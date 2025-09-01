@@ -1,0 +1,1613 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <title>Drive GLB Viewer + Pins (v1.21.1-bg)</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='64' height='64'%3E%3Crect width='64' height='64' fill='%23222'/%3E%3Ccircle cx='32' cy='32' r='18' fill='%23e33'/%3E%3C/svg%3E">
+  <style>
+    :root { --bg:#111; --muted:#666; }
+    html,body{height:100%}
+    body{margin:0;background:var(--bg);color:#222;font:14px/1.5 system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif}
+    header{display:flex;gap:8px;align-items:center;padding:10px 12px;background:#f8f8f8;border-bottom:1px solid #e8e8e8;position:sticky;top:0;z-index:10;flex-wrap:wrap}
+    header input{padding:6px 8px;border:1px solid #ddd;border-radius:8px;min-width:200px}
+    header button{padding:6px 10px;border:1px solid #ddd;border-radius:8px;background:#fff;cursor:pointer}
+    header .grow{flex:1}
+    main{display:grid;grid-template-columns: 1fr 360px;gap:10px;}
+    #view{position:relative;width:100%;height:calc(100vh - 56px);overflow:hidden}
+    /* 背景切替 */
+    .bg-dark { background:#222; }
+    .bg-light{ background:#f2f2f2; }
+    .bg-checker{
+      background:
+        linear-gradient(45deg,#ddd 25%,transparent 25%,transparent 75%,#ddd 75%,#ddd),
+        linear-gradient(45deg,#ddd 25%,transparent 25%,transparent 75%,#ddd 75%,#ddd);
+      background-size: 20px 20px;
+      background-position: 0 0,10px 10px;
+    }
+    #canvas{display:block;width:100%;height:100%}
+    aside{height:calc(100vh - 56px);overflow:auto;background:#fafafa;border-left:1px solid #eee}
+    .sec{padding:10px 12px;border-bottom:1px solid #eee}
+    .row{display:flex;gap:8px;align-items:center;margin-top:6px;flex-wrap:wrap}
+    .muted{color:var(--muted);font-size:12px}
+    .hidden{display:none}
+    .warn{color:#b00}
+    .badge{display:inline-block;background:#eef;border:1px solid #dde;border-radius:999px;padding:2px 8px;font-size:12px}
+    .pin{border:1px solid #e5e5e5;background:#fff;border-radius:10px;padding:8px;margin-top:8px}
+    .pin input,.pin textarea{width:100%;border:1px solid #ddd;border-radius:6px;padding:6px}
+    .pin img{max-width:100%;border-radius:8px;margin-top:6px}
+    #dbg{position:fixed;left:8px;bottom:8px;color:#0f0;font:12px/1.2 monospace;z-index:9999;pointer-events:none;white-space:pre}
+    .float-layer{position:absolute;left:0;top:0;width:100%;height:100%;pointer-events:none}
+    .float-card{
+      position:absolute; min-width:200px; max-width:280px; pointer-events:auto;
+      background:#fff; border:1px solid #ddd; border-radius:10px; box-shadow:0 8px 22px rgba(0,0,0,0.3);
+      user-select:none;
+    }
+    .float-card header{display:flex; align-items:center; gap:8px; padding:6px 8px; border-bottom:1px solid #eee;
+      background:#f6f7fb; border-radius:10px 10px 0 0; cursor:grab;}
+    .float-card header:active{ cursor:grabbing; }
+    .float-card header input{flex:1; min-width:0; border:1px solid #ddd; border-radius:6px; padding:4px 6px; font-size:13px; background:#fff;}
+    .float-card .body{ padding:8px }
+    .float-card .body textarea{ width:100%; border:1px solid #ddd; border-radius:6px; padding:6px; min-height:70px }
+    .float-card .body img{ display:block; max-width:100%; border-radius:8px; margin-top:6px }
+    .float-card .footer{ display:flex; gap:6px; padding:8px; border-top:1px solid #eee; flex-wrap:wrap; align-items:center }
+    .float-card .btn{ padding:4px 8px; border:1px solid #ddd; border-radius:8px; background:#fff; cursor:pointer; font-size:12px }
+    .float-card .btn.warn{ color:#b00 }
+    .float-card a.small { font-size:12px; color:#06c; text-decoration:none }
+    .float-card a.small:hover { text-decoration:underline }
+    .lines{ position:absolute; left:0; top:0; width:100%; height:100%; pointer-events:none }
+    .lines line{ stroke:#fff; stroke-opacity:0.85; stroke-width:2; filter:drop-shadow(0 0 1px rgba(0,0,0,.7)); }
+    .pill {font-size:12px;border:1px solid #ddd;border-radius:999px;padding:4px 8px;background:#fff;display:inline-flex;gap:6px;align-items:center}
+    .pill input{margin:0}
+    .save-ok{color:#0a0}.save-pending{color:#a60}.save-fail{color:#b00}
+    /* ===== Editor Dock ===== */
+    .dock{
+      position:absolute; top:12px; right:12px; width:340px; max-height:80vh; overflow:auto;
+      background:#ffffffea; backdrop-filter:saturate(1.2) blur(4px);
+      border:1px solid #ddd; border-radius:12px; box-shadow:0 10px 30px rgba(0,0,0,.35);
+      z-index:20;
+    }
+    .dock header{
+      display:flex; align-items:center; gap:8px; padding:8px 10px; border-bottom:1px solid #eee;
+      position:sticky; top:0; background:#f6f7fb; border-radius:12px 12px 0 0;
+    }
+    .dock .tabs{ display:flex; gap:6px; flex-wrap:wrap }
+    .dock .tabbtn{ padding:4px 10px; font-size:12px; border:1px solid #ddd; border-radius:999px; background:#fff; cursor:pointer; }
+    .dock .tabbtn.active{ background:#eef; border-color:#cdd; }
+    .dock .minbtn{ margin-left:auto; padding:4px 8px; border:1px solid #ddd; border-radius:8px; background:#fff; cursor:pointer; font-size:12px }
+    .dock .body{ padding:10px }
+    .dock.collapsed .body{ display:none }
+    .dock.collapsed header{ border-radius:12px }
+    .tool-row{ display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-bottom:8px }
+    .tool-btn{ padding:6px 10px; border:1px solid #ddd; background:#fff; border-radius:8px; font-size:12px; cursor:pointer }
+    .tool-btn.toggled{ background:#e8f0fe; border-color:#c7dafc }
+    .tool-input{ display:flex; align-items:center; gap:8px; margin-bottom:8px }
+    .tool-input input[type="range"]{ width:160px }
+    /* ===== Modal ===== */
+    .modal-overlay{ position:fixed; inset:0; background:rgba(0,0,0,.5); display:flex; align-items:center; justify-content:center; z-index:50; }
+    .modal{ width:840px; max-width:95vw; max-height:86vh; overflow:auto; background:#fff; border:1px solid #ddd; border-radius:12px; box-shadow:0 20px 40px rgba(0,0,0,0.4); }
+    .modal header{ position:sticky; top:0; background:#f6f7fb; border-bottom:1px solid #eee; padding:10px 12px; display:flex; gap:8px; align-items:center }
+    .modal .body{ padding:12px }
+    .list{ border:1px solid #eee; border-radius:10px; overflow:hidden }
+    .rowi{ display:grid; grid-template-columns: 1fr 200px 120px; gap:8px; padding:8px 10px; border-bottom:1px solid #f0f0f0; align-items:center }
+    .rowi:last-child{ border-bottom:none }
+    .rowi .name{ font-weight:600 }
+    .rowi .meta{ font-size:12px; color:#666 }
+    .modal footer{ padding:10px 12px; border-top:1px solid #eee; display:flex; gap:8px; justify-content:flex-end }
+    .grid{ display:grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap:10px }
+    .card{ border:1px solid #eee; border-radius:10px; padding:8px; display:flex; flex-direction:column; gap:6px; }
+    .card img{ width:100%; aspect-ratio: 1 / 1; object-fit:cover; border-radius:8px; background:#f3f3f3 }
+    .card .title{ font-size:12px; line-height:1.4; }
+    .card .meta{ font-size:11px; color:#666; }
+    .card button{ padding:6px 8px; font-size:12px; }
+    @media (max-width: 960px){
+      main{ grid-template-columns: 1fr }
+      aside{ display:none }
+      .dock{ left:12px; right:12px; width:auto }
+      .dock .tabbtn{ padding:6px 12px }
+      .tool-btn{ padding:8px 12px }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div>GLB fileId: <input id="fileId" placeholder="例: 1AbC..." autocomplete="off" /></div>
+    <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+      <div>Pins fileId: <input id="pinsId" placeholder="（任意）pins.json の fileId" autocomplete="off" /></div>
+      <button id="btnPickPins">選択…</button>
+      <button id="btnClearPins">クリア</button>
+    </div>
+    <div>Save FolderId: <input id="folderId" placeholder="（任意）保存先フォルダID" autocomplete="off" /></div>
+    <button id="btnAuth">Googleにサインイン</button>
+    <button id="btnLoad">読み込む</button>
+    <button id="btnSavePins">ピンをDriveに保存（リネーム）</button>
+    <button id="btnAddPin">ピン追加（画面中央）</button>
+    <label class="pill" id="pillMove" title="Gキーでも切替"><input type="checkbox" id="moveMode" checked> 移動モード（ギズモ）</label>
+    <div class="pill" id="pillAutosave">
+      <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;">
+        <input type="checkbox" id="autoSave" checked> 🧷オートセーブ
+      </label>
+      <span id="saveStatus" class="muted">待機中</span>
+    </div>
+    <div class="grow"></div>
+    <div class="pill"><button id="btnCopyReadonlyUrl" title="このビューを閲覧専用で共有">閲覧専用URLをコピー</button></div>
+    <div class="pill"><span class="muted">GLB:</span><button id="btnToggleGlbPublic" title="公開/限定を切替（デフォルトは限定）">限定</button></div>
+    <div class="pill"><span class="muted">pins:</span><button id="btnTogglePinsPublic" title="公開/限定を切替（デフォルトは限定）" disabled>限定</button></div>
+    <span id="status" class="muted">未サインイン</span>
+  </header>
+
+  <main>
+    <div id="view" class="bg-dark">
+      <canvas id="canvas"></canvas>
+      <svg class="lines" id="lines"></svg>
+      <div class="float-layer" id="floatLayer"></div>
+
+      <!-- 編集ドック -->
+      <div class="dock" id="editorDock">
+        <header>
+          <div class="tabs">
+            <button class="tabbtn active" data-tab="move">移動</button>
+            <button class="tabbtn" data-tab="materials">マテリアル</button>
+            <button class="tabbtn" data-tab="camera">カメラ</button>
+          </div>
+          <button class="minbtn" id="dockMin">最小化</button>
+        </header>
+        <div class="body">
+          <div id="tab-move">
+            <div class="tool-row">
+              <button class="tool-btn" id="dockMoveToggle">ギズモ ON</button>
+              <button class="tool-btn" id="dockCenterSelected">選択ピンへ</button>
+            </div>
+            <div class="tool-row">
+              <button class="tool-btn toggled" id="axisX">X</button>
+              <button class="tool-btn toggled" id="axisY">Y</button>
+              <button class="tool-btn toggled" id="axisZ">Z</button>
+            </div>
+            <div class="muted">G：ギズモ切替 / X,Y,Z：軸表示 / Esc：ポップアップ閉じ</div>
+          </div>
+
+          <div id="tab-materials" style="display:none">
+            <div class="muted" style="margin-bottom:6px">3Dスキャン前提。必要最低限の調整のみ。</div>
+            <div id="materialsDock"></div>
+          </div>
+
+          <div id="tab-camera" style="display:none">
+            <div class="tool-row">
+              <label class="pill" style="gap:10px">
+                <span>投影:</span>
+                <select id="projMode">
+                  <option value="persp">透視投影</option>
+                  <option value="ortho">平行投影</option>
+                </select>
+              </label>
+              <button class="tool-btn" id="btnFrame">モデルにフィット</button>
+            </div>
+            <div class="tool-input" id="rowFov">
+              <span class="muted" style="width:70px">視野角</span>
+              <input type="range" id="fov" min="25" max="90" step="1">
+              <span class="muted" id="fovVal"></span>
+            </div>
+            <div class="tool-input" id="rowZoom" style="display:none">
+              <span class="muted" style="width:70px">ズーム</span>
+              <input type="range" id="zoom" min="0.5" max="3" step="0.01" value="1">
+              <span class="muted" id="zoomVal">1.00</span>
+            </div>
+            <div class="tool-row">
+              <span class="muted" style="width:70px">ビュー</span>
+              <button class="tool-btn" data-view="front">前</button>
+              <button class="tool-btn" data-view="back">後</button>
+              <button class="tool-btn" data-view="left">左</button>
+              <button class="tool-btn" data-view="right">右</button>
+              <button class="tool-btn" data-view="top">上</button>
+              <button class="tool-btn" data-view="bottom">下</button>
+            </div>
+            <div class="tool-row">
+              <label class="pill" style="gap:10px">
+                <span>背景:</span>
+                <select id="bgMode">
+                  <option value="dark" selected>暗</option>
+                  <option value="light">明</option>
+                  <option value="checker">チェッカー</option>
+                </select>
+              </label>
+            </div>
+            <div class="tool-row">
+              <label class="pill" style="gap:10px">
+                <input type="checkbox" id="touchMode"> タッチUIを使う
+              </label>
+            </div>
+            <div class="muted" id="touchHelp"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <aside>
+      <div class="sec">
+        <div class="muted" id="hintDesktop" style="margin-top:6px">
+          Shift+クリック = ピン追加 / 左=回転 / 右=パン / ホイール=ズーム<br>
+          ピンをクリック → ポップアップを<strong>複数</strong>開けます（Ctrl+クリック＝このピンだけ残す）<br>
+          Escで全ポップアップ閉、移動モードOFFでギズモ非表示
+        </div>
+        <div class="muted hidden" id="hintTouch" style="margin-top:6px">
+          1本指=回転 / 2本指=パン / ピンチ=ズーム / <b>長押し</b>=ピン追加<br>
+          ピンをタップ → ポップアップを複数開けます（長押しで位置追加）
+        </div>
+        <div class="warn muted" id="scopeWarn" style="display:none;margin-top:6px">
+          書き込み権限不足。上の「Googleにサインイン」から再同意、または「ピンをDriveに保存」を押してください。
+        </div>
+      </div>
+
+      <div class="sec">
+        <strong>ピン一覧（クリックで編集） <span class="badge" id="pinCount">ピン: 0</span></strong>
+        <div id="pins"></div>
+        <div class="muted" style="margin-top:6px" id="pinsInfo"></div>
+      </div>
+    </aside>
+  </main>
+
+  <div id="dbg"></div>
+  <div id="modalRoot" class="hidden"></div>
+
+  <script type="module">
+  'use strict';
+  console.log('drive_three_pins v1.21.1-bg');
+
+  /* ===== Config: OAuth / Drive ===== */
+  const SCOPES_READ  = "https://www.googleapis.com/auth/drive.readonly";
+  const SCOPES_WRITE = "https://www.googleapis.com/auth/drive.file";
+  const SCOPES_FULL  = "https://www.googleapis.com/auth/drive";
+  const ALL_SCOPES   = `${SCOPES_READ} ${SCOPES_WRITE}`;
+  const CLIENT_ID    = "595200751510-ncahnf7edci6b9925becn5to49r6cguv.apps.googleusercontent.com";
+
+  /* ===== DOM ===== */
+  const canvas       = document.getElementById('canvas');
+  const view         = document.getElementById('view');
+  const statusEl     = document.getElementById('status');
+  const dbg          = document.getElementById('dbg');
+  const linesSvg     = document.getElementById('lines');
+  const floatLayer   = document.getElementById('floatLayer');
+  const pinsEl       = document.getElementById('pins');
+  const pinCountEl   = document.getElementById('pinCount');
+  const pinsInfoEl   = document.getElementById('pinsInfo');
+  const scopeWarnEl  = document.getElementById('scopeWarn');
+  const autoSaveEl   = document.getElementById('autoSave');
+  const saveStatusEl = document.getElementById('saveStatus');
+  const btnAuth      = document.getElementById('btnAuth');
+  const btnLoad      = document.getElementById('btnLoad');
+  const btnSavePins  = document.getElementById('btnSavePins');
+  const btnAddPin    = document.getElementById('btnAddPin');
+  const moveModeEl   = document.getElementById('moveMode');
+  const pillMove     = document.getElementById('pillMove');
+  const pillAutosave = document.getElementById('pillAutosave');
+  const fileIdInput  = document.getElementById('fileId');
+  const pinsIdInput  = document.getElementById('pinsId');
+  const folderIdInput= document.getElementById('folderId');
+  const btnPickPins  = document.getElementById('btnPickPins');
+  const btnClearPins = document.getElementById('btnClearPins');
+  const btnCopyReadonlyUrl = document.getElementById('btnCopyReadonlyUrl');
+  const btnToggleGlbPublic = document.getElementById('btnToggleGlbPublic');
+  const btnTogglePinsPublic= document.getElementById('btnTogglePinsPublic');
+
+  // Dock
+  const dock = document.getElementById('editorDock');
+  const materialsDockEl = document.getElementById('materialsDock');
+  const tabButtons = dock.querySelectorAll('.tabbtn');
+  const tabMove = document.getElementById('tab-move');
+  const tabMaterials = document.getElementById('tab-materials');
+  const tabCamera = document.getElementById('tab-camera');
+  const dockMoveToggle = document.getElementById('dockMoveToggle');
+  const dockCenterSelected = document.getElementById('dockCenterSelected');
+  const axisBtnX = document.getElementById('axisX');
+  const axisBtnY = document.getElementById('axisY');
+  const axisBtnZ = document.getElementById('axisZ');
+  const dockMin = document.getElementById('dockMin');
+
+  // Camera tab controls
+  const projModeSel = document.getElementById('projMode');
+  const fovRange = document.getElementById('fov');
+  const fovVal = document.getElementById('fovVal');
+  const zoomRange = document.getElementById('zoom');
+  const zoomVal = document.getElementById('zoomVal');
+  const btnFrame = document.getElementById('btnFrame');
+  const bgModeSel = document.getElementById('bgMode');
+
+  // Touch UI
+  const touchModeEl = document.getElementById('touchMode');
+  const hintDesktop = document.getElementById('hintDesktop');
+  const hintTouch = document.getElementById('hintTouch');
+  const touchHelp = document.getElementById('touchHelp');
+
+  const modalRoot    = document.getElementById('modalRoot');
+
+  /* ===== State ===== */
+  let accessToken = null;
+  let READ_ONLY = false;
+
+  const pinMap = new Map();
+  let selectedPinId = '';
+
+  let PINS = [];
+  let MATERIALS = {};
+  const materialList = [];
+  const materialCache = new Map();
+
+  let loadedPinsId = '';
+  let autosaveId   = '';
+  let loadedPinsName = '';
+  let autosaveName   = 'pins.json';
+
+  // Camera state (宣言は1回だけ)
+  let camera, cameraPersp, cameraOrtho, controls, gizmo, labelRenderer;
+  let cameraMode = 'persp';
+  let fitMaxDim = 1, fitDist = 3;
+
+  // Touch UI
+  let TOUCH_MODE = window.matchMedia && window.matchMedia('(pointer: coarse)').matches;
+  const DOCK_MIN_KEY = 'editorDock_min';
+
+  /* ===== Local mapping for autosave pins.json ===== */
+  const MAP_KEY = 'pinsMap_v1';
+  function loadMap(){ try{ return JSON.parse(localStorage.getItem(MAP_KEY)||'{}') }catch{ return {} } }
+  function saveMap(m){ localStorage.setItem(MAP_KEY, JSON.stringify(m)) }
+  function rememberAutosave(glbId, id){ const m=loadMap(); m[glbId]=id; saveMap(m); }
+
+  /* ===== gapi / GSI ===== */
+  async function loadGapi() {
+    if (window.gapiLoaded) return;
+    await new Promise((resolve, reject)=>{
+      const s=document.createElement('script'); s.src='https://apis.google.com/js/api.js';
+      s.onload=resolve; s.onerror=()=>reject(new Error('gapi/api.js の読み込み失敗'));
+      document.head.appendChild(s);
+    });
+    await new Promise((resolve)=> window.gapi.load('client', resolve));
+    await window.gapi.client.init({ discoveryDocs: ["https://www.googleapis.com/discovery/v1/apis/drive/v3/rest"] });
+    window.gapiLoaded = true;
+  }
+  async function ensureToken(scopes) {
+    await new Promise((resolve, reject)=>{
+      if (window.google && google.accounts && google.accounts.oauth2) return resolve();
+      const s=document.createElement('script'); s.src='https://accounts.google.com/gsi/client';
+      s.onload=resolve; s.onerror=()=>reject(new Error('gsi/client の読み込みに失敗'));
+      document.head.appendChild(s);
+    });
+    return new Promise((resolve, reject)=>{
+      try{
+        const client = google.accounts.oauth2.initTokenClient({
+          client_id: CLIENT_ID, scope: scopes, prompt: 'consent select_account',
+          callback: (resp)=>{ if (resp?.access_token){ accessToken = resp.access_token; resolve(); } else reject(new Error('トークンが返らない')); }
+        });
+        client.requestAccessToken();
+      }catch(e){ reject(e); }
+    });
+  }
+
+  /* ===== Drive helpers ===== */
+  async function driveFetchBinary(fileId) {
+    const url = `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media&supportsAllDrives=true`;
+    const headers = accessToken ? { Authorization: `Bearer ${accessToken}` } : {};
+    const res = await fetch(url, { headers });
+    if (!res.ok) { let d=''; try{d=await res.text();}catch{} throw new Error(`Drive fetch failed ${res.status} ${d}`); }
+    return await res.blob();
+  }
+  async function driveGetMetadata(fileId, fields='id,name,parents,mimeType,modifiedTime') {
+    if (!accessToken) throw new Error('auth-required');
+    const url = `https://www.googleapis.com/drive/v3/files/${fileId}?fields=${encodeURIComponent(fields)}&supportsAllDrives=true`;
+    const res = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } });
+    if (!res.ok) throw new Error('Drive meta failed ' + res.status);
+    return await res.json();
+  }
+  async function driveCreateFile({name, mimeType, parents, dataBlob}) {
+    const boundary = '-------314159265358979323846';
+    const meta = { name, mimeType, parents };
+    const body = new Blob([
+      `--${boundary}\r\n`,'Content-Type: application/json; charset=UTF-8\r\n\r\n',JSON.stringify(meta)+ "\r\n",
+      `--${boundary}\r\n`, `Content-Type: ${mimeType}\r\n\r\n`, dataBlob, `\r\n--${boundary}--\r\n`
+    ], { type: 'multipart/related; boundary=' + boundary });
+    const res = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&supportsAllDrives=true',
+      { method:'POST', headers:{ Authorization:`Bearer ${accessToken}` }, body });
+    if (!res.ok) throw new Error('Drive create failed ' + res.status);
+    return await res.json();
+  }
+  async function driveUpdateFile({fileId, name, mimeType, dataBlob}) {
+    const boundary = '-------314159265358979323846';
+    const meta = { name };
+    const body = new Blob([
+      `--${boundary}\r\n`,'Content-Type: application/json; charset=UTF-8\r\n\r\n',JSON.stringify(meta)+ "\r\n",
+      `--${boundary}\r\n`, `Content-Type: ${mimeType}\r\n\r\n`, dataBlob, `\r\n--${boundary}--\r\n`
+    ], { type:'multipart/related; boundary=' + boundary });
+    const res = await fetch(`https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=multipart&supportsAllDrives=true`,
+      { method:'PATCH', headers:{ Authorization:`Bearer ${accessToken}` }, body });
+    if (!res.ok) throw new Error('Drive update failed ' + res.status);
+    return await res.json();
+  }
+  async function driveListFiles({ q, orderBy='modifiedTime desc', pageSize=100 }){
+    if (!accessToken) throw new Error('auth-required');
+    const fields = 'files(id,name,modifiedTime,parents,iconLink,thumbnailLink,mimeType),nextPageToken';
+    const url = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&pageSize=${pageSize}&fields=${encodeURIComponent(fields)}&orderBy=${encodeURIComponent(orderBy)}&supportsAllDrives=true&includeItemsFromAllDrives=true`;
+    const res = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } });
+    if (!res.ok) throw new Error('Drive list failed ' + res.status);
+    return await res.json();
+  }
+  async function driveGetPermissions(fileId){
+    if (!accessToken) throw new Error('auth-required');
+    const url = `https://www.googleapis.com/drive/v3/files/${fileId}/permissions?supportsAllDrives=true&fields=permissions(id,type,role)`;
+    const res = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } });
+    if(!res.ok) throw new Error('Drive perms failed ' + res.status);
+    return await res.json();
+  }
+  async function driveSetPublic(fileId, makePublic){
+    if (!accessToken) throw new Error('auth-required');
+    if (makePublic){
+      const url = `https://www.googleapis.com/drive/v3/files/${fileId}/permissions?supportsAllDrives=true`;
+      const res = await fetch(url, {
+        method:'POST',
+        headers:{ Authorization:`Bearer ${accessToken}`, 'Content-Type':'application/json' },
+        body: JSON.stringify({ role:'reader', type:'anyone', allowFileDiscovery:false })
+      });
+      if(!res.ok) throw new Error('perm-create failed '+res.status);
+    } else {
+      const { permissions=[] } = await driveGetPermissions(fileId);
+      const any = permissions.find(p=>p.type==='anyone');
+      if (any){
+        const url = `https://www.googleapis.com/drive/v3/files/${fileId}/permissions/${any.id}?supportsAllDrives=true`;
+        const res = await fetch(url, { method:'DELETE', headers:{ Authorization:`Bearer ${accessToken}` } });
+        if(!res.ok) throw new Error('perm-delete failed '+res.status);
+      }
+    }
+  }
+  async function driveIsPublic(fileId){
+    const { permissions=[] } = await driveGetPermissions(fileId);
+    return !!permissions.find(p=>p.type==='anyone' && p.role==='reader');
+  }
+
+  /* ===== Three.js ===== */
+  import * as THREE from 'https://esm.sh/three@0.152.2';
+  import { OrbitControls } from 'https://esm.sh/three@0.152.2/examples/jsm/controls/OrbitControls.js';
+  import { GLTFLoader } from 'https://esm.sh/three@0.152.2/examples/jsm/loaders/GLTFLoader.js';
+  import { CSS2DRenderer as ThreeCSS2DRenderer } from 'https://esm.sh/three@0.152.2/examples/jsm/renderers/CSS2DRenderer.js';
+  import { TransformControls as ThreeTransformControls } from 'https://esm.sh/three@0.152.2/examples/jsm/controls/TransformControls.js';
+
+  // 透明キャンバス
+  const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
+  renderer.setPixelRatio(Math.max(1, window.devicePixelRatio || 1));
+  renderer.setSize(view.clientWidth, view.clientHeight);
+
+  const scene = new THREE.Scene();
+  scene.background = null;
+
+  function makePerspective(){
+    const aspect = view.clientWidth / view.clientHeight;
+    const c = new THREE.PerspectiveCamera(60, aspect, 0.01, 2000);
+    return c;
+  }
+  function makeOrtho(frustumHeight){
+    const aspect = view.clientWidth / view.clientHeight;
+    const h = frustumHeight || (fitMaxDim*2.2);
+    const w = h * aspect;
+    const c = new THREE.OrthographicCamera(-w/2, w/2, h/2, -h/2, 0.01, 2000);
+    c.zoom = 1;
+    c.updateProjectionMatrix();
+    return c;
+  }
+
+  // ← ここが修正点：再宣言しない（代入だけ）
+  cameraPersp = makePerspective();
+  camera = cameraPersp;
+  camera.position.set(0, 1, 3);
+
+  controls = new OrbitControls(camera, renderer.domElement);
+  controls.enableDamping = true;
+  controls.enablePan = true;
+  controls.touches = { ONE: THREE.TOUCH.ROTATE, TWO: THREE.TOUCH.DOLLY_PAN };
+  controls.mouseButtons = { LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.PAN };
+  controls.target.set(0, 0, 0);
+
+  scene.add(new THREE.AmbientLight(0xffffff, 1.0));
+  const dir = new THREE.DirectionalLight(0xffffff, 1.0); dir.position.set(3, 5, 2); scene.add(dir);
+
+  // ← 再宣言しない
+  labelRenderer = new ThreeCSS2DRenderer();
+  labelRenderer.setSize(view.clientWidth, view.clientHeight);
+  labelRenderer.domElement.style.position = 'absolute';
+  labelRenderer.domElement.style.top = '0';
+  labelRenderer.domElement.style.left = '0';
+  labelRenderer.domElement.style.pointerEvents = 'none';
+  view.appendChild(labelRenderer.domElement);
+
+  function updateCameraAspect(){
+    const aspect = view.clientWidth / view.clientHeight;
+    if (cameraMode==='persp'){
+      camera.aspect = aspect;
+    } else {
+      const h = fitMaxDim*2.2, w = h * aspect;
+      camera.left = -w/2; camera.right = w/2; camera.top = h/2; camera.bottom = -h/2;
+    }
+    camera.updateProjectionMatrix();
+  }
+  window.addEventListener('resize', ()=>{
+    renderer.setSize(view.clientWidth, view.clientHeight);
+    labelRenderer.setSize(view.clientWidth, view.clientHeight);
+    updateCameraAspect();
+  });
+
+  /* ===== 背景切替 ===== */
+  function applyBackground(mode){
+    view.classList.remove('bg-dark','bg-light','bg-checker');
+    if (mode==='light') view.classList.add('bg-light');
+    else if (mode==='checker') view.classList.add('bg-checker');
+    else view.classList.add('bg-dark');
+    scene.background = null;
+    renderer.setClearAlpha(0);
+  }
+
+  /* ===== リーダーライン ===== */
+  function updateLeaderLines(){
+    for (const [id, rec] of pinMap){
+      if (!rec.floatDom || !rec.lineEl) continue;
+      const world = rec.node.getWorldPosition(new THREE.Vector3());
+      const v = world.clone().project(camera);
+      const w=view.clientWidth, h=view.clientHeight;
+      const sx = (v.x * 0.5 + 0.5) * w;
+      const sy = (-v.y * 0.5 + 0.5) * h;
+      const cr = rec.floatDom.getBoundingClientRect();
+      const vr = view.getBoundingClientRect();
+      const cx = (cr.left - vr.left) + Math.min(16, cr.width*0.2);
+      const cy = (cr.top  - vr.top ) + Math.min(16, cr.height*0.2);
+      rec.lineEl.setAttribute('x1', sx.toFixed(1));
+      rec.lineEl.setAttribute('y1', sy.toFixed(1));
+      rec.lineEl.setAttribute('x2', cx.toFixed(1));
+      rec.lineEl.setAttribute('y2', cy.toFixed(1));
+    }
+  }
+  function tick(){
+    controls.update();
+    renderer.render(scene, camera);
+    labelRenderer.render(scene, camera);
+    updateLeaderLines();
+    requestAnimationFrame(tick);
+  }
+  tick();
+
+  /* ===== GLB 読み込み ===== */
+  let gltfRoot = null;
+  const pinsGroup = new THREE.Group(); scene.add(pinsGroup);
+
+  function frameToObject(){
+    if (!gltfRoot) return;
+    const box = new THREE.Box3().setFromObject(gltfRoot);
+    const size = new THREE.Vector3(); box.getSize(size);
+    const center = new THREE.Vector3(); box.getCenter(center);
+    gltfRoot.position.sub(center);
+    fitMaxDim = Math.max(size.x, size.y, size.z) || 1;
+    fitDist = fitMaxDim * 1.8 / Math.tan(THREE.MathUtils.degToRad((camera.fov||60)/2));
+    camera.position.set(0, fitMaxDim*0.6, fitDist);
+    controls.target.set(0, 0, 0); controls.update();
+    cameraOrtho = makeOrtho(fitMaxDim*2.2);
+    cameraOrtho.position.copy(camera.position);
+    cameraOrtho.lookAt(controls.target);
+    updateCameraAspect();
+  }
+  async function loadGLBFromDrive(fileId){
+    const blob = await driveFetchBinary(fileId);
+    const url  = URL.createObjectURL(blob);
+    if (gltfRoot) {
+      scene.remove(gltfRoot);
+      gltfRoot.traverse(o=>{
+        if(o.geometry) o.geometry.dispose();
+        if(o.material){
+          const mats = Array.isArray(o.material)? o.material : [o.material];
+          mats.forEach(m=>{
+            if (m.map && m.map.dispose) m.map.dispose();
+            if (m.dispose) m.dispose();
+          });
+        }
+      });
+      gltfRoot = null;
+      materialList.length = 0;
+      materialCache.clear();
+      materialsDockEl.innerHTML = '';
+    }
+    const loader = new GLTFLoader();
+    await new Promise((resolve, reject)=>{
+      loader.load(url, (gltf)=>{
+        gltfRoot = gltf.scene; scene.add(gltfRoot);
+        frameToObject();
+        collectMaterials(gltfRoot);
+        buildMaterialsUI(materialsDockEl);
+        URL.revokeObjectURL(url);
+        resolve();
+      }, undefined, reject);
+    });
+  }
+
+  /* ===== ピン ===== */
+  function makePinSprite(){
+    const size = 64, cvs = document.createElement('canvas'); cvs.width=cvs.height=size;
+    const ctx = cvs.getContext('2d');
+    ctx.fillStyle='rgba(255,0,0,0.85)'; ctx.beginPath(); ctx.arc(size/2,size/2,size*0.24,0,Math.PI*2); ctx.fill();
+    ctx.strokeStyle='rgba(255,255,255,0.95)'; ctx.lineWidth=3; ctx.stroke();
+    const tex = new THREE.CanvasTexture(cvs);
+    const mat = new THREE.SpriteMaterial({ map: tex, depthTest: true, depthWrite: false, transparent: true });
+    const spr = new THREE.Sprite(mat); spr.scale.set(0.02,0.02,0.02); return spr;
+  }
+  const safePos = a => (Array.isArray(a)&&a.length>=3)?a.map(n=>Number(n)||0):[0,0,0];
+
+  function redrawPins(){
+    while(pinsGroup.children.length) pinsGroup.remove(pinsGroup.children[0]);
+    for (const {floatDom, lineEl} of pinMap.values()){
+      if (floatDom?.parentNode) floatDom.parentNode.removeChild(floatDom);
+      if (lineEl?.parentNode) lineEl.parentNode.removeChild(lineEl);
+    }
+    pinMap.clear();
+
+    for (const p of PINS) {
+      const v = safePos(p.position);
+      const node = new THREE.Object3D(); node.position.set(v[0],v[1],v[2]); pinsGroup.add(node);
+      const sprite = makePinSprite(); sprite.userData.pinId=p.id; node.add(sprite);
+      pinMap.set(p.id, { node, sprite, floatDom:null, lineEl:null });
+    }
+
+    pinsEl.innerHTML=''; pinCountEl.textContent=`ピン: ${PINS.length}`;
+    for (const pin of PINS) {
+      const wrap=document.createElement('details'); wrap.className='pin';
+      const hid=`file_${pin.id}`;
+      const driveLink = pin.imageDriveId ? `https://drive.google.com/file/d/${pin.imageDriveId}/view?usp=drive_link` : '';
+      wrap.innerHTML = `
+        <summary data-summary="${pin.id}">${pin.title||'（無題）'} <span class="muted">@ ${safePos(pin.position).map(n=>Number(n).toFixed(3)).join(', ')}</span></summary>
+        <div class="row"><input data-k="title" placeholder="タイトル" value="${pin.title||''}" ${READ_ONLY?'disabled':''} autocomplete="off"></div>
+        <div class="row"><textarea data-k="text" rows="3" placeholder="キャプション" ${READ_ONLY?'disabled':''}>${pin.text||''}</textarea></div>
+        ${READ_ONLY?'':`<input id="${hid}" class="hidden" type="file" accept="image/*">`}
+        <div class="row">
+          ${READ_ONLY?'':`<button data-act="choose">ローカルから</button>
+          <button data-act="pickDrive">フォルダから選ぶ</button>`}
+          ${pin.imageUrl?`<img src="${pin.imageUrl}" alt="">`:''}
+          ${driveLink?`<a class="small" href="${driveLink}" target="_blank" rel="noopener">元画像を開く ↗</a>`:''}
+          ${pin.imageDriveId?`<button data-act="copyPrev" title="Driveの埋め込み用URLをコピー">コピー：プレビューURL</button>
+          <button data-act="togglePub" title="公開/限定を切替">公開↔限定</button>`:''}
+        </div>
+        <div class="row">
+          <button data-act="center">このピンへ移動</button>
+          <button data-act="toggle">ポップアップ</button>
+          ${READ_ONLY?'':`<button data-act="remove" class="warn">削除</button>`}
+        </div>`;
+      if (!READ_ONLY){
+        wrap.addEventListener('input',(e)=>{
+          const t=e.target;
+          if(t.dataset.k==='title'){ pin.title=t.value; updateListPositionSummary(pin.id); scheduleAutoSave(); }
+          if(t.dataset.k==='text'){ pin.text=t.value; scheduleAutoSave(); }
+        });
+      }
+      wrap.querySelector('[data-act="center"]').onclick = ()=> centerToPin(pin);
+      wrap.querySelector('[data-act="toggle"]').onclick = ()=> togglePinPopup(pin.id);
+      if (!READ_ONLY){
+        wrap.querySelector('[data-act="remove"]')?.addEventListener('click', ()=>{
+          closePinPopup(pin.id);
+          const selId = selectedPinId;
+          PINS=PINS.filter(p=>p.id!==pin.id); redrawPins(); scheduleAutoSave();
+          if (selId===pin.id) detachGizmo();
+        });
+        const fileInput = wrap.querySelector('#'+hid);
+        wrap.querySelector('[data-act="choose"]')?.addEventListener('click', ()=> fileInput.click());
+        fileInput && (fileInput.onchange = async ()=>{
+          if (!fileInput.files || !fileInput.files[0]) return;
+          const f = fileInput.files[0];
+          const doUpload = async ()=>{
+            let parents=[]; const folderId=folderIdInput.value.trim();
+            if (folderId) parents=[folderId]; else {
+              const glbId=fileIdInput.value.trim();
+              if (glbId){ const meta=await driveGetMetadata(glbId); if(meta.parents?.length) parents=[meta.parents[0]]; }
+            }
+            const up = await driveCreateFile({name:f.name,mimeType:f.type||'application/octet-stream',parents,dataBlob:f});
+            pin.imageDriveId=up.id;
+            const blob=await driveFetchBinary(up.id);
+            if (pin.imageUrl) { try { URL.revokeObjectURL(pin.imageUrl); } catch(e){} }
+            pin.imageUrl=URL.createObjectURL(blob);
+          };
+          try{ await doUpload(); redrawPins(); scheduleAutoSave(); }
+          catch(e){ try{ await ensureToken(SCOPES_WRITE); scopeWarnEl.style.display='none'; await doUpload(); redrawPins(); scheduleAutoSave(); }
+            catch(e2){ scopeWarnEl.style.display='block'; console.error(e2); alert('画像アップロードに失敗しました。権限（drive.file）とフォルダIDをご確認ください。'); } }
+        });
+        wrap.querySelector('[data-act="pickDrive"]')?.addEventListener('click', ()=> chooseDriveImageForPin(pin));
+      }
+      wrap.querySelector('[data-act="copyPrev"]')?.addEventListener('click', ()=>{
+        if (!pin.imageDriveId) return;
+        copyText(`https://drive.google.com/file/d/${pin.imageDriveId}/preview`, 'プレビューURLをコピーしました');
+      });
+      wrap.querySelector('[data-act="togglePub"]')?.addEventListener('click', async ()=>{
+        try{
+          await ensureToken(SCOPES_FULL);
+          const isPub = await driveIsPublic(pin.imageDriveId);
+          await driveSetPublic(pin.imageDriveId, !isPub);
+          alert(`画像を ${!isPub?'公開（リンクを知っている全員が閲覧可）':'限定'} にしました`);
+        }catch(e){ await explainShareError(pin.imageDriveId, e); }
+      });
+      pinsEl.appendChild(wrap);
+    }
+  }
+  function updateListPositionSummary(id){
+    const rec = pinMap.get(id); if(!rec) return;
+    const p = rec.node.position;
+    const summary = document.querySelector(`summary[data-summary="${id}"]`);
+    if (summary) {
+      const title = (PINS.find(x=>x.id===id)?.title)||'（無題）';
+      summary.innerHTML = `${title} <span class="muted">@ ${[p.x,p.y,p.z].map(n=>n.toFixed(3)).join(', ')}</span>`;
+    }
+  }
+  function centerToPin(pin){ const v = safePos(pin.position); controls.target.set(v[0],v[1],v[2]); controls.update(); }
+
+  /* ===== ポップアップ ===== */
+  function projectToScreen(vec3){
+    const v = vec3.clone().project(camera);
+    const w = view.clientWidth, h = view.clientHeight;
+    return { x: (v.x * 0.5 + 0.5) * w, y: (-v.y * 0.5 + 0.5) * h };
+  }
+  function closeAllPopups(){
+    for (const [id, rec] of pinMap){
+      if (rec.floatDom?.parentNode) rec.floatDom.parentNode.removeChild(rec.floatDom);
+      rec.floatDom = null;
+      if (rec.lineEl?.parentNode) rec.lineEl.parentNode.removeChild(rec.lineEl);
+      rec.lineEl = null;
+    }
+  }
+  function closePinPopup(id){
+    const rec = pinMap.get(id); if(!rec) return;
+    if (rec.floatDom?.parentNode) rec.floatDom.parentNode.removeChild(rec.floatDom);
+    rec.floatDom = null;
+    if (rec.lineEl?.parentNode) rec.lineEl.parentNode.removeChild(rec.lineEl);
+    rec.lineEl = null;
+  }
+  function makeFloatCard(pinId){
+    const pin = PINS.find(p=>p.id===pinId); if(!pin) return null;
+    const card = document.createElement('div'); card.className='float-card'; card.style.left='0px'; card.style.top='0px';
+    const hdr = document.createElement('header');
+    const title = document.createElement('input'); title.placeholder='タイトル'; title.value = pin.title||''; if (READ_ONLY) title.disabled = true;
+    const btnClose = document.createElement('button'); btnClose.textContent='×'; btnClose.className='btn ghost';
+    hdr.appendChild(title); hdr.appendChild(btnClose);
+    const body = document.createElement('div'); body.className='body';
+    const ta = document.createElement('textarea'); ta.placeholder='キャプション'; ta.value = pin.text||''; if (READ_ONLY) ta.disabled = true;
+    body.appendChild(ta);
+    if (pin.imageUrl){ const im=document.createElement('img'); im.src=pin.imageUrl; body.appendChild(im); }
+    const ftr = document.createElement('div'); ftr.className='footer';
+    const btnCenter = document.createElement('button'); btnCenter.className='btn'; btnCenter.textContent='ピンへ移動';
+    const btnChoose = !READ_ONLY ? (()=>{ const b=document.createElement('button'); b.className='btn'; b.textContent='ローカルから'; return b; })() : null;
+    const btnPickDrive = !READ_ONLY ? (()=>{ const b=document.createElement('button'); b.className='btn'; b.textContent='フォルダから選ぶ'; return b; })() : null;
+    const driveLink = pin.imageDriveId ? `https://drive.google.com/file/d/${pin.imageDriveId}/view?usp=drive_link` : '';
+    const previewLink = pin.imageDriveId ? `https://drive.google.com/file/d/${pin.imageDriveId}/preview` : '';
+    if (driveLink){
+      const a = document.createElement('a'); a.href = driveLink; a.target='_blank'; a.rel='noopener'; a.className='small'; a.textContent='元画像を開く ↗'; ftr.appendChild(a);
+      const copyBtn = document.createElement('button'); copyBtn.className='btn'; copyBtn.textContent='コピー：プレビューURL';
+      copyBtn.onclick = ()=> copyText(previewLink, 'プレビューURLをコピーしました');
+      ftr.appendChild(copyBtn);
+      const togBtn = document.createElement('button'); togBtn.className='btn'; togBtn.textContent='公開↔限定';
+      togBtn.onclick = async ()=>{
+        try{
+          await ensureToken(SCOPES_FULL);
+          const isPub = await driveIsPublic(pin.imageDriveId);
+          await driveSetPublic(pin.imageDriveId, !isPub);
+          alert(`画像を ${!isPub?'公開（リンクを知っている全員が閲覧可）':'限定'} にしました`);
+        }catch(e){ await explainShareError(pin.imageDriveId, e); }
+      };
+      ftr.appendChild(togBtn);
+    }
+    ftr.appendChild(btnCenter);
+    if (btnChoose) ftr.appendChild(btnChoose);
+    if (btnPickDrive) ftr.appendChild(btnPickDrive);
+    card.appendChild(hdr); card.appendChild(body); card.appendChild(ftr);
+
+    if (!READ_ONLY){
+      title.addEventListener('input', ()=>{ pin.title = title.value; scheduleAutoSave(); updateListPositionSummary(pinId); });
+      ta.addEventListener('input', ()=>{ pin.text = ta.value; scheduleAutoSave(); });
+      btnClose.onclick = ()=> closePinPopup(pinId);
+      btnCenter.onclick = ()=> centerToPin(pin);
+      btnChoose.onclick = ()=>{
+        const input = document.createElement('input'); input.type='file'; input.accept='image/*';
+        input.onchange = async ()=>{
+          if (!input.files || !input.files[0]) return;
+          const f = input.files[0];
+          const doUpload = async ()=>{
+            let parents=[]; const folderId=folderIdInput.value.trim();
+            if (folderId) parents=[folderId]; else {
+              const glbId=fileIdInput.value.trim();
+              if (glbId){ const meta=await driveGetMetadata(glbId); if(meta.parents?.length) parents=[meta.parents[0]]; }
+            }
+            const up = await driveCreateFile({name:f.name,mimeType:f.type||'application/octet-stream',parents,dataBlob:f});
+            pin.imageDriveId=up.id;
+            const blob=await driveFetchBinary(up.id);
+            if (pin.imageUrl) { try { URL.revokeObjectURL(pin.imageUrl); } catch(e){} }
+            pin.imageUrl=URL.createObjectURL(blob);
+            const im = body.querySelector('img') || body.appendChild(document.createElement('img'));
+            im.src = pin.imageUrl;
+          };
+          try{ await doUpload(); scheduleAutoSave(); }
+          catch(e){ try{ await ensureToken(SCOPES_WRITE); scopeWarnEl.style.display='none'; await doUpload(); scheduleAutoSave(); }
+            catch(e2){ scopeWarnEl.style.display='block'; console.error(e2); alert('画像アップロードに失敗しました。権限（drive.file）とフォルダIDをご確認ください。'); } }
+        };
+        input.click();
+      };
+      btnPickDrive.onclick = ()=> chooseDriveImageForPin(pin, { onApplied: ()=>{
+        const im = body.querySelector('img') || body.appendChild(document.createElement('img'));
+        im.src = pin.imageUrl;
+      } });
+    } else {
+      btnClose.onclick = ()=> closePinPopup(pinId);
+      btnCenter.onclick = ()=> centerToPin(pin);
+    }
+
+    // ドラッグ移動
+    let dragging=false, sx=0, sy=0, startL=0, startT=0;
+    hdr.addEventListener('mousedown',(ev)=>{
+      dragging=true; sx=ev.clientX; sy=ev.clientY;
+      const rect = card.getBoundingClientRect();
+      startL = rect.left - view.getBoundingClientRect().left;
+      startT = rect.top  - view.getBoundingClientRect().top;
+      ev.preventDefault();
+    });
+    window.addEventListener('mousemove',(ev)=>{
+      if(!dragging) return;
+      const dx = ev.clientX - sx, dy = ev.clientY - sy;
+      let L = startL + dx, T = startT + dy;
+      const vw=view.clientWidth, vh=view.clientHeight;
+      const cr = card.getBoundingClientRect(); const cw=cr.width, ch=cr.height;
+      L = Math.max(0, Math.min(vw - cw, L));
+      T = Math.max(0, Math.min(vh - ch, T));
+      card.style.left = L + 'px';
+      card.style.top  = T + 'px';
+      const p = PINS.find(p=>p.id===pinId); if(p) p.floatPos = { left:L, top:T };
+      updateLeaderLines();
+    });
+    window.addEventListener('mouseup',()=>{ if(dragging){ dragging=false; if(!READ_ONLY) scheduleAutoSave(); } });
+
+    return card;
+  }
+  function togglePinPopup(id){
+    const rec = pinMap.get(id); if(!rec) return;
+    if (rec.floatDom) { closePinPopup(id); return; }
+    const card = makeFloatCard(id);
+    floatLayer.appendChild(card); rec.floatDom = card;
+    const pin = PINS.find(x=>x.id===id);
+    const pWorld  = rec.node.position.clone();
+    const sc      = projectToScreen(pWorld);
+    const margin  = 14;
+    const initLeft= Math.min(view.clientWidth - 240, Math.max(0, sc.x + margin));
+    const initTop = Math.min(view.clientHeight - 160, Math.max(0, sc.y - 80));
+    if (pin?.floatPos) { card.style.left = pin.floatPos.left+'px'; card.style.top = pin.floatPos.top+'px'; }
+    else { card.style.left = initLeft+'px'; card.style.top = initTop+'px'; if (pin) pin.floatPos = { left:initLeft, top:initTop }; }
+    const line = document.createElementNS('http://www.w3.org/2000/svg','line');
+    line.setAttribute('data-id', id); linesSvg.appendChild(line);
+    rec.lineEl = line; updateLeaderLines();
+  }
+
+  /* ===== Raycaster / クリック ===== */
+  const raycaster = new THREE.Raycaster(); const mouseNdc = new THREE.Vector2();
+  function addPinFromScreen(xClient, yClient){
+    const rect = renderer.domElement.getBoundingClientRect();
+    const x = ((xClient - rect.left)/rect.width)*2 - 1;
+    const y = -((yClient - rect.top)/rect.height)*2 + 1;
+    mouseNdc.set(x, y);
+    let point=null;
+    if (gltfRoot){ raycaster.setFromCamera(mouseNdc, camera); const hits = raycaster.intersectObject(gltfRoot, true); if (hits?.length) point = hits[0].point.clone(); }
+    if (!point){ const planeY = controls.target.y; raycaster.setFromCamera(mouseNdc, camera); const dir = raycaster.ray.direction.clone(); const t = (planeY - raycaster.ray.origin.y) / dir.y; point = raycaster.ray.origin.clone().addScaledVector(dir, Math.max(t, 0.0)); }
+    dbg.textContent = `hit= ${point.x.toFixed(3)}, ${point.y.toFixed(3)}, ${point.z.toFixed(3)}`;
+    const pin = { id: crypto.randomUUID(), position:[point.x,point.y,point.z], title:'', text:'', imageDriveId:'', imageUrl:'', floatPos:null };
+    PINS.push(pin); redrawPins(); scheduleAutoSave(); selectPin(pin.id);
+  }
+  btnAddPin.onclick = ()=>{
+    if (READ_ONLY) return;
+    const rect = renderer.domElement.getBoundingClientRect();
+    addPinFromScreen(rect.left+rect.width/2, rect.top+rect.height/2);
+  };
+  renderer.domElement.addEventListener('click',(ev)=>{
+    if (!READ_ONLY && ev.shiftKey && !TOUCH_MODE) { addPinFromScreen(ev.clientX, ev.clientY); return; }
+    const rect = renderer.domElement.getBoundingClientRect();
+    const x = ((ev.clientX - rect.left)/rect.width)*2 - 1;
+    const y = -((ev.clientY - rect.top)/rect.height)*2 + 1;
+    mouseNdc.set(x, y); raycaster.setFromCamera(mouseNdc, camera);
+    const sprites = []; for (const rec of pinMap.values()) sprites.push(rec.sprite);
+    const hitsPins = raycaster.intersectObjects(sprites, true);
+    if (hitsPins?.length) {
+      const spr = hitsPins[0].object; const id = spr.userData.pinId;
+      if (ev.ctrlKey || ev.metaKey) { for (const [pid] of pinMap) { if (pid !== id) closePinPopup(pid); } }
+      togglePinPopup(id); selectPin(id);
+    }
+  });
+
+  /* ===== ギズモ ===== */
+  // ← 再宣言しない
+  gizmo = new ThreeTransformControls(camera, renderer.domElement);
+  gizmo.setMode('translate'); gizmo.size = 0.9; gizmo.visible = false; scene.add(gizmo);
+  gizmo.addEventListener('dragging-changed', (e)=>{ controls.enabled = !e.value; });
+  gizmo.addEventListener('objectChange', ()=>{
+    if (!selectedPinId) return;
+    const rec = pinMap.get(selectedPinId); if (!rec) return;
+    const p = rec.node.position;
+    const pin = PINS.find(pn=>pn.id===selectedPinId); if (pin){ pin.position = [p.x, p.y, p.z]; }
+    updateListPositionSummary(selectedPinId); updateLeaderLines();
+  });
+  function selectPin(id){
+    selectedPinId = id;
+    const rec = pinMap.get(id);
+    if (!rec) { detachGizmo(); return; }
+    if (!READ_ONLY && moveModeEl.checked){ gizmo.attach(rec.node); gizmo.visible = true; }
+    else { detachGizmo(); }
+    syncDockMoveToggle();
+  }
+  function detachGizmo(){ gizmo.detach(); gizmo.visible = false; }
+  gizmo.addEventListener('mouseUp', ()=>{ scheduleAutoSave(); });
+  moveModeEl.onchange = ()=>{
+    if (READ_ONLY) { moveModeEl.checked=false; detachGizmo(); return; }
+    if (!moveModeEl.checked) detachGizmo();
+    else if (selectedPinId){ const rec = pinMap.get(selectedPinId); if (rec){ gizmo.attach(rec.node); gizmo.visible = true; } }
+    syncDockMoveToggle();
+  };
+  window.addEventListener('keydown',(e)=>{
+    if (e.repeat) return;
+    if (!READ_ONLY && (e.key==='g'||e.key==='G')){ moveModeEl.checked = !moveModeEl.checked; moveModeEl.onchange(); }
+    else if (e.key==='x'||e.key==='X'){ gizmo.showX = !gizmo.showX; axisBtnX.classList.toggle('toggled', gizmo.showX); }
+    else if (e.key==='y'||e.key==='Y'){ gizmo.showY = !gizmo.showY; axisBtnY.classList.toggle('toggled', gizmo.showY); }
+    else if (e.key==='z'||e.key==='Z'){ gizmo.showZ = !gizmo.showZ; axisBtnZ.classList.toggle('toggled', gizmo.showZ); }
+    else if (e.key==='Escape') { detachGizmo(); closeAllPopups(); if (!READ_ONLY) { moveModeEl.checked=false; syncDockMoveToggle(); } }
+  });
+
+  /* ===== Dock interactions ===== */
+  tabButtons.forEach(b=>{
+    b.onclick = ()=>{
+      tabButtons.forEach(x=>x.classList.remove('active'));
+      b.classList.add('active');
+      const tab = b.dataset.tab;
+      tabMove.style.display = (tab==='move')?'block':'none';
+      tabMaterials.style.display = (tab==='materials')?'block':'none';
+      tabCamera.style.display = (tab==='camera')?'block':'none';
+    };
+  });
+  function syncDockMoveToggle(){
+    dockMoveToggle.textContent = (!READ_ONLY && moveModeEl.checked) ? 'ギズモ ON' : 'ギズモ OFF';
+    dockMoveToggle.classList.toggle('toggled', !READ_ONLY && moveModeEl.checked);
+  }
+  dockMoveToggle.onclick = ()=>{
+    if (READ_ONLY) return;
+    moveModeEl.checked = !moveModeEl.checked;
+    moveModeEl.onchange();
+  };
+  dockCenterSelected.onclick = ()=>{
+    const pin = PINS.find(p=>p.id===selectedPinId);
+    if (pin) centerToPin(pin);
+  };
+  function applyDockMinState(){
+    const min = localStorage.getItem('editorDock_min')==='1';
+    dock.classList.toggle('collapsed', !!min);
+    dockMin.textContent = min ? '展開' : '最小化';
+  }
+  dockMin.onclick = ()=>{
+    const min = localStorage.getItem('editorDock_min')==='1';
+    localStorage.setItem('editorDock_min', min?'0':'1');
+    applyDockMinState();
+  };
+  applyDockMinState();
+
+  /* ===== Camera tab ===== */
+  function setCameraMode(mode){
+    cameraMode = mode;
+    if (mode==='persp'){
+      camera = cameraPersp;
+      updateCameraAspect();
+      fovRange.disabled = false;
+      document.getElementById('rowFov').style.display = '';
+      document.getElementById('rowZoom').style.display = 'none';
+    } else {
+      camera = cameraOrtho || makeOrtho(fitMaxDim*2.2);
+      updateCameraAspect();
+      fovRange.disabled = true;
+      document.getElementById('rowFov').style.display = 'none';
+      document.getElementById('rowZoom').style.display = '';
+    }
+    controls.object = camera;
+    gizmo.camera = camera;
+    controls.update();
+  }
+  projModeSel.onchange = ()=> setCameraMode(projModeSel.value);
+  fovRange.value = 60; fovVal.textContent = '60°';
+  fovRange.oninput = ()=>{
+    const v = Number(fovRange.value)||60;
+    fovVal.textContent = v+'°';
+    if (cameraMode==='persp'){
+      camera.fov = v; camera.updateProjectionMatrix();
+    }
+  };
+  zoomRange.oninput = ()=>{
+    const z = Number(zoomRange.value)||1;
+    zoomVal.textContent = z.toFixed(2);
+    if (cameraMode==='ortho'){ camera.zoom = z; camera.updateProjectionMatrix(); }
+  };
+  btnFrame.onclick = ()=> frameToObject();
+  tabCamera.querySelectorAll('[data-view]').forEach(b=>{
+    b.onclick = ()=>{
+      const dir = b.getAttribute('data-view');
+      const d = fitDist;
+      const map = {
+        front:  [ 0,  0,  d],
+        back:   [ 0,  0, -d],
+        left:   [-d,  0,  0],
+        right:  [ d,  0,  0],
+        top:    [ 0,  d,  0],
+        bottom: [ 0, -d,  0],
+      }[dir] || [0, fitMaxDim*0.6, d];
+      camera.position.set(map[0], map[1], map[2]);
+      camera.lookAt(controls.target);
+      controls.update();
+    };
+  });
+  if (bgModeSel){
+    bgModeSel.onchange = ()=> applyBackground(bgModeSel.value);
+    applyBackground(bgModeSel.value || 'dark');
+  }
+
+  /* ===== Touch UI ===== */
+  function applyTouchUI(){
+    touchModeEl.checked = TOUCH_MODE;
+    hintDesktop.classList.toggle('hidden', TOUCH_MODE);
+    hintTouch.classList.toggle('hidden', !TOUCH_MODE);
+    touchHelp.textContent = TOUCH_MODE
+      ? '1本指=回転 / 2本指=パン / ピンチ=ズーム / 長押しでピン追加'
+      : 'Shift+クリックでピン追加 / マウス左=回転 / 右=パン / ホイール=ズーム';
+  }
+  touchModeEl.onchange = ()=>{ TOUCH_MODE = !!touchModeEl.checked; applyTouchUI(); };
+  applyTouchUI();
+
+  /* ===== Materials ===== */
+  function collectMaterials(root){
+    const set = new Set();
+    root.traverse(o=>{
+      const mats = o.material ? (Array.isArray(o.material)? o.material : [o.material]) : null;
+      if (!mats) return;
+      mats.forEach(m=>{
+        if (!set.has(m)) {
+          set.add(m);
+          const name = (m.name && m.name.trim()) || `Material_${materialList.length+1}`;
+          materialList.push({ name, material: m });
+          materialCache.set(m.uuid, { original: m.map || null, invertedCache: new Map() });
+          const cfg = MATERIALS[name];
+          if (cfg) applyMaterialConfig(m, cfg);
+        }
+      });
+    });
+  }
+  function buildMaterialsUI(targetEl){
+    targetEl.innerHTML='';
+    if (!materialList.length){
+      targetEl.innerHTML = `<div class="muted">GLBにマテリアルが見つかりませんでした。</div>`;
+      return;
+    }
+    for (const {name, material} of materialList){
+      const hasMap = !!material.map;
+      const cfg = MATERIALS[name] || (MATERIALS[name]={ invert:false, opacity:material.opacity ?? 1, blackThreshold:0.05, doubleSided:false });
+
+      const el=document.createElement('div'); el.className='mat';
+      el.innerHTML = `
+        <div class="name">${name}</div>
+        <div class="row${hasMap?'':' disabled'}">
+          <label><input type="checkbox" data-k="invert" ${cfg.invert&&hasMap?'checked':''} ${READ_ONLY?'disabled':''}> 色反転（黒を透過）</label>
+          ${!hasMap?`<span class="muted">（テクスチャなし）</span>`:''}
+        </div>
+        <div class="row">
+          <span class="muted">不透明度</span>
+          <input type="range" data-k="opacity" min="0" max="1" step="0.01" value="${cfg.opacity}" ${READ_ONLY?'disabled':''}>
+          <span class="muted" data-k="ov">${cfg.opacity.toFixed(2)}</span>
+        </div>
+        <div class="row${hasMap?'':' disabled'}">
+          <span class="muted">黒しきい値</span>
+          <input type="range" data-k="black" min="0" max="0.5" step="0.01" value="${cfg.blackThreshold}" ${READ_ONLY?'disabled':''}>
+          <span class="muted" data-k="bv">${cfg.blackThreshold.toFixed(2)}</span>
+        </div>
+        <div class="row">
+          <label><input type="checkbox" data-k="double" ${cfg.doubleSided?'checked':''} ${READ_ONLY?'disabled':''}> 両面表示（裏面も描画）</label>
+        </div>
+      `;
+
+      if (!READ_ONLY){
+        const chk = el.querySelector('input[data-k="invert"]');
+        if (chk) chk.onchange = ()=>{ cfg.invert = chk.checked; applyMaterialConfig(material, cfg); scheduleAutoSave(); };
+
+        const op = el.querySelector('input[data-k="opacity"]');
+        const ov = el.querySelector('span[data-k="ov"]');
+        op.oninput = ()=>{ cfg.opacity = Number(op.value); ov.textContent = cfg.opacity.toFixed(2); applyMaterialConfig(material, cfg); };
+        op.onchange = ()=>{ scheduleAutoSave(); };
+
+        const bt = el.querySelector('input[data-k="black"]');
+        const bv = el.querySelector('span[data-k="bv"]');
+        if (bt){ bt.oninput = ()=>{ cfg.blackThreshold = Number(bt.value); bv.textContent = cfg.blackThreshold.toFixed(2); if (cfg.invert) applyMaterialConfig(material, cfg); }; bt.onchange=()=>scheduleAutoSave(); }
+
+        const db = el.querySelector('input[data-k="double"]');
+        db.onchange = ()=>{ cfg.doubleSided = db.checked; applyMaterialConfig(material, cfg); scheduleAutoSave(); };
+      }
+      targetEl.appendChild(el);
+    }
+  }
+  function applyMaterialConfig(mat, cfg){
+    mat.opacity = (cfg.opacity!=null)? cfg.opacity : 1;
+    mat.transparent = mat.opacity < 1 || cfg.invert;
+    mat.side = cfg.doubleSided ? THREE.DoubleSide : THREE.FrontSide;
+    if (cfg.invert && mat.map){
+      const cache = materialCache.get(mat.uuid);
+      if (cache && cache.original==null) cache.original = mat.map;
+      const tex = getInvertedTexture(mat, cfg.blackThreshold || 0.05);
+      mat.map = tex;
+      mat.alphaTest = Math.min(0.49, (cfg.blackThreshold||0.05)/1.2);
+      mat.needsUpdate = true;
+    } else {
+      const cache = materialCache.get(mat.uuid);
+      if (cache && cache.original){
+        mat.map = cache.original;
+        mat.alphaTest = 0;
+        mat.needsUpdate = true;
+      }
+    }
+  }
+  function getInvertedTexture(mat, threshold){
+    const cache = materialCache.get(mat.uuid);
+    if (cache){
+      const key = Number(threshold).toFixed(2);
+      const hit = cache.invertedCache.get(key);
+      if (hit) return hit;
+    }
+    const src = (materialCache.get(mat.uuid)?.original) || mat.map;
+    const image = src?.image;
+    if (!image) return src;
+    const w = image.videoWidth || image.naturalWidth || image.width;
+    const h = image.videoHeight || image.naturalHeight || image.height;
+    const cvs = document.createElement('canvas'); cvs.width = w; cvs.height = h;
+    const ctx = cvs.getContext('2d');
+    try{ ctx.drawImage(image, 0, 0, w, h); }
+    catch(e){ console.warn('テクスチャの描画に失敗（CORSの可能性）。元のテクスチャを使用します。', e); return src; }
+    const img = ctx.getImageData(0,0,w,h);
+    const d = img.data;
+    const thr = Math.round(threshold * 255);
+    for (let i=0;i<d.length;i+=4){
+      const r=d[i], g=d[i+1], b=d[i+2], a=d[i+3];
+      const y = (r+g+b)/3|0;
+      const inv = 255 - y;
+      d[i]=d[i+1]=d[i+2]=inv;
+      d[i+3] = (inv <= thr) ? 0 : a;
+    }
+    ctx.putImageData(img,0,0);
+    const tex = new THREE.CanvasTexture(cvs);
+    tex.flipY = src.flipY;
+    tex.wrapS = src.wrapS; tex.wrapT = src.wrapT;
+    tex.repeat.copy(src.repeat); tex.offset.copy(src.offset);
+    if (src.center) tex.center.copy(src.center);
+    tex.rotation = src.rotation || 0;
+    if (cache){
+      const key = Number(threshold).toFixed(2);
+      cache.invertedCache.set(key, tex);
+    }
+    return tex;
+  }
+
+  /* ===== Save / Autosave ===== */
+  let autosaveTimer = null;
+  let lastSavedJson = '';
+  function setSaveStatus(state, msg=''){
+    if (state==='ok') saveStatusEl.textContent=msg||'保存済み', saveStatusEl.className='save-ok';
+    else if (state==='pending') saveStatusEl.textContent=msg||'保存中…', saveStatusEl.className='save-pending';
+    else if (state==='fail') saveStatusEl.textContent=msg||'保存失敗', saveStatusEl.className='save-fail';
+    else saveStatusEl.textContent=msg||'待機中', saveStatusEl.className='muted';
+  }
+  function scheduleAutoSave(){
+    if (READ_ONLY) return;
+    if (!autoSaveEl.checked) return;
+    const json = JSON.stringify({ pins:PINS, materials:MATERIALS });
+    if (json === lastSavedJson) return;
+    if (autosaveTimer) clearTimeout(autosaveTimer);
+    setSaveStatus('pending','自動保存待機中…');
+    autosaveTimer = setTimeout(autoSaveNow, 1500);
+  }
+  async function ensureAutosaveTarget(glbId){
+    if (!accessToken) return '';
+    if (autosaveId) return autosaveId;
+    const map = loadMap();
+    if (map[glbId]) { autosaveId = map[glbId]; autosaveName='pins.json'; return autosaveId; }
+    let parentId = folderIdInput.value.trim();
+    if (!parentId && glbId){
+      try{ const meta=await driveGetMetadata(glbId); if (meta.parents?.length) parentId = meta.parents[0]; }catch{}
+    }
+    if (parentId){
+      const q = `name = 'pins.json' and mimeType = 'application/json' and '${parentId}' in parents and trashed = false`;
+      try{
+        const res = await driveListFiles({ q, pageSize: 5 });
+        if (res.files?.length){
+          autosaveId = res.files[0].id; autosaveName = res.files[0].name || 'pins.json';
+          rememberAutosave(glbId, autosaveId);
+          return autosaveId;
+        }
+      }catch(e){ console.warn('search pins.json failed', e); }
+    }
+    return '';
+  }
+  async function autoSaveNow(){
+    autosaveTimer=null;
+    try{
+      const payload = { pins:PINS, materials:MATERIALS };
+      const jsonBlob = new Blob([JSON.stringify(payload,null,2)],{type:'application/json'});
+      const glbId = fileIdInput.value.trim();
+      let parentId=folderIdInput.value.trim();
+      if(!parentId && glbId && accessToken){
+        try{ const meta=await driveGetMetadata(glbId); if(meta.parents?.length) parentId=meta.parents[0]; }catch{}
+      }
+      if (!autosaveId && accessToken){ await ensureAutosaveTarget(glbId); }
+      setSaveStatus('pending','保存中…');
+      if(autosaveId && accessToken){
+        await driveUpdateFile({fileId:autosaveId, name:autosaveName, mimeType:'application/json', dataBlob:jsonBlob});
+      }else{
+        await ensureToken(SCOPES_WRITE);
+        const created=await driveCreateFile({name:'pins.json', mimeType:'application/json', parents:parentId?[parentId]:[], dataBlob:jsonBlob});
+        autosaveId=created.id; autosaveName=created.name||'pins.json';
+        if (glbId) rememberAutosave(glbId, autosaveId);
+      }
+      lastSavedJson = JSON.stringify(payload);
+      const t=new Date(), hh=String(t.getHours()).padStart(2,'0'), mm=String(t.getMinutes()).padStart(2,'0'), ss=String(t.getSeconds()).padStart(2,'0');
+      setSaveStatus('ok', `保存済み ${hh}:${mm}:${ss}`); scopeWarnEl.style.display='none';
+      updatePinsInfo();
+    }catch(e){ console.warn('autoSave failed', e); setSaveStatus('fail','オートセーブ失敗（権限？）'); scopeWarnEl.style.display='block'; }
+  }
+  function updatePinsInfo(){
+    const loaded = loadedPinsId ? `読み込み: ${loadedPinsName||'(名称未取得)'} (${loadedPinsId})` : '読み込み: なし';
+    const auto   = autosaveId   ? `オートセーブ: ${autosaveName} (${autosaveId})` : 'オートセーブ: pins.json（未作成）';
+    pinsInfoEl.textContent = loaded + ' / ' + auto;
+  }
+
+  /* ===== Pins Picker / Image Picker（省略せずそのまま） ===== */
+  const openModal = (html)=>{ modalRoot.className='modal-overlay'; modalRoot.innerHTML=html; };
+  const closeModal = ()=>{ modalRoot.className='hidden'; modalRoot.innerHTML=''; };
+
+  async function openPinsPicker({ parentId, onSelect }){
+    openModal(`
+      <div class="modal">
+        <header>
+          <strong>pins.json を選択</strong>
+          <div class="grow"></div>
+          <input id="pickerQuery" placeholder="名前でフィルタ（例：pins）" style="padding:6px 8px;border:1px solid #ddd;border-radius:8px;min-width:200px">
+          <button id="pickerSearchAll">ドライブ全体から検索</button>
+          <button id="pickerClose">閉じる</button>
+        </header>
+        <div class="body">
+          <div class="muted" style="margin-bottom:6px">${parentId?`まずはGLBと同じフォルダ内を表示します。`:`保存先フォルダが特定できないため、全体検索をお使いください。`}</div>
+          <div class="list" id="pickerList"><div class="rowi"><div>読み込み中…</div></div></div>
+        </div>
+        <footer><span class="muted">JSONのみ表示。最新順。</span></footer>
+      </div>
+    `);
+    const listEl = document.getElementById('pickerList');
+    document.getElementById('pickerClose').onclick = closeModal;
+    async function renderList(files){
+      if (!files?.length){ listEl.innerHTML = `<div class="rowi"><div>候補がありません</div></div>`; return; }
+      listEl.innerHTML = files.map(f=>{
+        const t = new Date(f.modifiedTime||Date.now()).toLocaleString();
+        return `<div class="rowi">
+          <div><div class="name">${f.name||'(名称なし)'}</div><div class="meta">更新: ${t}</div></div>
+          <div class="meta">${f.id}</div>
+          <div><button data-pick="${f.id}">選択</button></div>
+        </div>`;
+      }).join('');
+      listEl.querySelectorAll('[data-pick]').forEach(btn=>{
+        btn.onclick = ()=>{
+          const id = btn.getAttribute('data-pick');
+          const file = files.find(x=>x.id===id);
+          closeModal();
+          if (file) onSelect(file);
+        };
+      });
+    }
+    async function loadFolder(){
+      try{
+        let q = `mimeType = 'application/json' and trashed = false and name contains 'pins'`;
+        if (parentId) q += ` and '${parentId}' in parents`;
+        const res = await driveListFiles({ q, pageSize: 50 });
+        await renderList(res.files||[]);
+      }catch(e){ listEl.innerHTML = `<div class="rowi"><div>検索に失敗しました</div></div>`; }
+    }
+    await loadFolder();
+    document.getElementById('pickerSearchAll').onclick = async ()=>{
+      try{
+        const query = document.getElementById('pickerQuery').value.trim();
+        let q = `mimeType = 'application/json' and trashed = false`;
+        if (query) q += ` and name contains '${query.replace(/'/g,"\\'")}'`;
+        else q += ` and name contains 'pins'`;
+        const res = await driveListFiles({ q, pageSize: 100 });
+        await renderList(res.files||[]);
+      }catch(e){ listEl.innerHTML = `<div class="rowi"><div>全体検索に失敗しました</div></div>`; }
+    };
+  }
+
+  async function chooseDriveImageForPin(pin, opts={}){
+    try{
+      await ensureToken(SCOPES_READ);
+      const glbId=fileIdInput.value.trim();
+      let parentId=folderIdInput.value.trim();
+      if(!parentId && glbId){ const meta=await driveGetMetadata(glbId); if(meta.parents?.length) parentId=meta.parents[0]; }
+      openModal(`
+        <div class="modal">
+          <header>
+            <strong>画像を選択（GLBと同じフォルダ）</strong>
+            <div class="grow"></div>
+            <input id="imgQuery" placeholder="名前でフィルタ（例：scan）" style="padding:6px 8px;border:1px solid #ddd;border-radius:8px;min-width:200px">
+            <button id="imgSearchAll">ドライブ全体から検索</button>
+            <button id="imgClose">閉じる</button>
+          </header>
+          <div class="body"><div class="grid" id="imgGrid"><div>読み込み中…</div></div></div>
+          <footer><span class="muted">画像（image/*）のみ表示。最新順。</span></footer>
+        </div>
+      `);
+      const gridEl = document.getElementById('imgGrid');
+      document.getElementById('imgClose').onclick = closeModal;
+      function cardHTML(f){
+        const t = new Date(f.modifiedTime||Date.now()).toLocaleDateString();
+        const thumb = f.thumbnailLink ? f.thumbnailLink.replace(/=s220/,'=s400') : '';
+        return `<div class="card">
+          <img src="${thumb||''}" alt="${(f.name||'').replace(/"/g,'&quot;')}" onerror="this.style.visibility='hidden'">
+          <div class="title">${f.name||'(名称なし)'}</div>
+          <div class="meta">${t}</div>
+          <button data-pick="${f.id}">この画像を使う</button>
+        </div>`;
+      }
+      async function renderGrid(files){
+        if (!files?.length){ gridEl.innerHTML = `<div>候補がありません</div>`; return; }
+        gridEl.innerHTML = files.map(cardHTML).join('');
+        gridEl.querySelectorAll('[data-pick]').forEach(btn=>{
+          btn.onclick = async ()=>{
+            const id = btn.getAttribute('data-pick');
+            const file = files.find(x=>x.id===id);
+            closeModal();
+            if (file){
+              pin.imageDriveId = file.id;
+              const blob = await driveFetchBinary(file.id);
+              if (pin.imageUrl) { try { URL.revokeObjectURL(pin.imageUrl); } catch(e){} }
+              pin.imageUrl = URL.createObjectURL(blob);
+              redrawPins();
+              scheduleAutoSave();
+              if (typeof opts.onApplied === 'function') opts.onApplied();
+            }
+          };
+        });
+      }
+      async function loadFolder(){
+        try{
+          let q = `mimeType contains 'image/' and trashed = false`;
+          if (parentId) q += ` and '${parentId}' in parents`;
+          const res = await driveListFiles({ q, pageSize: 100 });
+          await renderGrid(res.files||[]);
+        }catch(e){ gridEl.innerHTML = `<div>検索に失敗しました</div>`; }
+      }
+      await loadFolder();
+      document.getElementById('imgSearchAll').onclick = async ()=>{
+        try{
+          const query = document.getElementById('imgQuery').value.trim();
+          let q = `mimeType contains 'image/' and trashed = false`;
+          if (query) q += ` and name contains '${query.replace(/'/g,"\\'")}'`;
+          const res = await driveListFiles({ q, pageSize: 200 });
+          await renderGrid(res.files||[]);
+        }catch(e){ gridEl.innerHTML = `<div>全体検索に失敗しました</div>`; }
+      };
+    }catch(e){ console.error(e); alert('画像の検索に失敗しました（権限をご確認ください）'); }
+  }
+
+  /* ===== 共有エラー診断 / 共有UI ===== */
+  async function explainShareError(fileId, err){
+    console.warn('share-toggle failed', err);
+    try{
+      const meta = await driveGetMetadata(
+        fileId,
+        'id,name,owners,driveId,capabilities(canShare,canEdit,canCopy,canComment),permissions'
+      );
+      const caps = meta.capabilities||{};
+      const onDrive = !!meta.driveId;
+      let reasons = [];
+      if (!caps.canShare) reasons.push('このファイルの共有設定は変更できない（capabilities.canShare=false）');
+      if (!caps.canEdit)  reasons.push('あなたは編集権限がない可能性（capabilities.canEdit=false）');
+      if (onDrive)        reasons.push('共有ドライブ：組織ポリシー制限の可能性');
+      if (!reasons.length) reasons.push('スコープ不足か管理者ポリシーの可能性');
+      alert(
+        `共有設定の変更に失敗しました。\n`+
+        `ファイル名: ${meta.name||'(不明)'}\n\n`+
+        `診断:\n - `+reasons.join('\n - ')+"\n\n"+
+        `ヒント:\n1) 共有ドライブは役割が必要\n2) 組織でリンク共有禁止の可能性\n3) DriveのUIで手動変更も試してください`
+      );
+    }catch(_){
+      alert('共有設定の変更に失敗しました。DriveのUIで共有設定をご確認ください。');
+    }
+  }
+  function copyText(text, okMsg='コピーしました'){
+    if (navigator.clipboard && window.isSecureContext){
+      navigator.clipboard.writeText(text).then(()=> alert(okMsg)).catch(()=> fallbackCopy(text, okMsg));
+    } else { fallbackCopy(text, okMsg); }
+  }
+  function fallbackCopy(text, okMsg){
+    const ta=document.createElement('textarea'); ta.value=text; document.body.appendChild(ta);
+    ta.select(); try{ document.execCommand('copy'); alert(okMsg); } finally{ document.body.removeChild(ta); }
+  }
+
+  /* ===== Header actions ===== */
+  btnAuth.onclick = async ()=>{
+    try{ statusEl.textContent='サインイン中…'; await loadGapi(); await ensureToken(ALL_SCOPES); statusEl.textContent='サインイン完了'; scopeWarnEl.style.display='none'; }
+    catch(e){ console.error(e); alert('Googleサインインに失敗しました。設定/ポップアップ/拡張のブロックをご確認ください。'); statusEl.textContent='サインイン失敗'; }
+  };
+  btnLoad.onclick = async ()=>{
+    const glbId=fileIdInput.value.trim();
+    const manualPinsId=pinsIdInput.value.trim();
+    if(!glbId){ alert('GLBの fileId を入力してください'); return; }
+    try{
+      statusEl.textContent='GLB読込中…';
+      try{ await loadGLBFromDrive(glbId); }
+      catch(e){ await loadGapi(); await ensureToken(SCOPES_READ); await loadGLBFromDrive(glbId); }
+      PINS=[]; MATERIALS={}; redrawPins(); lastSavedJson=''; loadedPinsId=''; loadedPinsName=''; autosaveId=''; autosaveName='pins.json';
+      if (!READ_ONLY && accessToken){ await ensureAutosaveTarget(glbId); }
+      let targetPinsId = manualPinsId || autosaveId || '';
+      if (targetPinsId){
+        statusEl.textContent='pins 読込中…';
+        let text=null;
+        try{ const pblob=await driveFetchBinary(targetPinsId); text=await pblob.text(); }
+        catch(e){ await loadGapi(); await ensureToken(SCOPES_READ); const pblob=await driveFetchBinary(targetPinsId); text=await pblob.text(); }
+        let data=null; try{ data=JSON.parse(text); }catch{}
+        if(Array.isArray(data)){ PINS=data.map(p=>({...p, position:safePos(p.position)})); MATERIALS={}; }
+        else if(data && typeof data==='object'){
+          PINS = Array.isArray(data.pins)? data.pins.map(p=>({...p, position:safePos(p.position)})) : [];
+          MATERIALS = (data.materials && typeof data.materials==='object') ? data.materials : {};
+        }
+        loadedPinsId = targetPinsId;
+        if (accessToken){ try{ const m=await driveGetMetadata(loadedPinsId); loadedPinsName=m.name||''; }catch{} }
+        redrawPins();
+        for (const {name, material} of materialList){ const cfg = MATERIALS[name]; if (cfg) applyMaterialConfig(material, cfg); }
+        lastSavedJson = JSON.stringify({pins:PINS,materials:MATERIALS});
+        setSaveStatus('ok','読み込み完了');
+      } else {
+        lastSavedJson = JSON.stringify({pins:PINS,materials:MATERIALS});
+        setSaveStatus('muted','新規セッション');
+      }
+      buildMaterialsUI(materialsDockEl);
+      statusEl.textContent='完了';
+      syncDockMoveToggle();
+      axisBtnX.classList.toggle('toggled', gizmo.showX);
+      axisBtnY.classList.toggle('toggled', gizmo.showY);
+      axisBtnZ.classList.toggle('toggled', gizmo.showZ);
+      updatePinsInfo();
+      refreshShareButtons();
+      projModeSel.value = cameraMode;
+      fovRange.value = Math.round(camera.fov||60);
+      fovVal.textContent = (camera.fov||60).toFixed(0)+'°';
+      zoomRange.value = (camera.zoom||1);
+      zoomVal.textContent = (camera.zoom||1).toFixed(2);
+      applyBackground(bgModeSel?.value || 'dark');
+    }catch(e){ console.error(e); alert('読み込みに失敗しました。権限と fileId を確認してください。'); statusEl.textContent='エラー'; }
+  };
+  btnSavePins.onclick = async ()=>{
+    if (READ_ONLY){ alert('閲覧専用モードでは保存できません'); return; }
+    try{
+      await ensureToken(SCOPES_WRITE); scopeWarnEl.style.display='none';
+      const glbId=fileIdInput.value.trim();
+      const payload={pins:PINS,materials:MATERIALS};
+      const json=new Blob([JSON.stringify(payload,null,2)],{type:'application/json'});
+      let parentId=folderIdInput.value.trim();
+      if(!parentId && glbId){
+        const meta=await driveGetMetadata(glbId);
+        if(meta.parents?.length) parentId=meta.parents[0];
+      }
+      const now=new Date();
+      const def=`pins_${now.getFullYear()}${String(now.getMonth()+1).padStart(2,'0')}${String(now.getDate()).padStart(2,'0')}_${String(now.getHours()).padStart(2,'0')}${String(now.getMinutes()).padStart(2,'0')}.json`;
+      const name=prompt('保存ファイル名を入力してください（例：'+def+'）', def);
+      if(!name) return;
+      const created=await driveCreateFile({name, mimeType:'application/json', parents:parentId?[parentId]:[], dataBlob:json});
+      alert(`保存しました: ${name}\nfileId: ${created.id}`);
+      updatePinsInfo();
+      refreshShareButtons();
+    }catch(e){ scopeWarnEl.style.display='block'; console.error(e); alert('保存に失敗しました。権限（drive.file）とフォルダIDをご確認ください。'); setSaveStatus('fail','手動保存失敗'); }
+  };
+  autoSaveEl.onchange = ()=>{ if (READ_ONLY) return; if (autoSaveEl.checked) scheduleAutoSave(); else setSaveStatus('muted','オートセーブOFF'); };
+  btnPickPins.onclick = async ()=>{
+    try{
+      await ensureToken(SCOPES_READ);
+      const glbId=fileIdInput.value.trim();
+      let parentId=folderIdInput.value.trim();
+      if(!parentId && glbId){ const meta=await driveGetMetadata(glbId); if(meta.parents?.length) parentId=meta.parents[0]; }
+      openPinsPicker({ parentId, onSelect: async (file)=> {
+        pinsIdInput.value=file.id;
+        loadedPinsId = file.id; loadedPinsName = file.name || '';
+        try{
+          const blob=await driveFetchBinary(file.id); const text=await blob.text();
+          let data=null; try{ data=JSON.parse(text); }catch{}
+          if(Array.isArray(data)){ PINS=data.map(p=>({...p, position:safePos(p.position)})); MATERIALS={}; }
+          else if(data && typeof data==='object'){
+            PINS = Array.isArray(data.pins)? data.pins.map(p=>({...p, position:safePos(p.position)})) : [];
+            MATERIALS = (data.materials && typeof data.materials==='object') ? data.materials : {};
+          }
+          redrawPins();
+          for (const {name, material} of materialList){ const cfg = MATERIALS[name]; if (cfg) applyMaterialConfig(material, cfg); }
+          lastSavedJson = JSON.stringify({pins:PINS,materials:MATERIALS});
+          setSaveStatus('ok','pinsを読み込みました');
+          if ((file.name||'').toLowerCase() === 'pins.json'){
+            autosaveId = file.id; autosaveName = file.name; if (glbId) rememberAutosave(glbId, autosaveId);
+          }
+          updatePinsInfo();
+          refreshShareButtons();
+        }catch(e){ console.error(e); alert('pinsの読み込みに失敗しました'); }
+      }});
+    }catch(e){ console.error(e); alert('Driveの検索に失敗しました（サインイン必要）'); }
+  };
+  btnClearPins.onclick = ()=>{ pinsIdInput.value=''; loadedPinsId=''; loadedPinsName=''; updatePinsInfo(); refreshShareButtons(); };
+  btnCopyReadonlyUrl.onclick = ()=>{
+    const glb = fileIdInput.value.trim();
+    const pins = (pinsIdInput.value.trim() || loadedPinsId || autosaveId || '').trim();
+    if (!glb){ alert('まずGLBのfileIdを設定してください'); return; }
+    const url = new URL(window.location.href);
+    url.searchParams.set('fileId', glb);
+    if (pins) url.searchParams.set('pinsId', pins);
+    url.searchParams.set('mode', 'read');
+    copyText(url.toString(), '閲覧専用URLをコピーしました（限定ファイルは閲覧者の権限が必要です）');
+  };
+  btnToggleGlbPublic.onclick = async ()=>{
+    const glb = fileIdInput.value.trim();
+    if (!glb){ alert('GLBのfileIdが未設定です'); return; }
+    try{
+      await ensureToken(SCOPES_FULL);
+      const isPub = await driveIsPublic(glb);
+      await driveSetPublic(glb, !isPub);
+      alert(`GLBを ${!isPub?'公開（リンクを知っている全員が閲覧可）':'限定'} にしました`);
+      refreshShareButtons();
+    }catch(e){ await explainShareError(glb, e); }
+  };
+  btnTogglePinsPublic.onclick = async ()=>{
+    const pid = pinsIdInput.value.trim() || loadedPinsId || autosaveId;
+    if (!pid){ alert('pins.json が未指定です'); return; }
+    try{
+      await ensureToken(SCOPES_FULL);
+      const isPub = await driveIsPublic(pid);
+      await driveSetPublic(pid, !isPub);
+      alert(`pins.jsonを ${!isPub?'公開（リンクを知っている全員が閲覧可）':'限定'} にしました`);
+      refreshShareButtons();
+    }catch(e){ await explainShareError(pid, e); }
+  };
+  async function refreshShareButtons(){
+    btnToggleGlbPublic.textContent = '限定';
+    btnTogglePinsPublic.textContent= '限定';
+    btnTogglePinsPublic.disabled = !(pinsIdInput.value.trim() || loadedPinsId || autosaveId);
+    if (!accessToken) return;
+    try{
+      const glb = fileIdInput.value.trim();
+      if (glb){
+        const pub = await driveIsPublic(glb);
+        btnToggleGlbPublic.textContent = pub ? '公開' : '限定';
+      }
+    }catch{}
+    try{
+      const pid = pinsIdInput.value.trim() || loadedPinsId || autosaveId;
+      if (pid){
+        const pub = await driveIsPublic(pid);
+        btnTogglePinsPublic.textContent = pub ? '公開' : '限定';
+      }
+    }catch{}
+  }
+
+  /* ===== READ-ONLY mode (URL ?mode=read) ===== */
+  function applyReadOnlyUI(){
+    if (!READ_ONLY) return;
+    btnSavePins.style.display = 'none';
+    btnAddPin.style.display = 'none';
+    pillMove.style.display = 'none';
+    pillAutosave.style.display = 'none';
+    dock.style.display = 'none';
+  }
+  (function bootFromUrl(){
+    const sp = new URLSearchParams(location.search);
+    const f = sp.get('fileId'); const p = sp.get('pinsId'); const mode = sp.get('mode');
+    if (f){ fileIdInput.value = f; }
+    if (p){ pinsIdInput.value = p; }
+    READ_ONLY = (mode === 'read');
+    TOUCH_MODE = TOUCH_MODE || (sp.get('touch')==='1');
+    applyTouchUI();
+    applyReadOnlyUI();
+    if (f){
+      setTimeout(()=> btnLoad.click(), 100);
+    }
+  })();
+
+  </script>
+</body>
+</html>
