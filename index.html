@@ -569,6 +569,25 @@
   }
   tick();
 
+  /* ===== カメラ補間（追加） ===== */
+  function animateCameraTo({ fromPos, toPos, fromTarget, toTarget, duration=400, ease=(t)=>t }){
+    const start = performance.now();
+    function step(){
+      const now = performance.now();
+      const t = Math.min(1, (now - start) / duration);
+      const k = ease(t);
+
+      camera.position.lerpVectors(fromPos, toPos, k);
+      controls.target.lerpVectors(fromTarget, toTarget, k);
+
+      camera.updateProjectionMatrix?.();
+      controls.update();
+
+      if (t < 1) requestAnimationFrame(step);
+    }
+    requestAnimationFrame(step);
+  }
+
   /* ===== GLB 読み込み ===== */
   let gltfRoot = null;
   const pinsGroup = new THREE.Group(); scene.add(pinsGroup);
@@ -734,7 +753,30 @@
       summary.innerHTML = `${title} <span class="muted">@ ${[p.x,p.y,p.z].map(n=>n.toFixed(3)).join(', ')}</span>`;
     }
   }
-  function centerToPin(pin){ const v = safePos(pin.position); controls.target.set(v[0],v[1],v[2]); controls.update(); }
+
+  /* centerToPin：ターゲット＋距離をスムーズに調整（置き換え済み） */
+  function centerToPin(pin){
+    const v = safePos(pin.position);
+    const target = new THREE.Vector3(v[0], v[1], v[2]);
+
+    const currentPos = camera.position.clone();
+    const currentTarget = controls.target.clone();
+    const currentDir = currentPos.clone().sub(currentTarget);
+    const currentDist = currentDir.length();
+
+    const ideal = Math.max(0.6, fitMaxDim * 0.9);
+    const dir = currentDir.normalize();
+    const nextPos = target.clone().addScaledVector(dir, ideal);
+
+    animateCameraTo({
+      fromPos: currentPos,
+      toPos: nextPos,
+      fromTarget: currentTarget,
+      toTarget: target,
+      duration: 380,
+      ease: t => 1 - Math.pow(1 - t, 3),
+    });
+  }
 
   /* ===== ポップアップ ===== */
   function projectToScreen(vec3){
@@ -1020,6 +1062,8 @@
     if (cameraMode==='ortho'){ camera.zoom = z; camera.updateProjectionMatrix(); }
   };
   btnFrame.onclick = ()=> frameToObject();
+
+  /* ビュー切替：スムーズ移動に差し替え済み */
   tabCamera.querySelectorAll('[data-view]').forEach(b=>{
     b.onclick = ()=>{
       const dir = b.getAttribute('data-view');
@@ -1032,11 +1076,18 @@
         top:    [ 0,  d,  0],
         bottom: [ 0, -d,  0],
       }[dir] || [0, fitMaxDim*0.6, d];
-      camera.position.set(map[0], map[1], map[2]);
-      camera.lookAt(controls.target);
-      controls.update();
+
+      const target = controls.target.clone();
+      const fromPos = camera.position.clone();
+      const toPos   = new THREE.Vector3(map[0], map[1], map[2]);
+
+      animateCameraTo({
+        fromPos, toPos, fromTarget: target, toTarget: target, duration: 320,
+        ease: t => 1 - Math.pow(1 - t, 3),
+      });
     };
   });
+
   if (bgModeSel){
     bgModeSel.onchange = ()=> applyBackground(bgModeSel.value);
     applyBackground(bgModeSel.value || 'dark');
