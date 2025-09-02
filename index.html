@@ -1104,16 +1104,31 @@ function closePinPopup(id){
     card.appendChild(hdr); card.appendChild(body); card.appendChild(ftr);
 
     if (!READ_ONLY){
-      title.addEventListener('input', ()=>{ pin.title = title.value; scheduleAutoSave(); updateListPositionSummary(pinId); });
-      ta.addEventListener('input', ()=>{ pin.text = ta.value; scheduleAutoSave(); });
+      title.addEventListener('input', ()=>{
+       if (!card._editedOnce){
+  card._editedOnce = true;
+  setTimeout(()=>{ card._editedOnce = false; }, 1200);
+  recordChange('pin:edit');
+}
+pin.title = title.value; scheduleAutoSave(); updateListPositionSummary(pinId); });
+      
+      ta.addEventListener('input', ()=>{
+      if (!card._editedOnce){
+  card._editedOnce = true;
+  setTimeout(()=>{ card._editedOnce = false; }, 1200);
+  recordChange('pin:edit');
+}
+ pin.text = ta.value; scheduleAutoSave(); });
       btnClose.onclick = ()=> closePinPopup(pinId);
       btnCenter.onclick = ()=> centerToPin(pin);
       btnChoose.onclick = ()=>{
         const input = document.createElement('input'); input.type='file'; input.accept='image/*';
         input.onchange = async ()=>{
-          if (!input.files || !input.files[0]) return;
-          const f = input.files[0];
-          const doUpload = async ()=>{
+  if (!input.files || !input.files[0]) return;
+  recordChange('pin:image');    // ← これを追加
+  const f = input.files[0];
+  const doUpload = async ()=>{
+    ...
             let parents=[]; const folderId=folderIdInput.value.trim();
             if (folderId) parents=[folderId]; else {
               const glbId=fileIdInput.value.trim();
@@ -1234,8 +1249,10 @@ try {
   // ← 再宣言しない
   gizmo = new ThreeTransformControls(camera, renderer.domElement);
   gizmo.setMode('translate'); gizmo.size = 0.9; gizmo.visible = false; scene.add(gizmo);
-  gizmo.addEventListener('dragging-changed', (e)=>{ controls.enabled = !e.value; });
+gizmo.addEventListener('dragging-changed', (e)=>{ 
+  controls.enabled = !e.value;
   if (e.value) recordChange('pin:move'); // つかみ始めた瞬間に記録
+});
   gizmo.addEventListener('objectChange', ()=>{
     if (!selectedPinId) return;
     const rec = pinMap.get(selectedPinId); if (!rec) return;
