@@ -764,7 +764,8 @@
     const currentDir = currentPos.clone().sub(currentTarget);
     const currentDist = currentDir.length();
 
-    const ideal = Math.max(0.6, fitMaxDim * 0.9);
+    const ideal = Math.max(0.4
+   , fitMaxDim * 0.6);
     const dir = currentDir.normalize();
     const nextPos = target.clone().addScaledVector(dir, ideal);
 
