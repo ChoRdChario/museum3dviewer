@@ -1063,31 +1063,31 @@
   };
   btnFrame.onclick = ()=> frameToObject();
 
-  // === ビュー切替（Y軸基準で90°補正 & 上下ビューの水平補正） ===
-	const VIEW_YAW_DEG = 90; // 必要なら 180 にすると逆向きになる
+// === ビュー切替（Y軸基準で90°補正 & 上下ビューの水平補正） ===
+const VIEW_YAW_DEG = 90; // 必要なら -90 にすると逆向きになる
 
-	function yawAroundY(vec, deg){
- 	 const r = THREE.MathUtils.degToRad(deg);
- 	 const c = Math.cos(r), s = Math.sin(r);
- 	 return new THREE.Vector3(
-   	 vec.x * c + vec.z * s,
-   	 vec.y,
-   	 -vec.x * s + vec.z * c
- 	 );
-	}
+function yawAroundY(vec, deg){
+  const r = THREE.MathUtils.degToRad(deg);
+  const c = Math.cos(r), s = Math.sin(r);
+  return new THREE.Vector3(
+    vec.x * c + vec.z * s,
+    vec.y,
+    -vec.x * s + vec.z * c
+  );
+}
 
-	tabCamera.querySelectorAll('[data-view]').forEach(b=>{
-	  b.onclick = ()=>{
- 	   const dir = b.getAttribute('data-view');
- 	   const d = fitDist;
- 	   const base = {
- 	     front:  new THREE.Vector3( 0,  0,  d),
- 	     back:   new THREE.Vector3( 0,  0, -d),
- 	     left:   new THREE.Vector3( d, 0,  0),
- 	     right:  new THREE.Vector3(-d, 0,  0),
- 	     top:    new THREE.Vector3( 0,  d,  0),
- 	     bottom: new THREE.Vector3( 0,-d,  0),
- 	   }[dir] || new THREE.Vector3(0, fitMaxDim*0.6, d);
+tabCamera.querySelectorAll('[data-view]').forEach(b=>{
+  b.onclick = ()=>{
+    const dir = b.getAttribute('data-view');
+    const d = fitDist;
+    const base = {
+      front:  new THREE.Vector3( 0,  0,  d),
+      back:   new THREE.Vector3( 0,  0, -d),
+      left:   new THREE.Vector3(-d, 0,  0),
+      right:  new THREE.Vector3( d, 0,  0),
+      top:    new THREE.Vector3( 0,  d,  0),
+      bottom: new THREE.Vector3( 0,-d,  0),
+    }[dir] || new THREE.Vector3(0, fitMaxDim*0.6, d);
 
     // 上下以外はY軸で90°回転
     const viewVec = (dir==='top' || dir==='bottom') ? base : yawAroundY(base, VIEW_YAW_DEG);
@@ -1096,21 +1096,21 @@
     const fromPos = camera.position.clone();
     const toPos   = target.clone().add(viewVec);
 
-    	// 上下ビューは水平をまっすぐに
-    	if (dir==='top')      camera.up.set(0,0,-1);
-    	else if (dir==='bottom') camera.up.set(0,0, 1);
-    	else                  camera.up.set(0,1, 0);
+    // 上下ビューは水平をまっすぐに
+    if (dir==='top')      camera.up.set(0,0,-1);
+    else if (dir==='bottom') camera.up.set(0,0, 1);
+    else                  camera.up.set(0,1, 0);
 
-    	animateCameraTo({
-      	fromPos,
-      	toPos,
-      	fromTarget: target,
-     	 toTarget: target,
-      	duration: 320,
-      	ease: t => 1 - Math.pow(1 - t, 3),
-    	});
-	  };
-	});
+    animateCameraTo({
+      fromPos,
+      toPos,
+      fromTarget: target,
+      toTarget: target,
+      duration: 320,
+      ease: t => 1 - Math.pow(1 - t, 3),
+    });
+  };
+});
 
   if (bgModeSel){
     bgModeSel.onchange = ()=> applyBackground(bgModeSel.value);
