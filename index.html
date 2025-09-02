@@ -310,6 +310,15 @@ header .grow{ flex:1 }
   <script type="module">
   'use strict';
   console.log('drive_three_pins v1.21.1-bg');
+  
+  function esc(s=''){
+  return String(s)
+    .replace(/&/g,'&amp;')
+    .replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;')
+    .replace(/'/g,'&#39;');
+}
 
   /* ===== Config: OAuth / Drive ===== */
   const SCOPES_READ  = "https://www.googleapis.com/auth/drive.readonly";
@@ -884,7 +893,17 @@ async function driveIsPublic(fileId) {
   function redrawPins(){
       detachGizmo(); // 古いノードにギズモが残っているときのエラー回避
       
-    while(pinsGroup.children.length) pinsGroup.remove(pinsGroup.children[0]);
+while (pinsGroup.children.length) {
+  const child = pinsGroup.children[0];
+  child.traverse(o=>{
+    if (o.isSprite && o.material) {
+      o.material.map?.dispose?.();
+      o.material.dispose?.();
+    }
+  });
+  pinsGroup.remove(child);
+}
+
     for (const {floatDom, lineEl} of pinMap.values()){
       if (floatDom?.parentNode) floatDom.parentNode.removeChild(floatDom);
       if (lineEl?.parentNode) lineEl.parentNode.removeChild(lineEl);
@@ -905,9 +924,9 @@ async function driveIsPublic(fileId) {
       const hid=`file_${pin.id}`;
       const driveLink = pin.imageDriveId ? `https://drive.google.com/file/d/${pin.imageDriveId}/view?usp=drive_link` : '';
       wrap.innerHTML = `
-        <summary data-summary="${pin.id}">${pin.title||'（無題）'} <span class="muted">@ ${safePos(pin.position).map(n=>Number(n).toFixed(3)).join(', ')}</span></summary>
+        <summary data-summary="${pin.id}">${esc(pin.title)||'（無題）'} <span class="muted">@ ${safePos(pin.position).map(n=>Number(n).toFixed(3)).join(', ')}</span></summary>
         <div class="row"><input data-k="title" placeholder="タイトル" value="${pin.title||''}" ${READ_ONLY?'disabled':''} autocomplete="off"></div>
-        <div class="row"><textarea data-k="text" rows="3" placeholder="キャプション" ${READ_ONLY?'disabled':''}>${pin.text||''}</textarea></div>
+        <div class="row"><textarea data-k="text" rows="3" placeholder="キャプション" ${READ_ONLY?'disabled':''}>${esc(pin.text)||''}</textarea></div>
         ${READ_ONLY?'':`<input id="${hid}" class="hidden" type="file" accept="image/*">`}
         <div class="row">
           ${READ_ONLY?'':`<button data-act="choose">ローカルから</button>
@@ -1069,7 +1088,7 @@ function closePinPopup(id){
     const btnClose = document.createElement('button'); btnClose.textContent='×'; btnClose.className='btn ghost';
     hdr.appendChild(title); hdr.appendChild(btnClose);
     const body = document.createElement('div'); body.className='body';
-    const ta = document.createElement('textarea'); ta.placeholder='キャプション'; ta.value = pin.text||''; if (READ_ONLY) ta.disabled = true;
+    const ta = document.createElement('textarea'); ta.placeholder='キャプション'; ta.value = esc(pin.text)||''; if (READ_ONLY) ta.disabled = true;
     body.appendChild(ta);
     if (pin.imageUrl || pin.imageDriveId) {
  	 const pic = makePictureNode(pin);
@@ -1127,23 +1146,36 @@ pin.title = title.value; scheduleAutoSave(); updateListPositionSummary(pinId); }
   if (!input.files || !input.files[0]) return;
   recordChange('pin:image');    // ← これを追加
   const f = input.files[0];
-  const doUpload = async ()=>{
-    ...
-            let parents=[]; const folderId=folderIdInput.value.trim();
-            if (folderId) parents=[folderId]; else {
-              const glbId=fileIdInput.value.trim();
-              if (glbId){ const meta=await driveGetMetadata(glbId); if(meta.parents?.length) parents=[meta.parents[0]]; }
-            }
-            const up = await driveCreateFile({name:f.name,mimeType:f.type||'application/octet-stream',parents,dataBlob:f});
-		pin.imageDriveId = up.id;
-		pin.imageMime    = f.type || '';  // ← 追加：ローカルアップロードのMIMEも保存
-		const blob = await driveFetchBinary(up.id);
-		if (pin.imageUrl) { try { URL.revokeObjectURL(pin.imageUrl); } catch(e){} }
-		pin.imageUrl = URL.createObjectURL(blob);
-		const im = body.querySelector('img') || body.appendChild(document.createElement('img'));
-		im.src = pin.imageUrl;
+ const doUpload = async ()=>{
+  let parents = [];
+  const folderId = folderIdInput.value.trim();
+  if (folderId) {
+    parents = [folderId];
+  } else {
+    const glbId = fileIdInput.value.trim();
+    if (glbId) {
+      const meta = await driveGetMetadata(glbId);
+      if (meta.parents?.length) parents = [meta.parents[0]];
+    }
+  }
+  const up = await driveCreateFile({
+    name: f.name,
+    mimeType: f.type || 'application/octet-stream',
+    parents,
+    dataBlob: f
+  });
 
-          };
+  pin.imageDriveId = up.id;
+  pin.imageMime    = f.type || '';
+  const blob = await driveFetchBinary(up.id);
+  if (pin.imageUrl) { try { URL.revokeObjectURL(pin.imageUrl); } catch(e){} }
+  pin.imageUrl = URL.createObjectURL(blob);
+
+  const im = body.querySelector('img') || body.appendChild(document.createElement('img'));
+  im.src = pin.imageUrl;
+};
+
+
 try {
   await doUpload();
   scheduleAutoSave();
