@@ -59,6 +59,7 @@
     .lines line{ stroke:#fff; stroke-opacity:0.85; stroke-width:2; filter:drop-shadow(0 0 1px rgba(0,0,0,.7)); }
     .pill {font-size:12px;border:1px solid #ddd;border-radius:999px;padding:4px 8px;background:#fff;display:inline-flex;gap:6px;align-items:center}
     .pill input{margin:0}
+    .pill.small{font-size:11px;padding:2px 6px}
     .save-ok{color:#0a0}.save-pending{color:#a60}.save-fail{color:#b00}
     /* ===== Editor Dock ===== */
     .dock{
@@ -111,25 +112,37 @@
 </head>
 <body>
   <header>
-    <div>GLB fileId: <input id="fileId" placeholder="例: 1AbC..." autocomplete="off" /></div>
+    <!-- モデル（GLB/GLTF）＋ 読み込む -->
     <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
-      <div>Pins fileId: <input id="pinsId" placeholder="（任意）pins.json の fileId" autocomplete="off" /></div>
+      <div>モデル <button id="btnHelpModel" title="対応形式のヘルプ">?</button>:
+        <input id="fileId" placeholder="例: 1AbC..." autocomplete="off" />
+      </div>
+      <button id="btnLoad">読み込む</button>
+    </div>
+
+    <!-- キャプション（pins.json） -->
+    <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+      <div>キャプション <button id="btnHelpPins" title="pins.jsonのヘルプ">?</button>:
+        <input id="pinsId" placeholder="（任意）pins.json の fileId" autocomplete="off" />
+      </div>
       <button id="btnPickPins">選択…</button>
       <button id="btnClearPins">クリア</button>
     </div>
+
     <div>Save FolderId: <input id="folderId" placeholder="（任意）保存先フォルダID" autocomplete="off" /></div>
     <button id="btnAuth">Googleにサインイン</button>
-    <button id="btnLoad">読み込む</button>
-    <button id="btnSavePins">ピンをDriveに保存（リネーム）</button>
-    <button id="btnAddPin">ピン追加（画面中央）</button>
-    <label class="pill" id="pillMove" title="Gキーでも切替"><input type="checkbox" id="moveMode"> 移動モード（ギズモ）</label>
-    <div class="pill" id="pillAutosave">
+
+    <!-- 小型オートセーブ -->
+    <div class="pill small" id="pillAutosave">
       <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;">
         <input type="checkbox" id="autoSave" checked> 🧷オートセーブ
       </label>
       <span id="saveStatus" class="muted">待機中</span>
     </div>
+
     <div class="grow"></div>
+
+    <div class="pill"><a href="./docs/museum3dviewer_user_guide.pdf" target="_blank" rel="noopener">使い方ガイド（PDF）</a></div>
     <div class="pill"><button id="btnCopyReadonlyUrl" title="このビューを閲覧専用で共有">閲覧専用URLをコピー</button></div>
     <div class="pill"><span class="muted">GLB:</span><button id="btnToggleGlbPublic" title="公開/限定を切替（デフォルトは限定）">限定</button></div>
     <div class="pill"><span class="muted">pins:</span><button id="btnTogglePinsPublic" title="公開/限定を切替（デフォルトは限定）" disabled>限定</button></div>
@@ -239,6 +252,13 @@
       </div>
 
       <div class="sec">
+        <!-- 右ペインにまとめた操作群 -->
+        <div class="row" id="pinActions">
+          <button id="btnSavePins">ピンをDriveに保存（リネーム）</button>
+          <button id="btnAddPin">ピン追加（画面中央）</button>
+          <label class="pill" id="pillMove" title="Gキーでも切替"><input type="checkbox" id="moveMode"> 移動モード（ギズモ）</label>
+        </div>
+
         <strong>ピン一覧（クリックで編集） <span class="badge" id="pinCount">ピン: 0</span></strong>
         <div id="pins"></div>
         <div class="muted" style="margin-top:6px" id="pinsInfo"></div>
@@ -288,6 +308,8 @@
   const btnCopyReadonlyUrl = document.getElementById('btnCopyReadonlyUrl');
   const btnToggleGlbPublic = document.getElementById('btnToggleGlbPublic');
   const btnTogglePinsPublic= document.getElementById('btnTogglePinsPublic');
+  const btnHelpModel = document.getElementById('btnHelpModel');
+  const btnHelpPins  = document.getElementById('btnHelpPins');
 
   // Dock
   const dock = document.getElementById('editorDock');
@@ -1063,54 +1085,53 @@
   };
   btnFrame.onclick = ()=> frameToObject();
 
-// === ビュー切替（Y軸基準で90°補正 & 上下ビューの水平補正） ===
-const VIEW_YAW_DEG = 90; // 必要なら -90 にすると逆向きになる
+  // === ビュー切替（Y軸基準で90°補正 & 上下ビューの水平補正 + 左右の逆修正） ===
+  const VIEW_YAW_DEG = 90;
 
-function yawAroundY(vec, deg){
-  const r = THREE.MathUtils.degToRad(deg);
-  const c = Math.cos(r), s = Math.sin(r);
-  return new THREE.Vector3(
-    vec.x * c + vec.z * s,
-    vec.y,
-    -vec.x * s + vec.z * c
-  );
-}
+  function yawAroundY(vec, deg){
+    const r = THREE.MathUtils.degToRad(deg);
+    const c = Math.cos(r), s = Math.sin(r);
+    return new THREE.Vector3(
+      vec.x * c + vec.z * s,
+      vec.y,
+      -vec.x * s + vec.z * c
+    );
+  }
 
-tabCamera.querySelectorAll('[data-view]').forEach(b=>{
-  b.onclick = ()=>{
-    const dir = b.getAttribute('data-view');
-    const d = fitDist;
-    const base = {
-      front:  new THREE.Vector3( 0,  0,  d),
-      back:   new THREE.Vector3( 0,  0, -d),
-      left:   new THREE.Vector3(-d, 0,  0),
-      right:  new THREE.Vector3( d, 0,  0),
-      top:    new THREE.Vector3( 0,  d,  0),
-      bottom: new THREE.Vector3( 0,-d,  0),
-    }[dir] || new THREE.Vector3(0, fitMaxDim*0.6, d);
+  tabCamera.querySelectorAll('[data-view]').forEach(b=>{
+    b.onclick = ()=>{
+      const dir = b.getAttribute('data-view');
+      const d = fitDist;
+      const base = {
+        front:  new THREE.Vector3( 0,  0,  d),
+        back:   new THREE.Vector3( 0,  0, -d),
+        // ← 左右だけ逆になっていたので修正
+        left:   new THREE.Vector3( d, 0,  0),
+        right:  new THREE.Vector3(-d, 0,  0),
+        top:    new THREE.Vector3( 0,  d,  0),
+        bottom: new THREE.Vector3( 0, -d,  0),
+      }[dir] || new THREE.Vector3(0, fitMaxDim*0.6, d);
 
-    // 上下以外はY軸で90°回転
-    const viewVec = (dir==='top' || dir==='bottom') ? base : yawAroundY(base, VIEW_YAW_DEG);
+      const viewVec = (dir==='top' || dir==='bottom') ? base : yawAroundY(base, VIEW_YAW_DEG);
 
-    const target = controls.target.clone();
-    const fromPos = camera.position.clone();
-    const toPos   = target.clone().add(viewVec);
+      const target = controls.target.clone();
+      const fromPos = camera.position.clone();
+      const toPos   = target.clone().add(viewVec);
 
-    // 上下ビューは水平をまっすぐに
-    if (dir==='top')      camera.up.set(0,0,-1);
-    else if (dir==='bottom') camera.up.set(0,0, 1);
-    else                  camera.up.set(0,1, 0);
+      if (dir==='top')      camera.up.set(0,0,-1);
+      else if (dir==='bottom') camera.up.set(0,0, 1);
+      else                  camera.up.set(0,1, 0);
 
-    animateCameraTo({
-      fromPos,
-      toPos,
-      fromTarget: target,
-      toTarget: target,
-      duration: 320,
-      ease: t => 1 - Math.pow(1 - t, 3),
-    });
-  };
-});
+      animateCameraTo({
+        fromPos,
+        toPos,
+        fromTarget: target,
+        toTarget: target,
+        duration: 320,
+        ease: t => 1 - Math.pow(1 - t, 3),
+      });
+    };
+  });
 
   if (bgModeSel){
     bgModeSel.onchange = ()=> applyBackground(bgModeSel.value);
@@ -1333,6 +1354,38 @@ tabCamera.querySelectorAll('[data-view]').forEach(b=>{
   /* ===== Pins Picker / Image Picker（省略せずそのまま） ===== */
   const openModal = (html)=>{ modalRoot.className='modal-overlay'; modalRoot.innerHTML=html; };
   const closeModal = ()=>{ modalRoot.className='hidden'; modalRoot.innerHTML=''; };
+
+  // --- 追加: ヘルプモーダル ---
+  btnHelpModel?.addEventListener('click', ()=>{
+    openModal(`
+      <div class="modal">
+        <header><strong>モデル（GLB/GLTF）の指定について</strong><div class="grow"></div><button id="helpClose1">閉じる</button></header>
+        <div class="body">
+          <p>Google Drive のファイルURL（例: https://drive.google.com/file/d/<b>FILE_ID</b>/view）から <b>FILE_ID</b> をコピーして『モデル』欄に入力し、<b>[読み込む]</b> を押してください。</p>
+          <p>GLTF の場合は外部テクスチャを同一フォルダに配置してください。</p>
+          <p>共有は『公開/限定』ボタンで切替できます（権限が必要）。</p>
+        </div>
+        <footer><button id="helpClose2">閉じる</button></footer>
+      </div>
+    `);
+    document.getElementById('helpClose1').onclick = closeModal;
+    document.getElementById('helpClose2').onclick = closeModal;
+  });
+  btnHelpPins?.addEventListener('click', ()=>{
+    openModal(`
+      <div class="modal">
+        <header><strong>キャプション（pins.json）について</strong><div class="grow"></div><button id="helpClose3">閉じる</button></header>
+        <div class="body">
+          <p>ピン（位置・タイトル・本文・画像など）を保存する JSON ファイルです。未指定でも作業可能で、オートセーブONなら GLB と同じフォルダに自動作成されます。</p>
+          <p>既存の pins.json を使う場合は fileId を『キャプション』欄に入力するか、[選択…] から選んでください。</p>
+          <p>手動保存は『ピンをDriveに保存（リネーム）』で可能です。共有は『公開/限定』ボタンで切替できます（権限が必要）。</p>
+        </div>
+        <footer><button id="helpClose4">閉じる</button></footer>
+      </div>
+    `);
+    document.getElementById('helpClose3').onclick = closeModal;
+    document.getElementById('helpClose4').onclick = closeModal;
+  });
 
   async function openPinsPicker({ parentId, onSelect }){
     openModal(`
