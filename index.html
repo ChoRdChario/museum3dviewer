@@ -767,8 +767,7 @@ function makePinSprite(color='#e33'){
   ctx.strokeStyle='rgba(0,0,0,0.25)'; ctx.lineWidth=2; ctx.stroke();
   const tex = new THREE.CanvasTexture(cvs);
   const mat = new THREE.SpriteMaterial({ map: tex, depthTest: true, depthWrite: false, transparent: true });
-  const spr = new THREE.Sprite(mat); spr.scale.set(0.022,0.022,0.022); return spr;
-}
+  const spr = new THREE.Sprite(mat); spr.scale.set(0.022,0.022,0.022); return spr;}
 function updatePinSpriteColor(id){
   const rec = pinMap.get(id); if (!rec) return;
   const pin = PINS.find(p=>p.id===id); const col = pinColorOf(pin);
@@ -1213,28 +1212,55 @@ zoomRange.oninput = ()=>{
 };
 btnFrame.onclick = ()=> frameToObject();
 
-/* === ビュー切替（不具合修正：確実に動く版） === */
+/* === ビュー切替（修正版・水平＋指定回転）=== */
 function setNamedView(name){
-  if (!gltfRoot) return;
-  const box = new THREE.Box3().setFromObject(gltfRoot);
-  const center = new THREE.Vector3(); box.getCenter(center);
-  const d = Math.max(0.2, fitMaxDim * 1.2);
-  let offset;
-  switch (name) {
-    case 'front':  offset = new THREE.Vector3(0,  d*0.4,  d);   break;
-    case 'back':   offset = new THREE.Vector3(0,  d*0.4, -d);   break;
-    case 'left':   offset = new THREE.Vector3(-d, d*0.4,  0);   break;
-    case 'right':  offset = new THREE.Vector3( d, d*0.4,  0);   break;
-    case 'top':    offset = new THREE.Vector3(0,   d,     d*0.02); break;
-    case 'bottom': offset = new THREE.Vector3(0,  -d,     d*0.02); break;
-    default:       offset = new THREE.Vector3(0,  d*0.6,  d*1.6);
+  const d = fitDist;
+  const t = controls.target.clone();
+  let base = new THREE.Vector3(0,0,d); // 正面基準
+
+  // 基本方向
+  switch(name){
+    case 'front':  base.set( 0, 0,  d); break;
+    case 'back':   base.set( 0, 0, -d); break;
+    case 'left':   base.set( d, 0,  0); break;
+    case 'right':  base.set(-d, 0,  0); break;
+    case 'top':    base.set( 0,  d,  0); break;
+    case 'bottom': base.set( 0, -d,  0); break;
   }
-  const fromPos = camera.position.clone();
-  const fromTarget = controls.target.clone();
-  const toPos = center.clone().add(offset);
-  animateCameraTo({ fromPos, toPos, fromTarget, toTarget: center, duration: 450, ease: t => 1-(1-t)*(1-t) });
+
+  // 鉛直軸まわりの回転（指定：前/後=+90°, 左/右=-90°）
+  let rotDeg = 0;
+  if (name==='front' || name==='back')  rotDeg =  +90;
+  if (name==='left'  || name==='right') rotDeg =  -90;
+
+  if (name!=='top' && name!=='bottom'){
+    const r = THREE.MathUtils.degToRad(rotDeg);
+    const c = Math.cos(r), s = Math.sin(r);
+    const x = base.x * c + base.z * s;
+    const z = -base.x * s + base.z * c;
+    base.set(x, 0, z);            // 水平を維持（見下ろさない）
+    camera.up.set(0,1,0);         // 上方向は常に世界Y
+  }else{
+    camera.up.set(0,1,0);
+  }
+
+  const toPos = t.clone().add(base.normalize().multiplyScalar(fitDist));
+  animateCameraTo({
+    fromPos: camera.position.clone(),
+    toPos,
+    fromTarget: controls.target.clone(),
+    toTarget: t,
+    duration: 320,
+    ease: (k)=>1-Math.pow(1-k,3)
+  });
 }
-tabCamera.querySelectorAll('[data-view]').forEach(b=> b.onclick = ()=> setNamedView(b.dataset.view));
+
+// ボタン紐づけ
+tabCamera.querySelectorAll('[data-view]').forEach(b=>{
+  b.onclick = ()=> setNamedView(b.dataset.view);
+});
+
+
 
 /* 背景UI */
 function syncBgUI(){
