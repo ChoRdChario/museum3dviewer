@@ -1064,7 +1064,7 @@
   btnFrame.onclick = ()=> frameToObject();
 
   // === ビュー切替（Y軸基準で90°補正 & 上下ビューの水平補正） ===
-	const VIEW_YAW_DEG = 0; // 必要なら 180 にすると逆向きになる
+	const VIEW_YAW_DEG = -90; // 必要なら 180 にすると逆向きになる
 
 	function yawAroundY(vec, deg){
  	 const r = THREE.MathUtils.degToRad(deg);
