@@ -122,7 +122,7 @@
     <button id="btnLoad">読み込む</button>
     <button id="btnSavePins">ピンをDriveに保存（リネーム）</button>
     <button id="btnAddPin">ピン追加（画面中央）</button>
-    <label class="pill" id="pillMove" title="Gキーでも切替"><input type="checkbox" id="moveMode" checked> 移動モード（ギズモ）</label>
+    <label class="pill" id="pillMove" title="Gキーでも切替"><input type="checkbox" id="moveMode"> 移動モード（ギズモ）</label>
     <div class="pill" id="pillAutosave">
       <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;">
         <input type="checkbox" id="autoSave" checked> 🧷オートセーブ
@@ -1063,30 +1063,54 @@
   };
   btnFrame.onclick = ()=> frameToObject();
 
-  /* ビュー切替：スムーズ移動に差し替え済み */
-  tabCamera.querySelectorAll('[data-view]').forEach(b=>{
-    b.onclick = ()=>{
-      const dir = b.getAttribute('data-view');
-      const d = fitDist;
-      const map = {
-        front:  [ 0,  0,  d],
-        back:   [ 0,  0, -d],
-        left:   [-d,  0,  0],
-        right:  [ d,  0,  0],
-        top:    [ 0,  d,  0],
-        bottom: [ 0, -d,  0],
-      }[dir] || [0, fitMaxDim*0.6, d];
+  // === ビュー切替（Y軸基準で90°補正 & 上下ビューの水平補正） ===
+	const VIEW_YAW_DEG = 90; // 必要なら -90 にすると逆向きになる
 
-      const target = controls.target.clone();
-      const fromPos = camera.position.clone();
-      const toPos   = new THREE.Vector3(map[0], map[1], map[2]);
+	function yawAroundY(vec, deg){
+ 	 const r = THREE.MathUtils.degToRad(deg);
+ 	 const c = Math.cos(r), s = Math.sin(r);
+ 	 return new THREE.Vector3(
+   	 vec.x * c + vec.z * s,
+   	 vec.y,
+   	 -vec.x * s + vec.z * c
+ 	 );
+	}
 
-      animateCameraTo({
-        fromPos, toPos, fromTarget: target, toTarget: target, duration: 320,
-        ease: t => 1 - Math.pow(1 - t, 3),
-      });
-    };
-  });
+	tabCamera.querySelectorAll('[data-view]').forEach(b=>{
+	  b.onclick = ()=>{
+ 	   const dir = b.getAttribute('data-view');
+ 	   const d = fitDist;
+ 	   const base = {
+ 	     front:  new THREE.Vector3( 0,  0,  d),
+ 	     back:   new THREE.Vector3( 0,  0, -d),
+ 	     left:   new THREE.Vector3(-d, 0,  0),
+ 	     right:  new THREE.Vector3( d, 0,  0),
+ 	     top:    new THREE.Vector3( 0,  d,  0),
+ 	     bottom: new THREE.Vector3( 0,-d,  0),
+ 	   }[dir] || new THREE.Vector3(0, fitMaxDim*0.6, d);
+
+    // 上下以外はY軸で90°回転
+    const viewVec = (dir==='top' || dir==='bottom') ? base : yawAroundY(base, VIEW_YAW_DEG);
+
+    const target = controls.target.clone();
+    const fromPos = camera.position.clone();
+    const toPos   = target.clone().add(viewVec);
+
+    	// 上下ビューは水平をまっすぐに
+    	if (dir==='top')      camera.up.set(0,0,-1);
+    	else if (dir==='bottom') camera.up.set(0,0, 1);
+    	else                  camera.up.set(0,1, 0);
+
+    	animateCameraTo({
+      	fromPos,
+      	toPos,
+      	fromTarget: target,
+     	 toTarget: target,
+      	duration: 320,
+      	ease: t => 1 - Math.pow(1 - t, 3),
+    	});
+	  };
+	});
 
   if (bgModeSel){
     bgModeSel.onchange = ()=> applyBackground(bgModeSel.value);
