@@ -289,6 +289,9 @@ header .grow{ flex:1 }
       <div class="sec">
         <!-- 右ペインにまとめた操作群 -->
         <div class="row" id="pinActions">
+        <!-- 追加：Undo/Redo -->
+<button id="btnUndo" disabled>元に戻す (Ctrl+Z)</button>
+<button id="btnRedo" disabled>やり直す (Ctrl+Shift+Z)</button>
           <button id="btnSavePins">ピンをDriveに保存（リネーム）</button>
           <button id="btnAddPin">ピン追加（画面中央）</button>
           <label class="pill" id="pillMove" title="Gキーでも切替"><input type="checkbox" id="moveMode"> 移動モード（ギズモ）</label>
@@ -921,6 +924,12 @@ async function driveIsPublic(fileId) {
         </div>`;
       if (!READ_ONLY){
         wrap.addEventListener('input',(e)=>{
+        if (!wrap._editedOnce){
+  wrap._editedOnce = true;
+  setTimeout(()=>{ wrap._editedOnce = false; }, 1200);
+  recordChange('pin:edit');
+}
+
           const t=e.target;
           if(t.dataset.k==='title'){ pin.title=t.value; updateListPositionSummary(pin.id); scheduleAutoSave(); }
           if(t.dataset.k==='text'){ pin.text=t.value; scheduleAutoSave(); }
@@ -930,6 +939,7 @@ async function driveIsPublic(fileId) {
       wrap.querySelector('[data-act="toggle"]').onclick = ()=> togglePinPopup(pin.id);
       if (!READ_ONLY){
         wrap.querySelector('[data-act="remove"]')?.addEventListener('click', ()=>{
+        recordChange('pin:remove');
 		  closePinPopup(pin.id);
 		  const selId = selectedPinId;
 		  PINS=PINS.filter(p=>p.id!==pin.id); 
@@ -941,6 +951,7 @@ async function driveIsPublic(fileId) {
         const fileInput = wrap.querySelector('#'+hid);
         wrap.querySelector('[data-act="choose"]')?.addEventListener('click', ()=> fileInput.click());
         fileInput && (fileInput.onchange = async ()=>{
+        recordChange('pin:image');
           if (!fileInput.files || !fileInput.files[0]) return;
           const f = fileInput.files[0];
           const doUpload = async ()=>{
@@ -1131,6 +1142,7 @@ try {
         input.click();
       };
       btnPickDrive.onclick = ()=> chooseDriveImageForPin(pin, { onApplied: ()=>{
+      recordChange('pin:image');
         const im = body.querySelector('img') || body.appendChild(document.createElement('img'));
         im.src = pin.imageUrl;
       } });
@@ -1194,6 +1206,7 @@ try {
     if (gltfRoot){ raycaster.setFromCamera(mouseNdc, camera); const hits = raycaster.intersectObject(gltfRoot, true); if (hits?.length) point = hits[0].point.clone(); }
     if (!point){ const planeY = controls.target.y; raycaster.setFromCamera(mouseNdc, camera); const dir = raycaster.ray.direction.clone(); const t = (planeY - raycaster.ray.origin.y) / dir.y; point = raycaster.ray.origin.clone().addScaledVector(dir, Math.max(t, 0.0)); }
     dbg.textContent = `hit= ${point.x.toFixed(3)}, ${point.y.toFixed(3)}, ${point.z.toFixed(3)}`;
+	recordChange('pin:add');
     const pin = { id: crypto.randomUUID(), position:[point.x,point.y,point.z], title:'', text:'', imageDriveId:'', imageUrl:'', floatPos:null };
     PINS.push(pin); redrawPins(); scheduleAutoSave(); selectPin(pin.id);
   }
@@ -1222,6 +1235,7 @@ try {
   gizmo = new ThreeTransformControls(camera, renderer.domElement);
   gizmo.setMode('translate'); gizmo.size = 0.9; gizmo.visible = false; scene.add(gizmo);
   gizmo.addEventListener('dragging-changed', (e)=>{ controls.enabled = !e.value; });
+  if (e.value) recordChange('pin:move'); // つかみ始めた瞬間に記録
   gizmo.addEventListener('objectChange', ()=>{
     if (!selectedPinId) return;
     const rec = pinMap.get(selectedPinId); if (!rec) return;
@@ -1443,19 +1457,23 @@ try {
 
       if (!READ_ONLY){
         const chk = el.querySelector('input[data-k="invert"]');
-        if (chk) chk.onchange = ()=>{ cfg.invert = chk.checked; applyMaterialConfig(material, cfg); scheduleAutoSave(); };
+        if (chk) chk.onchange = ()=>{ cfg.invert = chk.checked; applyMaterialConfig(material, cfg); recordChange('mat:invert'); scheduleAutoSave(); };
+
 
         const op = el.querySelector('input[data-k="opacity"]');
         const ov = el.querySelector('span[data-k="ov"]');
         op.oninput = ()=>{ cfg.opacity = Number(op.value); ov.textContent = cfg.opacity.toFixed(2); applyMaterialConfig(material, cfg); };
-        op.onchange = ()=>{ scheduleAutoSave(); };
+        op.onchange = ()=>{ recordChange('mat:opacity'); scheduleAutoSave(); };
+
 
         const bt = el.querySelector('input[data-k="black"]');
         const bv = el.querySelector('span[data-k="bv"]');
-        if (bt){ bt.oninput = ()=>{ cfg.blackThreshold = Number(bt.value); bv.textContent = cfg.blackThreshold.toFixed(2); if (cfg.invert) applyMaterialConfig(material, cfg); }; bt.onchange=()=>scheduleAutoSave(); }
+        if (bt){ bt.oninput = ()=>{ cfg.blackThreshold = Number(bt.value); bv.textContent = cfg.blackThreshold.toFixed(2); if (cfg.invert) applyMaterialConfig(material, cfg); }; bt.onchange=()=>{ recordChange('mat:black'); scheduleAutoSave(); };
+}
 
         const db = el.querySelector('input[data-k="double"]');
-        db.onchange = ()=>{ cfg.doubleSided = db.checked; applyMaterialConfig(material, cfg); scheduleAutoSave(); };
+        db.onchange = ()=>{ cfg.doubleSided = db.checked; applyMaterialConfig(material, cfg); recordChange('mat:doubleSided'); scheduleAutoSave(); };
+
       }
       targetEl.appendChild(el);
     }
@@ -1519,6 +1537,110 @@ try {
     }
     return tex;
   }
+
+/* ===== Undo / Redo ===== */
+let UNDO_STACK = [];
+let REDO_STACK = [];
+const MAX_HISTORY = 50;
+
+// 現在状態のスナップショット
+function snapshotState(){
+  return JSON.parse(JSON.stringify({
+    PINS, MATERIALS
+  }));
+}
+
+// スナップショットから復元
+function restoreState(snap, {silent=false}={}){
+  if (!snap) return;
+  // 既存のポップアップやギズモは一旦閉じる
+  closeAllPopups();
+  detachGizmo();
+
+  PINS = Array.isArray(snap.PINS) ? snap.PINS : [];
+  MATERIALS = (snap.MATERIALS && typeof snap.MATERIALS==='object') ? snap.MATERIALS : {};
+
+  redrawPins();
+  // 既存マテリアルに設定を再適用
+  for (const {name, material} of materialList){
+    const cfg = MATERIALS[name];
+    if (cfg) applyMaterialConfig(material, cfg);
+  }
+  buildMaterialsUI(materialsDockEl);
+  lastSavedJson = JSON.stringify({pins:PINS,materials:MATERIALS});
+  if (!silent){
+    setSaveStatus('pending','変更あり（Undo/Redo）');
+    scheduleAutoSave();
+  }
+  updateUndoRedoButtons();
+}
+
+// 変更開始前に呼ぶ：いまの状態をUNDOスタックに積む
+function recordChange(_label='change'){
+  try{
+    UNDO_STACK.push(snapshotState());
+    if (UNDO_STACK.length > MAX_HISTORY) UNDO_STACK.shift();
+    REDO_STACK.length = 0; // 何か変更が入ったら Redo は無効化
+    updateUndoRedoButtons();
+  }catch(e){ console.warn('recordChange failed', e); }
+}
+
+function canUndo(){ return UNDO_STACK.length > 0; }
+function canRedo(){ return REDO_STACK.length > 0; }
+
+function doUndo(){
+  if (!canUndo()) return;
+  // 現在状態を Redo 側に退避し、Undo 先頭を取り出し適用
+  REDO_STACK.push(snapshotState());
+  const prev = UNDO_STACK.pop();
+  restoreState(prev);
+  updateUndoRedoButtons();
+}
+function doRedo(){
+  if (!canRedo()) return;
+  UNDO_STACK.push(snapshotState());
+  const next = REDO_STACK.pop();
+  restoreState(next);
+  updateUndoRedoButtons();
+}
+
+function updateUndoRedoButtons(){
+  const u = document.getElementById('btnUndo');
+  const r = document.getElementById('btnRedo');
+  if (u) u.disabled = !canUndo();
+  if (r) r.disabled = !canRedo();
+}
+
+// 初期化時／GLB読込直後に呼ぶ（現状を基準として積む）
+function resetHistoryBaseline(){
+  UNDO_STACK.length = 0;
+  REDO_STACK.length = 0;
+  // 初回の「基準点」を積んでおくと、直後の Undo で読み込み直後の状態に戻れる
+  UNDO_STACK.push(snapshotState());
+  updateUndoRedoButtons();
+}
+
+// ボタンとショートカット
+document.getElementById('btnUndo')?.addEventListener('click', doUndo);
+document.getElementById('btnRedo')?.addEventListener('click', doRedo);
+window.addEventListener('keydown', (e)=>{
+  const isMac = navigator.platform.toUpperCase().includes('MAC');
+  const mod = isMac ? e.metaKey : e.ctrlKey;
+  if (!mod) return;
+
+  // Ctrl/Cmd + Z
+  if (e.key.toLowerCase() === 'z' && !e.shiftKey){
+    e.preventDefault();
+    doUndo();
+  }
+  // Ctrl/Cmd + Shift + Z
+  else if ((e.key.toLowerCase() === 'z' && e.shiftKey) || (e.key.toLowerCase() === 'y')){
+    e.preventDefault();
+    doRedo();
+  }
+});
+/* ===== Undo / Redo ここまで ===== */
+
 
   /* ===== Save / Autosave ===== */
   let autosaveTimer = null;
@@ -1836,7 +1958,8 @@ try {
         setSaveStatus('muted','新規セッション');
       }
       buildMaterialsUI(materialsDockEl);
-      statusEl.textContent='完了';
+      resetHistoryBaseline();
+
       syncDockMoveToggle();
       axisBtnX.classList.toggle('toggled', gizmo.showX);
       axisBtnY.classList.toggle('toggled', gizmo.showY);
