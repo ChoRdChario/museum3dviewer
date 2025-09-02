@@ -502,6 +502,21 @@ async function ensureToken() {
 }
 
 
+// ---- 追加：未サインインなら促す（失敗しても読み込みは続行）----
+async function ensureSignedInIfNeeded() {
+  try {
+    statusEl.textContent = 'サインイン確認中…';
+    await ensureToken();           // 初回はポップアップ、2回目以降は静かに再取得
+    statusEl.textContent = 'サインイン完了';
+    scopeWarnEl.style.display = 'none';
+  } catch (e) {
+    console.warn('sign-in skipped or failed', e);
+    // 公開ファイルは閲覧できるので、読み込み自体は続行
+    statusEl.textContent = '未サインイン（公開ファイルのみ閲覧可）';
+  }
+}
+
+
 
 
 /* ===== Drive helpers ===== */
@@ -1790,6 +1805,10 @@ try {
   const glbId = extractDriveId(fileIdInput.value);
   const manualPinsId = extractDriveId(pinsIdInput.value);
   if(!glbId){ alert('GLBの fileId / 共有リンクを入力してください'); return; }
+  
+    // 追加：必要ならここでサインインを促す（成功・失敗どちらでも先へ進む）
+    await ensureSignedInIfNeeded();
+    
     try{
       statusEl.textContent='GLB読込中…';
 	await loadGLBFromDrive(glbId);
@@ -1974,9 +1993,14 @@ try {
   applyReadOnlyUI();
 
   // fileId がURLに入っていれば自動読込
-  if (fId) {
-    setTimeout(() => btnLoad.click(), 80);
-  }
+if (fId) {
+  (async ()=>{
+    // ★追加：閲覧専用/通常どちらでも、必要ならサインインを促す
+    await ensureSignedInIfNeeded();
+    btnLoad.click();   // サインイン完了後にそのまま読み込み開始
+  })();
+}
+
 })();
 
 
