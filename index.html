@@ -101,53 +101,88 @@
     .card .title{ font-size:12px; line-height:1.4; }
     .card .meta{ font-size:11px; color:#666; }
     .card button{ padding:6px 8px; font-size:12px; }
+    /* ==== Toolbar grouping ==== */
+.toolbar { display:flex; gap:10px; flex-wrap:wrap; align-items:flex-start; width:100% }
+.hgroup{
+  background:#fff; border:1px solid #e6e6e6; border-radius:12px; padding:8px 10px;
+  display:flex; gap:10px; align-items:center; flex-wrap:wrap;
+}
+.hgroup .title{ font-weight:600; font-size:12px; color:#444; padding:2px 8px; background:#f4f4f6; border:1px solid #e9e9ee; border-radius:999px }
+.hgroup input{ padding:6px 8px; border:1px solid #ddd; border-radius:8px; min-width:220px }
+.hgroup .tiny{ font-size:12px; color:#666 }
+.hgroup .iconbtn{ padding:4px 8px; font-size:12px; border:1px solid #ddd; border-radius:8px; background:#fff; cursor:pointer }
+.hgroup .sep{ width:1px; height:20px; background:#eee; margin:0 2px }
+header .grow{ flex:1 }
+
+/* ヘッダー右側のユーティリティ */
+.header-utils{ display:flex; gap:8px; align-items:center; flex-wrap:wrap }
+
+/* オートセーブ pill を少しコンパクトに */
+#pillAutosave { padding:2px 8px }
+#pillAutosave input { transform:scale(.95) }
+
     @media (max-width: 960px){
       main{ grid-template-columns: 1fr }
       aside{ display:none }
       .dock{ left:12px; right:12px; width:auto }
       .dock .tabbtn{ padding:6px 12px }
       .tool-btn{ padding:8px 12px }
+      
     }
   </style>
 </head>
 <body>
-  <header>
-    <!-- モデル（GLB/GLTF）＋ 読み込む -->
-    <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
-      <div>モデル <button id="btnHelpModel" title="対応形式のヘルプ">?</button>:
-        <input id="fileId" placeholder="例: 1AbC..." autocomplete="off" />
-      </div>
-      <button id="btnLoad">読み込む</button>
+<header>
+  <div class="toolbar">
+    <!-- 📦 モデル -->
+    <div class="hgroup" id="grpModel">
+      <span class="title">モデル</span>
+      <input id="fileId" placeholder="GLBの fileId または 共有リンク" autocomplete="off" />
+      <button id="btnLoad" class="iconbtn">読み込む</button>
+      <button id="helpModel" class="iconbtn" title="対応形式など">？</button>
+      <span class="tiny" id="status">未サインイン</span>
     </div>
 
-    <!-- キャプション（pins.json） -->
-    <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
-      <div>キャプション <button id="btnHelpPins" title="pins.jsonのヘルプ">?</button>:
-        <input id="pinsId" placeholder="（任意）pins.json の fileId" autocomplete="off" />
-      </div>
-      <button id="btnPickPins">選択…</button>
-      <button id="btnClearPins">クリア</button>
+    <!-- 📍 キャプション -->
+    <div class="hgroup" id="grpPins">
+      <span class="title">キャプション</span>
+      <input id="pinsId" placeholder="（任意）pins.json の fileId / 共有リンク" autocomplete="off" />
+      <button id="btnPickPins" class="iconbtn">選択…</button>
+      <button id="btnClearPins" class="iconbtn">クリア</button>
+      <span class="sep"></span>
+      <span class="tiny">Save FolderId:</span>
+      <input id="folderId" placeholder="（任意）保存先フォルダID" autocomplete="off" />
+      <button id="helpPins" class="iconbtn" title="pins.jsonの説明">？</button>
     </div>
 
-    <div>Save FolderId: <input id="folderId" placeholder="（任意）保存先フォルダID" autocomplete="off" /></div>
-    <button id="btnAuth">Googleにサインイン</button>
+    <!-- 🔑 共有・権限 -->
+    <div class="hgroup" id="grpShare">
+      <span class="title">共有・権限</span>
+      <button id="btnAuth" class="iconbtn">Googleにサインイン</button>
 
-    <!-- 小型オートセーブ -->
-    <div class="pill small" id="pillAutosave">
-      <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;">
-        <input type="checkbox" id="autoSave" checked> 🧷オートセーブ
-      </label>
-      <span id="saveStatus" class="muted">待機中</span>
+      <div class="pill" id="pillAutosave" title="pins.json を自動保存">
+        <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;">
+          <input type="checkbox" id="autoSave" checked> 🧷オートセーブ
+        </label>
+        <span id="saveStatus" class="muted">待機中</span>
+      </div>
+
+      <div class="sep"></div>
+      <div class="pill"><button id="btnCopyReadonlyUrl" title="閲覧専用URLをコピー">閲覧専用URLをコピー</button></div>
+      <div class="pill"><span class="muted">GLB:</span><button id="btnToggleGlbPublic" title="公開/限定を切替（デフォルトは限定）">限定</button></div>
+      <div class="pill"><span class="muted">pins:</span><button id="btnTogglePinsPublic" title="公開/限定を切替（デフォルトは限定）" disabled>限定</button></div>
     </div>
 
     <div class="grow"></div>
 
-    <div class="pill"><a href="./docs/museum3dviewer_user_guide.pdf" target="_blank" rel="noopener">使い方ガイド（PDF）</a></div>
-    <div class="pill"><button id="btnCopyReadonlyUrl" title="このビューを閲覧専用で共有">閲覧専用URLをコピー</button></div>
-    <div class="pill"><span class="muted">GLB:</span><button id="btnToggleGlbPublic" title="公開/限定を切替（デフォルトは限定）">限定</button></div>
-    <div class="pill"><span class="muted">pins:</span><button id="btnTogglePinsPublic" title="公開/限定を切替（デフォルトは限定）" disabled>限定</button></div>
-    <span id="status" class="muted">未サインイン</span>
-  </header>
+    <!-- 右端ユーティリティ -->
+    <div class="header-utils">
+      <a class="iconbtn" id="btnGuidePdf" href="./docs/museum3dviewer_user_guide.pdf" target="_blank" rel="noopener">使い方ガイド（PDF）</a>
+      <span class="tiny">v1.21.1-bg</span>
+    </div>
+  </div>
+</header>
+
 
   <main>
     <div id="view" class="bg-dark">
@@ -308,8 +343,45 @@
   const btnCopyReadonlyUrl = document.getElementById('btnCopyReadonlyUrl');
   const btnToggleGlbPublic = document.getElementById('btnToggleGlbPublic');
   const btnTogglePinsPublic= document.getElementById('btnTogglePinsPublic');
-  const btnHelpModel = document.getElementById('btnHelpModel');
-  const btnHelpPins  = document.getElementById('btnHelpPins');
+  // === Driveの共有URLでもIDでもOKにするヘルパ ===
+// === Driveの共有URLでもIDでもOKにするヘルパ ===
+function extractDriveId(v=''){
+  if(!v) return '';
+  v = String(v).trim();
+
+  // パターン1: https://drive.google.com/file/d/FILEID/...
+  const m1 = v.match(/https?:\/\/drive\.google\.com\/file\/d\/([a-zA-Z0-9_-]{10,})/);
+  if (m1) return m1[1];
+
+  // パターン2: https://drive.google.com/open?id=FILEID
+  const m2 = v.match(/https?:\/\/drive\.google\.com\/open\?id=([a-zA-Z0-9_-]{10,})/);
+  if (m2) return m2[1];
+
+  // パターン3: https://drive.google.com/uc?id=FILEID もしくは素のID
+  const m3 = v.match(/[a-zA-Z0-9_-]{10,}/);
+  return m3 ? m3[0] : '';
+}
+
+// 入力欄に共有リンクを貼っても ID に正規化する
+['fileId','pinsId'].forEach(id=>{
+  const el = document.getElementById(id);
+  // フォーカスが外れたら正規化
+  el.addEventListener('blur', ()=>{ el.value = extractDriveId(el.value) || ''; });
+  // ペースト時に正規化
+  el.addEventListener('paste', (e)=>{
+    const txt = (e.clipboardData || window.clipboardData).getData('text');
+    const id = extractDriveId(txt);
+    if (id){ e.preventDefault(); el.value = id; }
+  });
+});
+
+// Enter でも読み込み開始できるように
+fileIdInput.addEventListener('keydown', (e)=>{ if(e.key==='Enter') btnLoad.click(); });
+// pinsIdInput.addEventListener('keydown', (e)=>{ if(e.key==='Enter') btnLoad.click(); });
+
+  const btnHelpModel = document.getElementById('helpModel');
+  const btnHelpPins  = document.getElementById('helpPins');
+
 
   // Dock
   const dock = document.getElementById('editorDock');
@@ -1559,9 +1631,9 @@
     catch(e){ console.error(e); alert('Googleサインインに失敗しました。設定/ポップアップ/拡張のブロックをご確認ください。'); statusEl.textContent='サインイン失敗'; }
   };
   btnLoad.onclick = async ()=>{
-    const glbId=fileIdInput.value.trim();
-    const manualPinsId=pinsIdInput.value.trim();
-    if(!glbId){ alert('GLBの fileId を入力してください'); return; }
+  const glbId = extractDriveId(fileIdInput.value);
+  const manualPinsId = extractDriveId(pinsIdInput.value);
+  if(!glbId){ alert('GLBの fileId / 共有リンクを入力してください'); return; }
     try{
       statusEl.textContent='GLB読込中…';
       try{ await loadGLBFromDrive(glbId); }
@@ -1661,8 +1733,8 @@
   };
   btnClearPins.onclick = ()=>{ pinsIdInput.value=''; loadedPinsId=''; loadedPinsName=''; updatePinsInfo(); refreshShareButtons(); };
   btnCopyReadonlyUrl.onclick = ()=>{
-    const glb = fileIdInput.value.trim();
-    const pins = (pinsIdInput.value.trim() || loadedPinsId || autosaveId || '').trim();
+  const glb = extractDriveId(fileIdInput.value);
+  const pins = extractDriveId(pinsIdInput.value) || loadedPinsId || autosaveId || '';
     if (!glb){ alert('まずGLBのfileIdを設定してください'); return; }
     const url = new URL(window.location.href);
     url.searchParams.set('fileId', glb);
@@ -1671,7 +1743,7 @@
     copyText(url.toString(), '閲覧専用URLをコピーしました（限定ファイルは閲覧者の権限が必要です）');
   };
   btnToggleGlbPublic.onclick = async ()=>{
-    const glb = fileIdInput.value.trim();
+    const glb = extractDriveId(fileIdInput.value);
     if (!glb){ alert('GLBのfileIdが未設定です'); return; }
     try{
       await ensureToken(SCOPES_FULL);
@@ -1682,7 +1754,7 @@
     }catch(e){ await explainShareError(glb, e); }
   };
   btnTogglePinsPublic.onclick = async ()=>{
-    const pid = pinsIdInput.value.trim() || loadedPinsId || autosaveId;
+    const pid = extractDriveId(pinsIdInput.value) || loadedPinsId || autosaveId;
     if (!pid){ alert('pins.json が未指定です'); return; }
     try{
       await ensureToken(SCOPES_FULL);
@@ -1722,19 +1794,37 @@
     pillAutosave.style.display = 'none';
     dock.style.display = 'none';
   }
-  (function bootFromUrl(){
-    const sp = new URLSearchParams(location.search);
-    const f = sp.get('fileId'); const p = sp.get('pinsId'); const mode = sp.get('mode');
-    if (f){ fileIdInput.value = f; }
-    if (p){ pinsIdInput.value = p; }
-    READ_ONLY = (mode === 'read');
-    TOUCH_MODE = TOUCH_MODE || (sp.get('touch')==='1');
-    applyTouchUI();
-    applyReadOnlyUI();
-    if (f){
-      setTimeout(()=> btnLoad.click(), 100);
-    }
-  })();
+(function bootFromUrl(){
+  const sp = new URLSearchParams(location.search);
+
+  // 互換エイリアスも受け付ける（fileId / glb / model / file / url）
+  const fRaw =
+    sp.get('fileId') || sp.get('glb') || sp.get('model') ||
+    sp.get('file')  || sp.get('url')  || '';
+  const pRaw = sp.get('pinsId') || sp.get('pins') || '';
+
+  // 共有リンクでもIDでもOK
+  const fId = fRaw ? extractDriveId(fRaw) : '';
+  const pId = pRaw ? extractDriveId(pRaw) : '';
+
+  // 入力欄へ反映（正規化済みのIDを入れておく）
+  if (fId) fileIdInput.value = fId;
+  if (pId) pinsIdInput.value = pId;
+
+  // 閲覧専用 / タッチUIのフラグ
+  const mode = sp.get('mode');
+  READ_ONLY = (mode === 'read');
+  TOUCH_MODE = TOUCH_MODE || (sp.get('touch') === '1');
+
+  applyTouchUI();
+  applyReadOnlyUI();
+
+  // fileId がURLに入っていれば自動読込
+  if (fId) {
+    setTimeout(() => btnLoad.click(), 80);
+  }
+})();
+
 
   </script>
 </body>
