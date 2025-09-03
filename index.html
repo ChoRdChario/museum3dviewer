@@ -540,23 +540,17 @@ async function ensureToken() {
 
   try{ await tokenRefreshing; } finally { tokenRefreshing = null; }
 }
+// ★差し替え版：未サインインなら中央ゲートを表示して処理中断。
+// すでに有効トークンがあれば true を返す。
 async function ensureSignedInIfNeeded() {
-  // モバイルは自動サインインしない（ポップアップブロック回避）
-  if (IS_MOBILE) {
-    statusEl.textContent = '未サインイン（公開ファイルのみ閲覧可）';
-    showSignInGate();     // 最初にゲートを出す
-    return;
-  }
-  // PCは従来通り（自動トークン更新を試みる）
-  try {
-    statusEl.textContent = 'サインイン確認中…';
-    await ensureToken();
-    statusEl.textContent = 'サインイン完了';
+  if (accessToken && (accessTokenExpiresAt - 30_000 > Date.now())) {
     scopeWarnEl.style.display = 'none';
-  } catch (e) {
-    console.warn('sign-in skipped or failed', e);
-    statusEl.textContent = '未サインイン（公開ファイルのみ閲覧可）';
+    statusEl.textContent = 'サインイン済み';
+    return true;
   }
+  statusEl.textContent = '未サインイン（公開ファイルのみ閲覧可）';
+  showSignInGate(); // 画面中央のサインインゲートを開く
+  return false;
 }
 
 
@@ -1796,7 +1790,11 @@ btnGateSignIn?.addEventListener('click', async ()=>{
 
 /* ===== Header actions ===== */
 btnAuth.onclick = async ()=>{
-  try{ statusEl.textContent='サインイン中…'; await loadGapi(); await ensureToken(); statusEl.textContent='サインイン完了'; scopeWarnEl.style.display='none'; }
+  try{ statusEl.textContent='サインイン中…'; await loadGapi(); 
+     await ensureToken();
+     statusEl.textContent='サインイン完了';
+     hideSignInGate(); // ← 追加
+     scopeWarnEl.style.display='none'; }
   catch(e){ console.error(e); alert('Googleサインインに失敗しました。設定/ポップアップ/拡張のブロックをご確認ください。'); statusEl.textContent='サインイン失敗'; }
 };
 
@@ -1804,13 +1802,10 @@ btnLoad.onclick = async ()=>{
   const glbId = extractDriveId(fileIdInput.value);
   const manualPinsId = extractDriveId(pinsIdInput.value);
   if(!glbId){ alert('GLBの fileId / 共有リンクを入力してください'); return; }
-  await ensureSignedInIfNeeded();
 
-  // ★モバイル：ゲート表示後はサインイン完了まで読込を進めない
-  if (IS_MOBILE && !accessToken) {
-    statusEl.textContent = 'サインインが必要です';
-    return;
-  }
+  // ★ここでサインインチェック（未サインインなら中央ゲート表示 → いったん処理中断）
+  const ok = await ensureSignedInIfNeeded();
+  if (!ok) return;
 
   try{
     statusEl.textContent='GLB読込中…';
@@ -2074,14 +2069,13 @@ function applyReadOnlyUI(){
   TOUCH_MODE = TOUCH_MODE || (sp.get('touch') === '1');
   applyTouchUI();
   applyReadOnlyUI();
- if (fId) {
+if (fId) {
   (async ()=>{
-    await ensureSignedInIfNeeded();
-    // ★モバイル＆未サインインなら、ゲート表示のみで待機（失敗を出さない）
-    if (IS_MOBILE && !accessToken) return;
-    btnLoad.click();
+    const ok = await ensureSignedInIfNeeded();
+    if (!ok) return;   // ゲートを出したら、サインイン完了まで待機
+    btnLoad.click();   // サインイン済みなら自動ロード
   })();
- }
+}
 
 })();
 
