@@ -6,6 +6,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='64' height='64'%3E%3Crect width='64' height='64' fill='%23222'/%3E%3Ccircle cx='32' cy='32' r='18' fill='%23e33'/%3E%3C/svg%3E">
   <style>
+  /* 非活性行の見た目と操作抑止 */
+.disabled { opacity: .55; pointer-events: none; }
     :root { --bg:#111; --muted:#666; }
     html,body{height:100%}
     body{margin:0;background:var(--bg);color:#222;font:14px/1.5 system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif}
@@ -95,6 +97,34 @@
     .card button{ padding:6px 8px; font-size:12px; }
 
     /* ==== Image Zoom Viewer ==== */
+    
+    /* ==== Sign-in Gate (mobile first) ==== */
+.gate-overlay{
+  position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+  background:rgba(0,0,0,.55); z-index:40;
+}
+.gate{
+  background:#fff; border:1px solid #ddd; border-radius:14px; padding:16px 18px;
+  width:min(92vw,420px); text-align:center; box-shadow:0 18px 40px rgba(0,0,0,.35);
+}
+.gate h3{ margin:0 0 8px; font-size:16px }
+.gate p { margin:0 0 12px; color:#666; font-size:13px }
+.gate .btn{ padding:10px 14px; border:1px solid #ddd; border-radius:999px; background:#fff; cursor:pointer; font-size:14px }
+.hidden{ display:none }
+
+/* FAB: モバイルでドックを開く小ボタン */
+#dockFab{
+  position:absolute; right:12px; bottom:12px; z-index:9;
+  display:none; padding:10px 14px; border:1px solid #ddd; border-radius:999px; background:#fff; cursor:pointer;
+}
+@media (max-width: 640px){
+  header{ padding:8px 10px }
+  .hgroup .tiny, .header-utils{ display:none }   /* 右端のPDF等を隠す */
+  .dock{ display:none }                          /* 初期は隠す。必要時はFABで開く */
+  #dockFab{ display:block }
+}
+
+    
     .zoom-overlay{ position:fixed; inset:0; background:rgba(0,0,0,.85); display:flex; align-items:center; justify-content:center; z-index:60; cursor:grab }
     .zoom-img{ max-width:none; max-height:none; transform-origin: 0 0; user-select:none; -webkit-user-drag:none; }
     .zoom-close{ position:fixed; top:12px; right:12px; z-index:61; padding:8px 10px; background:#fff; border:1px solid #ddd; border-radius:8px; cursor:pointer; }
@@ -181,6 +211,19 @@
     <canvas id="canvas"></canvas>
     <svg class="lines" id="lines"></svg>
     <div class="float-layer" id="floatLayer"></div>
+    
+    <!-- サインインゲート（必要なときだけ表示） -->
+<div id="signinGateWrap" class="gate-overlay hidden">
+  <div class="gate">
+    <h3>Googleにサインイン</h3>
+    <p>Driveの読み書きが必要です。ボタンを押して開始してください。</p>
+    <button id="btnGateSignIn" class="btn">サインインして続行</button>
+  </div>
+</div>
+
+<!-- モバイル用：ドック表示トグル -->
+<button id="dockFab" title="ツール">ツール</button>
+
 
     <!-- 編集ドック -->
     <div class="dock" id="editorDock">
@@ -342,6 +385,16 @@ const btnTogglePinsPublic= document.getElementById('btnTogglePinsPublic');
 const btnHelpModel = document.getElementById('helpModel');
 const btnHelpPins  = document.getElementById('helpPins');
 
+/* Gate & FAB */
+const signinGateWrap = document.getElementById('signinGateWrap');
+const btnGateSignIn  = document.getElementById('btnGateSignIn');
+const dockFab        = document.getElementById('dockFab');
+
+/* 端末判定（モバイル寄り） */
+const IS_MOBILE = window.matchMedia('(max-width: 640px), (pointer: coarse)').matches;
+
+
+
 /* Driveの共有URLでもIDでもOK */
 function extractDriveId(v=''){
   if(!v) return '';
@@ -428,6 +481,16 @@ function saveMap(m){ localStorage.setItem(MAP_KEY, JSON.stringify(m)) }
 function rememberAutosave(glbId, id){ const m=loadMap(); m[glbId]=id; saveMap(m); }
 
 /* ===== gapi / GSI ===== */
+
+function showSignInGate() {
+  signinGateWrap.classList.remove('hidden');
+  statusEl.textContent = 'サインインが必要です';
+}
+function hideSignInGate() {
+  signinGateWrap.classList.add('hidden');
+}
+
+
 async function loadGapi() {
   if (window.gapiLoaded) return;
   await new Promise((resolve, reject)=>{
@@ -478,6 +541,13 @@ async function ensureToken() {
   try{ await tokenRefreshing; } finally { tokenRefreshing = null; }
 }
 async function ensureSignedInIfNeeded() {
+  // モバイルは自動サインインしない（ポップアップブロック回避）
+  if (IS_MOBILE) {
+    statusEl.textContent = '未サインイン（公開ファイルのみ閲覧可）';
+    showSignInGate();     // 最初にゲートを出す
+    return;
+  }
+  // PCは従来通り（自動トークン更新を試みる）
   try {
     statusEl.textContent = 'サインイン確認中…';
     await ensureToken();
@@ -488,6 +558,7 @@ async function ensureSignedInIfNeeded() {
     statusEl.textContent = '未サインイン（公開ファイルのみ閲覧可）';
   }
 }
+
 
 /* ===== Drive helpers ===== */
 const DRIVE_BASE   = 'https://www.googleapis.com/drive/v3';
@@ -1153,6 +1224,18 @@ tabButtons.forEach(b=>{
     tabCamera.style.display = (tab==='camera')?'block':'none';
   };
 });
+
+dockFab?.addEventListener('click', ()=>{
+  // モバイル時のみ使用想定。押すたび切替
+  const show = dock.style.display === 'none';
+  dock.style.display = show ? 'block' : 'none';
+  if (show) {
+    // 表示直後に最小化状態を適用
+    applyDockMinState();
+  }
+});
+
+
 function syncDockMoveToggle(){
   dockMoveToggle.textContent = (!READ_ONLY && moveModeEl.checked) ? 'ギズモ ON' : 'ギズモ OFF';
   dockMoveToggle.classList.toggle('toggled', !READ_ONLY && moveModeEl.checked);
@@ -1688,29 +1771,70 @@ function fallbackCopy(text, okMsg){
   ta.select(); try{ document.execCommand('copy'); alert(okMsg); } finally{ document.body.removeChild(ta); }
 }
 
+btnGateSignIn?.addEventListener('click', async ()=>{
+  try{
+    statusEl.textContent='サインイン中…';
+    await loadGapi();             // ライブラリ読込
+    await ensureToken();          // ユーザー操作直後＝ポップアップブロック回避
+    statusEl.textContent='サインイン完了';
+    hideSignInGate();
+    scopeWarnEl.style.display = 'none';
+
+    // ★GLBが入力済みなら、そのまま読込を再開
+    if (extractDriveId(fileIdInput.value)) {
+      btnLoad.click();
+    }
+  }catch(e){
+    console.error(e);
+    statusEl.textContent='サインイン失敗';
+    alert('サインインに失敗しました。ブラウザのポップアップ許可をご確認ください。');
+  }
+});
+
+
+
+
 /* ===== Header actions ===== */
 btnAuth.onclick = async ()=>{
   try{ statusEl.textContent='サインイン中…'; await loadGapi(); await ensureToken(); statusEl.textContent='サインイン完了'; scopeWarnEl.style.display='none'; }
   catch(e){ console.error(e); alert('Googleサインインに失敗しました。設定/ポップアップ/拡張のブロックをご確認ください。'); statusEl.textContent='サインイン失敗'; }
 };
+
 btnLoad.onclick = async ()=>{
   const glbId = extractDriveId(fileIdInput.value);
   const manualPinsId = extractDriveId(pinsIdInput.value);
   if(!glbId){ alert('GLBの fileId / 共有リンクを入力してください'); return; }
   await ensureSignedInIfNeeded();
+
+  // ★モバイル：ゲート表示後はサインイン完了まで読込を進めない
+  if (IS_MOBILE && !accessToken) {
+    statusEl.textContent = 'サインインが必要です';
+    return;
+  }
+
   try{
     statusEl.textContent='GLB読込中…';
     await loadGLBFromDrive(glbId);
-    PINS=[]; MATERIALS={}; redrawPins(); lastSavedJson=''; loadedPinsId=''; loadedPinsName=''; autosaveId=''; autosaveName='pins.json';
+
+    // 読み込み時の状態初期化
+    PINS=[]; MATERIALS={}; redrawPins(); lastSavedJson='';
+    loadedPinsId=''; loadedPinsName=''; autosaveId=''; autosaveName='pins.json';
+
+    // オートセーブ作成候補の確保
     if (!READ_ONLY && accessToken){ await ensureAutosaveTarget(glbId); }
+
+    // pins.json の候補（明示指定→既存オートセーブ）
     let targetPinsId = manualPinsId || autosaveId || '';
+
     if (targetPinsId){
       statusEl.textContent='pins 読込中…';
       const pblob = await driveFetchBinary(targetPinsId);
       const text  = await pblob.text();
       let data=null; try{ data=JSON.parse(text); }catch{}
-      if(Array.isArray(data)){ PINS=data.map(p=>({...p, position:safePos(p.position), color:p.color||'#e33'})); MATERIALS={}; }
-      else if(data && typeof data==='object'){
+      if(Array.isArray(data)){
+        PINS=data.map(p=>({...p, position:safePos(p.position), color:p.color||'#e33'}));
+        MATERIALS={};
+      } else if(data && typeof data==='object'){
         PINS = Array.isArray(data.pins)? data.pins.map(p=>({...p, position:safePos(p.position), color:p.color||'#e33'})) : [];
         MATERIALS = (data.materials && typeof data.materials==='object') ? data.materials : {};
       }
@@ -1724,6 +1848,7 @@ btnLoad.onclick = async ()=>{
       lastSavedJson = JSON.stringify({pins:PINS,materials:MATERIALS});
       setSaveStatus('muted','新規セッション');
     }
+
     buildMaterialsUI(materialsDockEl);
     resetHistoryBaseline();
     syncDockMoveToggle();
@@ -1732,14 +1857,22 @@ btnLoad.onclick = async ()=>{
     axisBtnZ.classList.toggle('toggled', gizmo.showZ);
     updatePinsInfo();
     refreshShareButtons();
+
+    // カメラ/背景UIの同期
     projModeSel.value = cameraMode;
     fovRange.value = Math.round(camera.fov||60);
     fovVal.textContent = (camera.fov||60).toFixed(0)+'°';
     zoomRange.value = (camera.zoom||1);
     zoomVal.textContent = (camera.zoom||1).toFixed(2);
     syncBgUI();
-  }catch(e){ console.error(e); alert('読み込みに失敗しました。権限と fileId を確認してください。'); statusEl.textContent='エラー'; }
+  }catch(e){
+    console.error(e);
+    alert('読み込みに失敗しました。権限と fileId を確認してください。');
+    statusEl.textContent='エラー';
+  }
 };
+
+
 btnSavePins.onclick = async ()=>{
   if (READ_ONLY){ alert('閲覧専用モードでは保存できません'); return; }
   try{
@@ -1916,6 +2049,7 @@ async function refreshShareButtons(){
 }
 
 /* ===== READ-ONLY mode (URL ?mode=read) ===== */
+
 function applyReadOnlyUI(){
   if (!READ_ONLY) return;
   btnSavePins.style.display = 'none';
@@ -1923,7 +2057,10 @@ function applyReadOnlyUI(){
   pillMove.style.display = 'none';
   pillAutosave.style.display = 'none';
   dock.style.display = 'none';
+  dockFab.style.display = 'none'; // ★モバイルのツールボタンも非表示
 }
+
+
 (function bootFromUrl(){
   const sp = new URLSearchParams(location.search);
   const fRaw = sp.get('fileId') || sp.get('glb') || sp.get('model') || sp.get('file')  || sp.get('url')  || '';
@@ -1937,9 +2074,15 @@ function applyReadOnlyUI(){
   TOUCH_MODE = TOUCH_MODE || (sp.get('touch') === '1');
   applyTouchUI();
   applyReadOnlyUI();
-  if (fId) {
-    (async ()=>{ await ensureSignedInIfNeeded(); btnLoad.click(); })();
-  }
+ if (fId) {
+  (async ()=>{
+    await ensureSignedInIfNeeded();
+    // ★モバイル＆未サインインなら、ゲート表示のみで待機（失敗を出さない）
+    if (IS_MOBILE && !accessToken) return;
+    btnLoad.click();
+  })();
+ }
+
 })();
 
 /* ===== 画像拡大ビュー（ズーム＆ドラッグ） ===== */
