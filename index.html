@@ -271,22 +271,70 @@
 
     
   
-    /* ==== Global Loader ==== */
-    #loaderOverlay{
-      position:fixed; inset:0; display:none; align-items:center; justify-content:center;
-      background:rgba(0,0,0,.5); z-index:70;
-    }
-    #loaderOverlay.show{ display:flex; }
-    .spinner{
-      width:56px; height:56px; border-radius:50%;
-      border:6px solid #fff; border-top-color: transparent;
-      animation: spin 1s linear infinite;
-    }
-    @keyframes spin { to { transform: rotate(360deg); } }
-    
-  </style>
+/* === Added: Desktop open-dock button (top-right) === */
+#btnOpenDock{
+  position:fixed; top:12px; right:12px; z-index:11;
+  padding:8px 12px; border:1px solid #ddd; border-radius:10px; background:#fff; cursor:pointer; font-size:13px;
+  box-shadow:0 8px 20px rgba(0,0,0,.15);
+}
+@media (max-width: 960px){ #btnOpenDock{ display:none } } /* hide on mobile */
+
+/* === Added: Mobile sheet style for caption card === */
+.float-card.sheet{
+  position:fixed !important; left:0 !important; right:0 !important; bottom:0 !important; top:auto !important;
+  margin:0; width:auto !important; max-height:min(48vh, 460px); overflow:auto;
+  border-radius:16px 16px 0 0;
+}
+.float-card header .grab-handle{
+  width:42px; height:4px; border-radius:999px; background:#d0d0d0; margin-right:8px; flex:0 0 auto;
+}
+@media (max-width: 640px){
+  .float-card header .close-btn{ font-size:14px; padding:6px 8px }
+}
+
+/* === Added: Make the card header an obvious drag area on mobile === */
+@media (max-width: 640px){
+  .float-card header{ cursor:grab; user-select:none }
+  .float-card header:active{ cursor:grabbing }
+}
+
+/* === Added: Ensure close button is visible and aligned === */
+.float-card header .close-btn{
+  border:1px solid #ddd; border-radius:8px; background:#fff; cursor:pointer; padding:4px 8px; font-size:12px;
+}
+
+/* === Added: Fix caption tab text overflow inside dock === */
+#tab-camera .tool-input textarea, #tab-materials textarea{
+  max-width:100%; box-sizing:border-box;
+}
+
+/* === Added: Center loader overlay === */
+#loaderOverlay{
+  position:fixed; inset:0; display:none; align-items:center; justify-content:center; z-index:1000;
+  background:rgba(0,0,0,.45);
+}
+#loaderOverlay.active{ display:flex }
+.spinner{
+  width:56px; height:56px; border-radius:50%;
+  border:4px solid rgba(255,255,255,.35); border-top-color:#fff;
+  animation:spin 1s linear infinite;
+}
+@keyframes spin{ to{ transform:rotate(360deg) } }
+
+/* === Added: Dock visibility helpers === */
+.d-none{ display:none !important }
+
+</style>
 </head>
 <body>
+<!-- Desktop open-dock button (hidden on mobile) -->
+<button id="btnOpenDock" title="ツール">🛠 ツール</button>
+
+<!-- Global loader overlay -->
+<div id="loaderOverlay" aria-hidden="true">
+  <div class="spinner" role="progressbar" aria-label="読み込み中"></div>
+</div>
+
 <header>
   <div class="toolbar">
     <!-- 📦 モデル -->
@@ -331,7 +379,7 @@
     <div class="grow"></div>
 
     <!-- 右端ユーティリティ -->
-    <div class="header-utils"><button id="btnOpenDock" class="iconbtn" style="display:none" title="ツールを開く">🛠 ツール</button>
+    <div class="header-utils">
       <a class="iconbtn" id="btnGuidePdf" href="./docs/museum3dviewer_user_guide.pdf" target="_blank" rel="noopener">使い方ガイド（PDF）</a>
       <span class="tiny">v1.22.0-bg</span>
     </div>
@@ -373,7 +421,6 @@
           <button class="tabbtn" data-tab="camera">カメラ</button>
         </div>
         <button class="minbtn" id="dockMin">最小化</button>
-              <button class="minbtn" id="dockClose" title="ドックを閉じる">閉じる</button>
       </header>
       <div class="body">
           <div class="tool-row">
@@ -482,6 +529,23 @@
 'use strict';
 console.log('drive_three_pins v1.22.0-bg');
 
+
+/* === Loader helpers === */
+function showLoader(){ document.getElementById('loaderOverlay')?.classList.add('active'); }
+function hideLoader(){ document.getElementById('loaderOverlay')?.classList.remove('active'); }
+
+/* === Dock visibility helpers (desktop button logic) === */
+function openDock(){
+  dock.classList.remove('collapsed');
+  dock.style.display = 'block';
+  const openBtn = document.getElementById('btnOpenDock'); if (openBtn) openBtn.classList.add('d-none');
+  applyDockMinState?.();
+}
+function closeDock(){
+  dock.classList.add('collapsed');
+  dock.style.display = 'none';
+  const openBtn = document.getElementById('btnOpenDock'); if (openBtn) openBtn.classList.remove('d-none');
+}
 /* ===== Config: OAuth / Drive ===== */
 const SCOPES_READ  = "https://www.googleapis.com/auth/drive.readonly";
 const SCOPES_WRITE = "https://www.googleapis.com/auth/drive.file";
@@ -578,52 +642,6 @@ const touchHelp = document.getElementById('touchHelp');
 
 const modalRoot    = document.getElementById('modalRoot');
 
-/* ==== Loader helpers ==== */
-const loaderOverlay = document.getElementById('loaderOverlay');
-function showLoader(){ loaderOverlay?.classList.add('show'); }
-function hideLoader(){ loaderOverlay?.classList.remove('show'); }
-
-/* ==== Dock open/close helpers ==== */
-const btnOpenDock = document.getElementById('btnOpenDock');
-const btnDockClose = document.getElementById('dockClose');
-function openDock(){
-  dock.style.display = '';
-  dock.classList.remove('collapsed');
-  // Desktop: hide open button
-  if (!IS_MOBILE && btnOpenDock) btnOpenDock.style.display = 'none';
-}
-function closeDock(){
-  dock.style.display = 'none';
-  // Desktop: show open button
-  if (!IS_MOBILE && btnOpenDock) btnOpenDock.style.display = '';
-}
-if (btnOpenDock) btnOpenDock.addEventListener('click', openDock);
-if (btnDockClose) btnDockClose.addEventListener('click', closeDock);
-
-/* Mobile FAB toggles */
-dockFab?.addEventListener('click', ()=>{
-  if (dock.style.display === 'none' || getComputedStyle(dock).display === 'none'){
-    openDock();
-  } else {
-    closeDock();
-  }
-});
-
-/* On load, ensure correct initial visibility */
-(function initDockVisibility(){
-  if (IS_MOBILE){
-    closeDock();
-    if (dockFab) dockFab.style.display = 'block';
-    if (btnOpenDock) btnOpenDock.style.display = 'none';
-  } else {
-    // Desktop: dock visible by default, and open button hidden
-    dock.style.display = '';
-    if (btnOpenDock) btnOpenDock.style.display = 'none';
-    if (dockFab) dockFab.style.display = 'none';
-  }
-})();
-
-
 /* ===== State ===== */
 let READ_ONLY = false;
 
@@ -706,8 +724,8 @@ function requestTokenInteractive(scopes = ALL_SCOPES) {
       client.requestAccessToken(); // ← クリック同一ハンドラ内で即発火
     } catch (e) { reject(e); }
   });
-
 }
+
 /* 以後の更新/401リトライ用（ユーザー操作外でも通る想定） */
 async function ensureToken() {
   const now = Date.now();
@@ -759,21 +777,12 @@ async function gapiReady(){
 }
 
 async function driveFetchBinary(fileId){
-  try{
-    await ensureToken(); // may throw if not available/signed-out
-    const res = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, {
-      headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : {}
-    });
-    if(!res.ok) throw new Error(`Drive fetch with token failed: ${res.status}`);
-    return await res.blob();
-  }catch(e){
-    // Public or shared files: fallback to export=download (no token)
-    const res2 = await fetch(`https://drive.google.com/uc?export=download&id=${fileId}`);
-    if(!res2.ok) throw new Error(`Public fetch failed: ${res2.status}`);
-    return await res2.blob();
-  }
-}
-
+  await ensureToken();
+  const res = await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?alt=media`, {
+    headers: { Authorization: `Bearer ${accessToken}` }
+  });
+  if (!res.ok) throw new Error(`driveFetchBinary failed: ${res.status}`);
+  return await res.blob();
 }
 
 async function driveGetMetadata(fileId, fields='id,name,parents,capabilities,permissions,driveId,modifiedTime,owners'){
@@ -1022,45 +1031,37 @@ function frameToObject(){
   updateCameraAspect();
 }
 async function loadGLBFromDrive(fileId){
-  showLoader();
-  try{
-    const blob = await driveFetchBinary(fileId);
-    const arrayBuf = await blob.arrayBuffer();
-
-    // Dispose old
-    if(window._currentModel){
-      const old = window._currentModel;
-      if(old.geometry) old.geometry.dispose?.();
-      if(old.material){
-        const mats = Array.isArray(old.material) ? old.material : [old.material];
-        mats.forEach(m=>m.dispose?.());
+  const blob = await driveFetchBinary(fileId);
+  const url  = URL.createObjectURL(blob);
+  if (gltfRoot) {
+    scene.remove(gltfRoot);
+    gltfRoot.traverse(o=>{
+      if(o.geometry) o.geometry.dispose();
+      if(o.material){
+        const mats = Array.isArray(o.material)? o.material : [o.material];
+        mats.forEach(m=>{
+          if (m.map && m.map.dispose) m.map.dispose();
+          if (m.dispose) m.dispose();
+        });
       }
-      old.clear?.();
-      if(old.parent) old.parent.remove(old);
-    }
-
-    const gltfLoader = new THREE.GLTFLoader();
-    const glb = await new Promise((resolve,reject)=>{
-      gltfLoader.parse(arrayBuf, "", resolve, reject);
     });
-
-    window._currentModel = glb.scene;
-    if(window.scene){
-      window.scene.add(glb.scene);
-      // fit camera if helper exists
-      if(typeof fitCameraToObject === "function"){ 
-        fitCameraToObject(window.camera, glb.scene, 1.2);
-      }
-    }
-  }catch(err){
-    console.error("loadGLBFromDrive failed", err);
-    alert("モデルの読み込みに失敗しました。ファイルの公開設定をご確認ください。");
-    throw err;
-  }finally{
-    hideLoader();
+    gltfRoot = null;
+    materialList.length = 0;
+    materialCache.clear();
+    materialsDockEl.innerHTML = '';
   }
+  const loader = new GLTFLoader();
+  await new Promise((resolve, reject)=>{
+    loader.load(url, (gltf)=>{
+      gltfRoot = gltf.scene; scene.add(gltfRoot);
+      frameToObject();
+      collectMaterials(gltfRoot);
+      buildMaterialsUI(materialsDockEl);
+      URL.revokeObjectURL(url);
+      resolve();
+    }, undefined, reject);
+  });
 }
-
 
 /* ===== ピン ===== */
 const safePos = a => (Array.isArray(a)&&a.length>=3)?a.map(n=>Number(n)||0):[0,0,0];
@@ -1381,7 +1382,7 @@ function makeFloatCard(pinId){
   const card = document.createElement('div'); card.className='float-card'; card.style.left='0px'; card.style.top='0px';
   const hdr = document.createElement('header');
   const title = document.createElement('input'); title.placeholder='タイトル'; title.value = pin.title||''; if (READ_ONLY) title.disabled = true;
-  const btnClose = document.createElement('button'); btnClose.textContent='×'; btnClose.className='btn ghost';
+  const btnClose = document.createElement('button'); btnClose.textContent='閉じる'; btnClose.className='btn close-btn';
   hdr.appendChild(title); hdr.appendChild(btnClose);
   const body = document.createElement('div'); body.className='body';
   const ta = document.createElement('textarea'); ta.placeholder='キャプション'; ta.value = pin.text||''; if (READ_ONLY) ta.disabled = true;
@@ -1488,23 +1489,47 @@ function makeFloatCard(pinId){
   return card;
 }
 function togglePinPopup(id){
+
   const rec = pinMap.get(id); if(!rec) return;
   if (rec.floatDom) { closePinPopup(id); return; }
+  // Close others on mobile (single sheet behavior)
+  if (IS_MOBILE){ closeAllPopups(); }
+
   const card = makeFloatCard(id);
   floatLayer.appendChild(card); rec.floatDom = card;
-  const pin = PINS.find(x=>x.id===id);
-  const pWorld  = rec.node.position.clone();
-  const sc      = projectToScreen(pWorld);
-  const margin  = 14;
-  const initLeft= Math.min(view.clientWidth - 240, Math.max(0, sc.x + margin));
-  const initTop = Math.min(view.clientHeight - 160, Math.max(0, sc.y - 80));
-  if (pin?.floatPos) { card.style.left = pin.floatPos.left+'px'; card.style.top = pin.floatPos.top+'px'; }
-  else { card.style.left = initLeft+'px'; card.style.top = initTop+'px'; if (pin) pin.floatPos = { left:initLeft, top:initTop }; }
+
+  // Mobile: turn the card into a bottom sheet
+  if (IS_MOBILE){
+    card.classList.add('sheet');
+    // Ensure a visible grab handle exists
+    const hdr = card.querySelector('header');
+    if (hdr && !hdr.querySelector('.grab-handle')){
+      const gh = document.createElement('div'); gh.className='grab-handle'; hdr.prepend(gh);
+    }
+    // Simple swipe-to-close on header drag (vertical)
+    let tsY=0, dy=0;
+    card.addEventListener('touchstart', (ev)=>{ tsY=ev.touches[0].clientY; dy=0; }, {passive:true});
+    card.addEventListener('touchmove', (ev)=>{ dy = ev.touches[0].clientY - tsY; if (dy>0) card.style.transform=`translateY(${dy}px)`; }, {passive:true});
+    card.addEventListener('touchend', ()=>{ if (dy>80){ closePinPopup(id); card.style.transform=''; } else { card.style.transform=''; } });
+  } else {
+    // Desktop: keep floating near the pin
+    const pin = PINS.find(x=>x.id===id);
+    const pWorld  = rec.node.position.clone();
+    const sc      = projectToScreen(pWorld);
+    const margin  = 14;
+    const initLeft= Math.min(view.clientWidth - 240, Math.max(0, sc.x + margin));
+    const initTop = Math.min(view.clientHeight - 160, Math.max(0, sc.y - 80));
+    if (pin?.floatPos) { card.style.left = pin.floatPos.left+'px'; card.style.top = pin.floatPos.top+'px'; }
+    else { card.style.left = initLeft+'px'; card.style.top = initTop+'px'; if (pin) pin.floatPos = { left:initLeft, top:initTop }; }
+  }
+
   const line = document.createElementNS('http://www.w3.org/2000/svg','line');
   line.setAttribute('data-id', id); linesSvg.appendChild(line);
   rec.lineEl = line; updateLeaderLines();
-    clampCardToViewport(card);
+  clampCardToViewport(card);
+  
 }
+
 
 /* ===== Raycaster / クリック ===== */
 const raycaster = new THREE.Raycaster(); const mouseNdc = new THREE.Vector2();
@@ -1616,11 +1641,13 @@ const closeSheet = ()=>{
   dock.style.display = 'none';
 };
 dockFab?.addEventListener('click', ()=>{
-  if (dock.style.display === 'none' || dock.classList.contains('collapsed')) openSheet();
-  else closeSheet();
+  // mobile FAB
+
+  if (dock.style.display === 'none' || dock.classList.contains('collapsed')) if (typeof openSheet==='function') openSheet();
+  else if (typeof closeSheet==='function') closeSheet();
 });
 dock.addEventListener('click', (e)=>{
-  if (e.target?.id === 'dockMin') closeSheet(); // 既存の「最小化」ボタンで閉じる
+  if (e.target?.id === 'dockMin') if (typeof closeSheet==='function') closeSheet(); // 既存の「最小化」ボタンで閉じる
 });
 
 /* ページヘッダーのオートハイド（指を止めたら 1.5s で隠す） */
@@ -2227,6 +2254,9 @@ btnLoad.onclick = async ()=>{
   if(!glbId){ alert('GLBの fileId / 共有リンクを入力してください'); return; }
 
   // ★ここでサインインチェック（未サインインなら中央ゲート表示 → いったん処理中断）
+  const ok = await ensureSignedInIfNeeded();
+  if (!ok) return;
+
   try{
     statusEl.textContent='GLB読込中…';
     await loadGLBFromDrive(glbId);
@@ -2542,19 +2572,15 @@ document.addEventListener('drop', async (e)=>{
 applyBackgroundMode('dark');
 applyBackgroundColor('#222222');
 
-// Ignore MetaMask extension errors in console (unrelated to this app)
-window.addEventListener('unhandledrejection', (e)=>{
-  const msg = String(e?.reason?.message || e?.reason || '');
-  if (msg.includes('MetaMask')) {
-    e.preventDefault?.();
-    console.warn('Ignored MetaMask extension error:', msg);
+// Sync desktop open-dock button visibility on boot
+(function(){
+  const openBtn = document.getElementById('btnOpenDock');
+  if (openBtn){
+    const dockEl = document.getElementById('editorDock');
+    const hidden = !dockEl || dockEl.classList.contains('collapsed') || getComputedStyle(dockEl).display === 'none';
+    if (hidden){ openBtn.classList.remove('d-none'); } else { openBtn.classList.add('d-none'); }
   }
-});
+})();
 </script>
-
-<div id="loaderOverlay" aria-live="polite" aria-busy="true">
-  <div class="spinner" role="progressbar" aria-label="読み込み中"></div>
-</div>
-
 </body>
 </html>
