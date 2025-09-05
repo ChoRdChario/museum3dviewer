@@ -270,7 +270,24 @@
 
 
     
-  </style>
+  @media (min-width: 961px){
+  #dockFab{ left:14px; right:auto; }
+}
+#loading{
+  position:fixed; inset:0; display:none;
+  align-items:center; justify-content:center;
+  background:rgba(0,0,0,.5); z-index:2000;
+}
+#loading .loader{
+  border:6px solid #f3f3f3;
+  border-top:6px solid #3498db;
+  border-radius:50%;
+  width:48px; height:48px;
+  animation:spin 1s linear infinite;
+}
+@keyframes spin{ 100%{ transform:rotate(360deg);} }
+
+</style>
 </head>
 <body>
 <header>
@@ -561,6 +578,7 @@ const hintDesktop = document.getElementById('hintDesktop');
 const hintTouch = document.getElementById('hintTouch');
 const touchHelp = document.getElementById('touchHelp');
 
+const loadingEl = document.getElementById('loading');
 const modalRoot    = document.getElementById('modalRoot');
 
 /* ===== State ===== */
@@ -952,6 +970,7 @@ function frameToObject(){
   updateCameraAspect();
 }
 async function loadGLBFromDrive(fileId){
+  loadingEl.style.display = 'flex';
   const blob = await driveFetchBinary(fileId);
   const url  = URL.createObjectURL(blob);
   if (gltfRoot) {
@@ -982,6 +1001,7 @@ async function loadGLBFromDrive(fileId){
       resolve();
     }, undefined, reject);
   });
+  loadingEl.style.display = 'none';
 }
 
 /* ===== ピン ===== */
@@ -2467,5 +2487,6 @@ document.addEventListener('drop', async (e)=>{
 applyBackgroundMode('dark');
 applyBackgroundColor('#222222');
 </script>
+<div id="loading"><div class="loader"></div></div>
 </body>
 </html>
