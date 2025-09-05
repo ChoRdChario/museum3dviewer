@@ -265,6 +265,13 @@
   background:#d0d0d0; margin:8px auto;
 }
 
+/* 画面の下の安全域（iPhoneのホームバーなど）をよける */
+.float-layer { padding-bottom: env(safe-area-inset-bottom, 0); }
+
+/* カードが小画面でも読みやすい幅に */
+.float-card { max-width: min(92vw, 320px); }
+
+
     
   </style>
 </head>
@@ -856,6 +863,20 @@ window.addEventListener('resize', ()=>{
   updateCameraAspect();
 });
 
+// 向き/サイズが変わったら、全部のカードを画面内に戻す
+window.addEventListener('resize', ()=>{
+  for (const {floatDom} of pinMap.values()){
+    if (floatDom) clampCardToViewport(floatDom);
+  }
+});
+window.addEventListener('orientationchange', ()=>{
+  setTimeout(()=>{
+    for (const {floatDom} of pinMap.values()){
+      if (floatDom) clampCardToViewport(floatDom);
+    }
+  }, 50);
+});
+
 /* ===== 背景 ===== */
 function applyBackgroundMode(mode){
   const col = mode==='light' ? '#f2f2f2' : '#222';
@@ -1224,6 +1245,13 @@ function centerToPin(pin){
   // ★追加：移動と同時にピンを光らせる（1秒）
   const p = PINS.find(p=>p.id===pin.id);
   if (p) highlightPin(p.id, 1000);
+    if (!pinMap.get(pin.id)?.floatDom) togglePinPopup(pin.id);
+  clampCardToViewport(pinMap.get(pin.id)?.floatDom);
+  
+  /* ミニバーとFABも安全域をよける */
+.mini-bar { margin-bottom: env(safe-area-inset-bottom, 0); }
+#dockFab  { margin-bottom: env(safe-area-inset-bottom, 0); }
+
 }
 
 
@@ -1233,6 +1261,30 @@ function projectToScreen(vec3){
   const w = view.clientWidth, h = view.clientHeight;
   return { x: (v.x * 0.5 + 0.5) * w, y: (-v.y * 0.5 + 0.5) * h };
 }
+
+// 画面からはみ出さないように、カード位置を直す
+function clampCardToViewport(card){
+  const vw = view.clientWidth, vh = view.clientHeight;
+  const r  = card.getBoundingClientRect();
+  const vr = view.getBoundingClientRect();
+  const W = r.width, H = r.height;
+  const M = 10; // 余白
+  // iPhoneの下の安全域（CSSのenv()ぶん）
+  const safeBottom = parseInt(getComputedStyle(floatLayer).paddingBottom) || 0;
+
+  // 現在の left/top を取り出し（px→数値）
+  let L = parseFloat(card.style.left||'0');
+  let T = parseFloat(card.style.top ||'0');
+
+  // 収まるように補正
+  L = Math.max(M, Math.min(vw - W - M, L));
+  T = Math.max(M, Math.min(vh - H - M - safeBottom, T));
+
+  card.style.left = L + 'px';
+  card.style.top  = T + 'px';
+}
+
+
 function closeAllPopups(){
   for (const [id, rec] of pinMap){
     rec.floatDom?.parentNode?.removeChild(rec.floatDom);
@@ -1356,7 +1408,9 @@ function makeFloatCard(pinId){
     const p = PINS.find(p=>p.id===pinId); if(p) p.floatPos = { left:L, top:T };
     updateLeaderLines();
   });
-  window.addEventListener('mouseup',()=>{ if(dragging){ dragging=false; if(!READ_ONLY) scheduleAutoSave(); } });
+  window.addEventListener('mouseup',()=>{ if(dragging){ dragging=false; 
+  clampCardToViewport(card);
+  if(!READ_ONLY) scheduleAutoSave(); } });
 
   return card;
 }
@@ -1376,6 +1430,7 @@ function togglePinPopup(id){
   const line = document.createElementNS('http://www.w3.org/2000/svg','line');
   line.setAttribute('data-id', id); linesSvg.appendChild(line);
   rec.lineEl = line; updateLeaderLines();
+    clampCardToViewport(card);
 }
 
 /* ===== Raycaster / クリック ===== */
