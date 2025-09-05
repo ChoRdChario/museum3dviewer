@@ -3,6 +3,9 @@
 <head>
   <meta charset="utf-8" />
   <title>Drive GLB Viewer + Pins (v1.22.0-bg)</title>
+  <link rel="preconnect" href="https://accounts.google.com">
+<script async src="https://accounts.google.com/gsi/client"></script>
+<script async src="https://apis.google.com/js/api.js"></script>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='64' height='64'%3E%3Crect width='64' height='64' fill='%23222'/%3E%3Ccircle cx='32' cy='32' r='18' fill='%23e33'/%3E%3C/svg%3E">
   <style>
@@ -480,8 +483,8 @@ function loadMap(){ try{ return JSON.parse(localStorage.getItem(MAP_KEY)||'{}') 
 function saveMap(m){ localStorage.setItem(MAP_KEY, JSON.stringify(m)) }
 function rememberAutosave(glbId, id){ const m=loadMap(); m[glbId]=id; saveMap(m); }
 
-/* ===== gapi / GSI ===== */
 
+/* ===== gapi / GSI ===== */
 function showSignInGate() {
   signinGateWrap.classList.remove('hidden');
   statusEl.textContent = 'サインインが必要です';
@@ -490,36 +493,58 @@ function hideSignInGate() {
   signinGateWrap.classList.add('hidden');
 }
 
-
+/* gapi ローダ：既に読み込まれていれば待つだけに変更 */
 async function loadGapi() {
   if (window.gapiLoaded) return;
-  await new Promise((resolve, reject)=>{
-    const s=document.createElement('script'); s.src='https://apis.google.com/js/api.js';
-    s.onload=resolve; s.onerror=()=>reject(new Error('gapi/api.js の読み込み失敗'));
-    document.head.appendChild(s);
+  await new Promise((resolve) => {
+    if (window.gapi) return resolve();
+    const t = setInterval(()=>{ if (window.gapi){ clearInterval(t); resolve(); } }, 30);
   });
-  await new Promise((resolve)=> window.gapi.load('client', resolve));
-  await window.gapi.client.init({ discoveryDocs: ["https://www.googleapis.com/discovery/v1/apis/drive/v3/rest"] });
+  await new Promise((res)=> gapi.load('client', res));
+  await gapi.client.init({ discoveryDocs: ["https://www.googleapis.com/discovery/v1/apis/drive/v3/rest"] });
   window.gapiLoaded = true;
 }
+/* 起動直後に裏で初期化（ユーザー操作をブロックしない） */
+(async ()=>{ try{ await loadGapi(); }catch(e){} })();
+
 let accessToken = null;
 let accessTokenExpiresAt = 0;
 let tokenRefreshing = null;
 
+/* クリック“直下”でだけ使う：初回トークン取得（ポップアップブロック回避） */
+function requestTokenInteractive(scopes = ALL_SCOPES) {
+  return new Promise((resolve, reject) => {
+    try {
+      if (!window.google?.accounts?.oauth2) {
+        reject(new Error('GSIがまだ読み込まれていません'));
+        return;
+      }
+      const client = google.accounts.oauth2.initTokenClient({
+        client_id: CLIENT_ID,
+        scope: scopes,
+        prompt: '',
+        callback: (resp) => {
+          if (!resp?.access_token) { reject(new Error('access_tokenなし')); return; }
+          accessToken = resp.access_token;
+          const ttlMs = Math.max(60_000, (Number(resp.expires_in) || 3600) * 1000);
+          accessTokenExpiresAt = Date.now() + ttlMs;
+          resolve(resp);
+        }
+      });
+      client.requestAccessToken(); // ← クリック同一ハンドラ内で即発火
+    } catch (e) { reject(e); }
+  });
+}
+
+/* 以後の更新/401リトライ用（ユーザー操作外でも通る想定） */
 async function ensureToken() {
   const now = Date.now();
   if (accessToken && accessTokenExpiresAt - 30_000 > now) return;
   if (tokenRefreshing) { await tokenRefreshing; return; }
 
-  await new Promise((resolve, reject)=>{
-    if (window.google?.accounts?.oauth2) return resolve();
-    const s=document.createElement('script'); s.src='https://accounts.google.com/gsi/client';
-    s.onload=resolve; s.onerror=()=>reject(new Error('gsi/client の読み込みに失敗'));
-    document.head.appendChild(s);
-  });
-
   tokenRefreshing = new Promise((resolve, reject)=>{
     try{
+      if (!window.google?.accounts?.oauth2) throw new Error('GSI未ロード');
       const client = google.accounts.oauth2.initTokenClient({
         client_id: CLIENT_ID,
         scope: ALL_SCOPES,
@@ -540,8 +565,8 @@ async function ensureToken() {
 
   try{ await tokenRefreshing; } finally { tokenRefreshing = null; }
 }
-// ★差し替え版：未サインインなら中央ゲートを表示して処理中断。
-// すでに有効トークンがあれば true を返す。
+
+/* 未サインインならゲート表示＆中断。既に有効なら true を返す */
 async function ensureSignedInIfNeeded() {
   if (accessToken && (accessTokenExpiresAt - 30_000 > Date.now())) {
     scopeWarnEl.style.display = 'none';
@@ -549,97 +574,116 @@ async function ensureSignedInIfNeeded() {
     return true;
   }
   statusEl.textContent = '未サインイン（公開ファイルのみ閲覧可）';
-  showSignInGate(); // 画面中央のサインインゲートを開く
+  showSignInGate();
   return false;
 }
 
-
 /* ===== Drive helpers ===== */
-const DRIVE_BASE   = 'https://www.googleapis.com/drive/v3';
-const UPLOAD_BASE  = 'https://www.googleapis.com/upload/drive/v3';
-async function fetchWithRetry(url, init={}, {expect='json'} = {}) {
-  const doFetch = async () => {
-    const headers = new Headers(init.headers || {});
-    if (accessToken) headers.set('Authorization', `Bearer ${accessToken}`);
-    return fetch(url, { ...init, headers });
-  };
-  let res = await doFetch();
-  if (res.status === 401) {
-    try { await ensureToken(); res = await doFetch(); } catch {}
-  }
-  if (!res.ok) {
-    let body = ''; try { body = await res.text(); } catch {}
-    throw new Error(`Drive fetch ${res.status}: ${body || url}`);
-  }
-  if (expect === 'blob')  return res.blob();
-  if (expect === 'text')  return res.text();
-  if (expect === 'raw')   return res;
-  return res.json();
+/* すべて accessToken（ensureToken 経由）と gapi.client.drive を利用 */
+
+async function gapiReady(){
+  // 新しい loadGapi は「gapiが居たら待つだけ」なので呼べば安全
+  if (!window.gapiLoaded) { try{ await loadGapi(); }catch(e){} }
 }
-async function driveFetchBinary(fileId) {
-  const url = `${DRIVE_BASE}/files/${fileId}?alt=media&supportsAllDrives=true`;
-  return fetchWithRetry(url, {}, { expect:'blob' });
+
+async function driveFetchBinary(fileId){
+  await ensureToken();
+  const res = await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?alt=media`, {
+    headers: { Authorization: `Bearer ${accessToken}` }
+  });
+  if (!res.ok) throw new Error(`driveFetchBinary failed: ${res.status}`);
+  return await res.blob();
 }
-async function driveGetMetadata(fileId, fields='id,name,parents,mimeType,modifiedTime') {
-  const url = `${DRIVE_BASE}/files/${fileId}?fields=${encodeURIComponent(fields)}&supportsAllDrives=true`;
-  return fetchWithRetry(url);
+
+async function driveGetMetadata(fileId, fields='id,name,parents,capabilities,permissions,driveId,modifiedTime,owners'){
+  await gapiReady();
+  const r = await gapi.client.drive.files.get({ fileId, fields });
+  return r.result || {};
 }
-async function driveCreateFile({ name, mimeType, parents, dataBlob }) {
-  const boundary = '-------314159265358979323846';
+
+async function driveListFiles({ q='', pageSize=100, orderBy='modifiedTime desc', fields }={}){
+  await gapiReady();
+  const r = await gapi.client.drive.files.list({
+    q, pageSize, orderBy,
+    fields: fields || "files(id,name,mimeType,modifiedTime,parents,thumbnailLink),nextPageToken"
+  });
+  return r.result || { files:[] };
+}
+
+/* multipart アップロード（新規作成） */
+async function driveCreateFile({ name, mimeType='application/octet-stream', parents=[], dataBlob }){
+  await ensureToken();
   const meta = { name, mimeType, parents };
+  const boundary = '----drivehelper_' + Math.random().toString(36).slice(2);
   const body = new Blob([
     `--${boundary}\r\n`,
     'Content-Type: application/json; charset=UTF-8\r\n\r\n',
-    JSON.stringify(meta) + '\r\n',
+    JSON.stringify(meta), '\r\n',
     `--${boundary}\r\n`,
-    `Content-Type: ${mimeType || 'application/octet-stream'}\r\n\r\n`,
-    dataBlob,
-    `\r\n--${boundary}--\r\n`
-  ], { type: 'multipart/related; boundary=' + boundary });
-  const url = `${UPLOAD_BASE}/files?uploadType=multipart&supportsAllDrives=true`;
-  return fetchWithRetry(url, { method:'POST', headers:{ 'Content-Type': body.type }, body });
+    `Content-Type: ${mimeType}\r\n\r\n`,
+    dataBlob, '\r\n',
+    `--${boundary}--`
+  ], { type: `multipart/related; boundary=${boundary}` });
+
+  const res = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${accessToken}` },
+    body
+  });
+  if (!res.ok) throw new Error(`driveCreateFile failed: ${res.status}`);
+  return await res.json();
 }
-async function driveUpdateFile({ fileId, name, mimeType, dataBlob }) {
-  const boundary = '-------314159265358979323846';
-  const meta = { name };
+
+/* multipart アップロード（内容＋名前の更新） */
+async function driveUpdateFile({ fileId, name, mimeType='application/octet-stream', dataBlob }){
+  await ensureToken();
+  const meta = { name, mimeType };
+  const boundary = '----drivehelper_' + Math.random().toString(36).slice(2);
   const body = new Blob([
     `--${boundary}\r\n`,
     'Content-Type: application/json; charset=UTF-8\r\n\r\n',
-    JSON.stringify(meta) + '\r\n',
+    JSON.stringify(meta), '\r\n',
     `--${boundary}\r\n`,
-    `Content-Type: ${mimeType || 'application/octet-stream'}\r\n\r\n`,
-    dataBlob,
-    `\r\n--${boundary}--\r\n`
-  ], { type: 'multipart/related; boundary=' + boundary });
-  const url = `${UPLOAD_BASE}/files/${fileId}?uploadType=multipart&supportsAllDrives=true`;
-  return fetchWithRetry(url, { method:'PATCH', headers:{ 'Content-Type': body.type }, body });
+    `Content-Type: ${mimeType}\r\n\r\n`,
+    dataBlob, '\r\n',
+    `--${boundary}--`
+  ], { type: `multipart/related; boundary=${boundary}` });
+
+  const res = await fetch(`https://www.googleapis.com/upload/drive/v3/files/${encodeURIComponent(fileId)}?uploadType=multipart`, {
+    method: 'PATCH',
+    headers: { Authorization: `Bearer ${accessToken}` },
+    body
+  });
+  if (!res.ok) throw new Error(`driveUpdateFile failed: ${res.status}`);
+  return await res.json();
 }
-async function driveListFiles({ q, orderBy='modifiedTime desc', pageSize=100 }) {
-  const fields = 'files(id,name,modifiedTime,parents,iconLink,thumbnailLink,mimeType),nextPageToken';
-  const url = `${DRIVE_BASE}/files?q=${encodeURIComponent(q)}&pageSize=${pageSize}&fields=${encodeURIComponent(fields)}&orderBy=${encodeURIComponent(orderBy)}&supportsAllDrives=true&includeItemsFromAllDrives=true`;
-  return fetchWithRetry(url);
+
+/* 共有：公開状態の取得 */
+async function driveIsPublic(fileId){
+  await gapiReady();
+  const r = await gapi.client.drive.permissions.list({ fileId, fields: "permissions(id,type,role)" });
+  const perms = r.result?.permissions || [];
+  return perms.some(p => p.type === 'anyone' && (p.role === 'reader' || p.role === 'writer' || p.role === 'commenter'));
 }
-async function driveGetPermissions(fileId) {
-  const url = `${DRIVE_BASE}/files/${fileId}/permissions?supportsAllDrives=true&fields=permissions(id,type,role)`;
-  return fetchWithRetry(url);
-}
-async function driveSetPublic(fileId, makePublic) {
-  const base = `${DRIVE_BASE}/files/${fileId}/permissions?supportsAllDrives=true`;
-  if (makePublic) {
-    await fetchWithRetry(base, { method:'POST', headers:{ 'Content-Type': 'application/json' }, body: JSON.stringify({ role:'reader', type:'anyone', allowFileDiscovery:false }) }, { expect:'json' });
+
+/* 共有：公開/限定を切り替え */
+async function driveSetPublic(fileId, isPublic){
+  await gapiReady();
+  if (isPublic){
+    await gapi.client.drive.permissions.create({
+      fileId,
+      resource: { type: 'anyone', role: 'reader' }
+    });
   } else {
-    const { permissions = [] } = await driveGetPermissions(fileId);
-    const any = permissions.find(p => p.type === 'anyone');
-    if (any) {
-      const delUrl = `${DRIVE_BASE}/files/${fileId}/permissions/${any.id}?supportsAllDrives=true`;
-      await fetchWithRetry(delUrl, { method:'DELETE' }, { expect: 'raw' });
+    const r = await gapi.client.drive.permissions.list({ fileId, fields: "permissions(id,type)" });
+    const any = (r.result?.permissions||[]).find(p => p.type === 'anyone');
+    if (any){
+      await gapi.client.drive.permissions.delete({ fileId, permissionId: any.id });
     }
   }
 }
-async function driveIsPublic(fileId) {
-  const { permissions = [] } = await driveGetPermissions(fileId);
-  return !!permissions.find(p => p.type === 'anyone' && p.role === 'reader');
-}
+
+
 
 /* ===== Three.js ===== */
 import * as THREE from 'https://esm.sh/three@0.152.2';
@@ -1765,23 +1809,19 @@ function fallbackCopy(text, okMsg){
   ta.select(); try{ document.execCommand('copy'); alert(okMsg); } finally{ document.body.removeChild(ta); }
 }
 
+/* サインインゲートのボタン */
 btnGateSignIn?.addEventListener('click', async ()=>{
   try{
     statusEl.textContent='サインイン中…';
-    await loadGapi();             // ライブラリ読込
-    await ensureToken();          // ユーザー操作直後＝ポップアップブロック回避
+    await requestTokenInteractive(ALL_SCOPES);   // クリック直下
     statusEl.textContent='サインイン完了';
     hideSignInGate();
     scopeWarnEl.style.display = 'none';
-
-    // ★GLBが入力済みなら、そのまま読込を再開
-    if (extractDriveId(fileIdInput.value)) {
-      btnLoad.click();
-    }
+    if (extractDriveId(fileIdInput.value)) { btnLoad.click(); }
   }catch(e){
     console.error(e);
     statusEl.textContent='サインイン失敗';
-    alert('サインインに失敗しました。ブラウザのポップアップ許可をご確認ください。');
+    alert('サインインに失敗しました。Safari/Chromeのポップアップ許可をご確認ください。');
   }
 });
 
@@ -1789,13 +1829,19 @@ btnGateSignIn?.addEventListener('click', async ()=>{
 
 
 /* ===== Header actions ===== */
+/* ヘッダーの「Googleにサインイン」 */
 btnAuth.onclick = async ()=>{
-  try{ statusEl.textContent='サインイン中…'; await loadGapi(); 
-     await ensureToken();
-     statusEl.textContent='サインイン完了';
-     hideSignInGate(); // ← 追加
-     scopeWarnEl.style.display='none'; }
-  catch(e){ console.error(e); alert('Googleサインインに失敗しました。設定/ポップアップ/拡張のブロックをご確認ください。'); statusEl.textContent='サインイン失敗'; }
+  try{
+    statusEl.textContent='サインイン中…';
+    await requestTokenInteractive(ALL_SCOPES);   // クリック直下
+    statusEl.textContent='サインイン完了';
+    hideSignInGate();
+    scopeWarnEl.style.display='none';
+  }catch(e){
+    console.error(e);
+    alert('Googleサインインに失敗しました。設定/ポップアップ/拡張のブロックをご確認ください。');
+    statusEl.textContent='サインイン失敗';
+  }
 };
 
 btnLoad.onclick = async ()=>{
