@@ -270,41 +270,7 @@
 
 
     
-  
-@media (max-width:640px){
-  .float-card{
-    position:fixed;
-    left:0; right:0; bottom:0;
-    width:100%; max-height:65vh;
-    border-radius:16px 16px 0 0;
-    margin:0; padding:0;
-    box-shadow:0 -4px 20px rgba(0,0,0,0.3);
-    display:flex; flex-direction:column;
-  }
-  .float-card header{
-    padding:14px 40px 8px 40px;
-    position:relative;
-    border-bottom:1px solid #eee;
-  }
-  .float-card header::before{
-    content:"";
-    position:absolute; top:6px; left:50%;
-    transform:translateX(-50%);
-    width:36px; height:4px;
-    border-radius:2px;
-    background:#ccc;
-  }
-  .float-card header button.close{
-    position:absolute; top:8px; right:8px;
-    border:none; background:transparent;
-    font-size:20px;
-  }
-  .float-card .body{
-    overflow:auto; padding:12px;
-  }
-}
-
-</style>
+  </style>
 </head>
 <body>
 <header>
@@ -679,8 +645,6 @@ function requestTokenInteractive(scopes = ALL_SCOPES) {
       client.requestAccessToken(); // ← クリック同一ハンドラ内で即発火
     } catch (e) { reject(e); }
   });
-}
-
 /* 以後の更新/401リトライ用（ユーザー操作外でも通る想定） */
 async function ensureToken() {
   const now = Date.now();
@@ -1345,7 +1309,7 @@ function makeFloatCard(pinId){
   const card = document.createElement('div'); card.className='float-card'; card.style.left='0px'; card.style.top='0px';
   const hdr = document.createElement('header');
   const title = document.createElement('input'); title.placeholder='タイトル'; title.value = pin.title||''; if (READ_ONLY) title.disabled = true;
-  const btnClose = document.createElement('button'); btnClose.textContent='×'; btnClose.className='close';
+  const btnClose = document.createElement('button'); btnClose.textContent='×'; btnClose.className='btn ghost';
   hdr.appendChild(title); hdr.appendChild(btnClose);
   const body = document.createElement('div'); body.className='body';
   const ta = document.createElement('textarea'); ta.placeholder='キャプション'; ta.value = pin.text||''; if (READ_ONLY) ta.disabled = true;
@@ -1453,33 +1417,7 @@ function makeFloatCard(pinId){
 }
 function togglePinPopup(id){
   const rec = pinMap.get(id); if(!rec) return;
-  if (isMobile()){
-    closeAllPopups();
-  }
-  if (rec.floatDom){
-    closePinPopup(id);
-  } else {
-    const card = makeFloatCard(id);
-    floatLayer.appendChild(card);
-    rec.floatDom = card;
-    const pin = PINS.find(x=>x.id===id);
-    const pWorld  = rec.node.position.clone();
-    const sc      = projectToScreen(pWorld);
-    const margin  = 14;
-    const initLeft= Math.min(view.clientWidth - 240, Math.max(0, sc.x + margin));
-    const initTop = Math.min(view.clientHeight - 160, Math.max(0, sc.y - 80));
-    if (pin?.floatPos) {
-      card.style.left = pin.floatPos.left+'px'; card.style.top = pin.floatPos.top+'px';
-    } else {
-      card.style.left = initLeft+'px'; card.style.top = initTop+'px';
-      if (pin) pin.floatPos = { left:initLeft, top:initTop };
-    }
-    const line = document.createElementNS('http://www.w3.org/2000/svg','line');
-    line.setAttribute('data-id', id); linesSvg.appendChild(line);
-    rec.lineEl = line; updateLeaderLines();
-    clampCardToViewport(card);
-  }
-}
+  if (rec.floatDom) { closePinPopup(id); return; }
   const card = makeFloatCard(id);
   floatLayer.appendChild(card); rec.floatDom = card;
   const pin = PINS.find(x=>x.id===id);
