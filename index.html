@@ -228,7 +228,7 @@
   /* レイアウトを viewer 全画面化 */
   main{ grid-template-columns: 1fr }
   aside{ display:none }
-  #view{ height: 100vh; }
+  #view{ height: 100dvh; }
 
   /* 右下の FAB（既存）を使ってボトムシートを開閉 */
   #dockFab{ display:block; right:14px; bottom:14px; padding:12px 16px; box-shadow:0 8px 24px rgba(0,0,0,.25) }
@@ -1248,9 +1248,7 @@ function centerToPin(pin){
     if (!pinMap.get(pin.id)?.floatDom) togglePinPopup(pin.id);
   clampCardToViewport(pinMap.get(pin.id)?.floatDom);
   
-  /* ミニバーとFABも安全域をよける */
-.mini-bar { margin-bottom: env(safe-area-inset-bottom, 0); }
-#dockFab  { margin-bottom: env(safe-area-inset-bottom, 0); }
+  
 
 }
 
