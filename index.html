@@ -44,12 +44,22 @@
       background:#fff; border:1px solid #ddd; border-radius:10px; box-shadow:0 8px 22px rgba(0,0,0,0.3);
       user-select:none;
     }
-    .float-card header{display:flex; align-items:center; gap:8px; padding:6px 8px; border-bottom:1px solid #eee;
+    .float-card header{
+  cursor: grab;
+  background: repeating-linear-gradient(
+    45deg,
+    #eee,
+    #eee 6px,
+    #ddd 6px,
+    #ddd 12px
+  );
+  border-bottom:1px solid #ccc;
+display:flex; align-items:center; gap:8px; padding:6px 8px; border-bottom:1px solid #eee;
       background:#f6f7fb; border-radius:10px 10px 0 0; cursor:grab;}
     .float-card header:active{ cursor:grabbing; }
     .float-card header input{flex:1; min-width:0; border:1px solid #ddd; border-radius:6px; padding:4px 6px; font-size:13px; background:#fff;}
     .float-card .body{ padding:8px }
-    .float-card .body textarea{ width:100%; border:1px solid #ddd; border-radius:6px; padding:6px; min-height:70px }
+    .float-card .body textarea{ box-sizing:border-box; resize:vertical; width:100%; border:1px solid #ddd; border-radius:6px; padding:6px; min-height:70px }
     .float-card .body img{ display:block; max-width:100%; border-radius:8px; margin-top:6px; cursor:zoom-in }
     .float-card .footer{ display:flex; gap:6px; padding:8px; border-top:1px solid #eee; flex-wrap:wrap; align-items:center }
     .float-card .btn{ padding:4px 8px; border:1px solid #ddd; border-radius:8px; background:#fff; cursor:pointer; font-size:12px }
@@ -215,7 +225,17 @@
 
   /* 6) フロートカード類のフォント/パディングを気持ち小さく */
   .float-card{ font-size: 13px; }
-  .float-card header{ padding: 6px 8px; }
+  .float-card header{
+  cursor: grab;
+  background: repeating-linear-gradient(
+    45deg,
+    #eee,
+    #eee 6px,
+    #ddd 6px,
+    #ddd 12px
+  );
+  border-bottom:1px solid #ccc;
+ padding: 6px 8px; }
   .float-card .body{ padding: 8px; }
   .float-card .footer{ padding: 8px; gap: 6px; }
   .float-card .btn{ padding: 4px 8px; font-size: 12px; }
@@ -270,23 +290,9 @@
 
 
     
-  @media (min-width: 961px){
-  #dockFab{ left:14px; right:auto; }
+  @media (min-width:961px){
+  #dockFab{ top:14px; right:14px; bottom:auto; left:auto; }
 }
-#loading{
-  position:fixed; inset:0; display:none;
-  align-items:center; justify-content:center;
-  background:rgba(0,0,0,.5); z-index:2000;
-}
-#loading .loader{
-  border:6px solid #f3f3f3;
-  border-top:6px solid #3498db;
-  border-radius:50%;
-  width:48px; height:48px;
-  animation:spin 1s linear infinite;
-}
-@keyframes spin{ 100%{ transform:rotate(360deg);} }
-
 </style>
 </head>
 <body>
@@ -578,7 +584,6 @@ const hintDesktop = document.getElementById('hintDesktop');
 const hintTouch = document.getElementById('hintTouch');
 const touchHelp = document.getElementById('touchHelp');
 
-const loadingEl = document.getElementById('loading');
 const modalRoot    = document.getElementById('modalRoot');
 
 /* ===== State ===== */
@@ -970,7 +975,6 @@ function frameToObject(){
   updateCameraAspect();
 }
 async function loadGLBFromDrive(fileId){
-  loadingEl.style.display = 'flex';
   const blob = await driveFetchBinary(fileId);
   const url  = URL.createObjectURL(blob);
   if (gltfRoot) {
@@ -1001,7 +1005,6 @@ async function loadGLBFromDrive(fileId){
       resolve();
     }, undefined, reject);
   });
-  loadingEl.style.display = 'none';
 }
 
 /* ===== ピン ===== */
@@ -1516,6 +1519,22 @@ window.addEventListener('keydown',(e)=>{
 });
 
 /* ===== Dock interactions ===== */
+let dockOpen=false;
+const dockToggleBtn = dockMin; // 既存の最小化ボタンをトグルボタンに利用
+function updateDockUI(){
+  dock.classList.toggle('open', dockOpen);
+  dock.classList.toggle('collapsed', !dockOpen);
+  dockFab.style.display = dockOpen ? 'none' : '';
+  dockToggleBtn.textContent = dockOpen ? '閉じる' : '開く';
+}
+function toggleDock(){
+  dockOpen = !dockOpen;
+  updateDockUI();
+}
+dockToggleBtn.onclick = toggleDock;
+updateDockUI();
+
+
 tabButtons.forEach(b=>{
   b.onclick = ()=>{
     tabButtons.forEach(x=>x.classList.remove('active'));
@@ -2487,6 +2506,5 @@ document.addEventListener('drop', async (e)=>{
 applyBackgroundMode('dark');
 applyBackgroundColor('#222222');
 </script>
-<div id="loading"><div class="loader"></div></div>
 </body>
 </html>
