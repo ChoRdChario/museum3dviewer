@@ -262,32 +262,6 @@
   background:#d0d0d0; margin:8px auto;
 }
 
-
-.float-card header {
-  position: relative;
-  padding: 16px 8px 8px; /* 上に余白追加 */
-}
-.float-card header::before {
-  content:"";
-  position:absolute;
-  top:4px; left:50%;
-  transform:translateX(-50%);
-  width:40px; height:4px;
-  border-radius:2px;
-  background:#ccc;
-}
-.float-card header button.close {
-  position:absolute; right:6px; top:6px;
-  border:none; background:transparent;
-  font-size:18px; cursor:pointer;
-}
-.float-card .body textarea,
-.float-card .body input[type="text"],
-.float-card .body input[type="color"] {
-  width:100%;
-  box-sizing:border-box;
-}
-
 /* 画面の下の安全域（iPhoneのホームバーなど）をよける */
 .float-layer { padding-bottom: env(safe-area-inset-bottom, 0); }
 
@@ -296,12 +270,7 @@
 
 
     
-  
-@media (min-width:961px){
-  #dockFab { top:12px; right:12px; bottom:auto; left:auto; }
-}
-
-</style>
+  </style>
 </head>
 <body>
 <header>
@@ -729,12 +698,20 @@ async function gapiReady(){
 }
 
 async function driveFetchBinary(fileId){
-  await ensureToken();
-  const res = await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?alt=media`, {
-    headers: { Authorization: `Bearer ${accessToken}` }
-  });
-  if (!res.ok) throw new Error(`driveFetchBinary failed: ${res.status}`);
-  return await res.blob();
+  try{
+    await ensureToken();
+    const res = await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?alt=media`, {
+      headers: { Authorization: `Bearer ${accessToken}` }
+    });
+    if (!res.ok) throw new Error(`driveFetchBinary failed: ${res.status}`);
+    return await res.blob();
+  }catch(e){
+    // フォールバック：公開ファイルなら直接fetch
+    const res2 = await fetch(`https://drive.google.com/uc?export=download&id=${encodeURIComponent(fileId)}`);
+    if(!res2.ok) throw new Error(`driveFetchBinary fallback failed: ${res2.status}`);
+    return await res2.blob();
+  }
+}
 }
 
 async function driveGetMetadata(fileId, fields='id,name,parents,capabilities,permissions,driveId,modifiedTime,owners'){
@@ -1334,7 +1311,7 @@ function makeFloatCard(pinId){
   const card = document.createElement('div'); card.className='float-card'; card.style.left='0px'; card.style.top='0px';
   const hdr = document.createElement('header');
   const title = document.createElement('input'); title.placeholder='タイトル'; title.value = pin.title||''; if (READ_ONLY) title.disabled = true;
-  const btnClose = document.createElement('button'); btnClose.textContent='×'; btnClose.className='close';
+  const btnClose = document.createElement('button'); btnClose.textContent='×'; btnClose.className='btn ghost';
   hdr.appendChild(title); hdr.appendChild(btnClose);
   const body = document.createElement('div'); body.className='body';
   const ta = document.createElement('textarea'); ta.placeholder='キャプション'; ta.value = pin.text||''; if (READ_ONLY) ta.disabled = true;
@@ -1527,16 +1504,6 @@ window.addEventListener('keydown',(e)=>{
 });
 
 /* ===== Dock interactions ===== */
-
-function openDock(){
-  dock.style.display="block";
-  dockFab.style.display="none";
-}
-function closeDock(){
-  dock.style.display="none";
-  dockFab.style.display="block";
-}
-
 tabButtons.forEach(b=>{
   b.onclick = ()=>{
     tabButtons.forEach(x=>x.classList.remove('active'));
@@ -1579,8 +1546,64 @@ const closeSheet = ()=>{
   dock.style.display = 'none';
 };
 dockFab?.addEventListener('click', ()=>{
-  if (dock.style.display==='none') openDock(); else closeDock();
+  if (dock.style.display === 'none' || dock.classList.contains('collapsed')) openSheet();
+  else closeSheet();
 });
+dock.addEventListener('click', (e)=>{
+  if (e.target?.id === 'dockMin') closeSheet(); // 既存の「最小化」ボタンで閉じる
+});
+
+/* ページヘッダーのオートハイド（指を止めたら 1.5s で隠す） */
+const pageHeader = document.querySelector('header');
+let hideTimer=null;
+function scheduleHideHeader(){
+  if (!isMobile()) return;
+  if (hideTimer) clearTimeout(hideTimer);
+  hideTimer = setTimeout(()=> pageHeader.classList.add('compact'), 1500);
+}
+// 画面上端付近でヘッダー再表示
+document.addEventListener('pointermove', (e)=>{
+  if (!isMobile()) return;
+  if (e.clientY < 24) pageHeader.classList.remove('compact');
+  scheduleHideHeader();
+  
+
+
+});
+document.addEventListener('pointerdown', scheduleHideHeader);
+scheduleHideHeader();
+
+// 初期状態でヘッダーを隠してスタート（モバイルのみ）
+if (isMobile()) { pageHeader.classList.add('compact'); }
+
+/* 目安のUI占有率（console 表示） */
+function uiOccupancy(){
+  const H = window.innerHeight;
+  const headerVisible = !pageHeader.classList.contains('compact');
+  const headerH = headerVisible ? pageHeader.offsetHeight : 0;
+  const miniH = miniBar?.offsetHeight || 0;
+  const fabH = document.getElementById('dockFab')?.offsetHeight || 0;
+  const occ = ((headerH + miniH + fabH*0.5) / H) * 100; // FABは半分扱い
+  console.log(`UI占有率 ≈ ${occ.toFixed(1)}%`);
+}
+window.addEventListener('resize', uiOccupancy);
+setTimeout(uiOccupancy, 0);
+
+
+function syncDockMoveToggle(){/* no-op: 移動タブ廃止に伴いUI同期を無効化 */ 
+}
+
+
+function applyDockMinState(){
+  const min = localStorage.getItem('editorDock_min')==='1';
+  dock.classList.toggle('collapsed', !!min);
+  dockMin.textContent = min ? '展開' : '最小化';
+}
+dockMin.onclick = ()=>{
+  const min = localStorage.getItem('editorDock_min')==='1';
+  localStorage.setItem('editorDock_min', min?'0':'1');
+  applyDockMinState();
+};
 applyDockMinState();
 
 /* ===== Camera tab ===== */
