@@ -44,22 +44,12 @@
       background:#fff; border:1px solid #ddd; border-radius:10px; box-shadow:0 8px 22px rgba(0,0,0,0.3);
       user-select:none;
     }
-    .float-card header{
-  cursor: grab;
-  background: repeating-linear-gradient(
-    45deg,
-    #eee,
-    #eee 6px,
-    #ddd 6px,
-    #ddd 12px
-  );
-  border-bottom:1px solid #ccc;
-display:flex; align-items:center; gap:8px; padding:6px 8px; border-bottom:1px solid #eee;
+    .float-card header{display:flex; align-items:center; gap:8px; padding:6px 8px; border-bottom:1px solid #eee;
       background:#f6f7fb; border-radius:10px 10px 0 0; cursor:grab;}
     .float-card header:active{ cursor:grabbing; }
     .float-card header input{flex:1; min-width:0; border:1px solid #ddd; border-radius:6px; padding:4px 6px; font-size:13px; background:#fff;}
     .float-card .body{ padding:8px }
-    .float-card .body textarea{ box-sizing:border-box; resize:vertical; width:100%; border:1px solid #ddd; border-radius:6px; padding:6px; min-height:70px }
+    .float-card .body textarea{ width:100%; border:1px solid #ddd; border-radius:6px; padding:6px; min-height:70px }
     .float-card .body img{ display:block; max-width:100%; border-radius:8px; margin-top:6px; cursor:zoom-in }
     .float-card .footer{ display:flex; gap:6px; padding:8px; border-top:1px solid #eee; flex-wrap:wrap; align-items:center }
     .float-card .btn{ padding:4px 8px; border:1px solid #ddd; border-radius:8px; background:#fff; cursor:pointer; font-size:12px }
@@ -225,17 +215,7 @@ display:flex; align-items:center; gap:8px; padding:6px 8px; border-bottom:1px so
 
   /* 6) フロートカード類のフォント/パディングを気持ち小さく */
   .float-card{ font-size: 13px; }
-  .float-card header{
-  cursor: grab;
-  background: repeating-linear-gradient(
-    45deg,
-    #eee,
-    #eee 6px,
-    #ddd 6px,
-    #ddd 12px
-  );
-  border-bottom:1px solid #ccc;
- padding: 6px 8px; }
+  .float-card header{ padding: 6px 8px; }
   .float-card .body{ padding: 8px; }
   .float-card .footer{ padding: 8px; gap: 6px; }
   .float-card .btn{ padding: 4px 8px; font-size: 12px; }
@@ -282,6 +262,32 @@ display:flex; align-items:center; gap:8px; padding:6px 8px; border-bottom:1px so
   background:#d0d0d0; margin:8px auto;
 }
 
+
+.float-card header {
+  position: relative;
+  padding: 16px 8px 8px; /* 上に余白追加 */
+}
+.float-card header::before {
+  content:"";
+  position:absolute;
+  top:4px; left:50%;
+  transform:translateX(-50%);
+  width:40px; height:4px;
+  border-radius:2px;
+  background:#ccc;
+}
+.float-card header button.close {
+  position:absolute; right:6px; top:6px;
+  border:none; background:transparent;
+  font-size:18px; cursor:pointer;
+}
+.float-card .body textarea,
+.float-card .body input[type="text"],
+.float-card .body input[type="color"] {
+  width:100%;
+  box-sizing:border-box;
+}
+
 /* 画面の下の安全域（iPhoneのホームバーなど）をよける */
 .float-layer { padding-bottom: env(safe-area-inset-bottom, 0); }
 
@@ -290,9 +296,11 @@ display:flex; align-items:center; gap:8px; padding:6px 8px; border-bottom:1px so
 
 
     
-  @media (min-width:961px){
-  #dockFab{ top:14px; right:14px; bottom:auto; left:auto; }
+  
+@media (min-width:961px){
+  #dockFab { top:12px; right:12px; bottom:auto; left:auto; }
 }
+
 </style>
 </head>
 <body>
@@ -1326,7 +1334,7 @@ function makeFloatCard(pinId){
   const card = document.createElement('div'); card.className='float-card'; card.style.left='0px'; card.style.top='0px';
   const hdr = document.createElement('header');
   const title = document.createElement('input'); title.placeholder='タイトル'; title.value = pin.title||''; if (READ_ONLY) title.disabled = true;
-  const btnClose = document.createElement('button'); btnClose.textContent='×'; btnClose.className='btn ghost';
+  const btnClose = document.createElement('button'); btnClose.textContent='×'; btnClose.className='close';
   hdr.appendChild(title); hdr.appendChild(btnClose);
   const body = document.createElement('div'); body.className='body';
   const ta = document.createElement('textarea'); ta.placeholder='キャプション'; ta.value = pin.text||''; if (READ_ONLY) ta.disabled = true;
@@ -1519,21 +1527,15 @@ window.addEventListener('keydown',(e)=>{
 });
 
 /* ===== Dock interactions ===== */
-let dockOpen=false;
-const dockToggleBtn = dockMin; // 既存の最小化ボタンをトグルボタンに利用
-function updateDockUI(){
-  dock.classList.toggle('open', dockOpen);
-  dock.classList.toggle('collapsed', !dockOpen);
-  dockFab.style.display = dockOpen ? 'none' : '';
-  dockToggleBtn.textContent = dockOpen ? '閉じる' : '開く';
-}
-function toggleDock(){
-  dockOpen = !dockOpen;
-  updateDockUI();
-}
-dockToggleBtn.onclick = toggleDock;
-updateDockUI();
 
+function openDock(){
+  dock.style.display="block";
+  dockFab.style.display="none";
+}
+function closeDock(){
+  dock.style.display="none";
+  dockFab.style.display="block";
+}
 
 tabButtons.forEach(b=>{
   b.onclick = ()=>{
@@ -1577,64 +1579,8 @@ const closeSheet = ()=>{
   dock.style.display = 'none';
 };
 dockFab?.addEventListener('click', ()=>{
-  if (dock.style.display === 'none' || dock.classList.contains('collapsed')) openSheet();
-  else closeSheet();
+  if (dock.style.display==='none') openDock(); else closeDock();
 });
-dock.addEventListener('click', (e)=>{
-  if (e.target?.id === 'dockMin') closeSheet(); // 既存の「最小化」ボタンで閉じる
-});
-
-/* ページヘッダーのオートハイド（指を止めたら 1.5s で隠す） */
-const pageHeader = document.querySelector('header');
-let hideTimer=null;
-function scheduleHideHeader(){
-  if (!isMobile()) return;
-  if (hideTimer) clearTimeout(hideTimer);
-  hideTimer = setTimeout(()=> pageHeader.classList.add('compact'), 1500);
-}
-// 画面上端付近でヘッダー再表示
-document.addEventListener('pointermove', (e)=>{
-  if (!isMobile()) return;
-  if (e.clientY < 24) pageHeader.classList.remove('compact');
-  scheduleHideHeader();
-  
-
-
-});
-document.addEventListener('pointerdown', scheduleHideHeader);
-scheduleHideHeader();
-
-// 初期状態でヘッダーを隠してスタート（モバイルのみ）
-if (isMobile()) { pageHeader.classList.add('compact'); }
-
-/* 目安のUI占有率（console 表示） */
-function uiOccupancy(){
-  const H = window.innerHeight;
-  const headerVisible = !pageHeader.classList.contains('compact');
-  const headerH = headerVisible ? pageHeader.offsetHeight : 0;
-  const miniH = miniBar?.offsetHeight || 0;
-  const fabH = document.getElementById('dockFab')?.offsetHeight || 0;
-  const occ = ((headerH + miniH + fabH*0.5) / H) * 100; // FABは半分扱い
-  console.log(`UI占有率 ≈ ${occ.toFixed(1)}%`);
-}
-window.addEventListener('resize', uiOccupancy);
-setTimeout(uiOccupancy, 0);
-
-
-function syncDockMoveToggle(){/* no-op: 移動タブ廃止に伴いUI同期を無効化 */ 
-}
-
-
-function applyDockMinState(){
-  const min = localStorage.getItem('editorDock_min')==='1';
-  dock.classList.toggle('collapsed', !!min);
-  dockMin.textContent = min ? '展開' : '最小化';
-}
-dockMin.onclick = ()=>{
-  const min = localStorage.getItem('editorDock_min')==='1';
-  localStorage.setItem('editorDock_min', min?'0':'1');
-  applyDockMinState();
-};
 applyDockMinState();
 
 /* ===== Camera tab ===== */
