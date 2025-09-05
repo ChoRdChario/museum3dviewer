@@ -270,6 +270,20 @@
 
 
     
+  
+    /* ==== Global Loader ==== */
+    #loaderOverlay{
+      position:fixed; inset:0; display:none; align-items:center; justify-content:center;
+      background:rgba(0,0,0,.5); z-index:70;
+    }
+    #loaderOverlay.show{ display:flex; }
+    .spinner{
+      width:56px; height:56px; border-radius:50%;
+      border:6px solid #fff; border-top-color: transparent;
+      animation: spin 1s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    
   </style>
 </head>
 <body>
@@ -317,7 +331,7 @@
     <div class="grow"></div>
 
     <!-- 右端ユーティリティ -->
-    <div class="header-utils">
+    <div class="header-utils"><button id="btnOpenDock" class="iconbtn" style="display:none" title="ツールを開く">🛠 ツール</button>
       <a class="iconbtn" id="btnGuidePdf" href="./docs/museum3dviewer_user_guide.pdf" target="_blank" rel="noopener">使い方ガイド（PDF）</a>
       <span class="tiny">v1.22.0-bg</span>
     </div>
@@ -359,6 +373,7 @@
           <button class="tabbtn" data-tab="camera">カメラ</button>
         </div>
         <button class="minbtn" id="dockMin">最小化</button>
+              <button class="minbtn" id="dockClose" title="ドックを閉じる">閉じる</button>
       </header>
       <div class="body">
           <div class="tool-row">
@@ -563,6 +578,52 @@ const touchHelp = document.getElementById('touchHelp');
 
 const modalRoot    = document.getElementById('modalRoot');
 
+/* ==== Loader helpers ==== */
+const loaderOverlay = document.getElementById('loaderOverlay');
+function showLoader(){ loaderOverlay?.classList.add('show'); }
+function hideLoader(){ loaderOverlay?.classList.remove('show'); }
+
+/* ==== Dock open/close helpers ==== */
+const btnOpenDock = document.getElementById('btnOpenDock');
+const btnDockClose = document.getElementById('dockClose');
+function openDock(){
+  dock.style.display = '';
+  dock.classList.remove('collapsed');
+  // Desktop: hide open button
+  if (!IS_MOBILE && btnOpenDock) btnOpenDock.style.display = 'none';
+}
+function closeDock(){
+  dock.style.display = 'none';
+  // Desktop: show open button
+  if (!IS_MOBILE && btnOpenDock) btnOpenDock.style.display = '';
+}
+if (btnOpenDock) btnOpenDock.addEventListener('click', openDock);
+if (btnDockClose) btnDockClose.addEventListener('click', closeDock);
+
+/* Mobile FAB toggles */
+dockFab?.addEventListener('click', ()=>{
+  if (dock.style.display === 'none' || getComputedStyle(dock).display === 'none'){
+    openDock();
+  } else {
+    closeDock();
+  }
+});
+
+/* On load, ensure correct initial visibility */
+(function initDockVisibility(){
+  if (IS_MOBILE){
+    closeDock();
+    if (dockFab) dockFab.style.display = 'block';
+    if (btnOpenDock) btnOpenDock.style.display = 'none';
+  } else {
+    // Desktop: dock visible by default, and open button hidden
+    dock.style.display = '';
+    if (btnOpenDock) btnOpenDock.style.display = 'none';
+    if (dockFab) dockFab.style.display = 'none';
+  }
+})();
+
+
 /* ===== State ===== */
 let READ_ONLY = false;
 
@@ -645,6 +706,8 @@ function requestTokenInteractive(scopes = ALL_SCOPES) {
       client.requestAccessToken(); // ← クリック同一ハンドラ内で即発火
     } catch (e) { reject(e); }
   });
+
+}
 /* 以後の更新/401リトライ用（ユーザー操作外でも通る想定） */
 async function ensureToken() {
   const now = Date.now();
@@ -958,6 +1021,9 @@ function frameToObject(){
   updateCameraAspect();
 }
 async function loadGLBFromDrive(fileId){
+  try{
+    showLoader();
+
   const blob = await driveFetchBinary(fileId);
   const url  = URL.createObjectURL(blob);
   if (gltfRoot) {
@@ -969,7 +1035,9 @@ async function loadGLBFromDrive(fileId){
         mats.forEach(m=>{
           if (m.map && m.map.dispose) m.map.dispose();
           if (m.dispose) m.dispose();
-        });
+        
+  } finally { hideLoader(); }
+});
       }
     });
     gltfRoot = null;
@@ -2473,5 +2541,10 @@ document.addEventListener('drop', async (e)=>{
 applyBackgroundMode('dark');
 applyBackgroundColor('#222222');
 </script>
+
+<div id="loaderOverlay" aria-live="polite" aria-busy="true">
+  <div class="spinner" role="progressbar" aria-label="読み込み中"></div>
+</div>
+
 </body>
 </html>
