@@ -712,7 +712,6 @@ async function driveFetchBinary(fileId){
     return await res2.blob();
   }
 }
-}
 
 async function driveGetMetadata(fileId, fields='id,name,parents,capabilities,permissions,driveId,modifiedTime,owners'){
   await gapiReady();
