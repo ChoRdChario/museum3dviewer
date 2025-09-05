@@ -19,7 +19,13 @@
     header button{padding:6px 10px;border:1px solid #ddd;border-radius:8px;background:#fff;cursor:pointer}
     header .grow{flex:1}
     main{display:grid;grid-template-columns: 1fr 360px;gap:10px;}
-    #view{position:relative;width:100%;height:calc(100vh - 56px);overflow:hidden;background:#222}
+#view{
+  position:relative;
+  width:100%;
+  height:calc(100dvh - 56px); /* ← 100vh → 100dvh に変更 */
+  overflow:hidden;
+  background:#222;
+}
     #canvas{display:block;width:100%;height:100%}
     aside{height:calc(100vh - 56px);overflow:auto;background:#fafafa;border-left:1px solid #eee}
     .sec{padding:10px 12px;border-bottom:1px solid #eee}
@@ -120,12 +126,14 @@
   position:absolute; right:12px; bottom:12px; z-index:9;
   display:none; padding:10px 14px; border:1px solid #ddd; border-radius:999px; background:#fff; cursor:pointer;
 }
-@media (max-width: 640px){
-  header{ padding:8px 10px }
-  .hgroup .tiny, .header-utils{ display:none }   /* 右端のPDF等を隠す */
-  .dock{ display:none }                          /* 初期は隠す。必要時はFABで開く */
-  #dockFab{ display:block }
-}
+  #dockFab{
+    display:block;
+    position:fixed;              /* ← absolute から fixed に変更 */
+    right:14px;
+    bottom:14px;
+    padding:12px 16px;
+    box-shadow:0 8px 24px rgba(0,0,0,.25);
+  }
 
     
     .zoom-overlay{ position:fixed; inset:0; background:rgba(0,0,0,.85); display:flex; align-items:center; justify-content:center; z-index:60; cursor:grab }
@@ -155,6 +163,109 @@
       .dock .tabbtn{ padding:6px 12px }
       .tool-btn{ padding:8px 12px }
     }
+    
+    /* === Mobile compact mode (≈15% 常時UI) === */
+@media (max-width: 640px){
+  /* ヘッダーはオートハイド用に固定配置 */
+  header{ position: fixed; top:0; left:0; right:0; transform: translateY(0); transition: transform .25s; z-index: 10; }
+  header.compact{ transform: translateY(-100%); }
+  
+
+  /* 1) ヘッダーは“初期から”隠す（必要時のみスワイプで表示） */
+  header{ transform: translateY(-100%) !important; }
+
+  /* 2) ミニバー：ボタンを丸型・小型化（高さ=約40px） */
+  .mini-bar{
+    padding: 4px 6px !important;
+    gap: 6px !important;
+    border-radius: 999px !important;
+  }
+  .mini-btn{
+    width: 40px; height: 40px;
+    padding: 0 !important; border-radius: 999px !important;
+    font-size: 18px; line-height: 40px;
+  }
+
+  /* 3) FAB：丸型アイコン化（テキスト非表示） */
+  #dockFab{
+    width: 52px; height: 52px;
+    padding: 0 !important;
+    border-radius: 999px !important;
+    text-indent: -9999px; /* ラベル隠す */
+    position: fixed !important; right: 14px; bottom: 14px;
+  }
+  /* アイコンは疑似要素で表示 */
+  #dockFab::after{
+    content: "🛠";
+    position: absolute; inset: 0;
+    display: grid; place-items: center;
+    font-size: 22px;
+    text-indent: 0;
+  }
+
+  /* 4) 保存ステータスのピル：さらに小型に */
+  #pillAutosave{
+    padding: 2px 6px !important;
+    font-size: 11px; gap: 6px;
+  }
+  #pillAutosave input{ transform: scale(.9); }
+
+  /* 5) ボトムシート（dock）は開いた時のみ可視。高さは最大 40–45vh */
+  .dock{
+    max-height: min(40vh, 380px) !important;
+    box-shadow: 0 16px 40px rgba(0,0,0,.35);
+  }
+
+  /* 6) フロートカード類のフォント/パディングを気持ち小さく */
+  .float-card{ font-size: 13px; }
+  .float-card header{ padding: 6px 8px; }
+  .float-card .body{ padding: 8px; }
+  .float-card .footer{ padding: 8px; gap: 6px; }
+  .float-card .btn{ padding: 4px 8px; font-size: 12px; }
+
+/* ヘッダー再表示のトランジションは既存を利用 */
+
+  /* レイアウトを viewer 全画面化 */
+  main{ grid-template-columns: 1fr }
+  aside{ display:none }
+  #view{ height: 100vh; }
+
+  /* 右下の FAB（既存）を使ってボトムシートを開閉 */
+  #dockFab{ display:block; right:14px; bottom:14px; padding:12px 16px; box-shadow:0 8px 24px rgba(0,0,0,.25) }
+
+  /* 保存ステータスのピルを右上に固定 */
+  #pillAutosave{
+    position: fixed; right:12px; top:12px; z-index:9;
+    background:#ffffffea; backdrop-filter: blur(4px);
+    border:1px solid #ddd; border-radius:999px; padding:2px 8px;
+  }
+
+  /* 左下のミニツールバー（常時表示はココだけ+FAB） */
+  .mini-bar{
+    position:fixed; left:12px; bottom:14px; z-index:9; display:flex; gap:8px;
+    background:#ffffffea; backdrop-filter:blur(4px);
+    border:1px solid #ddd; border-radius:999px; padding:6px 8px;
+  }
+  .mini-btn{ border:0; background:transparent; padding:6px; border-radius:10px; }
+  .mini-btn:active{ background:#efefef }
+
+  /* 既存の .dock を “ボトムシート” に */
+  .dock{
+    position: fixed; left:0; right:0; bottom:0; top:auto;
+    width:auto; max-height:min(45vh, 420px); overflow:auto;
+    border-radius:16px 16px 0 0; margin:0 0 env(safe-area-inset-bottom,0) 0;
+    display:none; /* 初期は閉 */
+  }
+  .dock.collapsed{ display:none } /* 明示的に閉 */
+}
+
+/* ボトムシートのグラブハンドル */
+.dock::before{
+  content:""; display:block; width:44px; height:4px; border-radius:999px;
+  background:#d0d0d0; margin:8px auto;
+}
+
+    
   </style>
 </head>
 <body>
@@ -209,6 +320,14 @@
   </div>
 </header>
 
+<!-- Mini toolbar (mobile) -->
+<div class="mini-bar" id="miniBar" style="display:none">
+  <button class="mini-btn" id="miniLoad" title="読み込み">🗂</button>
+  <button class="mini-btn" id="miniPin" title="ピン追加">📍</button>
+  <button class="mini-btn" id="miniShare" title="共有">🔗</button>
+</div>
+
+
 <main>
   <div id="view">
     <canvas id="canvas"></canvas>
@@ -225,25 +344,19 @@
 </div>
 
 <!-- モバイル用：ドック表示トグル -->
-<button id="dockFab" title="ツール">ツール</button>
+<button id="dockFab" title="ツール" aria-label="ツールを開く">ツール</button>
 
 
     <!-- 編集ドック -->
     <div class="dock" id="editorDock">
       <header>
         <div class="tabs">
-          <button class="tabbtn active" data-tab="move">移動</button>
           <button class="tabbtn" data-tab="materials">マテリアル</button>
           <button class="tabbtn" data-tab="camera">カメラ</button>
         </div>
         <button class="minbtn" id="dockMin">最小化</button>
       </header>
       <div class="body">
-        <div id="tab-move">
-          <div class="tool-row">
-            <button class="tool-btn" id="dockMoveToggle">ギズモ ON</button>
-            <button class="tool-btn" id="dockCenterSelected">選択ピンへ</button>
-          </div>
           <div class="tool-row">
             <button class="tool-btn toggled" id="axisX">X</button>
             <button class="tool-btn toggled" id="axisY">Y</button>
@@ -424,14 +537,8 @@ fileIdInput.addEventListener('keydown', (e)=>{ if(e.key==='Enter') btnLoad.click
 const dock = document.getElementById('editorDock');
 const materialsDockEl = document.getElementById('materialsDock');
 const tabButtons = dock.querySelectorAll('.tabbtn');
-const tabMove = document.getElementById('tab-move');
 const tabMaterials = document.getElementById('tab-materials');
 const tabCamera = document.getElementById('tab-camera');
-const dockMoveToggle = document.getElementById('dockMoveToggle');
-const dockCenterSelected = document.getElementById('dockCenterSelected');
-const axisBtnX = document.getElementById('axisX');
-const axisBtnY = document.getElementById('axisY');
-const axisBtnZ = document.getElementById('axisZ');
 const dockMin = document.getElementById('dockMin');
 
 /* Camera tab controls */
@@ -863,7 +970,12 @@ async function loadGLBFromDrive(fileId){
 const safePos = a => (Array.isArray(a)&&a.length>=3)?a.map(n=>Number(n)||0):[0,0,0];
 
 function pinColorOf(pin){ return (pin && pin.color) ? String(pin.color) : '#e33'; }
-function makePinSprite(color='#e33'){
+
+// ★追加：ピンの基本の透明度（お好みで 0.55〜0.75 推奨）
+const PIN_BASE_OPACITY = 0.65;
+
+// ★新しい makePinSprite（ピンを半透明にする）
+function makePinSprite(color = '#e33', opacity = PIN_BASE_OPACITY){
   const size = 64, cvs = document.createElement('canvas'); cvs.width=cvs.height=size;
   const ctx = cvs.getContext('2d');
   // 外側白リング
@@ -874,17 +986,95 @@ function makePinSprite(color='#e33'){
   ctx.fillStyle=color; ctx.fill();
   // 縁
   ctx.strokeStyle='rgba(0,0,0,0.25)'; ctx.lineWidth=2; ctx.stroke();
+
   const tex = new THREE.CanvasTexture(cvs);
-  const mat = new THREE.SpriteMaterial({ map: tex, depthTest: true, depthWrite: false, transparent: true });
-  const spr = new THREE.Sprite(mat); spr.scale.set(0.022,0.022,0.022); return spr;}
+  const mat = new THREE.SpriteMaterial({
+    map: tex,
+    depthTest: true,
+    depthWrite: false,
+    transparent: true,
+    opacity
+  });
+  const spr = new THREE.Sprite(mat);
+  spr.scale.set(0.022,0.022,0.022);
+  return spr;
+}
+
+
 function updatePinSpriteColor(id){
   const rec = pinMap.get(id); if (!rec) return;
-  const pin = PINS.find(p=>p.id===id); const col = pinColorOf(pin);
-  const tex = makePinSprite(col).material.map;
+  const pin = PINS.find(p=>p.id===id);
+  const col = pinColorOf(pin);
+  const currentOpacity = rec.sprite?.material?.opacity ?? PIN_BASE_OPACITY;
+
+  // 新しい色で絵を作り直す（透明度はそのまま）
+  const tex = makePinSprite(col, currentOpacity).material.map;
   rec.sprite.material.map.dispose?.();
   rec.sprite.material.map = tex;
   rec.sprite.material.needsUpdate = true;
 }
+
+// === 光る輪っか（使い回し用）
+let highlightRingTexture = null;
+function getHighlightRingTexture(){
+  if (highlightRingTexture) return highlightRingTexture;
+  const size = 128, cvs = document.createElement('canvas'); cvs.width=cvs.height=size;
+  const ctx = cvs.getContext('2d');
+  const g = ctx.createRadialGradient(size/2,size/2,size*0.25, size/2,size/2,size*0.48);
+  g.addColorStop(0.00, 'rgba(0,128,255,0.00)');
+  g.addColorStop(0.60, 'rgba(0,128,255,0.35)');
+  g.addColorStop(0.90, 'rgba(0,128,255,0.00)');
+  ctx.fillStyle = g;
+  ctx.beginPath(); ctx.arc(size/2,size/2,size*0.48,0,Math.PI*2); ctx.fill();
+  highlightRingTexture = new THREE.CanvasTexture(cvs);
+  return highlightRingTexture;
+}
+
+// === ピンを一時的に強調（光る輪っか + 少し大きく）
+function highlightPin(pinId, duration = 1000){
+  const rec = pinMap.get(pinId); if (!rec) return;
+  const sprite = rec.sprite;
+
+  const ringMat = new THREE.SpriteMaterial({
+    map: getHighlightRingTexture(),
+    transparent: true,
+    depthTest: false,
+    depthWrite: false,
+    opacity: 0.0
+  });
+  const ring = new THREE.Sprite(ringMat);
+  ring.scale.set(0.06, 0.06, 0.06);
+  rec.node.add(ring);
+
+  const baseScale = sprite.scale.clone();
+  const baseOpacity = sprite.material.opacity ?? PIN_BASE_OPACITY;
+
+  const start = performance.now();
+  function step(){
+    const t = Math.min(1, (performance.now() - start) / duration);
+    const k = t < 0.5 ? (2*t*t) : (1 - Math.pow(-2*t + 2, 2)/2); // なめらかに
+
+    // 輪っかは前半明るく→後半消える
+    ring.material.opacity = (t < 0.5 ? t*2 : (1 - t)*2) * 0.9;
+
+    // ピンは少し大きく＆少しハッキリ
+    const s = 1 + 0.45 * k;
+    sprite.scale.set(baseScale.x*s, baseScale.y*s, baseScale.z*s);
+    sprite.material.opacity = baseOpacity + (1.0 - baseOpacity) * Math.min(1, k*1.1);
+
+    if (t < 1){ requestAnimationFrame(step); }
+    else {
+      sprite.scale.copy(baseScale);
+      sprite.material.opacity = baseOpacity;
+      rec.node.remove(ring);
+      ring.material.map.dispose?.();
+      ring.material.dispose?.();
+    }
+  }
+  requestAnimationFrame(step);
+}
+
+
 
 /* 画像ノード作成（HEICはpreviewにフォールバック） */
 function makePictureNode(pin) {
@@ -1011,6 +1201,7 @@ function updateListPositionSummary(id){
 }
 
 /* centerToPin */
+
 function centerToPin(pin){
   const v = safePos(pin.position);
   const target = new THREE.Vector3(v[0], v[1], v[2]);
@@ -1020,6 +1211,7 @@ function centerToPin(pin){
   const ideal = Math.max(0.2, fitMaxDim * 0.3);
   const dir = currentDir.normalize();
   const nextPos = target.clone().addScaledVector(dir, ideal);
+
   animateCameraTo({
     fromPos: currentPos,
     toPos: nextPos,
@@ -1028,7 +1220,12 @@ function centerToPin(pin){
     duration: 380,
     ease: t => 1 - Math.pow(1 - t, 3),
   });
+
+  // ★追加：移動と同時にピンを光らせる（1秒）
+  const p = PINS.find(p=>p.id===pin.id);
+  if (p) highlightPin(p.id, 1000);
 }
+
 
 /* ===== ポップアップ ===== */
 function projectToScreen(vec3){
@@ -1245,9 +1442,6 @@ moveModeEl.onchange = ()=>{
 window.addEventListener('keydown',(e)=>{
   if (e.repeat) return;
   if (!READ_ONLY && (e.key==='g'||e.key==='G')){ moveModeEl.checked = !moveModeEl.checked; moveModeEl.onchange(); }
-  else if (e.key==='x'||e.key==='X'){ gizmo.showX = !gizmo.showX; axisBtnX.classList.toggle('toggled', gizmo.showX); }
-  else if (e.key==='y'||e.key==='Y'){ gizmo.showY = !gizmo.showY; axisBtnY.classList.toggle('toggled', gizmo.showY); }
-  else if (e.key==='z'||e.key==='Z'){ gizmo.showZ = !gizmo.showZ; axisBtnZ.classList.toggle('toggled', gizmo.showZ); }
   else if (e.key==='Escape') { detachGizmo(); closeAllPopups(); if (!READ_ONLY) { moveModeEl.checked=false; syncDockMoveToggle(); } }
 });
 
@@ -1257,36 +1451,91 @@ tabButtons.forEach(b=>{
     tabButtons.forEach(x=>x.classList.remove('active'));
     b.classList.add('active');
     const tab = b.dataset.tab;
-    tabMove.style.display = (tab==='move')?'block':'none';
+  // tabMove は削除
     tabMaterials.style.display = (tab==='materials')?'block':'none';
     tabCamera.style.display = (tab==='camera')?'block':'none';
   };
 });
 
+/* ===== Mobile UI: mini bar / bottom sheet / auto-hide header ===== */
+const miniBar = document.getElementById('miniBar');
+const miniLoad = document.getElementById('miniLoad');
+const miniPin = document.getElementById('miniPin');
+const miniShare = document.getElementById('miniShare');
+
+function isMobile(){ return window.matchMedia('(max-width: 640px), (pointer: coarse)').matches; }
+function showMiniBarIfMobile(){ miniBar.style.display = isMobile() ? 'flex' : 'none'; }
+showMiniBarIfMobile();
+window.addEventListener('resize', showMiniBarIfMobile);
+
+/* ミニバーの動作（軽操作） */
+miniLoad?.addEventListener('click', ()=>{
+  // まずヘルプ（入力方法）→ すぐロードしたい場合は2度押しで btnLoad
+  if (document.getElementById('helpModel')) btnHelpModel.click();
+  else if (document.getElementById('btnLoad')) btnLoad.click();
+});
+miniPin?.addEventListener('click', ()=> btnAddPin?.click());
+miniShare?.addEventListener('click', ()=> btnCopyReadonlyUrl?.click());
+
+/* ボトムシート（dock）の開閉を FAB に一本化 */
+const openSheet = ()=>{
+  dock.classList.remove('collapsed');
+  dock.style.display = 'block';
+  applyDockMinState?.();
+};
+const closeSheet = ()=>{
+  dock.classList.add('collapsed');
+  dock.style.display = 'none';
+};
 dockFab?.addEventListener('click', ()=>{
-  // モバイル時のみ使用想定。押すたび切替
-  const show = dock.style.display === 'none';
-  dock.style.display = show ? 'block' : 'none';
-  if (show) {
-    // 表示直後に最小化状態を適用
-    applyDockMinState();
-  }
+  if (dock.style.display === 'none' || dock.classList.contains('collapsed')) openSheet();
+  else closeSheet();
+});
+dock.addEventListener('click', (e)=>{
+  if (e.target?.id === 'dockMin') closeSheet(); // 既存の「最小化」ボタンで閉じる
 });
 
-
-function syncDockMoveToggle(){
-  dockMoveToggle.textContent = (!READ_ONLY && moveModeEl.checked) ? 'ギズモ ON' : 'ギズモ OFF';
-  dockMoveToggle.classList.toggle('toggled', !READ_ONLY && moveModeEl.checked);
+/* ページヘッダーのオートハイド（指を止めたら 1.5s で隠す） */
+const pageHeader = document.querySelector('header');
+let hideTimer=null;
+function scheduleHideHeader(){
+  if (!isMobile()) return;
+  if (hideTimer) clearTimeout(hideTimer);
+  hideTimer = setTimeout(()=> pageHeader.classList.add('compact'), 1500);
 }
-dockMoveToggle.onclick = ()=>{
-  if (READ_ONLY) return;
-  moveModeEl.checked = !moveModeEl.checked;
-  moveModeEl.onchange();
-};
-dockCenterSelected.onclick = ()=>{
-  const pin = PINS.find(p=>p.id===selectedPinId);
-  if (pin) centerToPin(pin);
-};
+// 画面上端付近でヘッダー再表示
+document.addEventListener('pointermove', (e)=>{
+  if (!isMobile()) return;
+  if (e.clientY < 24) pageHeader.classList.remove('compact');
+  scheduleHideHeader();
+  
+
+
+});
+document.addEventListener('pointerdown', scheduleHideHeader);
+scheduleHideHeader();
+
+// 初期状態でヘッダーを隠してスタート（モバイルのみ）
+if (isMobile()) { pageHeader.classList.add('compact'); }
+
+/* 目安のUI占有率（console 表示） */
+function uiOccupancy(){
+  const H = window.innerHeight;
+  const headerVisible = !pageHeader.classList.contains('compact');
+  const headerH = headerVisible ? pageHeader.offsetHeight : 0;
+  const miniH = miniBar?.offsetHeight || 0;
+  const fabH = document.getElementById('dockFab')?.offsetHeight || 0;
+  const occ = ((headerH + miniH + fabH*0.5) / H) * 100; // FABは半分扱い
+  console.log(`UI占有率 ≈ ${occ.toFixed(1)}%`);
+}
+window.addEventListener('resize', uiOccupancy);
+setTimeout(uiOccupancy, 0);
+
+
+function syncDockMoveToggle(){/* no-op: 移動タブ廃止に伴いUI同期を無効化 */ 
+}
+
+
 function applyDockMinState(){
   const min = localStorage.getItem('editorDock_min')==='1';
   dock.classList.toggle('collapsed', !!min);
@@ -1893,9 +2142,7 @@ btnLoad.onclick = async ()=>{
     buildMaterialsUI(materialsDockEl);
     resetHistoryBaseline();
     syncDockMoveToggle();
-    axisBtnX.classList.toggle('toggled', gizmo.showX);
-    axisBtnY.classList.toggle('toggled', gizmo.showY);
-    axisBtnZ.classList.toggle('toggled', gizmo.showZ);
+
     updatePinsInfo();
     refreshShareButtons();
 
