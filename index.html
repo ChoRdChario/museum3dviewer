@@ -760,19 +760,20 @@ async function gapiReady(){
 
 async function driveFetchBinary(fileId){
   try{
-    await ensureToken();
-    const res = await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?alt=media`, {
-      headers: { Authorization: `Bearer ${accessToken}` }
+    await ensureToken(); // may throw if not available/signed-out
+    const res = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, {
+      headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : {}
     });
-    if (!res.ok) throw new Error(`driveFetchBinary failed: ${res.status}`);
+    if(!res.ok) throw new Error(`Drive fetch with token failed: ${res.status}`);
     return await res.blob();
   }catch(e){
-    // フォールバック：公開ファイルなら直接fetch
-    const res2 = await fetch(`https://drive.google.com/uc?export=download&id=${encodeURIComponent(fileId)}`);
-    if(!res2.ok) throw new Error(`driveFetchBinary fallback failed: ${res2.status}`);
+    // Public or shared files: fallback to export=download (no token)
+    const res2 = await fetch(`https://drive.google.com/uc?export=download&id=${fileId}`);
+    if(!res2.ok) throw new Error(`Public fetch failed: ${res2.status}`);
     return await res2.blob();
   }
 }
+
 }
 
 async function driveGetMetadata(fileId, fields='id,name,parents,capabilities,permissions,driveId,modifiedTime,owners'){
@@ -1021,42 +1022,45 @@ function frameToObject(){
   updateCameraAspect();
 }
 async function loadGLBFromDrive(fileId){
+  showLoader();
   try{
-    showLoader();
+    const blob = await driveFetchBinary(fileId);
+    const arrayBuf = await blob.arrayBuffer();
 
-  const blob = await driveFetchBinary(fileId);
-  const url  = URL.createObjectURL(blob);
-  if (gltfRoot) {
-    scene.remove(gltfRoot);
-    gltfRoot.traverse(o=>{
-      if(o.geometry) o.geometry.dispose();
-      if(o.material){
-        const mats = Array.isArray(o.material)? o.material : [o.material];
-        mats.forEach(m=>{
-          if (m.map && m.map.dispose) m.map.dispose();
-          if (m.dispose) m.dispose();
-        
-  } finally { hideLoader(); }
-});
+    // Dispose old
+    if(window._currentModel){
+      const old = window._currentModel;
+      if(old.geometry) old.geometry.dispose?.();
+      if(old.material){
+        const mats = Array.isArray(old.material) ? old.material : [old.material];
+        mats.forEach(m=>m.dispose?.());
       }
+      old.clear?.();
+      if(old.parent) old.parent.remove(old);
+    }
+
+    const gltfLoader = new THREE.GLTFLoader();
+    const glb = await new Promise((resolve,reject)=>{
+      gltfLoader.parse(arrayBuf, "", resolve, reject);
     });
-    gltfRoot = null;
-    materialList.length = 0;
-    materialCache.clear();
-    materialsDockEl.innerHTML = '';
+
+    window._currentModel = glb.scene;
+    if(window.scene){
+      window.scene.add(glb.scene);
+      // fit camera if helper exists
+      if(typeof fitCameraToObject === "function"){ 
+        fitCameraToObject(window.camera, glb.scene, 1.2);
+      }
+    }
+  }catch(err){
+    console.error("loadGLBFromDrive failed", err);
+    alert("モデルの読み込みに失敗しました。ファイルの公開設定をご確認ください。");
+    throw err;
+  }finally{
+    hideLoader();
   }
-  const loader = new GLTFLoader();
-  await new Promise((resolve, reject)=>{
-    loader.load(url, (gltf)=>{
-      gltfRoot = gltf.scene; scene.add(gltfRoot);
-      frameToObject();
-      collectMaterials(gltfRoot);
-      buildMaterialsUI(materialsDockEl);
-      URL.revokeObjectURL(url);
-      resolve();
-    }, undefined, reject);
-  });
 }
+
 
 /* ===== ピン ===== */
 const safePos = a => (Array.isArray(a)&&a.length>=3)?a.map(n=>Number(n)||0):[0,0,0];
@@ -2223,9 +2227,6 @@ btnLoad.onclick = async ()=>{
   if(!glbId){ alert('GLBの fileId / 共有リンクを入力してください'); return; }
 
   // ★ここでサインインチェック（未サインインなら中央ゲート表示 → いったん処理中断）
-  const ok = await ensureSignedInIfNeeded();
-  if (!ok) return;
-
   try{
     statusEl.textContent='GLB読込中…';
     await loadGLBFromDrive(glbId);
@@ -2540,6 +2541,15 @@ document.addEventListener('drop', async (e)=>{
 /* ==== 初期背景反映 ==== */
 applyBackgroundMode('dark');
 applyBackgroundColor('#222222');
+
+// Ignore MetaMask extension errors in console (unrelated to this app)
+window.addEventListener('unhandledrejection', (e)=>{
+  const msg = String(e?.reason?.message || e?.reason || '');
+  if (msg.includes('MetaMask')) {
+    e.preventDefault?.();
+    console.warn('Ignored MetaMask extension error:', msg);
+  }
+});
 </script>
 
 <div id="loaderOverlay" aria-live="polite" aria-busy="true">
