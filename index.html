@@ -2298,15 +2298,15 @@ async function chooseDriveImageForPin(pin, opts={}){
       }catch(e){ gridEl.innerHTML = `<div>検索に失敗しました</div>`; }
     }
     await loadFolder();
-    document.getElementById('imgSearchAll')?.addEventListener('click', (e)=>{ (async ()=>{
+    document.getElementById('imgSearchAll')?.addEventListener('click', async (e)=>{
       try{
-        const query = document.getElementById('imgQuery').value.trim()) });
+        const query = (document.getElementById('imgQuery')?.value || '').trim();
         let q = `mimeType contains 'image/' and trashed = false`;
         if (query) q += ` and name contains '${query.replace(/'/g,"\\'")}'`;
         const res = await driveListFiles({ q, pageSize: 200 });
         await renderGrid(res.files||[]);
       }catch(e){ gridEl.innerHTML = `<div>全体検索に失敗しました</div>`; }
-    };
+    });
   }catch(e){ console.error(e); alert('画像の検索に失敗しました（権限をご確認ください）'); }
 }
 
