@@ -253,14 +253,7 @@
 
 /* FAB: モバイルでドックを開く小ボタン */
 
-  #dockFab{
-    display:block;
-    position:fixed;              /* ← absolute から fixed に変更 */
-    right:14px;
-    bottom:14px;
-    padding:12px 16px;
-    box-shadow:0 8px 24px rgba(0,0,0,.25);
-  }
+  #dockFab{ display:none; }
 
     
     .zoom-overlay{ position:fixed; inset:0; background:rgba(0,0,0,.85); display:flex; align-items:center; justify-content:center; z-index:60; cursor:grab }
@@ -314,7 +307,7 @@
   }
 
   /* 3) FAB：丸型アイコン化（テキスト非表示） */
-  #dockFab{ width:auto; height:auto; padding:12px 16px; border-radius:999px; }
+  #dockFab{ display:none; }
   /* アイコンは疑似要素で表示 */
   
 
@@ -346,7 +339,7 @@
   #view{ height: 100dvh; }
 
   /* 右下の FAB（既存）を使ってボトムシートを開閉 */
-  #dockFab{ display:block; right:14px; bottom:14px; padding:12px 16px; box-shadow:0 8px 24px rgba(0,0,0,.25) }
+  #dockFab{ display:none; }
 
   /* 保存ステータスのピルを右上に固定 */
   #pillAutosave{
@@ -390,13 +383,13 @@
     
   
 /* === Added: Desktop open-dock button (top-right) === */
-#btnOpenDock{ min-width:40px; min-height:40px; outline:1px solid transparent; outline-offset:2px;
+#btnOpenDock_hidden{ min-width:40px; min-height:40px; outline:1px solid transparent; outline-offset:2px;
   position:fixed; top:12px; right:12px; z-index:11;
   padding:8px 12px; border:1px solid #ddd; border-radius:10px; background:#fff; cursor:pointer; font-size:13px;
   box-shadow:0 8px 20px rgba(0,0,0,.15);
 }
-@media (max-width: 960px){ #btnOpenDock{ min-width:40px; min-height:40px; outline:1px solid transparent; outline-offset:2px; display:none } } /* hide on mobile */
-#btnOpenDock:hover{ outline-color:#ddd }
+@media (max-width: 960px){ #btnOpenDock_hidden{ min-width:40px; min-height:40px; outline:1px solid transparent; outline-offset:2px; display:none } } /* hide on mobile */
+#btnOpenDock_hidden:hover{ outline-color:#ddd }
 
 /* === Added: Mobile sheet style for caption card === */
 .float-card.sheet{
@@ -471,7 +464,7 @@
 .cap-sheet textarea{ min-height:96px; max-height:calc(8lh + 12px); overflow:auto }
 @media (max-width: 960px){
   /* Dockはモバイルでは基本使わない（FAB→シート遷移を想定） */
-  #btnOpenDock{ display:none }
+  #btnOpenDock_hidden{ display:none }
 }
 
 
@@ -503,7 +496,12 @@
 @media (max-width: 960px){
   #toolFab{ display:block }
 }
+
+@media (max-width: 960px){
+  #dockFab{ display:block; position:fixed; right:14px; bottom:14px; padding:12px 16px; box-shadow:0 8px 24px rgba(0,0,0,.25); }
+}
 </style>
+
 
 
 
@@ -511,8 +509,6 @@
 </head>
 <body>
 <!-- Desktop open-dock button (hidden on mobile) -->
-<button id="btnOpenDock" title="ツール">ツール</button>
-
 <!-- Global loader overlay -->
 <div id="loaderOverlay" aria-hidden="true">
   <div style="display:flex;flex-direction:column;align-items:center;gap:10px">
@@ -771,7 +767,8 @@ function openDock(){
   dock.style.display = 'block';
   dock.setAttribute('data-open','true');
   dock.setAttribute('aria-hidden','false');
-  const openBtn = document.getElementById('btnOpenDock'); if (openBtn){ openBtn.classList.add('d-none'); openBtn.setAttribute('aria-hidden','true'); }
+  const inlineBtn = document.getElementById('toolInlineBtn'); if (inlineBtn){ inlineBtn.style.display='none'; }
+}
   applyDockMinState?.();
 }
 function closeDock(){
@@ -779,7 +776,8 @@ function closeDock(){
   dock.style.display = 'none';
   dock.setAttribute('data-open','false');
   dock.setAttribute('aria-hidden','true');
-  const openBtn = document.getElementById('btnOpenDock'); if (openBtn){ openBtn.classList.remove('d-none'); openBtn.setAttribute('aria-hidden','false'); }
+  const inlineBtn = document.getElementById('toolInlineBtn'); if (inlineBtn){ inlineBtn.style.display=''; }
+}
 }
 /* ===== Config: OAuth / Drive ===== */
 const SCOPES_READ  = "https://www.googleapis.com/auth/drive.readonly";
@@ -1236,6 +1234,8 @@ function tick(){
   requestAnimationFrame(tick);
 }
 tick();
+document.getElementById('toolInlineBtn')?.addEventListener('click', openDock);
+
 
 /* === Mobile: model load sheet === */
 const loadFab = document.getElementById('loadFab');
