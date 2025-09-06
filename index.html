@@ -609,7 +609,6 @@ function openDock(){
   dock.setAttribute('aria-hidden','false');
   const inlineBtn = document.getElementById('toolInlineBtn');
   if (inlineBtn){ inlineBtn.style.display='none'; }
-  applyDockMinState?.();
 }
 function closeDock(){
   dock.classList.add('collapsed');
@@ -763,7 +762,7 @@ function hideSignInGate() {
 }
 
 /* gapi ローダ：既に読み込まれていれば待つだけに変更 */
-async function loadGapi() {
+async async function loadGapi(){
   if (window.gapiLoaded) return;
   await new Promise((resolve) => {
     if (window.gapi) return resolve();
@@ -850,7 +849,7 @@ async function ensureSignedInIfNeeded() {
 /* ===== Drive helpers ===== */
 /* すべて accessToken（ensureToken 経由）と gapi.client.drive を利用 */
 
-async function gapiReady(){
+async async function gapiReady(){
   // 新しい loadGapi は「gapiが居たら待つだけ」なので呼べば安全
   if (!window.gapiLoaded) { try{ await loadGapi(); }catch(e){} }
 }
@@ -1780,7 +1779,6 @@ miniShare?.addEventListener('click', ()=> btnCopyReadonlyUrl?.click());
 const openSheet = ()=>{
   dock.classList.remove('collapsed');
   dock.style.display = 'block';
-  applyDockMinState?.();
 };
 const closeSheet = ()=>{
   dock.classList.add('collapsed');
@@ -1793,7 +1791,7 @@ dockFab?.addEventListener('click', ()=>{
   else if (typeof closeSheet==='function') closeSheet();
 });
 dock.addEventListener('click', (e)=>{
-  if (e.target?.id === 'dockMin') if (typeof closeSheet==='function') closeSheet(); // 既存の「最小化」ボタンで閉じる
+  /* noop: dockMin removed */ // 既存の「最小化」ボタンで閉じる
 });
 
 /* ページヘッダーのオートハイド（指を止めたら 1.5s で隠す） */
@@ -1835,20 +1833,8 @@ setTimeout(uiOccupancy, 0);
 
 function syncDockMoveToggle(){/* no-op: 移動タブ廃止に伴いUI同期を無効化 */ 
 }
-
-
-function applyDockMinState(){
-  const min = localStorage.getItem('editorDock_min')==='1';
-  dock.classList.toggle('collapsed', !!min);
-  dockMin.textContent = min ? '展開' : '最小化';
-}
-dockMin.onclick = ()=>{
-  const min = localStorage.getItem('editorDock_min')==='1';
-  localStorage.setItem('editorDock_min', min?'0':'1');
-  applyDockMinState();
-};
-applyDockMinState();
-
+try{ document.getElementById('dockClose')?.addEventListener('click', closeDock); }catch(e){}
+document.getElementById('toolInlineBtn')?.addEventListener('click', openDock);
 /* ===== Camera tab ===== */
 function setCameraMode(mode){
   cameraMode = mode;
