@@ -428,7 +428,7 @@ html.sheet-open .floating-buttons{
 }
 
 /* === Dock Top Sheet (Mobile) === */
-.top-sheet{
+.top-sheet{ z-index: 1300;
   top:0; bottom:auto; left:0; right:0;
   border-radius:0 0 16px 16px;
   transform:translateY(-110%);
@@ -445,7 +445,13 @@ html.sheet-open .floating-buttons{
 @media (max-width: 960px){
   html.sheet-open #dock{ display:none !important; }
 }
+
+/* Hide bottom caption sheet while dockSheet is open (mobile) */
+@media (max-width: 960px){
+  html.sheet-open #capSheet{ display:none !important; }
+}
 </style>
+
 
 
 
@@ -1198,6 +1204,8 @@ function tick(){
   requestAnimationFrame(tick);
 }
 tick();
+document.getElementById('toolFab')?.addEventListener('click', (e)=>{ e.preventDefault(); try{ closeCaptionSheet?.(); }catch(_){} openDockSheet(); });
+
 
 /* === Mobile Dock Sheet control === */
 const dockSheet = document.getElementById('dockSheet');
@@ -1206,6 +1214,8 @@ const dockSheetClose = document.getElementById('dockSheetClose');
 
 function openDockSheet(){
   if (!dockSheet) return;
+  try{ closeCaptionSheet?.(); }catch(_){}
+
   document.documentElement.classList.add('sheet-open');
   document.getElementById('sheetScrim')?.setAttribute('open','');
   document.getElementById('sheetScrim')?.removeAttribute('hidden');
