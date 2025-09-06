@@ -762,7 +762,7 @@ function hideSignInGate() {
 }
 
 /* gapi ローダ：既に読み込まれていれば待つだけに変更 */
-async async function loadGapi(){
+async function loadGapi(){
   if (window.gapiLoaded) return;
   await new Promise((resolve) => {
     if (window.gapi) return resolve();
@@ -849,7 +849,7 @@ async function ensureSignedInIfNeeded() {
 /* ===== Drive helpers ===== */
 /* すべて accessToken（ensureToken 経由）と gapi.client.drive を利用 */
 
-async async function gapiReady(){
+async function gapiReady(){
   // 新しい loadGapi は「gapiが居たら待つだけ」なので呼べば安全
   if (!window.gapiLoaded) { try{ await loadGapi(); }catch(e){} }
 }
