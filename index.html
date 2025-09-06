@@ -2560,10 +2560,10 @@ btnPickPins.onclick = async ()=>{
       listEl.innerHTML = `<div class="rowi">取得に失敗しました</div>`;
     }
 
-    document.getElementById('pinsUseAutosave')?.addEventListener('click', (e)=>{ (()=>{
-      pinsIdInput.value = '') });  // クリア＝オートセーブに任せる
-      closeModal();
-    };
+    document.getElementById('pinsUseAutosave')?.addEventListener('click', (e)=>{
+  pinsIdInput.value = '';
+  closeModal();
+});
   }catch(e){
     console.error(e);
     alert('サインインが必要です');
