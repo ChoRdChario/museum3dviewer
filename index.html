@@ -375,7 +375,7 @@
 /* === Mobile overlap hardening === */
 .scrim{
   position:fixed; inset:0; background:rgba(0,0,0,.35);
-  z-index:998; display:none;
+  z-index:1200; display:none;
 }
 .scrim[open]{ display:block }
 
@@ -402,7 +402,33 @@ html.sheet-open #toolInlineBtn{
 
 /* lock gestures under sheet */
 html.sheet-open #view{ pointer-events:none; }
+
+/* === Mobile overlap hardening v2 === */
+.sheet{
+  left:0; right:0; width:100%;
+}
+.sheet[data-snap="full"]{
+  max-height: none;
+  height: calc(92vh + env(safe-area-inset-bottom,0));
+  transform: translateY(0);
+}
+/* body scroll lock while sheet open */
+html.sheet-open, html.sheet-open body{ overflow: hidden; }
+
+/* hide floating chips while sheet open */
+html.sheet-open .chip, 
+html.sheet-open .pill, 
+html.sheet-open .fab, 
+html.sheet-open [data-fab],
+html.sheet-open .bubble,
+html.sheet-open .floating,
+html.sheet-open .floating-btn,
+html.sheet-open .floating-buttons{
+  display:none !important;
+}
 </style>
+
+
 
 
 </head>
@@ -1106,6 +1132,24 @@ function tick(){
   requestAnimationFrame(tick);
 }
 tick();
+
+function enforceFullSheetForSmallVH(){
+  const vh = Math.max(document.documentElement.clientHeight, window.innerHeight||0);
+  if (vh <= 700){
+    const ls = document.getElementById('loadSheet');
+    const cs = document.getElementById('capSheet');
+    if (ls && ls.hasAttribute('open')) ls.dataset.snap='full';
+    if (cs && cs.hasAttribute('open')) cs.dataset.snap='full';
+  }
+}
+window.addEventListener('resize', enforceFullSheetForSmallVH);
+
+
+document.getElementById('toolFab')?.addEventListener('click', ()=>{
+  try{ openCaptionSheet({}); }catch(e){}
+  const s=document.getElementById('capSheet'); if(s){ s.dataset.snap='full'; }
+});
+
 document.getElementById('toolInlineBtn')?.addEventListener('click', openDock);
 
 
