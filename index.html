@@ -1,144 +1,15 @@
 <!DOCTYPE html>
+
 <html lang="ja">
 <head>
-  <meta charset="utf-8" />
-  <title>Drive GLB Viewer + Pins (v1.22.0-bg)</title>
-  <link rel="preconnect" href="https://accounts.google.com">
-<script async src="https://accounts.google.com/gsi/client">
-/* === Caption Bottom Sheet logic (single-sheet rule) === */
-(function(){
-  const cap = document.getElementById('capSheet');
-  if (!cap) return;
-  const capHandle = cap.querySelector('.cap-handle');
-  const capHeader = cap.querySelector('.cap-header');
-  const capClose  = document.getElementById('capClose');
-  const capTitle  = document.getElementById('capTitle');
-  const capText   = document.getElementById('capText');
-  const capColor  = document.getElementById('capColor');
-  const capPick   = document.getElementById('capPickImage');
-  const capImgRow = document.getElementById('capImageRow');
-  const capImg    = document.getElementById('capImage');
-
-  function openSheet(data={}){
-    capTitle.value = data.title || '';
-    capText.value  = data.text  || '';
-    capColor.value = data.color || '#ee3333';
-    if (data.image){ capImg.src = data.image; capImgRow.hidden = false; }
-    else { capImgRow.hidden = true; }
-    cap.dataset.snap = 'peek';
-    cap.hidden = false;
-    cap.setAttribute('open','');
-    cap.setAttribute('aria-hidden','false');
-  }
-  function closeSheet(){
-    cap.removeAttribute('open');
-    cap.setAttribute('aria-hidden','true');
-    setTimeout(()=>{ cap.hidden = true; }, 160);
-  }
-  window.openCaptionSheet  = openSheet;
-  window.closeCaptionSheet = closeSheet;
-  capClose?.addEventListener('click', closeSheet);
-
-  // drag on handle/header only
-  function attachDrag(el){
-    let startY=0, startSnap='peek', dragging=false;
-    const order = ['peek','half','full'];
-    function next(dir){
-      let i = order.indexOf(startSnap);
-      i = Math.max(0, Math.min(order.length-1, i - dir));
-      return order[i];
-    }
-    function onDown(ev){ dragging=true; startY = ev.touches? ev.touches[0].clientY : ev.clientY; startSnap = cap.dataset.snap || 'peek'; ev.preventDefault(); }
-    function onMove(ev){
-      if (!dragging) return;
-      const y = ev.touches? ev.touches[0].clientY : ev.clientY;
-      const dy = y - startY;
-      const dir = (dy < -10) ? -1 : (dy > 10 ? +1 : 0);
-      if (dir){ cap.dataset.snap = next(dir); }
-    }
-    function onUp(ev){
-      if (!dragging) return;
-      dragging=false;
-      const endY = ev.changedTouches? ev.changedTouches[0].clientY : ev.clientY;
-      if ((cap.dataset.snap||'peek')==='peek' && endY - startY > 80){ closeSheet(); }
-    }
-    el.addEventListener('mousedown', onDown); el.addEventListener('touchstart', onDown, {passive:false});
-    window.addEventListener('mousemove', onMove, {passive:false}); window.addEventListener('touchmove', onMove, {passive:false});
-    window.addEventListener('mouseup', onUp);  window.addEventListener('touchend', onUp);
-  }
-  attachDrag(capHandle); attachDrag(capHeader);
-})();
-
-</script>
-<script async src="https://apis.google.com/js/api.js">
-/* === Caption Bottom Sheet logic (single-sheet rule) === */
-(function(){
-  const cap = document.getElementById('capSheet');
-  if (!cap) return;
-  const capHandle = cap.querySelector('.cap-handle');
-  const capHeader = cap.querySelector('.cap-header');
-  const capClose  = document.getElementById('capClose');
-  const capTitle  = document.getElementById('capTitle');
-  const capText   = document.getElementById('capText');
-  const capColor  = document.getElementById('capColor');
-  const capPick   = document.getElementById('capPickImage');
-  const capImgRow = document.getElementById('capImageRow');
-  const capImg    = document.getElementById('capImage');
-
-  function openSheet(data={}){
-    capTitle.value = data.title || '';
-    capText.value  = data.text  || '';
-    capColor.value = data.color || '#ee3333';
-    if (data.image){ capImg.src = data.image; capImgRow.hidden = false; }
-    else { capImgRow.hidden = true; }
-    cap.dataset.snap = 'peek';
-    cap.hidden = false;
-    cap.setAttribute('open','');
-    cap.setAttribute('aria-hidden','false');
-  }
-  function closeSheet(){
-    cap.removeAttribute('open');
-    cap.setAttribute('aria-hidden','true');
-    setTimeout(()=>{ cap.hidden = true; }, 160);
-  }
-  window.openCaptionSheet  = openSheet;
-  window.closeCaptionSheet = closeSheet;
-  capClose?.addEventListener('click', closeSheet);
-
-  // drag on handle/header only
-  function attachDrag(el){
-    let startY=0, startSnap='peek', dragging=false;
-    const order = ['peek','half','full'];
-    function next(dir){
-      let i = order.indexOf(startSnap);
-      i = Math.max(0, Math.min(order.length-1, i - dir));
-      return order[i];
-    }
-    function onDown(ev){ dragging=true; startY = ev.touches? ev.touches[0].clientY : ev.clientY; startSnap = cap.dataset.snap || 'peek'; ev.preventDefault(); }
-    function onMove(ev){
-      if (!dragging) return;
-      const y = ev.touches? ev.touches[0].clientY : ev.clientY;
-      const dy = y - startY;
-      const dir = (dy < -10) ? -1 : (dy > 10 ? +1 : 0);
-      if (dir){ cap.dataset.snap = next(dir); }
-    }
-    function onUp(ev){
-      if (!dragging) return;
-      dragging=false;
-      const endY = ev.changedTouches? ev.changedTouches[0].clientY : ev.clientY;
-      if ((cap.dataset.snap||'peek')==='peek' && endY - startY > 80){ closeSheet(); }
-    }
-    el.addEventListener('mousedown', onDown); el.addEventListener('touchstart', onDown, {passive:false});
-    window.addEventListener('mousemove', onMove, {passive:false}); window.addEventListener('touchmove', onMove, {passive:false});
-    window.addEventListener('mouseup', onUp);  window.addEventListener('touchend', onUp);
-  }
-  attachDrag(capHandle); attachDrag(capHeader);
-})();
-
-</script>
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='64' height='64'%3E%3Crect width='64' height='64' fill='%23222'/%3E%3Ccircle cx='32' cy='32' r='18' fill='%23e33'/%3E%3C/svg%3E">
-  <style>
+<meta charset="utf-8"/>
+<title>Drive GLB Viewer + Pins (v1.22.0-bg)</title>
+<link href="https://accounts.google.com" rel="preconnect"/>
+<script async="" src="https://accounts.google.com/gsi/client"></script>
+<script async="" src="https://apis.google.com/js/api.js"></script>
+<meta content="width=device-width, initial-scale=1" name="viewport"/>
+<link href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='64' height='64'%3E%3Crect width='64' height='64' fill='%23222'/%3E%3Ccircle cx='32' cy='32' r='18' fill='%23e33'/%3E%3C/svg%3E" rel="icon"/>
+<style>
   /* 非活性行の見た目と操作抑止 */
 .disabled { opacity: .55; pointer-events: none; }
     :root { --bg:#111; --muted:#666; }
@@ -501,256 +372,224 @@
   #dockFab{ display:block; position:fixed; right:14px; bottom:14px; padding:12px 16px; box-shadow:0 8px 24px rgba(0,0,0,.25); }
 }
 </style>
-
-
-
-
-
 </head>
 <body>
 <!-- Desktop open-dock button (hidden on mobile) -->
 <!-- Global loader overlay -->
-<div id="loaderOverlay" aria-hidden="true">
-  <div style="display:flex;flex-direction:column;align-items:center;gap:10px">
-    <div class="spinner" role="progressbar" aria-label="読み込み中"></div>
-    <div id="loadingMsg" style="color:#fff">GLBを読み込み中…</div>
-    <div class="progress" style="width:min(360px,80vw);height:4px;background:rgba(255,255,255,.25);border-radius:9999px;overflow:hidden">
-      <i id="loadingBar" style="display:block;height:100%;width:0%;background:#fff;transition:width .2s ease"></i>
-    </div>
-  </div>
-
-  <div class="spinner" role="progressbar" aria-label="読み込み中"></div>
+<div aria-hidden="true" id="loaderOverlay">
+<div style="display:flex;flex-direction:column;align-items:center;gap:10px">
+<div aria-label="読み込み中" class="spinner" role="progressbar"></div>
+<div id="loadingMsg" style="color:#fff">GLBを読み込み中…</div>
+<div class="progress" style="width:min(360px,80vw);height:4px;background:rgba(255,255,255,.25);border-radius:9999px;overflow:hidden">
+<i id="loadingBar" style="display:block;height:100%;width:0%;background:#fff;transition:width .2s ease"></i>
 </div>
-
+</div>
+<div aria-label="読み込み中" class="spinner" role="progressbar"></div>
+</div>
 <header>
-  <div class="toolbar">
-    <!-- 📦 モデル -->
-    <div class="hgroup" id="grpModel">
-      <span class="title">モデル</span>
-      <input id="fileId" placeholder="GLBの fileId または 共有リンク" autocomplete="off" />
-      <button id="btnLoad" class="iconbtn">読み込む</button>
-      <button id="helpModel" class="iconbtn" title="対応形式など">？</button>
-      <span class="tiny" id="status">未サインイン</span>
-    </div>
-
-    <!-- 📍 キャプション -->
-    <div class="hgroup" id="grpPins">
-      <span class="title">キャプション</span>
-      <input id="pinsId" placeholder="（任意）pins.json の fileId / 共有リンク" autocomplete="off" />
-      <button id="btnPickPins" class="iconbtn">選択…</button>
-      <button id="btnClearPins" class="iconbtn">クリア</button>
-      <span class="sep"></span>
-      <span class="tiny">Save FolderId:</span>
-      <input id="folderId" placeholder="（任意）保存先フォルダID" autocomplete="off" />
-      <button id="helpPins" class="iconbtn" title="pins.jsonの説明">？</button>
-    </div>
-
-    <!-- 🔑 共有・権限 -->
-    <div class="hgroup" id="grpShare">
-      <span class="title">共有・権限</span>
-      <button id="btnAuth" class="iconbtn">Googleにサインイン</button>
-
-      <div class="pill" id="pillAutosave" title="pins.json を自動保存">
-        <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;">
-          <input type="checkbox" id="autoSave" checked> 🧷オートセーブ
+<div class="toolbar">
+<!-- 📦 モデル -->
+<div class="hgroup" id="grpModel">
+<span class="title">モデル</span>
+<input autocomplete="off" id="fileId" placeholder="GLBの fileId または 共有リンク"/>
+<button class="iconbtn" id="btnLoad">読み込む</button>
+<button class="iconbtn" id="helpModel" title="対応形式など">？</button>
+<span class="tiny" id="status">未サインイン</span>
+</div>
+<!-- 📍 キャプション -->
+<div class="hgroup" id="grpPins">
+<span class="title">キャプション</span>
+<input autocomplete="off" id="pinsId" placeholder="（任意）pins.json の fileId / 共有リンク"/>
+<button class="iconbtn" id="btnPickPins">選択…</button>
+<button class="iconbtn" id="btnClearPins">クリア</button>
+<span class="sep"></span>
+<span class="tiny">Save FolderId:</span>
+<input autocomplete="off" id="folderId" placeholder="（任意）保存先フォルダID"/>
+<button class="iconbtn" id="helpPins" title="pins.jsonの説明">？</button>
+</div>
+<!-- 🔑 共有・権限 -->
+<div class="hgroup" id="grpShare">
+<span class="title">共有・権限</span>
+<button class="iconbtn" id="btnAuth">Googleにサインイン</button>
+<div class="pill" id="pillAutosave" title="pins.json を自動保存">
+<label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;">
+<input checked="" id="autoSave" type="checkbox"/> 🧷オートセーブ
         </label>
-        <span id="saveStatus" class="muted">待機中</span>
-      </div>
-
-      <div class="sep"></div>
-      <div class="pill"><button id="btnCopyReadonlyUrl" title="閲覧専用URLをコピー">閲覧専用URLをコピー</button></div>
-      <div class="pill"><span class="muted">GLB:</span><button id="btnToggleGlbPublic" title="公開/限定を切替（デフォルトは限定）">限定</button></div>
-      <div class="pill"><span class="muted">pins:</span><button id="btnTogglePinsPublic" title="公開/限定を切替（デフォルトは限定）" disabled>限定</button></div>
-    </div>
-
-    <div class="grow"></div>
-
-    <!-- 右端ユーティリティ -->
-    <div class="header-utils">
-      <a class="iconbtn" id="btnGuidePdf" href="./docs/museum3dviewer_user_guide.pdf" target="_blank" rel="noopener">使い方ガイド（PDF）</a>
-      <span class="tiny">v1.22.0-bg</span>
-    </div>
-  </div>
+<span class="muted" id="saveStatus">待機中</span>
+</div>
+<div class="sep"></div>
+<div class="pill"><button id="btnCopyReadonlyUrl" title="閲覧専用URLをコピー">閲覧専用URLをコピー</button></div>
+<div class="pill"><span class="muted">GLB:</span><button id="btnToggleGlbPublic" title="公開/限定を切替（デフォルトは限定）">限定</button></div>
+<div class="pill"><span class="muted">pins:</span><button disabled="" id="btnTogglePinsPublic" title="公開/限定を切替（デフォルトは限定）">限定</button></div>
+</div>
+<div class="grow"></div>
+<!-- 右端ユーティリティ -->
+<div class="header-utils">
+<a class="iconbtn" href="./docs/museum3dviewer_user_guide.pdf" id="btnGuidePdf" rel="noopener" target="_blank">使い方ガイド（PDF）</a>
+<span class="tiny">v1.22.0-bg</span>
+</div>
+</div>
 </header>
-
 <!-- Mini toolbar (mobile) -->
 <div class="mini-bar" id="miniBar" style="display:none">
-  <button class="mini-btn" id="miniLoad" title="読み込み">🗂</button>
-  <button class="mini-btn" id="miniPin" title="ピン追加">📍</button>
-  <button class="mini-btn" id="miniShare" title="共有">🔗</button>
+<button class="mini-btn" id="miniLoad" title="読み込み">🗂</button>
+<button class="mini-btn" id="miniPin" title="ピン追加">📍</button>
+<button class="mini-btn" id="miniShare" title="共有">🔗</button>
 </div>
-
-
 <main>
-  <div id="view">
-    <canvas id="canvas"></canvas>
-    <svg class="lines" id="lines"></svg>
-    <div class="float-layer" id="floatLayer"></div>
-    
-    <!-- サインインゲート（必要なときだけ表示） -->
-<div id="signinGateWrap" class="gate-overlay hidden">
-  <div class="gate">
-    <h3>Googleにサインイン</h3>
-    <p>Driveの読み書きが必要です。ボタンを押して開始してください。</p>
-    <button id="btnGateSignIn" class="btn">サインインして続行</button>
-  </div>
+<div id="view">
+<canvas id="canvas"></canvas>
+<svg class="lines" id="lines"></svg>
+<div class="float-layer" id="floatLayer"></div>
+<!-- サインインゲート（必要なときだけ表示） -->
+<div class="gate-overlay hidden" id="signinGateWrap">
+<div class="gate">
+<h3>Googleにサインイン</h3>
+<p>Driveの読み書きが必要です。ボタンを押して開始してください。</p>
+<button class="btn" id="btnGateSignIn">サインインして続行</button>
+</div>
+</div>
+<!-- モバイル用：ドック表示トグル -->
+<button aria-label="ツールを開く" id="dockFab" title="ツール">ツール</button>
+<!-- 編集ドック -->
+<div class="dock" id="editorDock">
+<header>
+<div class="tabs">
+<button class="tabbtn" data-tab="materials">マテリアル</button>
+<button class="tabbtn" data-tab="camera">カメラ</button>
+</div>
+<button class="minbtn" id="dockClose">閉じる</button>
+</header>
+<div class="body">
+<div class="tool-row">
+<button class="tool-btn toggled" id="axisX">X</button>
+<button class="tool-btn toggled" id="axisY">Y</button>
+<button class="tool-btn toggled" id="axisZ">Z</button>
+</div>
+<div class="muted">G：ギズモ切替 / X,Y,Z：軸表示 / Esc：ポップアップ閉じ</div>
+</div>
+<div id="tab-materials" style="display:none">
+<div class="muted" style="margin-bottom:6px">3Dスキャン前提。必要最低限の調整のみ。</div>
+<div id="materialsDock"></div>
+</div>
+<div id="tab-camera" style="display:none">
+<div class="tool-row">
+<label class="pill" style="gap:10px">
+<span>投影:</span>
+<select id="projMode">
+<option value="persp">透視投影</option>
+<option value="ortho">平行投影</option>
+</select>
+</label>
+<button class="tool-btn" id="btnFrame">モデルにフィット</button>
+</div>
+<div class="tool-input" id="rowFov">
+<span class="muted" style="width:70px">視野角</span>
+<input id="fov" max="90" min="25" step="1" type="range"/>
+<span class="muted" id="fovVal"></span>
+</div>
+<div class="tool-input" id="rowZoom" style="display:none">
+<span class="muted" style="width:70px">ズーム</span>
+<input id="zoom" max="3" min="0.5" step="0.01" type="range" value="1"/>
+<span class="muted" id="zoomVal">1.00</span>
+</div>
+<div class="tool-row">
+<span class="muted" style="width:70px">ビュー</span>
+<button class="tool-btn" data-view="front">前</button>
+<button class="tool-btn" data-view="back">後</button>
+<button class="tool-btn" data-view="left">左</button>
+<button class="tool-btn" data-view="right">右</button>
+<button class="tool-btn" data-view="top">上</button>
+<button class="tool-btn" data-view="bottom">下</button>
+</div>
+<div class="tool-row">
+<label class="pill" style="gap:10px">
+<span>背景:</span>
+<select id="bgMode">
+<option selected="" value="dark">暗</option>
+<option value="light">明</option>
+</select>
+</label>
+<label class="pill" style="gap:10px">
+<span>背景色</span>
+<input id="bgColor" type="color" value="#222222"/>
+</label>
+</div>
+<div class="tool-row">
+<label class="pill" style="gap:10px">
+<input id="touchMode" type="checkbox"/> タッチUIを使う
+            </label>
+</div>
+<div class="muted" id="touchHelp"></div>
+</div>
+</div>
 </div>
 
-<!-- モバイル用：ドック表示トグル -->
-<button id="dockFab" title="ツール" aria-label="ツールを開く">ツール</button>
-
-
-    <!-- 編集ドック -->
-    <div class="dock" id="editorDock">
-      <header>
-        <div class="tabs">
-          <button class="tabbtn" data-tab="materials">マテリアル</button>
-          <button class="tabbtn" data-tab="camera">カメラ</button>
-        </div>
-        <button class="minbtn" id="dockClose">閉じる</button>
-      </header>
-      <div class="body">
-          <div class="tool-row">
-            <button class="tool-btn toggled" id="axisX">X</button>
-            <button class="tool-btn toggled" id="axisY">Y</button>
-            <button class="tool-btn toggled" id="axisZ">Z</button>
-          </div>
-          <div class="muted">G：ギズモ切替 / X,Y,Z：軸表示 / Esc：ポップアップ閉じ</div>
-        </div>
-
-        <div id="tab-materials" style="display:none">
-          <div class="muted" style="margin-bottom:6px">3Dスキャン前提。必要最低限の調整のみ。</div>
-          <div id="materialsDock"></div>
-        </div>
-
-        <div id="tab-camera" style="display:none">
-          <div class="tool-row">
-            <label class="pill" style="gap:10px">
-              <span>投影:</span>
-              <select id="projMode">
-                <option value="persp">透視投影</option>
-                <option value="ortho">平行投影</option>
-              </select>
-            </label>
-            <button class="tool-btn" id="btnFrame">モデルにフィット</button>
-          </div>
-          <div class="tool-input" id="rowFov">
-            <span class="muted" style="width:70px">視野角</span>
-            <input type="range" id="fov" min="25" max="90" step="1">
-            <span class="muted" id="fovVal"></span>
-          </div>
-          <div class="tool-input" id="rowZoom" style="display:none">
-            <span class="muted" style="width:70px">ズーム</span>
-            <input type="range" id="zoom" min="0.5" max="3" step="0.01" value="1">
-            <span class="muted" id="zoomVal">1.00</span>
-          </div>
-          <div class="tool-row">
-            <span class="muted" style="width:70px">ビュー</span>
-            <button class="tool-btn" data-view="front">前</button>
-            <button class="tool-btn" data-view="back">後</button>
-            <button class="tool-btn" data-view="left">左</button>
-            <button class="tool-btn" data-view="right">右</button>
-            <button class="tool-btn" data-view="top">上</button>
-            <button class="tool-btn" data-view="bottom">下</button>
-          </div>
-          <div class="tool-row">
-            <label class="pill" style="gap:10px">
-              <span>背景:</span>
-              <select id="bgMode">
-                <option value="dark" selected>暗</option>
-                <option value="light">明</option>
-              </select>
-            </label>
-            <label class="pill" style="gap:10px">
-              <span>背景色</span>
-              <input type="color" id="bgColor" value="#222222">
-            </label>
-          </div>
-          <div class="tool-row">
-            <label class="pill" style="gap:10px">
-              <input type="checkbox" id="touchMode"> タッチUIを使う
-            </label>
-          </div>
-          <div class="muted" id="touchHelp"></div>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <aside>
-    <div class="sec">
-      <div class="muted" id="hintDesktop" style="margin-top:6px">
-        Shift+クリック = ピン追加 / 左=回転 / 右=パン / ホイール=ズーム<br>
-        ピンをクリック → ポップアップを<strong>複数</strong>開けます（Ctrl+クリック＝このピンだけ残す）<br>
+<aside>
+<div class="sec">
+<div class="muted" id="hintDesktop" style="margin-top:6px">
+        Shift+クリック = ピン追加 / 左=回転 / 右=パン / ホイール=ズーム<br/>
+        ピンをクリック → ポップアップを<strong>複数</strong>開けます（Ctrl+クリック＝このピンだけ残す）<br/>
         Escで全ポップアップ閉、移動モードOFFでギズモ非表示
       </div>
-      <div class="muted hidden" id="hintTouch" style="margin-top:6px">
-        1本指=回転 / 2本指=パン / ピンチ=ズーム / <b>長押し</b>=ピン追加<br>
+<div class="muted hidden" id="hintTouch" style="margin-top:6px">
+        1本指=回転 / 2本指=パン / ピンチ=ズーム / <b>長押し</b>=ピン追加<br/>
         ピンをタップ → ポップアップを複数開けます（長押しで位置追加）
       </div>
-      <div class="warn muted" id="scopeWarn" style="display:none;margin-top:6px">
+<div class="warn muted" id="scopeWarn" style="display:none;margin-top:6px">
         書き込み権限不足。上の「Googleにサインイン」から再同意、または「ピンをDriveに保存」を押してください。
       </div>
-    </div>
-
-    <div class="sec">
-      <div class="row" id="pinActions">
-        <button id="btnUndo" disabled>元に戻す (Ctrl+Z)</button>
-        <button id="btnRedo" disabled>やり直す (Ctrl+Shift+Z)</button>
-        <button id="btnSavePins">ピンをDriveに保存（リネーム）</button>
-        <button id="btnAddPin">ピン追加（画面中央）</button>
-        <label class="pill" id="pillMove" title="Gキーでも切替"><input type="checkbox" id="moveMode"> 移動モード（ギズモ）</label>
-      </div>
-
-      <strong>ピン一覧（クリックで編集） <span class="badge" id="pinCount">ピン: 0</span></strong>
-      <div id="pins"></div>
-      <div class="muted" style="margin-top:6px" id="pinsInfo"></div>
-    </div>
-  </aside>
-
+</div>
+<div class="sec">
+<div class="row" id="pinActions">
+<button disabled="" id="btnUndo">元に戻す (Ctrl+Z)</button>
+<button disabled="" id="btnRedo">やり直す (Ctrl+Shift+Z)</button>
+<button id="btnSavePins">ピンをDriveに保存（リネーム）</button>
+<button id="btnAddPin">ピン追加（画面中央）</button>
+<label class="pill" id="pillMove" title="Gキーでも切替"><input id="moveMode" type="checkbox"/> 移動モード（ギズモ）</label>
+</div>
+<strong>ピン一覧（クリックで編集） <span class="badge" id="pinCount">ピン: 0</span></strong>
+<div id="pins"></div>
+<div class="muted" id="pinsInfo" style="margin-top:6px"></div>
+</div>
+</aside>
 </main>
-<button id="loadFab" class="load-fab" aria-label="モデル読み込み">読み込み</button>
-
-<section id="loadSheet" class="sheet load-sheet" aria-modal="true" role="dialog" aria-label="モデル読み込み" hidden aria-hidden="true">
-  <div class="handle" id="loadHandle" title="ドラッグしてサイズ変更"></div>
-  <header class="load-header">
-    <div class="title">モデル読み込み</div>
-    <button class="close" id="loadClose">閉じる</button>
-  </header>
-  <div class="body">
-    <div class="row"><input id="loadInput" type="text" placeholder="URL または Google DriveのfileID"></div>
-    <div class="row">
-      <button id="loadStart">読み込む</button>
-    </div>
-    <p class="hint">URLを貼り付けるか、fileIDのみでもOK（例: 1AbC... → https://drive.google.com/uc?id=1AbC... に変換）</p>
-  </div>
+<button aria-label="モデル読み込み" class="load-fab" id="loadFab">読み込み</button>
+<section aria-hidden="true" aria-label="モデル読み込み" aria-modal="true" class="sheet load-sheet" hidden="" id="loadSheet" role="dialog">
+<div class="handle" id="loadHandle" title="ドラッグしてサイズ変更"></div>
+<header class="load-header">
+<div class="title">モデル読み込み</div>
+<button class="close" id="loadClose">閉じる</button>
+</header>
+<div class="body">
+<div class="row"><input id="loadInput" placeholder="URL または Google DriveのfileID" type="text"/></div>
+<div class="row">
+<button id="loadStart">読み込む</button>
+</div>
+<p class="hint">URLを貼り付けるか、fileIDのみでもOK（例: 1AbC... → https://drive.google.com/uc?id=1AbC... に変換）</p>
+</div>
 </section>
-
-
 <!-- Caption Bottom Sheet (mobile first) -->
-<section id="capSheet" class="cap-sheet" aria-modal="true" role="dialog" aria-label="キャプション" hidden aria-hidden="true">
-  <div class="cap-handle" title="ドラッグしてサイズ変更"></div>
-  <header class="cap-header">
-    <div class="cap-title">キャプション</div>
-    <button id="capClose" class="cap-close">閉じる</button>
-  </header>
-  <div class="cap-body">
-    <div class="cap-row"><input id="capTitle" type="text" placeholder="タイトル" /></div>
-    <div class="cap-row"><textarea id="capText" placeholder="本文（最大8行）"></textarea></div>
-    <div class="cap-row">
-      <label>色 <input id="capColor" type="color" value="#ee3333"></label>
-      <button id="capPickImage">画像を選ぶ</button>
-    </div>
-    <div class="cap-row" id="capImageRow" hidden>
-      <img id="capImage" alt="" style="max-width:100%; border-radius:10px;"/>
-    </div>
-  </div>
+<section aria-hidden="true" aria-label="キャプション" aria-modal="true" class="cap-sheet" hidden="" id="capSheet" role="dialog">
+<div class="cap-handle" title="ドラッグしてサイズ変更"></div>
+<header class="cap-header">
+<div class="cap-title">キャプション</div>
+<button class="cap-close" id="capClose">閉じる</button>
+</header>
+<div class="cap-body">
+<div class="cap-row"><input id="capTitle" placeholder="タイトル" type="text"/></div>
+<div class="cap-row"><textarea id="capText" placeholder="本文（最大8行）"></textarea></div>
+<div class="cap-row">
+<label>色 <input id="capColor" type="color" value="#ee3333"/></label>
+<button id="capPickImage">画像を選ぶ</button>
+</div>
+<div class="cap-row" hidden="" id="capImageRow">
+<img alt="" id="capImage" style="max-width:100%; border-radius:10px;"/>
+</div>
+</div>
 </section>
-
-
 <div id="dbg"></div>
-<div id="modalRoot" class="hidden"></div>
-
+<div class="hidden" id="modalRoot"></div>
 <script type="module">
 'use strict';
 console.log('drive_three_pins v1.22.0-bg');
@@ -767,7 +606,9 @@ function openDock(){
   dock.style.display = 'block';
   dock.setAttribute('data-open','true');
   dock.setAttribute('aria-hidden','false');
-  const inlineBtn = document.getElementById('toolInlineBtn'); if (inlineBtn){ inlineBtn.style.display='none';   applyDockMinState?.();
+  const inlineBtn = document.getElementById('toolInlineBtn');
+  if (inlineBtn){ inlineBtn.style.display='none'; }
+  applyDockMinState?.();
 }
 function closeDock(){
   dock.classList.add('collapsed');
@@ -2949,6 +2790,140 @@ applyBackgroundColor('#222222');
   }
   attachDrag(capHandle); attachDrag(capHeader);
 })();
+
+
+/* Moved inline JS from external scripts */
+
+/* === Caption Bottom Sheet logic (single-sheet rule) === */
+(function(){
+  const cap = document.getElementById('capSheet');
+  if (!cap) return;
+  const capHandle = cap.querySelector('.cap-handle');
+  const capHeader = cap.querySelector('.cap-header');
+  const capClose  = document.getElementById('capClose');
+  const capTitle  = document.getElementById('capTitle');
+  const capText   = document.getElementById('capText');
+  const capColor  = document.getElementById('capColor');
+  const capPick   = document.getElementById('capPickImage');
+  const capImgRow = document.getElementById('capImageRow');
+  const capImg    = document.getElementById('capImage');
+
+  function openSheet(data={}){
+    capTitle.value = data.title || '';
+    capText.value  = data.text  || '';
+    capColor.value = data.color || '#ee3333';
+    if (data.image){ capImg.src = data.image; capImgRow.hidden = false; }
+    else { capImgRow.hidden = true; }
+    cap.dataset.snap = 'peek';
+    cap.hidden = false;
+    cap.setAttribute('open','');
+    cap.setAttribute('aria-hidden','false');
+  }
+  function closeSheet(){
+    cap.removeAttribute('open');
+    cap.setAttribute('aria-hidden','true');
+    setTimeout(()=>{ cap.hidden = true; }, 160);
+  }
+  window.openCaptionSheet  = openSheet;
+  window.closeCaptionSheet = closeSheet;
+  capClose?.addEventListener('click', closeSheet);
+
+  // drag on handle/header only
+  function attachDrag(el){
+    let startY=0, startSnap='peek', dragging=false;
+    const order = ['peek','half','full'];
+    function next(dir){
+      let i = order.indexOf(startSnap);
+      i = Math.max(0, Math.min(order.length-1, i - dir));
+      return order[i];
+    }
+    function onDown(ev){ dragging=true; startY = ev.touches? ev.touches[0].clientY : ev.clientY; startSnap = cap.dataset.snap || 'peek'; ev.preventDefault(); }
+    function onMove(ev){
+      if (!dragging) return;
+      const y = ev.touches? ev.touches[0].clientY : ev.clientY;
+      const dy = y - startY;
+      const dir = (dy < -10) ? -1 : (dy > 10 ? +1 : 0);
+      if (dir){ cap.dataset.snap = next(dir); }
+    }
+    function onUp(ev){
+      if (!dragging) return;
+      dragging=false;
+      const endY = ev.changedTouches? ev.changedTouches[0].clientY : ev.clientY;
+      if ((cap.dataset.snap||'peek')==='peek' && endY - startY > 80){ closeSheet(); }
+    }
+    el.addEventListener('mousedown', onDown); el.addEventListener('touchstart', onDown, {passive:false});
+    window.addEventListener('mousemove', onMove, {passive:false}); window.addEventListener('touchmove', onMove, {passive:false});
+    window.addEventListener('mouseup', onUp);  window.addEventListener('touchend', onUp);
+  }
+  attachDrag(capHandle); attachDrag(capHeader);
+})();
+
+
+
+/* === Caption Bottom Sheet logic (single-sheet rule) === */
+(function(){
+  const cap = document.getElementById('capSheet');
+  if (!cap) return;
+  const capHandle = cap.querySelector('.cap-handle');
+  const capHeader = cap.querySelector('.cap-header');
+  const capClose  = document.getElementById('capClose');
+  const capTitle  = document.getElementById('capTitle');
+  const capText   = document.getElementById('capText');
+  const capColor  = document.getElementById('capColor');
+  const capPick   = document.getElementById('capPickImage');
+  const capImgRow = document.getElementById('capImageRow');
+  const capImg    = document.getElementById('capImage');
+
+  function openSheet(data={}){
+    capTitle.value = data.title || '';
+    capText.value  = data.text  || '';
+    capColor.value = data.color || '#ee3333';
+    if (data.image){ capImg.src = data.image; capImgRow.hidden = false; }
+    else { capImgRow.hidden = true; }
+    cap.dataset.snap = 'peek';
+    cap.hidden = false;
+    cap.setAttribute('open','');
+    cap.setAttribute('aria-hidden','false');
+  }
+  function closeSheet(){
+    cap.removeAttribute('open');
+    cap.setAttribute('aria-hidden','true');
+    setTimeout(()=>{ cap.hidden = true; }, 160);
+  }
+  window.openCaptionSheet  = openSheet;
+  window.closeCaptionSheet = closeSheet;
+  capClose?.addEventListener('click', closeSheet);
+
+  // drag on handle/header only
+  function attachDrag(el){
+    let startY=0, startSnap='peek', dragging=false;
+    const order = ['peek','half','full'];
+    function next(dir){
+      let i = order.indexOf(startSnap);
+      i = Math.max(0, Math.min(order.length-1, i - dir));
+      return order[i];
+    }
+    function onDown(ev){ dragging=true; startY = ev.touches? ev.touches[0].clientY : ev.clientY; startSnap = cap.dataset.snap || 'peek'; ev.preventDefault(); }
+    function onMove(ev){
+      if (!dragging) return;
+      const y = ev.touches? ev.touches[0].clientY : ev.clientY;
+      const dy = y - startY;
+      const dir = (dy < -10) ? -1 : (dy > 10 ? +1 : 0);
+      if (dir){ cap.dataset.snap = next(dir); }
+    }
+    function onUp(ev){
+      if (!dragging) return;
+      dragging=false;
+      const endY = ev.changedTouches? ev.changedTouches[0].clientY : ev.clientY;
+      if ((cap.dataset.snap||'peek')==='peek' && endY - startY > 80){ closeSheet(); }
+    }
+    el.addEventListener('mousedown', onDown); el.addEventListener('touchstart', onDown, {passive:false});
+    window.addEventListener('mousemove', onMove, {passive:false}); window.addEventListener('touchmove', onMove, {passive:false});
+    window.addEventListener('mouseup', onUp);  window.addEventListener('touchend', onUp);
+  }
+  attachDrag(capHandle); attachDrag(capHeader);
+})();
+
 
 </script>
 </body>
