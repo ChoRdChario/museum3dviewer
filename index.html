@@ -4,8 +4,138 @@
   <meta charset="utf-8" />
   <title>Drive GLB Viewer + Pins (v1.22.0-bg)</title>
   <link rel="preconnect" href="https://accounts.google.com">
-<script async src="https://accounts.google.com/gsi/client"></script>
-<script async src="https://apis.google.com/js/api.js"></script>
+<script async src="https://accounts.google.com/gsi/client">
+/* === Caption Bottom Sheet logic (single-sheet rule) === */
+(function(){
+  const cap = document.getElementById('capSheet');
+  if (!cap) return;
+  const capHandle = cap.querySelector('.cap-handle');
+  const capHeader = cap.querySelector('.cap-header');
+  const capClose  = document.getElementById('capClose');
+  const capTitle  = document.getElementById('capTitle');
+  const capText   = document.getElementById('capText');
+  const capColor  = document.getElementById('capColor');
+  const capPick   = document.getElementById('capPickImage');
+  const capImgRow = document.getElementById('capImageRow');
+  const capImg    = document.getElementById('capImage');
+
+  function openSheet(data={}){
+    capTitle.value = data.title || '';
+    capText.value  = data.text  || '';
+    capColor.value = data.color || '#e33';
+    if (data.image){ capImg.src = data.image; capImgRow.hidden = False; }
+    else { capImgRow.hidden = true; }
+    cap.dataset.snap = 'peek';
+    cap.hidden = false;
+    cap.setAttribute('open','');
+    cap.setAttribute('aria-hidden','false');
+  }
+  function closeSheet(){
+    cap.removeAttribute('open');
+    cap.setAttribute('aria-hidden','true');
+    setTimeout(()=>{ cap.hidden = true; }, 160);
+  }
+  window.openCaptionSheet  = openSheet;
+  window.closeCaptionSheet = closeSheet;
+  capClose?.addEventListener('click', closeSheet);
+
+  // drag on handle/header only
+  function attachDrag(el){
+    let startY=0, startSnap='peek', dragging=false;
+    const order = ['peek','half','full'];
+    function next(dir){
+      let i = order.indexOf(startSnap);
+      i = Math.max(0, Math.min(order.length-1, i - dir));
+      return order[i];
+    }
+    function onDown(ev){ dragging=true; startY = ev.touches? ev.touches[0].clientY : ev.clientY; startSnap = cap.dataset.snap || 'peek'; ev.preventDefault(); }
+    function onMove(ev){
+      if (!dragging) return;
+      const y = ev.touches? ev.touches[0].clientY : ev.clientY;
+      const dy = y - startY;
+      const dir = (dy < -10) ? -1 : (dy > 10 ? +1 : 0);
+      if (dir){ cap.dataset.snap = next(dir); }
+    }
+    function onUp(ev){
+      if (!dragging) return;
+      dragging=false;
+      const endY = ev.changedTouches? ev.changedTouches[0].clientY : ev.clientY;
+      if ((cap.dataset.snap||'peek')==='peek' && endY - startY > 80){ closeSheet(); }
+    }
+    el.addEventListener('mousedown', onDown); el.addEventListener('touchstart', onDown, {passive:false});
+    window.addEventListener('mousemove', onMove, {passive:false}); window.addEventListener('touchmove', onMove, {passive:false});
+    window.addEventListener('mouseup', onUp);  window.addEventListener('touchend', onUp);
+  }
+  attachDrag(capHandle); attachDrag(capHeader);
+})();
+
+</script>
+<script async src="https://apis.google.com/js/api.js">
+/* === Caption Bottom Sheet logic (single-sheet rule) === */
+(function(){
+  const cap = document.getElementById('capSheet');
+  if (!cap) return;
+  const capHandle = cap.querySelector('.cap-handle');
+  const capHeader = cap.querySelector('.cap-header');
+  const capClose  = document.getElementById('capClose');
+  const capTitle  = document.getElementById('capTitle');
+  const capText   = document.getElementById('capText');
+  const capColor  = document.getElementById('capColor');
+  const capPick   = document.getElementById('capPickImage');
+  const capImgRow = document.getElementById('capImageRow');
+  const capImg    = document.getElementById('capImage');
+
+  function openSheet(data={}){
+    capTitle.value = data.title || '';
+    capText.value  = data.text  || '';
+    capColor.value = data.color || '#e33';
+    if (data.image){ capImg.src = data.image; capImgRow.hidden = False; }
+    else { capImgRow.hidden = true; }
+    cap.dataset.snap = 'peek';
+    cap.hidden = false;
+    cap.setAttribute('open','');
+    cap.setAttribute('aria-hidden','false');
+  }
+  function closeSheet(){
+    cap.removeAttribute('open');
+    cap.setAttribute('aria-hidden','true');
+    setTimeout(()=>{ cap.hidden = true; }, 160);
+  }
+  window.openCaptionSheet  = openSheet;
+  window.closeCaptionSheet = closeSheet;
+  capClose?.addEventListener('click', closeSheet);
+
+  // drag on handle/header only
+  function attachDrag(el){
+    let startY=0, startSnap='peek', dragging=false;
+    const order = ['peek','half','full'];
+    function next(dir){
+      let i = order.indexOf(startSnap);
+      i = Math.max(0, Math.min(order.length-1, i - dir));
+      return order[i];
+    }
+    function onDown(ev){ dragging=true; startY = ev.touches? ev.touches[0].clientY : ev.clientY; startSnap = cap.dataset.snap || 'peek'; ev.preventDefault(); }
+    function onMove(ev){
+      if (!dragging) return;
+      const y = ev.touches? ev.touches[0].clientY : ev.clientY;
+      const dy = y - startY;
+      const dir = (dy < -10) ? -1 : (dy > 10 ? +1 : 0);
+      if (dir){ cap.dataset.snap = next(dir); }
+    }
+    function onUp(ev){
+      if (!dragging) return;
+      dragging=false;
+      const endY = ev.changedTouches? ev.changedTouches[0].clientY : ev.clientY;
+      if ((cap.dataset.snap||'peek')==='peek' && endY - startY > 80){ closeSheet(); }
+    }
+    el.addEventListener('mousedown', onDown); el.addEventListener('touchstart', onDown, {passive:false});
+    window.addEventListener('mousemove', onMove, {passive:false}); window.addEventListener('touchmove', onMove, {passive:false});
+    window.addEventListener('mouseup', onUp);  window.addEventListener('touchend', onUp);
+  }
+  attachDrag(capHandle); attachDrag(capHeader);
+})();
+
+</script>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='64' height='64'%3E%3Crect width='64' height='64' fill='%23222'/%3E%3Ccircle cx='32' cy='32' r='18' fill='%23e33'/%3E%3C/svg%3E">
   <style>
@@ -184,21 +314,9 @@
   }
 
   /* 3) FAB：丸型アイコン化（テキスト非表示） */
-  #dockFab{
-    width: 52px; height: 52px;
-    padding: 0 !important;
-    border-radius: 999px !important;
-    text-indent: -9999px; /* ラベル隠す */
-    position: fixed !important; right: 14px; bottom: 14px;
-  }
+  #dockFab{ width:auto; height:auto; padding:12px 16px; border-radius:999px; }
   /* アイコンは疑似要素で表示 */
-  #dockFab::after{
-    content: "🛠";
-    position: absolute; inset: 0;
-    display: grid; place-items: center;
-    font-size: 22px;
-    text-indent: 0;
-  }
+  
 
   /* 4) 保存ステータスのピル：さらに小型に */
   #pillAutosave{
@@ -272,12 +390,13 @@
     
   
 /* === Added: Desktop open-dock button (top-right) === */
-#btnOpenDock{
+#btnOpenDock{ min-width:40px; min-height:40px; outline:1px solid transparent; outline-offset:2px;
   position:fixed; top:12px; right:12px; z-index:11;
   padding:8px 12px; border:1px solid #ddd; border-radius:10px; background:#fff; cursor:pointer; font-size:13px;
   box-shadow:0 8px 20px rgba(0,0,0,.15);
 }
-@media (max-width: 960px){ #btnOpenDock{ display:none } } /* hide on mobile */
+@media (max-width: 960px){ #btnOpenDock{ min-width:40px; min-height:40px; outline:1px solid transparent; outline-offset:2px; display:none } } /* hide on mobile */
+#btnOpenDock:hover{ outline-color:#ddd }
 
 /* === Added: Mobile sheet style for caption card === */
 .float-card.sheet{
@@ -324,14 +443,54 @@
 /* === Added: Dock visibility helpers === */
 .d-none{ display:none !important }
 
+
+/* tabs: aria-selected 表示 */
+.dock .tabbtn[aria-selected="true"]{
+  background:#eef; border-color:#cdd; text-decoration:underline;
+}
+
+/* === Caption Bottom Sheet === */
+.cap-sheet{
+  position:fixed; left:0; right:0; bottom:0; z-index:60;
+  background:#fff; border-radius:16px 16px 0 0; box-shadow:0 -10px 30px rgba(0,0,0,.35);
+  transform:translateY(110%); transition:transform .24s ease, opacity .12s ease; opacity:0;
+  max-height:92vh;
+}
+.cap-sheet[open]{ opacity:1; transform:translateY(0) }
+.cap-sheet[data-snap="peek"]{ transform:translateY(calc(100% - 28vh)); }
+.cap-sheet[data-snap="half"]{ transform:translateY(calc(100% - 50vh)); }
+.cap-sheet[data-snap="full"]{ transform:translateY(0); }
+.cap-handle{ height:28px; display:flex; align-items:center; justify-content:center; cursor:grab; touch-action:none; }
+.cap-handle::before{ content:""; width:44px; height:4px; border-radius:999px; background:#d0d0d0; box-shadow:inset 0 -1px 0 #c7c7c7; }
+.cap-header{ display:flex; gap:8px; align-items:center; padding:6px 12px; border-bottom:1px solid #eee; cursor:grab; user-select:none }
+.cap-title{ flex:1; font-weight:600 }
+.cap-close{ padding:8px 10px; border:1px solid #ddd; border-radius:8px; background:#fff; cursor:pointer }
+.cap-body{ padding:10px 12px; overflow:auto; max-height:calc(92vh - 28px - 44px - env(safe-area-inset-bottom,0)); }
+.cap-row{ display:flex; gap:8px; align-items:center; margin-bottom:10px; flex-wrap:wrap }
+.cap-sheet input[type="text"], .cap-sheet textarea{ width:100%; border:1px solid #ddd; border-radius:8px; padding:8px; background:#fff; color:#222; box-sizing:border-box }
+.cap-sheet textarea{ min-height:96px; max-height:calc(8lh + 12px); overflow:auto }
+@media (max-width: 960px){
+  /* Dockはモバイルでは基本使わない（FAB→シート遷移を想定） */
+  #btnOpenDock{ display:none }
+}
+
 </style>
+
 </head>
 <body>
 <!-- Desktop open-dock button (hidden on mobile) -->
-<button id="btnOpenDock" title="ツール">🛠 ツール</button>
+<button id="btnOpenDock" title="ツール">ツール</button>
 
 <!-- Global loader overlay -->
 <div id="loaderOverlay" aria-hidden="true">
+  <div style="display:flex;flex-direction:column;align-items:center;gap:10px">
+    <div class="spinner" role="progressbar" aria-label="読み込み中"></div>
+    <div id="loadingMsg" style="color:#fff">GLBを読み込み中…</div>
+    <div class="progress" style="width:min(360px,80vw);height:4px;background:rgba(255,255,255,.25);border-radius:9999px;overflow:hidden">
+      <i id="loadingBar" style="display:block;height:100%;width:0%;background:#fff;transition:width .2s ease"></i>
+    </div>
+  </div>
+
   <div class="spinner" role="progressbar" aria-label="読み込み中"></div>
 </div>
 
@@ -420,7 +579,7 @@
           <button class="tabbtn" data-tab="materials">マテリアル</button>
           <button class="tabbtn" data-tab="camera">カメラ</button>
         </div>
-        <button class="minbtn" id="dockMin">最小化</button>
+        <button class="minbtn" id="dockClose">閉じる</button>
       </header>
       <div class="body">
           <div class="tool-row">
@@ -522,6 +681,27 @@
   </aside>
 </main>
 
+<!-- Caption Bottom Sheet (mobile first) -->
+<section id="capSheet" class="cap-sheet" aria-modal="true" role="dialog" aria-label="キャプション" hidden aria-hidden="true">
+  <div class="cap-handle" title="ドラッグしてサイズ変更"></div>
+  <header class="cap-header">
+    <div class="cap-title">キャプション</div>
+    <button id="capClose" class="cap-close">閉じる</button>
+  </header>
+  <div class="cap-body">
+    <div class="cap-row"><input id="capTitle" type="text" placeholder="タイトル" /></div>
+    <div class="cap-row"><textarea id="capText" placeholder="本文（最大8行）"></textarea></div>
+    <div class="cap-row">
+      <label>色 <input id="capColor" type="color" value="#e33"></label>
+      <button id="capPickImage">画像を選ぶ</button>
+    </div>
+    <div class="cap-row" id="capImageRow" hidden>
+      <img id="capImage" alt="" style="max-width:100%; border-radius:10px;"/>
+    </div>
+  </div>
+</section>
+
+
 <div id="dbg"></div>
 <div id="modalRoot" class="hidden"></div>
 
@@ -531,20 +711,25 @@ console.log('drive_three_pins v1.22.0-bg');
 
 
 /* === Loader helpers === */
-function showLoader(){ document.getElementById('loaderOverlay')?.classList.add('active'); }
-function hideLoader(){ document.getElementById('loaderOverlay')?.classList.remove('active'); }
+function showLoader(msg){ const ol=document.getElementById('loaderOverlay'); if(!ol) return; ol.classList.add('active'); const m=document.getElementById('loadingMsg'); if(m) m.textContent = msg||'読み込み中…'; const bar=document.getElementById('loadingBar'); if(bar) bar.style.width='8%'; }
+function hideLoader(){ const ol=document.getElementById('loaderOverlay'); if(!ol) return; ol.classList.remove('active'); const bar=document.getElementById('loadingBar'); if(bar) bar.style.width='0%'; }
 
+function setLoadingProgress(p,msg){ const bar=document.getElementById('loadingBar'); if(bar){ bar.style.width = Math.max(8, Math.min(100, Math.round(p*100))) + '%'; } const m=document.getElementById('loadingMsg'); if(m&&msg) m.textContent = msg; }
 /* === Dock visibility helpers (desktop button logic) === */
 function openDock(){
   dock.classList.remove('collapsed');
   dock.style.display = 'block';
-  const openBtn = document.getElementById('btnOpenDock'); if (openBtn) openBtn.classList.add('d-none');
+  dock.setAttribute('data-open','true');
+  dock.setAttribute('aria-hidden','false');
+  const openBtn = document.getElementById('btnOpenDock'); if (openBtn){ openBtn.classList.add('d-none'); openBtn.setAttribute('aria-hidden','true'); }
   applyDockMinState?.();
 }
 function closeDock(){
   dock.classList.add('collapsed');
   dock.style.display = 'none';
-  const openBtn = document.getElementById('btnOpenDock'); if (openBtn) openBtn.classList.remove('d-none');
+  dock.setAttribute('data-open','false');
+  dock.setAttribute('aria-hidden','true');
+  const openBtn = document.getElementById('btnOpenDock'); if (openBtn){ openBtn.classList.remove('d-none'); openBtn.setAttribute('aria-hidden','false'); }
 }
 /* ===== Config: OAuth / Drive ===== */
 const SCOPES_READ  = "https://www.googleapis.com/auth/drive.readonly";
@@ -618,11 +803,18 @@ fileIdInput.addEventListener('keydown', (e)=>{ if(e.key==='Enter') btnLoad.click
 
 /* Dock */
 const dock = document.getElementById('editorDock');
+const dockClose = document.getElementById('dockClose');
 const materialsDockEl = document.getElementById('materialsDock');
 const tabButtons = dock.querySelectorAll('.tabbtn');
+tabButtons.forEach((b,i)=>b.setAttribute('aria-selected', i===0 ? 'true' : 'false'));
 const tabMaterials = document.getElementById('tab-materials');
+tabButtons.forEach(btn=>{
+  btn.addEventListener('click', ()=>{
+    tabButtons.forEach(b=>b.setAttribute('aria-selected', b===btn ? 'true' : 'false'));
+  });
+});
 const tabCamera = document.getElementById('tab-camera');
-const dockMin = document.getElementById('dockMin');
+const dockMin = null;
 
 /* Camera tab controls */
 const projModeSel = document.getElementById('projMode');
@@ -994,6 +1186,7 @@ function tick(){
   requestAnimationFrame(tick);
 }
 tick();
+try{ dockClose?.addEventListener('click', closeDock); }catch(e){}
 
 /* ===== カメラ補間 ===== */
 function animateCameraTo({ fromPos, toPos, fromTarget, toTarget, duration=400, ease=(t)=>t }){
@@ -1934,8 +2127,6 @@ function getInvertedTexture(mat, threshold){
 }
 
 /* ===== Undo / Redo（最低限） ===== */
-
-
 let UNDO_STACK = [];
 let REDO_STACK = [];
 const MAX_HISTORY = 50;
@@ -2583,6 +2774,71 @@ applyBackgroundColor('#222222');
     if (hidden){ openBtn.classList.remove('d-none'); } else { openBtn.classList.add('d-none'); }
   }
 })();
+
+/* === Caption Bottom Sheet logic (single-sheet rule) === */
+(function(){
+  const cap = document.getElementById('capSheet');
+  if (!cap) return;
+  const capHandle = cap.querySelector('.cap-handle');
+  const capHeader = cap.querySelector('.cap-header');
+  const capClose  = document.getElementById('capClose');
+  const capTitle  = document.getElementById('capTitle');
+  const capText   = document.getElementById('capText');
+  const capColor  = document.getElementById('capColor');
+  const capPick   = document.getElementById('capPickImage');
+  const capImgRow = document.getElementById('capImageRow');
+  const capImg    = document.getElementById('capImage');
+
+  function openSheet(data={}){
+    capTitle.value = data.title || '';
+    capText.value  = data.text  || '';
+    capColor.value = data.color || '#e33';
+    if (data.image){ capImg.src = data.image; capImgRow.hidden = False; }
+    else { capImgRow.hidden = true; }
+    cap.dataset.snap = 'peek';
+    cap.hidden = false;
+    cap.setAttribute('open','');
+    cap.setAttribute('aria-hidden','false');
+  }
+  function closeSheet(){
+    cap.removeAttribute('open');
+    cap.setAttribute('aria-hidden','true');
+    setTimeout(()=>{ cap.hidden = true; }, 160);
+  }
+  window.openCaptionSheet  = openSheet;
+  window.closeCaptionSheet = closeSheet;
+  capClose?.addEventListener('click', closeSheet);
+
+  // drag on handle/header only
+  function attachDrag(el){
+    let startY=0, startSnap='peek', dragging=false;
+    const order = ['peek','half','full'];
+    function next(dir){
+      let i = order.indexOf(startSnap);
+      i = Math.max(0, Math.min(order.length-1, i - dir));
+      return order[i];
+    }
+    function onDown(ev){ dragging=true; startY = ev.touches? ev.touches[0].clientY : ev.clientY; startSnap = cap.dataset.snap || 'peek'; ev.preventDefault(); }
+    function onMove(ev){
+      if (!dragging) return;
+      const y = ev.touches? ev.touches[0].clientY : ev.clientY;
+      const dy = y - startY;
+      const dir = (dy < -10) ? -1 : (dy > 10 ? +1 : 0);
+      if (dir){ cap.dataset.snap = next(dir); }
+    }
+    function onUp(ev){
+      if (!dragging) return;
+      dragging=false;
+      const endY = ev.changedTouches? ev.changedTouches[0].clientY : ev.clientY;
+      if ((cap.dataset.snap||'peek')==='peek' && endY - startY > 80){ closeSheet(); }
+    }
+    el.addEventListener('mousedown', onDown); el.addEventListener('touchstart', onDown, {passive:false});
+    window.addEventListener('mousemove', onMove, {passive:false}); window.addEventListener('touchmove', onMove, {passive:false});
+    window.addEventListener('mouseup', onUp);  window.addEventListener('touchend', onUp);
+  }
+  attachDrag(capHandle); attachDrag(capHeader);
+})();
+
 </script>
 </body>
 </html>
