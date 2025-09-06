@@ -2193,8 +2193,8 @@ btnHelpModel?.addEventListener('click', ()=>{
       <footer><button id="helpClose2">閉じる</button></footer>
     </div>
   `);
-  document.getElementById('helpClose1').onclick = closeModal;
-  document.getElementById('helpClose2').onclick = closeModal;
+  document.addEventListener('click', (e)=>{ if(e.target?.id==='helpClose1') closeModal(); });
+  document.addEventListener('click', (e)=>{ if(e.target?.id==='helpClose2') closeModal(); });
 });
 btnHelpPins?.addEventListener('click', ()=>{
   openModal(`
@@ -2207,8 +2207,8 @@ btnHelpPins?.addEventListener('click', ()=>{
       <footer><button id="helpClose4">閉じる</button></footer>
     </div>
   `);
-  document.getElementById('helpClose3').onclick = closeModal;
-  document.getElementById('helpClose4').onclick = closeModal;
+  document.addEventListener('click', (e)=>{ if(e.target?.id==='helpClose3') closeModal(); });
+  document.getElementById('helpClose4')?.addEventListener('click', (e)=>{ (closeModal) });
 });
 
 /* 画像アップロード共通 */
@@ -2257,7 +2257,7 @@ async function chooseDriveImageForPin(pin, opts={}){
       </div>
     `);
     const gridEl = document.getElementById('imgGrid');
-    document.getElementById('imgClose').onclick = closeModal;
+    document.getElementById('imgClose')?.addEventListener('click', (e)=>{ (closeModal) });
     function cardHTML(f){
       const t = new Date(f.modifiedTime||Date.now()).toLocaleDateString();
       const thumb = f.thumbnailLink ? f.thumbnailLink.replace(/=s220/,'=s400') : '';
@@ -2298,9 +2298,9 @@ async function chooseDriveImageForPin(pin, opts={}){
       }catch(e){ gridEl.innerHTML = `<div>検索に失敗しました</div>`; }
     }
     await loadFolder();
-    document.getElementById('imgSearchAll').onclick = async ()=>{
+    document.getElementById('imgSearchAll')?.addEventListener('click', (e)=>{ (async ()=>{
       try{
-        const query = document.getElementById('imgQuery').value.trim();
+        const query = document.getElementById('imgQuery').value.trim()) });
         let q = `mimeType contains 'image/' and trashed = false`;
         if (query) q += ` and name contains '${query.replace(/'/g,"\\'")}'`;
         const res = await driveListFiles({ q, pageSize: 200 });
@@ -2499,7 +2499,7 @@ btnPickPins.onclick = async ()=>{
         </footer>
       </div>
     `);
-    document.getElementById('pinsClose').onclick = closeModal;
+    document.getElementById('pinsClose')?.addEventListener('click', (e)=>{ (closeModal) });
     const listEl = document.getElementById('pinsList');
 
     try{
@@ -2560,8 +2560,8 @@ btnPickPins.onclick = async ()=>{
       listEl.innerHTML = `<div class="rowi">取得に失敗しました</div>`;
     }
 
-    document.getElementById('pinsUseAutosave').onclick = ()=>{
-      pinsIdInput.value = '';  // クリア＝オートセーブに任せる
+    document.getElementById('pinsUseAutosave')?.addEventListener('click', (e)=>{ (()=>{
+      pinsIdInput.value = '') });  // クリア＝オートセーブに任せる
       closeModal();
     };
   }catch(e){
