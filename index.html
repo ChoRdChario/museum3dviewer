@@ -426,7 +426,27 @@ html.sheet-open .floating-btn,
 html.sheet-open .floating-buttons{
   display:none !important;
 }
+
+/* === Dock Top Sheet (Mobile) === */
+.top-sheet{
+  top:0; bottom:auto; left:0; right:0;
+  border-radius:0 0 16px 16px;
+  transform:translateY(-110%);
+  max-height:92vh;
+}
+.top-sheet[open]{ transform:translateY(0); opacity:1; }
+.top-sheet .body{ max-height:calc(92vh - 28px - 44px - env(safe-area-inset-top,0)); overflow:auto; }
+@media (min-width: 961px){
+  #dockSheet{ display:none !important; }
+}
+
+
+/* Hide PC dock when a mobile sheet is open */
+@media (max-width: 960px){
+  html.sheet-open #dock{ display:none !important; }
+}
 </style>
+
 
 
 
@@ -615,6 +635,52 @@ html.sheet-open .floating-buttons{
 </div>
 </aside>
 </main>
+
+<!-- Dock Top Sheet (Mobile) -->
+<section id="dockSheet" class="sheet top-sheet" aria-modal="true" role="dialog" aria-label="ツール" hidden aria-hidden="true">
+  <div class="handle" id="dockHandle" title="ドラッグしてサイズ変更（上方向へ）"></div>
+  <header class="dock-header">
+    <div class="title">ツール</div>
+    <button class="close" id="dockSheetClose">閉じる</button>
+  </header>
+  <div class="body">
+    <nav class="tabs" role="tablist" aria-label="ツールタブ">
+      <button class="tabbtn" data-tab="materials" aria-selected="true">マテリアル</button>
+      <button class="tabbtn" data-tab="camera" aria-selected="false">カメラ</button>
+    </nav>
+    <div class="sheet-tools" style="margin-top:8px">
+      <div id="sheet-tab-materials">
+        <div class="tool-row"><span class="muted">デモ：マテリアル設定（PCと同等）</span></div>
+        <div class="tool-row">
+          <label><input type="checkbox" id="s_matDouble"> 両面</label>
+          <label>不透明度 <input type="range" id="s_matOpacity" min="0" max="1" step="0.01" value="1"></label>
+        </div>
+      </div>
+      <div id="sheet-tab-camera" hidden>
+        <div class="tool-row">
+          <label>投影
+            <select id="s_projMode">
+              <option value="persp">透視</option>
+              <option value="ortho">平行</option>
+            </select>
+          </label>
+          <button id="s_btnFrame">モデルにフィット</button>
+        </div>
+        <div class="tool-row" id="s_rowFov">
+          <span class="muted" style="width:70px">視野角</span>
+          <input type="range" id="s_fov" min="25" max="90" step="1" value="60">
+          <span class="muted" id="s_fovVal">60°</span>
+        </div>
+        <div class="tool-row" id="s_rowZoom" hidden>
+          <span class="muted" style="width:70px">ズーム</span>
+          <input type="range" id="s_zoom" min="0.5" max="3" step="0.01" value="1">
+          <span class="muted" id="s_zoomVal">1.00</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
 <button aria-label="モデル読み込み" class="load-fab" id="loadFab">読み込み</button>
 <section aria-hidden="true" aria-label="モデル読み込み" aria-modal="true" class="sheet load-sheet" hidden="" id="loadSheet" role="dialog">
 <div class="handle" id="loadHandle" title="ドラッグしてサイズ変更"></div>
@@ -1132,6 +1198,99 @@ function tick(){
   requestAnimationFrame(tick);
 }
 tick();
+
+/* === Mobile Dock Sheet control === */
+const dockSheet = document.getElementById('dockSheet');
+const dockHandle = document.getElementById('dockHandle');
+const dockSheetClose = document.getElementById('dockSheetClose');
+
+function openDockSheet(){
+  if (!dockSheet) return;
+  document.documentElement.classList.add('sheet-open');
+  document.getElementById('sheetScrim')?.setAttribute('open','');
+  document.getElementById('sheetScrim')?.removeAttribute('hidden');
+  dockSheet.dataset.snap = 'full';
+  dockSheet.hidden = false;
+  dockSheet.setAttribute('open','');
+  dockSheet.setAttribute('aria-hidden','false');
+}
+function closeDockSheet(){
+  if (!dockSheet) return;
+  dockSheet.removeAttribute('open');
+  dockSheet.setAttribute('aria-hidden','true');
+  setTimeout(()=>{ dockSheet.hidden = true; }, 160);
+  document.documentElement.classList.remove('sheet-open');
+  const s=document.getElementById('sheetScrim'); if(s){ s.removeAttribute('open'); s.setAttribute('aria-hidden','true'); s.setAttribute('hidden',''); }
+}
+dockSheetClose?.addEventListener('click', closeDockSheet);
+document.getElementById('toolFab')?.addEventListener('click', openDockSheet);
+
+// drag handle (top direction)
+(function(){
+  if (!dockHandle) return;
+  let startY=0, startSnap='full', dragging=false;
+  const order = ['peek','half','full']; // interpret as top-sheet levels
+  function next(dir){ let i = order.indexOf(startSnap); i = Math.max(0, Math.min(order.length-1, i - dir)); return order[i]; }
+  function onDown(ev){ dragging=true; startY = ev.touches? ev.touches[0].clientY : ev.clientY; startSnap = dockSheet.dataset.snap||'full'; ev.preventDefault(); }
+  function onMove(ev){ if(!dragging) return; const y = ev.touches? ev.touches[0].clientY : ev.clientY; const dy = startY - y; const dir = (dy< -10) ? +1 : (dy>10 ? -1 : 0); if(dir){ dockSheet.dataset.snap = next(dir); } }
+  function onUp(ev){ if(!dragging) return; dragging=false; const endY = ev.changedTouches? ev.changedTouches[0].clientY : ev.clientY; if ((dockSheet.dataset.snap||'peek')==='peek' && startY - endY > 80){ closeDockSheet(); } }
+  dockHandle.addEventListener('mousedown', onDown); dockHandle.addEventListener('touchstart', onDown, {passive:false});
+  window.addEventListener('mousemove', onMove, {passive:false}); window.addEventListener('touchmove', onMove, {passive:false});
+  window.addEventListener('mouseup', onUp); window.addEventListener('touchend', onUp);
+})();
+
+// Tabs inside dockSheet
+(function(){
+  const tabs = dockSheet?.querySelectorAll('.tabbtn')||[];
+  const mat = document.getElementById('sheet-tab-materials');
+  const cam = document.getElementById('sheet-tab-camera');
+  tabs.forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      tabs.forEach(b=>b.setAttribute('aria-selected', String(b===btn)));
+      const name = btn.dataset.tab;
+      mat.hidden = name!=='materials';
+      cam.hidden = name!=='camera';
+    });
+  });
+})();
+
+// Wire tool controls in dockSheet to existing viewer (reuse same IDs with 's_' prefix)
+(function(){
+  const s_matDouble = document.getElementById('s_matDouble');
+  const s_matOpacity = document.getElementById('s_matOpacity');
+  const s_projMode = document.getElementById('s_projMode');
+  const s_fov = document.getElementById('s_fov'), s_fovVal = document.getElementById('s_fovVal');
+  const s_zoom = document.getElementById('s_zoom'), s_zoomVal = document.getElementById('s_zoomVal');
+  const s_btnFrame = document.getElementById('s_btnFrame');
+
+  try{
+    s_matDouble?.addEventListener('change', ()=>{
+      window.matDouble?.dispatchEvent(new Event('change'));
+      // mirror: if desktop control exists, sync its checked state
+      const d = document.getElementById('matDouble'); if (d) d.checked = s_matDouble.checked, d.dispatchEvent(new Event('change'));
+    });
+    s_matOpacity?.addEventListener('input', ()=>{
+      const d = document.getElementById('matOpacity'); if (d){ d.value = s_matOpacity.value; d.dispatchEvent(new Event('input')); }
+    });
+
+    s_projMode?.addEventListener('change', ()=>{
+      const d = document.getElementById('projMode'); if (d){ d.value = s_projMode.value; d.dispatchEvent(new Event('change')); }
+      document.getElementById('s_rowFov').hidden = s_projMode.value!=='persp';
+      document.getElementById('s_rowZoom').hidden = s_projMode.value!=='ortho';
+    });
+    s_fov?.addEventListener('input', ()=>{
+      const d = document.getElementById('fov'); if (d){ d.value = s_fov.value; d.dispatchEvent(new Event('input')); }
+      s_fovVal.textContent = `${s_fov.value}°`;
+    });
+    s_zoom?.addEventListener('input', ()=>{
+      const d = document.getElementById('zoom'); if (d){ d.value = s_zoom.value; d.dispatchEvent(new Event('input')); }
+      s_zoomVal.textContent = Number(s_zoom.value).toFixed(2);
+    });
+    s_btnFrame?.addEventListener('click', ()=> document.getElementById('btnFrame')?.click());
+  }catch(e){ console.warn('DockSheet wiring warn', e); }
+})();
+
+
 
 function enforceFullSheetForSmallVH(){
   const vh = Math.max(document.documentElement.clientHeight, window.innerHeight||0);
