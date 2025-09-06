@@ -438,6 +438,7 @@
 </div>
 <main>
 <div id="view">
+  <button id="toolInlineBtn" class="tool-inline-btn" aria-label="ツール">ツール</button>
 <canvas id="canvas"></canvas>
 <svg class="lines" id="lines"></svg>
 <div class="float-layer" id="floatLayer"></div>
@@ -2924,6 +2925,70 @@ applyBackgroundColor('#222222');
   attachDrag(capHandle); attachDrag(capHeader);
 })();
 
+
+
+
+// === Workspace inline tool button opens dock (PC) ===
+document.getElementById('toolInlineBtn')?.addEventListener('click', ()=>{
+  const d = document.getElementById('editorDock');
+  if (!d) return;
+  d.classList.remove('collapsed');
+  d.style.display = 'block';
+});
+
+// === Mobile: model load sheet ===
+(()=>{
+  const loadFab = document.getElementById('loadFab');
+  const loadSheet = document.getElementById('loadSheet');
+  const loadHandle = document.getElementById('loadHandle');
+  const loadClose = document.getElementById('loadClose');
+  const loadInput = document.getElementById('loadInput');
+  const loadStart = document.getElementById('loadStart');
+
+  function openLoadSheet(){
+    if (!loadSheet) return;
+    loadSheet.dataset.snap = 'half';
+    loadSheet.hidden = false;
+    loadSheet.setAttribute('open','');
+    loadSheet.setAttribute('aria-hidden','false');
+    setTimeout(()=> loadInput?.focus(), 50);
+  }
+  function closeLoadSheet(){
+    if (!loadSheet) return;
+    loadSheet.removeAttribute('open');
+    loadSheet.setAttribute('aria-hidden','true');
+    setTimeout(()=>{ loadSheet.hidden = true; }, 160);
+  }
+  function toLoadUrl(val){
+    const s = (val||'').trim();
+    if (!s) return '';
+    if (s.includes('://')) return s;
+    return 'https://drive.google.com/uc?id=' + encodeURIComponent(s);
+  }
+  loadFab?.addEventListener('click', openLoadSheet);
+  loadClose?.addEventListener('click', closeLoadSheet);
+  // simple handle drag (header only)
+  (function(){
+    let startY=0, startSnap='half', dragging=false;
+    const order = ['peek','half','full'];
+    function next(dir){ let i=order.indexOf(startSnap); i=Math.max(0,Math.min(order.length-1, i-dir)); return order[i]; }
+    function onDown(ev){ dragging=true; startY = ev.touches? ev.touches[0].clientY : ev.clientY; startSnap = loadSheet.dataset.snap||'half'; ev.preventDefault(); }
+    function onMove(ev){ if(!dragging) return; const y=ev.touches? ev.touches[0].clientY : ev.clientY; const dy=y-startY; const dir=(dy<-10)?-1:((dy>10)?+1:0); if(dir){ loadSheet.dataset.snap = next(dir); } }
+    function onUp(ev){ if(!dragging) return; dragging=false; const endY = ev.changedTouches? ev.changedTouches[0].clientY : ev.clientY; if((loadSheet.dataset.snap||'peek')==='peek' && endY-startY>80){ closeLoadSheet(); } }
+    loadHandle?.addEventListener('mousedown', onDown); loadHandle?.addEventListener('touchstart', onDown, {passive:false});
+    window.addEventListener('mousemove', onMove, {passive:false}); window.addEventListener('touchmove', onMove, {passive:false});
+    window.addEventListener('mouseup', onUp); window.addEventListener('touchend', onUp);
+  })();
+  loadStart?.addEventListener('click', ()=>{
+    const url = toLoadUrl(loadInput?.value||'');
+    if(!url){ alert('URLかfileIDを入力してください'); return; }
+    document.getElementById('fileId')?.focus();
+    const fileIdBox = document.getElementById('fileId');
+    if (fileIdBox){ fileIdBox.value = url.includes('googleusercontent.com') ? url : url; }
+    document.getElementById('btnLoad')?.click();
+    closeLoadSheet();
+  });
+})();
 
 </script>
 </body>
