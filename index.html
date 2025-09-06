@@ -1204,6 +1204,24 @@ function tick(){
   requestAnimationFrame(tick);
 }
 tick();
+
+// === Unified tool button behavior (mobile => top dockSheet, desktop => side dock) ===
+(function(){
+  const openTool = (ev)=>{
+    const isMobile = window.matchMedia('(max-width: 960px)').matches;
+    if (isMobile){
+      ev?.preventDefault?.();
+      try{ closeCaptionSheet?.(); }catch(_){}
+      try{ openDockSheet(); }catch(e){ console.warn('openDockSheet failed', e); }
+    }else{
+      try{ openDock(); }catch(e){ console.warn('openDock failed', e); }
+    }
+  };
+  document.getElementById('toolFab')?.addEventListener('click', openTool);
+  document.getElementById('toolInlineBtn')?.addEventListener('click', openTool);
+})();
+
+
 document.getElementById('toolFab')?.addEventListener('click', (e)=>{ e.preventDefault(); try{ closeCaptionSheet?.(); }catch(_){} openDockSheet(); });
 
 
