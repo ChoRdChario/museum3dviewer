@@ -22,8 +22,8 @@
   function openSheet(data={}){
     capTitle.value = data.title || '';
     capText.value  = data.text  || '';
-    capColor.value = data.color || '#e33';
-    if (data.image){ capImg.src = data.image; capImgRow.hidden = False; }
+    capColor.value = data.color || '#ee3333';
+    if (data.image){ capImg.src = data.image; capImgRow.hidden = false; }
     else { capImgRow.hidden = true; }
     cap.dataset.snap = 'peek';
     cap.hidden = false;
@@ -88,8 +88,8 @@
   function openSheet(data={}){
     capTitle.value = data.title || '';
     capText.value  = data.text  || '';
-    capColor.value = data.color || '#e33';
-    if (data.image){ capImg.src = data.image; capImgRow.hidden = False; }
+    capColor.value = data.color || '#ee3333';
+    if (data.image){ capImg.src = data.image; capImgRow.hidden = false; }
     else { capImgRow.hidden = true; }
     cap.dataset.snap = 'peek';
     cap.hidden = false;
@@ -738,7 +738,7 @@
     <div class="cap-row"><input id="capTitle" type="text" placeholder="タイトル" /></div>
     <div class="cap-row"><textarea id="capText" placeholder="本文（最大8行）"></textarea></div>
     <div class="cap-row">
-      <label>色 <input id="capColor" type="color" value="#e33"></label>
+      <label>色 <input id="capColor" type="color" value="#ee3333"></label>
       <button id="capPickImage">画像を選ぶ</button>
     </div>
     <div class="cap-row" id="capImageRow" hidden>
@@ -767,9 +767,7 @@ function openDock(){
   dock.style.display = 'block';
   dock.setAttribute('data-open','true');
   dock.setAttribute('aria-hidden','false');
-  const inlineBtn = document.getElementById('toolInlineBtn'); if (inlineBtn){ inlineBtn.style.display='none'; }
-}
-  applyDockMinState?.();
+  const inlineBtn = document.getElementById('toolInlineBtn'); if (inlineBtn){ inlineBtn.style.display='none';   applyDockMinState?.();
 }
 function closeDock(){
   dock.classList.add('collapsed');
@@ -777,7 +775,6 @@ function closeDock(){
   dock.setAttribute('data-open','false');
   dock.setAttribute('aria-hidden','true');
   const inlineBtn = document.getElementById('toolInlineBtn'); if (inlineBtn){ inlineBtn.style.display=''; }
-}
 }
 /* ===== Config: OAuth / Drive ===== */
 const SCOPES_READ  = "https://www.googleapis.com/auth/drive.readonly";
@@ -1373,13 +1370,13 @@ async function loadGLBFromDrive(fileId){
 /* ===== ピン ===== */
 const safePos = a => (Array.isArray(a)&&a.length>=3)?a.map(n=>Number(n)||0):[0,0,0];
 
-function pinColorOf(pin){ return (pin && pin.color) ? String(pin.color) : '#e33'; }
+function pinColorOf(pin){ return (pin && pin.color) ? String(pin.color) : '#ee3333'; }
 
 // ★追加：ピンの基本の透明度（お好みで 0.55〜0.75 推奨）
 const PIN_BASE_OPACITY = 0.65;
 
 // ★新しい makePinSprite（ピンを半透明にする）
-function makePinSprite(color = '#e33', opacity = PIN_BASE_OPACITY){
+function makePinSprite(color = '#ee3333', opacity = PIN_BASE_OPACITY){
   const size = 64, cvs = document.createElement('canvas'); cvs.width=cvs.height=size;
   const ctx = cvs.getContext('2d');
   // 外側白リング
@@ -1522,7 +1519,7 @@ function redrawPins(){
       <summary data-summary="${pin.id}">${pin.title||'（無題）'} <span class="muted">@ ${safePos(pin.position).map(n=>Number(n).toFixed(3)).join(', ')}</span></summary>
       <div class="row"><input data-k="title" placeholder="タイトル" value="${pin.title||''}" ${READ_ONLY?'disabled':''} autocomplete="off"></div>
       <div class="row"><textarea data-k="text" rows="3" placeholder="キャプション" ${READ_ONLY?'disabled':''}>${pin.text||''}</textarea></div>
-      <div class="row"><label class="pill small">色 <input type="color" data-k="color" value="${pin.color||'#e33'}" ${READ_ONLY?'disabled':''}></label></div>
+      <div class="row"><label class="pill small">色 <input type="color" data-k="color" value="${pin.color||'#ee3333'}" ${READ_ONLY?'disabled':''}></label></div>
       ${READ_ONLY?'':`<input id="${hid}" class="hidden" type="file" accept="image/*">`}
       <div class="row">
         ${READ_ONLY?'':`<button data-act="choose">ローカルから</button>
@@ -1697,7 +1694,7 @@ function makeFloatCard(pinId){
   // 色
   const row = document.createElement('div'); row.className='row';
   const colorLabel = document.createElement('label'); colorLabel.className='pill small'; colorLabel.textContent='色 ';
-  const colorInput = document.createElement('input'); colorInput.type='color'; colorInput.value = pin.color || '#e33'; if (READ_ONLY) colorInput.disabled = true;
+  const colorInput = document.createElement('input'); colorInput.type='color'; colorInput.value = pin.color || '#ee3333'; if (READ_ONLY) colorInput.disabled = true;
   colorLabel.appendChild(colorInput); body.appendChild(row); row.appendChild(colorLabel);
 
   if (pin.imageUrl || pin.imageDriveId) {
@@ -1849,7 +1846,7 @@ function addPinFromScreen(xClient, yClient){
   if (gltfRoot){ raycaster.setFromCamera(mouseNdc, camera); const hits = raycaster.intersectObject(gltfRoot, true); if (hits?.length) point = hits[0].point.clone(); }
   if (!point){ const planeY = controls.target.y; raycaster.setFromCamera(mouseNdc, camera); const dir = raycaster.ray.direction.clone(); const t = (planeY - raycaster.ray.origin.y) / dir.y; point = raycaster.ray.origin.clone().addScaledVector(dir, Math.max(t, 0.0)); }
   dbg.textContent = `hit= ${point.x.toFixed(3)}, ${point.y.toFixed(3)}, ${point.z.toFixed(3)}`;
-  const pin = { id: crypto.randomUUID(), position:[point.x,point.y,point.z], title:'', text:'', imageDriveId:'', imageUrl:'', imageMime:'', floatPos:null, color:'#e33' };
+  const pin = { id: crypto.randomUUID(), position:[point.x,point.y,point.z], title:'', text:'', imageDriveId:'', imageUrl:'', imageMime:'', floatPos:null, color:'#ee3333' };
   PINS.push(pin); redrawPins(); scheduleAutoSave(); selectPin(pin.id);
 }
 btnAddPin.onclick = ()=>{
@@ -2584,10 +2581,10 @@ btnLoad.onclick = async ()=>{
       const text  = await pblob.text();
       let data=null; try{ data=JSON.parse(text); }catch{}
       if(Array.isArray(data)){
-        PINS=data.map(p=>({...p, position:safePos(p.position), color:p.color||'#e33'}));
+        PINS=data.map(p=>({...p, position:safePos(p.position), color:p.color||'#ee3333'}));
         MATERIALS={};
       } else if(data && typeof data==='object'){
-        PINS = Array.isArray(data.pins)? data.pins.map(p=>({...p, position:safePos(p.position), color:p.color||'#e33'})) : [];
+        PINS = Array.isArray(data.pins)? data.pins.map(p=>({...p, position:safePos(p.position), color:p.color||'#ee3333'})) : [];
         MATERIALS = (data.materials && typeof data.materials==='object') ? data.materials : {};
       }
       loadedPinsId = targetPinsId;
@@ -2708,10 +2705,10 @@ btnPickPins.onclick = async ()=>{
               const text  = await pblob.text();
               let data=null; try{ data=JSON.parse(text); }catch{}
               if(Array.isArray(data)){
-                PINS = data.map(p=>({...p, position:safePos(p.position), color:p.color||'#e33'}));
+                PINS = data.map(p=>({...p, position:safePos(p.position), color:p.color||'#ee3333'}));
                 MATERIALS = {};
               } else if(data && typeof data==='object'){
-                PINS = Array.isArray(data.pins) ? data.pins.map(p=>({...p, position:safePos(p.position), color:p.color||'#e33'})) : [];
+                PINS = Array.isArray(data.pins) ? data.pins.map(p=>({...p, position:safePos(p.position), color:p.color||'#ee3333'})) : [];
                 MATERIALS = (data.materials && typeof data.materials==='object') ? data.materials : {};
               }
               loadedPinsId = id;
@@ -2906,8 +2903,8 @@ applyBackgroundColor('#222222');
   function openSheet(data={}){
     capTitle.value = data.title || '';
     capText.value  = data.text  || '';
-    capColor.value = data.color || '#e33';
-    if (data.image){ capImg.src = data.image; capImgRow.hidden = False; }
+    capColor.value = data.color || '#ee3333';
+    if (data.image){ capImg.src = data.image; capImgRow.hidden = false; }
     else { capImgRow.hidden = true; }
     cap.dataset.snap = 'peek';
     cap.hidden = false;
