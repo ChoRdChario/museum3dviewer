@@ -474,7 +474,39 @@
   #btnOpenDock{ display:none }
 }
 
+
+/* === Workspace inline tool button (PC) === */
+.tool-inline-btn{
+  position:absolute; right:12px; top:12px; z-index:6;
+  padding:8px 12px; border:1px solid #ddd; border-radius:999px; background:#fff; cursor:pointer;
+  box-shadow:0 8px 24px rgba(0,0,0,.25);
+  min-width:40px; min-height:40px; outline:1px solid transparent; outline-offset:2px;
+}
+.tool-inline-btn:hover{ outline-color:#ddd }
+#dock[data-open="true"] ~ main #view .tool-inline-btn{ display:none } /* Dock openなら隠す */
+
+/* === Mobile load FAB & sheet === */
+.load-fab{
+  position:fixed; left:14px; bottom:14px; z-index:9; display:none;
+  padding:12px 16px; border:1px solid #ddd; border-radius:999px; background:#fff; box-shadow:0 12px 28px rgba(0,0,0,.35); cursor:pointer;
+}
+@media (max-width: 960px){
+  .load-fab{ display:block }
+}
+
+/* reuse .sheet styles already present */
+.load-sheet .title{ font-weight:600 }
+.load-sheet .row{ display:flex; gap:8px; align-items:center; margin-bottom:10px; flex-wrap:wrap }
+.load-sheet input{ width:100%; border:1px solid #ddd; border-radius:8px; padding:8px }
+
+#toolFab{ display:none }
+@media (max-width: 960px){
+  #toolFab{ display:block }
+}
 </style>
+
+
+
 
 </head>
 <body>
@@ -679,7 +711,25 @@
       <div class="muted" style="margin-top:6px" id="pinsInfo"></div>
     </div>
   </aside>
+
 </main>
+<button id="loadFab" class="load-fab" aria-label="モデル読み込み">読み込み</button>
+
+<section id="loadSheet" class="sheet load-sheet" aria-modal="true" role="dialog" aria-label="モデル読み込み" hidden aria-hidden="true">
+  <div class="handle" id="loadHandle" title="ドラッグしてサイズ変更"></div>
+  <header class="load-header">
+    <div class="title">モデル読み込み</div>
+    <button class="close" id="loadClose">閉じる</button>
+  </header>
+  <div class="body">
+    <div class="row"><input id="loadInput" type="text" placeholder="URL または Google DriveのfileID"></div>
+    <div class="row">
+      <button id="loadStart">読み込む</button>
+    </div>
+    <p class="hint">URLを貼り付けるか、fileIDのみでもOK（例: 1AbC... → https://drive.google.com/uc?id=1AbC... に変換）</p>
+  </div>
+</section>
+
 
 <!-- Caption Bottom Sheet (mobile first) -->
 <section id="capSheet" class="cap-sheet" aria-modal="true" role="dialog" aria-label="キャプション" hidden aria-hidden="true">
@@ -1186,6 +1236,70 @@ function tick(){
   requestAnimationFrame(tick);
 }
 tick();
+
+/* === Mobile: model load sheet === */
+const loadFab = document.getElementById('loadFab');
+const loadSheet = document.getElementById('loadSheet');
+const loadHandle = document.getElementById('loadHandle');
+const loadClose = document.getElementById('loadClose');
+const loadInput = document.getElementById('loadInput');
+const loadStart = document.getElementById('loadStart');
+
+function openLoadSheet(){
+  loadSheet.dataset.snap = 'half';
+  loadSheet.hidden = false;
+  loadSheet.setAttribute('open','');
+  loadSheet.setAttribute('aria-hidden','false');
+  setTimeout(()=> loadInput?.focus(), 50);
+}
+function closeLoadSheet(){
+  loadSheet.removeAttribute('open');
+  loadSheet.setAttribute('aria-hidden','true');
+  setTimeout(()=>{ loadSheet.hidden = true; }, 160);
+}
+
+loadFab?.addEventListener('click', openLoadSheet);
+loadClose?.addEventListener('click', closeLoadSheet);
+
+// drag (reuse caption logic style: handle only)
+(function(){
+  let startY=0, startSnap='half', dragging=false;
+  const order = ['peek','half','full'];
+  function next(dir){ let i=order.indexOf(startSnap); i=Math.max(0,Math.min(order.length-1,i-dir)); return order[i]; }
+  function onDown(ev){ dragging=true; startY = ev.touches? ev.touches[0].clientY : ev.clientY; startSnap = loadSheet.dataset.snap||'half'; ev.preventDefault(); }
+  function onMove(ev){ if(!dragging) return; const y=ev.touches? ev.touches[0].clientY : ev.clientY; const dy=y-startY; const dir=(dy<-10)?-1:((dy>10)?+1:0); if(dir){ loadSheet.dataset.snap = next(dir); } }
+  function onUp(ev){ if(!dragging) return; dragging=false; const endY = ev.changedTouches? ev.changedTouches[0].clientY : ev.clientY; if((loadSheet.dataset.snap||'peek')==='peek' && endY-startY>80){ closeLoadSheet(); } }
+  loadHandle?.addEventListener('mousedown', onDown); loadHandle?.addEventListener('touchstart', onDown, {passive:false});
+  window.addEventListener('mousemove', onMove, {passive:false}); window.addEventListener('touchmove', onMove, {passive:false});
+  window.addEventListener('mouseup', onUp); window.addEventListener('touchend', onUp);
+})();
+
+function toLoadUrl(val){
+  const s = (val||'').trim();
+  if (!s) return '';
+  if (s.includes('://')) return s;
+  // treat as Google Drive fileId
+  return 'https://drive.google.com/uc?id=' + encodeURIComponent(s);
+}
+
+loadStart?.addEventListener('click', ()=>{
+  const url = toLoadUrl(loadInput?.value||'');
+  if(!url){ alert('URLかfileIDを入力してください'); return; }
+  // メッセージ更新＆読み込み開始
+  if (typeof showLoading === 'function') showLoading('GLBを読み込み中…');
+  (async ()=>{
+    try{
+      await loadModel(url);
+    }catch(e){
+      console.error(e);
+      alert('読み込みに失敗しました');
+    }finally{
+      if (typeof hideLoading === 'function') hideLoading();
+      closeLoadSheet();
+    }
+  })();
+});
+
 try{ dockClose?.addEventListener('click', closeDock); }catch(e){}
 
 /* ===== カメラ補間 ===== */
