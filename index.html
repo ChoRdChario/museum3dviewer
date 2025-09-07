@@ -1843,11 +1843,13 @@ function applyDockMinState(){
   if (dockMin) dockMin.textContent = min ? '展開' : '最小化';
 }
 
-dockMin && (if (dockMin) dockMin.onclick = ()=>{
-  const min = localStorage.getItem('editorDock_min')==='1';
-  localStorage.setItem('editorDock_min', min?'0':'1');
-  applyDockMinState();
-});
+ if (dockMin) {
+   dockMin.onclick = ()=>{
+     const min = localStorage.getItem('editorDock_min')==='1';
+     localStorage.setItem('editorDock_min', min?'0':'1');
+     applyDockMinState();
+   };
+ }
 try{ applyDockMinState(); }catch(_){}
 
 
