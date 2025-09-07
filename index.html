@@ -1792,7 +1792,7 @@ dockFab?.addEventListener('click', ()=>{
   else if (typeof closeSheet==='function') closeSheet();
 });
 dock.addEventListener('click', (e)=>{
-  if (e.target?.id === 'dockMin') if (typeof closeSheet==='function') closeSheet(); // 既存の「最小化」ボタンで閉じる
+  if (e.if (target) target.id=== 'dockMin') if (typeof closeSheet==='function') closeSheet(); // 既存の「最小化」ボタンで閉じる
 });
 
 /* ページヘッダーのオートハイド（指を止めたら 1.5s で隠す） */
@@ -1843,7 +1843,7 @@ function applyDockMinState(){
   if (dockMin) dockMin.textContent = min ? '展開' : '最小化';
 }
 
-dockMin && (dockMin?.onclick = ()=>{
+dockMin && (if (dockMin) dockMin.onclick = ()=>{
   const min = localStorage.getItem('editorDock_min')==='1';
   localStorage.setItem('editorDock_min', min?'0':'1');
   applyDockMinState();
