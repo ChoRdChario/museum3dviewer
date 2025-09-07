@@ -3044,5 +3044,76 @@ applyBackgroundColor('#222222');
 })();
 </script>
 
+
+<script>
+// === Robust loader lifecycle (ref-count + LoadingManager + first-render fallback) ===
+(function(){
+  let activeLoads = 0;
+  const MIN_SHOW_MS = 200; // show at least a brief moment to avoid flicker
+  let lastShow = 0;
+
+  function _show(step){
+    lastShow = Date.now();
+    try{ window.showLoading && window.showLoading(step||'glb'); }catch(_){}
+  }
+  function _hideSoon(){
+    const elapsed = Date.now() - lastShow;
+    const wait = Math.max(0, MIN_SHOW_MS - elapsed);
+    setTimeout(()=>{ try{ window.hideLoading && window.hideLoading(120); }catch(_){} }, wait);
+  }
+
+  // Expose to global for other modules if needed
+  window.__gl_refLoadBegin = function(step){ if (activeLoads++ === 0) _show(step); };
+  window.__gl_refLoadEnd   = function(){ if (activeLoads > 0 && --activeLoads === 0) _hideSoon(); };
+
+  // Hook THREE.DefaultLoadingManager if available
+  try{
+    const M = (window.THREE && window.THREE.DefaultLoadingManager) || null;
+    if (M && !M.__gl_patched){
+      const prevStart = M.onStart, prevLoad = M.onLoad, prevError = M.onError, prevProg = M.onProgress;
+      M.onStart = function(url, itemsLoaded, itemsTotal){ try{ window.__gl_refLoadBegin('glb'); }catch(_){} if (typeof prevStart==='function') prevStart(url, itemsLoaded, itemsTotal); };
+      M.onLoad  = function(){ try{ window.__gl_refLoadEnd(); }catch(_){} if (typeof prevLoad==='function') prevLoad(); };
+      M.onError = function(url){ try{ window.__gl_refLoadEnd(); }catch(_){} if (typeof prevError==='function') prevError(url); };
+      M.onProgress = function(url, itemsLoaded, itemsTotal){ 
+        try{ window.setLoadingProgress && window.setLoadingProgress(itemsTotal? itemsLoaded/itemsTotal : 0.5); }catch(_){} 
+        if (typeof prevProg==='function') prevProg(url, itemsLoaded, itemsTotal);
+      };
+      M.__gl_patched = true;
+    }
+  }catch(e){}
+
+  // Fallback: hide after the first successful frame render post-load.
+  // If your viewer dispatches a custom event when the model is added, listen and hide.
+  window.addEventListener('model-loaded', ()=>{ try{ window.__gl_refLoadEnd(); }catch(_){} });
+  // If not, attempt a heuristic: when requestAnimationFrame ticks after 2 frames following a begin, hide.
+  (function(){
+    let pending = false, ticks = 0;
+    const origBegin = window.__gl_refLoadBegin;
+    window.__gl_refLoadBegin = function(step){ origBegin(step); pending = true; ticks = 0; };
+    function rafLoop(){
+      requestAnimationFrame(()=>{
+        if (pending){ if (++ticks > 2){ pending = false; try{ window.__gl_refLoadEnd(); }catch(_){} } }
+        rafLoop();
+      });
+    }
+    rafLoop();
+  })();
+
+  // Ensure buttons that trigger loading bump the ref counter too
+  ['btnLoad','loadStart'].forEach(id=>{
+    const el = document.getElementById(id);
+    if (el){
+      el.addEventListener('click', ()=>{ try{ window.__gl_refLoadBegin('glb'); }catch(_){} }, {capture:true});
+    }
+  });
+
+  // Safety net: hard timeout to close if something fails to call onLoad/onError
+  setInterval(()=>{
+    // If progress hasn't advanced for a long time but there's no network activity hooks, force-end after 15s
+    if (activeLoads>0 && (Date.now()-lastShow) > 15000){ activeLoads = 0; _hideSoon(); }
+  }, 4000);
+})();
+</script>
+
 </body>
 </html>
