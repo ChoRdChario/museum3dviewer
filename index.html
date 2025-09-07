@@ -350,12 +350,9 @@
 #dock[data-open="true"] ~ main #view .tool-inline-btn{ display:none } /* Dock openなら隠す */
 
 /* === Mobile load FAB & sheet === */
-.load-fab{
-  position:fixed; left:14px; bottom:14px; z-index:9; display:none;
-  padding:12px 16px; border:1px solid #ddd; border-radius:999px; background:#fff; box-shadow:0 12px 28px rgba(0,0,0,.35); cursor:pointer;
-}
+.load-fab{ position:fixed; right:14px; bottom:calc(14px + env(safe-area-inset-bottom,0)); z-index:1000; padding:12px 16px; border:1px solid #ddd; border-radius:999px; background:#fff; box-shadow:0 12px 28px rgba(0,0,0,.35); cursor:pointer; }
 @media (max-width: 960px){
-  .load-fab{ display:block }
+  .load-fab{ position:fixed; right:14px; bottom:calc(14px + env(safe-area-inset-bottom,0)); z-index:1000; padding:12px 16px; border:1px solid #ddd; border-radius:999px; background:#fff; box-shadow:0 12px 28px rgba(0,0,0,.35); cursor:pointer; }
 }
 
 /* reuse .sheet styles already present */
@@ -372,28 +369,101 @@
   #dockFab{ display:block; position:fixed; right:14px; bottom:14px; padding:12px 16px; box-shadow:0 8px 24px rgba(0,0,0,.25); }
 }
 
-/* === Global Loading Overlay (PC / Mobile 共通) === */
-.gl-loading{
-  position:fixed; inset:0;
-  display:flex; align-items:center; justify-content:center; flex-direction:column;
-  background:rgba(0,0,0,.55); color:#fff; z-index:2147483000; /* over everything */
-  opacity:0; transition:opacity .15s ease; pointer-events:none;
+/* === Mobile overlap hardening === */
+.scrim{
+  position:fixed; inset:0; background:rgba(0,0,0,.35);
+  z-index:1200; display:none;
 }
-.gl-loading.show{ opacity:1; pointer-events:auto; }
-.gl-spinner{
-  width:40px; height:40px; border-radius:50%;
-  border:4px solid rgba(255,255,255,.25); border-top-color:#fff;
-  animation:gl-spin .9s linear infinite; margin-bottom:10px;
-}
-.gl-progress{ width:min(420px, 80vw); height:4px; background:rgba(255,255,255,.28); border-radius:999px; overflow:hidden; }
-.gl-progress>i{ display:block; height:100%; width:0%; background:#fff; transition:width .2s ease; }
-.gl-msg{ margin:8px 0 12px; font-weight:600; text-shadow:0 1px 2px rgba(0,0,0,.35) }
+.scrim[open]{ display:block }
 
-@keyframes gl-spin{ to{ transform:rotate(360deg) } }
+/* Raise sheet above any floating pills, ensure safe-area paddings */
+.sheet{ z-index:999; }
+.sheet .body{ padding-bottom: calc(16px + env(safe-area-inset-bottom, 0)); }
+
+/* Keep FABs above safe area; hide while a sheet is open */
+#toolFab, .load-fab{ position:fixed; right:14px; bottom:calc(14px + env(safe-area-inset-bottom,0)); z-index:1000; padding:12px 16px; border:1px solid #ddd; border-radius:999px; background:#fff; box-shadow:0 12px 28px rgba(0,0,0,.35); cursor:pointer; }
+html.sheet-open #toolFab,
+html.sheet-open .load-fab,
+html.sheet-open #toolInlineBtn{
+  display:none !important;
+}
+
+/* On small screens, reserve a little top space so the header hint doesn't overlap */
+@media (max-width: 960px){
+  body{ padding-top: env(safe-area-inset-top, 0); }
+}
+
+/* lock gestures under sheet */
+html.sheet-open #view{ pointer-events:none; }
+
+/* === Mobile overlap hardening v2 === */
+.sheet{
+  left:0; right:0; width:100%;
+}
+.sheet[data-snap="full"]{
+  max-height: none;
+  height: calc(92vh + env(safe-area-inset-bottom,0));
+  transform: translateY(0);
+}
+/* body scroll lock while sheet open */
+html.sheet-open, html.sheet-open body{ overflow: hidden; }
+
+/* hide floating chips while sheet open */
+html.sheet-open .chip, 
+html.sheet-open .pill, 
+html.sheet-open .fab, 
+html.sheet-open [data-fab],
+html.sheet-open .bubble,
+html.sheet-open .floating,
+html.sheet-open .floating-btn,
+html.sheet-open .floating-buttons{
+  display:none !important;
+}
+
+/* === Dock Top Sheet (Mobile) === */
+.top-sheet{ z-index: 1300;
+  top:0; bottom:auto; left:0; right:0;
+  border-radius:0 0 16px 16px;
+  transform:translateY(-110%);
+  max-height:92vh;
+}
+.top-sheet[open]{ transform:translateY(0); opacity:1; }
+.top-sheet .body{ max-height:calc(92vh - 28px - 44px - env(safe-area-inset-top,0)); overflow:auto; }
+@media (min-width: 961px){
+  #dockSheet{ display:none !important; }
+}
+
+
+/* Hide PC dock when a mobile sheet is open */
+@media (max-width: 960px){
+  html.sheet-open #dock{ display:none !important; }
+}
+
+/* Hide bottom caption sheet while dockSheet is open (mobile) */
+@media (max-width: 960px){
+  html.sheet-open #capSheet{ display:none !important; }
+}
+@media (max-width: 960px){ .load-fab{ display:block } }
+
+/* Mobile: hide all tool docks and buttons */
+@media (max-width: 960px){
+  #dockFab, #editorDock, #materialsDock,
+  #toolFab, #toolBtn, #dock, #dockSheet,
+  [data-open-dock], [data-role="tool-button"], .dock, .tool-btn {
+    display: none !important;
+  }
+}
 
 </style>
+
+
+
+
+
+
 </head>
 <body>
+<div id="sheetScrim" class="scrim" hidden aria-hidden="true"></div>
 <!-- Desktop open-dock button (hidden on mobile) -->
 <!-- Global loader overlay -->
 <div aria-hidden="true" id="loaderOverlay">
@@ -458,6 +528,7 @@
 </div>
 <main>
 <div id="view">
+  <button id="toolInlineBtn" class="tool-inline-btn" aria-label="ツール">ツール</button>
 <canvas id="canvas"></canvas>
 <svg class="lines" id="lines"></svg>
 <div class="float-layer" id="floatLayer"></div>
@@ -574,6 +645,52 @@
 </div>
 </aside>
 </main>
+
+<!-- Dock Top Sheet (Mobile) -->
+<section id="dockSheet" class="sheet top-sheet" aria-modal="true" role="dialog" aria-label="ツール" hidden aria-hidden="true">
+  <div class="handle" id="dockHandle" title="ドラッグしてサイズ変更（上方向へ）"></div>
+  <header class="dock-header">
+    <div class="title">ツール</div>
+    <button class="close" id="dockSheetClose">閉じる</button>
+  </header>
+  <div class="body">
+    <nav class="tabs" role="tablist" aria-label="ツールタブ">
+      <button class="tabbtn" data-tab="materials" aria-selected="true">マテリアル</button>
+      <button class="tabbtn" data-tab="camera" aria-selected="false">カメラ</button>
+    </nav>
+    <div class="sheet-tools" style="margin-top:8px">
+      <div id="sheet-tab-materials">
+        <div class="tool-row"><span class="muted">デモ：マテリアル設定（PCと同等）</span></div>
+        <div class="tool-row">
+          <label><input type="checkbox" id="s_matDouble"> 両面</label>
+          <label>不透明度 <input type="range" id="s_matOpacity" min="0" max="1" step="0.01" value="1"></label>
+        </div>
+      </div>
+      <div id="sheet-tab-camera" hidden>
+        <div class="tool-row">
+          <label>投影
+            <select id="s_projMode">
+              <option value="persp">透視</option>
+              <option value="ortho">平行</option>
+            </select>
+          </label>
+          <button id="s_btnFrame">モデルにフィット</button>
+        </div>
+        <div class="tool-row" id="s_rowFov">
+          <span class="muted" style="width:70px">視野角</span>
+          <input type="range" id="s_fov" min="25" max="90" step="1" value="60">
+          <span class="muted" id="s_fovVal">60°</span>
+        </div>
+        <div class="tool-row" id="s_rowZoom" hidden>
+          <span class="muted" style="width:70px">ズーム</span>
+          <input type="range" id="s_zoom" min="0.5" max="3" step="0.01" value="1">
+          <span class="muted" id="s_zoomVal">1.00</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
 <button aria-label="モデル読み込み" class="load-fab" id="loadFab">読み込み</button>
 <section aria-hidden="true" aria-label="モデル読み込み" aria-modal="true" class="sheet load-sheet" hidden="" id="loadSheet" role="dialog">
 <div class="handle" id="loadHandle" title="ドラッグしてサイズ変更"></div>
@@ -628,7 +745,6 @@ function openDock(){
   dock.setAttribute('aria-hidden','false');
   const inlineBtn = document.getElementById('toolInlineBtn');
   if (inlineBtn){ inlineBtn.style.display='none'; }
-  applyDockMinState?.();
 }
 function closeDock(){
   dock.classList.add('collapsed');
@@ -782,7 +898,7 @@ function hideSignInGate() {
 }
 
 /* gapi ローダ：既に読み込まれていれば待つだけに変更 */
-async function loadGapi() {
+async function loadGapi(){
   if (window.gapiLoaded) return;
   await new Promise((resolve) => {
     if (window.gapi) return resolve();
@@ -1092,6 +1208,139 @@ function tick(){
   requestAnimationFrame(tick);
 }
 tick();
+
+// === Unified tool button behavior (mobile => top dockSheet, desktop => side dock) ===
+(function(){
+  const openTool = (ev)=>{
+    const isMobile = window.matchMedia('(max-width: 960px)').matches;
+    if (isMobile){
+      ev?.preventDefault?.();
+      try{ closeCaptionSheet?.(); }catch(_){}
+      try{ openDockSheet(); }catch(e){ console.warn('openDockSheet failed', e); }
+    }else{
+      try{ openDock(); }catch(e){ console.warn('openDock failed', e); }
+    }
+  };
+  document.getElementById('toolFab')?.addEventListener('click', openTool);
+  document.getElementById('toolInlineBtn')?.addEventListener('click', openTool);
+})();
+
+
+document.getElementById('toolFab')?.addEventListener('click', (e)=>{ e.preventDefault(); try{ closeCaptionSheet?.(); }catch(_){} openDockSheet(); });
+
+
+/* === Mobile Dock Sheet control === */
+const dockSheet = document.getElementById('dockSheet');
+const dockHandle = document.getElementById('dockHandle');
+const dockSheetClose = document.getElementById('dockSheetClose');
+
+function openDockSheet(){
+  if (!dockSheet) return;
+  try{ closeCaptionSheet?.(); }catch(_){}
+
+  document.documentElement.classList.add('sheet-open');
+  document.getElementById('sheetScrim')?.setAttribute('open','');
+  document.getElementById('sheetScrim')?.removeAttribute('hidden');
+  dockSheet.dataset.snap = 'full';
+  dockSheet.hidden = false;
+  dockSheet.setAttribute('open','');
+  dockSheet.setAttribute('aria-hidden','false');
+}
+function closeDockSheet(){
+  if (!dockSheet) return;
+  dockSheet.removeAttribute('open');
+  dockSheet.setAttribute('aria-hidden','true');
+  setTimeout(()=>{ dockSheet.hidden = true; }, 160);
+  document.documentElement.classList.remove('sheet-open');
+  const s=document.getElementById('sheetScrim'); if(s){ s.removeAttribute('open'); s.setAttribute('aria-hidden','true'); s.setAttribute('hidden',''); }
+}
+dockSheetClose?.addEventListener('click', closeDockSheet);
+document.getElementById('toolFab')?.addEventListener('click', openDockSheet);
+
+// drag handle (top direction)
+(function(){
+  if (!dockHandle) return;
+  let startY=0, startSnap='full', dragging=false;
+  const order = ['peek','half','full']; // interpret as top-sheet levels
+  function next(dir){ let i = order.indexOf(startSnap); i = Math.max(0, Math.min(order.length-1, i - dir)); return order[i]; }
+  function onDown(ev){ dragging=true; startY = ev.touches? ev.touches[0].clientY : ev.clientY; startSnap = dockSheet.dataset.snap||'full'; ev.preventDefault(); }
+  function onMove(ev){ if(!dragging) return; const y = ev.touches? ev.touches[0].clientY : ev.clientY; const dy = startY - y; const dir = (dy< -10) ? +1 : (dy>10 ? -1 : 0); if(dir){ dockSheet.dataset.snap = next(dir); } }
+  function onUp(ev){ if(!dragging) return; dragging=false; const endY = ev.changedTouches? ev.changedTouches[0].clientY : ev.clientY; if ((dockSheet.dataset.snap||'peek')==='peek' && startY - endY > 80){ closeDockSheet(); } }
+  dockHandle.addEventListener('mousedown', onDown); dockHandle.addEventListener('touchstart', onDown, {passive:false});
+  window.addEventListener('mousemove', onMove, {passive:false}); window.addEventListener('touchmove', onMove, {passive:false});
+  window.addEventListener('mouseup', onUp); window.addEventListener('touchend', onUp);
+})();
+
+// Tabs inside dockSheet
+(function(){
+  const tabs = dockSheet?.querySelectorAll('.tabbtn')||[];
+  const mat = document.getElementById('sheet-tab-materials');
+  const cam = document.getElementById('sheet-tab-camera');
+  tabs.forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      tabs.forEach(b=>b.setAttribute('aria-selected', String(b===btn)));
+      const name = btn.dataset.tab;
+      mat.hidden = name!=='materials';
+      cam.hidden = name!=='camera';
+    });
+  });
+})();
+
+// Wire tool controls in dockSheet to existing viewer (reuse same IDs with 's_' prefix)
+(function(){
+  const s_matDouble = document.getElementById('s_matDouble');
+  const s_matOpacity = document.getElementById('s_matOpacity');
+  const s_projMode = document.getElementById('s_projMode');
+  const s_fov = document.getElementById('s_fov'), s_fovVal = document.getElementById('s_fovVal');
+  const s_zoom = document.getElementById('s_zoom'), s_zoomVal = document.getElementById('s_zoomVal');
+  const s_btnFrame = document.getElementById('s_btnFrame');
+
+  try{
+    s_matDouble?.addEventListener('change', ()=>{
+      window.matDouble?.dispatchEvent(new Event('change'));
+      // mirror: if desktop control exists, sync its checked state
+      const d = document.getElementById('matDouble'); if (d) d.checked = s_matDouble.checked, d.dispatchEvent(new Event('change'));
+    });
+    s_matOpacity?.addEventListener('input', ()=>{
+      const d = document.getElementById('matOpacity'); if (d){ d.value = s_matOpacity.value; d.dispatchEvent(new Event('input')); }
+    });
+
+    s_projMode?.addEventListener('change', ()=>{
+      const d = document.getElementById('projMode'); if (d){ d.value = s_projMode.value; d.dispatchEvent(new Event('change')); }
+      document.getElementById('s_rowFov').hidden = s_projMode.value!=='persp';
+      document.getElementById('s_rowZoom').hidden = s_projMode.value!=='ortho';
+    });
+    s_fov?.addEventListener('input', ()=>{
+      const d = document.getElementById('fov'); if (d){ d.value = s_fov.value; d.dispatchEvent(new Event('input')); }
+      s_fovVal.textContent = `${s_fov.value}°`;
+    });
+    s_zoom?.addEventListener('input', ()=>{
+      const d = document.getElementById('zoom'); if (d){ d.value = s_zoom.value; d.dispatchEvent(new Event('input')); }
+      s_zoomVal.textContent = Number(s_zoom.value).toFixed(2);
+    });
+    s_btnFrame?.addEventListener('click', ()=> document.getElementById('btnFrame')?.click());
+  }catch(e){ console.warn('DockSheet wiring warn', e); }
+})();
+
+
+
+function enforceFullSheetForSmallVH(){
+  const vh = Math.max(document.documentElement.clientHeight, window.innerHeight||0);
+  if (vh <= 700){
+    const ls = document.getElementById('loadSheet');
+    const cs = document.getElementById('capSheet');
+    if (ls && ls.hasAttribute('open')) ls.dataset.snap='full';
+    if (cs && cs.hasAttribute('open')) cs.dataset.snap='full';
+  }
+}
+window.addEventListener('resize', enforceFullSheetForSmallVH);
+
+
+document.getElementById('toolFab')?.addEventListener('click', ()=>{
+  try{ openCaptionSheet({}); }catch(e){}
+  const s=document.getElementById('capSheet'); if(s){ s.dataset.snap='full'; }
+});
+
 document.getElementById('toolInlineBtn')?.addEventListener('click', openDock);
 
 
@@ -1104,6 +1353,9 @@ const loadInput = document.getElementById('loadInput');
 const loadStart = document.getElementById('loadStart');
 
 function openLoadSheet(){
+  document.documentElement.classList.add('sheet-open');
+  document.getElementById('sheetScrim')?.setAttribute('open','');
+  document.getElementById('sheetScrim')?.removeAttribute('hidden');
   loadSheet.dataset.snap = 'half';
   loadSheet.hidden = false;
   loadSheet.setAttribute('open','');
@@ -1111,6 +1363,8 @@ function openLoadSheet(){
   setTimeout(()=> loadInput?.focus(), 50);
 }
 function closeLoadSheet(){
+  document.documentElement.classList.remove('sheet-open');
+  const s=document.getElementById('sheetScrim'); if(s){ s.removeAttribute('open'); s.setAttribute('aria-hidden','true'); s.setAttribute('hidden',''); }
   loadSheet.removeAttribute('open');
   loadSheet.setAttribute('aria-hidden','true');
   setTimeout(()=>{ loadSheet.hidden = true; }, 160);
@@ -1799,20 +2053,19 @@ miniShare?.addEventListener('click', ()=> btnCopyReadonlyUrl?.click());
 const openSheet = ()=>{
   dock.classList.remove('collapsed');
   dock.style.display = 'block';
-  applyDockMinState?.();
 };
 const closeSheet = ()=>{
   dock.classList.add('collapsed');
   dock.style.display = 'none';
 };
 dockFab?.addEventListener('click', ()=>{
-  // mobile FAB: prefer top dock sheet / otherwise fallback
-  if (typeof openDockSheet==='function') { openDockSheet(); return; }
-  if (typeof openSheet==='function') { openSheet(); return; }
+  // mobile FAB
+
+  if (dock.style.display === 'none' || dock.classList.contains('collapsed')) if (typeof openSheet==='function') openSheet();
+  else if (typeof closeSheet==='function') closeSheet();
 });
-dock?.addEventListener('click', (e)=>{
-  const t = e && (e.target || e.srcElement);
-  if (t && t.id === 'dockMin') { if (typeof closeSheet==='function') closeSheet(); }
+dock.addEventListener('click', (e)=>{
+  /* noop: dockMin removed */ // 既存の「最小化」ボタンで閉じる
 });
 
 /* ページヘッダーのオートハイド（指を止めたら 1.5s で隠す） */
@@ -1854,26 +2107,8 @@ setTimeout(uiOccupancy, 0);
 
 function syncDockMoveToggle(){/* no-op: 移動タブ廃止に伴いUI同期を無効化 */ 
 }
-
-
-function applyDockMinState(){
-  if (!dock || !dockMin) return;
-  const min = localStorage.getItem('editorDock_min')==='1';
-  dock.classList.toggle('collapsed', !!min);
-  if (dockMin) dockMin.textContent = min ? '展開' : '最小化';
-}
-
-
- if (dockMin) {
-   dockMin.onclick = ()=>{
-     const min = localStorage.getItem('editorDock_min')==='1';
-     localStorage.setItem('editorDock_min', min?'0':'1');
-     applyDockMinState();
-   };
- }
-try{ applyDockMinState(); }catch(_){}
-
-
+try{ document.getElementById('dockClose')?.addEventListener('click', closeDock); }catch(e){}
+document.getElementById('toolInlineBtn')?.addEventListener('click', openDock);
 /* ===== Camera tab ===== */
 function setCameraMode(mode){
   cameraMode = mode;
@@ -2232,8 +2467,8 @@ btnHelpModel?.addEventListener('click', ()=>{
       <footer><button id="helpClose2">閉じる</button></footer>
     </div>
   `);
-  document.getElementById('helpClose1').onclick = closeModal;
-  document.getElementById('helpClose2').onclick = closeModal;
+  document.addEventListener('click', (e)=>{ if(e.target?.id==='helpClose1') closeModal(); });
+  document.addEventListener('click', (e)=>{ if(e.target?.id==='helpClose2') closeModal(); });
 });
 btnHelpPins?.addEventListener('click', ()=>{
   openModal(`
@@ -2246,8 +2481,8 @@ btnHelpPins?.addEventListener('click', ()=>{
       <footer><button id="helpClose4">閉じる</button></footer>
     </div>
   `);
-  document.getElementById('helpClose3').onclick = closeModal;
-  document.getElementById('helpClose4').onclick = closeModal;
+  document.addEventListener('click', (e)=>{ if(e.target?.id==='helpClose3') closeModal(); });
+  document.getElementById('helpClose4')?.addEventListener('click', (e)=>{ (closeModal) });
 });
 
 /* 画像アップロード共通 */
@@ -2296,7 +2531,7 @@ async function chooseDriveImageForPin(pin, opts={}){
       </div>
     `);
     const gridEl = document.getElementById('imgGrid');
-    document.getElementById('imgClose').onclick = closeModal;
+    document.getElementById('imgClose')?.addEventListener('click', (e)=>{ (closeModal) });
     function cardHTML(f){
       const t = new Date(f.modifiedTime||Date.now()).toLocaleDateString();
       const thumb = f.thumbnailLink ? f.thumbnailLink.replace(/=s220/,'=s400') : '';
@@ -2337,15 +2572,15 @@ async function chooseDriveImageForPin(pin, opts={}){
       }catch(e){ gridEl.innerHTML = `<div>検索に失敗しました</div>`; }
     }
     await loadFolder();
-    document.getElementById('imgSearchAll').onclick = async ()=>{
+    document.getElementById('imgSearchAll')?.addEventListener('click', async (e)=>{
       try{
-        const query = document.getElementById('imgQuery').value.trim();
+        const query = (document.getElementById('imgQuery')?.value || '').trim();
         let q = `mimeType contains 'image/' and trashed = false`;
         if (query) q += ` and name contains '${query.replace(/'/g,"\\'")}'`;
         const res = await driveListFiles({ q, pageSize: 200 });
         await renderGrid(res.files||[]);
       }catch(e){ gridEl.innerHTML = `<div>全体検索に失敗しました</div>`; }
-    };
+    });
   }catch(e){ console.error(e); alert('画像の検索に失敗しました（権限をご確認ください）'); }
 }
 
@@ -2538,7 +2773,7 @@ btnPickPins.onclick = async ()=>{
         </footer>
       </div>
     `);
-    document.getElementById('pinsClose').onclick = closeModal;
+    document.getElementById('pinsClose')?.addEventListener('click', (e)=>{ (closeModal) });
     const listEl = document.getElementById('pinsList');
 
     try{
@@ -2599,10 +2834,10 @@ btnPickPins.onclick = async ()=>{
       listEl.innerHTML = `<div class="rowi">取得に失敗しました</div>`;
     }
 
-    document.getElementById('pinsUseAutosave').onclick = ()=>{
-      pinsIdInput.value = '';  // クリア＝オートセーブに任せる
-      closeModal();
-    };
+    document.getElementById('pinsUseAutosave')?.addEventListener('click', (e)=>{
+  pinsIdInput.value = '';
+  closeModal();
+});
   }catch(e){
     console.error(e);
     alert('サインインが必要です');
@@ -2951,191 +3186,115 @@ applyBackgroundColor('#222222');
 })();
 
 
-</script>
-
-<div id="globalLoading" class="gl-loading" aria-busy="false" aria-live="polite" hidden>
-  <div class="gl-spinner" aria-hidden="true"></div>
-  <div id="glMsg" class="gl-msg">読み込み中…</div>
-  <div class="gl-progress"><i id="glBar"></i></div>
-</div>
 
 
-<script>
-// === Global loader helpers (shared PC/Mobile) ===
-(function(){
-  const root = document.getElementById('globalLoading');
-  const msgEl = document.getElementById('glMsg');
-  const barEl = document.getElementById('glBar');
-  let hideTimer = null;
+// === Workspace inline tool button opens dock (PC) ===
+document.getElementById('toolInlineBtn')?.addEventListener('click', ()=>{
+  const d = document.getElementById('editorDock');
+  if (!d) return;
+  d.classList.remove('collapsed');
+  d.style.display = 'block';
+});
 
-  function setMsg(stepOrText){
-    const map = { glb:'GLBを読み込み中…', pins:'ピンを読み込み中…', materials:'マテリアルを準備中…', finalize:'最終処理…' };
-    msgEl && (msgEl.textContent = map[stepOrText] || stepOrText || '読み込み中…');
+// === Mobile: model load sheet ===
+(()=>{
+  const loadFab = document.getElementById('loadFab');
+  const loadSheet = document.getElementById('loadSheet');
+  const loadHandle = document.getElementById('loadHandle');
+  const loadClose = document.getElementById('loadClose');
+  const loadInput = document.getElementById('loadInput');
+  const loadStart = document.getElementById('loadStart');
+
+  function openLoadSheet(){
+  document.documentElement.classList.add('sheet-open');
+  document.getElementById('sheetScrim')?.setAttribute('open','');
+  document.getElementById('sheetScrim')?.removeAttribute('hidden');
+    if (!loadSheet) return;
+    loadSheet.dataset.snap = 'half';
+    loadSheet.hidden = false;
+    loadSheet.setAttribute('open','');
+    loadSheet.setAttribute('aria-hidden','false');
+    setTimeout(()=> loadInput?.focus(), 50);
   }
-  function showLoader(step){
-    clearTimeout(hideTimer); hideTimer = null;
-    if (!root) return;
-    setMsg(step||'glb');
-    if (barEl) barEl.style.width = '12%';
-    root.classList.add('show');
-    root.removeAttribute('hidden');
-    root.setAttribute('aria-busy','true');
+  function closeLoadSheet(){
+  document.documentElement.classList.remove('sheet-open');
+  const s=document.getElementById('sheetScrim'); if(s){ s.removeAttribute('open'); s.setAttribute('aria-hidden','true'); s.setAttribute('hidden',''); }
+    if (!loadSheet) return;
+    loadSheet.removeAttribute('open');
+    loadSheet.setAttribute('aria-hidden','true');
+    setTimeout(()=>{ loadSheet.hidden = true; }, 160);
   }
-  function setProgress(p, step){
-    if (typeof step !== 'undefined') setMsg(step);
-    if (!barEl) return;
-    const pct = Math.max(12, Math.min(100, Math.round((p||0)*100)));
-    barEl.style.width = pct + '%';
+  function toLoadUrl(val){
+    const s = (val||'').trim();
+    if (!s) return '';
+    if (s.includes('://')) return s;
+    return 'https://drive.google.com/uc?id=' + encodeURIComponent(s);
   }
-  function hideLoader(delay){
-    clearTimeout(hideTimer);
-    const d = typeof delay==='number' ? delay : 150;
-    hideTimer = setTimeout(()=>{
-      if (!root) return;
-      root.setAttribute('aria-busy','false');
-      root.classList.remove('show');
-      // keep hidden flag for a11y + prevent focus
-      root.setAttribute('hidden','');
-      if (barEl) barEl.style.width = '0%';
-    }, d);
-  }
-  // expose globals
-  window.showLoading = window.showLoading || showLoader;
-  window.hideLoading = window.hideLoading || hideLoader;
-  window.setLoadingProgress = window.setLoadingProgress || setProgress;
-  window.setLoadingStep = function(step){ setMsg(step); };
-
-  // Patch GLTFLoader to report progress if available
-  try{
-    const GLTFLoader = (window.THREE && window.THREE.GLTFLoader) || (window.GLTFLoader);
-    if (GLTFLoader && !GLTFLoader.__gl_patched){
-      const orig = GLTFLoader.prototype.load;
-      GLTFLoader.prototype.load = function(url, onLoad, onProgress, onError){
-  const wrapProgress = function(ev){
-    try{
-      if (ev && ev.total) setLoadingProgress((ev.loaded||0)/(ev.total||1));
-    }catch(_){} 
-    if (onProgress) try{ onProgress(ev); }catch(_){}
-  };
-  const wrapLoad = function(gltf){
-    try{ setLoadingProgress(1,'finalize'); }catch(_){}
-    if (onLoad) onLoad(gltf);
-  };
-  const wrapError = function(err){
-    if (onError) onError(err);
-  };
-  return orig.call(this, url, wrapLoad, wrapProgress, wrapError);
-};
-      GLTFLoader.__gl_patched = true;
-    }
-  }catch(e){ /* no-op */ }
-
-  // Pre-hook: if there is a dedicated "読み込む" button, show loader early
-  try{
-    const btnLoad = document.getElementById('btnLoad');
-    btnLoad && btnLoad.addEventListener('click', function(){ showLoader('glb'); }, {capture:true});
-  }catch(e){}
-  try{
-    const loadStart = document.getElementById('loadStart');
-    loadStart && loadStart.addEventListener('click', function(){ showLoader('glb'); }, {capture:true});
-  }catch(e){}
-})();
-</script>
-
-
-<script>
-// === Robust loader lifecycle (ref-count + LoadingManager + first-render fallback) ===
-(function(){
-  let activeLoads = 0;
-  const MIN_SHOW_MS = 200; // show at least a brief moment to avoid flicker
-  let lastShow = 0;
-
-  function _show(step){
-    lastShow = Date.now();
-    try{ window.showLoading && window.showLoading(step||'glb'); }catch(_){}
-  }
-  function _hideSoon(){
-    const elapsed = Date.now() - lastShow;
-    const wait = Math.max(0, MIN_SHOW_MS - elapsed);
-    setTimeout(()=>{ try{ window.hideLoading && window.hideLoading(120); }catch(_){} }, wait);
-  }
-
-  // Expose to global for other modules if needed
-  window.__gl_refLoadBegin = function(step){ if (activeLoads++ === 0) _show(step); };
-  window.__gl_refLoadEnd   = function(){ if (activeLoads > 0 && --activeLoads === 0) _hideSoon(); };
-
-  // Hook THREE.DefaultLoadingManager if available
-  try{
-    const M = (window.THREE && window.THREE.DefaultLoadingManager) || null;
-    if (M && !M.__gl_patched){
-      const prevStart = M.onStart, prevLoad = M.onLoad, prevError = M.onError, prevProg = M.onProgress;
-      M.onStart = function(url, itemsLoaded, itemsTotal){ try{ window.__gl_refLoadBegin('glb'); }catch(_){} if (typeof prevStart==='function') prevStart(url, itemsLoaded, itemsTotal); };
-      M.onLoad  = function(){ try{ window.__gl_refLoadEnd(); }catch(_){} if (typeof prevLoad==='function') prevLoad(); };
-      M.onError = function(url){ try{ window.__gl_refLoadEnd(); }catch(_){} if (typeof prevError==='function') prevError(url); };
-      M.onProgress = function(url, itemsLoaded, itemsTotal){ 
-        try{ window.setLoadingProgress && window.setLoadingProgress(itemsTotal? itemsLoaded/itemsTotal : 0.5); }catch(_){} 
-        if (typeof prevProg==='function') prevProg(url, itemsLoaded, itemsTotal);
-      };
-      M.__gl_patched = true;
-    }
-  }catch(e){}
-
-  // Fallback: hide after the first successful frame render post-load.
-  // If your viewer dispatches a custom event when the model is added, listen and hide.
-  window.addEventListener('model-loaded', ()=>{ try{ window.__gl_refLoadEnd(); }catch(_){} });
-  // If not, attempt a heuristic: when requestAnimationFrame ticks after 2 frames following a begin, hide.
+  loadFab?.addEventListener('click', openLoadSheet);
+  loadClose?.addEventListener('click', closeLoadSheet);
+  // simple handle drag (header only)
   (function(){
-    let pending = false, ticks = 0;
-    const origBegin = window.__gl_refLoadBegin;
-    window.__gl_refLoadBegin = function(step){ origBegin(step); pending = true; ticks = 0; };
-    function rafLoop(){
-      requestAnimationFrame(()=>{
-        if (pending){ if (++ticks > 2){ pending = false; try{ window.__gl_refLoadEnd(); }catch(_){} } }
-        rafLoop();
-      });
-    }
-    rafLoop();
+    let startY=0, startSnap='half', dragging=false;
+    const order = ['peek','half','full'];
+    function next(dir){ let i=order.indexOf(startSnap); i=Math.max(0,Math.min(order.length-1, i-dir)); return order[i]; }
+    function onDown(ev){ dragging=true; startY = ev.touches? ev.touches[0].clientY : ev.clientY; startSnap = loadSheet.dataset.snap||'half'; ev.preventDefault(); }
+    function onMove(ev){ if(!dragging) return; const y=ev.touches? ev.touches[0].clientY : ev.clientY; const dy=y-startY; const dir=(dy<-10)?-1:((dy>10)?+1:0); if(dir){ loadSheet.dataset.snap = next(dir); } }
+    function onUp(ev){ if(!dragging) return; dragging=false; const endY = ev.changedTouches? ev.changedTouches[0].clientY : ev.clientY; if((loadSheet.dataset.snap||'peek')==='peek' && endY-startY>80){ closeLoadSheet(); } }
+    loadHandle?.addEventListener('mousedown', onDown); loadHandle?.addEventListener('touchstart', onDown, {passive:false});
+    window.addEventListener('mousemove', onMove, {passive:false}); window.addEventListener('touchmove', onMove, {passive:false});
+    window.addEventListener('mouseup', onUp); window.addEventListener('touchend', onUp);
   })();
+  loadStart?.addEventListener('click', ()=>{
+    const url = toLoadUrl(loadInput?.value||'');
+    if(!url){ alert('URLかfileIDを入力してください'); return; }
+    document.getElementById('fileId')?.focus();
+    const fileIdBox = document.getElementById('fileId');
+    if (fileIdBox){ fileIdBox.value = url.includes('googleusercontent.com') ? url : url; }
+    document.getElementById('btnLoad')?.click();
+    closeLoadSheet();
+  });
+})();
 
-  // Ensure buttons that trigger loading bump the ref counter too
-  ['btnLoad','loadStart'].forEach(id=>{
-    const el = document.getElementById(id);
-    if (el){
-      el.addEventListener('click', ()=>{ try{ window.__gl_refLoadBegin('glb'); }catch(_){} }, {capture:true});
-    }
+</script>
+
+<script>
+(function(){
+  const isMobile = ()=> window.matchMedia('(max-width: 960px)').matches;
+  if (!isMobile()) return;
+
+  // Neutralize global openers if present
+  const g = window;
+  const guard = fn => function(){ /* view-only on mobile */ };
+  ['openDock','toggleDock','openDockSheet','openToolDock','showTools'].forEach(n=>{
+    if (typeof g[n]==='function'){ try{ g[n] = guard(g[n]); }catch(_){ } }
   });
 
-  // Safety net: hard timeout to close if something fails to call onLoad/onError
-  setInterval(()=>{
-    // If progress hasn't advanced for a long time but there's no network activity hooks, force-end after 15s
-    if (activeLoads>0 && (Date.now()-lastShow) > 15000){ activeLoads = 0; _hideSoon(); }
-  }, 4000);
+  // Block delegated clicks
+  document.addEventListener('click', (e)=>{
+    const t = e.target;
+    if (!t) return;
+    if (t.closest && t.closest('#dockFab, #editorDock, #materialsDock, #toolFab, #toolBtn, [data-open-dock], [data-role="tool-button"]')){
+      e.preventDefault(); e.stopPropagation();
+    }
+  }, {capture:true});
 })();
 </script>
 
 
-<script>(function(){function x(v){if(!v||v[0]!=='#'||(v.length!==4&&v.length!==5))return v;const r=v[1],g=v[2],b=v[3];return '#'+r+r+g+g+b+b;}document.querySelectorAll('input[type="color"]').forEach(i=>{const v=i.getAttribute('value')||i.value;const nv=x(v);if(nv&&nv!==v){i.setAttribute('value',nv);try{i.value=nv;}catch(_){}}});})();</script>
-
-
 <script>
 (function(){
-  let activeLoads = 0, lastShow = 0;
-  const MIN_SHOW_MS = 200;
-  function _show(step){ lastShow=Date.now(); try{ showLoading(step||'glb'); }catch(_){ } }
-  function _hideSoon(){ const wait=Math.max(0, MIN_SHOW_MS-(Date.now()-lastShow)); setTimeout(()=>{ try{ hideLoading(120); }catch(_){ } }, wait); }
-  try{
-    const M = (window.THREE && window.THREE.DefaultLoadingManager);
-    if (M && !M.__gl2){
-      const prevStart = M.onStart, prevLoad = M.onLoad, prevError = M.onError, prevProg = M.onProgress;
-      M.onStart = function(url, itemsLoaded, itemsTotal){ if (activeLoads++===0) _show('glb'); if (prevStart) prevStart(url, itemsLoaded, itemsTotal); };
-      M.onLoad  = function(){ if (activeLoads>0 && --activeLoads===0) _hideSoon(); if (prevLoad) prevLoad(); };
-      M.onError = function(url){ if (activeLoads>0 && --activeLoads===0) _hideSoon(); if (prevError) prevError(url); };
-      M.onProgress = function(url, itemsLoaded, itemsTotal){ try{ setLoadingProgress(itemsTotal? itemsLoaded/itemsTotal : 0.5); }catch(_){ } if (prevProg) prevProg(url, itemsLoaded, itemsTotal); };
-      M.__gl2 = true;
-    }
-  }catch(e){}
-  setInterval(()=>{ if (activeLoads>0 && (Date.now()-lastShow)>15000){ activeLoads=0; _hideSoon(); } }, 4000);
-})();</script>
+  const btn = document.getElementById('loadFab');
+  if (!btn) return;
+  btn.addEventListener('click', ()=>{
+    // Prefer existing load flow if present
+    const openLoad = window.openLoadSheet || window.openLoadDialog || null;
+    const start = document.getElementById('loadStart');
+    const input = document.getElementById('loadInput') || document.getElementById('fileId');
+    if (openLoad){ try{ openLoad(); return; }catch(_){} }
+    if (input){ try{ input.scrollIntoView({behavior:'smooth', block:'center'}); input.focus(); }catch(_){} }
+  });
+})();
+</script>
 
 </body>
 </html>
