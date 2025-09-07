@@ -457,6 +457,14 @@ html.sheet-open .floating-buttons{
 
 
 
+<style>
+/* === Mobile view-only: hide all tool docks & buttons === */
+@media (max-width: 960px){
+  #dock, #dockSheet, #dockFab, #toolBtn, #toolFab, [data-role="dock"], [data-role="tool-button"]{
+    display: none !important;
+  }
+}
+</style>
 </head>
 <body>
 <div id="sheetScrim" class="scrim" hidden aria-hidden="true"></div>
@@ -3252,5 +3260,41 @@ document.getElementById('toolInlineBtn')?.addEventListener('click', ()=>{
 })();
 
 </script>
+
+<script>
+// === Mobile view-only: disable dock open actions safely ===
+(function(){
+  const IS_MOBILE = window.matchMedia('(max-width: 960px)').matches;
+
+  function safeHide(el){ if(el){ el.style.display='none'; el.setAttribute('aria-hidden','true'); } }
+
+  if (IS_MOBILE){
+    // Best-effort: hide known containers/buttons if they exist
+    safeHide(document.getElementById('dock'));
+    safeHide(document.getElementById('dockSheet'));
+    safeHide(document.getElementById('dockFab'));
+    safeHide(document.getElementById('toolBtn'));
+    safeHide(document.getElementById('toolFab'));
+  }
+
+  // Monkey-patch common openers so nothing triggers on mobile
+  const guard = (fn)=> function(){ if (IS_MOBILE) { return false; } return fn && fn.apply(this, arguments); };
+
+  // Try patching global functions if present
+  const g = window;
+  ['openDock','toggleDock','openDockSheet','showTools','openToolDock','toggleToolDock'].forEach(name=>{
+    if (typeof g[name]==='function'){ g[name] = guard(g[name]); }
+  });
+
+  // Any button with data-open-dock attribute should be disabled on mobile
+  if (IS_MOBILE){
+    document.querySelectorAll('[data-open-dock]').forEach(btn=>{
+      btn.addEventListener('click', (e)=>{ e.preventDefault(); e.stopPropagation(); }, {capture:true});
+      btn.setAttribute('aria-disabled','true');
+    });
+  }
+})();
+</script>
+
 </body>
 </html>
