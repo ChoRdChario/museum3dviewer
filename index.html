@@ -466,6 +466,16 @@ html.sheet-open .floating-buttons{
   }
 }
 
+
+/* Mobile: hide any Tool buttons (top-right etc.) */
+@media (max-width: 960px){
+  #toolBtn, #toolFab, #dockFab, #toolInlineBtn,
+  [data-role="tool-button"],
+  button[aria-label*="ツール"],
+  .tool-btn, .btn-tool { display: none !important; }
+  .load-fab{ display:block !important; }
+}
+
 </style>
 
 
@@ -3339,6 +3349,93 @@ document.getElementById('toolInlineBtn')?.addEventListener('click', ()=>{
     const input = document.getElementById('loadInput') || document.getElementById('fileId');
     if (input){ input.scrollIntoView({behavior:'smooth', block:'center'}); input.focus(); }
   });
+})();
+</script>
+
+
+<script>
+(function(){
+  function $(sel, root){ return (root||document).querySelector(sel); }
+  function all(sel, root){ return Array.from((root||document).querySelectorAll(sel)); }
+
+  // Canonical open/close for Load UI
+  function openLoadUI(){
+    // Prefer existing functions
+    if (typeof window.openLoadSheet === 'function') return window.openLoadSheet();
+    if (typeof window.openLoadDialog === 'function') return window.openLoadDialog();
+    // Fallback: find a sheet/dialog that contains load controls
+    const panels = all('#loadSheet, #dockSheet, .sheet[role="dialog"], dialog, [data-load-panel]');
+    const target = panels.find(p => p.contains($('#loadStart')) || p.contains($('#loadInput')) || p.contains($('#fileId')));
+    if (target){
+      try{
+        // sheet style
+        target.dataset.snap = target.dataset.snap || 'full';
+        target.hidden = false; target.setAttribute('open',''); target.setAttribute('aria-hidden','false');
+        document.documentElement.classList.add('sheet-open');
+      }catch(_){}
+      try{ if (typeof target.showModal==='function') target.showModal(); }catch(_){}
+      return;
+    }
+    // If nothing, scroll to input as last resort
+    const input = $('#loadInput') || $('#fileId');
+    if (input){ input.scrollIntoView({behavior:'smooth', block:'center'}); input.focus(); }
+  }
+
+  function closeLoadUI(){
+    // Prefer existing close functions
+    if (typeof window.closeLoadSheet === 'function') try{ window.closeLoadSheet(); }catch(_){}
+    if (typeof window.closeDockSheet === 'function') try{ window.closeDockSheet(); }catch(_){}
+    // Fallback close: any visible panel that contains the controls
+    const panels = all('#loadSheet, #dockSheet, .sheet[role="dialog"], dialog, [data-load-panel]');
+    panels.forEach(p => {
+      if (p.contains($('#loadStart')) || p.contains($('#loadInput')) || p.contains($('#fileId'))){
+        try{ p.removeAttribute('open'); p.setAttribute('aria-hidden','true'); }catch(_){}
+        try{ p.hidden = true; }catch(_){}
+        try{ if (typeof p.close === 'function') p.close(); }catch(_){}
+      }
+    });
+    document.documentElement.classList.remove('sheet-open');
+    // Clear inputs explicitly (this is the "URL入力そのものをキャンセル")
+    try{ const li = $('#loadInput'); if (li) li.value = ''; }catch(_){}
+    try{ const fi = $('#fileId'); if (fi) fi.value = ''; }catch(_){}
+    try{ const gi = $('#glbUrl'); if (gi) gi.value = ''; }catch(_){}
+    // Hide overlay if any
+    try{ if (typeof window.hideLoading === 'function') window.hideLoading(0); }catch(_){}
+    // Blur focus to avoid mobile keyboards lingering
+    try{ if (document.activeElement) document.activeElement.blur(); }catch(_){}
+  }
+
+  // Export for other scripts (optional)
+  window.openLoadUI = window.openLoadUI || openLoadUI;
+  window.closeLoadUI = window.closeLoadUI || closeLoadUI;
+
+  // Wire the bottom-right "読み込み" button to open the UI
+  const loadFab = document.getElementById('loadFab');
+  if (loadFab){
+    loadFab.addEventListener('click', function(ev){
+      ev.preventDefault();
+      openLoadUI();
+    });
+  }
+
+  // Wire Cancel explicitly
+  const loadCancel = document.getElementById('loadCancel');
+  if (loadCancel){
+    loadCancel.addEventListener('click', function(ev){
+      ev.preventDefault();
+      // Do NOT trigger any loading; just cancel and close
+      closeLoadUI();
+    });
+  }
+
+  // Also ensure "ツール"ボタンはモバイルで非表示＆動作しない
+  const isMobile = window.matchMedia('(max-width: 960px)').matches;
+  if (isMobile){
+    ['toolBtn','toolFab','dockFab','toolInlineBtn'].forEach(id=>{
+      const el = document.getElementById(id);
+      if (el){ el.style.display='none'; el.setAttribute('aria-hidden','true'); el.addEventListener('click', e=>{ e.preventDefault(); e.stopPropagation(); }, {capture:true}); }
+    });
+  }
 })();
 </script>
 
