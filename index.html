@@ -350,7 +350,7 @@
 #dock[data-open="true"] ~ main #view .tool-inline-btn{ display:none } /* Dock openなら隠す */
 
 /* === Mobile load FAB & sheet === */
-.load-fab{ position:fixed; right:14px; bottom:calc(14px + env(safe-area-inset-bottom,0)); z-index:1000; padding:12px 16px; border:1px solid #ddd; border-radius:999px; background:#fff; box-shadow:0 12px 28px rgba(0,0,0,.35); cursor:pointer; }
+.load-fab{ position:fixed; right:14px; bottom:calc(14px + env(safe-area-inset-bottom,0)); z-index:1200; padding:12px 16px; border:1px solid #ddd; border-radius:999px; background:#fff; box-shadow:0 12px 28px rgba(0,0,0,.35); cursor:pointer; }
 @media (max-width: 960px){
   .load-fab{ position:fixed; right:14px; bottom:calc(14px + env(safe-area-inset-bottom,0)); z-index:1000; padding:12px 16px; border:1px solid #ddd; border-radius:999px; background:#fff; box-shadow:0 12px 28px rgba(0,0,0,.35); cursor:pointer; }
 }
@@ -450,6 +450,18 @@ html.sheet-open .floating-buttons{
   #dockFab, #editorDock, #materialsDock,
   #toolFab, #toolBtn, #dock, #dockSheet,
   [data-open-dock], [data-role="tool-button"], .dock, .tool-btn {
+    display: none !important;
+  }
+}
+
+
+/* Mobile: hide any tool buttons (right-top etc.) */
+@media (max-width: 960px){
+  #toolBtn, #toolFab, #dockFab, #toolInlineBtn,
+  [data-role="tool-button"],
+  button[aria-label*="ツール"], 
+  button[aria-label*="tool"],
+  .tool-btn, .btn-tool {
     display: none !important;
   }
 }
@@ -702,6 +714,7 @@ html.sheet-open .floating-buttons{
 <div class="row"><input id="loadInput" placeholder="URL または Google DriveのfileID" type="text"/></div>
 <div class="row">
 <button id="loadStart">読み込む</button>
+<button id="loadCancel" data-variant="secondary">キャンセル</button>
 </div>
 <p class="hint">URLを貼り付けるか、fileIDのみでもOK（例: 1AbC... → https://drive.google.com/uc?id=1AbC... に変換）</p>
 </div>
@@ -3292,6 +3305,39 @@ document.getElementById('toolInlineBtn')?.addEventListener('click', ()=>{
     const input = document.getElementById('loadInput') || document.getElementById('fileId');
     if (openLoad){ try{ openLoad(); return; }catch(_){} }
     if (input){ try{ input.scrollIntoView({behavior:'smooth', block:'center'}); input.focus(); }catch(_){} }
+  });
+})();
+</script>
+
+
+<script>
+(function(){
+  const cancel = document.getElementById('loadCancel');
+  if (!cancel) return;
+  cancel.addEventListener('click', (e)=>{
+    e.preventDefault();
+    // close known sheets/dialogs
+    try{ if (typeof closeLoadSheet==='function') closeLoadSheet(); }catch(_){}
+    try{ if (typeof closeDockSheet==='function') closeDockSheet(); }catch(_){}
+    // hide overlay if visible
+    try{ if (typeof hideLoading==='function') hideLoading(0); }catch(_){}
+    // also collapse any <dialog> used for loading
+    const dlg = document.getElementById('loadDialog');
+    if (dlg && typeof dlg.close==='function'){ try{ dlg.close(); }catch(_){ } }
+  });
+})();
+</script>
+
+
+<script>
+(function(){
+  const btn = document.getElementById('loadFab');
+  if (!btn) return;
+  btn.addEventListener('click', ()=>{
+    if (typeof openLoadSheet==='function'){ openLoadSheet(); return; }
+    if (typeof openLoadDialog==='function'){ openLoadDialog(); return; }
+    const input = document.getElementById('loadInput') || document.getElementById('fileId');
+    if (input){ input.scrollIntoView({behavior:'smooth', block:'center'}); input.focus(); }
   });
 })();
 </script>
