@@ -3011,23 +3011,21 @@ applyBackgroundColor('#222222');
     if (GLTFLoader && !GLTFLoader.__gl_patched){
       const orig = GLTFLoader.prototype.load;
       GLTFLoader.prototype.load = function(url, onLoad, onProgress, onError){
-        try{ showLoader('glb'); }catch(_){}
-        const wrapProgress = function(ev){ try{ 
-          if (ev && ev.total) setProgress((ev.loaded||0)/(ev.total||1));
-        }catch(_){} 
-          if (onProgress) try{ onProgress(ev); }catch(_){} 
-        };
-        const wrapLoad = function(gltf){
-          try{ setProgress(1,'finalize'); }catch(_){}
-          if (onLoad) onLoad(gltf);
-          try{ hideLoader(180); }catch(_){}
-        };
-        const wrapError = function(err){
-          try{ hideLoader(0); }catch(_){}
-          if (onError) onError(err);
-        };
-        return orig.call(this, url, wrapLoad, wrapProgress, wrapError);
-      };
+  const wrapProgress = function(ev){
+    try{
+      if (ev && ev.total) setLoadingProgress((ev.loaded||0)/(ev.total||1));
+    }catch(_){} 
+    if (onProgress) try{ onProgress(ev); }catch(_){}
+  };
+  const wrapLoad = function(gltf){
+    try{ setLoadingProgress(1,'finalize'); }catch(_){}
+    if (onLoad) onLoad(gltf);
+  };
+  const wrapError = function(err){
+    if (onError) onError(err);
+  };
+  return orig.call(this, url, wrapLoad, wrapProgress, wrapError);
+};
       GLTFLoader.__gl_patched = true;
     }
   }catch(e){ /* no-op */ }
@@ -3114,6 +3112,30 @@ applyBackgroundColor('#222222');
   }, 4000);
 })();
 </script>
+
+
+<script>(function(){function x(v){if(!v||v[0]!=='#'||(v.length!==4&&v.length!==5))return v;const r=v[1],g=v[2],b=v[3];return '#'+r+r+g+g+b+b;}document.querySelectorAll('input[type="color"]').forEach(i=>{const v=i.getAttribute('value')||i.value;const nv=x(v);if(nv&&nv!==v){i.setAttribute('value',nv);try{i.value=nv;}catch(_){}}});})();</script>
+
+
+<script>
+(function(){
+  let activeLoads = 0, lastShow = 0;
+  const MIN_SHOW_MS = 200;
+  function _show(step){ lastShow=Date.now(); try{ showLoading(step||'glb'); }catch(_){ } }
+  function _hideSoon(){ const wait=Math.max(0, MIN_SHOW_MS-(Date.now()-lastShow)); setTimeout(()=>{ try{ hideLoading(120); }catch(_){ } }, wait); }
+  try{
+    const M = (window.THREE && window.THREE.DefaultLoadingManager);
+    if (M && !M.__gl2){
+      const prevStart = M.onStart, prevLoad = M.onLoad, prevError = M.onError, prevProg = M.onProgress;
+      M.onStart = function(url, itemsLoaded, itemsTotal){ if (activeLoads++===0) _show('glb'); if (prevStart) prevStart(url, itemsLoaded, itemsTotal); };
+      M.onLoad  = function(){ if (activeLoads>0 && --activeLoads===0) _hideSoon(); if (prevLoad) prevLoad(); };
+      M.onError = function(url){ if (activeLoads>0 && --activeLoads===0) _hideSoon(); if (prevError) prevError(url); };
+      M.onProgress = function(url, itemsLoaded, itemsTotal){ try{ setLoadingProgress(itemsTotal? itemsLoaded/itemsTotal : 0.5); }catch(_){ } if (prevProg) prevProg(url, itemsLoaded, itemsTotal); };
+      M.__gl2 = true;
+    }
+  }catch(e){}
+  setInterval(()=>{ if (activeLoads>0 && (Date.now()-lastShow)>15000){ activeLoads=0; _hideSoon(); } }, 4000);
+})();</script>
 
 </body>
 </html>
