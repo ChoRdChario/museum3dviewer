@@ -1786,13 +1786,13 @@ const closeSheet = ()=>{
   dock.style.display = 'none';
 };
 dockFab?.addEventListener('click', ()=>{
-  // mobile FAB
-
-  if (dock.style.display === 'none' || dock.classList.contains('collapsed')) if (typeof openSheet==='function') openSheet();
-  else if (typeof closeSheet==='function') closeSheet();
+  // mobile FAB: prefer top dock sheet / otherwise fallback
+  if (typeof openDockSheet==='function') { openDockSheet(); return; }
+  if (typeof openSheet==='function') { openSheet(); return; }
 });
-dock.addEventListener('click', (e)=>{
-  if (e.if (target) target.id=== 'dockMin') if (typeof closeSheet==='function') closeSheet(); // 既存の「最小化」ボタンで閉じる
+dock?.addEventListener('click', (e)=>{
+  const t = e && (e.target || e.srcElement);
+  if (t && t.id === 'dockMin') { if (typeof closeSheet==='function') closeSheet(); }
 });
 
 /* ページヘッダーのオートハイド（指を止めたら 1.5s で隠す） */
