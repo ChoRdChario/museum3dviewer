@@ -350,12 +350,9 @@
 #dock[data-open="true"] ~ main #view .tool-inline-btn{ display:none } /* Dock openなら隠す */
 
 /* === Mobile load FAB & sheet === */
-.load-fab{
-  position:fixed; left:14px; bottom:14px; z-index:9; display:none;
-  padding:12px 16px; border:1px solid #ddd; border-radius:999px; background:#fff; box-shadow:0 12px 28px rgba(0,0,0,.35); cursor:pointer;
-}
+.load-fab{ position:fixed; right:14px; bottom:calc(14px + env(safe-area-inset-bottom,0)); z-index:9; display:none; padding:12px 16px; border:1px solid #ddd; border-radius:999px; background:#fff; box-shadow:0 12px 28px rgba(0,0,0,.35); cursor:pointer; }
 @media (max-width: 960px){
-  .load-fab{ display:block }
+  .load-fab{ position:fixed; right:14px; bottom:calc(14px + env(safe-area-inset-bottom,0)); z-index:9; display:none; padding:12px 16px; border:1px solid #ddd; border-radius:999px; background:#fff; box-shadow:0 12px 28px rgba(0,0,0,.35); cursor:pointer; }
 }
 
 /* reuse .sheet styles already present */
@@ -371,25 +368,7 @@
 @media (max-width: 960px){
   #dockFab{ display:block; position:fixed; right:14px; bottom:14px; padding:12px 16px; box-shadow:0 8px 24px rgba(0,0,0,.25); }
 }
-</style>
-<style>
-/* --- Mobile: hide tool dock & invokers (view-only) --- */
-@media (max-width: 960px){
-  /* IDs actually present in this file */
-  #editorDock,
-  #materialsDock,
-  #dockFab,
-  #dockClose,
-  /* generic fallbacks */
-  #dock, #dockSheet, #toolFab, #toolBtn,
-  .dock,
-  [data-role="dock"],
-  [data-open-dock],
-  [data-tool],
-  [data-role="tool-button"]{
-    display: none !important;
-  }
-}
+@media (max-width: 960px){ .load-fab{ display:block } }
 </style>
 </head>
 <body>
@@ -2946,32 +2925,74 @@ applyBackgroundColor('#222222');
 
 </script>
 
+<div id="loadingOverlay" aria-busy="false" aria-live="polite" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:2000;display:none;align-items:center;justify-content:center;flex-direction:column;color:#fff;text-align:center;padding:20px;">
+  <div class="spinner" style="width:40px;height:40px;border-radius:50%;border:4px solid rgba(255,255,255,.25);border-top-color:#fff;animation:spin .9s linear infinite;margin-bottom:10px;"></div>
+  <div id="loadingMsg">読み込み中…</div>
+  <div class="progress" style="width:min(360px, 80vw); height:4px; background:rgba(255,255,255,.25); border-radius:999px; overflow:hidden; margin-top:10px">
+    <i id="loadingBar" style="display:block; height:100%; width:0%; background:#fff; transition:width .2s ease"></i>
+  </div>
+</div>
+
+
 <script>
 (function(){
-  const isMobile = ()=> window.matchMedia('(max-width: 960px)').matches;
-  if (!isMobile()) return;
+  const overlay = document.getElementById('loadingOverlay');
+  const msgEl = document.getElementById('loadingMsg');
+  const bar = document.getElementById('loadingBar');
+  function showLoading(msg){
+    if (!overlay) return;
+    overlay.style.display='flex';
+    overlay.setAttribute('aria-busy','true');
+    if (msgEl) msgEl.textContent = msg || '読み込み中…';
+    if (bar) bar.style.width = '15%';
+  }
+  function setLoadingProgress(p, msg){
+    if (bar){ bar.style.width = Math.max(15, Math.min(100, Math.round(p*100))) + '%'; }
+    if (msg && msgEl){ msgEl.textContent = msg; }
+  }
+  function hideLoading(){
+    if (!overlay) return;
+    overlay.setAttribute('aria-busy','false');
+    overlay.style.display='none';
+    if (bar) bar.style.width = '0%';
+  }
+  // expose globally for existing code to call if needed
+  window.showLoading = window.showLoading || showLoading;
+  window.hideLoading = window.hideLoading || hideLoading;
+  window.setLoadingProgress = window.setLoadingProgress || setLoadingProgress;
 
-  // Guard: neutralize openers if defined
-  const g = window;
-  const guard = (fn)=> function(){ return; };
-  ['openDock','closeDock','openDockSheet','toggleDock','showTools','openToolDock','syncDockMoveToggle'].forEach(name=>{
-    if (typeof g[name]==='function'){ try{ g[name] = guard(g[name]); }catch(_){} }
-  });
-
-  // Stop any delegated openers
-  document.addEventListener('click', (e)=>{
-    const t = e.target;
-    if (!t) return;
-    if (t.matches?.('[data-open-dock], [data-role="tool-button"], #dockFab')){
-      e.preventDefault(); e.stopPropagation();
-    }
-  }, {capture:true});
-
-  // Hide instances that may be set via inline style
-  ['editorDock','materialsDock','dockFab','toolFab','toolBtn','dock'].forEach(id=>{
-    const el = document.getElementById(id);
-    if (el){ el.style.display='none'; el.setAttribute('aria-hidden','true'); }
-  });
+  // Hook: モバイルの読み込みシートの「読み込む」
+  const loadStart = document.getElementById('loadStart');
+  const loadInput = document.getElementById('loadInput');
+  const fileIdInput = document.getElementById('fileId');
+  const btnLoad = document.getElementById('btnLoad');
+  function toLoadUrl(val){
+    const s = (val||'').trim();
+    if (!s) return '';
+    if (s.includes('://')) return s;
+    return 'https://drive.google.com/uc?id=' + encodeURIComponent(s);
+  }
+  if (loadStart){
+    loadStart.addEventListener('click', ()=>{
+      try{
+        const url = toLoadUrl(loadInput?.value||'');
+        if (!url){ alert('URLかfileIDを入力してください'); return; }
+        if (fileIdInput){ fileIdInput.value = url; }
+        showLoading('GLBを読み込み中…');
+        // 既存のロードボタン動作に委譲
+        btnLoad?.click();
+        // セーフガード：一定時間でフェードアウト（既存コードがhideLoadingを呼ぶ場合は早期に消える）
+        setTimeout(()=>{ hideLoading(); }, 8000);
+      }catch(e){ console.error(e); hideLoading(); }
+    });
+  }
+  // 既存の PC 側の読み込みボタンにもフック（直接クリック時）
+  if (btnLoad){
+    btnLoad.addEventListener('click', ()=>{
+      showLoading('GLBを読み込み中…');
+      setTimeout(()=>{ hideLoading(); }, 8000);
+    }, {capture:true});
+  }
 })();
 </script>
 
