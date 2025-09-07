@@ -1843,6 +1843,7 @@ function applyDockMinState(){
   if (dockMin) dockMin.textContent = min ? '展開' : '最小化';
 }
 
+
  if (dockMin) {
    dockMin.onclick = ()=>{
      const min = localStorage.getItem('editorDock_min')==='1';
