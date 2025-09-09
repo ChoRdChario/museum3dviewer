@@ -3439,5 +3439,124 @@ document.getElementById('toolInlineBtn')?.addEventListener('click', ()=>{
 })();
 </script>
 
+
+<script>
+// === Patch: reliable file-picker cancel handling for caption image & pins ===
+(function(){
+  // Utility: robust single-use file picker with cancel detection
+  function pickFileOnce({accept='', multiple=false}={}){
+    return new Promise((resolve)=>{
+      const inp = document.createElement('input');
+      inp.type = 'file';
+      if (accept) inp.accept = accept;
+      inp.multiple = !!multiple;
+      inp.style.position = 'fixed';
+      inp.style.left = '-9999px';
+      document.body.appendChild(inp);
+
+      let settled = false;
+      const cleanup = () => {
+        window.removeEventListener('focus', onFocus, true);
+        document.removeEventListener('visibilitychange', onVis, true);
+        setTimeout(()=> inp.remove(), 0);
+      };
+      const finish = (payload) => { if (settled) return; settled = true; resolve(payload); cleanup(); };
+
+      inp.addEventListener('change', () => {
+        if (inp.files && inp.files.length > 0){
+          finish({ files: inp.files, canceled: false });
+        }else{
+          finish({ files: null, canceled: true });
+        }
+      }, { once:true });
+
+      // When the file dialog closes without selection, focus typically returns; detect that.
+      const onFocus = () => {
+        setTimeout(()=>{
+          if (!settled && (!inp.files || inp.files.length === 0)){
+            finish({ files: null, canceled: true });
+          }
+        }, 120);
+      };
+      const onVis = () => {
+        if (document.visibilityState === 'visible') onFocus();
+      };
+      window.addEventListener('focus', onFocus, true);
+      document.addEventListener('visibilitychange', onVis, true);
+
+      // Open dialog
+      inp.click();
+    });
+  }
+
+  function reenableButtons(scope){
+    try{
+      (scope||document).querySelectorAll('.disabled').forEach(el=> el.classList.remove('disabled'));
+      (scope||document).querySelectorAll('[aria-disabled="true"]').forEach(el=> el.setAttribute('aria-disabled','false'));
+    }catch(_){}
+  }
+
+  // === Caption image: cancel-safe wiring ===
+  const capPickImage = document.getElementById('capPickImage');
+  const capSheet = document.getElementById('capSheet');
+  const capImageRow = document.getElementById('capImageRow');
+  const capImage = document.getElementById('capImage');
+  if (capPickImage){
+    capPickImage.addEventListener('click', async (e)=>{
+      e.preventDefault(); e.stopPropagation();
+      const { files, canceled } = await pickFileOnce({ accept: 'image/*' });
+      if (canceled){
+        reenableButtons(capSheet);
+        return;
+      }
+      try{
+        const file = files[0];
+        const url = URL.createObjectURL(file);
+        if (capImage){ capImage.src = url; }
+        if (capImageRow){ capImageRow.hidden = false; }
+      }catch(_){}
+      reenableButtons(capSheet);
+    });
+  }
+
+  // === Pins JSON: cancel-safe wiring ===
+  const btnPickPins = document.getElementById('btnPickPins') || document.querySelector('[data-action="pick-pins"]');
+  const pinsIdInput = document.getElementById('pinsId') || document.querySelector('input[name="pinsId"]');
+  if (btnPickPins){
+    btnPickPins.addEventListener('click', async (e)=>{
+      e.preventDefault(); e.stopPropagation();
+      const { files, canceled } = await pickFileOnce({ accept: 'application/json,.json' });
+      if (canceled){
+        reenableButtons(document);
+        return;
+      }
+      try{
+        const file = files[0];
+        if (pinsIdInput && !pinsIdInput.value){
+          pinsIdInput.value = file.name || '';
+        }
+      }catch(_){}
+      reenableButtons(document);
+    });
+  }
+
+  // === Ensure Cancel/Close buttons always respond, even after picker cancel ===
+  const cancelIds = ['loadCancel','loadClose','capClose','dockSheetClose','capCancel'];
+  cancelIds.forEach(id=>{
+    const btn = document.getElementById(id);
+    if (!btn) return;
+    btn.addEventListener('click', (e)=>{
+      // Undo any accidental UI lock
+      reenableButtons(document);
+      // Blur to close keyboards
+      try{ if (document.activeElement) document.activeElement.blur(); }catch(_){}
+    }, { capture:true });
+  });
+
+  // Expose for reuse
+  window.__pickFileOnce = pickFileOnce;
+})();
+</script>
+
 </body>
 </html>
