@@ -483,6 +483,16 @@ html.sheet-open .floating-buttons{
 
 
 
+
+<style>
+/* --- fix: ensure sheets sit above the scrim overlay --- */
+.scrim{ z-index:1200; }              /* keep existing */
+.sheet{ z-index:1400 !important; }   /* generic sheet */
+.cap-sheet{ z-index:1400 !important; } 
+.load-sheet{ z-index:1400 !important; }
+.top-sheet{ z-index:1500 !important; } /* top tool sheet highest */
+</style>
+
 </head>
 <body>
 <div id="sheetScrim" class="scrim" hidden aria-hidden="true"></div>
@@ -3436,6 +3446,43 @@ document.getElementById('toolInlineBtn')?.addEventListener('click', ()=>{
       if (el){ el.style.display='none'; el.setAttribute('aria-hidden','true'); el.addEventListener('click', e=>{ e.preventDefault(); e.stopPropagation(); }, {capture:true}); }
     });
   }
+})();
+
+// === patch: robust closing for caption/load/dock sheets and scrim/Esc ===
+(function(){
+  const sheetScrim = document.getElementById('sheetScrim');
+  function hideScrim(){
+    if (!sheetScrim) return;
+    sheetScrim.removeAttribute('open');
+    sheetScrim.setAttribute('hidden','');
+    sheetScrim.setAttribute('aria-hidden','true');
+  }
+  window.closeCaptionSheet = function closeCaptionSheet(){
+    const cs = document.getElementById('capSheet');
+    if (!cs) return;
+    cs.removeAttribute('open');
+    cs.setAttribute('aria-hidden','true');
+    setTimeout(()=>{ cs.hidden = true; }, 160);
+    document.documentElement.classList.remove('sheet-open');
+    hideScrim();
+  };
+  // bind close button if present
+  document.getElementById('capClose')?.addEventListener('click', window.closeCaptionSheet);
+
+  // clicking the scrim closes any open sheets
+  sheetScrim?.addEventListener('click', ()=>{
+    try{ window.closeDockSheet?.(); }catch(e){}
+    try{ window.closeLoadSheet?.(); }catch(e){}
+    try{ window.closeCaptionSheet?.(); }catch(e){}
+  });
+
+  // Esc key also closes
+  window.addEventListener('keydown', (e)=>{
+    if (e.key !== 'Escape') return;
+    try{ window.closeDockSheet?.(); }catch(e){}
+    try{ window.closeLoadSheet?.(); }catch(e){}
+    try{ window.closeCaptionSheet?.(); }catch(e){}
+  });
 })();
 </script>
 
