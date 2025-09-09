@@ -3558,5 +3558,90 @@ document.getElementById('toolInlineBtn')?.addEventListener('click', ()=>{
 })();
 </script>
 
+
+<script>
+// === Patch v2: Strong-close handlers + disable local pin file picking on mobile ===
+(function(){
+  const isMobile = ()=> window.matchMedia('(max-width: 960px)').matches;
+
+  function $(sel, root){ return (root||document).querySelector(sel); }
+  function all(sel, root){ return Array.from((root||document).querySelectorAll(sel)); }
+
+  // Unified close routine for load/caption sheets/dialogs + input clear
+  function closePanels(){
+    // Hide common panels
+    const ids = ['capSheet','loadSheet','dockSheet','loadDialog'];
+    ids.forEach(id=>{
+      const el = document.getElementById(id);
+      if (!el) return;
+      try{ el.removeAttribute('open'); }catch(_){}
+      try{ el.setAttribute('aria-hidden','true'); }catch(_){}
+      try{ el.hidden = true; }catch(_){}
+      try{ if (typeof el.close === 'function') el.close(); }catch(_){}
+    });
+    // Clear inputs (cancel URL/pins entry)
+    ['loadInput','fileId','glbUrl'].forEach(id=>{
+      const inp = document.getElementById(id);
+      if (inp){ try{ inp.value = ''; }catch(_){ } }
+    });
+    // Re-enable UI if something disabled it
+    try{
+      document.querySelectorAll('.disabled,[aria-disabled="true"]').forEach(el=>{
+        el.classList.remove('disabled'); el.setAttribute('aria-disabled','false');
+      });
+    }catch(_){}
+    // Hide loader if visible
+    try{ if (typeof window.hideLoading==='function') window.hideLoading(0); }catch(_){}
+    // Blur to dismiss keyboards
+    try{ if (document.activeElement) document.activeElement.blur(); }catch(_){}
+  }
+  window.__closePanels = closePanels;
+
+  // Make close buttons react even if overlays or capture traps exist
+  const closeIds = ['capClose','loadClose','loadCancel','dockSheetClose','capCancel'];
+  document.addEventListener('click', (e)=>{
+    const t = e.target;
+    if (!t) return;
+    const id = (t.id||'').toLowerCase();
+    if (closeIds.some(x => x.toLowerCase() === id)){
+      e.preventDefault(); e.stopPropagation();
+      closePanels();
+    }
+  }, {capture:true});
+
+  // Also wire keydown Esc to close
+  document.addEventListener('keydown', (e)=>{
+    if (e.key === 'Escape'){ closePanels(); }
+  }, {capture:true});
+
+  // Disable "Pick Pins from local" on mobile; align to latest mobile spec
+  const btnPickPins = document.getElementById('btnPickPins') || document.querySelector('[data-action="pick-pins"]');
+  if (btnPickPins){
+    btnPickPins.addEventListener('click', (e)=>{
+      if (!isMobile()) return; // Desktopは既存挙動のまま
+      e.preventDefault(); e.stopPropagation();
+      // Instead of opening a local picker, guide to pinsId input (or show notice)
+      const field = document.getElementById('pinsId') || document.querySelector('input[name="pinsId"]');
+      if (field){
+        try{
+          field.scrollIntoView({behavior:'smooth', block:'center'});
+          field.focus();
+        }catch(_){}
+      }else{
+        // Fallback notice
+        try{ alert('モバイルではローカルからのピン選択は非対応です。pinsId またはURLで指定してください。'); }catch(_){}
+      }
+    }, {capture:true});
+  }
+
+  // Ensure close buttons are clickable above any overlays
+  const style = document.createElement('style');
+  style.textContent = `
+    #capClose, #loadClose, #loadCancel, #dockSheetClose, #capCancel { pointer-events:auto !important; position:relative; z-index:2147483646; }
+  `;
+  document.head.appendChild(style);
+})();
+</script>
+
 </body>
 </html>
