@@ -493,6 +493,16 @@ html.sheet-open .floating-buttons{
 .top-sheet .top-sheet{ z-index:1500 !important; } /* top tool sheet highest */
 </style>
 
+
+<style>
+/* --- v3 fix: ensure sheets sit above scrim overlay --- */
+.scrim{ z-index:1200; }
+.sheet{ z-index:1400 !important; }
+.cap-sheet{ z-index:1400 !important; }
+.load-sheet{ z-index:1400 !important; }
+.top-sheet{ z-index:1500 !important; }
+</style>
+
 </head>
 <body>
 <div id="sheetScrim" class="scrim" hidden aria-hidden="true"></div>
@@ -3577,6 +3587,192 @@ window.addEventListener('DOMContentLoaded', ()=>{
           const res = await driveListFiles({ q, pageSize: 200 });
           await renderGrid(res.files||[]);
         }catch(e){ gridEl.innerHTML = `<div>検索に失敗しました</div>`; }
+      });
+    }catch(e){
+      console.warn('openPinsChooser failed:', e);
+      alert('pins.json の取得に失敗しました。サインイン/権限やネットワークをご確認ください。');
+    }
+  }
+
+  btnPickPins?.addEventListener('click', (e)=>{
+    e.preventDefault();
+    e.stopPropagation();
+    openPinsChooser();
+  });
+});
+
+
+// === patch v3: robust helpers + Drive pins chooser with fallbacks ===
+window.addEventListener('DOMContentLoaded', ()=>{
+  // --- Robust helper resolution ---
+  // Modal helpers (fallback if missing)
+  if (typeof window.openModal !== 'function' || typeof window.closeModal !== 'function') {
+    let _overlay = null;
+    window.openModal = (html)=>{
+      if (!_overlay){
+        _overlay = document.createElement('div');
+        _overlay.className = 'modal-overlay';
+        _overlay.id = 'modalRoot_patch';
+        document.body.appendChild(_overlay);
+      }
+      _overlay.className = 'modal-overlay';
+      _overlay.innerHTML = html;
+    };
+    window.closeModal = ()=>{
+      const root = document.getElementById('modalRoot_patch') || document.getElementById('modalRoot');
+      if (root){ root.className = 'hidden'; root.innerHTML = ''; }
+    };
+  }
+
+  // Drive list fallback using gapi if driveListFiles is missing
+  if (typeof window.driveListFiles !== 'function') {
+    window.driveListFiles = async function({ q='', pageSize=100, orderBy='modifiedTime desc', fields }={}){
+      // try gapi client directly
+      if (!window.gapi || !gapi.client?.drive?.files?.list) throw new Error('gapi drive client not ready');
+      if (typeof window.gapiReady === 'function') { try{ await window.gapiReady(); }catch(e){} }
+      const r = await gapi.client.drive.files.list({
+        q, pageSize, orderBy,
+        fields: fields || "files(id,name,mimeType,modifiedTime,parents,thumbnailLink),nextPageToken"
+      });
+      return r.result || { files:[] };
+    };
+  }
+
+  // Ensure ensureToken exists (no-op fallback)
+  if (typeof window.ensureToken !== 'function') {
+    window.ensureToken = async ()=>{};
+  }
+
+  const sheetScrim = document.getElementById('sheetScrim');
+  const capClose = document.getElementById('capClose');
+  const pinsIdInput  = document.getElementById('pinsId');
+  const folderIdInput= document.getElementById('folderId');
+  const fileIdInput  = document.getElementById('fileId');
+  const btnPickPins  = document.getElementById('btnPickPins');
+
+  // Fallback close for caption sheet if not defined
+  if (typeof window.closeCaptionSheet !== 'function') {
+    window.closeCaptionSheet = function closeCaptionSheet(){
+      const cs = document.getElementById('capSheet');
+      if (!cs) return;
+      cs.removeAttribute('open');
+      cs.setAttribute('aria-hidden','true');
+      setTimeout(()=>{ cs.hidden = true; }, 160);
+      document.documentElement.classList.remove('sheet-open');
+      if (sheetScrim){
+        sheetScrim.removeAttribute('open');
+        sheetScrim.setAttribute('hidden','');
+        sheetScrim.setAttribute('aria-hidden','true');
+      }
+    };
+  }
+
+  // Delegate clicks for any modal close button (more reliable)
+  document.addEventListener('click', (e)=>{
+    const t = e.target;
+    if (!t) return;
+    if (t.id === 'pinsClose' || t.id === 'helpClose1' || t.id === 'helpClose2' || t.id === 'helpClose3') {
+      try{ window.closeModal(); }catch(_){}
+    }
+    // 'このファイルを使う'
+    if (t.matches('[data-pick]')){
+      const id = t.getAttribute('data-pick');
+      const name = t.getAttribute('data-name') || '';
+      try{ window.closeModal(); }catch(_){}
+      if (pinsIdInput && id){ pinsIdInput.value = id; }
+      try{ window.loadedPinsName = name; }catch(_){}
+      try{ window.updatePinsInfo?.(); }catch(_){}
+    }
+  });
+
+  capClose?.addEventListener('click', ()=> window.closeCaptionSheet());
+
+  // Clicking the scrim closes any open sheets
+  sheetScrim?.addEventListener('click', ()=>{
+    try{ window.closeDockSheet?.(); }catch(e){}
+    try{ window.closeLoadSheet?.(); }catch(e){}
+    try{ window.closeCaptionSheet?.(); }catch(e){}
+  });
+
+  // Esc key closes sheets and modal
+  window.addEventListener('keydown', (e)=>{
+    if (e.key !== 'Escape') return;
+    try{ window.closeDockSheet?.(); }catch(e){}
+    try{ window.closeLoadSheet?.(); }catch(e){}
+    try{ window.closeCaptionSheet?.(); }catch(e){}
+    try{ window.closeModal?.(); }catch(e){}
+  });
+
+  // Pins chooser: list JSON in the same Drive folder as GLB (or folderIdInput)
+  async function openPinsChooser(){
+    try{
+      const ensureToken = window.ensureToken;
+      const driveGetMetadata = window.driveGetMetadata;
+      const driveListFiles = window.driveListFiles;
+      const openModal = window.openModal;
+
+      await ensureToken?.();
+
+      // Resolve target parent folder
+      const glbId = (fileIdInput?.value || '').trim();
+      let parentId = (folderIdInput?.value || '').trim();
+      if (!parentId && glbId && typeof driveGetMetadata === 'function'){
+        try{
+          const meta = await driveGetMetadata(glbId);
+          if (meta.parents && meta.parents.length) parentId = meta.parents[0];
+        }catch(e){ /* ignore */ }
+      }
+
+      const hdr = parentId ? 'pins.json を選択（GLBと同じフォルダ）' : 'pins.json を選択（ドライブ全体検索）';
+      openModal(`
+        <div class="modal">
+          <header>
+            <strong>${hdr}</strong>
+            <div class="grow"></div>
+            <input id="pinsQuery" placeholder="名前でフィルタ（例：pins）" style="padding:6px 8px;border:1px solid #ddd;border-radius:8px;min-width:200px">
+            <button id="pinsSearchAll">ドライブ全体から検索</button>
+            <button id="pinsClose">閉じる</button>
+          </header>
+          <div class="body"><div class="grid" id="pinsGrid"><div>読み込み中…</div></div></div>
+          <footer><span class="muted">JSON（application/json）と pins.json を表示。最新順。</span></footer>
+        </div>
+      `);
+
+      const gridEl = document.getElementById('pinsGrid');
+
+      function rowHTML(f){
+        const t = new Date(f.modifiedTime||Date.now()).toLocaleString();
+        const name = (f.name||'(名称なし)').replace(/"/g,'&quot;');
+        return `<div class="card">
+          <div class="title">${name}</div>
+          <div class="meta">${t}</div>
+          <button data-pick="${f.id}" data-name="${name}">このファイルを使う</button>
+        </div>`;
+      }
+
+      async function renderGrid(files){
+        if (!files?.length){ gridEl.innerHTML = `<div>候補がありません</div>`; return; }
+        gridEl.innerHTML = files.map(rowHTML).join('');
+      }
+
+      async function loadFolder(){
+        try{
+          let q = "trashed = false and (mimeType = 'application/json' or name = 'pins.json')";
+          if (parentId) q += " and '"+parentId+"' in parents";
+          const res = await driveListFiles({ q, pageSize: 100 });
+          await renderGrid(res.files||[]);
+        }catch(e){ console.warn(e); gridEl.innerHTML = `<div>検索に失敗しました</div>`; }
+      }
+      await loadFolder();
+
+      document.getElementById('pinsSearchAll')?.addEventListener('click', async ()=>{
+        try{
+          const query = (document.getElementById('pinsQuery')?.value || '').trim();
+          let q = "trashed = false and (mimeType = 'application/json' or name = 'pins.json')";
+          if (query) q += " and name contains '"+query.replace(/'/g, "\'")+"'";
+          const res = await driveListFiles({ q, pageSize: 200 });
+          await renderGrid(res.files||[]);
+        }catch(e){ console.warn(e); gridEl.innerHTML = `<div>検索に失敗しました</div>`; }
       });
     }catch(e){
       console.warn('openPinsChooser failed:', e);
