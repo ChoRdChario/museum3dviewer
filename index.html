@@ -513,7 +513,7 @@ html.sheet-open .floating-buttons{
 <span class="title">キャプション</span>
 <input autocomplete="off" id="pinsId" placeholder="（任意）pins.json の fileId / 共有リンク"/>
 <button class="iconbtn" id="btnPickPins">選択…</button>
-<button class="iconbtn" id="btnPickPins" title="GLBと同じフォルダから pins.json を選ぶ">選択</button>
+
   <button class="iconbtn" id="btnClearPins">クリア</button>
 <span class="sep"></span>
 <span class="tiny">Save FolderId:</span>
@@ -3446,6 +3446,24 @@ document.getElementById('btnPickPins')?.addEventListener('click', (e)=>{
   if (typeof openPinsChooser === 'function') {
     openPinsChooser();
   }
+});
+
+
+// v11: robust close binding for caption/pins sheets (capture phase)
+window.addEventListener('DOMContentLoaded', ()=>{
+  document.addEventListener('click', (e)=>{
+    const t = e.target;
+    if (!t) return;
+    if (t.id === 'capClose' || t.id === 'pinsClose') {
+      e.preventDefault();
+      e.stopPropagation();
+      try{ window.closeCaptionSheet?.(); }catch(_){}
+      try{ window.closeModal?.(); }catch(_){}
+      const s = document.getElementById('sheetScrim');
+      if (s){ s.removeAttribute('open'); s.setAttribute('hidden',''); s.setAttribute('aria-hidden','true'); }
+      document.documentElement.classList.remove('sheet-open');
+    }
+  }, true);
 });
 
 </script>
