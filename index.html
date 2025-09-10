@@ -12,12 +12,12 @@
 <style>
   /* 非活性行の見た目と操作抑止 */
 .disabled { opacity: .55; pointer-events: none; }
-    :root { --bg:#111; --muted:#666; }
+    :root { --bg:#111111; --muted:#666666; }
     html,body{height:100%}
-    body{margin:0;background:var(--bg);color:#222;font:14px/1.5 system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif}
+    body{margin:0;background:var(--bg);color:#222222;font:14px/1.5 system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif}
     header{display:flex;gap:8px;align-items:center;padding:10px 12px;background:#f8f8f8;border-bottom:1px solid #e8e8e8;position:sticky;top:0;z-index:10;flex-wrap:wrap}
-    header input{padding:6px 8px;border:1px solid #ddd;border-radius:8px;min-width:200px}
-    header button{padding:6px 10px;border:1px solid #ddd;border-radius:8px;background:#fff;cursor:pointer}
+    header input{padding:6px 8px;border:1px solid #dddddd;border-radius:8px;min-width:200px}
+    header button{padding:6px 10px;border:1px solid #dddddd;border-radius:8px;background:#ffffff;cursor:pointer}
     header .grow{flex:1}
     main{display:grid;grid-template-columns: 1fr 360px;gap:10px;}
 #view{
@@ -25,85 +25,85 @@
   width:100%;
   height:calc(100dvh - 56px); /* ← 100vh → 100dvh に変更 */
   overflow:hidden;
-  background:#222;
+  background:#222222;
 }
     #canvas{display:block;width:100%;height:100%}
-    aside{height:calc(100dvh - 56px);overflow:auto;background:#fafafa;border-left:1px solid #eee}
-    .sec{padding:10px 12px;border-bottom:1px solid #eee}
+    aside{height:calc(100dvh - 56px);overflow:auto;background:#fafafa;border-left:1px solid #eeeeee}
+    .sec{padding:10px 12px;border-bottom:1px solid #eeeeee}
     .row{display:flex;gap:8px;align-items:center;margin-top:6px;flex-wrap:wrap}
     .muted{color:var(--muted);font-size:12px}
     .hidden{display:none}
-    .warn{color:#b00}
-    .badge{display:inline-block;background:#eef;border:1px solid #dde;border-radius:999px;padding:2px 8px;font-size:12px}
-    .pin{border:1px solid #e5e5e5;background:#fff;border-radius:10px;padding:8px;margin-top:8px}
-    .pin input,.pin textarea{width:100%;border:1px solid #ddd;border-radius:6px;padding:6px}
+    .warn{color:#bb0000}
+    .badge{display:inline-block;background:#eeeeff;border:1px solid #ddddee;border-radius:999px;padding:2px 8px;font-size:12px}
+    .pin{border:1px solid #e5e5e5;background:#ffffff;border-radius:10px;padding:8px;margin-top:8px}
+    .pin input,.pin textarea{width:100%;border:1px solid #dddddd;border-radius:6px;padding:6px}
     .pin img{max-width:100%;border-radius:8px;margin-top:6px;cursor:zoom-in}
-    #dbg{position:fixed;left:8px;bottom:8px;color:#0f0;font:12px/1.2 monospace;z-index:9999;pointer-events:none;white-space:pre}
+    #dbg{position:fixed;left:8px;bottom:8px;color:#00ff00;font:12px/1.2 monospace;z-index:9999;pointer-events:none;white-space:pre}
     .float-layer{position:absolute;left:0;top:0;width:100%;height:100%;pointer-events:none}
     .float-card{
       position:absolute; min-width:200px; max-width:280px; pointer-events:auto;
-      background:#fff; border:1px solid #ddd; border-radius:10px; box-shadow:0 8px 22px rgba(0,0,0,0.3);
+      background:#ffffff; border:1px solid #dddddd; border-radius:10px; box-shadow:0 8px 22px rgba(0,0,0,0.3);
       user-select:none;
     }
-    .float-card header{display:flex; align-items:center; gap:8px; padding:6px 8px; border-bottom:1px solid #eee;
+    .float-card header{display:flex; align-items:center; gap:8px; padding:6px 8px; border-bottom:1px solid #eeeeee;
       background:#f6f7fb; border-radius:10px 10px 0 0; cursor:grab;}
     .float-card header:active{ cursor:grabbing; }
-    .float-card header input{flex:1; min-width:0; border:1px solid #ddd; border-radius:6px; padding:4px 6px; font-size:13px; background:#fff;}
+    .float-card header input{flex:1; min-width:0; border:1px solid #dddddd; border-radius:6px; padding:4px 6px; font-size:13px; background:#ffffff;}
     .float-card .body{ padding:8px }
-    .float-card .body textarea{ width:100%; border:1px solid #ddd; border-radius:6px; padding:6px; min-height:70px }
+    .float-card .body textarea{ width:100%; border:1px solid #dddddd; border-radius:6px; padding:6px; min-height:70px }
     .float-card .body img{ display:block; max-width:100%; border-radius:8px; margin-top:6px; cursor:zoom-in }
-    .float-card .footer{ display:flex; gap:6px; padding:8px; border-top:1px solid #eee; flex-wrap:wrap; align-items:center }
-    .float-card .btn{ padding:4px 8px; border:1px solid #ddd; border-radius:8px; background:#fff; cursor:pointer; font-size:12px }
-    .float-card .btn.warn{ color:#b00 }
-    .float-card a.small { font-size:12px; color:#06c; text-decoration:none }
+    .float-card .footer{ display:flex; gap:6px; padding:8px; border-top:1px solid #eeeeee; flex-wrap:wrap; align-items:center }
+    .float-card .btn{ padding:4px 8px; border:1px solid #dddddd; border-radius:8px; background:#ffffff; cursor:pointer; font-size:12px }
+    .float-card .btn.warn{ color:#bb0000 }
+    .float-card a.small { font-size:12px; color:#0066cc; text-decoration:none }
     .float-card a.small:hover { text-decoration:underline }
     .lines{ position:absolute; left:0; top:0; width:100%; height:100%; pointer-events:none }
-    .lines line{ stroke:#fff; stroke-opacity:0.85; stroke-width:2; filter:drop-shadow(0 0 1px rgba(0,0,0,.7)); }
-    .pill {font-size:12px;border:1px solid #ddd;border-radius:999px;padding:4px 8px;background:#fff;display:inline-flex;gap:6px;align-items:center}
+    .lines line{ stroke:#ffffff; stroke-opacity:0.85; stroke-width:2; filter:drop-shadow(0 0 1px rgba(0,0,0,.7)); }
+    .pill {font-size:12px;border:1px solid #dddddd;border-radius:999px;padding:4px 8px;background:#ffffff;display:inline-flex;gap:6px;align-items:center}
     .pill input{margin:0}
     .pill.small{font-size:11px;padding:2px 6px}
-    .save-ok{color:#0a0}.save-pending{color:#a60}.save-fail{color:#b00}
+    .save-ok{color:#00aa00}.save-pending{color:#aa6600}.save-fail{color:#bb0000}
 
     /* ==== Editor Dock ==== */
     .dock{
       position:absolute; top:12px; right:12px; width:340px; max-height:80vh; overflow:auto;
       background:#ffffffea; backdrop-filter:saturate(1.2) blur(4px);
-      border:1px solid #ddd; border-radius:12px; box-shadow:0 10px 30px rgba(0,0,0,.35);
+      border:1px solid #dddddd; border-radius:12px; box-shadow:0 10px 30px rgba(0,0,0,.35);
       z-index:8; /* ← ヘッダー(z=10)より下：被り防止 */
     }
     .dock header{
-      display:flex; align-items:center; gap:8px; padding:8px 10px; border-bottom:1px solid #eee;
+      display:flex; align-items:center; gap:8px; padding:8px 10px; border-bottom:1px solid #eeeeee;
       position:sticky; top:0; background:#f6f7fb; border-radius:12px 12px 0 0;
     }
     .dock .tabs{ display:flex; gap:6px; flex-wrap:wrap }
-    .dock .tabbtn{ padding:4px 10px; font-size:12px; border:1px solid #ddd; border-radius:999px; background:#fff; cursor:pointer; }
-    .dock .tabbtn.active{ background:#eef; border-color:#cdd; }
-    .dock .minbtn{ margin-left:auto; padding:4px 8px; border:1px solid #ddd; border-radius:8px; background:#fff; cursor:pointer; font-size:12px }
+    .dock .tabbtn{ padding:4px 10px; font-size:12px; border:1px solid #dddddd; border-radius:999px; background:#ffffff; cursor:pointer; }
+    .dock .tabbtn.active{ background:#eeeeff; border-color:#ccdddd; }
+    .dock .minbtn{ margin-left:auto; padding:4px 8px; border:1px solid #dddddd; border-radius:8px; background:#ffffff; cursor:pointer; font-size:12px }
     .dock .body{ padding:10px }
     .dock.collapsed .body{ display:none }
     .dock.collapsed header{ border-radius:12px }
     .tool-row{ display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-bottom:8px }
-    .tool-btn{ padding:6px 10px; border:1px solid #ddd; background:#fff; border-radius:8px; font-size:12px; cursor:pointer }
+    .tool-btn{ padding:6px 10px; border:1px solid #dddddd; background:#ffffff; border-radius:8px; font-size:12px; cursor:pointer }
     .tool-btn.toggled{ background:#e8f0fe; border-color:#c7dafc }
     .tool-input{ display:flex; align-items:center; gap:8px; margin-bottom:8px }
     .tool-input input[type="range"]{ width:160px }
 
     /* ==== Modal (list/picker) ==== */
     .modal-overlay{ position:fixed; inset:0; background:rgba(0,0,0,.5); display:flex; align-items:center; justify-content:center; z-index:50; }
-    .modal{ width:840px; max-width:95vw; max-height:86vh; overflow:auto; background:#fff; border:1px solid #ddd; border-radius:12px; box-shadow:0 20px 40px rgba(0,0,0,0.4); }
-    .modal header{ position:sticky; top:0; background:#f6f7fb; border-bottom:1px solid #eee; padding:10px 12px; display:flex; gap:8px; align-items:center }
+    .modal{ width:840px; max-width:95vw; max-height:86vh; overflow:auto; background:#ffffff; border:1px solid #dddddd; border-radius:12px; box-shadow:0 20px 40px rgba(0,0,0,0.4); }
+    .modal header{ position:sticky; top:0; background:#f6f7fb; border-bottom:1px solid #eeeeee; padding:10px 12px; display:flex; gap:8px; align-items:center }
     .modal .body{ padding:12px }
-    .list{ border:1px solid #eee; border-radius:10px; overflow:hidden }
+    .list{ border:1px solid #eeeeee; border-radius:10px; overflow:hidden }
     .rowi{ display:grid; grid-template-columns: 1fr 200px 120px; gap:8px; padding:8px 10px; border-bottom:1px solid #f0f0f0; align-items:center }
     .rowi:last-child{ border-bottom:none }
     .rowi .name{ font-weight:600 }
-    .rowi .meta{ font-size:12px; color:#666 }
-    .modal footer{ padding:10px 12px; border-top:1px solid #eee; display:flex; gap:8px; justify-content:flex-end }
+    .rowi .meta{ font-size:12px; color:#666666 }
+    .modal footer{ padding:10px 12px; border-top:1px solid #eeeeee; display:flex; gap:8px; justify-content:flex-end }
     .grid{ display:grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap:10px }
-    .card{ border:1px solid #eee; border-radius:10px; padding:8px; display:flex; flex-direction:column; gap:6px; }
+    .card{ border:1px solid #eeeeee; border-radius:10px; padding:8px; display:flex; flex-direction:column; gap:6px; }
     .card img{ width:100%; aspect-ratio: 1 / 1; object-fit:cover; border-radius:8px; background:#f3f3f3 }
     .card .title{ font-size:12px; line-height:1.4; }
-    .card .meta{ font-size:11px; color:#666; }
+    .card .meta{ font-size:11px; color:#666666; }
     .card button{ padding:6px 8px; font-size:12px; }
 
     /* ==== Image Zoom Viewer ==== */
@@ -114,12 +114,12 @@
   background:rgba(0,0,0,.55); z-index:40;
 }
 .gate{
-  background:#fff; border:1px solid #ddd; border-radius:14px; padding:16px 18px;
+  background:#ffffff; border:1px solid #dddddd; border-radius:14px; padding:16px 18px;
   width:min(92vw,420px); text-align:center; box-shadow:0 18px 40px rgba(0,0,0,.35);
 }
 .gate h3{ margin:0 0 8px; font-size:16px }
-.gate p { margin:0 0 12px; color:#666; font-size:13px }
-.gate .btn{ padding:10px 14px; border:1px solid #ddd; border-radius:999px; background:#fff; cursor:pointer; font-size:14px }
+.gate p { margin:0 0 12px; color:#666666; font-size:13px }
+.gate .btn{ padding:10px 14px; border:1px solid #dddddd; border-radius:999px; background:#ffffff; cursor:pointer; font-size:14px }
 .hidden{ display:none }
 
 /* FAB: モバイルでドックを開く小ボタン */
@@ -129,19 +129,19 @@
     
     .zoom-overlay{ position:fixed; inset:0; background:rgba(0,0,0,.85); display:flex; align-items:center; justify-content:center; z-index:60; cursor:grab }
     .zoom-img{ max-width:none; max-height:none; transform-origin: 0 0; user-select:none; -webkit-user-drag:none; }
-    .zoom-close{ position:fixed; top:12px; right:12px; z-index:61; padding:8px 10px; background:#fff; border:1px solid #ddd; border-radius:8px; cursor:pointer; }
+    .zoom-close{ position:fixed; top:12px; right:12px; z-index:61; padding:8px 10px; background:#ffffff; border:1px solid #dddddd; border-radius:8px; cursor:pointer; }
 
     /* ==== Toolbar groups ==== */
     .toolbar { display:flex; gap:10px; flex-wrap:wrap; align-items:flex-start; width:100% }
     .hgroup{
-      background:#fff; border:1px solid #e6e6e6; border-radius:12px; padding:8px 10px;
+      background:#ffffff; border:1px solid #e6e6e6; border-radius:12px; padding:8px 10px;
       display:flex; gap:10px; align-items:center; flex-wrap:wrap;
     }
-    .hgroup .title{ font-weight:600; font-size:12px; color:#444; padding:2px 8px; background:#f4f4f6; border:1px solid #e9e9ee; border-radius:999px }
-    .hgroup input{ padding:6px 8px; border:1px solid #ddd; border-radius:8px; min-width:220px }
-    .hgroup .tiny{ font-size:12px; color:#666 }
-    .hgroup .iconbtn{ padding:4px 8px; font-size:12px; border:1px solid #ddd; border-radius:8px; background:#fff; cursor:pointer }
-    .hgroup .sep{ width:1px; height:20px; background:#eee; margin:0 2px }
+    .hgroup .title{ font-weight:600; font-size:12px; color:#444444; padding:2px 8px; background:#f4f4f6; border:1px solid #e9e9ee; border-radius:999px }
+    .hgroup input{ padding:6px 8px; border:1px solid #dddddd; border-radius:8px; min-width:220px }
+    .hgroup .tiny{ font-size:12px; color:#666666 }
+    .hgroup .iconbtn{ padding:4px 8px; font-size:12px; border:1px solid #dddddd; border-radius:8px; background:#ffffff; cursor:pointer }
+    .hgroup .sep{ width:1px; height:20px; background:#eeeeee; margin:0 2px }
     header .grow{ flex:1 }
     .header-utils{ display:flex; gap:8px; align-items:center; flex-wrap:wrap }
     #pillAutosave { padding:2px 8px }
@@ -216,14 +216,14 @@
   #pillAutosave{
     position: fixed; right:12px; top:12px; z-index:9;
     background:#ffffffea; backdrop-filter: blur(4px);
-    border:1px solid #ddd; border-radius:999px; padding:2px 8px;
+    border:1px solid #dddddd; border-radius:999px; padding:2px 8px;
   }
 
   /* 左下のミニツールバー（常時表示はココだけ+FAB） */
   .mini-bar{
     position:fixed; left:12px; bottom:14px; z-index:9; display:flex; gap:8px;
     background:#ffffffea; backdrop-filter:blur(4px);
-    border:1px solid #ddd; border-radius:999px; padding:6px 8px;
+    border:1px solid #dddddd; border-radius:999px; padding:6px 8px;
   }
   .mini-btn{ border:0; background:transparent; padding:6px; border-radius:10px; }
   .mini-btn:active{ background:#efefef }
@@ -256,11 +256,11 @@
 /* === Added: Desktop open-dock button (top-right) === */
 #btnOpenDock_hidden{ min-width:40px; min-height:40px; outline:1px solid transparent; outline-offset:2px;
   position:fixed; top:12px; right:12px; z-index:11;
-  padding:8px 12px; border:1px solid #ddd; border-radius:10px; background:#fff; cursor:pointer; font-size:13px;
+  padding:8px 12px; border:1px solid #dddddd; border-radius:10px; background:#ffffff; cursor:pointer; font-size:13px;
   box-shadow:0 8px 20px rgba(0,0,0,.15);
 }
 @media (max-width: 960px){ #btnOpenDock_hidden{ min-width:40px; min-height:40px; outline:1px solid transparent; outline-offset:2px; display:none } } /* hide on mobile */
-#btnOpenDock_hidden:hover{ outline-color:#ddd }
+#btnOpenDock_hidden:hover{ outline-color:#dddddd }
 
 /* === Added: Mobile sheet style for caption card === */
 .float-card.sheet{
@@ -283,7 +283,7 @@
 
 /* === Added: Ensure close button is visible and aligned === */
 .float-card header .close-btn{
-  border:1px solid #ddd; border-radius:8px; background:#fff; cursor:pointer; padding:4px 8px; font-size:12px;
+  border:1px solid #dddddd; border-radius:8px; background:#ffffff; cursor:pointer; padding:4px 8px; font-size:12px;
 }
 
 /* === Added: Fix caption tab text overflow inside dock === */
@@ -299,7 +299,7 @@
 #loaderOverlay.active{ display:flex }
 .spinner{
   width:56px; height:56px; border-radius:50%;
-  border:4px solid rgba(255,255,255,.35); border-top-color:#fff;
+  border:4px solid rgba(255,255,255,.35); border-top-color:#ffffff;
   animation:spin 1s linear infinite;
 }
 @keyframes spin{ to{ transform:rotate(360deg) } }
@@ -310,13 +310,13 @@
 
 /* tabs: aria-selected 表示 */
 .dock .tabbtn[aria-selected="true"]{
-  background:#eef; border-color:#cdd; text-decoration:underline;
+  background:#eeeeff; border-color:#ccdddd; text-decoration:underline;
 }
 
 /* === Caption Bottom Sheet === */
 .cap-sheet{
   position:fixed; left:0; right:0; bottom:0; z-index:60;
-  background:#fff; border-radius:16px 16px 0 0; box-shadow:0 -10px 30px rgba(0,0,0,.35);
+  background:#ffffff; border-radius:16px 16px 0 0; box-shadow:0 -10px 30px rgba(0,0,0,.35);
   transform:translateY(110%); transition:transform .24s ease, opacity .12s ease; opacity:0;
   max-height:92vh;
 }
@@ -326,12 +326,12 @@
 .cap-sheet[data-snap="full"]{ transform:translateY(0); }
 .cap-handle{ height:28px; display:flex; align-items:center; justify-content:center; cursor:grab; touch-action:none; }
 .cap-handle::before{ content:""; width:44px; height:4px; border-radius:999px; background:#d0d0d0; box-shadow:inset 0 -1px 0 #c7c7c7; }
-.cap-header{ display:flex; gap:8px; align-items:center; padding:6px 12px; border-bottom:1px solid #eee; cursor:grab; user-select:none }
+.cap-header{ display:flex; gap:8px; align-items:center; padding:6px 12px; border-bottom:1px solid #eeeeee; cursor:grab; user-select:none }
 .cap-title{ flex:1; font-weight:600 }
-.cap-close{ padding:8px 10px; border:1px solid #ddd; border-radius:8px; background:#fff; cursor:pointer }
+.cap-close{ padding:8px 10px; border:1px solid #dddddd; border-radius:8px; background:#ffffff; cursor:pointer }
 .cap-body{ padding:10px 12px; overflow:auto; max-height:calc(92vh - 28px - 44px - env(safe-area-inset-bottom,0)); }
 .cap-row{ display:flex; gap:8px; align-items:center; margin-bottom:10px; flex-wrap:wrap }
-.cap-sheet input[type="text"], .cap-sheet textarea{ width:100%; border:1px solid #ddd; border-radius:8px; padding:8px; background:#fff; color:#222; box-sizing:border-box }
+.cap-sheet input[type="text"], .cap-sheet textarea{ width:100%; border:1px solid #dddddd; border-radius:8px; padding:8px; background:#ffffff; color:#222222; box-sizing:border-box }
 .cap-sheet textarea{ min-height:96px; max-height:calc(8lh + 12px); overflow:auto }
 @media (max-width: 960px){
   /* Dockはモバイルでは基本使わない（FAB→シート遷移を想定） */
@@ -342,23 +342,23 @@
 /* === Workspace inline tool button (PC) === */
 .tool-inline-btn{
   position:absolute; right:12px; top:12px; z-index:6;
-  padding:8px 12px; border:1px solid #ddd; border-radius:999px; background:#fff; cursor:pointer;
+  padding:8px 12px; border:1px solid #dddddd; border-radius:999px; background:#ffffff; cursor:pointer;
   box-shadow:0 8px 24px rgba(0,0,0,.25);
   min-width:40px; min-height:40px; outline:1px solid transparent; outline-offset:2px;
 }
-.tool-inline-btn:hover{ outline-color:#ddd }
+.tool-inline-btn:hover{ outline-color:#dddddd }
 #dock[data-open="true"] ~ main #view .tool-inline-btn{ display:none } /* Dock openなら隠す */
 
 /* === Mobile load FAB & sheet === */
-.load-fab{ position:fixed; right:14px; bottom:calc(14px + env(safe-area-inset-bottom,0)); z-index:1200; padding:12px 16px; border:1px solid #ddd; border-radius:999px; background:#fff; box-shadow:0 12px 28px rgba(0,0,0,.35); cursor:pointer; }
+.load-fab{ position:fixed; right:14px; bottom:calc(14px + env(safe-area-inset-bottom,0)); z-index:1200; padding:12px 16px; border:1px solid #dddddd; border-radius:999px; background:#ffffff; box-shadow:0 12px 28px rgba(0,0,0,.35); cursor:pointer; }
 @media (max-width: 960px){
-  .load-fab{ position:fixed; right:14px; bottom:calc(14px + env(safe-area-inset-bottom,0)); z-index:1000; padding:12px 16px; border:1px solid #ddd; border-radius:999px; background:#fff; box-shadow:0 12px 28px rgba(0,0,0,.35); cursor:pointer; }
+  .load-fab{ position:fixed; right:14px; bottom:calc(14px + env(safe-area-inset-bottom,0)); z-index:1000; padding:12px 16px; border:1px solid #dddddd; border-radius:999px; background:#ffffff; box-shadow:0 12px 28px rgba(0,0,0,.35); cursor:pointer; }
 }
 
 /* reuse .sheet styles already present */
 .load-sheet .title{ font-weight:600 }
 .load-sheet .row{ display:flex; gap:8px; align-items:center; margin-bottom:10px; flex-wrap:wrap }
-.load-sheet input{ width:100%; border:1px solid #ddd; border-radius:8px; padding:8px }
+.load-sheet input{ width:100%; border:1px solid #dddddd; border-radius:8px; padding:8px }
 
 #toolFab{ display:none }
 @media (max-width: 960px){
@@ -381,7 +381,7 @@
 .sheet .body{ padding-bottom: calc(16px + env(safe-area-inset-bottom, 0)); }
 
 /* Keep FABs above safe area; hide while a sheet is open */
-#toolFab, .load-fab{ position:fixed; right:14px; bottom:calc(14px + env(safe-area-inset-bottom,0)); z-index:1000; padding:12px 16px; border:1px solid #ddd; border-radius:999px; background:#fff; box-shadow:0 12px 28px rgba(0,0,0,.35); cursor:pointer; }
+#toolFab, .load-fab{ position:fixed; right:14px; bottom:calc(14px + env(safe-area-inset-bottom,0)); z-index:1000; padding:12px 16px; border:1px solid #dddddd; border-radius:999px; background:#ffffff; box-shadow:0 12px 28px rgba(0,0,0,.35); cursor:pointer; }
 html.sheet-open #toolFab,
 html.sheet-open .load-fab,
 html.sheet-open #toolInlineBtn{
@@ -483,6 +483,12 @@ html.sheet-open .floating-buttons{
 
 
 
+
+<style>
+/* v12 safety: hide any extra select-like buttons under grpPins except the allowed ones */
+#grpPins button:not(#btnPickPins):not(#btnClearPins){ display:none !important; }
+</style>
+
 </head>
 <body>
 <div id="sheetScrim" class="scrim" hidden aria-hidden="true"></div>
@@ -491,9 +497,9 @@ html.sheet-open .floating-buttons{
 <div aria-hidden="true" id="loaderOverlay">
 <div style="display:flex;flex-direction:column;align-items:center;gap:10px">
 <div aria-label="読み込み中" class="spinner" role="progressbar"></div>
-<div id="loadingMsg" style="color:#fff">GLBを読み込み中…</div>
+<div id="loadingMsg" style="color:#ffffff">GLBを読み込み中…</div>
 <div class="progress" style="width:min(360px,80vw);height:4px;background:rgba(255,255,255,.25);border-radius:9999px;overflow:hidden">
-<i id="loadingBar" style="display:block;height:100%;width:0%;background:#fff;transition:width .2s ease"></i>
+<i id="loadingBar" style="display:block;height:100%;width:0%;background:#ffffff;transition:width .2s ease"></i>
 </div>
 </div>
 <div aria-label="読み込み中" class="spinner" role="progressbar"></div>
@@ -1193,7 +1199,7 @@ window.addEventListener('orientationchange', ()=>{
 
 /* ===== 背景 ===== */
 function applyBackgroundMode(mode){
-  const col = mode==='light' ? '#f2f2f2' : '#222';
+  const col = mode==='light' ? '#f2f2f2' : '#222222';
   view.style.background = col;
   renderer.setClearAlpha(0);
   scene.background = null;
@@ -1520,7 +1526,7 @@ function makePinSprite(color = '#ee3333', opacity = PIN_BASE_OPACITY){
   const ctx = cvs.getContext('2d');
   // 外側白リング
   ctx.beginPath(); ctx.arc(size/2,size/2,size*0.28,0,Math.PI*2);
-  ctx.fillStyle='#fff'; ctx.fill();
+  ctx.fillStyle='#ffffff'; ctx.fill();
   // 中の色ドット
   ctx.beginPath(); ctx.arc(size/2,size/2,size*0.22,0,Math.PI*2);
   ctx.fillStyle=color; ctx.fill();
@@ -1719,7 +1725,7 @@ function redrawPins(){
       if (node) holder.appendChild(node);
       // D&D（このピンにドロップで画像差し替え）
       if (!READ_ONLY){
-        holder.addEventListener('dragover', (ev)=>{ ev.preventDefault(); holder.style.outline='2px dashed #09f'; });
+        holder.addEventListener('dragover', (ev)=>{ ev.preventDefault(); holder.style.outline='2px dashed #0099ff'; });
         holder.addEventListener('dragleave', ()=>{ holder.style.outline=''; });
         holder.addEventListener('drop', async (ev)=>{
           ev.preventDefault(); holder.style.outline='';
@@ -1888,7 +1894,7 @@ function makeFloatCard(pinId){
     } });
 
     // D&D（カードへドロップで画像差し替え）
-    body.addEventListener('dragover', (ev)=>{ ev.preventDefault(); card.style.boxShadow='0 0 0 2px #09f inset, 0 8px 22px rgba(0,0,0,0.3)'; });
+    body.addEventListener('dragover', (ev)=>{ ev.preventDefault(); card.style.boxShadow='0 0 0 2px #0099ff inset, 0 8px 22px rgba(0,0,0,0.3)'; });
     body.addEventListener('dragleave', ()=>{ card.style.boxShadow='0 8px 22px rgba(0,0,0,0.3)'; });
     body.addEventListener('drop', async (ev)=>{
       ev.preventDefault(); card.style.boxShadow='0 8px 22px rgba(0,0,0,0.3)';
@@ -2220,7 +2226,7 @@ tabCamera.querySelectorAll('[data-view]').forEach(b=>{
 /* 背景UI */
 function syncBgUI(){
   applyBackgroundMode(bgModeSel.value || 'dark');
-  applyBackgroundColor(bgColorEl.value || (bgModeSel.value==='light'?'#f2f2f2':'#222'));
+  applyBackgroundColor(bgColorEl.value || (bgModeSel.value==='light'?'#f2f2f2':'#222222'));
 }
 bgModeSel.onchange = syncBgUI;
 bgColorEl.oninput  = ()=> applyBackgroundColor(bgColorEl.value);
@@ -2546,7 +2552,7 @@ async function chooseDriveImageForPin(pin, opts={}){
         <header>
           <strong>画像を選択（GLBと同じフォルダ）</strong>
           <div class="grow"></div>
-          <input id="imgQuery" placeholder="名前でフィルタ（例：scan）" style="padding:6px 8px;border:1px solid #ddd;border-radius:8px;min-width:200px">
+          <input id="imgQuery" placeholder="名前でフィルタ（例：scan）" style="padding:6px 8px;border:1px solid #dddddd;border-radius:8px;min-width:200px">
           <button id="imgSearchAll">ドライブ全体から検索</button>
           <button id="imgClose">閉じる</button>
         </header>
@@ -3465,6 +3471,39 @@ window.addEventListener('DOMContentLoaded', ()=>{
     }
   }, true);
 });
+
+
+// v12: robust close for caption sheet
+(function(){
+  function hideScrim(){
+    const s = document.getElementById('sheetScrim');
+    if (s){ s.removeAttribute('open'); s.setAttribute('hidden',''); s.setAttribute('aria-hidden','true'); }
+    document.documentElement.classList.remove('sheet-open');
+  }
+  function closeCaptionSheetStrong(){
+    const cs = document.getElementById('capSheet') || document.querySelector('.cap-sheet');
+    if (!cs) return;
+    cs.removeAttribute('open');
+    cs.setAttribute('aria-hidden','true');
+    cs.hidden = true;
+    hideScrim();
+  }
+  // Delegate close from any reasonable "close" target inside capSheet
+  window.addEventListener('DOMContentLoaded', ()=>{
+    document.addEventListener('click', (e)=>{
+      const t = e.target;
+      if (!t) return;
+      const inCap = t.closest('#capSheet, .cap-sheet');
+      const isClose = t.id === 'capClose' || t.matches('[data-close]') || t.matches('.close') ||
+                      t.matches('.icon-close') || t.matches('button[aria-label="閉じる"]');
+      if (inCap && isClose){
+        e.preventDefault();
+        e.stopPropagation();
+        try{ (window.closeCaptionSheet||closeCaptionSheetStrong)(); }catch(_){ closeCaptionSheetStrong(); }
+      }
+    }, true);
+  });
+})();
 
 </script>
 
