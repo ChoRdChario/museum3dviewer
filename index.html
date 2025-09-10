@@ -816,22 +816,8 @@ html.sheet-open .floating-buttons{
   </div>
 </section>
 
-<button aria-label="モデル読み込み" class="load-fab" id="loadFab">読み込み</button>
-<section aria-hidden="true" aria-label="モデル読み込み" aria-modal="true" class="sheet load-sheet" hidden="" id="loadSheet" role="dialog">
-<div class="handle" id="loadHandle" title="ドラッグしてサイズ変更"></div>
-<header class="load-header">
-<div class="title">モデル読み込み</div>
-<button class="close" id="loadClose">閉じる</button>
-</header>
-<div class="body">
-<div class="row"><input id="loadInput" placeholder="URL または Google DriveのfileID" type="text"/></div>
-<div class="row">
-<button id="loadStart">読み込む</button>
-<button id="loadCancel" data-variant="secondary">キャンセル</button>
-</div>
-<p class="hint">URLを貼り付けるか、fileIDのみでもOK（例: 1AbC... → https://drive.google.com/uc?id=1AbC... に変換）</p>
-</div>
-</section>
+
+
 <!-- Caption Bottom Sheet (mobile first) -->
 <section aria-hidden="true" aria-label="キャプション" aria-modal="true" class="cap-sheet" hidden="" id="capSheet" role="dialog">
 <div class="cap-handle" title="ドラッグしてサイズ変更"></div>
@@ -909,7 +895,6 @@ const pillAutosave = document.getElementById('pillAutosave');
 const fileIdInput  = document.getElementById('fileId');
 const pinsIdInput  = document.getElementById('pinsId');
 const folderIdInput= document.getElementById('folderId');
-const btnPickPins  = document.getElementById('btnPickPins');
 const btnClearPins = document.getElementById('btnClearPins');
 const btnCopyReadonlyUrl = document.getElementById('btnCopyReadonlyUrl');
 const btnToggleGlbPublic = document.getElementById('btnToggleGlbPublic');
@@ -938,7 +923,7 @@ function extractDriveId(v=''){
   const m3 = v.match(/[a-zA-Z0-9_-]{10,}/);
   return m3 ? m3[0] : '';
 }
-['fileId','pinsId'].forEach(id=>{
+['fileId'].forEach(id=>{
   const el = document.getElementById(id);
   el.addEventListener('blur', ()=>{ el.value = extractDriveId(el.value) || ''; });
   el.addEventListener('paste', (e)=>{
@@ -3548,8 +3533,6 @@ window.addEventListener('DOMContentLoaded', ()=>{
   const pinsIdInput  = document.getElementById('pinsId');
   const folderIdInput= document.getElementById('folderId');
   const fileIdInput  = document.getElementById('fileId');
-  const btnPickPins  = document.getElementById('btnPickPins');
-
   // Fallback close for caption sheet if not defined
   if (typeof window.closeCaptionSheet !== 'function') {
     window.closeCaptionSheet = function closeCaptionSheet(){
@@ -3731,8 +3714,6 @@ window.addEventListener('DOMContentLoaded', ()=>{
   const pinsIdInput  = document.getElementById('pinsId');
   const folderIdInput= document.getElementById('folderId');
   const fileIdInput  = document.getElementById('fileId');
-  const btnPickPins  = document.getElementById('btnPickPins');
-
   // Fallback close for caption sheet if not defined
   if (typeof window.closeCaptionSheet !== 'function') {
     window.closeCaptionSheet = function closeCaptionSheet(){
@@ -3877,8 +3858,6 @@ window.addEventListener('DOMContentLoaded', ()=>{
   const pinsIdInput  = document.getElementById('pinsId');
   const folderIdInput= document.getElementById('folderId');
   const fileIdInput  = document.getElementById('fileId');
-  const btnPickPins  = document.getElementById('btnPickPins');
-
   // Document-level capture for caption close (id=capClose)
   document.addEventListener('click', (e)=>{
     const t = e.target;
