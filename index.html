@@ -5,7 +5,77 @@
 <meta charset="utf-8"/>
 <title>Drive GLB Viewer + Pins (v1.22.0-bg)</title>
 <link href="https://accounts.google.com" rel="preconnect"/>
-<script async="" src="https://accounts.google.com/gsi/client"></script>
+<script async="" src="https://accounts.google.com/gsi/client">
+// === v5: Simplified pins chooser (GLB folder only) ===
+async function openPinsChooser(){
+  try{
+    const glbId = (fileIdInput?.value || '').trim();
+    let parentId = (folderIdInput?.value || '').trim();
+    if (!parentId && glbId){
+      try{
+        const meta = await driveGetMetadata(glbId, 'id,parents');
+        if (meta.parents && meta.parents.length) parentId = meta.parents[0];
+      }catch(e){ console.warn('driveGetMetadata failed', e); }
+    }
+    if (!parentId){
+      alert('GLBのフォルダを特定できませんでした。保存先フォルダIDを指定してください。');
+      return;
+    }
+
+    const hdr = 'pins.json を選択（GLBと同じフォルダ）';
+    openModal(`
+      <div class="modal">
+        <header>
+          <strong>${hdr}</strong>
+          <div class="grow"></div>
+          <button id="pinsClose">閉じる</button>
+        </header>
+        <div class="body"><div class="grid" id="pinsGrid"><div>読み込み中…</div></div></div>
+        <footer><span class="muted">JSON（application/json）と pins.json を表示。最新順。</span></footer>
+      </div>
+    `);
+
+    const gridEl = document.getElementById('pinsGrid');
+
+    function rowHTML(f){
+      const t = new Date(f.modifiedTime||Date.now()).toLocaleString();
+      const name = (f.name||'(名称なし)').replace(/"/g,'&quot;');
+      return `<div class="card">
+        <div class="title">${name}</div>
+        <div class="meta">${t}</div>
+        <button data-pick="${f.id}" data-name="${name}">このファイルを使う</button>
+      </div>`;
+    }
+
+    async function renderGrid(files){
+      if (!files?.length){ gridEl.innerHTML = `<div>候補がありません</div>`; return; }
+      gridEl.innerHTML = files.map(rowHTML).join('');
+      gridEl.querySelectorAll('[data-pick]').forEach(btn=>{
+        btn.onclick = ()=>{
+          const id = btn.getAttribute('data-pick');
+          const name = btn.getAttribute('data-name')||'';
+          closeModal();
+          if (pinsIdInput && id){ pinsIdInput.value = id; }
+          try{ window.loadedPinsName = name; }catch(e){}
+          try{ window.updatePinsInfo?.(); }catch(e){}
+        };
+      });
+    }
+
+    try{
+      let q = "trashed = false and (mimeType = 'application/json' or name = 'pins.json') and '"+parentId+"' in parents";
+      const res = await driveListFiles({ q, pageSize: 50 });
+      await renderGrid(res.files||[]);
+    }catch(e){ console.error(e); gridEl.innerHTML = `<div>検索に失敗しました</div>`; }
+
+    document.getElementById('pinsClose')?.addEventListener('click', ()=> closeModal());
+  }catch(e){
+    console.error('openPinsChooser v5 failed:', e);
+    alert('pins.json の取得に失敗しました');
+  }
+}
+
+</script>
 <script async="" src="https://apis.google.com/js/api.js"></script>
 <meta content="width=device-width, initial-scale=1" name="viewport"/>
 <link href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='64' height='64'%3E%3Crect width='64' height='64' fill='%23222'/%3E%3Ccircle cx='32' cy='32' r='18' fill='%23e33'/%3E%3C/svg%3E" rel="icon"/>
@@ -546,8 +616,6 @@ html.sheet-open .floating-buttons{
 <!-- 📍 キャプション -->
 <div class="hgroup" id="grpPins">
 <span class="title">キャプション</span>
-<input autocomplete="off" id="pinsId" placeholder="（任意）pins.json の fileId / 共有リンク"/>
-<button class="iconbtn" id="btnPickPins">選択…</button>
 <button class="iconbtn" id="btnClearPins">クリア</button>
 <span class="sep"></span>
 <span class="tiny">Save FolderId:</span>
