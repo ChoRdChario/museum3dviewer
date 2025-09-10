@@ -503,6 +503,21 @@ html.sheet-open .floating-buttons{
 .top-sheet{ z-index:1500 !important; }
 </style>
 
+
+<style>
+/* --- v4: strongest stacking for sheets over scrim --- */
+.scrim{ z-index:1200; }
+.sheet{ z-index:1400 !important; }
+.cap-sheet{ z-index:1400 !important; }
+.load-sheet{ z-index:1400 !important; }
+.top-sheet{ z-index:1500 !important; }
+/* IDs as final safety */
+#capSheet{ z-index:1501 !important; }
+#loadSheet{ z-index:1501 !important; }
+#dockSheet{ z-index:1501 !important; }
+.cap-sheet, .sheet{ pointer-events:auto; }
+</style>
+
 </head>
 <body>
 <div id="sheetScrim" class="scrim" hidden aria-hidden="true"></div>
@@ -3777,6 +3792,148 @@ window.addEventListener('DOMContentLoaded', ()=>{
     }catch(e){
       console.warn('openPinsChooser failed:', e);
       alert('pins.json の取得に失敗しました。サインイン/権限やネットワークをご確認ください。');
+    }
+  }
+
+  btnPickPins?.addEventListener('click', (e)=>{
+    e.preventDefault();
+    e.stopPropagation();
+    openPinsChooser();
+  });
+});
+
+
+// === patch v4: stronger close handling + direct module helpers ===
+window.addEventListener('DOMContentLoaded', ()=>{
+  const sheetScrim = document.getElementById('sheetScrim');
+  const pinsIdInput  = document.getElementById('pinsId');
+  const folderIdInput= document.getElementById('folderId');
+  const fileIdInput  = document.getElementById('fileId');
+  const btnPickPins  = document.getElementById('btnPickPins');
+
+  // Document-level capture for caption close (id=capClose)
+  document.addEventListener('click', (e)=>{
+    const t = e.target;
+    if (!t) return;
+    if (t.id === 'capClose'){
+      e.preventDefault();
+      e.stopPropagation();
+      try{ window.closeCaptionSheet?.(); }catch(_){}
+      // also hide scrim just in case
+      const s = document.getElementById('sheetScrim');
+      if (s){ s.removeAttribute('open'); s.setAttribute('aria-hidden','true'); s.setAttribute('hidden',''); }
+      document.documentElement.classList.remove('sheet-open');
+    }
+  }, true); // capture to win over overlays
+
+  // Esc key (capture) also closes everything
+  window.addEventListener('keydown', (e)=>{
+    if (e.key !== 'Escape') return;
+    try{ window.closeDockSheet?.(); }catch(e){}
+    try{ window.closeLoadSheet?.(); }catch(e){}
+    try{ window.closeCaptionSheet?.(); }catch(e){}
+    try{ window.closeModal?.(); }catch(e){}
+    const s = document.getElementById('sheetScrim');
+    if (s){ s.removeAttribute('open'); s.setAttribute('aria-hidden','true'); s.setAttribute('hidden',''); }
+    document.documentElement.classList.remove('sheet-open');
+  }, true);
+
+  // -------- Pins chooser (prefer module-local helpers) --------
+  async function openPinsChooser(){
+    try{
+      // Prefer direct references defined earlier in the same module
+      const _driveListFiles   = (typeof driveListFiles === 'function') ? driveListFiles : (window.driveListFiles || null);
+      const _driveGetMetadata = (typeof driveGetMetadata === 'function') ? driveGetMetadata : (window.driveGetMetadata || null);
+      const _openModal        = (typeof openModal === 'function') ? openModal : (window.openModal || null);
+      const _closeModal       = (typeof closeModal === 'function') ? closeModal : (window.closeModal || null);
+      const _ensureToken      = (typeof ensureToken === 'function') ? ensureToken : (window.ensureToken || (async()=>{}));
+
+      if (!_driveListFiles || !_openModal || !_closeModal){
+        console.error('pins chooser helpers missing', { _driveListFiles: !!_driveListFiles, _openModal: !!_openModal, _closeModal: !!_closeModal });
+        throw new Error('内部ヘルパー未初期化');
+      }
+
+      await _ensureToken?.();
+
+      // Resolve target parent folder (prefer explicit folderId, else parent of glb)
+      const glbId = (fileIdInput?.value || '').trim();
+      let parentId = (folderIdInput?.value || '').trim();
+      if (!parentId && glbId && typeof _driveGetMetadata === 'function'){
+        try{
+          const meta = await _driveGetMetadata(glbId, 'id,parents');
+          if (meta.parents && meta.parents.length) parentId = meta.parents[0];
+        }catch(e){ console.warn('getMetadata failed', e); }
+      }
+
+      const hdr = parentId ? 'pins.json を選択（GLBと同じフォルダ）' : 'pins.json を選択（ドライブ全体検索）';
+      _openModal(`
+        <div class="modal">
+          <header>
+            <strong>${hdr}</strong>
+            <div class="grow"></div>
+            <input id="pinsQuery" placeholder="名前でフィルタ（例：pins）" style="padding:6px 8px;border:1px solid #ddd;border-radius:8px;min-width:200px">
+            <button id="pinsSearchAll">ドライブ全体から検索</button>
+            <button id="pinsClose">閉じる</button>
+          </header>
+          <div class="body"><div class="grid" id="pinsGrid"><div>読み込み中…</div></div></div>
+          <footer><span class="muted">JSON（application/json）と pins.json を表示。最新順。</span></footer>
+        </div>
+      `);
+
+      const gridEl = document.getElementById('pinsGrid');
+
+      function rowHTML(f){
+        const t = new Date(f.modifiedTime||Date.now()).toLocaleString();
+        const name = (f.name||'(名称なし)').replace(/"/g,'&quot;');
+        return `<div class="card">
+          <div class="title">${name}</div>
+          <div class="meta">${t}</div>
+          <button data-pick="${f.id}" data-name="${name}">このファイルを使う</button>
+        </div>`;
+      }
+
+      async function renderGrid(files){
+        if (!files?.length){ gridEl.innerHTML = `<div>候補がありません</div>`; return; }
+        gridEl.innerHTML = files.map(rowHTML).join('');
+      }
+
+      async function loadFolder(){
+        try{
+          let q = "trashed = false and (mimeType = 'application/json' or name = 'pins.json')";
+          if (parentId) q += " and '"+parentId+"' in parents";
+          const res = await _driveListFiles({ q, pageSize: 100 });
+          await renderGrid(res.files||[]);
+        }catch(e){ console.error('loadFolder error', e); gridEl.innerHTML = `<div>検索に失敗しました</div>`; }
+      }
+      await loadFolder();
+
+      document.getElementById('pinsClose')?.addEventListener('click', (e)=>{ e.preventDefault(); _closeModal(); }, { once:true });
+      document.getElementById('pinsSearchAll')?.addEventListener('click', async ()=>{
+        try{
+          const query = (document.getElementById('pinsQuery')?.value || '').trim();
+          let q = "trashed = false and (mimeType = 'application/json' or name = 'pins.json')";
+          if (query) q += " and name contains '"+query.replace(/'/g, "\'")+"'";
+          const res = await _driveListFiles({ q, pageSize: 200 });
+          await renderGrid(res.files||[]);
+        }catch(e){ console.error('searchAll error', e); gridEl.innerHTML = `<div>検索に失敗しました</div>`; }
+      });
+
+      // Delegate pick handling (for dynamically rendered items)
+      document.addEventListener('click', (ev)=>{
+        const t = ev.target;
+        if (!t?.matches('[data-pick]')) return;
+        ev.preventDefault();
+        const id = t.getAttribute('data-pick');
+        const name = t.getAttribute('data-name') || '';
+        try{ _closeModal(); }catch(_){}
+        if (pinsIdInput && id){ pinsIdInput.value = id; }
+        try{ window.loadedPinsName = name; }catch(_){}
+        try{ window.updatePinsInfo?.(); }catch(_){}
+      }, { once:true, capture:true });
+
+    }catch(e){
+      console.error('openPinsChooser failed(v4):', e);
+      alert('pins.json の取得に失敗しました。サインイン・権限・ネットワーク状態をご確認ください。');
     }
   }
 
