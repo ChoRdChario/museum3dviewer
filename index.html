@@ -528,6 +528,14 @@ html.sheet-open .floating-buttons{
 .modal header .grow{ flex: 1 1 auto; }
 </style>
 
+
+<style>
+/* v15: hide mobile-only loader on desktop */
+@media (min-width: 769px){
+  #loadFab, #loadSheet { display: none !important; visibility: hidden !important; pointer-events: none !important; }
+}
+</style>
+
 </head>
 <body>
 <div id="sheetScrim" class="scrim" hidden aria-hidden="true"></div>
@@ -3549,6 +3557,31 @@ window.addEventListener('DOMContentLoaded', ()=>{
       const s = document.getElementById('sheetScrim');
       if (s){ s.removeAttribute('open'); s.setAttribute('hidden',''); s.setAttribute('aria-hidden','true'); }
       document.documentElement.classList.remove('sheet-open');
+    }
+  }, true);
+});
+
+
+// v15: disable mobile loader UI on desktop
+window.addEventListener('DOMContentLoaded', ()=>{
+  const isDesktop = window.matchMedia('(min-width: 769px)').matches;
+  const loadFab = document.getElementById('loadFab');
+  const loadSheet = document.getElementById('loadSheet');
+  if (isDesktop){
+    // Remove to be safe
+    if (loadFab && loadFab.parentNode) loadFab.parentNode.removeChild(loadFab);
+    if (loadSheet){
+      loadSheet.hidden = true;
+      loadSheet.removeAttribute('open');
+      loadSheet.setAttribute('aria-hidden','true');
+    }
+  }
+  // Guard any click in case handler was bound earlier
+  loadFab?.addEventListener('click', (e)=>{
+    if (window.matchMedia('(min-width: 769px)').matches){
+      e.preventDefault();
+      e.stopPropagation();
+      return false;
     }
   }, true);
 });
