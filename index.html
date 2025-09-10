@@ -485,8 +485,10 @@ html.sheet-open .floating-buttons{
 
 
 <style>
-/* v12 safety: hide any extra select-like buttons under grpPins except the allowed ones */
-#grpPins button:not(#btnPickPins):not(#btnClearPins){ display:none !important; }
+/* v13: sheets above scrim and clickable */
+.scrim{ z-index:1200; }
+.cap-sheet, #capSheet{ z-index:1501 !important; pointer-events:auto; }
+.sheet, .top-sheet, #dockSheet{ z-index:1500 !important; pointer-events:auto; }
 </style>
 
 </head>
@@ -519,8 +521,7 @@ html.sheet-open .floating-buttons{
 <span class="title">キャプション</span>
 <input autocomplete="off" id="pinsId" placeholder="（任意）pins.json の fileId / 共有リンク"/>
 <button class="iconbtn" id="btnPickPins">選択…</button>
-
-  <button class="iconbtn" id="btnClearPins">クリア</button>
+<button class="iconbtn" id="btnClearPins">クリア</button>
 <span class="sep"></span>
 <span class="tiny">Save FolderId:</span>
 <input autocomplete="off" id="folderId" placeholder="（任意）保存先フォルダID"/>
@@ -741,7 +742,7 @@ html.sheet-open .floating-buttons{
 <div class="cap-handle" title="ドラッグしてサイズ変更"></div>
 <header class="cap-header">
 <div class="cap-title">キャプション</div>
-<button class="cap-close" id="capClose">閉じる</button>
+<button class="cap-close" id="capClose" onclick="(window.closeCaptionSheet||(()=>{const cs=document.getElementById('capSheet')||document.querySelector('.cap-sheet'); if(cs){cs.removeAttribute('open'); cs.setAttribute('aria-hidden','true'); cs.hidden=true; const s=document.getElementById('sheetScrim'); if(s){s.removeAttribute('open'); s.setAttribute('hidden',''); s.setAttribute('aria-hidden','true');} document.documentElement.classList.remove('sheet-open');}}))()">
 </header>
 <div class="cap-body">
 <div class="cap-row"><input id="capTitle" placeholder="タイトル" type="text"/></div>
@@ -3445,35 +3446,7 @@ document.getElementById('toolInlineBtn')?.addEventListener('click', ()=>{
   }
 })();
 
-// v10: bind pins chooser button
-document.getElementById('btnPickPins')?.addEventListener('click', (e)=>{
-  e.preventDefault();
-  e.stopPropagation();
-  if (typeof openPinsChooser === 'function') {
-    openPinsChooser();
-  }
-});
-
-
-// v11: robust close binding for caption/pins sheets (capture phase)
-window.addEventListener('DOMContentLoaded', ()=>{
-  document.addEventListener('click', (e)=>{
-    const t = e.target;
-    if (!t) return;
-    if (t.id === 'capClose' || t.id === 'pinsClose') {
-      e.preventDefault();
-      e.stopPropagation();
-      try{ window.closeCaptionSheet?.(); }catch(_){}
-      try{ window.closeModal?.(); }catch(_){}
-      const s = document.getElementById('sheetScrim');
-      if (s){ s.removeAttribute('open'); s.setAttribute('hidden',''); s.setAttribute('aria-hidden','true'); }
-      document.documentElement.classList.remove('sheet-open');
-    }
-  }, true);
-});
-
-
-// v12: robust close for caption sheet
+// v13: robust caption close binding
 (function(){
   function hideScrim(){
     const s = document.getElementById('sheetScrim');
@@ -3488,20 +3461,42 @@ window.addEventListener('DOMContentLoaded', ()=>{
     cs.hidden = true;
     hideScrim();
   }
-  // Delegate close from any reasonable "close" target inside capSheet
   window.addEventListener('DOMContentLoaded', ()=>{
+    // 4a) Click capture on close-like controls INSIDE cap sheet
     document.addEventListener('click', (e)=>{
       const t = e.target;
       if (!t) return;
-      const inCap = t.closest('#capSheet, .cap-sheet');
-      const isClose = t.id === 'capClose' || t.matches('[data-close]') || t.matches('.close') ||
-                      t.matches('.icon-close') || t.matches('button[aria-label="閉じる"]');
-      if (inCap && isClose){
-        e.preventDefault();
-        e.stopPropagation();
+      const cap = t.closest('#capSheet, .cap-sheet');
+      if (!cap) return;
+      const isClose = t.id === 'capClose' || t.matches('[data-close], .close, .icon-close, button[aria-label="閉じる"], [aria-label="close"], [aria-label="Close"]');
+      if (isClose){
+        e.preventDefault(); e.stopPropagation();
         try{ (window.closeCaptionSheet||closeCaptionSheetStrong)(); }catch(_){ closeCaptionSheetStrong(); }
       }
     }, true);
+
+    // 4b) Ensure explicit close button (if present) is bound
+    const capSheet = document.getElementById('capSheet') || document.querySelector('.cap-sheet');
+    if (capSheet){
+      const closeBtn = capSheet.querySelector('#capClose, [data-close], .close, .icon-close, button[aria-label="閉じる"], [aria-label="close"], [aria-label="Close"]');
+      if (closeBtn && !closeBtn._capBound){
+        closeBtn._capBound = true;
+        closeBtn.addEventListener('click', (e)=>{
+          e.preventDefault(); e.stopPropagation();
+          closeCaptionSheetStrong();
+        }, true);
+      }
+    }
+
+    // 4c) Esc key closes caption
+    window.addEventListener('keydown', (e)=>{
+      if (e.key !== 'Escape') return;
+      closeCaptionSheetStrong();
+    }, true);
+
+    // 4d) Clicking scrim also closes
+    const s = document.getElementById('sheetScrim');
+    s?.addEventListener('click', ()=> closeCaptionSheetStrong(), true);
   });
 })();
 
