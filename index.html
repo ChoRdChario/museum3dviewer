@@ -3396,7 +3396,7 @@ document.getElementById('toolInlineBtn')?.addEventListener('click', ()=>{
 (function(){
   const btn = document.getElementById('loadFab');
   if (!btn) return;
-  btn.addEventListener('click', ()=>{
+  if (btn) btn.addEventListener('click', ()=>{
     // Prefer existing load flow if present
     const openLoad = window.openLoadSheet || window.openLoadDialog || null;
     const start = document.getElementById('loadStart');
@@ -3412,7 +3412,7 @@ document.getElementById('toolInlineBtn')?.addEventListener('click', ()=>{
 (function(){
   const cancel = document.getElementById('loadCancel');
   if (!cancel) return;
-  cancel.addEventListener('click', (e)=>{
+  if (cancel) cancel.addEventListener('click', (e)=>{
     e.preventDefault();
     // close known sheets/dialogs
     try{ if (typeof closeLoadSheet==='function') closeLoadSheet(); }catch(_){}
@@ -3431,7 +3431,7 @@ document.getElementById('toolInlineBtn')?.addEventListener('click', ()=>{
 (function(){
   const btn = document.getElementById('loadFab');
   if (!btn) return;
-  btn.addEventListener('click', ()=>{
+  if (btn) btn.addEventListener('click', ()=>{
     if (typeof openLoadSheet==='function'){ openLoadSheet(); return; }
     if (typeof openLoadDialog==='function'){ openLoadDialog(); return; }
     const input = document.getElementById('loadInput') || document.getElementById('fileId');
@@ -3500,7 +3500,7 @@ document.getElementById('toolInlineBtn')?.addEventListener('click', ()=>{
   // Wire the bottom-right "読み込み" button to open the UI
   const loadFab = document.getElementById('loadFab');
   if (loadFab){
-    loadFab.addEventListener('click', function(ev){
+    if (loadFab) loadFab.addEventListener('click', function(ev){
       ev.preventDefault();
       openLoadUI();
     });
@@ -3509,7 +3509,7 @@ document.getElementById('toolInlineBtn')?.addEventListener('click', ()=>{
   // Wire Cancel explicitly
   const loadCancel = document.getElementById('loadCancel');
   if (loadCancel){
-    loadCancel.addEventListener('click', function(ev){
+    if (loadCancel) loadCancel.addEventListener('click', function(ev){
       ev.preventDefault();
       // Do NOT trigger any loading; just cancel and close
       closeLoadUI();
