@@ -536,6 +536,15 @@ html.sheet-open .floating-buttons{
 }
 </style>
 
+
+<style>
+/* v16: default hide mobile-only loader; enable only on small screens */
+#loadFab, #loadSheet { display: none !important; visibility: hidden !important; pointer-events: none !important; }
+@media (max-width: 768px){
+  #loadFab, #loadSheet { display: inline-flex !important; visibility: visible !important; pointer-events: auto !important; }
+}
+</style>
+
 </head>
 <body>
 <div id="sheetScrim" class="scrim" hidden aria-hidden="true"></div>
@@ -3582,6 +3591,35 @@ window.addEventListener('DOMContentLoaded', ()=>{
       e.preventDefault();
       e.stopPropagation();
       return false;
+    }
+  }, true);
+});
+
+
+// v16: hard-disable mobile loader on desktop and mid-size windows
+window.addEventListener('DOMContentLoaded', ()=>{
+  const isMobile = window.matchMedia('(max-width: 768px)').matches;
+  const loadFab = document.getElementById('loadFab');
+  const loadSheet = document.getElementById('loadSheet');
+  if (!isMobile){
+    // Remove FAB entirely to avoid late style overrides
+    if (loadFab && loadFab.parentNode) loadFab.parentNode.removeChild(loadFab);
+    if (loadSheet){
+      loadSheet.hidden = true;
+      loadSheet.removeAttribute('open');
+      loadSheet.setAttribute('aria-hidden','true');
+      // Also remove to avoid accidental openings
+      if (loadSheet.parentNode) loadSheet.parentNode.removeChild(loadSheet);
+    }
+  }
+  // Final guard in capture
+  document.addEventListener('click', (e)=>{
+    const t = e.target;
+    if (t && (t.id === 'loadFab' || t.closest && t.closest('#loadSheet'))){
+      if (!window.matchMedia('(max-width: 768px)').matches){
+        e.preventDefault(); e.stopPropagation();
+        return false;
+      }
     }
   }, true);
 });
