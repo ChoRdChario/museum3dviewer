@@ -483,17 +483,6 @@ html.sheet-open .floating-buttons{
 
 
 
-
-<style>
-/* v9: ensure sheets sit above scrim overlay */
-.scrim{ z-index:1200; }
-.sheet{ z-index:1400 !important; }
-.cap-sheet{ z-index:1400 !important; }
-.load-sheet{ z-index:1400 !important; }
-.top-sheet{ z-index:1500 !important; }
-#capSheet,#loadSheet,#dockSheet{ z-index:1501 !important; }
-</style>
-
 </head>
 <body>
 <div id="sheetScrim" class="scrim" hidden aria-hidden="true"></div>
@@ -521,9 +510,11 @@ html.sheet-open .floating-buttons{
 </div>
 <!-- 📍 キャプション -->
 <div class="hgroup" id="grpPins">
-  <input type="hidden" id="pinsId" />
 <span class="title">キャプション</span>
-<button class="iconbtn" id="btnClearPins">クリア</button>
+<input autocomplete="off" id="pinsId" placeholder="（任意）pins.json の fileId / 共有リンク"/>
+<button class="iconbtn" id="btnPickPins">選択…</button>
+<button class="iconbtn" id="btnPickPins" title="GLBと同じフォルダから pins.json を選ぶ">選択</button>
+  <button class="iconbtn" id="btnClearPins">クリア</button>
 <span class="sep"></span>
 <span class="tiny">Save FolderId:</span>
 <input autocomplete="off" id="folderId" placeholder="（任意）保存先フォルダID"/>
@@ -723,8 +714,22 @@ html.sheet-open .floating-buttons{
   </div>
 </section>
 
-
-
+<button aria-label="モデル読み込み" class="load-fab" id="loadFab">読み込み</button>
+<section aria-hidden="true" aria-label="モデル読み込み" aria-modal="true" class="sheet load-sheet" hidden="" id="loadSheet" role="dialog">
+<div class="handle" id="loadHandle" title="ドラッグしてサイズ変更"></div>
+<header class="load-header">
+<div class="title">モデル読み込み</div>
+<button class="close" id="loadClose">閉じる</button>
+</header>
+<div class="body">
+<div class="row"><input id="loadInput" placeholder="URL または Google DriveのfileID" type="text"/></div>
+<div class="row">
+<button id="loadStart">読み込む</button>
+<button id="loadCancel" data-variant="secondary">キャンセル</button>
+</div>
+<p class="hint">URLを貼り付けるか、fileIDのみでもOK（例: 1AbC... → https://drive.google.com/uc?id=1AbC... に変換）</p>
+</div>
+</section>
 <!-- Caption Bottom Sheet (mobile first) -->
 <section aria-hidden="true" aria-label="キャプション" aria-modal="true" class="cap-sheet" hidden="" id="capSheet" role="dialog">
 <div class="cap-handle" title="ドラッグしてサイズ変更"></div>
@@ -3434,107 +3439,14 @@ document.getElementById('toolInlineBtn')?.addEventListener('click', ()=>{
   }
 })();
 
-// === v9 shim & folder-only pins chooser ===
-
-// v9: robust close on scrim & Esc
-window.addEventListener('DOMContentLoaded', ()=>{
-  const s = document.getElementById('sheetScrim');
-  function hideScrim(){ if(!s) return; s.removeAttribute('open'); s.setAttribute('hidden',''); s.setAttribute('aria-hidden','true'); }
-  function tryAllClose(){
-    try{ closeDockSheet?.(); }catch(_){}
-    try{ closeLoadSheet?.(); }catch(_){}
-    try{ closeCaptionSheet?.(); }catch(_){}
+// v10: bind pins chooser button
+document.getElementById('btnPickPins')?.addEventListener('click', (e)=>{
+  e.preventDefault();
+  e.stopPropagation();
+  if (typeof openPinsChooser === 'function') {
+    openPinsChooser();
   }
-  s?.addEventListener('click', ()=>{ tryAllClose(); hideScrim(); });
-  window.addEventListener('keydown', (e)=>{
-    if (e.key !== 'Escape') return;
-    tryAllClose(); hideScrim(); document.documentElement.classList.remove('sheet-open');
-  }, true);
 });
-
-(function(){
-  // Shim old variable so any residual references won't break
-  try{ if (typeof btnPickPins === 'undefined') { window.btnPickPins = null; } }catch(_){ window.btnPickPins = null; }
-
-  const pinsIdInput  = document.getElementById('pinsId');
-  const folderIdInput= document.getElementById('folderId');
-  const fileIdInput  = document.getElementById('fileId');
-
-  // Limit pins chooser to GLB's parent folder only
-  window.openPinsChooser = async function(){
-    try{
-      const glbId = (fileIdInput?.value || '').trim();
-      let parentId = (folderIdInput?.value || '').trim();
-      if (!parentId && glbId && typeof driveGetMetadata === 'function'){
-        try{
-          const meta = await driveGetMetadata(glbId, 'id,parents');
-          if (meta.parents && meta.parents.length) parentId = meta.parents[0];
-        }catch(e){ console.warn('getMetadata failed', e); }
-      }
-      if (!parentId){
-        alert('GLBのフォルダを特定できませんでした。保存先フォルダIDを指定してください。');
-        return;
-      }
-
-      const hdr = 'pins.json を選択（GLBと同じフォルダ）';
-      (typeof openModal==='function' ? openModal : (h=>{
-        // very small fallback modal
-        const root = document.getElementById('modalRoot') || (()=>{ const d=document.createElement('div'); d.id='modalRoot'; document.body.appendChild(d); return d; })();
-        root.innerHTML = h;
-      }))(`
-        <div class="modal">
-          <header>
-            <strong>${hdr}</strong>
-            <div class="grow"></div>
-            <button id="pinsClose">閉じる</button>
-          </header>
-          <div class="body"><div class="grid" id="pinsGrid"><div>読み込み中…</div></div></div>
-          <footer><span class="muted">JSON（application/json）と pins.json を表示。最新順。</span></footer>
-        </div>
-      `);
-
-      const gridEl = document.getElementById('pinsGrid');
-
-      function rowHTML(f){
-        const t = new Date(f.modifiedTime||Date.now()).toLocaleString();
-        const name = (f.name||'(名称なし)').replace(/"/g,'&quot;');
-        return `<div class="card">
-          <div class="title">${name}</div>
-          <div class="meta">${t}</div>
-          <button data-pick="${f.id}" data-name="${name}">このファイルを使う</button>
-        </div>`;
-      }
-
-      async function renderGrid(files){
-        if (!files?.length){ gridEl.innerHTML = `<div>このフォルダには pins.json が見つかりません</div>`; return; }
-        gridEl.innerHTML = files.map(rowHTML).join('');
-      }
-
-      try{
-        let q = "trashed = false and (mimeType = 'application/json' or name = 'pins.json') and '"+parentId+"' in parents";
-        const res = await (typeof driveListFiles==='function' ? driveListFiles : async()=>({files:[]}))({ q, pageSize: 50 });
-        await renderGrid(res.files||[]);
-      }catch(e){ console.error(e); gridEl.innerHTML = `<div>検索に失敗しました</div>`; }
-
-      document.getElementById('pinsClose')?.addEventListener('click', ()=> (typeof closeModal==='function' ? closeModal() : (document.getElementById('modalRoot')?.remove())));
-
-      document.addEventListener('click', (ev)=>{
-        const t = ev.target;
-        if (!t?.matches('[data-pick]')) return;
-        ev.preventDefault();
-        const id = t.getAttribute('data-pick');
-        const name = t.getAttribute('data-name') || '';
-        try{ (typeof closeModal==='function' ? closeModal() : (document.getElementById('modalRoot')?.remove())); }catch(_){}
-        if (pinsIdInput && id){ pinsIdInput.value = id; }
-        try{ window.loadedPinsName = name; }catch(_){}
-        try{ window.updatePinsInfo?.(); }catch(_){}
-      }, { once:true, capture:true });
-    }catch(e){
-      console.error('openPinsChooser(v9) failed:', e);
-      alert('pins.json の取得に失敗しました。サインイン・権限・ネットワークをご確認ください。');
-    }
-  };
-})();
 
 </script>
 
