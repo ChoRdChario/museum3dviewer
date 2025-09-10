@@ -491,6 +491,43 @@ html.sheet-open .floating-buttons{
 .sheet, .top-sheet, #dockSheet{ z-index:1500 !important; pointer-events:auto; }
 </style>
 
+
+<style>
+/* v14: desktop vs mobile layout fixes */
+@media (min-width: 769px){
+  /* Bottom sheets should not cover desktop like mobile */
+  .cap-sheet, #capSheet, .sheet, .load-sheet, #dockSheet{
+    width: 720px !important;
+    max-width: 90vw !important;
+    left: 50% !important;
+    transform: translateX(-50%) !important;
+    bottom: auto !important;
+    top: 10vh !important;
+    border-radius: 12px !important;
+  }
+  .cap-sheet[open], #capSheet[open], .sheet[open], .load-sheet[open]{
+    display: block !important;
+  }
+}
+@media (max-width: 768px){
+  .cap-sheet, #capSheet, .sheet, .load-sheet{
+    width: 100vw !important;
+    left: 0 !important;
+    transform: none !important;
+    bottom: 0 !important;
+    top: auto !important;
+    border-radius: 12px 12px 0 0 !important;
+  }
+}
+/* Center generic modal on desktop */
+.modal{
+  max-width: 760px;
+  margin: 0 auto;
+}
+.modal header{ display:flex; align-items:center; gap:.5rem; }
+.modal header .grow{ flex: 1 1 auto; }
+</style>
+
 </head>
 <body>
 <div id="sheetScrim" class="scrim" hidden aria-hidden="true"></div>
@@ -2794,7 +2831,7 @@ btnPickPins.onclick = async ()=>{
         <header>
           <strong>キャプションファイルを選択（同フォルダ）</strong>
           <div class="grow"></div>
-          <button id="pinsClose">閉じる</button>
+          <button id="pinsClose" type="button" onclick="(function(){ try{ closeModal(); }catch(_){} var s=document.getElementById(\'sheetScrim\'); if(s){ s.removeAttribute(\'open\'); s.setAttribute(\'hidden\',\'\'); s.setAttribute(\'aria-hidden\',\'true\'); } document.documentElement.classList.remove(\'sheet-open\'); })()">閉じる</button>
         </header>
         <div class="body">
           <div class="list" id="pinsList"><div class="rowi">読み込み中…</div></div>
@@ -3499,6 +3536,22 @@ document.getElementById('toolInlineBtn')?.addEventListener('click', ()=>{
     s?.addEventListener('click', ()=> closeCaptionSheetStrong(), true);
   });
 })();
+
+
+// v14: ensure pinsClose always works (capture)
+window.addEventListener('DOMContentLoaded', ()=>{
+  document.addEventListener('click', (e)=>{
+    const t = e.target;
+    if (t && t.id === 'pinsClose'){
+      e.preventDefault();
+      e.stopPropagation();
+      try{ closeModal(); }catch(_){}
+      const s = document.getElementById('sheetScrim');
+      if (s){ s.removeAttribute('open'); s.setAttribute('hidden',''); s.setAttribute('aria-hidden','true'); }
+      document.documentElement.classList.remove('sheet-open');
+    }
+  }, true);
+});
 
 </script>
 
