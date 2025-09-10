@@ -55,7 +55,7 @@ async function openPinsChooser(){
           const id = btn.getAttribute('data-pick');
           const name = btn.getAttribute('data-name')||'';
           closeModal();
-          if (pinsIdInput && id){ pinsIdInput.value = id; }
+          if (pinsIdInput && id){ (pinsIdInput ? pinsIdInput.value : '') = id; }
           try{ window.loadedPinsName = name; }catch(e){}
           try{ window.updatePinsInfo?.(); }catch(e){}
         };
@@ -2767,7 +2767,7 @@ btnAuth.onclick = async ()=>{
 
 btnLoad.onclick = async ()=>{
   const glbId = extractDriveId(fileIdInput.value);
-  const manualPinsId = extractDriveId(pinsIdInput.value);
+  const manualPinsId = (pinsIdInput ? extractDriveId((pinsIdInput ? pinsIdInput.value : '')) : '');
   if(!glbId){ alert('GLBの fileId / 共有リンクを入力してください'); return; }
 
   // ★ここでサインインチェック（未サインインなら中央ゲート表示 → いったん処理中断）
@@ -2910,7 +2910,7 @@ btnPickPins.onclick = async ()=>{
         listEl.querySelectorAll('[data-pick]').forEach(btn=>{
           btn.onclick = async ()=>{
             const id = btn.getAttribute('data-pick');
-            pinsIdInput.value = id;
+            (pinsIdInput ? pinsIdInput.value : '') = id;
             closeModal();
             try{
               statusEl.textContent='pins 読込中…';
@@ -2946,7 +2946,7 @@ btnPickPins.onclick = async ()=>{
     }
 
     document.getElementById('pinsUseAutosave')?.addEventListener('click', (e)=>{
-  pinsIdInput.value = '';
+  (pinsIdInput ? pinsIdInput.value : '') = '';
   closeModal();
 });
   }catch(e){
@@ -2954,10 +2954,10 @@ btnPickPins.onclick = async ()=>{
     alert('サインインが必要です');
   }
 };
-btnClearPins.onclick = ()=>{ pinsIdInput.value=''; loadedPinsId=''; loadedPinsName=''; updatePinsInfo(); refreshShareButtons(); };
+btnClearPins.onclick = ()=>{ (pinsIdInput ? pinsIdInput.value : '')=''; loadedPinsId=''; loadedPinsName=''; updatePinsInfo(); refreshShareButtons(); };
 btnCopyReadonlyUrl.onclick = ()=>{
   const glb = extractDriveId(fileIdInput.value);
-  const pins = extractDriveId(pinsIdInput.value) || loadedPinsId || autosaveId || '';
+  const pins = (pinsIdInput ? extractDriveId((pinsIdInput ? pinsIdInput.value : '')) : '') || loadedPinsId || autosaveId || '';
   if (!glb){ alert('まずGLBのfileIdを設定してください'); return; }
   const url = new URL(window.location.href);
   url.searchParams.set('fileId', glb);
@@ -2977,7 +2977,7 @@ btnToggleGlbPublic.onclick = async ()=>{
   }catch(e){ await explainShareError(glb, e); }
 };
 btnTogglePinsPublic.onclick = async ()=>{
-  const pid = extractDriveId(pinsIdInput.value) || loadedPinsId || autosaveId;
+  const pid = (pinsIdInput ? extractDriveId((pinsIdInput ? pinsIdInput.value : '')) : '') || loadedPinsId || autosaveId;
   if (!pid){ alert('pins.json が未指定です'); return; }
   try{
     await ensureToken();
@@ -2990,7 +2990,7 @@ btnTogglePinsPublic.onclick = async ()=>{
 async function refreshShareButtons(){
   btnToggleGlbPublic.textContent = '限定';
   btnTogglePinsPublic.textContent= '限定';
-  btnTogglePinsPublic.disabled = !(pinsIdInput.value.trim() || loadedPinsId || autosaveId);
+  btnTogglePinsPublic.disabled = !((pinsIdInput ? pinsIdInput.value : '').trim() || loadedPinsId || autosaveId);
   if (!accessToken) return;
   try{
     const glb = fileIdInput.value.trim();
@@ -3000,7 +3000,7 @@ async function refreshShareButtons(){
     }
   }catch{}
   try{
-    const pid = pinsIdInput.value.trim() || loadedPinsId || autosaveId;
+    const pid = (pinsIdInput ? pinsIdInput.value : '').trim() || loadedPinsId || autosaveId;
     if (pid){
       const pub = await driveIsPublic(pid);
       btnTogglePinsPublic.textContent = pub ? '公開' : '限定';
@@ -3028,7 +3028,7 @@ function applyReadOnlyUI(){
   const fId = fRaw ? extractDriveId(fRaw) : '';
   const pId = pRaw ? extractDriveId(pRaw) : '';
   if (fId) fileIdInput.value = fId;
-  if (pId) pinsIdInput.value = pId;
+  if (pId) (pinsIdInput ? pinsIdInput.value : '') = pId;
   const mode = sp.get('mode');
   READ_ONLY = (mode === 'read');
   TOUCH_MODE = TOUCH_MODE || (sp.get('touch') === '1');
@@ -3442,6 +3442,9 @@ document.getElementById('toolInlineBtn')?.addEventListener('click', ()=>{
 
 
 <script>
+// shim: old UI removed
+try{ if (typeof btnPickPins === 'undefined') { window.btnPickPins = null; } }catch(_){ window.btnPickPins = null; }
+
 (function(){
   function $(sel, root){ return (root||document).querySelector(sel); }
   function all(sel, root){ return Array.from((root||document).querySelectorAll(sel)); }
@@ -3627,7 +3630,7 @@ window.addEventListener('DOMContentLoaded', ()=>{
             const file = (files||[]).find(x=>x.id===id);
             closeModal();
             if (file && pinsIdInput){
-              pinsIdInput.value = file.id;
+              (pinsIdInput ? pinsIdInput.value : '') = file.id;
               try{ window.loadedPinsName = file.name; }catch(e){}
               try{ window.updatePinsInfo?.(); }catch(e){}
             }
@@ -3743,7 +3746,7 @@ window.addEventListener('DOMContentLoaded', ()=>{
       const id = t.getAttribute('data-pick');
       const name = t.getAttribute('data-name') || '';
       try{ window.closeModal(); }catch(_){}
-      if (pinsIdInput && id){ pinsIdInput.value = id; }
+      if (pinsIdInput && id){ (pinsIdInput ? pinsIdInput.value : '') = id; }
       try{ window.loadedPinsName = name; }catch(_){}
       try{ window.updatePinsInfo?.(); }catch(_){}
     }
@@ -3973,7 +3976,7 @@ window.addEventListener('DOMContentLoaded', ()=>{
         const id = t.getAttribute('data-pick');
         const name = t.getAttribute('data-name') || '';
         try{ _closeModal(); }catch(_){}
-        if (pinsIdInput && id){ pinsIdInput.value = id; }
+        if (pinsIdInput && id){ (pinsIdInput ? pinsIdInput.value : '') = id; }
         try{ window.loadedPinsName = name; }catch(_){}
         try{ window.updatePinsInfo?.(); }catch(_){}
       }, { once:true, capture:true });
