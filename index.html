@@ -3,7 +3,7 @@
 <html lang="ja">
 <head>
 <meta charset="utf-8"/>
-<title>Drive GLB Viewer + Pins (v1.22.0-bg)</title>
+<title>Drive GLB Viewer + Pins (v1.22.1-bg)</title>
 <link href="https://accounts.google.com" rel="preconnect"/>
 <script async="" src="https://accounts.google.com/gsi/client"></script>
 <script>
@@ -527,6 +527,38 @@ html.sheet-open, body.sheet-open { overflow: hidden !important; }
 #sheetScrim.scrim { pointer-events: auto !important; }
 .sheet[open] { pointer-events: auto !important; }
 </style>
+
+
+<style>
+/* --- v1.22.1-bg: Load Sheet fullscreen-first UX --- */
+.sheet {
+  position: fixed !important;
+  left: 0 !important;
+  right: 0 !important;
+  bottom: 0 !important;
+  width: 100% !important;
+  max-height: none !important;
+  overflow: auto !important;
+}
+/* Fullscreen-ish default when open */
+.sheet[open] {
+  height: calc(92vh + env(safe-area-inset-bottom, 0));
+}
+/* Ensure header/body padding respects safe area */
+.sheet .body {
+  padding-bottom: calc(16px + env(safe-area-inset-bottom, 0)) !important;
+}
+/* Desktop can remain more compact via media query if desired */
+@media (min-width: 961px) {
+  .sheet[open] {
+    max-width: 680px;
+    margin: 0 auto;
+    height: auto; /* desktop uses content height */
+    max-height: 560px;
+  }
+}
+</style>
+
 </head>
 <body>
 <div id="sheetScrim" class="scrim" hidden aria-hidden="true"></div>
@@ -796,7 +828,7 @@ html.sheet-open, body.sheet-open { overflow: hidden !important; }
 <div class="hidden" id="modalRoot"></div>
 <script type="module">
 'use strict';
-console.log('drive_three_pins v1.22.0-bg');
+console.log('drive_three_pins v1.22.1-bg');
 
 
 /* === Loader helpers === */
@@ -1444,10 +1476,19 @@ function openLoadSheet(){
 document.documentElement.classList.add('sheet-open');
   document.getElementById('sheetScrim')?.setAttribute('open','');
   document.getElementById('sheetScrim')?.removeAttribute('hidden');
-  loadSheet.dataset.snap = 'half';
+  loadSheet.dataset.snap = 'full';
   loadSheet.hidden = false;
   loadSheet.setAttribute('open','');
   loadSheet.setAttribute('aria-hidden','false');
+  // Compute a robust fullscreen-ish height for mobile Safari
+  try {
+    var vh = window.innerHeight || document.documentElement.clientHeight || 640;
+    // Reserve a little margin to avoid Safari UI overlap
+    var h = Math.max(280, Math.floor(vh * 0.92));
+    loadSheet.style.height = h + 'px';
+    // For desktop wide screens, let CSS cap the height later
+  } catch(e){}
+
   setTimeout(()=> loadInput?.focus(), 50);
 }
 function closeLoadSheet(){
@@ -3903,6 +3944,25 @@ document.getElementById('toolInlineBtn')?.addEventListener('click', ()=>{
     };
   }
 })();
+</script>
+
+<script>
+
+// v1.22.1-bg: Recompute sheet height on viewport changes (iOS Safari safe)
+(function(){
+  function recomputeSheetHeight(){
+    try{
+      var el = document.getElementById('loadSheet');
+      if (!el || !el.hasAttribute('open')) return;
+      var vh = window.innerHeight || document.documentElement.clientHeight || 640;
+      var h  = Math.max(280, Math.floor(vh * 0.92));
+      el.style.height = h + 'px';
+    }catch(e){}
+  }
+  window.addEventListener('resize', recomputeSheetHeight);
+  window.addEventListener('orientationchange', recomputeSheetHeight);
+})();
+
 </script>
 </body>
 </html>
