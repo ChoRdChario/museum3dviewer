@@ -520,6 +520,13 @@ html.sheet-open .floating-buttons{
 /* Ensure sheet receives events over scrim */
 .sheet[open] { pointer-events: auto !important; }
 </style>
+
+<style>
+/* ---- iOS Safari stacking & hit-test hardening (v2) ---- */
+html.sheet-open, body.sheet-open { overflow: hidden !important; }
+#sheetScrim.scrim { pointer-events: auto !important; }
+.sheet[open] { pointer-events: auto !important; }
+</style>
 </head>
 <body>
 <div id="sheetScrim" class="scrim" hidden aria-hidden="true"></div>
@@ -1299,6 +1306,7 @@ function openDockSheet(){
   try{ closeCaptionSheet?.(); }catch(_){}
 
   document.documentElement.classList.add('sheet-open');
+  try{ document.body.classList.add('sheet-open'); }catch(_){}
   document.getElementById('sheetScrim')?.setAttribute('open','');
   document.getElementById('sheetScrim')?.removeAttribute('hidden');
   dockSheet.dataset.snap = 'full';
@@ -1413,24 +1421,42 @@ const loadInput = document.getElementById('loadInput');
 const loadStart = document.getElementById('loadStart');
 
 function openLoadSheet(){
-  document.documentElement.classList.add('sheet-open');
+  
+  // Ensure stacking order on iOS Safari by re-appending scrim then sheet as last children of <body>
+  try {
+    const scrim = document.getElementById('sheetScrim');
+    if (scrim && scrim.parentNode !== document.body) {
+      document.body.appendChild(scrim);
+    } else if (scrim) {
+      document.body.appendChild(scrim); // move to end to ensure paint order
+    }
+    if (loadSheet && loadSheet.parentNode !== document.body) {
+      document.body.appendChild(loadSheet);
+    } else if (loadSheet) {
+      document.body.appendChild(loadSheet); // move to end
+    }
+  } catch(e){}
+document.documentElement.classList.add('sheet-open');
   document.getElementById('sheetScrim')?.setAttribute('open','');
   document.getElementById('sheetScrim')?.removeAttribute('hidden');
-  loadSheet.dataset.snap = 'half';
+  loadSheet.dataset.snap = 'full';
   loadSheet.hidden = false;
   loadSheet.setAttribute('open','');
   loadSheet.setAttribute('aria-hidden','false');
   setTimeout(()=> loadInput?.focus(), 50);
 }
 function closeLoadSheet(){
-  document.documentElement.classList.remove('sheet-open');
+    try{ document.body.classList.remove('sheet-open'); }catch(_){}
+document.documentElement.classList.remove('sheet-open');
   const s=document.getElementById('sheetScrim'); if(s){ s.removeAttribute('open'); s.setAttribute('aria-hidden','true'); s.setAttribute('hidden',''); }
   loadSheet.removeAttribute('open');
   loadSheet.setAttribute('aria-hidden','true');
   setTimeout(()=>{ loadSheet.hidden = true; }, 160);
 }
 
-loadFab?.addEventListener('click', openLoadSheet);
+loadFab?.addEventListener('click', openLoadSheet)
+(document.getElementById('sheetScrim'))?.addEventListener('click', closeLoadSheet);
+;
 loadClose?.addEventListener('click', closeLoadSheet);
 
 // drag (reuse caption logic style: handle only)
@@ -3303,7 +3329,7 @@ document.getElementById('toolInlineBtn')?.addEventListener('click', ()=>{
   document.getElementById('sheetScrim')?.setAttribute('open','');
   document.getElementById('sheetScrim')?.removeAttribute('hidden');
     if (!loadSheet) return;
-    loadSheet.dataset.snap = 'half';
+    loadSheet.dataset.snap = 'full';
     loadSheet.hidden = false;
     loadSheet.setAttribute('open','');
     loadSheet.setAttribute('aria-hidden','false');
