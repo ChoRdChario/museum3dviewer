@@ -604,6 +604,15 @@ if (typeof window.escAttr !== 'function') {
   .load-fab { display: none !important; }
 }
 </style>
+<style>
+/* v1.22.1-bg.p15: tiny toast */
+#_toast_ {
+  position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%);
+  background: rgba(0,0,0,0.85); color: #fff; font-size: 14px;
+  padding: 10px 14px; border-radius: 10px; z-index: 6000; pointer-events: none;
+  opacity: 0; transition: opacity .2s ease;
+}
+</style>
 </head>
 <body>
 <!-- Sign-in Gate -->
@@ -4126,25 +4135,82 @@ document.getElementById("btnGateSignIn")?.addEventListener("click", ()=>{
 </script>
 
 
-<script>
-// v1.22.1-bg.p14: Sign-in gate handler (callback style)
-document.getElementById("btnGateSignIn")?.addEventListener("click", ()=>{
-  if (typeof requestTokenInteractive === 'function') {
-    try {
-      requestTokenInteractive(ALL_SCOPES, (resp)=>{
-        if (resp && resp.access_token) {
-          const gate = document.getElementById("signinGateWrap");
-          if (gate) gate.hidden = true;
-        } else {
-          console.warn("Sign-in failed or no token", resp);
-        }
-      });
-    } catch(err) {
-      console.error("Sign-in error", err);
-    }
-  }
-});
-</script>
 
+
+<script>
+// v1.22.1-bg.p15: sign-in click closes gate immediately; re-open on cancel/timeout
+(function(){
+  function hideGate(){
+    const g = document.getElementById('signinGateWrap');
+    if (g) g.hidden = true;
+    try{ document.documentElement.classList.remove('sheet-open'); document.body.classList.remove('sheet-open'); }catch(_){}
+  }
+  function showGate(){
+    const g = document.getElementById('signinGateWrap');
+    if (g) g.hidden = false;
+  }
+  function showToast(msg, ms=1500){
+    try{
+      let el = document.getElementById('_toast_');
+      if (!el){
+        el = document.createElement('div');
+        el.id = '_toast_';
+        document.body.appendChild(el);
+      }
+      el.textContent = msg;
+      requestAnimationFrame(()=>{ el.style.opacity = '1'; });
+      setTimeout(()=>{ el.style.opacity = '0'; }, ms);
+    }catch(_){ try{ alert(msg); }catch(__){} }
+  }
+
+  const btn = document.getElementById('btnGateSignIn');
+  if (btn){
+    btn.addEventListener('click', ()=>{
+      // Close gate immediately to remove overlay
+      hideGate();
+      let handled = false;
+      let timeoutId = setTimeout(()=>{
+        if (!handled) {
+          // If no callback within 20s, assume cancelled and re-open
+          showGate();
+          showToast('サインインをキャンセルしました');
+        }
+      }, 20000);
+
+      try {
+        if (typeof requestTokenInteractive === 'function'){
+          // Prefer callback style if supported
+          const needsCallback = requestTokenInteractive.length >= 2; // (scopes, callback)
+          if (needsCallback){
+            requestTokenInteractive(ALL_SCOPES, (resp)=>{
+              handled = true; clearTimeout(timeoutId);
+              if (resp && resp.access_token){
+                // success: keep gate hidden
+              } else {
+                showGate();
+                showToast('サインインできませんでした');
+              }
+            });
+          } else {
+            // Promise style (fallback)
+            Promise.resolve(requestTokenInteractive(ALL_SCOPES))
+              .then(()=>{ handled = true; clearTimeout(timeoutId); /* success */ })
+              .catch(()=>{ handled = true; clearTimeout(timeoutId); showGate(); showToast('サインインできませんでした'); });
+          }
+        } else {
+          handled = true; clearTimeout(timeoutId);
+          showGate();
+          showToast('サインイン機能が無効です');
+        }
+      } catch(e){
+        handled = true; clearTimeout(timeoutId);
+        showGate();
+        showToast('サインインに失敗しました');
+        console.warn(e);
+      }
+    });
+  }
+})();
+</script>
 </body>
 </html>
