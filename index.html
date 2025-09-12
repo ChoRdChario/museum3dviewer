@@ -6,8 +6,606 @@
 <title>Drive GLB Viewer + Pins (v1.22.1-bg)</title>
 <link href="https://accounts.google.com" rel="preconnect"/>
 <script async="" src="https://accounts.google.com/gsi/client"></script>
+<script>
 
 
+/** Hex color normalizer: supports #rgb -> #rrggbb and validates */
+function normalizeHex(c){
+  try{
+    if(!c) return '#000000';
+    c = String(c).trim();
+    if(c[0] !== '#') c = '#'+c;
+    if(c.length === 4){ // #rgb
+      const r=c[1], g=c[2], b=c[3];
+      return ('#' + r+r + g+g + b+b).toLowerCase();
+    }
+    if(c.length === 7){
+      return c.toLowerCase();
+    }
+  }catch(_){/* noop */}
+  // Fallback safe default
+  return '#000000';
+}
+
+</script>
+<script async="" src="https://apis.google.com/js/api.js"></script>
+<meta content="width=device-width, initial-scale=1" name="viewport"/>
+<link href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='64' height='64'%3E%3Crect width='64' height='64' fill='%23222'/%3E%3Ccircle cx='32' cy='32' r='18' fill='%23e33'/%3E%3C/svg%3E" rel="icon"/>
+<style>
+  /* 非活性行の見た目と操作抑止 */
+.disabled { opacity: .55; pointer-events: none; }
+    :root { --bg:#111; --muted:#666; }
+    html,body{height:100%}
+    body{margin:0;background:var(--bg);color:#222;font:14px/1.5 system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif}
+    header{display:flex;gap:8px;align-items:center;padding:10px 12px;background:#f8f8f8;border-bottom:1px solid #e8e8e8;position:sticky;top:0;z-index:10;flex-wrap:wrap}
+    header input{padding:6px 8px;border:1px solid #ddd;border-radius:8px;min-width:200px}
+    header button{padding:6px 10px;border:1px solid #ddd;border-radius:8px;background:#fff;cursor:pointer}
+    header .grow{flex:1}
+    main{display:grid;grid-template-columns: 1fr 360px;gap:10px;}
+#view{
+  position:relative;
+  width:100%;
+  height:calc(100dvh - 56px); /* ← 100vh → 100dvh に変更 */
+  overflow:hidden;
+  background:#222;
+}
+    #canvas{display:block;width:100%;height:100%}
+    aside{height:calc(100dvh - 56px);overflow:auto;background:#fafafa;border-left:1px solid #eee}
+    .sec{padding:10px 12px;border-bottom:1px solid #eee}
+    .row{display:flex;gap:8px;align-items:center;margin-top:6px;flex-wrap:wrap}
+    .muted{color:var(--muted);font-size:12px}
+    .hidden{display:none}
+    .warn{color:#b00}
+    .badge{display:inline-block;background:#eef;border:1px solid #dde;border-radius:999px;padding:2px 8px;font-size:12px}
+    .pin{border:1px solid #e5e5e5;background:#fff;border-radius:10px;padding:8px;margin-top:8px}
+    .pin input,.pin textarea{width:100%;border:1px solid #ddd;border-radius:6px;padding:6px}
+    .pin img{max-width:100%;border-radius:8px;margin-top:6px;cursor:zoom-in}
+    #dbg{position:fixed;left:8px;bottom:8px;color:#0f0;font:12px/1.2 monospace;z-index:9999;pointer-events:none;white-space:pre}
+    .float-layer{position:absolute;left:0;top:0;width:100%;height:100%;pointer-events:none}
+    .float-card{
+      position:absolute; min-width:200px; max-width:280px; pointer-events:auto;
+      background:#fff; border:1px solid #ddd; border-radius:10px; box-shadow:0 8px 22px rgba(0,0,0,0.3);
+      user-select:none;
+    }
+    .float-card header{display:flex; align-items:center; gap:8px; padding:6px 8px; border-bottom:1px solid #eee;
+      background:#f6f7fb; border-radius:10px 10px 0 0; cursor:grab;}
+    .float-card header:active{ cursor:grabbing; }
+    .float-card header input{flex:1; min-width:0; border:1px solid #ddd; border-radius:6px; padding:4px 6px; font-size:13px; background:#fff;}
+    .float-card .body{ padding:8px }
+    .float-card .body textarea{ width:100%; border:1px solid #ddd; border-radius:6px; padding:6px; min-height:70px }
+    .float-card .body img{ display:block; max-width:100%; border-radius:8px; margin-top:6px; cursor:zoom-in }
+    .float-card .footer{ display:flex; gap:6px; padding:8px; border-top:1px solid #eee; flex-wrap:wrap; align-items:center }
+    .float-card .btn{ padding:4px 8px; border:1px solid #ddd; border-radius:8px; background:#fff; cursor:pointer; font-size:12px }
+    .float-card .btn.warn{ color:#b00 }
+    .float-card a.small { font-size:12px; color:#06c; text-decoration:none }
+    .float-card a.small:hover { text-decoration:underline }
+    .lines{ position:absolute; left:0; top:0; width:100%; height:100%; pointer-events:none }
+    .lines line{ stroke:#fff; stroke-opacity:0.85; stroke-width:2; filter:drop-shadow(0 0 1px rgba(0,0,0,.7)); }
+    .pill {font-size:12px;border:1px solid #ddd;border-radius:999px;padding:4px 8px;background:#fff;display:inline-flex;gap:6px;align-items:center}
+    .pill input{margin:0}
+    .pill.small{font-size:11px;padding:2px 6px}
+    .save-ok{color:#0a0}.save-pending{color:#a60}.save-fail{color:#b00}
+
+    /* ==== Editor Dock ==== */
+    .dock{
+      position:absolute; top:12px; right:12px; width:340px; max-height:80vh; overflow:auto;
+      background:#ffffffea; backdrop-filter:saturate(1.2) blur(4px);
+      border:1px solid #ddd; border-radius:12px; box-shadow:0 10px 30px rgba(0,0,0,.35);
+      z-index:8; /* ← ヘッダー(z=10)より下：被り防止 */
+    }
+    .dock header{
+      display:flex; align-items:center; gap:8px; padding:8px 10px; border-bottom:1px solid #eee;
+      position:sticky; top:0; background:#f6f7fb; border-radius:12px 12px 0 0;
+    }
+    .dock .tabs{ display:flex; gap:6px; flex-wrap:wrap }
+    .dock .tabbtn{ padding:4px 10px; font-size:12px; border:1px solid #ddd; border-radius:999px; background:#fff; cursor:pointer; }
+    .dock .tabbtn.active{ background:#eef; border-color:#cdd; }
+    .dock .minbtn{ margin-left:auto; padding:4px 8px; border:1px solid #ddd; border-radius:8px; background:#fff; cursor:pointer; font-size:12px }
+    .dock .body{ padding:10px }
+    .dock.collapsed .body{ display:none }
+    .dock.collapsed header{ border-radius:12px }
+    .tool-row{ display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-bottom:8px }
+    .tool-btn{ padding:6px 10px; border:1px solid #ddd; background:#fff; border-radius:8px; font-size:12px; cursor:pointer }
+    .tool-btn.toggled{ background:#e8f0fe; border-color:#c7dafc }
+    .tool-input{ display:flex; align-items:center; gap:8px; margin-bottom:8px }
+    .tool-input input[type="range"]{ width:160px }
+
+    /* ==== Modal (list/picker) ==== */
+    .modal-overlay{ position:fixed; inset:0; background:rgba(0,0,0,.5); display:flex; align-items:center; justify-content:center; z-index:50; }
+    .modal{ width:840px; max-width:95vw; max-height:86vh; overflow:auto; background:#fff; border:1px solid #ddd; border-radius:12px; box-shadow:0 20px 40px rgba(0,0,0,0.4); }
+    .modal header{ position:sticky; top:0; background:#f6f7fb; border-bottom:1px solid #eee; padding:10px 12px; display:flex; gap:8px; align-items:center }
+    .modal .body{ padding:12px }
+    .list{ border:1px solid #eee; border-radius:10px; overflow:hidden }
+    .rowi{ display:grid; grid-template-columns: 1fr 200px 120px; gap:8px; padding:8px 10px; border-bottom:1px solid #f0f0f0; align-items:center }
+    .rowi:last-child{ border-bottom:none }
+    .rowi .name{ font-weight:600 }
+    .rowi .meta{ font-size:12px; color:#666 }
+    .modal footer{ padding:10px 12px; border-top:1px solid #eee; display:flex; gap:8px; justify-content:flex-end }
+    .grid{ display:grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap:10px }
+    .card{ border:1px solid #eee; border-radius:10px; padding:8px; display:flex; flex-direction:column; gap:6px; }
+    .card img{ width:100%; aspect-ratio: 1 / 1; object-fit:cover; border-radius:8px; background:#f3f3f3 }
+    .card .title{ font-size:12px; line-height:1.4; }
+    .card .meta{ font-size:11px; color:#666; }
+    .card button{ padding:6px 8px; font-size:12px; }
+
+    /* ==== Image Zoom Viewer ==== */
+    
+    /* ==== Sign-in Gate (mobile first) ==== */
+.gate-overlay{
+  position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+  background:rgba(0,0,0,.55); z-index:40;
+}
+.gate{
+  background:#fff; border:1px solid #ddd; border-radius:14px; padding:16px 18px;
+  width:min(92vw,420px); text-align:center; box-shadow:0 18px 40px rgba(0,0,0,.35);
+}
+.gate h3{ margin:0 0 8px; font-size:16px }
+.gate p { margin:0 0 12px; color:#666; font-size:13px }
+.gate .btn{ padding:10px 14px; border:1px solid #ddd; border-radius:999px; background:#fff; cursor:pointer; font-size:14px }
+.hidden{ display:none }
+
+/* FAB: モバイルでドックを開く小ボタン */
+
+  #dockFab{ display:none; }
+
+    
+    .zoom-overlay{ position:fixed; inset:0; background:rgba(0,0,0,.85); display:flex; align-items:center; justify-content:center; z-index:60; cursor:grab }
+    .zoom-img{ max-width:none; max-height:none; transform-origin: 0 0; user-select:none; -webkit-user-drag:none; }
+    .zoom-close{ position:fixed; top:12px; right:12px; z-index:61; padding:8px 10px; background:#fff; border:1px solid #ddd; border-radius:8px; cursor:pointer; }
+
+    /* ==== Toolbar groups ==== */
+    .toolbar { display:flex; gap:10px; flex-wrap:wrap; align-items:flex-start; width:100% }
+    .hgroup{
+      background:#fff; border:1px solid #e6e6e6; border-radius:12px; padding:8px 10px;
+      display:flex; gap:10px; align-items:center; flex-wrap:wrap;
+    }
+    .hgroup .title{ font-weight:600; font-size:12px; color:#444; padding:2px 8px; background:#f4f4f6; border:1px solid #e9e9ee; border-radius:999px }
+    .hgroup input{ padding:6px 8px; border:1px solid #ddd; border-radius:8px; min-width:220px }
+    .hgroup .tiny{ font-size:12px; color:#666 }
+    .hgroup .iconbtn{ padding:4px 8px; font-size:12px; border:1px solid #ddd; border-radius:8px; background:#fff; cursor:pointer }
+    .hgroup .sep{ width:1px; height:20px; background:#eee; margin:0 2px }
+    header .grow{ flex:1 }
+    .header-utils{ display:flex; gap:8px; align-items:center; flex-wrap:wrap }
+    #pillAutosave { padding:2px 8px }
+    #pillAutosave input { transform:scale(.95) }
+
+    @media (max-width: 960px){
+      main{ grid-template-columns: 1fr }
+      aside{ display:none }
+      .dock{ left:12px; right:12px; width:auto }
+      .dock .tabbtn{ padding:6px 12px }
+      .tool-btn{ padding:8px 12px }
+    }
+    
+    /* === Mobile compact mode (≈15% 常時UI) === */
+@media (max-width: 640px){
+  /* ヘッダーはオートハイド用に固定配置 */
+  header{ position: fixed; top:0; left:0; right:0; transform: translateY(0); transition: transform .25s; z-index: 10; }
+  header.compact{ transform: translateY(-100%); }
+  
+
+  /* 1) ヘッダーは“初期から”隠す（必要時のみスワイプで表示） */
+  header{ transform: translateY(-100%) !important; }
+
+  /* 2) ミニバー：ボタンを丸型・小型化（高さ=約40px） */
+  .mini-bar{
+    padding: 4px 6px !important;
+    gap: 6px !important;
+    border-radius: 999px !important;
+  }
+  .mini-btn{
+    width: 40px; height: 40px;
+    padding: 0 !important; border-radius: 999px !important;
+    font-size: 18px; line-height: 40px;
+  }
+
+  /* 3) FAB：丸型アイコン化（テキスト非表示） */
+  #dockFab{ display:none; }
+  /* アイコンは疑似要素で表示 */
+  
+
+  /* 4) 保存ステータスのピル：さらに小型に */
+  #pillAutosave{
+    padding: 2px 6px !important;
+    font-size: 11px; gap: 6px;
+  }
+  #pillAutosave input{ transform: scale(.9); }
+
+  /* 5) ボトムシート（dock）は開いた時のみ可視。高さは最大 40–45vh */
+  .dock{
+    max-height: min(40vh, 380px) !important;
+    box-shadow: 0 16px 40px rgba(0,0,0,.35);
+  }
+
+  /* 6) フロートカード類のフォント/パディングを気持ち小さく */
+  .float-card{ font-size: 13px; }
+  .float-card header{ padding: 6px 8px; }
+  .float-card .body{ padding: 8px; }
+  .float-card .footer{ padding: 8px; gap: 6px; }
+  .float-card .btn{ padding: 4px 8px; font-size: 12px; }
+
+/* ヘッダー再表示のトランジションは既存を利用 */
+
+  /* レイアウトを viewer 全画面化 */
+  main{ grid-template-columns: 1fr }
+  aside{ display:none }
+  #view{ height: 100dvh; }
+
+  /* 右下の FAB（既存）を使ってボトムシートを開閉 */
+  #dockFab{ display:none; }
+
+  /* 保存ステータスのピルを右上に固定 */
+  #pillAutosave{
+    position: fixed; right:12px; top:12px; z-index:9;
+    background:#ffffffea; backdrop-filter: blur(4px);
+    border:1px solid #ddd; border-radius:999px; padding:2px 8px;
+  }
+
+  /* 左下のミニツールバー（常時表示はココだけ+FAB） */
+  .mini-bar{
+    position:fixed; left:12px; bottom:14px; z-index:9; display:flex; gap:8px;
+    background:#ffffffea; backdrop-filter:blur(4px);
+    border:1px solid #ddd; border-radius:999px; padding:6px 8px;
+  }
+  .mini-btn{ border:0; background:transparent; padding:6px; border-radius:10px; }
+  .mini-btn:active{ background:#efefef }
+
+  /* 既存の .dock を “ボトムシート” に */
+  .dock{
+    position: fixed; left:0; right:0; bottom:0; top:auto;
+    width:auto; max-height:min(45vh, 420px); overflow:auto;
+    border-radius:16px 16px 0 0; margin:0 0 env(safe-area-inset-bottom,0) 0;
+    display:none; /* 初期は閉 */
+  }
+  .dock.collapsed{ display:none } /* 明示的に閉 */
+}
+
+/* ボトムシートのグラブハンドル */
+.dock::before{
+  content:""; display:block; width:44px; height:4px; border-radius:999px;
+  background:#d0d0d0; margin:8px auto;
+}
+
+/* 画面の下の安全域（iPhoneのホームバーなど）をよける */
+.float-layer { padding-bottom: env(safe-area-inset-bottom, 0); }
+
+/* カードが小画面でも読みやすい幅に */
+.float-card { max-width: min(92vw, 320px); }
+
+
+    
+  
+/* === Added: Desktop open-dock button (top-right) === */
+#btnOpenDock_hidden{ min-width:40px; min-height:40px; outline:1px solid transparent; outline-offset:2px;
+  position:fixed; top:12px; right:12px; z-index:11;
+  padding:8px 12px; border:1px solid #ddd; border-radius:10px; background:#fff; cursor:pointer; font-size:13px;
+  box-shadow:0 8px 20px rgba(0,0,0,.15);
+}
+@media (max-width: 960px){ #btnOpenDock_hidden{ min-width:40px; min-height:40px; outline:1px solid transparent; outline-offset:2px; display:none } } /* hide on mobile */
+#btnOpenDock_hidden:hover{ outline-color:#ddd }
+
+/* === Added: Mobile sheet style for caption card === */
+.float-card.sheet{
+  position:fixed !important; left:0 !important; right:0 !important; bottom:0 !important; top:auto !important;
+  margin:0; width:auto !important; max-height:min(48vh, 460px); overflow:auto;
+  border-radius:16px 16px 0 0;
+}
+.float-card header .grab-handle{
+  width:42px; height:4px; border-radius:999px; background:#d0d0d0; margin-right:8px; flex:0 0 auto;
+}
+@media (max-width: 640px){
+  .float-card header .close-btn{ font-size:14px; padding:6px 8px }
+}
+
+/* === Added: Make the card header an obvious drag area on mobile === */
+@media (max-width: 640px){
+  .float-card header{ cursor:grab; user-select:none }
+  .float-card header:active{ cursor:grabbing }
+}
+
+/* === Added: Ensure close button is visible and aligned === */
+.float-card header .close-btn{
+  border:1px solid #ddd; border-radius:8px; background:#fff; cursor:pointer; padding:4px 8px; font-size:12px;
+}
+
+/* === Added: Fix caption tab text overflow inside dock === */
+#tab-camera .tool-input textarea, #tab-materials textarea{
+  max-width:100%; box-sizing:border-box;
+}
+
+/* === Added: Center loader overlay === */
+#loaderOverlay{
+  position:fixed; inset:0; display:none; align-items:center; justify-content:center; z-index:1000;
+  background:rgba(0,0,0,.45);
+}
+#loaderOverlay.active{ display:flex }
+.spinner{
+  width:56px; height:56px; border-radius:50%;
+  border:4px solid rgba(255,255,255,.35); border-top-color:#fff;
+  animation:spin 1s linear infinite;
+}
+@keyframes spin{ to{ transform:rotate(360deg) } }
+
+/* === Added: Dock visibility helpers === */
+.d-none{ display:none !important }
+
+
+/* tabs: aria-selected 表示 */
+.dock .tabbtn[aria-selected="true"]{
+  background:#eef; border-color:#cdd; text-decoration:underline;
+}
+
+/* === Caption Bottom Sheet === */
+.cap-sheet{
+  position:fixed; left:0; right:0; bottom:0; z-index:60;
+  background:#fff; border-radius:16px 16px 0 0; box-shadow:0 -10px 30px rgba(0,0,0,.35);
+  transform:translateY(110%); transition:transform .24s ease, opacity .12s ease; opacity:0;
+  max-height:92vh;
+}
+.cap-sheet[open]{ opacity:1; transform:translateY(0) }
+.cap-sheet[data-snap="peek"]{ transform:translateY(calc(100% - 28vh)); }
+.cap-sheet[data-snap="half"]{ transform:translateY(calc(100% - 50vh)); }
+.cap-sheet[data-snap="full"]{ transform:translateY(0); }
+.cap-handle{ height:28px; display:flex; align-items:center; justify-content:center; cursor:grab; touch-action:none; }
+.cap-handle::before{ content:""; width:44px; height:4px; border-radius:999px; background:#d0d0d0; box-shadow:inset 0 -1px 0 #c7c7c7; }
+.cap-header{ display:flex; gap:8px; align-items:center; padding:6px 12px; border-bottom:1px solid #eee; cursor:grab; user-select:none }
+.cap-title{ flex:1; font-weight:600 }
+.cap-close{ padding:8px 10px; border:1px solid #ddd; border-radius:8px; background:#fff; cursor:pointer }
+.cap-body{ padding:10px 12px; overflow:auto; max-height:calc(92vh - 28px - 44px - env(safe-area-inset-bottom,0)); }
+.cap-row{ display:flex; gap:8px; align-items:center; margin-bottom:10px; flex-wrap:wrap }
+.cap-sheet input[type="text"], .cap-sheet textarea{ width:100%; border:1px solid #ddd; border-radius:8px; padding:8px; background:#fff; color:#222; box-sizing:border-box }
+.cap-sheet textarea{ min-height:96px; max-height:calc(8lh + 12px); overflow:auto }
+@media (max-width: 960px){
+  /* Dockはモバイルでは基本使わない（FAB→シート遷移を想定） */
+  #btnOpenDock_hidden{ display:none }
+}
+
+
+/* === Workspace inline tool button (PC) === */
+.tool-inline-btn{
+  position:absolute; right:12px; top:12px; z-index:6;
+  padding:8px 12px; border:1px solid #ddd; border-radius:999px; background:#fff; cursor:pointer;
+  box-shadow:0 8px 24px rgba(0,0,0,.25);
+  min-width:40px; min-height:40px; outline:1px solid transparent; outline-offset:2px;
+}
+.tool-inline-btn:hover{ outline-color:#ddd }
+#dock[data-open="true"] ~ main #view .tool-inline-btn{ display:none } /* Dock openなら隠す */
+
+/* === Mobile load FAB & sheet === */
+.load-fab{ display:none;  position:fixed; right:14px; bottom:calc(14px + env(safe-area-inset-bottom,0)); z-index:1200; padding:12px 16px; border:1px solid #ddd; border-radius:999px; background:#fff; box-shadow:0 12px 28px rgba(0,0,0,.35); cursor:pointer; }
+@media (max-width: 960px){
+  .load-fab{ position:fixed; right:14px; bottom:calc(14px + env(safe-area-inset-bottom,0)); z-index:1000; padding:12px 16px; border:1px solid #ddd; border-radius:999px; background:#fff; box-shadow:0 12px 28px rgba(0,0,0,.35); cursor:pointer; }
+}
+
+/* reuse .sheet styles already present */
+.load-sheet .title{ font-weight:600 }
+.load-sheet .row{ display:flex; gap:8px; align-items:center; margin-bottom:10px; flex-wrap:wrap }
+.load-sheet input{ width:100%; border:1px solid #ddd; border-radius:8px; padding:8px }
+
+#toolFab{ display:none }
+@media (max-width: 960px){
+  #toolFab{ display:block }
+}
+
+@media (max-width: 960px){
+  #dockFab{ display:block; position:fixed; right:14px; bottom:14px; padding:12px 16px; box-shadow:0 8px 24px rgba(0,0,0,.25); }
+}
+
+/* === Mobile overlap hardening === */
+.scrim{
+  position:fixed; inset:0; background:rgba(0,0,0,.35);
+  z-index:1200; display:none;
+}
+.scrim[open]{ display:block }
+
+/* Raise sheet above any floating pills, ensure safe-area paddings */
+.sheet{ z-index:1305; }
+.sheet .body{ padding-bottom: calc(16px + env(safe-area-inset-bottom, 0)); }
+
+/* Keep FABs above safe area; hide while a sheet is open */
+#toolFab, .load-fab{ position:fixed; right:14px; bottom:calc(14px + env(safe-area-inset-bottom,0)); z-index:1000; padding:12px 16px; border:1px solid #ddd; border-radius:999px; background:#fff; box-shadow:0 12px 28px rgba(0,0,0,.35); cursor:pointer; }
+html.sheet-open #toolFab,
+html.sheet-open .load-fab,
+html.sheet-open #toolInlineBtn{
+  display:none !important;
+}
+
+/* On small screens, reserve a little top space so the header hint doesn't overlap */
+@media (max-width: 960px){
+  body{ padding-top: env(safe-area-inset-top, 0); }
+}
+
+/* lock gestures under sheet */
+html.sheet-open #view{ pointer-events:none; }
+
+/* === Mobile overlap hardening v2 === */
+.sheet{
+  left:0; right:0; width:100%;
+}
+.sheet[data-snap="full"]{
+  max-height: none;
+  height: calc(92vh + env(safe-area-inset-bottom,0));
+  transform: translateY(0);
+}
+/* body scroll lock while sheet open */
+html.sheet-open, html.sheet-open body{ overflow: hidden; }
+
+/* hide floating chips while sheet open */
+html.sheet-open .chip, 
+html.sheet-open .pill, 
+html.sheet-open .fab, 
+html.sheet-open [data-fab],
+html.sheet-open .bubble,
+html.sheet-open .floating,
+html.sheet-open .floating-btn,
+html.sheet-open .floating-buttons{
+  display:none !important;
+}
+
+/* === Dock Top Sheet (Mobile) === */
+.top-sheet{ z-index: 1300;
+  top:0; bottom:auto; left:0; right:0;
+  border-radius:0 0 16px 16px;
+  transform:translateY(-110%);
+  max-height:92vh;
+}
+.top-sheet[open]{ transform:translateY(0); opacity:1; }
+.top-sheet .body{ max-height:calc(92vh - 28px - 44px - env(safe-area-inset-top,0)); overflow:auto; }
+@media (min-width: 961px){
+  #dockSheet{ display:none !important; }
+}
+
+
+/* Hide PC dock when a mobile sheet is open */
+@media (max-width: 960px){
+  html.sheet-open #dock{ display:none !important; }
+}
+
+/* Hide bottom caption sheet while dockSheet is open (mobile) */
+@media (max-width: 960px){
+  html.sheet-open #capSheet{ display:none !important; }
+}
+@media (max-width: 960px){ .load-fab{ display:block } }
+
+/* Mobile: hide all tool docks and buttons */
+@media (max-width: 960px){
+  #dockFab, #editorDock, #materialsDock,
+  #toolFab, #toolBtn, #dock, #dockSheet,
+  [data-open-dock], [data-role="tool-button"], .dock, .tool-btn {
+    display: none !important;
+  }
+}
+
+
+/* Mobile: hide any tool buttons (right-top etc.) */
+@media (max-width: 960px){
+  #toolBtn, #toolFab, #dockFab, #toolInlineBtn,
+  [data-role="tool-button"],
+  button[aria-label*="ツール"], 
+  button[aria-label*="tool"],
+  .tool-btn, .btn-tool {
+    display: none !important;
+  }
+}
+
+
+/* Mobile: hide any Tool buttons (top-right etc.) */
+@media (max-width: 960px){
+  #toolBtn, #toolFab, #dockFab, #toolInlineBtn,
+  [data-role="tool-button"],
+  button[aria-label*="ツール"],
+  .tool-btn, .btn-tool { display: none !important; }
+  .load-fab{ display:block !important; }
+}
+
+
+/* Desktop: never show mobile load FAB */
+@media (min-width: 961px){
+  .load-fab{ display:none !important; visibility:hidden !important; pointer-events:none !important; }
+}
+
+</style>
+
+
+
+
+
+
+
+<style>
+/* ---- iOS Safari overlay ordering hardening ---- */
+.scrim { z-index: 3100 !important; }
+.sheet { z-index: 3200 !important; position: fixed !important; }
+.modal-overlay { z-index: 3300 !important; }
+/* Ensure sheet receives events over scrim */
+.sheet[open] { pointer-events: auto !important; }
+</style>
+
+<style>
+/* ---- iOS Safari stacking & hit-test hardening (v2) ---- */
+html.sheet-open, body.sheet-open { overflow: hidden !important; }
+#sheetScrim.scrim { pointer-events: auto !important; }
+.sheet[open] { pointer-events: auto !important; }
+</style>
+
+
+<style>
+/* --- v1.22.1-bg: Load Sheet fullscreen-first UX --- */
+.sheet {
+  position: fixed !important;
+  left: 0 !important;
+  right: 0 !important;
+  bottom: 0 !important;
+  width: 100% !important;
+  max-height: none !important;
+  overflow: auto !important;
+}
+/* Fullscreen-ish default when open */
+.sheet[open] {
+  height: calc(92vh + env(safe-area-inset-bottom, 0));
+}
+/* Ensure header/body padding respects safe area */
+.sheet .body {
+  padding-bottom: calc(16px + env(safe-area-inset-bottom, 0)) !important;
+}
+/* Desktop can remain more compact via media query if desired */
+@media (min-width: 961px) {
+  .sheet[open] {
+    max-width: 680px;
+    margin: 0 auto;
+    height: auto; /* desktop uses content height */
+    max-height: 560px;
+  }
+}
+</style>
+
+<style>
+/* v1.22.1-bg.p1: improve hint contrast under overlay */
+.sheet .hint {
+  color: #fff !important;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.55);
+  opacity: 0.95;
+}
+</style>
+
+<script>
+// v1.22.1-bg.p3: minimal escape for HTML injection points
+function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+</script>
+
+
+<script>
+// v1.22.1-bg.p5: escape helpers
+if (typeof window.esc !== 'function') {
+  window.esc = function(s){ return String(s==null?'':s).replace(/[&<>"']/g, function(c){ return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]); }); };
+}
+if (typeof window.escAttr !== 'function') {
+  window.escAttr = function(s){ return window.esc(s); };
+}
+</script>
+
+<style>
+/* v1.22.1-bg.p6: cleanup & unification */
+/* Z-index variables for overlays */
+:root {
+  --z-scrim: 3100;
+  --z-sheet: 3200;
+  --z-modal: 3300;
+}
+.scrim { z-index: var(--z-scrim) !important; }
+.sheet { z-index: var(--z-sheet) !important; }
+.modal-overlay { z-index: var(--z-modal) !important; }
+
+/* Single-source visibility for mobile Load FAB */
+@media (max-width: 960.98px) {
+  .load-fab { display: flex !important; }
+}
+@media (min-width: 961px) {
+  .load-fab { display: none !important; }
+}
+</style>
+</head>
+<body>
 <div id="sheetScrim" class="scrim" hidden aria-hidden="true"></div>
 <!-- Desktop open-dock button (hidden on mobile) -->
 <!-- Global loader overlay -->
@@ -3442,6 +4040,7 @@ document.getElementById('toolInlineBtn')?.addEventListener('click', ()=>{
 </script>
 
 <script>
+// v1.22.1-bg.p9: Sign-in gate control (safe)
 document.addEventListener("DOMContentLoaded", ()=>{
   const gate = document.getElementById("signinGateWrap");
   if (gate) gate.hidden = false; // show by default
