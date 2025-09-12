@@ -8,7 +8,7 @@
 <script async="" src="https://accounts.google.com/gsi/client"></script>
 <script async="" src="https://apis.google.com/js/api.js"></script>
 <meta content="width=device-width, initial-scale=1" name="viewport"/>
-<link href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='64' height='64'%3E%3Crect width='64' height='64' fill='%23222'/%3E%3Ccircle cx='32' cy='32' r='18' fill='%23e33'/%3E%3C/svg%3E" rel="icon"/>
+<link href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='64' height='64'%3E%3Crect width='64' height='64' fill='%23222'/%3E%3Ccircle cx='32' cy='32' r='18' fill='%23ee3333'/%3E%3C/svg%3E" rel="icon"/>
 <style>
   /* 非活性行の見た目と操作抑止 */
 .disabled { opacity: .55; pointer-events: none; }
@@ -485,63 +485,25 @@ html.sheet-open .floating-buttons{
 
 
 <style>
-/* v13: sheets above scrim and clickable */
-.scrim{ z-index:1200; }
-.cap-sheet, #capSheet{ z-index:1501 !important; pointer-events:auto; }
-.sheet, .top-sheet, #dockSheet{ z-index:1500 !important; pointer-events:auto; }
-</style>
-
-
-<style>
-/* v14: desktop vs mobile layout fixes */
+/* v17 force-front & layout */
+.scrim{ z-index:1200 !important; }
+.cap-sheet, #capSheet, .sheet, .top-sheet, #dockSheet, .modal{
+  z-index:1501 !important; pointer-events:auto !important;
+}
 @media (min-width: 769px){
-  /* Bottom sheets should not cover desktop like mobile */
   .cap-sheet, #capSheet, .sheet, .load-sheet, #dockSheet{
-    width: 720px !important;
-    max-width: 90vw !important;
-    left: 50% !important;
-    transform: translateX(-50%) !important;
-    bottom: auto !important;
-    top: 10vh !important;
-    border-radius: 12px !important;
+    width: 720px !important; max-width: 90vw !important;
+    left: 50% !important; transform: translateX(-50%) !important;
+    bottom: auto !important; top: 10vh !important; border-radius: 12px !important;
   }
-  .cap-sheet[open], #capSheet[open], .sheet[open], .load-sheet[open]{
-    display: block !important;
-  }
+  .cap-sheet[open], #capSheet[open], .sheet[open], .load-sheet[open]{ display:block !important; }
 }
-@media (max-width: 768px){
-  .cap-sheet, #capSheet, .sheet, .load-sheet{
-    width: 100vw !important;
-    left: 0 !important;
-    transform: none !important;
-    bottom: 0 !important;
-    top: auto !important;
-    border-radius: 12px 12px 0 0 !important;
-  }
-}
-/* Center generic modal on desktop */
-.modal{
-  max-width: 760px;
-  margin: 0 auto;
-}
-.modal header{ display:flex; align-items:center; gap:.5rem; }
-.modal header .grow{ flex: 1 1 auto; }
 </style>
 
 
 <style>
-/* v15: hide mobile-only loader on desktop */
 @media (min-width: 769px){
-  #loadFab, #loadSheet { display: none !important; visibility: hidden !important; pointer-events: none !important; }
-}
-</style>
-
-
-<style>
-/* v16: default hide mobile-only loader; enable only on small screens */
-#loadFab, #loadSheet { display: none !important; visibility: hidden !important; pointer-events: none !important; }
-@media (max-width: 768px){
-  #loadFab, #loadSheet { display: inline-flex !important; visibility: visible !important; pointer-events: auto !important; }
+  #loadFab, #loadSheet { display:none !important; visibility:hidden !important; pointer-events:none !important; }
 }
 </style>
 
@@ -796,7 +758,7 @@ html.sheet-open .floating-buttons{
 <div class="cap-handle" title="ドラッグしてサイズ変更"></div>
 <header class="cap-header">
 <div class="cap-title">キャプション</div>
-<button class="cap-close" id="capClose" onclick="(window.closeCaptionSheet||(()=>{const cs=document.getElementById('capSheet')||document.querySelector('.cap-sheet'); if(cs){cs.removeAttribute('open'); cs.setAttribute('aria-hidden','true'); cs.hidden=true; const s=document.getElementById('sheetScrim'); if(s){s.removeAttribute('open'); s.setAttribute('hidden',''); s.setAttribute('aria-hidden','true');} document.documentElement.classList.remove('sheet-open');}}))()">
+<button class="cap-close" id="capClose" type="button" onclick="(window.closeCaptionSheet||(()=>{const cs=document.getElementById('capSheet')||document.querySelector('.cap-sheet'); if(cs){cs.removeAttribute('open'); cs.setAttribute('aria-hidden','true'); cs.hidden=true; const s=document.getElementById('sheetScrim'); if(s){s.removeAttribute('open'); s.setAttribute('hidden',''); s.setAttribute('aria-hidden','true');} document.documentElement.classList.remove('sheet-open');}}))()">閉じる</button>
 </header>
 <div class="cap-body">
 <div class="cap-row"><input id="capTitle" placeholder="タイトル" type="text"/></div>
@@ -2848,7 +2810,7 @@ btnPickPins.onclick = async ()=>{
         <header>
           <strong>キャプションファイルを選択（同フォルダ）</strong>
           <div class="grow"></div>
-          <button id="pinsClose" type="button" onclick="(function(){ try{ closeModal(); }catch(_){} var s=document.getElementById(\'sheetScrim\'); if(s){ s.removeAttribute(\'open\'); s.setAttribute(\'hidden\',\'\'); s.setAttribute(\'aria-hidden\',\'true\'); } document.documentElement.classList.remove(\'sheet-open\'); })()">閉じる</button>
+          <button id="pinsClose" type="button" onclick="(function(){try{closeModal()}catch(_ ){} var s=document.getElementById('sheetScrim'); if(s){s.removeAttribute('open'); s.setAttribute('hidden',''); s.setAttribute('aria-hidden','true');} document.documentElement.classList.remove('sheet-open'); var cs=document.getElementById('capSheet')||document.querySelector('.cap-sheet'); if(cs){cs.removeAttribute('open'); cs.hidden=true; cs.setAttribute('aria-hidden','true');} })()">閉じる</button>
         </header>
         <div class="body">
           <div class="list" id="pinsList"><div class="rowi">読み込み中…</div></div>
@@ -3499,131 +3461,43 @@ document.getElementById('toolInlineBtn')?.addEventListener('click', ()=>{
     });
   }
 })();
+</script>
 
-// v13: robust caption close binding
+
+<script>
+// v17: robust close handlers (capture phase + Esc)
 (function(){
-  function hideScrim(){
-    const s = document.getElementById('sheetScrim');
+  function forceCloseAll(){
+    try{ closeModal(); }catch(_){}
+    try{ (window.closeCaptionSheet||(()=>{}))(); }catch(_){}
+    var cs = document.getElementById('capSheet') || document.querySelector('.cap-sheet');
+    if (cs){
+      cs.removeAttribute('open'); cs.setAttribute('aria-hidden','true'); cs.hidden = true;
+    }
+    var s = document.getElementById('sheetScrim');
     if (s){ s.removeAttribute('open'); s.setAttribute('hidden',''); s.setAttribute('aria-hidden','true'); }
     document.documentElement.classList.remove('sheet-open');
   }
-  function closeCaptionSheetStrong(){
-    const cs = document.getElementById('capSheet') || document.querySelector('.cap-sheet');
-    if (!cs) return;
-    cs.removeAttribute('open');
-    cs.setAttribute('aria-hidden','true');
-    cs.hidden = true;
-    hideScrim();
-  }
-  window.addEventListener('DOMContentLoaded', ()=>{
-    // 4a) Click capture on close-like controls INSIDE cap sheet
-    document.addEventListener('click', (e)=>{
-      const t = e.target;
+  window.addEventListener('DOMContentLoaded', function(){
+    document.addEventListener('click', function(e){
+      var t = e.target;
       if (!t) return;
-      const cap = t.closest('#capSheet, .cap-sheet');
-      if (!cap) return;
-      const isClose = t.id === 'capClose' || t.matches('[data-close], .close, .icon-close, button[aria-label="閉じる"], [aria-label="close"], [aria-label="Close"]');
-      if (isClose){
+      var isCloseLike = (t.id==='capClose' || t.id==='pinsClose' ||
+        (t.matches && t.matches('[data-close], .close, .icon-close, button[aria-label=\"閉じる\"], [aria-label=\"close\"], [aria-label=\"Close\"]')));
+      if (isCloseLike){
         e.preventDefault(); e.stopPropagation();
-        try{ (window.closeCaptionSheet||closeCaptionSheetStrong)(); }catch(_){ closeCaptionSheetStrong(); }
+        forceCloseAll();
       }
+    }, true); // capture
+    window.addEventListener('keydown', function(e){
+      if (e.key === 'Escape'){ forceCloseAll(); }
     }, true);
-
-    // 4b) Ensure explicit close button (if present) is bound
-    const capSheet = document.getElementById('capSheet') || document.querySelector('.cap-sheet');
-    if (capSheet){
-      const closeBtn = capSheet.querySelector('#capClose, [data-close], .close, .icon-close, button[aria-label="閉じる"], [aria-label="close"], [aria-label="Close"]');
-      if (closeBtn && !closeBtn._capBound){
-        closeBtn._capBound = true;
-        closeBtn.addEventListener('click', (e)=>{
-          e.preventDefault(); e.stopPropagation();
-          closeCaptionSheetStrong();
-        }, true);
-      }
+    var scrim = document.getElementById('sheetScrim');
+    if (scrim){
+      scrim.addEventListener('click', function(e){ e.preventDefault(); forceCloseAll(); }, true);
     }
-
-    // 4c) Esc key closes caption
-    window.addEventListener('keydown', (e)=>{
-      if (e.key !== 'Escape') return;
-      closeCaptionSheetStrong();
-    }, true);
-
-    // 4d) Clicking scrim also closes
-    const s = document.getElementById('sheetScrim');
-    s?.addEventListener('click', ()=> closeCaptionSheetStrong(), true);
   });
 })();
-
-
-// v14: ensure pinsClose always works (capture)
-window.addEventListener('DOMContentLoaded', ()=>{
-  document.addEventListener('click', (e)=>{
-    const t = e.target;
-    if (t && t.id === 'pinsClose'){
-      e.preventDefault();
-      e.stopPropagation();
-      try{ closeModal(); }catch(_){}
-      const s = document.getElementById('sheetScrim');
-      if (s){ s.removeAttribute('open'); s.setAttribute('hidden',''); s.setAttribute('aria-hidden','true'); }
-      document.documentElement.classList.remove('sheet-open');
-    }
-  }, true);
-});
-
-
-// v15: disable mobile loader UI on desktop
-window.addEventListener('DOMContentLoaded', ()=>{
-  const isDesktop = window.matchMedia('(min-width: 769px)').matches;
-  const loadFab = document.getElementById('loadFab');
-  const loadSheet = document.getElementById('loadSheet');
-  if (isDesktop){
-    // Remove to be safe
-    if (loadFab && loadFab.parentNode) loadFab.parentNode.removeChild(loadFab);
-    if (loadSheet){
-      loadSheet.hidden = true;
-      loadSheet.removeAttribute('open');
-      loadSheet.setAttribute('aria-hidden','true');
-    }
-  }
-  // Guard any click in case handler was bound earlier
-  loadFab?.addEventListener('click', (e)=>{
-    if (window.matchMedia('(min-width: 769px)').matches){
-      e.preventDefault();
-      e.stopPropagation();
-      return false;
-    }
-  }, true);
-});
-
-
-// v16: hard-disable mobile loader on desktop and mid-size windows
-window.addEventListener('DOMContentLoaded', ()=>{
-  const isMobile = window.matchMedia('(max-width: 768px)').matches;
-  const loadFab = document.getElementById('loadFab');
-  const loadSheet = document.getElementById('loadSheet');
-  if (!isMobile){
-    // Remove FAB entirely to avoid late style overrides
-    if (loadFab && loadFab.parentNode) loadFab.parentNode.removeChild(loadFab);
-    if (loadSheet){
-      loadSheet.hidden = true;
-      loadSheet.removeAttribute('open');
-      loadSheet.setAttribute('aria-hidden','true');
-      // Also remove to avoid accidental openings
-      if (loadSheet.parentNode) loadSheet.parentNode.removeChild(loadSheet);
-    }
-  }
-  // Final guard in capture
-  document.addEventListener('click', (e)=>{
-    const t = e.target;
-    if (t && (t.id === 'loadFab' || t.closest && t.closest('#loadSheet'))){
-      if (!window.matchMedia('(max-width: 768px)').matches){
-        e.preventDefault(); e.stopPropagation();
-        return false;
-      }
-    }
-  }, true);
-});
-
 </script>
 
 </body>
