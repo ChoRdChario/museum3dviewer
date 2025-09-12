@@ -511,6 +511,15 @@ html.sheet-open .floating-buttons{
 
 
 
+
+<style>
+/* ---- iOS Safari overlay ordering hardening ---- */
+.scrim { z-index: 3100 !important; }
+.sheet { z-index: 3200 !important; position: fixed !important; }
+.modal-overlay { z-index: 3300 !important; }
+/* Ensure sheet receives events over scrim */
+.sheet[open] { pointer-events: auto !important; }
+</style>
 </head>
 <body>
 <div id="sheetScrim" class="scrim" hidden aria-hidden="true"></div>
@@ -3739,5 +3748,131 @@ document.getElementById('toolInlineBtn')?.addEventListener('click', ()=>{
 </script>
 <!-- /Guardrails patch (Step 2) -->
 
+
+<script>
+/* ---- AuthManager: reduce repeated sign-in prompts on iOS Safari ---- */
+(function(){
+  'use strict';
+  const W = window;
+  // If an ensureToken already exists, wrap it with de-dup + silent prompt.
+  const originalEnsure = W.ensureToken;
+
+  let tokenInfo = { access_token: '', expires_at: 0 };
+  let pending = null;
+  let tokenClient = null;
+
+  function now(){ return Math.floor(Date.now()/1000); }
+  function nearExpiry(){ return (tokenInfo.expires_at - now()) < 60; }
+
+  function initTokenClient(){
+    if (tokenClient || !W.google || !google.accounts || !google.accounts.oauth2) return tokenClient;
+    try {
+      tokenClient = google.accounts.oauth2.initTokenClient({
+        client_id: (W.CLIENT_ID || W.GOOGLE_CLIENT_ID || ''),
+        scope: (W.ALL_SCOPES || 'https://www.googleapis.com/auth/drive.readonly'),
+        callback: (resp)=>{
+          if (resp && resp.access_token){
+            tokenInfo.access_token = resp.access_token;
+            // GIS does not give expires_in in callback for token client; assume 1h if present.
+            const exp = Number(resp.expires_in || 3600);
+            tokenInfo.expires_at = now() + exp;
+          }
+        }
+      });
+    } catch(e) {}
+    return tokenClient;
+  }
+
+  async function silentToken(){
+    initTokenClient();
+    if (!tokenClient) throw new Error('tokenClient init failed');
+    return new Promise((resolve, reject)=>{
+      try {
+        tokenClient.requestAccessToken({ prompt: '' });
+        // resolve happens via callback; poll tokenInfo change
+        const start = Date.now();
+        const t = setInterval(()=>{
+          if (tokenInfo.access_token){
+            clearInterval(t); resolve(tokenInfo.access_token);
+          } else if (Date.now() - start > 3000){
+            clearInterval(t); reject(new Error('silent timeout'));
+          }
+        }, 50);
+      } catch(e) { reject(e); }
+    });
+  }
+
+  async function interactiveToken(){
+    initTokenClient();
+    if (!tokenClient) throw new Error('tokenClient init failed');
+    return new Promise((resolve, reject)=>{
+      try {
+        const prev = tokenInfo.access_token;
+        tokenClient.requestAccessToken({ prompt: 'consent' });
+        const start = Date.now();
+        const t = setInterval(()=>{
+          if (tokenInfo.access_token && tokenInfo.access_token !== prev){
+            clearInterval(t); resolve(tokenInfo.access_token);
+          } else if (Date.now() - start > 60000){
+            clearInterval(t); reject(new Error('interactive timeout'));
+          }
+        }, 100);
+      } catch(e) { reject(e); }
+    });
+  }
+
+  async function ensureTokenSafe(){
+    if (pending) return pending;
+    pending = (async()=>{
+      // If we already have a valid token, return it.
+      if (tokenInfo.access_token && !nearExpiry()) return tokenInfo.access_token;
+      // Try original ensure first (if present)
+      if (typeof originalEnsure === 'function'){
+        try {
+          const res = await originalEnsure();
+          // If original populated a token on window, prefer that.
+          if (W.accessToken || (res && typeof res === 'string')){
+            pending = null; return W.accessToken || res;
+          }
+        } catch(e){ /* fallthrough to GIS */ }
+      }
+      // Silent first
+      try {
+        const t = await silentToken();
+        pending = null; return t;
+      } catch(e){ /* need interaction */ }
+      // Defer interactive prompt to a user gesture if possible
+      // If we are inside a click handler, this will proceed; otherwise throw so caller can trigger via UI
+      const t = await interactiveToken();
+      pending = null; return t;
+    })();
+    try {
+      return await pending;
+    } finally {
+      pending = null;
+    }
+  }
+
+  // Expose
+  if (typeof W.ensureToken !== 'function') {
+    W.ensureToken = ensureTokenSafe;
+  } else {
+    // Wrap existing to add de-dup and silent-first behavior
+    const orig = W.ensureToken;
+    W.ensureToken = async function(){
+      if (pending) return pending;
+      pending = (async()=>{
+        try {
+          const r = await orig();
+          if (r) return r;
+        } catch(e){}
+        try { return await silentToken(); } catch(e){}
+        return await interactiveToken();
+      })();
+      try { return await pending; } finally { pending = null; }
+    };
+  }
+})();
+</script>
 </body>
 </html>
