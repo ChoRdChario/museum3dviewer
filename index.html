@@ -1444,7 +1444,7 @@ function openLoadSheet(){
 document.documentElement.classList.add('sheet-open');
   document.getElementById('sheetScrim')?.setAttribute('open','');
   document.getElementById('sheetScrim')?.removeAttribute('hidden');
-  loadSheet.dataset.snap = 'full';
+  loadSheet.dataset.snap = 'half';
   loadSheet.hidden = false;
   loadSheet.setAttribute('open','');
   loadSheet.setAttribute('aria-hidden','false');
@@ -3333,7 +3333,7 @@ document.getElementById('toolInlineBtn')?.addEventListener('click', ()=>{
   document.getElementById('sheetScrim')?.setAttribute('open','');
   document.getElementById('sheetScrim')?.removeAttribute('hidden');
     if (!loadSheet) return;
-    loadSheet.dataset.snap = 'full';
+    loadSheet.dataset.snap = 'half';
     loadSheet.hidden = false;
     loadSheet.setAttribute('open','');
     loadSheet.setAttribute('aria-hidden','false');
