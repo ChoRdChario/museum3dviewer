@@ -612,59 +612,6 @@ if (typeof window.escAttr !== 'function') {
 
 </head>
 <body>
-<!-- Sign-in Gate -->
-<div id="signinGateWrap" class="signin-gate" hidden>
-  <div class="gate-card">
-    <h2>Google サインイン</h2>
-    <p class="lead">museum3dviewer を利用するには Google サインインが必要です</p>
-    <button id="btnGateSignIn" class="google-btn">
-      <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="">
-      Google でサインイン
-    </button>
-    <p class="note">
-      サインインすると、権限のある Google Drive 内に保存された GLB モデルと JSON（キャプションファイル）を読み込むことができます。
-    </p>
-  </div>
-</div>
-<style>
-/* Sign-in Gate styles */
-.signin-gate {
-  position: fixed;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(0,0,0,0.5);
-  z-index: 5000;
-}
-.gate-card {
-  background: #fff;
-  color: #222;
-  padding: 2rem;
-  border-radius: 12px;
-  max-width: 420px;
-  width: 90%;
-  text-align: center;
-  box-shadow: 0 6px 18px rgba(0,0,0,0.2);
-}
-.gate-card h2 { margin-bottom: .5rem; font-size: 1.4rem; }
-.gate-card .lead { font-size: 1rem; margin-bottom: 1rem; }
-.gate-card .note { font-size: .8rem; color: #555; margin-top: 1rem; line-height: 1.4; }
-
-.google-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  padding: .6rem 1rem;
-  border: 1px solid #ccc;
-  border-radius: 6px;
-  background: #fff;
-  font-size: 1rem;
-  cursor: pointer;
-}
-.google-btn:hover { background: #f8f8f8; }
-.google-btn img { width: 18px; height: 18px; }
-</style>
 <div id="sheetScrim" class="scrim" hidden aria-hidden="true"></div>
 <!-- Desktop open-dock button (hidden on mobile) -->
 <!-- Global loader overlay -->
@@ -4192,11 +4139,24 @@ document.getElementById('toolInlineBtn')?.addEventListener('click', ()=>{
 </script>
 
 
+
+
+
 <script>
-// v1.22.1-bg.p20: Gate click handler that waits for GIS readiness
+// v1.22.1-bg.p22: Gate handler toggling class "hidden"
 (function(){
-  function hideGate(){ const g=document.getElementById('signinGateWrap'); if(g) g.hidden=true; }
-  function showGate(){ const g=document.getElementById('signinGateWrap'); if(g) g.hidden=false; }
+  function hideGate(){
+    const g = document.getElementById('signinGateWrap');
+    if (!g) return;
+    try { g.hidden = true; } catch(_){}
+    g.classList.add('hidden');
+  }
+  function showGate(){
+    const g = document.getElementById('signinGateWrap');
+    if (!g) return;
+    try { g.hidden = false; } catch(_){}
+    g.classList.remove('hidden');
+  }
   const btn = document.getElementById('btnGateSignIn');
   if (!btn) return;
   btn.addEventListener('click', async ()=>{
@@ -4210,7 +4170,7 @@ document.getElementById('toolInlineBtn')?.addEventListener('click', ()=>{
       }
       requestTokenInteractive(undefined, (resp)=>{
         if (resp && resp.access_token){
-          // success: keep hidden
+          hideGate();
         }else{
           showGate();
           console.warn('Sign-in failed or no token', resp);
