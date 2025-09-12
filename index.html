@@ -501,6 +501,25 @@ html.sheet-open .floating-buttons{
 .cap-header .cap-close:focus{ outline:2px solid rgba(0,0,0,.35); outline-offset:2px; }
 </style>
 
+
+<style>
+/* v22: scrim/fullscreen overlay neutralization when not open */
+#sheetScrim:not([open]),
+#sheetScrim[hidden],
+.scrim[hidden],
+.scrim:not([open]),
+.mdc-dialog__scrim[hidden],
+.mdc-dialog__scrim:not([open]){
+  display: none !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+/* Safety: ensure main app regains clicks */
+#app, main, .viewer, .root {
+  pointer-events: auto !important;
+}
+</style>
+
 </head>
 <body>
 <div id="sheetScrim" class="scrim" hidden aria-hidden="true"></div>
@@ -3375,6 +3394,89 @@ document.getElementById('toolInlineBtn')?.addEventListener('click', ()=>{
         forceClose(document.activeElement || document.body);
       }
     }, true);
+  });
+})();
+</script>
+
+
+<script>
+/* v22: fully clear dark overlay & unlock UI */
+(function(){
+  function clearOverlays(){
+    try{
+      // Known scrim/overlay selectors
+      var sels = [
+        '#sheetScrim','.scrim','.modal-scrim','.mdc-dialog__scrim','.dialog-scrim',
+        '.overlay','.mdc-dialog__backdrop','.backdrop','.modal-backdrop'
+      ];
+      sels.forEach(function(sel){
+        document.querySelectorAll(sel).forEach(function(el){
+          try{
+            el.removeAttribute('open');
+            el.setAttribute('hidden','');
+            el.setAttribute('aria-hidden','true');
+            el.style.display = 'none';
+            el.style.opacity = '0';
+            el.style.pointerEvents = 'none';
+            el.classList.remove('open','opened','active','show','is-open');
+          }catch(_){}
+        });
+      });
+      // html/body flags commonly used to lock background
+      document.documentElement.classList.remove('sheet-open','modal-open','dialog-open','no-scroll','is-dimmed');
+      document.body.classList.remove('sheet-open','modal-open','dialog-open','no-scroll','is-dimmed');
+      // Remove inert/aria-hidden from app roots
+      var roots = document.querySelectorAll('#app, main, .viewer, .root, body > *:not(script):not(style)');
+      roots.forEach(function(n){
+        try{
+          n.inert = false;
+          n.removeAttribute('inert');
+          if(n !== document.getElementById('capSheet') && n !== document.querySelector('.cap-sheet')){
+            n.removeAttribute('aria-hidden');
+          }
+          n.style.pointerEvents = 'auto';
+        }catch(_){}
+      });
+    }catch(_){}
+  }
+
+  // Expose so existing close handlers can reuse
+  window.__clearOverlaysV22 = clearOverlays;
+
+  // Hook into existing v21 close pipeline if present
+  var oldForceClose = null;
+  try {
+    oldForceClose = window.forceClose;
+  } catch(_){}
+  // We don't overwrite window.forceClose (scoped), but we add global listeners
+  window.addEventListener('DOMContentLoaded', function(){
+    // Scrim click also clears overlays
+    document.addEventListener('click', function(e){
+      var t = e.target;
+      if(!t) return;
+      if (t.id === 'sheetScrim' || (t.classList && (t.classList.contains('scrim') || t.classList.contains('mdc-dialog__scrim')))){
+        setTimeout(clearOverlays, 0);
+      }
+    }, true);
+
+    // After any click on close-like controls, ensure overlays are cleared next frame
+    document.addEventListener('click', function(e){
+      var t = e.target;
+      if(!t) return;
+      var closeLike = t.closest && t.closest('#capClose, #pinsClose, [data-close], .close, .icon-close, button[aria-label="閉じる"], [aria-label="close"], [aria-label="Close"]');
+      if (closeLike){
+        setTimeout(clearOverlays, 0);
+      }
+    }, true);
+
+    // As a fail-safe, if no modal is open, keep scrims inert
+    var mo = new MutationObserver(function(){
+      var anyOpen = document.querySelector('#capSheet[open], .cap-sheet[open], [role="dialog"][open], dialog[open]');
+      if (!anyOpen){ clearOverlays(); }
+    });
+    try{
+      mo.observe(document.documentElement, { subtree:true, attributes:true, attributeFilter:['open','class','hidden','style','aria-hidden']});
+    }catch(_){}
   });
 })();
 </script>
