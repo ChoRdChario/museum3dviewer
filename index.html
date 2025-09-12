@@ -4246,5 +4246,128 @@ const Overlay = (()=> {
 })();
 </script>
 
+
+<script>
+/* ===================== pins.json v2 utilities (ID-based) ===================== */
+(function(){
+  if (window.PinsV2) return; // avoid double-inject
+
+  window.PinsV2 = {
+    driveUrl(id){ return `https://drive.google.com/uc?id=${id}`; },
+
+    async load(pinsFileId){
+      if (!window.gapi || !gapi.client?.drive) throw new Error('gapi.drive is not ready');
+      const res = await gapi.client.drive.files.get({ fileId: pinsFileId, alt: 'media' });
+      const data = res.result || JSON.parse(res.body || '{}');
+      if (data.version !== 2) throw new Error('Unsupported pins.json version (expect 2)');
+      return data;
+    },
+
+    async save({ pins, parentFolderId, glbId }){
+      if (!window.gapi) throw new Error('gapi not initialized');
+      const body = { version: 2, model: { glbId }, pins };
+      const meta = { name: 'pins.json', mimeType: 'application/json', parents: [parentFolderId] };
+      const boundary='-------314159265358979323846';
+      const d = `
+--${boundary}
+`;
+      const end = `
+--${boundary}--`;
+      const payload = d+'Content-Type: application/json; charset=UTF-8
+
+'+JSON.stringify(meta)+
+                      d+'Content-Type: application/json
+
+'+JSON.stringify(body)+end;
+      const r = await gapi.client.request({
+        path:'/upload/drive/v3/files?uploadType=multipart', method:'POST',
+        headers:{ 'Content-Type':`multipart/related; boundary=${boundary}` },
+        body: payload
+      });
+      return r.result; // -> { id, name, ... }
+    }
+  };
+
+  // Helper: current model state (safe global)
+  window.ModelState = window.ModelState || {
+    glbId: (new URL(location.href)).searchParams.get('fileId') || null,
+    pinsId: (new URL(location.href)).searchParams.get('pinsId') || null,
+    data: null
+  };
+
+  // Hook: define loadPinsFromDrive to v2 (backward-safe override)
+  if (typeof window.loadPinsFromDrive !== 'function'){
+    window.loadPinsFromDrive = async function(pinsFileId){
+      try{
+        const data = await PinsV2.load(pinsFileId);
+        ModelState.pinsId = pinsFileId;
+        ModelState.data = data;
+        // reflect to hidden input if present
+        const inp = document.getElementById('pinsId');
+        if (inp) inp.value = pinsFileId;
+        // try to paint pins onto scene if renderer exists
+        try { window.applyPinsToScene?.(data.pins || []); } catch(_){}
+        console.log('pins v2 loaded:', data);
+      }catch(err){
+        console.error('loadPinsFromDrive(v2) failed', err);
+        alert('pins.json(v2) の読み込みに失敗しました: ' + err.message);
+      }
+    };
+  } else {
+    // If a legacy loader exists, keep it but add a v2 shim callable as loadPinsFromDriveV2
+    window.loadPinsFromDriveV2 = async function(pinsFileId){
+      try{
+        const data = await PinsV2.load(pinsFileId);
+        ModelState.pinsId = pinsFileId;
+        ModelState.data = data;
+        try { window.applyPinsToScene?.(data.pins || []); } catch(_){}
+        console.log('pins v2 loaded:', data);
+      }catch(err){
+        console.error('loadPinsFromDriveV2 failed', err);
+        alert('pins.json(v2) の読み込みに失敗しました: ' + err.message);
+      }
+    };
+  }
+
+  // Bind save button (if exists) to save v2 in GLB parent folder
+  window.addEventListener('DOMContentLoaded', ()=>{
+    const saveBtn = document.getElementById('btnSavePins');
+    if (saveBtn && !saveBtn._v2bound){
+      saveBtn._v2bound = true;
+      saveBtn.addEventListener('click', async (e)=>{
+        e.preventDefault(); e.stopPropagation();
+        try{
+          if (!ModelState.glbId) throw new Error('GLB fileId is unknown (URL must include ?fileId=...)');
+          // Find GLB parent id
+          const r = await gapi.client.drive.files.get({ fileId: ModelState.glbId, fields: 'parents' });
+          const parentId = (r.result.parents||[])[0];
+          if (!parentId) throw new Error('GLB parent folder not found');
+          // Prepare pins data: expect window.collectPins() to provide current pins array
+          const pins = (await window.collectPins?.()) || (ModelState.data?.pins) || [];
+          const out = await PinsV2.save({ pins, parentFolderId: parentId, glbId: ModelState.glbId });
+          // update pinsId and hidden input
+          ModelState.pinsId = out.id;
+          const inp = document.getElementById('pinsId'); if (inp) inp.value = out.id;
+          alert('pins.json(v2) を保存しました（id: ' + out.id + '）');
+        }catch(err){
+          console.error('save v2 failed', err);
+          alert('pins.json(v2) の保存に失敗: ' + err.message);
+        }
+      }, true);
+    }
+  });
+
+  // Hook: Image picking should store fileId instead of name
+  window.onImagePicked = function(doc){
+    try{
+      window.currentPin = window.currentPin || {};
+      window.currentPin.image = { id: doc.id, name: doc.name || undefined };
+      const img = document.getElementById('pinPreview');
+      if (img) img.src = PinsV2.driveUrl(doc.id);
+    }catch(err){ console.error('onImagePicked(v2) failed', err); }
+  };
+})();
+</script>
+
 </body>
 </html>
