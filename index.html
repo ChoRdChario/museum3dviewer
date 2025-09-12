@@ -507,6 +507,26 @@ html.sheet-open .floating-buttons{
 }
 </style>
 
+
+<style>
+/* v18: ensure close button clickable target and layering */
+.cap-header .cap-close,
+.modal header #pinsClose{
+  position: relative;
+  z-index: 1600 !important;
+  pointer-events: auto !important;
+}
+.cap-header .cap-close:focus,
+.modal header #pinsClose:focus{ outline: 2px solid rgba(0,0,0,.3); outline-offset: 2px; }
+</style>
+
+
+<style>
+@media (min-width: 769px){
+  #loadFab, #loadSheet { display:none !important; visibility:hidden !important; pointer-events:none !important; }
+}
+</style>
+
 </head>
 <body>
 <div id="sheetScrim" class="scrim" hidden aria-hidden="true"></div>
@@ -758,7 +778,7 @@ html.sheet-open .floating-buttons{
 <div class="cap-handle" title="ドラッグしてサイズ変更"></div>
 <header class="cap-header">
 <div class="cap-title">キャプション</div>
-<button class="cap-close" id="capClose" type="button" onclick="(window.closeCaptionSheet||(()=>{const cs=document.getElementById('capSheet')||document.querySelector('.cap-sheet'); if(cs){cs.removeAttribute('open'); cs.setAttribute('aria-hidden','true'); cs.hidden=true; const s=document.getElementById('sheetScrim'); if(s){s.removeAttribute('open'); s.setAttribute('hidden',''); s.setAttribute('aria-hidden','true');} document.documentElement.classList.remove('sheet-open');}}))()">閉じる</button>
+<button class="cap-close" id="capClose" type="button" onclick="(window.closeCaptionSheet||(()= tabindex="0" aria-label="閉じる">{const cs=document.getElementById('capSheet')||document.querySelector('.cap-sheet'); if(cs){cs.removeAttribute('open'); cs.setAttribute('aria-hidden','true'); cs.hidden=true; const s=document.getElementById('sheetScrim'); if(s){s.removeAttribute('open'); s.setAttribute('hidden',''); s.setAttribute('aria-hidden','true');} document.documentElement.classList.remove('sheet-open');}}))()">閉じる</button>
 </header>
 <div class="cap-body">
 <div class="cap-row"><input id="capTitle" placeholder="タイトル" type="text"/></div>
@@ -2810,7 +2830,7 @@ btnPickPins.onclick = async ()=>{
         <header>
           <strong>キャプションファイルを選択（同フォルダ）</strong>
           <div class="grow"></div>
-          <button id="pinsClose" type="button" onclick="(function(){try{closeModal()}catch(_ ){} var s=document.getElementById('sheetScrim'); if(s){s.removeAttribute('open'); s.setAttribute('hidden',''); s.setAttribute('aria-hidden','true');} document.documentElement.classList.remove('sheet-open'); var cs=document.getElementById('capSheet')||document.querySelector('.cap-sheet'); if(cs){cs.removeAttribute('open'); cs.hidden=true; cs.setAttribute('aria-hidden','true');} })()">閉じる</button>
+          <button id="pinsClose" type="button" onclick="(function(){try{closeModal()}catch(_ ){} var s=document.getElementById('sheetScrim'); if(s){s.removeAttribute('open'); s.setAttribute('hidden',''); s.setAttribute('aria-hidden','true');} document.documentElement.classList.remove('sheet-open'); var cs=document.getElementById('capSheet')||document.querySelector('.cap-sheet'); if(cs){cs.removeAttribute('open'); cs.hidden=true; cs.setAttribute('aria-hidden','true');} })()" tabindex="0" aria-label="閉じる">閉じる</button>
         </header>
         <div class="body">
           <div class="list" id="pinsList"><div class="rowi">読み込み中…</div></div>
@@ -3496,6 +3516,56 @@ document.getElementById('toolInlineBtn')?.addEventListener('click', ()=>{
     if (scrim){
       scrim.addEventListener('click', function(e){ e.preventDefault(); forceCloseAll(); }, true);
     }
+  });
+})();
+</script>
+
+
+<script>
+// v18: make "閉じる" react to click, Enter, and Space even when icon/SVG is clicked
+(function(){
+  function forceCloseAll(){
+    try{ closeModal(); }catch(_){}
+    try{ (window.closeCaptionSheet||(()=>{}))(); }catch(_){}
+    var cs = document.getElementById('capSheet') || document.querySelector('.cap-sheet');
+    if (cs){ cs.removeAttribute('open'); cs.setAttribute('aria-hidden','true'); cs.hidden = true; }
+    var s = document.getElementById('sheetScrim');
+    if (s){ s.removeAttribute('open'); s.setAttribute('hidden',''); s.setAttribute('aria-hidden','true'); }
+    document.documentElement.classList.remove('sheet-open');
+  }
+
+  function isCloseLike(el){
+    if (!el) return false;
+    if (el.id === 'capClose' || el.id === 'pinsClose') return true;
+    if (el.matches && el.matches('[data-close], .close, .icon-close, button[aria-label=\"閉じる\"], [aria-label=\"close\"], [aria-label=\"Close\"]')) return true;
+    var btn = el.closest && el.closest('#capClose, #pinsClose, [data-close], .close, .icon-close, button[aria-label=\"閉じる\"], [aria-label=\"close\"], [aria-label=\"Close\"]');
+    return !!btn;
+  }
+
+  window.addEventListener('DOMContentLoaded', function(){
+    // Click (capture)
+    document.addEventListener('click', function(e){
+      var t = e.target;
+      if (isCloseLike(t)){
+        e.preventDefault(); e.stopPropagation();
+        forceCloseAll();
+      }
+    }, true);
+
+    // Keyboard: Enter/Space should also close when focus is on close-like element or inside header
+    document.addEventListener('keydown', function(e){
+      if (e.key === 'Enter' || e.key === ' ' || e.code === 'Space'){
+        var a = document.activeElement;
+        if (isCloseLike(a) || (a && a.closest && a.closest('.cap-header, .modal header'))){
+          e.preventDefault(); e.stopPropagation();
+          forceCloseAll();
+        }
+      }
+      if (e.key === 'Escape'){
+        e.preventDefault(); e.stopPropagation();
+        forceCloseAll();
+      }
+    }, true);
   });
 })();
 </script>
