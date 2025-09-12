@@ -2673,8 +2673,23 @@ function copyText(text, okMsg='コピーしました'){
   } else { fallbackCopy(text, okMsg); }
 }
 function fallbackCopy(text, okMsg){
-  const ta=document.createElement('textarea'); ta.value=text; document.body.appendChild(ta);
-  ta.select(); try{ document.execCommand('copy'); alert(okMsg); }
+  const ta = document.createElement('textarea');
+  ta.value = text;
+  ta.style.position = 'fixed';
+  ta.style.top = '-1000px';
+  document.body.appendChild(ta);
+  try{
+    ta.focus();
+    ta.select();
+    document.execCommand('copy');
+    alert(okMsg);
+  }catch(_){
+    // 最終フォールバック：ユーザーに手動コピーを促す
+    window.prompt('このテキストをコピーしてください（Ctrl/Cmd+C）', text);
+  }finally{
+    try{ document.body.removeChild(ta); }catch(_){}
+  }
+}
 
 function normalizeHex(v){
   if(!v) return '#ee3333';
