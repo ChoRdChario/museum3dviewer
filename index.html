@@ -535,26 +535,27 @@ html.sheet-open .floating-buttons{
 
 
 <style>
-/* v19: hide legacy pins UI in header (keep only the new selector button & clear) */
+/* v20: hide only legacy controls in grpPins (no blanket button hide) */
 #grpPins input#pinsId:not([type="hidden"]),
 #grpPins input[placeholder*="pins.json"],
 #grpPins input[placeholder*="pins.json の fileId"],
 #grpPins .legacy-ui,
 #grpPins .old-ui,
 #grpPins .old-chooser,
-#grpPins button#btnPickPinsOld,
-#grpPins button.select-pins-old { display: none !important; }
-/* Allow only these buttons under grpPins */
-#grpPins button { display: none !important; }
-#grpPins button#btnPickPins,
-#grpPins button#btnClearPins { display: inline-flex !important; }
+#grpPins #btnPickPinsOld,
+#grpPins .select-pins-old { display: none !important; }
 
-/* Ensure mobile loader never shows on desktop */
+/* ensure grpPins stays clickable above any stray overlay */
+#grpPins { position: relative; z-index: 2; }
+#grpPins #btnPickPins { pointer-events: auto !important; }
+
+/* keep desktop: hide mobile loader UI */
 #loadFab, #loadSheet { display:none !important; visibility:hidden !important; pointer-events:none !important; }
 @media (max-width: 768px){
   #loadFab, #loadSheet { display:inline-flex !important; visibility:visible !important; pointer-events:auto !important; }
 }
-/* Sheets & modals should sit above scrim and be clickable */
+
+/* sheets above scrim */
 .scrim{ z-index:1200 !important; }
 .cap-sheet, #capSheet, .sheet, .load-sheet, .top-sheet, #dockSheet, .modal{
   z-index:1501 !important; pointer-events:auto !important;
@@ -4042,78 +4043,59 @@ window.addEventListener('DOMContentLoaded', ()=>{
 })();
 
 
-// v19: remove legacy header UI & deduplicate buttons; keep single hidden pinsId
-window.addEventListener('DOMContentLoaded', () => {
+// v20: ensure pins select button is visible, enabled, and bound
+window.addEventListener('DOMContentLoaded', ()=>{
   const grp = document.getElementById('grpPins');
-  if (grp){
-    // Ensure pinsId exists once and is hidden
-    let pins = grp.querySelectorAll('#pinsId');
-    if (pins.length === 0) {
-      const hid = document.createElement('input');
-      hid.type = 'hidden';
-      hid.id = 'pinsId';
-      grp.appendChild(hid);
-      pins = grp.querySelectorAll('#pinsId');
-    }
-    pins.forEach((el, i)=>{
-      el.setAttribute('type','hidden');
-      if (i>0) el.remove();
+  if (!grp) return;
+
+  // Ensure pinsId hidden single
+  let pins = grp.querySelectorAll('#pinsId');
+  if (pins.length === 0) {
+    const hid = document.createElement('input');
+    hid.type = 'hidden'; hid.id = 'pinsId';
+    grp.appendChild(hid);
+    pins = grp.querySelectorAll('#pinsId');
+  }
+  pins.forEach((el,i)=>{ el.type='hidden'; if(i>0) el.remove(); });
+
+  // Locate the intended "選択" button
+  let pick = document.getElementById('btnPickPins');
+  if (!pick){
+    const candidates = Array.from(grp.querySelectorAll('button, a[role="button"]')).filter(el => {
+      const tx = (el.textContent||'').trim();
+      return tx.includes('選択');
     });
-    // Remove legacy wrappers/controls
-    grp.querySelectorAll('.legacy-ui,.old-ui,.old-chooser,#btnPickPinsOld,[data-legacy="pins"]').forEach(n=>n.remove());
-    grp.querySelectorAll('input[type="text"], input:not([type])').forEach(inp=>{
-      const ph = (inp.getAttribute('placeholder')||'') + ' ' + (inp.id||'');
-      if (/pins\.json|fileId/i.test(ph)){ inp.remove(); }
-    });
-    // Keep only one btnPickPins; remove other "選択" buttons
-    const btns = Array.from(grp.querySelectorAll('button'));
-    let keptPick = false;
-    btns.forEach(btn=>{
-      const id = (btn.id||'').toLowerCase();
-      const label = (btn.textContent||'').trim();
-      if (id === 'btnpickpins'){
-        if (!keptPick){ keptPick = true; }
-        else{ btn.remove(); }
-      } else if (label.includes('選択')){
-        btn.remove();
-      }
-    });
-    // Ensure '#btnPickPins' exists and is bound
-    let pick = document.getElementById('btnPickPins');
-    const clear = document.getElementById('btnClearPins');
-    if (!pick){
-      pick = document.createElement('button');
-      pick.className = 'iconbtn';
-      pick.id = 'btnPickPins';
-      pick.textContent = '選択';
-      pick.title = 'GLBと同じフォルダから pins.json を選ぶ';
-      if (clear && clear.parentNode){
-        clear.parentNode.insertBefore(pick, clear);
-      }else{
-        grp.appendChild(pick);
-      }
-    }
-    if (!pick._bound){
-      pick._bound = true;
-      pick.addEventListener('click', (e)=>{
-        e.preventDefault(); e.stopPropagation();
-        if (typeof openPinsChooser === 'function') openPinsChooser();
-      }, true);
+    if (candidates.length){
+      pick = candidates[0];
+      try{ pick.id = 'btnPickPins'; }catch(_){}
     }
   }
+  const clear = grp.querySelector('#btnClearPins') || grp.querySelector('[id*="ClearPins"]');
+  if (!pick){
+    const b = document.createElement('button');
+    b.className = 'iconbtn';
+    b.id = 'btnPickPins';
+    b.textContent = '選択';
+    b.title = 'GLBと同じフォルダから pins.json を選ぶ';
+    if (clear && clear.parentNode) clear.parentNode.insertBefore(b, clear);
+    else grp.appendChild(b);
+    pick = b;
+  }
 
-  // Desktop killer for mobile loader, including dynamic insertions
-  const killMobileLoader = ()=>{
-    const isDesktop = window.matchMedia('(min-width: 769px)').matches;
-    if (!isDesktop) return;
-    document.getElementById('loadFab')?.remove();
-    document.getElementById('loadSheet')?.remove();
-    document.querySelectorAll('.load-fab,.mobile-load,[data-mobile-load]').forEach(el=> el.parentNode && el.parentNode.removeChild(el));
-  };
-  killMobileLoader();
-  window.matchMedia('(min-width: 769px)').addEventListener?.('change', killMobileLoader);
-  const mo = new MutationObserver(()=> killMobileLoader());
-  mo.observe(document.documentElement, {childList:true, subtree:true});
+  // Ensure clickable/enabled/visible
+  pick.disabled = false;
+  pick.style.pointerEvents = 'auto';
+  pick.style.opacity = '';
+  pick.removeAttribute('aria-disabled');
+
+  if (!pick._bound){
+    pick._bound = true;
+    pick.addEventListener('click', (e)=>{
+      e.preventDefault(); e.stopPropagation();
+      if (typeof openPinsChooser === 'function') openPinsChooser();
+      else console.warn('openPinsChooser is not defined');
+    }, true);
+  }
 });
 
 </script>
