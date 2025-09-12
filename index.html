@@ -2,14 +2,6 @@
 
 <html lang="ja">
 <head>
-
-<!-- v23.8 early flags -->
-<script>
-  // Block legacy demo/default pins and enforce same-folder policy globally
-  window.__NO_DEFAULT_PINS__ = true;
-  window.__PIN_SAME_FOLDER_ONLY__ = true;
-</script>
-
 <meta charset="utf-8"/>
 <title>Drive GLB Viewer + Pins (v1.22.0-bg)</title>
 <link href="https://accounts.google.com" rel="preconnect"/>
@@ -20,12 +12,12 @@
 <style>
   /* 非活性行の見た目と操作抑止 */
 .disabled { opacity: .55; pointer-events: none; }
-    :root { --bg:#111111; --muted:#666666; }
+    :root { --bg:#111; --muted:#666; }
     html,body{height:100%}
-    body{margin:0;background:var(--bg);color:#222222;font:14px/1.5 system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif}
+    body{margin:0;background:var(--bg);color:#222;font:14px/1.5 system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif}
     header{display:flex;gap:8px;align-items:center;padding:10px 12px;background:#f8f8f8;border-bottom:1px solid #e8e8e8;position:sticky;top:0;z-index:10;flex-wrap:wrap}
-    header input{padding:6px 8px;border:1px solid #dddddd;border-radius:8px;min-width:200px}
-    header button{padding:6px 10px;border:1px solid #dddddd;border-radius:8px;background:#ffffff;cursor:pointer}
+    header input{padding:6px 8px;border:1px solid #ddd;border-radius:8px;min-width:200px}
+    header button{padding:6px 10px;border:1px solid #ddd;border-radius:8px;background:#fff;cursor:pointer}
     header .grow{flex:1}
     main{display:grid;grid-template-columns: 1fr 360px;gap:10px;}
 #view{
@@ -33,85 +25,85 @@
   width:100%;
   height:calc(100dvh - 56px); /* ← 100vh → 100dvh に変更 */
   overflow:hidden;
-  background:#222222;
+  background:#222;
 }
     #canvas{display:block;width:100%;height:100%}
-    aside{height:calc(100dvh - 56px);overflow:auto;background:#fafafa;border-left:1px solid #eeeeee}
-    .sec{padding:10px 12px;border-bottom:1px solid #eeeeee}
+    aside{height:calc(100dvh - 56px);overflow:auto;background:#fafafa;border-left:1px solid #eee}
+    .sec{padding:10px 12px;border-bottom:1px solid #eee}
     .row{display:flex;gap:8px;align-items:center;margin-top:6px;flex-wrap:wrap}
     .muted{color:var(--muted);font-size:12px}
     .hidden{display:none}
-    .warn{color:#bb0000}
-    .badge{display:inline-block;background:#eeeeff;border:1px solid #ddddee;border-radius:999px;padding:2px 8px;font-size:12px}
-    .pin{border:1px solid #e5e5e5;background:#ffffff;border-radius:10px;padding:8px;margin-top:8px}
-    .pin input,.pin textarea{width:100%;border:1px solid #dddddd;border-radius:6px;padding:6px}
+    .warn{color:#b00}
+    .badge{display:inline-block;background:#eef;border:1px solid #dde;border-radius:999px;padding:2px 8px;font-size:12px}
+    .pin{border:1px solid #e5e5e5;background:#fff;border-radius:10px;padding:8px;margin-top:8px}
+    .pin input,.pin textarea{width:100%;border:1px solid #ddd;border-radius:6px;padding:6px}
     .pin img{max-width:100%;border-radius:8px;margin-top:6px;cursor:zoom-in}
-    #dbg{position:fixed;left:8px;bottom:8px;color:#00ff00;font:12px/1.2 monospace;z-index:9999;pointer-events:none;white-space:pre}
+    #dbg{position:fixed;left:8px;bottom:8px;color:#0f0;font:12px/1.2 monospace;z-index:9999;pointer-events:none;white-space:pre}
     .float-layer{position:absolute;left:0;top:0;width:100%;height:100%;pointer-events:none}
     .float-card{
       position:absolute; min-width:200px; max-width:280px; pointer-events:auto;
-      background:#ffffff; border:1px solid #dddddd; border-radius:10px; box-shadow:0 8px 22px rgba(0,0,0,0.3);
+      background:#fff; border:1px solid #ddd; border-radius:10px; box-shadow:0 8px 22px rgba(0,0,0,0.3);
       user-select:none;
     }
-    .float-card header{display:flex; align-items:center; gap:8px; padding:6px 8px; border-bottom:1px solid #eeeeee;
+    .float-card header{display:flex; align-items:center; gap:8px; padding:6px 8px; border-bottom:1px solid #eee;
       background:#f6f7fb; border-radius:10px 10px 0 0; cursor:grab;}
     .float-card header:active{ cursor:grabbing; }
-    .float-card header input{flex:1; min-width:0; border:1px solid #dddddd; border-radius:6px; padding:4px 6px; font-size:13px; background:#ffffff;}
+    .float-card header input{flex:1; min-width:0; border:1px solid #ddd; border-radius:6px; padding:4px 6px; font-size:13px; background:#fff;}
     .float-card .body{ padding:8px }
-    .float-card .body textarea{ width:100%; border:1px solid #dddddd; border-radius:6px; padding:6px; min-height:70px }
+    .float-card .body textarea{ width:100%; border:1px solid #ddd; border-radius:6px; padding:6px; min-height:70px }
     .float-card .body img{ display:block; max-width:100%; border-radius:8px; margin-top:6px; cursor:zoom-in }
-    .float-card .footer{ display:flex; gap:6px; padding:8px; border-top:1px solid #eeeeee; flex-wrap:wrap; align-items:center }
-    .float-card .btn{ padding:4px 8px; border:1px solid #dddddd; border-radius:8px; background:#ffffff; cursor:pointer; font-size:12px }
-    .float-card .btn.warn{ color:#bb0000 }
-    .float-card a.small { font-size:12px; color:#0066cc; text-decoration:none }
+    .float-card .footer{ display:flex; gap:6px; padding:8px; border-top:1px solid #eee; flex-wrap:wrap; align-items:center }
+    .float-card .btn{ padding:4px 8px; border:1px solid #ddd; border-radius:8px; background:#fff; cursor:pointer; font-size:12px }
+    .float-card .btn.warn{ color:#b00 }
+    .float-card a.small { font-size:12px; color:#06c; text-decoration:none }
     .float-card a.small:hover { text-decoration:underline }
     .lines{ position:absolute; left:0; top:0; width:100%; height:100%; pointer-events:none }
-    .lines line{ stroke:#ffffff; stroke-opacity:0.85; stroke-width:2; filter:drop-shadow(0 0 1px rgba(0,0,0,.7)); }
-    .pill {font-size:12px;border:1px solid #dddddd;border-radius:999px;padding:4px 8px;background:#ffffff;display:inline-flex;gap:6px;align-items:center}
+    .lines line{ stroke:#fff; stroke-opacity:0.85; stroke-width:2; filter:drop-shadow(0 0 1px rgba(0,0,0,.7)); }
+    .pill {font-size:12px;border:1px solid #ddd;border-radius:999px;padding:4px 8px;background:#fff;display:inline-flex;gap:6px;align-items:center}
     .pill input{margin:0}
     .pill.small{font-size:11px;padding:2px 6px}
-    .save-ok{color:#00aa00}.save-pending{color:#aa6600}.save-fail{color:#bb0000}
+    .save-ok{color:#0a0}.save-pending{color:#a60}.save-fail{color:#b00}
 
     /* ==== Editor Dock ==== */
     .dock{
       position:absolute; top:12px; right:12px; width:340px; max-height:80vh; overflow:auto;
       background:#ffffffea; backdrop-filter:saturate(1.2) blur(4px);
-      border:1px solid #dddddd; border-radius:12px; box-shadow:0 10px 30px rgba(0,0,0,.35);
+      border:1px solid #ddd; border-radius:12px; box-shadow:0 10px 30px rgba(0,0,0,.35);
       z-index:8; /* ← ヘッダー(z=10)より下：被り防止 */
     }
     .dock header{
-      display:flex; align-items:center; gap:8px; padding:8px 10px; border-bottom:1px solid #eeeeee;
+      display:flex; align-items:center; gap:8px; padding:8px 10px; border-bottom:1px solid #eee;
       position:sticky; top:0; background:#f6f7fb; border-radius:12px 12px 0 0;
     }
     .dock .tabs{ display:flex; gap:6px; flex-wrap:wrap }
-    .dock .tabbtn{ padding:4px 10px; font-size:12px; border:1px solid #dddddd; border-radius:999px; background:#ffffff; cursor:pointer; }
-    .dock .tabbtn.active{ background:#eeeeff; border-color:#ccdddd; }
-    .dock .minbtn{ margin-left:auto; padding:4px 8px; border:1px solid #dddddd; border-radius:8px; background:#ffffff; cursor:pointer; font-size:12px }
+    .dock .tabbtn{ padding:4px 10px; font-size:12px; border:1px solid #ddd; border-radius:999px; background:#fff; cursor:pointer; }
+    .dock .tabbtn.active{ background:#eef; border-color:#cdd; }
+    .dock .minbtn{ margin-left:auto; padding:4px 8px; border:1px solid #ddd; border-radius:8px; background:#fff; cursor:pointer; font-size:12px }
     .dock .body{ padding:10px }
     .dock.collapsed .body{ display:none }
     .dock.collapsed header{ border-radius:12px }
     .tool-row{ display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-bottom:8px }
-    .tool-btn{ padding:6px 10px; border:1px solid #dddddd; background:#ffffff; border-radius:8px; font-size:12px; cursor:pointer }
+    .tool-btn{ padding:6px 10px; border:1px solid #ddd; background:#fff; border-radius:8px; font-size:12px; cursor:pointer }
     .tool-btn.toggled{ background:#e8f0fe; border-color:#c7dafc }
     .tool-input{ display:flex; align-items:center; gap:8px; margin-bottom:8px }
     .tool-input input[type="range"]{ width:160px }
 
     /* ==== Modal (list/picker) ==== */
     .modal-overlay{ position:fixed; inset:0; background:rgba(0,0,0,.5); display:flex; align-items:center; justify-content:center; z-index:50; }
-    .modal{ width:840px; max-width:95vw; max-height:86vh; overflow:auto; background:#ffffff; border:1px solid #dddddd; border-radius:12px; box-shadow:0 20px 40px rgba(0,0,0,0.4); }
-    .modal header{ position:sticky; top:0; background:#f6f7fb; border-bottom:1px solid #eeeeee; padding:10px 12px; display:flex; gap:8px; align-items:center }
+    .modal{ width:840px; max-width:95vw; max-height:86vh; overflow:auto; background:#fff; border:1px solid #ddd; border-radius:12px; box-shadow:0 20px 40px rgba(0,0,0,0.4); }
+    .modal header{ position:sticky; top:0; background:#f6f7fb; border-bottom:1px solid #eee; padding:10px 12px; display:flex; gap:8px; align-items:center }
     .modal .body{ padding:12px }
-    .list{ border:1px solid #eeeeee; border-radius:10px; overflow:hidden }
+    .list{ border:1px solid #eee; border-radius:10px; overflow:hidden }
     .rowi{ display:grid; grid-template-columns: 1fr 200px 120px; gap:8px; padding:8px 10px; border-bottom:1px solid #f0f0f0; align-items:center }
     .rowi:last-child{ border-bottom:none }
     .rowi .name{ font-weight:600 }
-    .rowi .meta{ font-size:12px; color:#666666 }
-    .modal footer{ padding:10px 12px; border-top:1px solid #eeeeee; display:flex; gap:8px; justify-content:flex-end }
+    .rowi .meta{ font-size:12px; color:#666 }
+    .modal footer{ padding:10px 12px; border-top:1px solid #eee; display:flex; gap:8px; justify-content:flex-end }
     .grid{ display:grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap:10px }
-    .card{ border:1px solid #eeeeee; border-radius:10px; padding:8px; display:flex; flex-direction:column; gap:6px; }
+    .card{ border:1px solid #eee; border-radius:10px; padding:8px; display:flex; flex-direction:column; gap:6px; }
     .card img{ width:100%; aspect-ratio: 1 / 1; object-fit:cover; border-radius:8px; background:#f3f3f3 }
     .card .title{ font-size:12px; line-height:1.4; }
-    .card .meta{ font-size:11px; color:#666666; }
+    .card .meta{ font-size:11px; color:#666; }
     .card button{ padding:6px 8px; font-size:12px; }
 
     /* ==== Image Zoom Viewer ==== */
@@ -122,12 +114,12 @@
   background:rgba(0,0,0,.55); z-index:40;
 }
 .gate{
-  background:#ffffff; border:1px solid #dddddd; border-radius:14px; padding:16px 18px;
+  background:#fff; border:1px solid #ddd; border-radius:14px; padding:16px 18px;
   width:min(92vw,420px); text-align:center; box-shadow:0 18px 40px rgba(0,0,0,.35);
 }
 .gate h3{ margin:0 0 8px; font-size:16px }
-.gate p { margin:0 0 12px; color:#666666; font-size:13px }
-.gate .btn{ padding:10px 14px; border:1px solid #dddddd; border-radius:999px; background:#ffffff; cursor:pointer; font-size:14px }
+.gate p { margin:0 0 12px; color:#666; font-size:13px }
+.gate .btn{ padding:10px 14px; border:1px solid #ddd; border-radius:999px; background:#fff; cursor:pointer; font-size:14px }
 .hidden{ display:none }
 
 /* FAB: モバイルでドックを開く小ボタン */
@@ -137,19 +129,19 @@
     
     .zoom-overlay{ position:fixed; inset:0; background:rgba(0,0,0,.85); display:flex; align-items:center; justify-content:center; z-index:60; cursor:grab }
     .zoom-img{ max-width:none; max-height:none; transform-origin: 0 0; user-select:none; -webkit-user-drag:none; }
-    .zoom-close{ position:fixed; top:12px; right:12px; z-index:61; padding:8px 10px; background:#ffffff; border:1px solid #dddddd; border-radius:8px; cursor:pointer; }
+    .zoom-close{ position:fixed; top:12px; right:12px; z-index:61; padding:8px 10px; background:#fff; border:1px solid #ddd; border-radius:8px; cursor:pointer; }
 
     /* ==== Toolbar groups ==== */
     .toolbar { display:flex; gap:10px; flex-wrap:wrap; align-items:flex-start; width:100% }
     .hgroup{
-      background:#ffffff; border:1px solid #e6e6e6; border-radius:12px; padding:8px 10px;
+      background:#fff; border:1px solid #e6e6e6; border-radius:12px; padding:8px 10px;
       display:flex; gap:10px; align-items:center; flex-wrap:wrap;
     }
-    .hgroup .title{ font-weight:600; font-size:12px; color:#444444; padding:2px 8px; background:#f4f4f6; border:1px solid #e9e9ee; border-radius:999px }
-    .hgroup input{ padding:6px 8px; border:1px solid #dddddd; border-radius:8px; min-width:220px }
-    .hgroup .tiny{ font-size:12px; color:#666666 }
-    .hgroup .iconbtn{ padding:4px 8px; font-size:12px; border:1px solid #dddddd; border-radius:8px; background:#ffffff; cursor:pointer }
-    .hgroup .sep{ width:1px; height:20px; background:#eeeeee; margin:0 2px }
+    .hgroup .title{ font-weight:600; font-size:12px; color:#444; padding:2px 8px; background:#f4f4f6; border:1px solid #e9e9ee; border-radius:999px }
+    .hgroup input{ padding:6px 8px; border:1px solid #ddd; border-radius:8px; min-width:220px }
+    .hgroup .tiny{ font-size:12px; color:#666 }
+    .hgroup .iconbtn{ padding:4px 8px; font-size:12px; border:1px solid #ddd; border-radius:8px; background:#fff; cursor:pointer }
+    .hgroup .sep{ width:1px; height:20px; background:#eee; margin:0 2px }
     header .grow{ flex:1 }
     .header-utils{ display:flex; gap:8px; align-items:center; flex-wrap:wrap }
     #pillAutosave { padding:2px 8px }
@@ -224,14 +216,14 @@
   #pillAutosave{
     position: fixed; right:12px; top:12px; z-index:9;
     background:#ffffffea; backdrop-filter: blur(4px);
-    border:1px solid #dddddd; border-radius:999px; padding:2px 8px;
+    border:1px solid #ddd; border-radius:999px; padding:2px 8px;
   }
 
   /* 左下のミニツールバー（常時表示はココだけ+FAB） */
   .mini-bar{
     position:fixed; left:12px; bottom:14px; z-index:9; display:flex; gap:8px;
     background:#ffffffea; backdrop-filter:blur(4px);
-    border:1px solid #dddddd; border-radius:999px; padding:6px 8px;
+    border:1px solid #ddd; border-radius:999px; padding:6px 8px;
   }
   .mini-btn{ border:0; background:transparent; padding:6px; border-radius:10px; }
   .mini-btn:active{ background:#efefef }
@@ -264,11 +256,11 @@
 /* === Added: Desktop open-dock button (top-right) === */
 #btnOpenDock_hidden{ min-width:40px; min-height:40px; outline:1px solid transparent; outline-offset:2px;
   position:fixed; top:12px; right:12px; z-index:11;
-  padding:8px 12px; border:1px solid #dddddd; border-radius:10px; background:#ffffff; cursor:pointer; font-size:13px;
+  padding:8px 12px; border:1px solid #ddd; border-radius:10px; background:#fff; cursor:pointer; font-size:13px;
   box-shadow:0 8px 20px rgba(0,0,0,.15);
 }
 @media (max-width: 960px){ #btnOpenDock_hidden{ min-width:40px; min-height:40px; outline:1px solid transparent; outline-offset:2px; display:none } } /* hide on mobile */
-#btnOpenDock_hidden:hover{ outline-color:#dddddd }
+#btnOpenDock_hidden:hover{ outline-color:#ddd }
 
 /* === Added: Mobile sheet style for caption card === */
 .float-card.sheet{
@@ -291,7 +283,7 @@
 
 /* === Added: Ensure close button is visible and aligned === */
 .float-card header .close-btn{
-  border:1px solid #dddddd; border-radius:8px; background:#ffffff; cursor:pointer; padding:4px 8px; font-size:12px;
+  border:1px solid #ddd; border-radius:8px; background:#fff; cursor:pointer; padding:4px 8px; font-size:12px;
 }
 
 /* === Added: Fix caption tab text overflow inside dock === */
@@ -307,7 +299,7 @@
 #loaderOverlay.active{ display:flex }
 .spinner{
   width:56px; height:56px; border-radius:50%;
-  border:4px solid rgba(255,255,255,.35); border-top-color:#ffffff;
+  border:4px solid rgba(255,255,255,.35); border-top-color:#fff;
   animation:spin 1s linear infinite;
 }
 @keyframes spin{ to{ transform:rotate(360deg) } }
@@ -318,13 +310,13 @@
 
 /* tabs: aria-selected 表示 */
 .dock .tabbtn[aria-selected="true"]{
-  background:#eeeeff; border-color:#ccdddd; text-decoration:underline;
+  background:#eef; border-color:#cdd; text-decoration:underline;
 }
 
 /* === Caption Bottom Sheet === */
 .cap-sheet{
   position:fixed; left:0; right:0; bottom:0; z-index:60;
-  background:#ffffff; border-radius:16px 16px 0 0; box-shadow:0 -10px 30px rgba(0,0,0,.35);
+  background:#fff; border-radius:16px 16px 0 0; box-shadow:0 -10px 30px rgba(0,0,0,.35);
   transform:translateY(110%); transition:transform .24s ease, opacity .12s ease; opacity:0;
   max-height:92vh;
 }
@@ -334,12 +326,12 @@
 .cap-sheet[data-snap="full"]{ transform:translateY(0); }
 .cap-handle{ height:28px; display:flex; align-items:center; justify-content:center; cursor:grab; touch-action:none; }
 .cap-handle::before{ content:""; width:44px; height:4px; border-radius:999px; background:#d0d0d0; box-shadow:inset 0 -1px 0 #c7c7c7; }
-.cap-header{ display:flex; gap:8px; align-items:center; padding:6px 12px; border-bottom:1px solid #eeeeee; cursor:grab; user-select:none }
+.cap-header{ display:flex; gap:8px; align-items:center; padding:6px 12px; border-bottom:1px solid #eee; cursor:grab; user-select:none }
 .cap-title{ flex:1; font-weight:600 }
-.cap-close{ padding:8px 10px; border:1px solid #dddddd; border-radius:8px; background:#ffffff; cursor:pointer }
+.cap-close{ padding:8px 10px; border:1px solid #ddd; border-radius:8px; background:#fff; cursor:pointer }
 .cap-body{ padding:10px 12px; overflow:auto; max-height:calc(92vh - 28px - 44px - env(safe-area-inset-bottom,0)); }
 .cap-row{ display:flex; gap:8px; align-items:center; margin-bottom:10px; flex-wrap:wrap }
-.cap-sheet input[type="text"], .cap-sheet textarea{ width:100%; border:1px solid #dddddd; border-radius:8px; padding:8px; background:#ffffff; color:#222222; box-sizing:border-box }
+.cap-sheet input[type="text"], .cap-sheet textarea{ width:100%; border:1px solid #ddd; border-radius:8px; padding:8px; background:#fff; color:#222; box-sizing:border-box }
 .cap-sheet textarea{ min-height:96px; max-height:calc(8lh + 12px); overflow:auto }
 @media (max-width: 960px){
   /* Dockはモバイルでは基本使わない（FAB→シート遷移を想定） */
@@ -350,23 +342,23 @@
 /* === Workspace inline tool button (PC) === */
 .tool-inline-btn{
   position:absolute; right:12px; top:12px; z-index:6;
-  padding:8px 12px; border:1px solid #dddddd; border-radius:999px; background:#ffffff; cursor:pointer;
+  padding:8px 12px; border:1px solid #ddd; border-radius:999px; background:#fff; cursor:pointer;
   box-shadow:0 8px 24px rgba(0,0,0,.25);
   min-width:40px; min-height:40px; outline:1px solid transparent; outline-offset:2px;
 }
-.tool-inline-btn:hover{ outline-color:#dddddd }
+.tool-inline-btn:hover{ outline-color:#ddd }
 #dock[data-open="true"] ~ main #view .tool-inline-btn{ display:none } /* Dock openなら隠す */
 
 /* === Mobile load FAB & sheet === */
-.load-fab{ position:fixed; right:14px; bottom:calc(14px + env(safe-area-inset-bottom,0)); z-index:1200; padding:12px 16px; border:1px solid #dddddd; border-radius:999px; background:#ffffff; box-shadow:0 12px 28px rgba(0,0,0,.35); cursor:pointer; }
+.load-fab{ position:fixed; right:14px; bottom:calc(14px + env(safe-area-inset-bottom,0)); z-index:1200; padding:12px 16px; border:1px solid #ddd; border-radius:999px; background:#fff; box-shadow:0 12px 28px rgba(0,0,0,.35); cursor:pointer; }
 @media (max-width: 960px){
-  .load-fab{ position:fixed; right:14px; bottom:calc(14px + env(safe-area-inset-bottom,0)); z-index:1000; padding:12px 16px; border:1px solid #dddddd; border-radius:999px; background:#ffffff; box-shadow:0 12px 28px rgba(0,0,0,.35); cursor:pointer; }
+  .load-fab{ position:fixed; right:14px; bottom:calc(14px + env(safe-area-inset-bottom,0)); z-index:1000; padding:12px 16px; border:1px solid #ddd; border-radius:999px; background:#fff; box-shadow:0 12px 28px rgba(0,0,0,.35); cursor:pointer; }
 }
 
 /* reuse .sheet styles already present */
 .load-sheet .title{ font-weight:600 }
 .load-sheet .row{ display:flex; gap:8px; align-items:center; margin-bottom:10px; flex-wrap:wrap }
-.load-sheet input{ width:100%; border:1px solid #dddddd; border-radius:8px; padding:8px }
+.load-sheet input{ width:100%; border:1px solid #ddd; border-radius:8px; padding:8px }
 
 #toolFab{ display:none }
 @media (max-width: 960px){
@@ -389,7 +381,7 @@
 .sheet .body{ padding-bottom: calc(16px + env(safe-area-inset-bottom, 0)); }
 
 /* Keep FABs above safe area; hide while a sheet is open */
-#toolFab, .load-fab{ position:fixed; right:14px; bottom:calc(14px + env(safe-area-inset-bottom,0)); z-index:1000; padding:12px 16px; border:1px solid #dddddd; border-radius:999px; background:#ffffff; box-shadow:0 12px 28px rgba(0,0,0,.35); cursor:pointer; }
+#toolFab, .load-fab{ position:fixed; right:14px; bottom:calc(14px + env(safe-area-inset-bottom,0)); z-index:1000; padding:12px 16px; border:1px solid #ddd; border-radius:999px; background:#fff; box-shadow:0 12px 28px rgba(0,0,0,.35); cursor:pointer; }
 html.sheet-open #toolFab,
 html.sheet-open .load-fab,
 html.sheet-open #toolInlineBtn{
@@ -491,83 +483,6 @@ html.sheet-open .floating-buttons{
 
 
 
-
-<style>
-/* --- fix: sheets must sit above scrim overlay (compound selectors) --- */
-.scrim{ z-index:1200; } /* keep as-is for overlay */
-.sheet .sheet{ z-index:1400 !important; }
-.cap-sheet .cap-sheet{ z-index:1400 !important; }
-.load-sheet .load-sheet{ z-index:1400 !important; }
-.top-sheet .top-sheet{ z-index:1500 !important; } /* top tool sheet highest */
-</style>
-
-
-<style>
-/* --- v3 fix: ensure sheets sit above scrim overlay --- */
-.scrim{ z-index:1200; }
-.sheet{ z-index:1400 !important; }
-.cap-sheet{ z-index:1400 !important; }
-.load-sheet{ z-index:1400 !important; }
-.top-sheet{ z-index:1500 !important; }
-</style>
-
-
-<style>
-/* --- v4: strongest stacking for sheets over scrim --- */
-.scrim{ z-index:1200; }
-.sheet{ z-index:1400 !important; }
-.cap-sheet{ z-index:1400 !important; }
-.load-sheet{ z-index:1400 !important; }
-.top-sheet{ z-index:1500 !important; }
-/* IDs as final safety */
-#capSheet{ z-index:1501 !important; }
-#loadSheet{ z-index:1501 !important; }
-#dockSheet{ z-index:1501 !important; }
-.cap-sheet, .sheet{ pointer-events:auto; }
-</style>
-
-
-<style>
-/* v18: Hide mobile loader on desktop; show only on mobile */
-#loadFab, #loadSheet { display: none !important; visibility: hidden !important; pointer-events: none !important; }
-@media (max-width: 768px){
-  #loadFab, #loadSheet { display: inline-flex !important; visibility: visible !important; pointer-events: auto !important; }
-}
-/* Sheets and modals above scrim */
-.scrim{ z-index:1200 !important; }
-.cap-sheet, #capSheet, .sheet, .load-sheet, .top-sheet, #dockSheet, .modal {
-  z-index:1501 !important;
-  pointer-events:auto !important;
-}
-</style>
-
-
-<style>
-/* v22 — Layers: scrim < modal/sheet */
-.scrim{ z-index: 1200 !important; pointer-events:auto; }
-.modal, .cap-sheet, #capSheet, .sheet, .load-sheet, .top-sheet, #dockSheet{
-  z-index: 1501 !important; pointer-events:auto !important;
-}
-
-/* grpPins は常にクリック可（重なり対策）*/
-#grpPins{ position:relative; z-index: 1600; }
-
-/* 旧UIを画面から隠す（表示側から遮断）*/
-#grpPins [data-ui="legacy"],
-#grpPins #btnPickPinsOld,
-#grpPins .old-ui, #grpPins .old-chooser,
-#grpPins input[placeholder*="pins.json"],
-#grpPins input[placeholder*="fileId"]{
-  display:none !important;
-}
-
-/* モバイル用ローダーはデフォ非表示、スマホでのみ表示 */
-#loadFab, #loadSheet{ display:none !important; visibility:hidden !important; pointer-events:none !important; }
-@media (max-width:768px){
-  #loadFab, #loadSheet{ display:inline-flex !important; visibility:visible !important; pointer-events:auto !important; }
-}
-</style>
-
 </head>
 <body>
 <div id="sheetScrim" class="scrim" hidden aria-hidden="true"></div>
@@ -576,9 +491,9 @@ html.sheet-open .floating-buttons{
 <div aria-hidden="true" id="loaderOverlay">
 <div style="display:flex;flex-direction:column;align-items:center;gap:10px">
 <div aria-label="読み込み中" class="spinner" role="progressbar"></div>
-<div id="loadingMsg" style="color:#ffffff">GLBを読み込み中…</div>
+<div id="loadingMsg" style="color:#fff">GLBを読み込み中…</div>
 <div class="progress" style="width:min(360px,80vw);height:4px;background:rgba(255,255,255,.25);border-radius:9999px;overflow:hidden">
-<i id="loadingBar" style="display:block;height:100%;width:0%;background:#ffffff;transition:width .2s ease"></i>
+<i id="loadingBar" style="display:block;height:100%;width:0%;background:#fff;transition:width .2s ease"></i>
 </div>
 </div>
 <div aria-label="読み込み中" class="spinner" role="progressbar"></div>
@@ -597,7 +512,7 @@ html.sheet-open .floating-buttons{
 <div class="hgroup" id="grpPins">
 <span class="title">キャプション</span>
 <input autocomplete="off" id="pinsId" placeholder="（任意）pins.json の fileId / 共有リンク"/>
-<button class="iconbtn" id="btnPickPins" type="button" data-action="pick-pins">選択…</button>
+<button class="iconbtn" id="btnPickPins">選択…</button>
 <button class="iconbtn" id="btnClearPins">クリア</button>
 <span class="sep"></span>
 <span class="tiny">Save FolderId:</span>
@@ -1277,7 +1192,7 @@ window.addEventListener('orientationchange', ()=>{
 
 /* ===== 背景 ===== */
 function applyBackgroundMode(mode){
-  const col = mode==='light' ? '#f2f2f2' : '#222222';
+  const col = mode==='light' ? '#f2f2f2' : '#222';
   view.style.background = col;
   renderer.setClearAlpha(0);
   scene.background = null;
@@ -1604,7 +1519,7 @@ function makePinSprite(color = '#ee3333', opacity = PIN_BASE_OPACITY){
   const ctx = cvs.getContext('2d');
   // 外側白リング
   ctx.beginPath(); ctx.arc(size/2,size/2,size*0.28,0,Math.PI*2);
-  ctx.fillStyle='#ffffff'; ctx.fill();
+  ctx.fillStyle='#fff'; ctx.fill();
   // 中の色ドット
   ctx.beginPath(); ctx.arc(size/2,size/2,size*0.22,0,Math.PI*2);
   ctx.fillStyle=color; ctx.fill();
@@ -1742,7 +1657,7 @@ function redrawPins(){
       <summary data-summary="${pin.id}">${pin.title||'（無題）'} <span class="muted">@ ${safePos(pin.position).map(n=>Number(n).toFixed(3)).join(', ')}</span></summary>
       <div class="row"><input data-k="title" placeholder="タイトル" value="${pin.title||''}" ${READ_ONLY?'disabled':''} autocomplete="off"></div>
       <div class="row"><textarea data-k="text" rows="3" placeholder="キャプション" ${READ_ONLY?'disabled':''}>${pin.text||''}</textarea></div>
-      <div class="row"><label class="pill small">色 <input type="color" data-k="color" value="${pin.color||'#ee3333'}" ${READ_ONLY?'disabled':''}></label></div>
+      <div class="row"><label class="pill small">色 <input type="color" data-k="color" value="${normalizeHex(pin.color||'#ee3333')}" ${READ_ONLY?'disabled':''}></label></div>
       ${READ_ONLY?'':`<input id="${hid}" class="hidden" type="file" accept="image/*">`}
       <div class="row">
         ${READ_ONLY?'':`<button data-act="choose">ローカルから</button>
@@ -1803,7 +1718,7 @@ function redrawPins(){
       if (node) holder.appendChild(node);
       // D&D（このピンにドロップで画像差し替え）
       if (!READ_ONLY){
-        holder.addEventListener('dragover', (ev)=>{ ev.preventDefault(); holder.style.outline='2px dashed #0099ff'; });
+        holder.addEventListener('dragover', (ev)=>{ ev.preventDefault(); holder.style.outline='2px dashed #09f'; });
         holder.addEventListener('dragleave', ()=>{ holder.style.outline=''; });
         holder.addEventListener('drop', async (ev)=>{
           ev.preventDefault(); holder.style.outline='';
@@ -1917,7 +1832,7 @@ function makeFloatCard(pinId){
   // 色
   const row = document.createElement('div'); row.className='row';
   const colorLabel = document.createElement('label'); colorLabel.className='pill small'; colorLabel.textContent='色 ';
-  const colorInput = document.createElement('input'); colorInput.type='color'; colorInput.value = pin.color || '#ee3333'; if (READ_ONLY) colorInput.disabled = true;
+  const colorInput = document.createElement('input'); colorInput.type='color'; colorInput.value = normalizeHex(pin.color || '#ee3333'); if (READ_ONLY) colorInput.disabled = true;
   colorLabel.appendChild(colorInput); body.appendChild(row); row.appendChild(colorLabel);
 
   if (pin.imageUrl || pin.imageDriveId) {
@@ -1972,7 +1887,7 @@ function makeFloatCard(pinId){
     } });
 
     // D&D（カードへドロップで画像差し替え）
-    body.addEventListener('dragover', (ev)=>{ ev.preventDefault(); card.style.boxShadow='0 0 0 2px #0099ff inset, 0 8px 22px rgba(0,0,0,0.3)'; });
+    body.addEventListener('dragover', (ev)=>{ ev.preventDefault(); card.style.boxShadow='0 0 0 2px #09f inset, 0 8px 22px rgba(0,0,0,0.3)'; });
     body.addEventListener('dragleave', ()=>{ card.style.boxShadow='0 8px 22px rgba(0,0,0,0.3)'; });
     body.addEventListener('drop', async (ev)=>{
       ev.preventDefault(); card.style.boxShadow='0 8px 22px rgba(0,0,0,0.3)';
@@ -2304,7 +2219,7 @@ tabCamera.querySelectorAll('[data-view]').forEach(b=>{
 /* 背景UI */
 function syncBgUI(){
   applyBackgroundMode(bgModeSel.value || 'dark');
-  applyBackgroundColor(bgColorEl.value || (bgModeSel.value==='light'?'#f2f2f2':'#222222'));
+  applyBackgroundColor(bgColorEl.value || (bgModeSel.value==='light'?'#f2f2f2':'#222'));
 }
 bgModeSel.onchange = syncBgUI;
 bgColorEl.oninput  = ()=> applyBackgroundColor(bgColorEl.value);
@@ -2508,7 +2423,7 @@ async function ensureAutosaveTarget(glbId){
   if (!accessToken) return '';
   if (autosaveId) return autosaveId;
   const map = loadMap();
-  if (map[glbId]) { autosaveId = map[glbId]; autosaveName='pins.json'; return autosaveId; }
+  if (map[glbId]) { autosaveId = map[glbId]; autosaveName='pins.json'; try{ await driveGetMetadata(autosaveId); }catch(e){ autosaveId=''; saveMap({ ...map, [glbId]: '' }); } if(autosaveId) return autosaveId; }
   let parentId = folderIdInput.value.trim();
   if (!parentId && glbId){
     try{ const meta=await driveGetMetadata(glbId); if (meta.parents?.length) parentId = meta.parents[0]; }catch{}
@@ -2630,7 +2545,7 @@ async function chooseDriveImageForPin(pin, opts={}){
         <header>
           <strong>画像を選択（GLBと同じフォルダ）</strong>
           <div class="grow"></div>
-          <input id="imgQuery" placeholder="名前でフィルタ（例：scan）" style="padding:6px 8px;border:1px solid #dddddd;border-radius:8px;min-width:200px">
+          <input id="imgQuery" placeholder="名前でフィルタ（例：scan）" style="padding:6px 8px;border:1px solid #ddd;border-radius:8px;min-width:200px">
           <button id="imgSearchAll">ドライブ全体から検索</button>
           <button id="imgClose">閉じる</button>
         </header>
@@ -2639,7 +2554,7 @@ async function chooseDriveImageForPin(pin, opts={}){
       </div>
     `);
     const gridEl = document.getElementById('imgGrid');
-    document.getElementById('imgClose')?.addEventListener('click', ()=> closeModal());
+    document.getElementById('imgClose')?.addEventListener('click', (e)=>{ (closeModal) });
     function cardHTML(f){
       const t = new Date(f.modifiedTime||Date.now()).toLocaleDateString();
       const thumb = f.thumbnailLink ? f.thumbnailLink.replace(/=s220/,'=s400') : '';
@@ -2791,10 +2706,10 @@ btnLoad.onclick = async ()=>{
       const text  = await pblob.text();
       let data=null; try{ data=JSON.parse(text); }catch{}
       if(Array.isArray(data)){
-        PINS=data.map(p=>({...p, position:safePos(p.position), color:p.color||'#ee3333'}));
+        PINS=data.map(p=>({...p, position:safePos(p.position), color: normalizeHex(p.color||'#ee3333')}));
         MATERIALS={};
       } else if(data && typeof data==='object'){
-        PINS = Array.isArray(data.pins)? data.pins.map(p=>({...p, position:safePos(p.position), color:p.color||'#ee3333'})) : [];
+        PINS = Array.isArray(data.pins)? data.pins.map(p=>({...p, position:safePos(p.position), color: normalizeHex(p.color||'#ee3333')})) : [];
         MATERIALS = (data.materials && typeof data.materials==='object') ? data.materials : {};
       }
       loadedPinsId = targetPinsId;
@@ -2871,7 +2786,7 @@ btnPickPins.onclick = async ()=>{
         <header>
           <strong>キャプションファイルを選択（同フォルダ）</strong>
           <div class="grow"></div>
-          <button id="pinsClose" type="button" data-action="close-modal">閉じる</button>
+          <button id="pinsClose">閉じる</button>
         </header>
         <div class="body">
           <div class="list" id="pinsList"><div class="rowi">読み込み中…</div></div>
@@ -2915,10 +2830,10 @@ btnPickPins.onclick = async ()=>{
               const text  = await pblob.text();
               let data=null; try{ data=JSON.parse(text); }catch{}
               if(Array.isArray(data)){
-                PINS = data.map(p=>({...p, position:safePos(p.position), color:p.color||'#ee3333'}));
+                PINS = data.map(p=>({...p, position:safePos(p.position), color: normalizeHex(p.color||'#ee3333')}));
                 MATERIALS = {};
               } else if(data && typeof data==='object'){
-                PINS = Array.isArray(data.pins) ? data.pins.map(p=>({...p, position:safePos(p.position), color:p.color||'#ee3333'})) : [];
+                PINS = Array.isArray(data.pins) ? data.pins.map(p=>({...p, position:safePos(p.position), color: normalizeHex(p.color||'#ee3333')})) : [];
                 MATERIALS = (data.materials && typeof data.materials==='object') ? data.materials : {};
               }
               loadedPinsId = id;
@@ -3522,1909 +3437,22 @@ document.getElementById('toolInlineBtn')?.addEventListener('click', ()=>{
     });
   }
 })();
-
-// === patch v2: robust closing & Drive pins chooser ===
-window.addEventListener('DOMContentLoaded', ()=>{
-  const sheetScrim = document.getElementById('sheetScrim');
-  const capClose = document.getElementById('capClose');
-  const pinsIdInput  = document.getElementById('pinsId');
-  const folderIdInput= document.getElementById('folderId');
-  const fileIdInput  = document.getElementById('fileId');
-  const btnPickPins  = document.getElementById('btnPickPins');
-
-  // Fallback close for caption sheet if not defined
-  if (typeof window.closeCaptionSheet !== 'function') {
-    window.closeCaptionSheet = function closeCaptionSheet(){
-      const cs = document.getElementById('capSheet');
-      if (!cs) return;
-      cs.removeAttribute('open');
-      cs.setAttribute('aria-hidden','true');
-      setTimeout(()=>{ cs.hidden = true; }, 160);
-      document.documentElement.classList.remove('sheet-open');
-      if (sheetScrim){
-        sheetScrim.removeAttribute('open');
-        sheetScrim.setAttribute('hidden','');
-        sheetScrim.setAttribute('aria-hidden','true');
-      }
-    };
-  }
-
-  capClose?.addEventListener('click', ()=> window.closeCaptionSheet());
-
-  // Clicking the scrim closes any open sheets
-  sheetScrim?.addEventListener('click', ()=>{
-    try{ window.closeDockSheet?.(); }catch(e){}
-    try{ window.closeLoadSheet?.(); }catch(e){}
-    try{ window.closeCaptionSheet?.(); }catch(e){}
-  });
-
-  // Esc key closes sheets and modal
-  window.addEventListener('keydown', (e)=>{
-    if (e.key !== 'Escape') return;
-    try{ window.closeDockSheet?.(); }catch(e){}
-    try{ window.closeLoadSheet?.(); }catch(e){}
-    try{ window.closeCaptionSheet?.(); }catch(e){}
-    try{ window.closeModal?.(); }catch(e){}
-  });
-
-  // Pins chooser: list JSON in the same Drive folder as GLB (or folderIdInput)
-  async function openPinsChooser(){
-    try{
-      const ensureToken = window.ensureToken;
-      const driveGetMetadata = window.driveGetMetadata;
-      const driveListFiles = window.driveListFiles;
-      const openModal = window.openModal;
-      const closeModal = window.closeModal;
-
-      if (!driveListFiles || !openModal || !closeModal) throw new Error('required helpers not found');
-      await ensureToken?.();
-
-      // Resolve target parent folder
-      const glbId = (fileIdInput?.value || '').trim();
-      let parentId = (folderIdInput?.value || '').trim();
-      if (!parentId && glbId && typeof driveGetMetadata === 'function'){
-        try{
-          const meta = await driveGetMetadata(glbId);
-          if (meta.parents && meta.parents.length) parentId = meta.parents[0];
-        }catch(e){ /* ignore */ }
-      }
-
-      const hdr = parentId ? 'pins.json を選択（GLBと同じフォルダ）' : 'pins.json を選択（ドライブ全体検索）';
-      openModal(`
-        <div class="modal">
-          <header>
-            <strong>${hdr}</strong>
-            <div class="grow"></div>
-            <input id="pinsQuery" placeholder="名前でフィルタ（例：pins）" style="padding:6px 8px;border:1px solid #dddddd;border-radius:8px;min-width:200px">
-            <button id="pinsSearchAll">ドライブ全体から検索</button>
-            <button id="pinsClose">閉じる</button>
-          </header>
-          <div class="body"><div class="grid" id="pinsGrid"><div>読み込み中…</div></div></div>
-          <footer><span class="muted">JSON（application/json）と pins.json を表示。最新順。</span></footer>
-        </div>
-      `);
-
-      const gridEl = document.getElementById('pinsGrid');
-      document.getElementById('pinsClose')?.addEventListener('click', ()=> closeModal());
-
-      function rowHTML(f){
-        const t = new Date(f.modifiedTime||Date.now()).toLocaleString();
-        const name = (f.name||'(名称なし)').replace(/"/g,'&quot;');
-        return `<div class="card">
-          <div class="title">${name}</div>
-          <div class="meta">${t}</div>
-          <button data-pick="${f.id}">このファイルを使う</button>
-        </div>`;
-      }
-
-      async function renderGrid(files){
-        if (!files?.length){ gridEl.innerHTML = `<div>候補がありません</div>`; return; }
-        gridEl.innerHTML = files.map(rowHTML).join('');
-        gridEl.querySelectorAll('[data-pick]').forEach(btn=>{
-          btn.onclick = ()=>{
-            const id = btn.getAttribute('data-pick');
-            const file = (files||[]).find(x=>x.id===id);
-            closeModal();
-            if (file && pinsIdInput){
-              pinsIdInput.value = file.id;
-              try{ window.loadedPinsName = file.name; }catch(e){}
-              try{ window.updatePinsInfo?.(); }catch(e){}
-            }
-          };
-        });
-      }
-
-      async function loadFolder(){
-        try{
-          let q = "trashed = false and (mimeType = 'application/json' or name = 'pins.json')";
-          if (parentId) q += " and '"+parentId+"' in parents";
-          const res = await driveListFiles({ q, pageSize: 100 });
-          await renderGrid(res.files||[]);
-        }catch(e){ gridEl.innerHTML = `<div>検索に失敗しました</div>`; }
-      }
-      await loadFolder();
-
-      document.getElementById('pinsSearchAll')?.addEventListener('click', async ()=>{
-        try{
-          const query = (document.getElementById('pinsQuery')?.value || '').trim();
-          let q = "trashed = false and (mimeType = 'application/json' or name = 'pins.json')";
-          if (query) q += " and name contains '"+query.replace(/'/g, "\'")+"'";
-          const res = await driveListFiles({ q, pageSize: 200 });
-          await renderGrid(res.files||[]);
-        }catch(e){ gridEl.innerHTML = `<div>検索に失敗しました</div>`; }
-      });
-    }catch(e){
-      console.warn('openPinsChooser failed:', e);
-      alert('pins.json の取得に失敗しました。サインイン/権限やネットワークをご確認ください。');
-    }
-  }
-
-  btnPickPins?.addEventListener('click', (e)=>{
-    e.preventDefault();
-    e.stopPropagation();
-    openPinsChooser();
-  });
-});
-
-
-// === patch v3: robust helpers + Drive pins chooser with fallbacks ===
-window.addEventListener('DOMContentLoaded', ()=>{
-  // --- Robust helper resolution ---
-  // Modal helpers (fallback if missing)
-  if (typeof window.openModal !== 'function' || typeof window.closeModal !== 'function') {
-    let _overlay = null;
-    window.openModal = (html)=>{
-      if (!_overlay){
-        _overlay = document.createElement('div');
-        _overlay.className = 'modal-overlay';
-        _overlay.id = 'modalRoot_patch';
-        document.body.appendChild(_overlay);
-      }
-      _overlay.className = 'modal-overlay';
-      _overlay.innerHTML = html;
-    };
-    window.closeModal = ()=>{
-      const root = document.getElementById('modalRoot_patch') || document.getElementById('modalRoot');
-      if (root){ root.className = 'hidden'; root.innerHTML = ''; }
-    };
-  }
-
-  // Drive list fallback using gapi if driveListFiles is missing
-  if (typeof window.driveListFiles !== 'function') {
-    window.driveListFiles = async function({ q='', pageSize=100, orderBy='modifiedTime desc', fields }={}){
-      // try gapi client directly
-      if (!window.gapi || !gapi.client?.drive?.files?.list) throw new Error('gapi drive client not ready');
-      if (typeof window.gapiReady === 'function') { try{ await window.gapiReady(); }catch(e){} }
-      const r = await gapi.client.drive.files.list({
-        q, pageSize, orderBy,
-        fields: fields || "files(id,name,mimeType,modifiedTime,parents,thumbnailLink),nextPageToken"
-      });
-      return r.result || { files:[] };
-    };
-  }
-
-  // Ensure ensureToken exists (no-op fallback)
-  if (typeof window.ensureToken !== 'function') {
-    window.ensureToken = async ()=>{};
-  }
-
-  const sheetScrim = document.getElementById('sheetScrim');
-  const capClose = document.getElementById('capClose');
-  const pinsIdInput  = document.getElementById('pinsId');
-  const folderIdInput= document.getElementById('folderId');
-  const fileIdInput  = document.getElementById('fileId');
-  const btnPickPins  = document.getElementById('btnPickPins');
-
-  // Fallback close for caption sheet if not defined
-  if (typeof window.closeCaptionSheet !== 'function') {
-    window.closeCaptionSheet = function closeCaptionSheet(){
-      const cs = document.getElementById('capSheet');
-      if (!cs) return;
-      cs.removeAttribute('open');
-      cs.setAttribute('aria-hidden','true');
-      setTimeout(()=>{ cs.hidden = true; }, 160);
-      document.documentElement.classList.remove('sheet-open');
-      if (sheetScrim){
-        sheetScrim.removeAttribute('open');
-        sheetScrim.setAttribute('hidden','');
-        sheetScrim.setAttribute('aria-hidden','true');
-      }
-    };
-  }
-
-  // Delegate clicks for any modal close button (more reliable)
-  document.addEventListener('click', (e)=>{
-    const t = e.target;
-    if (!t) return;
-    if (t.id === 'pinsClose' || t.id === 'helpClose1' || t.id === 'helpClose2' || t.id === 'helpClose3') {
-      try{ window.closeModal(); }catch(_){}
-    }
-    // 'このファイルを使う'
-    if (t.matches('[data-pick]')){
-      const id = t.getAttribute('data-pick');
-      const name = t.getAttribute('data-name') || '';
-      try{ window.closeModal(); }catch(_){}
-      if (pinsIdInput && id){ pinsIdInput.value = id; }
-      try{ window.loadedPinsName = name; }catch(_){}
-      try{ window.updatePinsInfo?.(); }catch(_){}
-    }
-  });
-
-  capClose?.addEventListener('click', ()=> window.closeCaptionSheet());
-
-  // Clicking the scrim closes any open sheets
-  sheetScrim?.addEventListener('click', ()=>{
-    try{ window.closeDockSheet?.(); }catch(e){}
-    try{ window.closeLoadSheet?.(); }catch(e){}
-    try{ window.closeCaptionSheet?.(); }catch(e){}
-  });
-
-  // Esc key closes sheets and modal
-  window.addEventListener('keydown', (e)=>{
-    if (e.key !== 'Escape') return;
-    try{ window.closeDockSheet?.(); }catch(e){}
-    try{ window.closeLoadSheet?.(); }catch(e){}
-    try{ window.closeCaptionSheet?.(); }catch(e){}
-    try{ window.closeModal?.(); }catch(e){}
-  });
-
-  // Pins chooser: list JSON in the same Drive folder as GLB (or folderIdInput)
-  async function openPinsChooser(){
-    try{
-      const ensureToken = window.ensureToken;
-      const driveGetMetadata = window.driveGetMetadata;
-      const driveListFiles = window.driveListFiles;
-      const openModal = window.openModal;
-
-      await ensureToken?.();
-
-      // Resolve target parent folder
-      const glbId = (fileIdInput?.value || '').trim();
-      let parentId = (folderIdInput?.value || '').trim();
-      if (!parentId && glbId && typeof driveGetMetadata === 'function'){
-        try{
-          const meta = await driveGetMetadata(glbId);
-          if (meta.parents && meta.parents.length) parentId = meta.parents[0];
-        }catch(e){ /* ignore */ }
-      }
-
-      const hdr = parentId ? 'pins.json を選択（GLBと同じフォルダ）' : 'pins.json を選択（ドライブ全体検索）';
-      openModal(`
-        <div class="modal">
-          <header>
-            <strong>${hdr}</strong>
-            <div class="grow"></div>
-            <input id="pinsQuery" placeholder="名前でフィルタ（例：pins）" style="padding:6px 8px;border:1px solid #dddddd;border-radius:8px;min-width:200px">
-            <button id="pinsSearchAll">ドライブ全体から検索</button>
-            <button id="pinsClose">閉じる</button>
-          </header>
-          <div class="body"><div class="grid" id="pinsGrid"><div>読み込み中…</div></div></div>
-          <footer><span class="muted">JSON（application/json）と pins.json を表示。最新順。</span></footer>
-        </div>
-      `);
-
-      const gridEl = document.getElementById('pinsGrid');
-
-      function rowHTML(f){
-        const t = new Date(f.modifiedTime||Date.now()).toLocaleString();
-        const name = (f.name||'(名称なし)').replace(/"/g,'&quot;');
-        return `<div class="card">
-          <div class="title">${name}</div>
-          <div class="meta">${t}</div>
-          <button data-pick="${f.id}" data-name="${name}">このファイルを使う</button>
-        </div>`;
-      }
-
-      async function renderGrid(files){
-        if (!files?.length){ gridEl.innerHTML = `<div>候補がありません</div>`; return; }
-        gridEl.innerHTML = files.map(rowHTML).join('');
-      }
-
-      async function loadFolder(){
-        try{
-          let q = "trashed = false and (mimeType = 'application/json' or name = 'pins.json')";
-          if (parentId) q += " and '"+parentId+"' in parents";
-          const res = await driveListFiles({ q, pageSize: 100 });
-          await renderGrid(res.files||[]);
-        }catch(e){ console.warn(e); gridEl.innerHTML = `<div>検索に失敗しました</div>`; }
-      }
-      await loadFolder();
-
-      document.getElementById('pinsSearchAll')?.addEventListener('click', async ()=>{
-        try{
-          const query = (document.getElementById('pinsQuery')?.value || '').trim();
-          let q = "trashed = false and (mimeType = 'application/json' or name = 'pins.json')";
-          if (query) q += " and name contains '"+query.replace(/'/g, "\'")+"'";
-          const res = await driveListFiles({ q, pageSize: 200 });
-          await renderGrid(res.files||[]);
-        }catch(e){ console.warn(e); gridEl.innerHTML = `<div>検索に失敗しました</div>`; }
-      });
-    }catch(e){
-      console.warn('openPinsChooser failed:', e);
-      alert('pins.json の取得に失敗しました。サインイン/権限やネットワークをご確認ください。');
-    }
-  }
-
-  btnPickPins?.addEventListener('click', (e)=>{
-    e.preventDefault();
-    e.stopPropagation();
-    openPinsChooser();
-  });
-});
-
-
-// === patch v4: stronger close handling + direct module helpers ===
-window.addEventListener('DOMContentLoaded', ()=>{
-  const sheetScrim = document.getElementById('sheetScrim');
-  const pinsIdInput  = document.getElementById('pinsId');
-  const folderIdInput= document.getElementById('folderId');
-  const fileIdInput  = document.getElementById('fileId');
-  const btnPickPins  = document.getElementById('btnPickPins');
-
-  // Document-level capture for caption close (id=capClose)
-  document.addEventListener('click', (e)=>{
-    const t = e.target;
-    if (!t) return;
-    if (t.id === 'capClose'){
-      e.preventDefault();
-      e.stopPropagation();
-      try{ window.closeCaptionSheet?.(); }catch(_){}
-      // also hide scrim just in case
-      const s = document.getElementById('sheetScrim');
-      if (s){ s.removeAttribute('open'); s.setAttribute('aria-hidden','true'); s.setAttribute('hidden',''); }
-      document.documentElement.classList.remove('sheet-open');
-    }
-  }, true); // capture to win over overlays
-
-  // Esc key (capture) also closes everything
-  window.addEventListener('keydown', (e)=>{
-    if (e.key !== 'Escape') return;
-    try{ window.closeDockSheet?.(); }catch(e){}
-    try{ window.closeLoadSheet?.(); }catch(e){}
-    try{ window.closeCaptionSheet?.(); }catch(e){}
-    try{ window.closeModal?.(); }catch(e){}
-    const s = document.getElementById('sheetScrim');
-    if (s){ s.removeAttribute('open'); s.setAttribute('aria-hidden','true'); s.setAttribute('hidden',''); }
-    document.documentElement.classList.remove('sheet-open');
-  }, true);
-
-  // -------- Pins chooser (prefer module-local helpers) --------
-  async function openPinsChooser(){
-    try{
-      // Prefer direct references defined earlier in the same module
-      const _driveListFiles   = (typeof driveListFiles === 'function') ? driveListFiles : (window.driveListFiles || null);
-      const _driveGetMetadata = (typeof driveGetMetadata === 'function') ? driveGetMetadata : (window.driveGetMetadata || null);
-      const _openModal        = (typeof openModal === 'function') ? openModal : (window.openModal || null);
-      const _closeModal       = (typeof closeModal === 'function') ? closeModal : (window.closeModal || null);
-      const _ensureToken      = (typeof ensureToken === 'function') ? ensureToken : (window.ensureToken || (async()=>{}));
-
-      if (!_driveListFiles || !_openModal || !_closeModal){
-        console.error('pins chooser helpers missing', { _driveListFiles: !!_driveListFiles, _openModal: !!_openModal, _closeModal: !!_closeModal });
-        throw new Error('内部ヘルパー未初期化');
-      }
-
-      await _ensureToken?.();
-
-      // Resolve target parent folder (prefer explicit folderId, else parent of glb)
-      const glbId = (fileIdInput?.value || '').trim();
-      let parentId = (folderIdInput?.value || '').trim();
-      if (!parentId && glbId && typeof _driveGetMetadata === 'function'){
-        try{
-          const meta = await _driveGetMetadata(glbId, 'id,parents');
-          if (meta.parents && meta.parents.length) parentId = meta.parents[0];
-        }catch(e){ console.warn('getMetadata failed', e); }
-      }
-
-      const hdr = parentId ? 'pins.json を選択（GLBと同じフォルダ）' : 'pins.json を選択（ドライブ全体検索）';
-      _openModal(`
-        <div class="modal">
-          <header>
-            <strong>${hdr}</strong>
-            <div class="grow"></div>
-            <input id="pinsQuery" placeholder="名前でフィルタ（例：pins）" style="padding:6px 8px;border:1px solid #dddddd;border-radius:8px;min-width:200px">
-            <button id="pinsSearchAll">ドライブ全体から検索</button>
-            <button id="pinsClose">閉じる</button>
-          </header>
-          <div class="body"><div class="grid" id="pinsGrid"><div>読み込み中…</div></div></div>
-          <footer><span class="muted">JSON（application/json）と pins.json を表示。最新順。</span></footer>
-        </div>
-      `);
-
-      const gridEl = document.getElementById('pinsGrid');
-
-      function rowHTML(f){
-        const t = new Date(f.modifiedTime||Date.now()).toLocaleString();
-        const name = (f.name||'(名称なし)').replace(/"/g,'&quot;');
-        return `<div class="card">
-          <div class="title">${name}</div>
-          <div class="meta">${t}</div>
-          <button data-pick="${f.id}" data-name="${name}">このファイルを使う</button>
-        </div>`;
-      }
-
-      async function renderGrid(files){
-        if (!files?.length){ gridEl.innerHTML = `<div>候補がありません</div>`; return; }
-        gridEl.innerHTML = files.map(rowHTML).join('');
-      }
-
-      async function loadFolder(){
-        try{
-          let q = "trashed = false and (mimeType = 'application/json' or name = 'pins.json')";
-          if (parentId) q += " and '"+parentId+"' in parents";
-          const res = await _driveListFiles({ q, pageSize: 100 });
-          await renderGrid(res.files||[]);
-        }catch(e){ console.error('loadFolder error', e); gridEl.innerHTML = `<div>検索に失敗しました</div>`; }
-      }
-      await loadFolder();
-
-      document.getElementById('pinsClose')?.addEventListener('click', (e)=>{ e.preventDefault(); _closeModal(); }, { once:true });
-      document.getElementById('pinsSearchAll')?.addEventListener('click', async ()=>{
-        try{
-          const query = (document.getElementById('pinsQuery')?.value || '').trim();
-          let q = "trashed = false and (mimeType = 'application/json' or name = 'pins.json')";
-          if (query) q += " and name contains '"+query.replace(/'/g, "\'")+"'";
-          const res = await _driveListFiles({ q, pageSize: 200 });
-          await renderGrid(res.files||[]);
-        }catch(e){ console.error('searchAll error', e); gridEl.innerHTML = `<div>検索に失敗しました</div>`; }
-      });
-
-      // Delegate pick handling (for dynamically rendered items)
-      document.addEventListener('click', (ev)=>{
-        const t = ev.target;
-        if (!t?.matches('[data-pick]')) return;
-        ev.preventDefault();
-        const id = t.getAttribute('data-pick');
-        const name = t.getAttribute('data-name') || '';
-        try{ _closeModal(); }catch(_){}
-        if (pinsIdInput && id){ pinsIdInput.value = id; }
-        try{ window.loadedPinsName = name; }catch(_){}
-        try{ window.updatePinsInfo?.(); }catch(_){}
-      }, { once:true, capture:true });
-
-    }catch(e){
-      console.error('openPinsChooser failed(v4):', e);
-      alert('pins.json の取得に失敗しました。サインイン・権限・ネットワーク状態をご確認ください。');
-    }
-  }
-
-  btnPickPins?.addEventListener('click', (e)=>{
-    e.preventDefault();
-    e.stopPropagation();
-    openPinsChooser();
-  });
-});
-
-// v18: universal close + desktop hide loader
-(function(){
-  window.forceCloseAllSheets = function(){
-    const sels = ['#capSheet','.cap-sheet','.sheet','.load-sheet','.top-sheet','#dockSheet','.modal','[role="dialog"]'];
-    document.querySelectorAll(sels.join(',')).forEach(el=>{
-      el.removeAttribute('open');
-      el.setAttribute?.('aria-hidden','true');
-      el.hidden = true;
-      if (el.id==='modalRoot'){ el.classList.add('hidden'); el.innerHTML=''; }
-    });
-    document.querySelectorAll('#sheetScrim,.scrim').forEach(s=>{
-      s.removeAttribute('open'); s.setAttribute?.('hidden',''); s.setAttribute?.('aria-hidden','true');
-    });
-    document.documentElement.classList.remove('sheet-open');
-  };
-
-  window.addEventListener('DOMContentLoaded', ()=>{
-    // Close buttons capture
-    document.addEventListener('click',(e)=>{
-      const t=e.target;
-      if(!t) return;
-      const isClose = t.id==='pinsClose'||t.id==='capClose'||t.matches?.('[data-close],.close,.icon-close,button[aria-label="閉じる"],[aria-label="close"],[aria-label="Close"]');
-      if(isClose){
-        e.preventDefault(); e.stopPropagation();
-        try{ closeModal?.(); }catch(_){}
-        try{ closeCaptionSheet?.(); }catch(_){}
-        forceCloseAllSheets();
-      }
-    },true);
-    // Esc
-    window.addEventListener('keydown',(e)=>{
-      if(e.key!=='Escape') return;
-      try{ closeModal?.(); }catch(_){}
-      try{ closeCaptionSheet?.(); }catch(_){}
-      forceCloseAllSheets();
-    },true);
-    // Scrim
-    document.getElementById('sheetScrim')?.addEventListener('click',(e)=>{
-      e.preventDefault(); e.stopPropagation(); forceCloseAllSheets();
-    },true);
-
-    // Desktop: remove mobile loader UI
-    const kill=()=>{
-      if(!window.matchMedia('(min-width:769px)').matches) return;
-      document.getElementById('loadFab')?.remove();
-      document.getElementById('loadSheet')?.remove();
-      document.querySelectorAll('.load-fab,.mobile-load,[data-mobile-load]').forEach(el=>el.remove());
-    };
-    kill();
-    window.matchMedia('(min-width:769px)').addEventListener?.('change',kill);
-    new MutationObserver(kill).observe(document.documentElement,{childList:true,subtree:true});
-  });
-})();
-
-</script>
-
-
-<script>
-/*** v22 Overlay Manager: 開閉の単一責任 ***/
-const Overlay = (()=> {
-  function hideScrims(){
-    document.querySelectorAll('#sheetScrim,.scrim').forEach(s=>{
-      s.removeAttribute('open');
-      s.setAttribute?.('hidden','');
-      s.setAttribute?.('aria-hidden','true');
-    });
-    document.documentElement.classList.remove('sheet-open','modal-open');
-  }
-  function closeAll(){
-    document.querySelectorAll('#capSheet,.cap-sheet,.sheet,.load-sheet,.top-sheet,#dockSheet,.modal,[role="dialog"]').forEach(el=>{
-      el.removeAttribute('open');
-      el.hidden = true;
-      el.setAttribute?.('aria-hidden','true');
-      if (el.id === 'modalRoot'){ el.classList.add('hidden'); el.innerHTML=''; }
-    });
-    hideScrims();
-  }
-  return { closeAll };
-})();
-
-/*** v22 Mobile Loader 殲滅（PC） + 動的再挿入対策 ***/
-(function(){
-  function killMobileLoader(){
-    if (!window.matchMedia('(min-width:769px)').matches) return;
-    document.getElementById('loadFab')?.remove();
-    document.getElementById('loadSheet')?.remove();
-    document.querySelectorAll('.load-fab,.mobile-load,[data-mobile-load]').forEach(n=>n.remove());
-  }
-  const mql = window.matchMedia('(min-width:769px)');
-  killMobileLoader();
-  mql.addEventListener?.('change', killMobileLoader);
-  new MutationObserver(killMobileLoader).observe(document.documentElement,{childList:true,subtree:true});
-})();
-
-/*** v22 Legacy UI 排除（DOMからも除去） ***/
-(function(){
-  const grp = document.getElementById('grpPins');
-  if (grp){
-    grp.querySelectorAll('[data-ui="legacy"],#btnPickPinsOld,.old-ui,.old-chooser').forEach(n=>n.remove());
-    // pinsId は hidden 1つに統一
-    const pins = Array.from(grp.querySelectorAll('#pinsId'));
-    if (pins.length === 0){
-      const hid = document.createElement('input'); hid.type='hidden'; hid.id='pinsId'; grp.appendChild(hid);
-    } else {
-      pins.forEach((el,i)=>{ el.type='hidden'; if(i>0) el.remove(); });
-    }
-  }
-})();
-
-/*** v22 Action Delegation（クリックは1か所で捕捉） ***/
-(function(){
-  // 選択ボタンの存在保証（なければ作る/テキストから拾う）
-  window.addEventListener('DOMContentLoaded', ()=>{
-    const grp = document.getElementById('grpPins');
-    if (!grp) return;
-    let pick = document.getElementById('btnPickPins');
-    if (!pick){
-      // ラベルから推定
-      const cand = Array.from(grp.querySelectorAll('button, a[role="button"]')).find(el => (el.textContent||'').trim().includes('選択'));
-      if (cand){ pick = cand; try{ pick.id='btnPickPins'; }catch(_){ } }
-    }
-    if (!pick){
-      const clear = grp.querySelector('#btnClearPins') || grp.querySelector('[id*="ClearPins"]');
-      pick = document.createElement('button');
-      pick.id = 'btnPickPins'; pick.type='button'; pick.dataset.action='pick-pins';
-      pick.className='iconbtn'; pick.textContent='選択'; pick.title='GLBと同じフォルダから pins.json を選ぶ';
-      if (clear && clear.parentNode) clear.parentNode.insertBefore(pick, clear);
-      else grp.appendChild(pick);
-    }else{
-      pick.type='button'; pick.dataset.action='pick-pins';
-    }
-    // 有効化
-    pick.disabled=false; pick.style.pointerEvents='auto'; pick.removeAttribute('aria-disabled');
-  });
-
-  // クリックは capture で最上流から拾う：Stopされても届く
-  document.addEventListener('click', (e)=>{
-    const t = e.target.closest?.('[data-action]');
-    if (!t) return;
-    const act = t.getAttribute('data-action');
-
-    if (act === 'pick-pins'){
-      e.preventDefault(); e.stopPropagation();
-      try{
-        if (typeof openPinsChooser === 'function') openPinsChooser();
-        else console.warn('openPinsChooser not defined');
-      }catch(err){ console.error(err); }
-      return;
-    }
-
-    if (act === 'close-modal'){
-      e.preventDefault(); e.stopPropagation();
-      try { window.closeModal?.(); } catch(_){}
-      try { window.closeCaptionSheet?.(); } catch(_){}
-      Overlay.closeAll();
-      return;
-    }
-  }, true);
-
-  // Esc / scrim でも閉じる
-  window.addEventListener('keydown', (e)=>{
-    if (e.key === 'Escape'){ Overlay.closeAll(); }
-  }, true);
-  document.getElementById('sheetScrim')?.addEventListener('click', (e)=>{ e.preventDefault(); e.stopPropagation(); Overlay.closeAll(); }, true);
-})();
-</script>
-
-
-<script>
-// v22.1: define openPinsChooser if missing, scoped to GLB's parent folder
-(function(){
-  if (typeof window.openPinsChooser === 'function') return; // respect existing impl
-
-  async function getDrive(){ 
-    if (window.gapi && gapi.client && gapi.client.drive) return gapi;
-    throw new Error('Google Drive API (gapi) is not ready.');
-  }
-  function getQueryParam(name){
-    const u = new URL(window.location.href);
-    return u.searchParams.get(name);
-  }
-  async function getParentId(gapi, fileId){
-    const res = await gapi.client.drive.files.get({ fileId, fields: 'parents' });
-    const parents = res.result.parents || [];
-    if (!parents.length) throw new Error('Parent folder not found for GLB.');
-    return parents[0];
-  }
-  async function listJsonInFolder(gapi, folderId){
-    const q = `'${folderId}' in parents and mimeType='application/json' and trashed=false`;
-    const res = await gapi.client.drive.files.list({ q, fields: 'files(id,name,modifiedTime,size)', pageSize: 200, orderBy: 'modifiedTime desc' });
-    return res.result.files || [];
-  }
-  function ensurePinsIdInput(){
-    let inp = document.getElementById('pinsId');
-    if (!inp){
-      const grp = document.getElementById('grpPins') || document.body;
-      inp = document.createElement('input'); inp.type='hidden'; inp.id='pinsId';
-      grp.appendChild(inp);
-    }
-    return inp;
-  }
-  function buildChooser(items){
-    // Simple modal sheet
-    let host = document.getElementById('pinsChooser');
-    if (host) host.remove();
-    host = document.createElement('div');
-    host.id = 'pinsChooser';
-    host.className = 'modal';
-    host.setAttribute('role','dialog');
-    host.style.cssText = 'position:fixed; inset:10% 15%; background:#ffffff; border-radius:10px; box-shadow:0 12px 32px rgba(0,0,0,.25); padding:16px; overflow:auto; z-index:1605;';
-    host.innerHTML = `
-      <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:12px;">
-        <h3 style="margin:0; font-size:18px;">pins.json を選択（GLBと同じフォルダ）</h3>
-        <button type="button" data-action="close-modal" aria-label="閉じる">閉じる</button>
-      </div>
-      <div id="pinsChooserList"></div>
-    `;
-    document.body.appendChild(host);
-    const list = host.querySelector('#pinsChooserList');
-    if (!items.length){
-      list.innerHTML = `<p style="margin:8px 0;">このフォルダに JSON が見つかりませんでした。</p>`;
-      return host;
-    }
-    items.forEach(f=>{
-      const row = document.createElement('button');
-      row.type = 'button';
-      row.style.cssText = 'display:flex; width:100%; text-align:left; padding:10px 12px; border:1px solid #dddddd; border-radius:8px; margin:6px 0; gap:12px; background:#fafafa;';
-      row.innerHTML = `<span style="font-weight:600;">${f.name}</span><span style="margin-left:auto; opacity:.7; font-size:12px;">${(f.size?Number(f.size).toLocaleString():'')}&nbsp;&nbsp;${(f.modifiedTime||'').replace('T',' ').replace('Z','')}</span>`;
-      row.addEventListener('click', ()=>{
-        const inp = ensurePinsIdInput();
-        inp.value = f.id;
-        // call existing loader if available
-        try{ window.loadPinsFromDrive?.(f.id); }catch(_){}
-        // Close the chooser
-        try{ window.Overlay?.closeAll(); }catch(_){}
-        host.remove();
-      }, { once: true });
-      list.appendChild(row);
-    });
-    return host;
-  }
-
-  window.openPinsChooser = async function(){
-    try{
-      const g = await getDrive();
-      const glbId = getQueryParam('fileId');
-      if (!glbId){ console.warn('fileId not in URL; cannot locate folder.'); alert('GLBの fileId が不明です。URLに ?fileId=... が必要です。'); return; }
-      const parent = await getParentId(g, glbId);
-      const files = await listJsonInFolder(g, parent);
-      const chooser = buildChooser(files.filter(f => /\.json$/i.test(f.name)));
-      // Slight overlay state for ESC/scrim close support
-      document.documentElement.classList.add('modal-open');
-    }catch(err){
-      console.error('openPinsChooser polyfill failed', err);
-      alert('pins.json の取得に失敗しました。サインイン/権限やネットワークをご確認ください。\n' + err.message);
-    }
-  };
-})();
-</script>
-
-
-<script>
-/* ===================== pins.json v2 utilities (ID-based) ===================== */
-(function(){
-  if (window.PinsV2) return; // avoid double-inject
-
-  window.PinsV2 = {
-    driveUrl(id){ return `https://drive.google.com/uc?id=${id}`; },
-
-    async load(pinsFileId){
-      if (!window.gapi || !gapi.client?.drive) throw new Error('gapi.drive is not ready');
-      const res = await gapi.client.drive.files.get({ fileId: pinsFileId, alt: 'media' });
-      const data = res.result || JSON.parse(res.body || '{}');
-      if (data.version !== 2) throw new Error('Unsupported pins.json version (expect 2)');
-      return data;
-    },
-
-    async save({ pins, parentFolderId, glbId }){
-      if (!window.gapi) throw new Error('gapi not initialized');
-      const body = { version: 2, model: { glbId }, pins };
-      const meta = { name: 'pins.json', mimeType: 'application/json', parents: [parentFolderId] };
-      const boundary='-------314159265358979323846';
-      const d = `
---${boundary}
-`;
-      const end = `
---${boundary}--`;
-      const payload = d+'Content-Type: application/json; charset=UTF-8
-
-'+JSON.stringify(meta)+
-                      d+'Content-Type: application/json
-
-'+JSON.stringify(body)+end;
-      const r = await gapi.client.request({
-        path:'/upload/drive/v3/files?uploadType=multipart', method:'POST',
-        headers:{ 'Content-Type':`multipart/related; boundary=${boundary}` },
-        body: payload
-      });
-      return r.result; // -> { id, name, ... }
-    }
-  };
-
-  // Helper: current model state (safe global)
-  window.ModelState = window.ModelState || {
-    glbId: (new URL(location.href)).searchParams.get('fileId') || null,
-    pinsId: (new URL(location.href)).searchParams.get('pinsId') || null,
-    data: null
-  };
-
-  // Hook: define loadPinsFromDrive to v2 (backward-safe override)
-  if (typeof window.loadPinsFromDrive !== 'function'){
-    window.loadPinsFromDrive = async function(pinsFileId){
-      try{
-        const data = await PinsV2.load(pinsFileId);
-        ModelState.pinsId = pinsFileId;
-        ModelState.data = data;
-        // reflect to hidden input if present
-        const inp = document.getElementById('pinsId');
-        if (inp) inp.value = pinsFileId;
-        // try to paint pins onto scene if renderer exists
-        try { window.applyPinsToScene?.(data.pins || []); } catch(_){}
-        console.log('pins v2 loaded:', data);
-      }catch(err){
-        console.error('loadPinsFromDrive(v2) failed', err);
-        alert('pins.json(v2) の読み込みに失敗しました: ' + err.message);
-      }
-    };
-  } else {
-    // If a legacy loader exists, keep it but add a v2 shim callable as loadPinsFromDriveV2
-    window.loadPinsFromDriveV2 = async function(pinsFileId){
-      try{
-        const data = await PinsV2.load(pinsFileId);
-        ModelState.pinsId = pinsFileId;
-        ModelState.data = data;
-        try { window.applyPinsToScene?.(data.pins || []); } catch(_){}
-        console.log('pins v2 loaded:', data);
-      }catch(err){
-        console.error('loadPinsFromDriveV2 failed', err);
-        alert('pins.json(v2) の読み込みに失敗しました: ' + err.message);
-      }
-    };
-  }
-
-  // Bind save button (if exists) to save v2 in GLB parent folder
-  window.addEventListener('DOMContentLoaded', ()=>{
-    const saveBtn = document.getElementById('btnSavePins');
-    if (saveBtn && !saveBtn._v2bound){
-      saveBtn._v2bound = true;
-      saveBtn.addEventListener('click', async (e)=>{
-        e.preventDefault(); e.stopPropagation();
-        try{
-          if (!ModelState.glbId) throw new Error('GLB fileId is unknown (URL must include ?fileId=...)');
-          // Find GLB parent id
-          const r = await gapi.client.drive.files.get({ fileId: ModelState.glbId, fields: 'parents' });
-          const parentId = (r.result.parents||[])[0];
-          if (!parentId) throw new Error('GLB parent folder not found');
-          // Prepare pins data: expect window.collectPins() to provide current pins array
-          const pins = (await window.collectPins?.()) || (ModelState.data?.pins) || [];
-          const out = await PinsV2.save({ pins, parentFolderId: parentId, glbId: ModelState.glbId });
-          // update pinsId and hidden input
-          ModelState.pinsId = out.id;
-          const inp = document.getElementById('pinsId'); if (inp) inp.value = out.id;
-          alert('pins.json(v2) を保存しました（id: ' + out.id + '）');
-        }catch(err){
-          console.error('save v2 failed', err);
-          alert('pins.json(v2) の保存に失敗: ' + err.message);
-        }
-      }, true);
-    }
-  });
-
-  // Hook: Image picking should store fileId instead of name
-  window.onImagePicked = function(doc){
-    try{
-      window.currentPin = window.currentPin || {};
-      window.currentPin.image = { id: doc.id, name: doc.name || undefined };
-      const img = document.getElementById('pinPreview');
-      if (img) img.src = PinsV2.driveUrl(doc.id);
-    }catch(err){ console.error('onImagePicked(v2) failed', err); }
-  };
-})();
-</script>
-
-
-<script>
-/* v23.2 — Robust GLB id discovery + pinsId parent fallback + optional GLB picker */
-(function(){
-  // Expand 3-hex color values at runtime (inputs that still have #ee3333-like values)
-  window.addEventListener('DOMContentLoaded', ()=>{
-    document.querySelectorAll('input[type="color"]').forEach(inp=>{
-      const v = (inp.value||'').trim();
-      const m = /^#([0-9a-fA-F])([0-9a-fA-F])([0-9a-fA-F])$/i.exec(v);
-      if (m){ inp.value = `#${m[1]}${m[1]}${m[2]}${m[2]}${m[3]}${m[3]}`; }
-    });
-  });
-
-  function fromUrlAll(){
-    try{
-      const href = String(window.location && window.location.href || '');
-      // 1) search params
-      const u = new URL(href);
-      const q1 = u.searchParams.get('fileId');
-      const qPins = u.searchParams.get('pinsId');
-      // 2) hash params: #...fileId=...&...
-      let q2 = null;
-      if (u.hash && u.hash.includes('fileId=')){
-        const h = new URLSearchParams(u.hash.replace(/^#/, ''));
-        q2 = h.get('fileId') || null;
-      }
-      return { fileId: q1 || q2 || null, pinsId: qPins || null };
-    }catch(_){
-      return { fileId: null, pinsId: null };
-    }
-  }
-  async function getParentsOf(gapi, id){
-    const r = await gapi.client.drive.files.get({ fileId: id, fields: 'parents' });
-    return (r.result.parents||[]);
-  }
-
-  async function resolveGlbId(){
-    // 1) URL (search/hash)
-    const u = fromUrlAll();
-    if (u.fileId) return u.fileId;
-
-    // 2) DOM hints
-    const byId = document.getElementById('fileId')?.value || document.getElementById('glbId')?.value;
-    if (byId) return byId;
-    const byData = document.querySelector('[data-file-id]')?.getAttribute('data-file-id')
-               || document.querySelector('[data-glb-id]')?.getAttribute('data-glb-id');
-    if (byData) return byData;
-
-    // 3) ModelState
-    if (window.ModelState?.glbId) return window.ModelState.glbId;
-
-    // 4) Derive from pinsId parent if present in URL or ModelState (same folder = OK)
-    const g = (window.gapi && gapi.client?.drive) ? gapi : null;
-    const pinsId = u.pinsId || window.ModelState?.pinsId || document.getElementById('pinsId')?.value;
-    if (g && pinsId){
-      const parents = await getParentsOf(g, pinsId);
-      if (parents[0]){
-        // We don't know GLB, but we can still use this parent folder to list JSON
-        return null; // explicit: GLB unknown; parent can be used
-      }
-    }
-    return null;
-  }
-
-  async function pickGlbViaDrive(){
-    // Minimal fallback: use Drive files.list to choose a recent .glb if Picker not available
-    if (!window.gapi || !gapi.client?.drive) throw new Error('gapi.drive is not ready');
-    const res = await gapi.client.drive.files.list({
-      q: "mimeType='model/gltf-binary' or name contains '.glb'",
-      orderBy: 'modifiedTime desc',
-      fields: 'files(id,name,modifiedTime,parents)',
-      pageSize: 50
-    });
-    const files = res.result.files || [];
-    // Simple chooser
-    return await new Promise((resolve, reject)=>{
-      const hostId = 'glbChooser';
-      document.getElementById(hostId)?.remove();
-      const host = document.createElement('div');
-      host.id = hostId;
-      host.className='modal';
-      host.setAttribute('role','dialog');
-      host.style.cssText='position:fixed; inset:12% 18%; background:#ffffff; padding:16px; border-radius:10px; box-shadow:0 12px 32px rgba(0,0,0,.25); z-index:1606;';
-      host.innerHTML = `
-        <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:8px;">
-          <h3 style="margin:0;font-size:18px;">GLB を選択（fallback）</h3>
-          <button type="button" data-action="close-modal">閉じる</button>
-        </div>
-        <div id="glbList"></div>
-      `;
-      document.body.appendChild(host);
-      const list = host.querySelector('#glbList');
-      if (!files.length){
-        list.innerHTML = `<p>候補が見つかりませんでした。</p>`;
-      }else{
-        files.forEach(f=>{
-          const row = document.createElement('button');
-          row.type='button';
-          row.style.cssText='display:flex;width:100%;text-align:left;padding:10px 12px;border:1px solid #dddddd;border-radius:8px;margin:6px 0;gap:12px;background:#fafafa;';
-          row.innerHTML = `<span style="font-weight:600;">${f.name}</span><span style="margin-left:auto;opacity:.7;font-size:12px;">${(f.modifiedTime||'').replace('T',' ').replace('Z','')}</span>`;
-          row.addEventListener('click', ()=>{
-            resolve(f); host.remove();
-          }, { once:true });
-          list.appendChild(row);
-        });
-      }
-      // If user closes, reject
-      setTimeout(()=>{
-        const closeBtn = host.querySelector('[data-action="close-modal"]');
-        closeBtn?.addEventListener('click', ()=>{ host.remove(); reject(new Error('GLB not selected')); }, { once:true });
-      });
-    });
-  }
-
-  const prevOpen = window.openPinsChooser;
-  window.openPinsChooser = async function(){
-    try{
-      const g = (window.gapi && gapi.client?.drive) ? gapi : null;
-      if (!g) throw new Error('Google Drive API (gapi) is not ready.');
-
-      // Try to resolve GLB id
-      let glbId = await resolveGlbId();
-
-      // Parent folder to search JSON
-      let parentId = null;
-
-      if (glbId){
-        const r = await g.client.drive.files.get({ fileId: glbId, fields: 'parents' });
-        parentId = (r.result.parents||[])[0] || null;
-      } else {
-        // Fallback: use pinsId's parent
-        const fromUrl = fromUrlAll();
-        const pinsId = fromUrl.pinsId || window.ModelState?.pinsId || document.getElementById('pinsId')?.value;
-        if (pinsId){
-          const parents = await getParentsOf(g, pinsId);
-          parentId = parents[0] || null;
-        }
-      }
-
-      if (!parentId){
-        // Last resort: let user choose a GLB to anchor the folder
-        const choice = await pickGlbViaDrive();
-        glbId = choice?.id || null;
-        parentId = (choice?.parents||[])[0] || null;
-        if (!parentId) throw new Error('GLB parent folder not found');
-        // Cache resolved glbId
-        window.ModelState = window.ModelState || {};
-        window.ModelState.glbId = glbId;
-      }
-
-      // List JSON in that folder
-      const q = `'${parentId}' in parents and mimeType='application/json' and trashed=false`;
-      const res = await g.client.drive.files.list({ q, fields: 'files(id,name,modifiedTime,size)', pageSize: 200, orderBy: 'modifiedTime desc' });
-      const items = (res.result.files||[]).filter(f => /\.json$/i.test(f.name));
-
-      // Reuse existing builder if present, else simple one
-      if (typeof window.buildPinsChooser === 'function'){
-        const chooser = window.buildPinsChooser(items);
-        document.documentElement.classList.add('modal-open');
-        return;
-      } else {
-        // lightweight builder (same as v22.1)
-        let host = document.getElementById('pinsChooser');
-        if (host) host.remove();
-        host = document.createElement('div');
-        host.id = 'pinsChooser';
-        host.className = 'modal';
-        host.setAttribute('role','dialog');
-        host.style.cssText = 'position:fixed; inset:10% 15%; background:#ffffff; border-radius:10px; box-shadow:0 12px 32px rgba(0,0,0,.25); padding:16px; overflow:auto; z-index:1605;';
-        host.innerHTML = `
-          <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:12px;">
-            <h3 style="margin:0; font-size:18px;">pins.json を選択（同フォルダ）</h3>
-            <button type="button" data-action="close-modal" aria-label="閉じる">閉じる</button>
-          </div>
-          <div id="pinsChooserList"></div>
-        `;
-        document.body.appendChild(host);
-        const list = host.querySelector('#pinsChooserList');
-        if (!items.length){
-          list.innerHTML = `<p style="margin:8px 0;">このフォルダに JSON が見つかりませんでした。</p>`;
-        } else {
-          items.forEach(f=>{
-            const row = document.createElement('button');
-            row.type = 'button';
-            row.style.cssText = 'display:flex; width:100%; text-align:left; padding:10px 12px; border:1px solid #dddddd; border-radius:8px; margin:6px 0; gap:12px; background:#fafafa;';
-            row.innerHTML = `<span style="font-weight:600;">${f.name}</span><span style="margin-left:auto; opacity:.7; font-size:12px;">${(f.size?Number(f.size).toLocaleString():'')}&nbsp;&nbsp;${(f.modifiedTime||'').replace('T',' ').replace('Z','')}</span>`;
-            row.addEventListener('click', ()=>{
-              const inp = document.getElementById('pinsId') || (function(){ const i=document.createElement('input'); i.type='hidden'; i.id='pinsId'; document.getElementById('grpPins')?.appendChild(i) || document.body.appendChild(i); return i; })();
-              inp.value = f.id;
-              // Prefer v2 loader if available
-              try{ (window.loadPinsFromDriveV2||window.loadPinsFromDrive)?.(f.id); }catch(_){}
-              // Close the chooser
-              try{ window.Overlay?.closeAll(); }catch(_){}
-              host.remove();
-            }, { once: true });
-            list.appendChild(row);
-          });
-        }
-        document.documentElement.classList.add('modal-open');
-      }
-    }catch(err){
-      console.error('openPinsChooser (v23.2) failed', err);
-      alert('pins.json の取得に失敗しました。サインイン/権限やネットワークをご確認ください。\n' + err.message);
-      try{ if (typeof prevOpen === 'function') return prevOpen(); }catch(_){}
-    }
-  };
-})();
-</script>
-
-
-<script>
-/* v23.3 — GLB fileId resolution reads user input fields (id & name) */
-(function(){
-  function fromUrlAll(){
-    try{
-      const href = String(window.location && window.location.href || '');
-      const u = new URL(href);
-      const q1 = u.searchParams.get('fileId');
-      const qPins = u.searchParams.get('pinsId');
-      let q2 = null;
-      if (u.hash && u.hash.includes('fileId=')){
-        const h = new URLSearchParams(u.hash.replace(/^#/, ''));
-        q2 = h.get('fileId') || null;
-      }
-      return { fileId: q1 || q2 || null, pinsId: qPins || null };
-    }catch(_){
-      return { fileId: null, pinsId: null };
-    }
-  }
-  async function getParentsOf(gapi, id){
-    const r = await gapi.client.drive.files.get({ fileId: id, fields: 'parents' });
-    return (r.result.parents||[]);
-  }
-
-  async function resolveGlbId_v233(){
-    const u = fromUrlAll();
-    if (u.fileId) return (''+u.fileId).trim();
-
-    // 2) hidden/visible input fields by id
-    const byHidden = document.getElementById('fileId')?.value 
-                  || document.getElementById('glbId')?.value;
-    if (byHidden && String(byHidden).trim()) return String(byHidden).trim();
-
-    // 3) input fields by name
-    const byName = document.querySelector('input[name="fileId"]')?.value
-                || document.querySelector('input[name="glbId"]')?.value;
-    if (byName && String(byName).trim()) return String(byName).trim();
-
-    // 4) data-* attributes
-    const byData = document.querySelector('[data-file-id]')?.getAttribute('data-file-id')
-                || document.querySelector('[data-glb-id]')?.getAttribute('data-glb-id');
-    if (byData && String(byData).trim()) return String(byData).trim();
-
-    // 5) global state
-    if (window.ModelState?.glbId && String(window.ModelState.glbId).trim())
-      return String(window.ModelState.glbId).trim();
-
-    // 6) parent from pinsId (fallback to just use folder)
-    const g = (window.gapi && gapi.client?.drive) ? gapi : null;
-    const pinsId = u.pinsId || window.ModelState?.pinsId || document.getElementById('pinsId')?.value
-                || document.querySelector('input[name="pinsId"]')?.value;
-    if (g && pinsId){
-      const parents = await getParentsOf(g, pinsId);
-      if (parents[0]) return null; // explicit: unknown GLB but parent known
-    }
-    return null;
-  }
-
-  // Re-declare openPinsChooser using the new resolver
-  const prevOpen = window.openPinsChooser;
-  window.openPinsChooser = async function(){
-    try{
-      const g = (window.gapi && gapi.client?.drive) ? gapi : null;
-      if (!g) throw new Error('Google Drive API (gapi) is not ready.');
-
-      // Try to resolve GLB id using improved resolver
-      let glbId = await resolveGlbId_v233();
-
-      // Derive parent folder
-      let parentId = null;
-      if (glbId){
-        const r = await g.client.drive.files.get({ fileId: glbId, fields: 'parents' });
-        parentId = (r.result.parents||[])[0] || null;
-      }else{
-        // use pinsId parent
-        const u = fromUrlAll();
-        const pinsId = u.pinsId || window.ModelState?.pinsId || document.getElementById('pinsId')?.value
-                    || document.querySelector('input[name="pinsId"]')?.value;
-        if (pinsId){
-          const parents = await getParentsOf(g, pinsId);
-          parentId = parents[0] || null;
-        }
-      }
-
-      // Last resort: ask user to pick a GLB (to anchor folder)
-      async function pickGlbViaDrive(){
-        const res = await g.client.drive.files.list({
-          q: "mimeType='model/gltf-binary' or name contains '.glb'",
-          orderBy: 'modifiedTime desc',
-          fields: 'files(id,name,modifiedTime,parents)',
-          pageSize: 50
-        });
-        const files = res.result.files || [];
-        return await new Promise((resolve, reject)=>{
-          const hostId = 'glbChooser';
-          document.getElementById(hostId)?.remove();
-          const host = document.createElement('div');
-          host.id = hostId;
-          host.className='modal';
-          host.setAttribute('role','dialog');
-          host.style.cssText='position:fixed; inset:12% 18%; background:#ffffff; padding:16px; border-radius:10px; box-shadow:0 12px 32px rgba(0,0,0,.25); z-index:1606;';
-          host.innerHTML = `
-            <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:8px;">
-              <h3 style="margin:0;font-size:18px;">GLB を選択（fallback）</h3>
-              <button type="button" data-action="close-modal">閉じる</button>
-            </div>
-            <div id="glbList"></div>
-          `;
-          document.body.appendChild(host);
-          const list = host.querySelector('#glbList');
-          if (!files.length){
-            list.innerHTML = `<p>候補が見つかりませんでした。</p>`;
-          }else{
-            files.forEach(f=>{
-              const row = document.createElement('button');
-              row.type='button';
-              row.style.cssText='display:flex;width:100%;text-align:left;padding:10px 12px;border:1px solid #dddddd;border-radius:8px;margin:6px 0;gap:12px;background:#fafafa;';
-              row.innerHTML = `<span style="font-weight:600;">${f.name}</span><span style="margin-left:auto;opacity:.7;font-size:12px;">${(f.modifiedTime||'').replace('T',' ').replace('Z','')}</span>`;
-              row.addEventListener('click', ()=>{ resolve(f); host.remove(); }, { once:true });
-              list.appendChild(row);
-            });
-          }
-          setTimeout(()=>{
-            host.querySelector('[data-action="close-modal"]')?.addEventListener('click', ()=>{ host.remove(); reject(new Error('GLB not selected')); }, { once:true });
-          });
-        });
-      }
-
-      if (!parentId){
-        const choice = await pickGlbViaDrive();
-        glbId = choice?.id || null;
-        parentId = (choice?.parents||[])[0] || null;
-        if (!parentId) throw new Error('GLB parent folder not found');
-        window.ModelState = window.ModelState || {};
-        window.ModelState.glbId = glbId;
-      }
-
-      // List JSON in that folder
-      const q = `'${parentId}' in parents and mimeType='application/json' and trashed=false`;
-      const res = await g.client.drive.files.list({ q, fields: 'files(id,name,modifiedTime,size)', pageSize: 200, orderBy: 'modifiedTime desc' });
-      const items = (res.result.files||[]).filter(f => /\.json$/i.test(f.name));
-
-      // Build simple chooser if none provided by host app
-      if (typeof window.buildPinsChooser === 'function'){
-        window.buildPinsChooser(items);
-        document.documentElement.classList.add('modal-open');
-      } else {
-        let host = document.getElementById('pinsChooser');
-        if (host) host.remove();
-        host = document.createElement('div');
-        host.id = 'pinsChooser';
-        host.className = 'modal';
-        host.setAttribute('role','dialog');
-        host.style.cssText = 'position:fixed; inset:10% 15%; background:#ffffff; border-radius:10px; box-shadow:0 12px 32px rgba(0,0,0,.25); padding:16px; overflow:auto; z-index:1605;';
-        host.innerHTML = `
-          <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:12px;">
-            <h3 style="margin:0; font-size:18px;">pins.json を選択（同フォルダ）</h3>
-            <button type="button" data-action="close-modal" aria-label="閉じる">閉じる</button>
-          </div>
-          <div id="pinsChooserList"></div>
-        `;
-        document.body.appendChild(host);
-        const list = host.querySelector('#pinsChooserList');
-        if (!items.length){
-          list.innerHTML = `<p style="margin:8px 0;">このフォルダに JSON が見つかりませんでした。</p>`;
-        } else {
-          items.forEach(f=>{
-            const row = document.createElement('button');
-            row.type = 'button';
-            row.style.cssText = 'display:flex; width:100%; text-align:left; padding:10px 12px; border:1px solid #dddddd; border-radius:8px; margin:6px 0; gap:12px; background:#fafafa;';
-            row.innerHTML = `<span style="font-weight:600;">${f.name}</span><span style="margin-left:auto; opacity:.7; font-size:12px;">${(f.size?Number(f.size).toLocaleString():'')}&nbsp;&nbsp;${(f.modifiedTime||'').replace('T',' ').replace('Z','')}</span>`;
-            row.addEventListener('click', ()=>{
-              const inp = document.getElementById('pinsId') 
-                       || document.querySelector('input[name="pinsId"]') 
-                       || (function(){ const i=document.createElement('input'); i.type='hidden'; i.id='pinsId'; (document.getElementById('grpPins')||document.body).appendChild(i); return i; })();
-              if (inp) inp.value = f.id;
-              try{ (window.loadPinsFromDriveV2||window.loadPinsFromDrive)?.(f.id); }catch(_){}
-              try{ window.Overlay?.closeAll(); }catch(_){}
-              host.remove();
-            }, { once: true });
-            list.appendChild(row);
-          });
-        }
-        document.documentElement.classList.add('modal-open');
-      }
-    }catch(err){
-      console.error('openPinsChooser (v23.3) failed', err);
-      alert('pins.json の取得に失敗しました。サインイン/権限やネットワークをご確認ください。\n' + err.message);
-      try{ if (typeof prevOpen === 'function') return prevOpen(); }catch(_){}
-    }
-  };
-})();
-</script>
-
-
-<script>
-/* v23.4 — pins.json v2 → ランタイム適合 & 画像URLをDrive直リンクに変換 */
-(function(){
-  // v2 → runtime pin adapter
-  function v2ToRuntime(pins){
-    const out = [];
-    (pins||[]).forEach(p=>{
-      const pos = p.pos || p.position || [0,0,0];
-      const title = p.title || p.name || '';
-      const text = p.caption || p.text || '';
-      const color = normalizeHex(p.color || '#ee3333');
-      const imgId = p.imageDriveId || p.image?.id || null;
-      const imgUrl = imgId ? `https://drive.google.com/uc?id=${imgId}` : (p.imageUrl || p.picture || undefined);
-      // 互換のため複数エイリアスを埋める
-      const pin = {
-        id: p.id || title || Math.random().toString(36).slice(2),
-        position: pos,
-        rotation: p.rotation || [0,0,0],
-        scale: p.scale || 1,
-        title: title,
-        text: text,
-        caption: text,
-        color: color,
-        picture: imgUrl,
-        imageUrl: imgUrl,
-        imageDriveId: imgId || undefined
-      };
-      out.push(pin);
-    });
-    return out;
-  }
-
-  function normalizeHex(c){
-    if (typeof c !== 'string') return '#ee3333';
-    c = c.trim();
-    const m = /^#([0-9a-fA-F])([0-9a-fA-F])([0-9a-fA-F])$/.exec(c);
-    if (m) return `#${m[1]}${m[1]}${m[2]}${m[2]}${m[3]}${m[3]}`.toLowerCase();
-    return c.toLowerCase();
-  }
-
-  // 既存レンダラに橋渡しする共通フック
-  if (typeof window.applyPinsToScene !== 'function'){
-    window.applyPinsToScene = function(pins){
-      try{
-        const runtimePins = v2ToRuntime(pins);
-        // 既存コードが見ていそうな候補へブロードキャスト
-        window.pins = runtimePins;
-        window.PINS = runtimePins;
-        window.currentPins = runtimePins;
-        // カスタムイベント
-        window.dispatchEvent(new CustomEvent('pins:loaded', { detail: { pins: runtimePins } }));
-        // 代表的な再描画関数を順に試す
-        const fns = ['redrawPins', 'renderPins', 'refreshPins', 'updatePins', 'repaintPins'];
-        for (const name of fns){
-          try{ if (typeof window[name] === 'function'){ window[name](runtimePins); break; } }catch(_){}
-        }
-        console.log('[v23.4] pins applied:', runtimePins.length);
-      }catch(err){
-        console.error('[v23.4] applyPinsToScene failed', err);
-      }
-    };
-  } else {
-    // 既存 applyPinsToScene があれば、v2→runtime 変換を差し込むラッパー
-    const _orig = window.applyPinsToScene;
-    window.applyPinsToScene = function(pins){
-      const runtimePins = v2ToRuntime(pins);
-      try{ _orig(runtimePins); } catch(e){ console.warn('orig applyPinsToScene failed, fallback redraw', e); try{ window.redrawPins?.(runtimePins); }catch(_){ } }
-    };
-  }
-
-  // 安全策: makePictureNode が blob: 専用実装でも URL をそのまま渡せるようにプリロード
-  (function monkeyPatchImage(){
-    const ImageProto = window.Image && window.Image.prototype;
-    if (!ImageProto) return;
-    // 何もしないが、必要ならここで onerror フォールバックを入れられる
-  })();
-})();
-</script>
-
-
-<script>
-/* v23.5 — Robust pins.json loader (Drive alt=media), BOM-safe JSON parsing, v2→runtime mapping, redraw */
-(function(){
-  // --- helpers ---
-  function normalizeHex(c){
-    if (typeof c !== 'string') return '#ee3333';
-    c = c.trim();
-    const m = /^#([0-9a-fA-F])([0-9a-fA-F])([0-9a-fA-F])$/.exec(c);
-    if (m) return `#${m[1]}${m[1]}${m[2]}${m[2]}${m[3]}${m[3]}`.toLowerCase();
-    return c.toLowerCase();
-  }
-  function stripBOM(s){
-    if (typeof s !== 'string') return s;
-    // Remove UTF-8 BOM and invisible control chars that sometimes break JSON.parse
-    return s.replace(/^\uFEFF/, '').replace(/^\u200B+/, '');
-  }
-  function safeParseJSON(raw){
-    if (raw == null) throw new Error('No content returned');
-    if (typeof raw !== 'string'){
-      // Some environments give an object already
-      return raw;
-    }
-    let s = stripBOM(raw).trim();
-    try{
-      return JSON.parse(s);
-    }catch(e){
-      // Try to salvage by slicing to first "{" and last "}" (guards against stray logs around JSON)
-      const i = s.indexOf('{');
-      const j = s.lastIndexOf('}');
-      if (i >= 0 && j > i){
-        try{ return JSON.parse(s.slice(i, j+1)); }catch(_){}
-      }
-      throw e;
-    }
-  }
-
-  function v2ToRuntime(pins){
-    const out = [];
-    (pins||[]).forEach(p=>{
-      const pos = p.pos || p.position || [0,0,0];
-      const title = p.title || p.name || '';
-      const text = p.caption || p.text || '';
-      const color = normalizeHex(p.color || '#ee3333');
-      const imgId = p.imageDriveId || (p.image && p.image.id) || null;
-      const imgUrl = imgId ? `https://drive.google.com/uc?id=${imgId}` : (p.imageUrl || p.picture || undefined);
-      out.push({
-        id: p.id || title || Math.random().toString(36).slice(2),
-        position: pos,
-        rotation: p.rotation || [0,0,0],
-        scale: p.scale || 1,
-        title: title,
-        text: text,
-        caption: text,
-        color: color,
-        picture: imgUrl,
-        imageUrl: imgUrl,
-        imageDriveId: imgId || undefined
-      });
-    });
-    return out;
-  }
-
-  // Provide a single entrypoint to apply pins to the scene
-  function applyPins(runtimePins){
-    try{
-      // Broadcast to common globals
-      window.pins = runtimePins;
-      window.PINS = runtimePins;
-      window.currentPins = runtimePins;
-      window.dispatchEvent(new CustomEvent('pins:loaded', { detail: { pins: runtimePins } }));
-      // Try common redraw hooks
-      const fns = ['redrawPins', 'renderPins', 'refreshPins', 'updatePins', 'repaintPins'];
-      for (const name of fns){
-        try{ if (typeof window[name] === 'function'){ window[name](runtimePins); break; } }catch(_){}
-      }
-      console.log('[v23.5] pins applied:', runtimePins.length);
-    }catch(err){
-      console.error('[v23.5] applyPins failed', err);
-    }
-  }
-  window.applyPinsToScene = window.applyPinsToScene || function(pins){ applyPins(v2ToRuntime(pins)); };
-
-  // Normalize any color inputs still using 3-hex (prevents console noise)
-  window.addEventListener('DOMContentLoaded', ()=>{
-    document.querySelectorAll('input[type="color"]').forEach(inp=>{
-      const v = (inp.value||'').trim();
-      const m = /^#([0-9a-fA-F])([0-9a-fA-F])([0-9a-fA-F])$/.exec(v);
-      if (m){ inp.value = `#${m[1]}${m[1]}${m[2]}${m[2]}${m[3]}${m[3]}`; }
-    });
-  });
-
-  // --- Drive JSON loader (alt=media) ---
-  async function fetchJsonFromDrive(fileId){
-    if (!window.gapi || !gapi.client) throw new Error('gapi not ready');
-    // Try 1: official files.get with alt=media
-    try{
-      const r1 = await gapi.client.drive.files.get({ fileId, alt: 'media' });
-      const raw = (typeof r1.body !== 'undefined') ? r1.body : (typeof r1.result !== 'undefined' ? r1.result : r1);
-      return safeParseJSON(raw);
-    }catch(e){
-      console.warn('[v23.5] files.get alt=media failed, fallback to client.request', e);
-    }
-    // Try 2: generic client.request
-    try{
-      const r2 = await gapi.client.request({ path: `/drive/v3/files/${fileId}`, method: 'GET', params: { alt: 'media' } });
-      const raw = (typeof r2.body !== 'undefined') ? r2.body : (typeof r2.result !== 'undefined' ? r2.result : r2);
-      return safeParseJSON(raw);
-    }catch(e2){
-      console.error('[v23.5] client.request alt=media also failed', e2);
-      throw e2;
-    }
-  }
-
-  // Public APIs (override/define)
-  async function loadPinsGeneric(fileId){
-    const data = await fetchJsonFromDrive(fileId);
-    const arr = Array.isArray(data) ? data : (Array.isArray(data.pins) ? data.pins : []);
-    const runtimePins = v2ToRuntime(arr);
-    applyPins(runtimePins);
-    return runtimePins;
-  }
-
-  window.loadPinsFromDriveV2 = async function(fileId){
-    try{
-      const pins = await loadPinsGeneric(fileId);
-      console.log('[v23.5] loadPinsFromDriveV2 OK', pins.length);
-    }catch(err){
-      console.error('[v23.5] loadPinsFromDriveV2 failed', err);
-      alert('pins.json の読み込みに失敗しました: ' + err.message);
-    }
-  };
-  window.loadPinsFromDrive = async function(fileId){
-    try{
-      const pins = await loadPinsGeneric(fileId);
-      console.log('[v23.5] loadPinsFromDrive OK', pins.length);
-    }catch(err){
-      console.error('[v23.5] loadPinsFromDrive failed', err);
-      alert('pins.json の読み込みに失敗しました: ' + err.message);
-    }
-  };
-
-  // Auto-load if pinsId is present
-  async function autoLoadIfPresent(){
-    try{
-      const u = new URL(window.location.href);
-      const pid = u.searchParams.get('pinsId')
-              || document.getElementById('pinsId')?.value
-              || document.querySelector('input[name="pinsId"]')?.value;
-      if (pid){
-        let tries = 0;
-        while(!(window.gapi && gapi.client?.drive) && tries < 60){
-          await new Promise(r=>setTimeout(r, 100));
-          tries++;
-        }
-        if (window.gapi && gapi.client?.drive){
-          await window.loadPinsFromDriveV2(pid);
-        }
-      }
-    }catch(_){}
-  }
-  document.addEventListener('DOMContentLoaded', autoLoadIfPresent);
-})();
-</script>
-
-<script>
-/* v23.6 — pins.json は常に「GLBと同じフォルダ」に限定して扱う（自動ロードは維持） */
-(function(){
-  // --- helpers reused ---
-  function fromUrlAll(){
-    try{
-      const u = new URL(window.location.href);
-      const q1 = u.searchParams.get('fileId');
-      const qPins = u.searchParams.get('pinsId');
-      let q2 = null;
-      if (u.hash && u.hash.includes('fileId=')){
-        const h = new URLSearchParams(u.hash.replace(/^#/, ''));
-        q2 = h.get('fileId') || null;
-      }
-      return { fileId: q1 || q2 || null, pinsId: qPins || null };
-    }catch(_){
-      return { fileId: null, pinsId: null };
-    }
-  }
-  async function resolveGlbId(){
-    const u = fromUrlAll();
-    if (u.fileId) return (''+u.fileId).trim();
-    const byHidden = document.getElementById('fileId')?.value 
-                  || document.getElementById('glbId')?.value;
-    if (byHidden && String(byHidden).trim()) return String(byHidden).trim();
-    const byName = document.querySelector('input[name="fileId"]')?.value
-                || document.querySelector('input[name="glbId"]')?.value;
-    if (byName && String(byName).trim()) return String(byName).trim();
-    const byData = document.querySelector('[data-file-id]')?.getAttribute('data-file-id')
-                || document.querySelector('[data-glb-id]')?.getAttribute('data-glb-id');
-    if (byData && String(byData).trim()) return String(byData).trim();
-    if (window.ModelState?.glbId && String(window.ModelState.glbId).trim())
-      return String(window.ModelState.glbId).trim();
-    return null;
-  }
-  async function getParents(gapi, id){
-    const r = await gapi.client.drive.files.get({ fileId: id, fields: 'parents' });
-    return (r.result.parents || []);
-  }
-
-  async function getGlbParentId(){
-    if (!(window.gapi && gapi.client?.drive)) throw new Error('gapi not ready');
-    const glbId = await resolveGlbId();
-    if (!glbId) return null;
-    const pr = await getParents(gapi, glbId);
-    return pr[0] || null;
-  }
-
-  // 1) openPinsChooser を GLB親フォルダ限定に固定
-  (function patchOpenPinsChooser(){
-    const prev = window.openPinsChooser;
-    window.openPinsChooser = async function(){
-      const g = (window.gapi && gapi.client?.drive) ? gapi : null;
-      if (!g) { console.error('gapi not ready'); return prev?.(); }
-      try{
-        const parentId = await getGlbParentId();
-        if (!parentId){ alert('GLBの親フォルダを特定できませんでした。GLBのfileIdを入力/URL指定してください。'); return; }
-        const q = `'${parentId}' in parents and mimeType='application/json' and trashed=false`;
-        const res = await g.client.drive.files.list({ q, fields: 'files(id,name,modifiedTime,size,parents)', orderBy:'modifiedTime desc', pageSize: 200 });
-        const items = (res.result.files||[]).filter(f=>/\.json$/i.test(f.name));
-
-        // ビルダーがある場合はそれを使う
-        if (typeof window.buildPinsChooser === 'function'){
-          window.buildPinsChooser(items);
-          document.documentElement.classList.add('modal-open');
-          return;
-        }
-        // 簡易UI
-        let host = document.getElementById('pinsChooser');
-        host?.remove();
-        host = document.createElement('div');
-        host.id = 'pinsChooser';
-        host.style.cssText = 'position:fixed;inset:10% 15%;background:#fff;border-radius:10px;box-shadow:0 12px 32px rgba(0,0,0,.25);padding:16px;overflow:auto;z-index:1605;';
-        host.innerHTML = `
-          <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px;">
-            <h3 style="margin:0;font-size:18px;">pins.json を選択（GLBと同じフォルダ）</h3>
-            <button type="button" data-action="close">閉じる</button>
-          </div>
-          <div id="pinsChooserList"></div>
-        `;
-        document.body.appendChild(host);
-        const list = host.querySelector('#pinsChooserList');
-        if (!items.length){
-          list.innerHTML = `<p>このフォルダに JSON が見つかりませんでした。</p>`;
-        } else {
-          items.forEach(f=>{
-            const row = document.createElement('button');
-            row.type='button';
-            row.style.cssText='display:flex;width:100%;text-align:left;padding:10px 12px;border:1px solid #ddd;border-radius:8px;margin:6px 0;gap:12px;background:#fafafa;';
-            row.innerHTML = `<span style="font-weight:600;">${f.name}</span><span style="margin-left:auto;opacity:.7;font-size:12px;">${(f.size?Number(f.size).toLocaleString():'')}&nbsp;&nbsp;${(f.modifiedTime||'').replace('T',' ').replace('Z','')}</span>`;
-            row.addEventListener('click', async ()=>{
-              try{
-                const inp = document.getElementById('pinsId') 
-                         || document.querySelector('input[name="pinsId"]') 
-                         || (function(){ const i=document.createElement('input'); i.type='hidden'; i.id='pinsId'; document.body.appendChild(i); return i; })();
-                inp.value = f.id;
-                await (window.loadPinsFromDriveV2||window.loadPinsFromDrive)?.(f.id);
-              }finally{
-                host.remove();
-                document.documentElement.classList.remove('modal-open');
-              }
-            }, { once:true });
-            list.appendChild(row);
-          });
-        }
-        host.querySelector('[data-action="close"]')?.addEventListener('click', ()=>{
-          host.remove();
-          document.documentElement.classList.remove('modal-open');
-        }, { once:true });
-      }catch(err){
-        console.error('[v23.6] openPinsChooser failed', err);
-        alert('pins.json の列挙に失敗しました：' + err.message);
-        return prev?.();
-      }
-    };
-  })();
-
-  // 2) 自動ロードは維持しつつ、「pinsIdがGLBと同じ親フォルダの場合のみ」読み込む
-  (function patchAutoLoadConstraint(){
-    const prevAuto = document._v235_autoLoadIfPresentPatched;
-    if (prevAuto) return; // 重複防止
-    document._v235_autoLoadIfPresentPatched = true;
-
-    // ランタイムの既存自動ロードを置き換えるため、DOMContentLoaded後に検査
-    document.addEventListener('DOMContentLoaded', async ()=>{
-      try{
-        // 待機: gapi 準備
-        let tries = 0;
-        while(!(window.gapi && gapi.client?.drive) && tries < 60){
-          await new Promise(r=>setTimeout(r, 100));
-          tries++;
-        }
-        if (!(window.gapi && gapi.client?.drive)) return;
-
-        const u = new URL(window.location.href);
-        const pinsId = u.searchParams.get('pinsId')
-                    || document.getElementById('pinsId')?.value
-                    || document.querySelector('input[name="pinsId"]')?.value;
-        if (!pinsId) return;
-
-        const glbParent = await getGlbParentId();
-        if (!glbParent) return;
-
-        // pinsId の親をチェック
-        const parents = await getParents(gapi, pinsId);
-        const pinsParent = parents[0] || null;
-
-        if (pinsParent && pinsParent === glbParent){
-          // 同一フォルダ → 許可
-          await (window.loadPinsFromDriveV2||window.loadPinsFromDrive)?.(pinsId);
-          console.log('[v23.6] auto-load pinsId accepted (same folder).');
-        }else{
-          console.warn('[v23.6] auto-load pinsId ignored (different folder).');
-          // UI上の表示は変更せず、必要ならユーザーが手動で openPinsChooser できる
-        }
-      }catch(err){
-        console.error('[v23.6] constrained auto-load failed', err);
-      }
-    }, { once:true });
-  })();
-})();
-</script>
-
-
-<script>
-/* v23.7 — 「GLBと同じフォルダにjsonが無いときはピンを出さない」強制ガードを追加
-   ・自動ロードは維持（同一フォルダのみ許可：v23.6の仕様）
-   ・jsonが無い/外部由来の場合は pins を空にして再描画
-*/
-(function(){
-  async function waitGapi(maxWaitMs=8000){
-    const t0 = Date.now();
-    while(!(window.gapi && gapi.client?.drive) && (Date.now()-t0) < maxWaitMs){
-      await new Promise(r=>setTimeout(r, 100));
-    }
-    return !!(window.gapi && gapi.client?.drive);
-  }
-  async function getParents(id){
-    const r = await gapi.client.drive.files.get({ fileId:id, fields:'parents' });
-    return r.result.parents || [];
-  }
-  function applyPinsEmpty(){
-    try{
-      const empty = [];
-      window.pins = empty;
-      window.PINS = empty;
-      window.currentPins = empty;
-      window.dispatchEvent(new CustomEvent('pins:loaded', { detail: { pins: empty } }));
-      const fns = ['redrawPins','renderPins','refreshPins','updatePins','repaintPins'];
-      for (const n of fns){ try{ if (typeof window[n]==='function'){ window[n](empty); break; } }catch(_){ } }
-      console.log('[v23.7] forced clear pins (no json in folder).');
-    }catch(e){ console.warn('[v23.7] clear pins failed', e); }
-  }
-  async function resolveGlbId(){
-    try{
-      const u = new URL(location.href);
-      const urlId = u.searchParams.get('fileId');
-      if (urlId) return urlId.trim();
-    }catch(_){}
-    const ids = [
-      document.getElementById('fileId')?.value,
-      document.getElementById('glbId')?.value,
-      document.querySelector('input[name="fileId"]')?.value,
-      document.querySelector('input[name="glbId"]')?.value,
-      document.querySelector('[data-file-id]')?.getAttribute('data-file-id'),
-      document.querySelector('[data-glb-id]')?.getAttribute('data-glb-id'),
-      window.ModelState?.glbId
-    ].filter(Boolean).map(String);
-    return (ids[0]||'').trim() || null;
-  }
-  async function listJsonInSameFolder(glbId){
-    const parents = await getParents(glbId);
-    const parent = parents[0] || null;
-    if (!parent) return [];
-    const q = `'${parent}' in parents and mimeType='application/json' and trashed=false`;
-    const res = await gapi.client.drive.files.list({ q, fields:'files(id,name,modifiedTime,size,parents)', pageSize:200 });
-    const files = (res.result.files||[]).filter(f=>/\.json$/i.test(f.name));
-    return files;
-  }
-
-  // 起動後の整合チェック：
-  // 1) gapi準備 → 2) GLB親フォルダにjsonがあるかチェック → 3) 無ければ pins を強制クリア
-  document.addEventListener('DOMContentLoaded', async ()=>{
-    try{
-      const ok = await waitGapi(12000);
-      if (!ok){ console.warn('[v23.7] gapi not ready; skip guard'); return; }
-      const glbId = await resolveGlbId();
-      if (!glbId){ console.warn('[v23.7] glbId not found; skip guard'); return; }
-      const jsons = await listJsonInSameFolder(glbId);
-      if (!jsons.length){
-        // 旧コードがローカルストレージや埋め込みデモで pins を出していても上書きで空にする
-        try{
-          // よくありそうなキーを掃除（存在しなくてもOK）
-          const keys = ['pins','PINS','currentPins','museum3d_pins','storedPins','lastPins'];
-          keys.forEach(k=>{ try{ localStorage.removeItem(k);}catch(_){ } });
-        }catch(_){}
-        applyPinsEmpty();
-      }else{
-        console.log('[v23.7] json exists in same folder:', jsons.length);
-      }
-    }catch(e){
-      console.error('[v23.7] guard check failed', e);
-    }
-  }, { once:true });
-})();
-</script>
-
-
-<script>
-/* v23.8 — 強制ガード（GLB未解決でも外部ピンを止める）＋ ローダーのラップ */
-(function(){
-  // --- small utils ---
-  function log(){ try{ console.log.apply(console, arguments);}catch(_){ } }
-  function warn(){ try{ console.warn.apply(console, arguments);}catch(_){ } }
-  function err(){ try{ console.error.apply(console, arguments);}catch(_){ } }
-
-  async function waitGapi(maxWaitMs=12000){
-    const t0 = Date.now();
-    while(!(window.gapi && gapi.client?.drive) && (Date.now()-t0) < maxWaitMs){
-      await new Promise(r=>setTimeout(r, 80));
-    }
-    return !!(window.gapi && gapi.client?.drive);
-  }
-  async function getParentsSafe(id){
-    try{
-      const r = await gapi.client.drive.files.get({ fileId:id, fields:'parents' });
-      return r.result?.parents || [];
-    }catch(e){ warn('[v23.8] getParentsSafe failed', e); return []; }
-  }
-  function hex6(v){ 
-    if (!v) return '#cccccc';
-    if (/^#[0-9a-f]{3}$/i.test(v)) return '#'+v.slice(1).split('').map(x=>x+x).join('');
-    if (/^#[0-9a-f]{6}$/i.test(v)) return v;
-    return '#cccccc';
-  }
-  function clearPins(reason){
-    try{
-      const empty=[];
-      window.pins=empty; window.PINS=empty; window.currentPins=empty;
-      const fns=['redrawPins','renderPins','refreshPins','updatePins','repaintPins'];
-      for(const n of fns){ try{ if(typeof window[n]==='function'){ window[n](empty); break; } }catch(_){ } }
-      window.dispatchEvent?.(new CustomEvent('pins:loaded',{detail:{pins:empty, reason}}));
-      log('[v23.8] pins cleared:', reason);
-    }catch(e){ warn('[v23.8] clearPins failed', e); }
-  }
-
-  function resolveGlbIdSync(){
-    // 最優先: URL
-    try{
-      const u = new URL(location.href);
-      const q = u.searchParams.get('fileId'); if(q) return q.trim();
-    }catch(_){}
-    // hidden/name/data 属性
-    const cands = [
-      document.getElementById('fileId')?.value,
-      document.getElementById('glbId')?.value,
-      document.querySelector('input[name="fileId"]')?.value,
-      document.querySelector('input[name="glbId"]')?.value,
-      document.querySelector('[data-file-id]')?.getAttribute('data-file-id'),
-      document.querySelector('[data-glb-id]')?.getAttribute('data-glb-id'),
-      window.ModelState?.glbId,
-      window.__GLB_ID__,
-      window.model?.fileId,
-    ].filter(Boolean).map(String);
-    return (cands[0]||'').trim() || null;
-  }
-
-  // 0) カラーの短縮HEXを6桁化（警告抑止）
-  document.addEventListener('DOMContentLoaded', ()=>{
-    document.querySelectorAll('input[type="color"]').forEach(inp=>{
-      if (inp.value && /^#[0-9a-f]{3}$/i.test(inp.value)){ inp.value = hex6(inp.value); }
-      ['change','input'].forEach(ev=>inp.addEventListener(ev, e=>{
-        e.target.value = hex6(e.target.value);
-      }));
-    });
-  }, {once:true});
-
-  // 1) pins:loaded をインターセプトして「同一フォルダ制約」をかける
-  (function(){
-    const origDispatch = window.dispatchEvent?.bind(window);
-    window.addEventListener('pins:attempt-load', (e)=>{ /* noop hook for debugging */ });
-    // 既存コードが直接 pins を差し込むケースに備えて、Mutation でも拾う
-    const obs = new MutationObserver(()=>{
-      if (Array.isArray(window.pins) && window.__PIN_SAME_FOLDER_ONLY__){
-        // ここでは制約確認ができないため、gapi準備後に判定する
-      }
-    });
-    try{ obs.observe(document.documentElement, {childList:true,subtree:true}); }catch(_){}
-  })();
-
-  // 2) ローダーをラップ：loadPinsFromDrive / V2 を同一フォルダチェック付きに差し替え
-  (function wrapLoaders(){
-    const wrap = (fnName)=>{
-      const orig = window[fnName];
-      if (typeof orig !== 'function') return;
-      if (orig.__wrapped_v238) return;
-      const wrapped = async function(fileId){
-        window.dispatchEvent?.(new CustomEvent('pins:attempt-load',{detail:{fileId, via:fnName}}));
-        // GLBが不明なら拒否（これが今回の根本）
-        const glbId = resolveGlbIdSync();
-        if (!glbId){
-          warn('[v23.8] GLB id unresolved. Block pins load.');
-          clearPins('glb-unknown');
-          throw new Error('GLB fileId is not resolved; pins load is blocked.');
-        }
-        const ok = await waitGapi(10000);
-        if (!ok){
-          warn('[v23.8] gapi not ready. Block pins load.');
-          clearPins('gapi-not-ready');
-          throw new Error('gapi not ready; pins load is blocked.');
-        }
-        // 親フォルダ一致チェック
-        const [gp, pp] = await Promise.all([ getParentsSafe(glbId), getParentsSafe(fileId) ]);
-        const glbParent = gp[0] || null;
-        const pinsParent = pp[0] || null;
-        if (!glbParent || !pinsParent || glbParent !== pinsParent){
-          warn('[v23.8] same-folder check failed. Block pins load.', {glbParent, pinsParent});
-          clearPins('different-folder-or-missing');
-          throw new Error('pins.json is not in the same folder as GLB.');
-        }
-        // OK → ロード実行
-        return await orig.apply(this, arguments);
-      };
-      wrapped.__wrapped_v238 = true;
-      window[fnName] = wrapped;
-    };
-    wrap('loadPinsFromDrive');
-    wrap('loadPinsFromDriveV2');
-  })();
-
-  // 3) 起動時ガード（GLB未解決時も pins を空に）
-  document.addEventListener('DOMContentLoaded', async ()=>{
-    try{
-      if (!window.__PIN_SAME_FOLDER_ONLY__) return;
-      const glbId = resolveGlbIdSync();
-      if (!glbId){
-        // GLBの特定ができない時点でピンは表示しない
-        clearPins('glb-unknown-at-startup');
-        return;
-      }
-      const ok = await waitGapi(10000);
-      if (!ok){ clearPins('gapi-not-ready-at-startup'); return; }
-      const glbParents = await getParentsSafe(glbId);
-      const parent = glbParents[0] || null;
-      if (!parent){
-        clearPins('no-parent');
-        return;
-      }
-      // 同一フォルダにjsonが無い場合もクリア（v23.7相当）
-      try{
-        const q = `'${parent}' in parents and mimeType='application/json' and trashed=false`;
-        const res = await gapi.client.drive.files.list({ q, fields:'files(id,name)' });
-        const list = res.result?.files || [];
-        if (!list.length) clearPins('no-json-in-folder');
-      }catch(e){ warn('[v23.8] list json failed', e); }
-    }catch(e){ err('[v23.8] startup guard error', e); }
-  }, {once:true});
-})();
 </script>
 
 </body>
-</html>
+</html
+function normalizeHex(c){
+  if(!c || typeof c!=='string') return '#ee3333';
+  c = c.trim();
+  // allow 3-digit like #e33 -> expand to #ee3333
+  const m3 = c.match(/^#([0-9a-fA-F]{3})$/);
+  if(m3){ return '#' + m3[1].split('').map(x=>x+x).join(''); }
+  const m6 = c.match(/^#([0-9a-fA-F]{6})$/);
+  if(m6){ return '#' + m6[1].toLowerCase(); }
+  // accept without # as well
+  const bare6 = c.match(/^([0-9a-fA-F]{6})$/);
+  if(bare6){ return '#' + bare6[1].lower(); }
+  // fallback
+  return '#ee3333';
+}
+>
