@@ -1417,6 +1417,11 @@ const loadFab = document.getElementById('loadFab');
 const loadSheet = document.getElementById('loadSheet');
 const loadHandle = document.getElementById('loadHandle');
 const loadClose = document.getElementById('loadClose');
+// Attach listeners (after elements exist)
+try{ loadFab?.addEventListener('click', openLoadSheet); }catch(_){}
+try{ (document.getElementById('sheetScrim'))?.addEventListener('click', closeLoadSheet); }catch(_){}
+try{ loadClose?.addEventListener('click', closeLoadSheet); }catch(_){}
+
 const loadInput = document.getElementById('loadInput');
 const loadStart = document.getElementById('loadStart');
 
@@ -1446,7 +1451,8 @@ document.documentElement.classList.add('sheet-open');
   setTimeout(()=> loadInput?.focus(), 50);
 }
 function closeLoadSheet(){
-    try{ document.body.classList.remove('sheet-open'); }catch(_){}
+    try{ document.documentElement.classList.remove('sheet-open'); }catch(_){}
+try{ document.body.classList.remove('sheet-open'); }catch(_){}
 document.documentElement.classList.remove('sheet-open');
   const s=document.getElementById('sheetScrim'); if(s){ s.removeAttribute('open'); s.setAttribute('aria-hidden','true'); s.setAttribute('hidden',''); }
   loadSheet.removeAttribute('open');
@@ -1454,9 +1460,7 @@ document.documentElement.classList.remove('sheet-open');
   setTimeout(()=>{ loadSheet.hidden = true; }, 160);
 }
 
-loadFab?.addEventListener('click', openLoadSheet)
-(document.getElementById('sheetScrim'))?.addEventListener('click', closeLoadSheet);
-;
+
 loadClose?.addEventListener('click', closeLoadSheet);
 
 // drag (reuse caption logic style: handle only)
