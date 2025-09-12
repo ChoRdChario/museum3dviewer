@@ -604,6 +604,12 @@ if (typeof window.escAttr !== 'function') {
   .load-fab { display: none !important; }
 }
 </style>
+
+<script>
+// v1.22.1-bg.p17: scope guard
+window.ALL_SCOPES = window.ALL_SCOPES || 'https://www.googleapis.com/auth/drive.readonly';
+</script>
+
 </head>
 <body>
 <!-- Sign-in Gate -->
@@ -4097,121 +4103,40 @@ document.getElementById('toolInlineBtn')?.addEventListener('click', ()=>{
 
 
 
-<script>
-// v1.22.1-bg.p12: Corrected sign-in handler without extra popup
-document.getElementById("btnGateSignIn")?.addEventListener("click", ()=>{
-  if (typeof requestTokenInteractive === 'function') {
-    requestTokenInteractive(ALL_SCOPES).then(()=>{
-      const gate = document.getElementById("signinGateWrap");
-      if (gate) gate.hidden = true;
-    }).catch(err=>{
-      console.warn("Sign-in failed or cancelled:", err);
-    });
-  }
-});
-</script>
+
+
+
+
+
+
+
 
 
 <script>
-// v1.22.1-bg.p16: Official GIS token client wrapper
+// v1.22.1-bg.p17: Sign-in gate button handler (no global ALL_SCOPES reference)
 (function(){
-  const SCOPES = window.ALL_SCOPES || 'https://www.googleapis.com/auth/drive.readonly';
-  const CLIENT_ID = window.CLIENT_ID || window.GOOGLE_CLIENT_ID || window.GIS_CLIENT_ID || '';
-  let tokenClient = null;
-  let accessToken = '';
-  let expiresAt = 0;
-
-  function now(){ return Math.floor(Date.now()/1000); }
-  function initTokenClient(){
-    if (tokenClient) return tokenClient;
-    if (!window.google || !google.accounts || !google.accounts.oauth2 || !CLIENT_ID) return null;
-    tokenClient = google.accounts.oauth2.initTokenClient({
-      client_id: CLIENT_ID,
-      scope: SCOPES,
-      callback: (resp)=>{
+  function hideGate(){ const g=document.getElementById('signinGateWrap'); if(g) g.hidden=true; }
+  function showGate(){ const g=document.getElementById('signinGateWrap'); if(g) g.hidden=false; }
+  const btn = document.getElementById("btnGateSignIn");
+  if (!btn) return;
+  btn.addEventListener("click", ()=>{
+    hideGate();
+    if (typeof requestTokenInteractive === 'function') {
+      requestTokenInteractive(undefined, (resp)=>{
         if (resp && resp.access_token){
-          accessToken = resp.access_token;
-          expiresAt = now() + Number(resp.expires_in || 3600);
-          const gate = document.getElementById('signinGateWrap');
-          if (gate) gate.hidden = true;
+          // success: gate remains hidden
+        } else {
+          // failure/cancel: show gate again
+          showGate();
+          console.warn("Sign-in failed or no token", resp);
         }
-      }
-    });
-    return tokenClient;
-  }
-
-  // Interactive request; supports optional callback(resp)
-  window.requestTokenInteractive = function(scopes, cb){
-    const tc = initTokenClient();
-    if (!tc){
-      console.warn('GIS init failed: missing google api or client id');
-      if (typeof cb === 'function') cb({error: 'init_failed'});
-      return;
+      });
+    } else {
+      console.warn("requestTokenInteractive not available");
+      showGate();
     }
-    try {
-      tc.requestAccessToken({ prompt: 'consent', scope: scopes || SCOPES });
-    } catch(e) {
-      console.warn('requestAccessToken error', e);
-      if (typeof cb === 'function') cb({error: 'request_failed'});
-      return;
-    }
-    if (typeof cb === 'function'){
-      const start = Date.now();
-      const t = setInterval(()=>{
-        if (accessToken){
-          clearInterval(t); cb({access_token: accessToken});
-        } else if (Date.now() - start > 60000){
-          clearInterval(t); cb({error: 'timeout'});
-        }
-      }, 100);
-    }
-  };
-
-  // Silent ensure; returns Promise<boolean>
-  window.ensureSignedInIfNeeded = function(){
-    return new Promise((resolve)=>{
-      const tc = initTokenClient();
-      if (!tc){ resolve(false); return; }
-      // already valid
-      if (accessToken && (expiresAt - now()) > 60){ resolve(true); return; }
-      try{
-        tc.requestAccessToken({ prompt: '' });
-      }catch(e){ resolve(false); return; }
-      const start = Date.now();
-      const t = setInterval(()=>{
-        if (accessToken){
-          clearInterval(t); resolve(true);
-        } else if (Date.now() - start > 2500){
-          clearInterval(t); resolve(false);
-        }
-      }, 100);
-    });
-  };
-
-  // Expose a getter for other code paths
-  Object.defineProperty(window, 'accessToken', { get: ()=> accessToken });
+  });
 })();
-</script>
-
-
-<script>
-// v1.22.1-bg.p16: Sign-in gate button handler (callback)
-document.getElementById("btnGateSignIn")?.addEventListener("click", ()=>{
-  if (typeof requestTokenInteractive === 'function') {
-    requestTokenInteractive(ALL_SCOPES, (resp)=>{
-      if (resp && resp.access_token){
-        const gate = document.getElementById("signinGateWrap");
-        if (gate) gate.hidden = true;
-      } else {
-        console.warn("Sign-in failed or no token", resp);
-        const gate = document.getElementById("signinGateWrap");
-        if (gate) gate.hidden = false;
-      }
-    });
-  } else {
-    console.warn("requestTokenInteractive not available");
-  }
-});
 </script>
 
 </body>
