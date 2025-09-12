@@ -5,7 +5,9 @@
 <meta charset="utf-8"/>
 <title>Drive GLB Viewer + Pins (v1.22.0-bg)</title>
 <link href="https://accounts.google.com" rel="preconnect"/>
-<script async="" src="https://accounts.google.com/gsi/client">
+<script async="" src="https://accounts.google.com/gsi/client"></script>
+<script>
+
 
 /** Hex color normalizer: supports #rgb -> #rrggbb and validates */
 function normalizeHex(c){
@@ -24,6 +26,7 @@ function normalizeHex(c){
   // Fallback safe default
   return '#000000';
 }
+
 </script>
 <script async="" src="https://apis.google.com/js/api.js"></script>
 <meta content="width=device-width, initial-scale=1" name="viewport"/>
@@ -3497,5 +3500,76 @@ document.getElementById('toolInlineBtn')?.addEventListener('click', ()=>{
 })();
 </script>
 
+
+<!-- Safe init patch: aliases and stubs (auto-inserted) -->
+<script>
+(function(){
+  try {
+    // Compatibility aliases: showLoading/hideLoading -> showLoader/hideLoader
+    if (typeof window !== 'undefined') {
+      if (!('showLoading' in window)) {
+        window.showLoading = (typeof window.showLoader === 'function') ? window.showLoader : function(){ /* no-op */ };
+      }
+      if (!('hideLoading' in window)) {
+        window.hideLoading = (typeof window.hideLoader === 'function') ? window.hideLoader : function(){ /* no-op */ };
+      }
+    }
+
+    // Safe stubs for potentially undefined functions used by UI hooks
+    var stubNames = [
+      'loadModel',
+      'copyText',
+      'openImageViewer',
+      'explainShareError',
+      'uploadAndAttachImage',
+      'chooseDriveImageForPin'
+    ];
+
+    stubNames.forEach(function(name){
+      if (typeof window !== 'undefined' && typeof window[name] !== 'function') {
+        // Provide minimal, non-crashing implementations
+        if (name === 'copyText') {
+          window.copyText = function(t, msg){
+            try {
+              var s = (t==null) ? '' : String(t);
+              if (navigator.clipboard && navigator.clipboard.writeText) {
+                return navigator.clipboard.writeText(s).then(function(){
+                  if (msg) { try { alert(msg); } catch(e){} }
+                }).catch(function(){
+                  // Fallback: temporary textarea
+                  var ta = document.createElement('textarea');
+                  ta.value = s; document.body.appendChild(ta);
+                  ta.select(); try { document.execCommand('copy'); } catch(e){}
+                  document.body.removeChild(ta);
+                  if (msg) { try { alert(msg); } catch(e){} }
+                });
+              } else {
+                // Fallback path
+                var ta = document.createElement('textarea');
+                ta.value = s; document.body.appendChild(ta);
+                ta.select(); try { document.execCommand('copy'); } catch(e){}
+                document.body.removeChild(ta);
+                if (msg) { try { alert(msg); } catch(e){} }
+              }
+            } catch (e) {
+              console && console.warn && console.warn('copyText stub error:', e);
+            }
+          };
+        } else {
+          window[name] = function(){
+            // Non-fatal no-op with console notice
+            try {
+              console && console.warn && console.warn('[stub]', name + '() called but not implemented.');
+            } catch(e){}
+          };
+        }
+      }
+    });
+  } catch (e) {
+    try { console.warn('Safe init patch block failed:', e); } catch(_){}
+  }
+})();
+</script>
+<!-- /Safe init patch -->
 </body>
 </html>
