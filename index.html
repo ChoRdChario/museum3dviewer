@@ -4153,5 +4153,98 @@ const Overlay = (()=> {
 })();
 </script>
 
+
+<script>
+// v22.1: define openPinsChooser if missing, scoped to GLB's parent folder
+(function(){
+  if (typeof window.openPinsChooser === 'function') return; // respect existing impl
+
+  async function getDrive(){ 
+    if (window.gapi && gapi.client && gapi.client.drive) return gapi;
+    throw new Error('Google Drive API (gapi) is not ready.');
+  }
+  function getQueryParam(name){
+    const u = new URL(window.location.href);
+    return u.searchParams.get(name);
+  }
+  async function getParentId(gapi, fileId){
+    const res = await gapi.client.drive.files.get({ fileId, fields: 'parents' });
+    const parents = res.result.parents || [];
+    if (!parents.length) throw new Error('Parent folder not found for GLB.');
+    return parents[0];
+  }
+  async function listJsonInFolder(gapi, folderId){
+    const q = `'${folderId}' in parents and mimeType='application/json' and trashed=false`;
+    const res = await gapi.client.drive.files.list({ q, fields: 'files(id,name,modifiedTime,size)', pageSize: 200, orderBy: 'modifiedTime desc' });
+    return res.result.files || [];
+  }
+  function ensurePinsIdInput(){
+    let inp = document.getElementById('pinsId');
+    if (!inp){
+      const grp = document.getElementById('grpPins') || document.body;
+      inp = document.createElement('input'); inp.type='hidden'; inp.id='pinsId';
+      grp.appendChild(inp);
+    }
+    return inp;
+  }
+  function buildChooser(items){
+    // Simple modal sheet
+    let host = document.getElementById('pinsChooser');
+    if (host) host.remove();
+    host = document.createElement('div');
+    host.id = 'pinsChooser';
+    host.className = 'modal';
+    host.setAttribute('role','dialog');
+    host.style.cssText = 'position:fixed; inset:10% 15%; background:#fff; border-radius:10px; box-shadow:0 12px 32px rgba(0,0,0,.25); padding:16px; overflow:auto; z-index:1605;';
+    host.innerHTML = `
+      <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:12px;">
+        <h3 style="margin:0; font-size:18px;">pins.json を選択（GLBと同じフォルダ）</h3>
+        <button type="button" data-action="close-modal" aria-label="閉じる">閉じる</button>
+      </div>
+      <div id="pinsChooserList"></div>
+    `;
+    document.body.appendChild(host);
+    const list = host.querySelector('#pinsChooserList');
+    if (!items.length){
+      list.innerHTML = `<p style="margin:8px 0;">このフォルダに JSON が見つかりませんでした。</p>`;
+      return host;
+    }
+    items.forEach(f=>{
+      const row = document.createElement('button');
+      row.type = 'button';
+      row.style.cssText = 'display:flex; width:100%; text-align:left; padding:10px 12px; border:1px solid #ddd; border-radius:8px; margin:6px 0; gap:12px; background:#fafafa;';
+      row.innerHTML = `<span style="font-weight:600;">${f.name}</span><span style="margin-left:auto; opacity:.7; font-size:12px;">${(f.size?Number(f.size).toLocaleString():'')}&nbsp;&nbsp;${(f.modifiedTime||'').replace('T',' ').replace('Z','')}</span>`;
+      row.addEventListener('click', ()=>{
+        const inp = ensurePinsIdInput();
+        inp.value = f.id;
+        // call existing loader if available
+        try{ window.loadPinsFromDrive?.(f.id); }catch(_){}
+        // Close the chooser
+        try{ window.Overlay?.closeAll(); }catch(_){}
+        host.remove();
+      }, { once: true });
+      list.appendChild(row);
+    });
+    return host;
+  }
+
+  window.openPinsChooser = async function(){
+    try{
+      const g = await getDrive();
+      const glbId = getQueryParam('fileId');
+      if (!glbId){ console.warn('fileId not in URL; cannot locate folder.'); alert('GLBの fileId が不明です。URLに ?fileId=... が必要です。'); return; }
+      const parent = await getParentId(g, glbId);
+      const files = await listJsonInFolder(g, parent);
+      const chooser = buildChooser(files.filter(f => /\.json$/i.test(f.name)));
+      // Slight overlay state for ESC/scrim close support
+      document.documentElement.classList.add('modal-open');
+    }catch(err){
+      console.error('openPinsChooser polyfill failed', err);
+      alert('pins.json の取得に失敗しました。サインイン/権限やネットワークをご確認ください。\n' + err.message);
+    }
+  };
+})();
+</script>
+
 </body>
 </html>
