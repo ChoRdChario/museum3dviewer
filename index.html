@@ -3439,6 +3439,60 @@ document.getElementById('toolInlineBtn')?.addEventListener('click', ()=>{
 })();
 </script>
 
+
+<!-- v23.10 forced pins switch + cache bust -->
+<script>
+(function(){
+  const __URL = (typeof URL !== 'undefined') ? URL : (window && window.URL);
+  function revokeAllPinImages(){
+    try{
+      document.querySelectorAll('img[src^="blob:"]').forEach(img=>{
+        try{ __URL.revokeObjectURL(img.src); }catch(_){}
+      });
+      console.info('[v23.10] revoked blob: image urls');
+    }catch(_){}
+  }
+  function hardResetPins(){
+    try{ revokeAllPinImages(); }catch(_){}
+    try{
+      const cont = document.getElementById('pinLayer') || 
+                   document.querySelector('#pins,#pin-layer,.pin-layer,.pins,.pin-container');
+      if(cont) cont.innerHTML='';
+    }catch(_){}
+    try{
+      if(Array.isArray(window.PINS)) window.PINS.length = 0;
+      else window.PINS = [];
+    }catch(_){ window.PINS = []; }
+    try{ if(typeof window.redrawPins==='function') window.redrawPins(true); }catch(_){}
+    console.info('[v23.10] hardResetPins executed');
+  }
+  const orig = window.loadPinsFromDriveV2 || window.loadPinsFromDrive || null;
+  if(orig){
+    let lastPinsId = '';
+    window.loadPinsFromDriveV2 = async function(pinsId, ...rest){
+      const switching = !!pinsId && pinsId !== lastPinsId;
+      if(switching){ hardResetPins(); }
+      const out = await orig.call(this, pinsId, ...rest);
+      lastPinsId = pinsId || lastPinsId;
+      return out;
+    };
+  }
+
+  // Also, when user explicitly picks a JSON from chooser, force clear before apply
+  const origApply = window.applyPinsFromJson;
+  if(typeof origApply === 'function'){
+    window.applyPinsFromJson = function(jsonObj){
+      hardResetPins();
+      return origApply.call(this, jsonObj);
+    };
+  }
+
+  // Expose for manual debug
+  window.hardResetPins = hardResetPins;
+  window.revokeAllPinImages = revokeAllPinImages;
+})();
+</script>
+
 </body>
 </html
 function normalizeHex(c){
