@@ -4578,5 +4578,200 @@ const Overlay = (()=> {
 })();
 </script>
 
+
+<script>
+/* v23.3 — GLB fileId resolution reads user input fields (id & name) */
+(function(){
+  function fromUrlAll(){
+    try{
+      const href = String(window.location && window.location.href || '');
+      const u = new URL(href);
+      const q1 = u.searchParams.get('fileId');
+      const qPins = u.searchParams.get('pinsId');
+      let q2 = null;
+      if (u.hash && u.hash.includes('fileId=')){
+        const h = new URLSearchParams(u.hash.replace(/^#/, ''));
+        q2 = h.get('fileId') || null;
+      }
+      return { fileId: q1 || q2 || null, pinsId: qPins || null };
+    }catch(_){
+      return { fileId: null, pinsId: null };
+    }
+  }
+  async function getParentsOf(gapi, id){
+    const r = await gapi.client.drive.files.get({ fileId: id, fields: 'parents' });
+    return (r.result.parents||[]);
+  }
+
+  async function resolveGlbId_v233(){
+    const u = fromUrlAll();
+    if (u.fileId) return (''+u.fileId).trim();
+
+    // 2) hidden/visible input fields by id
+    const byHidden = document.getElementById('fileId')?.value 
+                  || document.getElementById('glbId')?.value;
+    if (byHidden && String(byHidden).trim()) return String(byHidden).trim();
+
+    // 3) input fields by name
+    const byName = document.querySelector('input[name="fileId"]')?.value
+                || document.querySelector('input[name="glbId"]')?.value;
+    if (byName && String(byName).trim()) return String(byName).trim();
+
+    // 4) data-* attributes
+    const byData = document.querySelector('[data-file-id]')?.getAttribute('data-file-id')
+                || document.querySelector('[data-glb-id]')?.getAttribute('data-glb-id');
+    if (byData && String(byData).trim()) return String(byData).trim();
+
+    // 5) global state
+    if (window.ModelState?.glbId && String(window.ModelState.glbId).trim())
+      return String(window.ModelState.glbId).trim();
+
+    // 6) parent from pinsId (fallback to just use folder)
+    const g = (window.gapi && gapi.client?.drive) ? gapi : null;
+    const pinsId = u.pinsId || window.ModelState?.pinsId || document.getElementById('pinsId')?.value
+                || document.querySelector('input[name="pinsId"]')?.value;
+    if (g && pinsId){
+      const parents = await getParentsOf(g, pinsId);
+      if (parents[0]) return null; // explicit: unknown GLB but parent known
+    }
+    return null;
+  }
+
+  // Re-declare openPinsChooser using the new resolver
+  const prevOpen = window.openPinsChooser;
+  window.openPinsChooser = async function(){
+    try{
+      const g = (window.gapi && gapi.client?.drive) ? gapi : null;
+      if (!g) throw new Error('Google Drive API (gapi) is not ready.');
+
+      // Try to resolve GLB id using improved resolver
+      let glbId = await resolveGlbId_v233();
+
+      // Derive parent folder
+      let parentId = null;
+      if (glbId){
+        const r = await g.client.drive.files.get({ fileId: glbId, fields: 'parents' });
+        parentId = (r.result.parents||[])[0] || null;
+      }else{
+        // use pinsId parent
+        const u = fromUrlAll();
+        const pinsId = u.pinsId || window.ModelState?.pinsId || document.getElementById('pinsId')?.value
+                    || document.querySelector('input[name="pinsId"]')?.value;
+        if (pinsId){
+          const parents = await getParentsOf(g, pinsId);
+          parentId = parents[0] || null;
+        }
+      }
+
+      // Last resort: ask user to pick a GLB (to anchor folder)
+      async function pickGlbViaDrive(){
+        const res = await g.client.drive.files.list({
+          q: "mimeType='model/gltf-binary' or name contains '.glb'",
+          orderBy: 'modifiedTime desc',
+          fields: 'files(id,name,modifiedTime,parents)',
+          pageSize: 50
+        });
+        const files = res.result.files || [];
+        return await new Promise((resolve, reject)=>{
+          const hostId = 'glbChooser';
+          document.getElementById(hostId)?.remove();
+          const host = document.createElement('div');
+          host.id = hostId;
+          host.className='modal';
+          host.setAttribute('role','dialog');
+          host.style.cssText='position:fixed; inset:12% 18%; background:#ffffff; padding:16px; border-radius:10px; box-shadow:0 12px 32px rgba(0,0,0,.25); z-index:1606;';
+          host.innerHTML = `
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:8px;">
+              <h3 style="margin:0;font-size:18px;">GLB を選択（fallback）</h3>
+              <button type="button" data-action="close-modal">閉じる</button>
+            </div>
+            <div id="glbList"></div>
+          `;
+          document.body.appendChild(host);
+          const list = host.querySelector('#glbList');
+          if (!files.length){
+            list.innerHTML = `<p>候補が見つかりませんでした。</p>`;
+          }else{
+            files.forEach(f=>{
+              const row = document.createElement('button');
+              row.type='button';
+              row.style.cssText='display:flex;width:100%;text-align:left;padding:10px 12px;border:1px solid #dddddd;border-radius:8px;margin:6px 0;gap:12px;background:#fafafa;';
+              row.innerHTML = `<span style="font-weight:600;">${f.name}</span><span style="margin-left:auto;opacity:.7;font-size:12px;">${(f.modifiedTime||'').replace('T',' ').replace('Z','')}</span>`;
+              row.addEventListener('click', ()=>{ resolve(f); host.remove(); }, { once:true });
+              list.appendChild(row);
+            });
+          }
+          setTimeout(()=>{
+            host.querySelector('[data-action="close-modal"]')?.addEventListener('click', ()=>{ host.remove(); reject(new Error('GLB not selected')); }, { once:true });
+          });
+        });
+      }
+
+      if (!parentId){
+        const choice = await pickGlbViaDrive();
+        glbId = choice?.id || null;
+        parentId = (choice?.parents||[])[0] || null;
+        if (!parentId) throw new Error('GLB parent folder not found');
+        window.ModelState = window.ModelState || {};
+        window.ModelState.glbId = glbId;
+      }
+
+      // List JSON in that folder
+      const q = `'${parentId}' in parents and mimeType='application/json' and trashed=false`;
+      const res = await g.client.drive.files.list({ q, fields: 'files(id,name,modifiedTime,size)', pageSize: 200, orderBy: 'modifiedTime desc' });
+      const items = (res.result.files||[]).filter(f => /\.json$/i.test(f.name));
+
+      // Build simple chooser if none provided by host app
+      if (typeof window.buildPinsChooser === 'function'){
+        window.buildPinsChooser(items);
+        document.documentElement.classList.add('modal-open');
+      } else {
+        let host = document.getElementById('pinsChooser');
+        if (host) host.remove();
+        host = document.createElement('div');
+        host.id = 'pinsChooser';
+        host.className = 'modal';
+        host.setAttribute('role','dialog');
+        host.style.cssText = 'position:fixed; inset:10% 15%; background:#ffffff; border-radius:10px; box-shadow:0 12px 32px rgba(0,0,0,.25); padding:16px; overflow:auto; z-index:1605;';
+        host.innerHTML = `
+          <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:12px;">
+            <h3 style="margin:0; font-size:18px;">pins.json を選択（同フォルダ）</h3>
+            <button type="button" data-action="close-modal" aria-label="閉じる">閉じる</button>
+          </div>
+          <div id="pinsChooserList"></div>
+        `;
+        document.body.appendChild(host);
+        const list = host.querySelector('#pinsChooserList');
+        if (!items.length){
+          list.innerHTML = `<p style="margin:8px 0;">このフォルダに JSON が見つかりませんでした。</p>`;
+        } else {
+          items.forEach(f=>{
+            const row = document.createElement('button');
+            row.type = 'button';
+            row.style.cssText = 'display:flex; width:100%; text-align:left; padding:10px 12px; border:1px solid #dddddd; border-radius:8px; margin:6px 0; gap:12px; background:#fafafa;';
+            row.innerHTML = `<span style="font-weight:600;">${f.name}</span><span style="margin-left:auto; opacity:.7; font-size:12px;">${(f.size?Number(f.size).toLocaleString():'')}&nbsp;&nbsp;${(f.modifiedTime||'').replace('T',' ').replace('Z','')}</span>`;
+            row.addEventListener('click', ()=>{
+              const inp = document.getElementById('pinsId') 
+                       || document.querySelector('input[name="pinsId"]') 
+                       || (function(){ const i=document.createElement('input'); i.type='hidden'; i.id='pinsId'; (document.getElementById('grpPins')||document.body).appendChild(i); return i; })();
+              if (inp) inp.value = f.id;
+              try{ (window.loadPinsFromDriveV2||window.loadPinsFromDrive)?.(f.id); }catch(_){}
+              try{ window.Overlay?.closeAll(); }catch(_){}
+              host.remove();
+            }, { once: true });
+            list.appendChild(row);
+          });
+        }
+        document.documentElement.classList.add('modal-open');
+      }
+    }catch(err){
+      console.error('openPinsChooser (v23.3) failed', err);
+      alert('pins.json の取得に失敗しました。サインイン/権限やネットワークをご確認ください。\n' + err.message);
+      try{ if (typeof prevOpen === 'function') return prevOpen(); }catch(_){}
+    }
+  };
+})();
+</script>
+
 </body>
 </html>
