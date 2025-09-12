@@ -5,7 +5,26 @@
 <meta charset="utf-8"/>
 <title>Drive GLB Viewer + Pins (v1.22.0-bg)</title>
 <link href="https://accounts.google.com" rel="preconnect"/>
-<script async="" src="https://accounts.google.com/gsi/client"></script>
+<script async="" src="https://accounts.google.com/gsi/client">
+
+/** Hex color normalizer: supports #rgb -> #rrggbb and validates */
+function normalizeHex(c){
+  try{
+    if(!c) return '#000000';
+    c = String(c).trim();
+    if(c[0] !== '#') c = '#'+c;
+    if(c.length === 4){ // #rgb
+      const r=c[1], g=c[2], b=c[3];
+      return ('#' + r+r + g+g + b+b).toLowerCase();
+    }
+    if(c.length === 7){
+      return c.toLowerCase();
+    }
+  }catch(_){/* noop */}
+  // Fallback safe default
+  return '#000000';
+}
+</script>
 <script async="" src="https://apis.google.com/js/api.js"></script>
 <meta content="width=device-width, initial-scale=1" name="viewport"/>
 <link href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='64' height='64'%3E%3Crect width='64' height='64' fill='%23222'/%3E%3Ccircle cx='32' cy='32' r='18' fill='%23e33'/%3E%3C/svg%3E" rel="icon"/>
@@ -2638,22 +2657,41 @@ function copyText(text, okMsg='コピーしました'){
   } else { fallbackCopy(text, okMsg); }
 }
 function fallbackCopy(text, okMsg){
+  // Modern async clipboard first
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text)
+        .then(() => alert(okMsg))
+        .catch((e) => {
+          console.warn('navigator.clipboard failed', e);
+          legacyTextareaCopy(text, okMsg);
+        });
+      return;
+    }
+  } catch (e) {
+    console.warn('navigator.clipboard not usable', e);
+  }
+  // Fallback
+  legacyTextareaCopy(text, okMsg);
+}
+
+function legacyTextareaCopy(text, okMsg){
   const ta = document.createElement('textarea');
   ta.value = text;
   ta.style.position = 'fixed';
   ta.style.top = '-1000px';
   document.body.appendChild(ta);
-  try{
+  try {
     ta.focus();
     ta.select();
     document.execCommand('copy');
     alert(okMsg);
-  }catch(e){
-    console.warn('copy failed; prompting manual copy', e);
+  } catch (e2) {
+    console.warn('execCommand copy failed', e2);
     window.prompt('このテキストをコピーしてください（Ctrl/Cmd+C）', text);
-  }finally{
-    try{ document.body.removeChild(ta); }catch(_){}
   }
+  // Ensure cleanup even if copy fails
+  try { document.body.removeChild(ta); } catch(_){}
 }
 
 /* サインインゲートのボタン */
