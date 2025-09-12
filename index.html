@@ -2533,7 +2533,7 @@ btnHelpPins?.addEventListener('click', ()=>{
     </div>
   `);
   document.addEventListener('click', (e)=>{ if(e.target?.id==='helpClose3') closeModal(); });
-  document.getElementById('helpClose4')?.addEventListener('click', (e)=>{ (closeModal) });
+  document.getElementById('helpClose4')?.addEventListener('click', (e)=>{ closeModal(); });
 });
 
 /* 画像アップロード共通 */
@@ -2582,7 +2582,7 @@ async function chooseDriveImageForPin(pin, opts={}){
       </div>
     `);
     const gridEl = document.getElementById('imgGrid');
-    document.getElementById('imgClose')?.addEventListener('click', (e)=>{ (closeModal) });
+    document.getElementById('imgClose')?.addEventListener('click', (e)=>{ closeModal(); });
     function cardHTML(f){
       const t = new Date(f.modifiedTime||Date.now()).toLocaleDateString();
       const thumb = f.thumbnailLink ? f.thumbnailLink.replace(/=s220/,'=s400') : '';
@@ -2857,7 +2857,7 @@ btnPickPins.onclick = async ()=>{
         </footer>
       </div>
     `);
-    document.getElementById('pinsClose')?.addEventListener('click', (e)=>{ (closeModal) });
+    document.getElementById('pinsClose')?.addEventListener('click', (e)=>{ closeModal(); });
     const listEl = document.getElementById('pinsList');
 
     try{
