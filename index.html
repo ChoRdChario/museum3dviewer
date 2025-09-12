@@ -5017,5 +5017,169 @@ const Overlay = (()=> {
   document.addEventListener('DOMContentLoaded', autoLoadIfPresent);
 })();
 </script>
+
+<script>
+/* v23.6 — pins.json は常に「GLBと同じフォルダ」に限定して扱う（自動ロードは維持） */
+(function(){
+  // --- helpers reused ---
+  function fromUrlAll(){
+    try{
+      const u = new URL(window.location.href);
+      const q1 = u.searchParams.get('fileId');
+      const qPins = u.searchParams.get('pinsId');
+      let q2 = null;
+      if (u.hash && u.hash.includes('fileId=')){
+        const h = new URLSearchParams(u.hash.replace(/^#/, ''));
+        q2 = h.get('fileId') || null;
+      }
+      return { fileId: q1 || q2 || null, pinsId: qPins || null };
+    }catch(_){
+      return { fileId: null, pinsId: null };
+    }
+  }
+  async function resolveGlbId(){
+    const u = fromUrlAll();
+    if (u.fileId) return (''+u.fileId).trim();
+    const byHidden = document.getElementById('fileId')?.value 
+                  || document.getElementById('glbId')?.value;
+    if (byHidden && String(byHidden).trim()) return String(byHidden).trim();
+    const byName = document.querySelector('input[name="fileId"]')?.value
+                || document.querySelector('input[name="glbId"]')?.value;
+    if (byName && String(byName).trim()) return String(byName).trim();
+    const byData = document.querySelector('[data-file-id]')?.getAttribute('data-file-id')
+                || document.querySelector('[data-glb-id]')?.getAttribute('data-glb-id');
+    if (byData && String(byData).trim()) return String(byData).trim();
+    if (window.ModelState?.glbId && String(window.ModelState.glbId).trim())
+      return String(window.ModelState.glbId).trim();
+    return null;
+  }
+  async function getParents(gapi, id){
+    const r = await gapi.client.drive.files.get({ fileId: id, fields: 'parents' });
+    return (r.result.parents || []);
+  }
+
+  async function getGlbParentId(){
+    if (!(window.gapi && gapi.client?.drive)) throw new Error('gapi not ready');
+    const glbId = await resolveGlbId();
+    if (!glbId) return null;
+    const pr = await getParents(gapi, glbId);
+    return pr[0] || null;
+  }
+
+  // 1) openPinsChooser を GLB親フォルダ限定に固定
+  (function patchOpenPinsChooser(){
+    const prev = window.openPinsChooser;
+    window.openPinsChooser = async function(){
+      const g = (window.gapi && gapi.client?.drive) ? gapi : null;
+      if (!g) { console.error('gapi not ready'); return prev?.(); }
+      try{
+        const parentId = await getGlbParentId();
+        if (!parentId){ alert('GLBの親フォルダを特定できませんでした。GLBのfileIdを入力/URL指定してください。'); return; }
+        const q = `'${parentId}' in parents and mimeType='application/json' and trashed=false`;
+        const res = await g.client.drive.files.list({ q, fields: 'files(id,name,modifiedTime,size,parents)', orderBy:'modifiedTime desc', pageSize: 200 });
+        const items = (res.result.files||[]).filter(f=>/\.json$/i.test(f.name));
+
+        // ビルダーがある場合はそれを使う
+        if (typeof window.buildPinsChooser === 'function'){
+          window.buildPinsChooser(items);
+          document.documentElement.classList.add('modal-open');
+          return;
+        }
+        // 簡易UI
+        let host = document.getElementById('pinsChooser');
+        host?.remove();
+        host = document.createElement('div');
+        host.id = 'pinsChooser';
+        host.style.cssText = 'position:fixed;inset:10% 15%;background:#fff;border-radius:10px;box-shadow:0 12px 32px rgba(0,0,0,.25);padding:16px;overflow:auto;z-index:1605;';
+        host.innerHTML = `
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px;">
+            <h3 style="margin:0;font-size:18px;">pins.json を選択（GLBと同じフォルダ）</h3>
+            <button type="button" data-action="close">閉じる</button>
+          </div>
+          <div id="pinsChooserList"></div>
+        `;
+        document.body.appendChild(host);
+        const list = host.querySelector('#pinsChooserList');
+        if (!items.length){
+          list.innerHTML = `<p>このフォルダに JSON が見つかりませんでした。</p>`;
+        } else {
+          items.forEach(f=>{
+            const row = document.createElement('button');
+            row.type='button';
+            row.style.cssText='display:flex;width:100%;text-align:left;padding:10px 12px;border:1px solid #ddd;border-radius:8px;margin:6px 0;gap:12px;background:#fafafa;';
+            row.innerHTML = `<span style="font-weight:600;">${f.name}</span><span style="margin-left:auto;opacity:.7;font-size:12px;">${(f.size?Number(f.size).toLocaleString():'')}&nbsp;&nbsp;${(f.modifiedTime||'').replace('T',' ').replace('Z','')}</span>`;
+            row.addEventListener('click', async ()=>{
+              try{
+                const inp = document.getElementById('pinsId') 
+                         || document.querySelector('input[name="pinsId"]') 
+                         || (function(){ const i=document.createElement('input'); i.type='hidden'; i.id='pinsId'; document.body.appendChild(i); return i; })();
+                inp.value = f.id;
+                await (window.loadPinsFromDriveV2||window.loadPinsFromDrive)?.(f.id);
+              }finally{
+                host.remove();
+                document.documentElement.classList.remove('modal-open');
+              }
+            }, { once:true });
+            list.appendChild(row);
+          });
+        }
+        host.querySelector('[data-action="close"]')?.addEventListener('click', ()=>{
+          host.remove();
+          document.documentElement.classList.remove('modal-open');
+        }, { once:true });
+      }catch(err){
+        console.error('[v23.6] openPinsChooser failed', err);
+        alert('pins.json の列挙に失敗しました：' + err.message);
+        return prev?.();
+      }
+    };
+  })();
+
+  // 2) 自動ロードは維持しつつ、「pinsIdがGLBと同じ親フォルダの場合のみ」読み込む
+  (function patchAutoLoadConstraint(){
+    const prevAuto = document._v235_autoLoadIfPresentPatched;
+    if (prevAuto) return; // 重複防止
+    document._v235_autoLoadIfPresentPatched = true;
+
+    // ランタイムの既存自動ロードを置き換えるため、DOMContentLoaded後に検査
+    document.addEventListener('DOMContentLoaded', async ()=>{
+      try{
+        // 待機: gapi 準備
+        let tries = 0;
+        while(!(window.gapi && gapi.client?.drive) && tries < 60){
+          await new Promise(r=>setTimeout(r, 100));
+          tries++;
+        }
+        if (!(window.gapi && gapi.client?.drive)) return;
+
+        const u = new URL(window.location.href);
+        const pinsId = u.searchParams.get('pinsId')
+                    || document.getElementById('pinsId')?.value
+                    || document.querySelector('input[name="pinsId"]')?.value;
+        if (!pinsId) return;
+
+        const glbParent = await getGlbParentId();
+        if (!glbParent) return;
+
+        // pinsId の親をチェック
+        const parents = await getParents(gapi, pinsId);
+        const pinsParent = parents[0] || null;
+
+        if (pinsParent && pinsParent === glbParent){
+          // 同一フォルダ → 許可
+          await (window.loadPinsFromDriveV2||window.loadPinsFromDrive)?.(pinsId);
+          console.log('[v23.6] auto-load pinsId accepted (same folder).');
+        }else{
+          console.warn('[v23.6] auto-load pinsId ignored (different folder).');
+          // UI上の表示は変更せず、必要ならユーザーが手動で openPinsChooser できる
+        }
+      }catch(err){
+        console.error('[v23.6] constrained auto-load failed', err);
+      }
+    }, { once:true });
+  })();
+})();
+</script>
+
 </body>
 </html>
