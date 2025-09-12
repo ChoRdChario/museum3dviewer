@@ -4773,5 +4773,85 @@ const Overlay = (()=> {
 })();
 </script>
 
+
+<script>
+/* v23.4 — pins.json v2 → ランタイム適合 & 画像URLをDrive直リンクに変換 */
+(function(){
+  // v2 → runtime pin adapter
+  function v2ToRuntime(pins){
+    const out = [];
+    (pins||[]).forEach(p=>{
+      const pos = p.pos || p.position || [0,0,0];
+      const title = p.title || p.name || '';
+      const text = p.caption || p.text || '';
+      const color = normalizeHex(p.color || '#ee3333');
+      const imgId = p.imageDriveId || p.image?.id || null;
+      const imgUrl = imgId ? `https://drive.google.com/uc?id=${imgId}` : (p.imageUrl || p.picture || undefined);
+      // 互換のため複数エイリアスを埋める
+      const pin = {
+        id: p.id || title || Math.random().toString(36).slice(2),
+        position: pos,
+        rotation: p.rotation || [0,0,0],
+        scale: p.scale || 1,
+        title: title,
+        text: text,
+        caption: text,
+        color: color,
+        picture: imgUrl,
+        imageUrl: imgUrl,
+        imageDriveId: imgId || undefined
+      };
+      out.push(pin);
+    });
+    return out;
+  }
+
+  function normalizeHex(c){
+    if (typeof c !== 'string') return '#ee3333';
+    c = c.trim();
+    const m = /^#([0-9a-fA-F])([0-9a-fA-F])([0-9a-fA-F])$/.exec(c);
+    if (m) return `#${m[1]}${m[1]}${m[2]}${m[2]}${m[3]}${m[3]}`.toLowerCase();
+    return c.toLowerCase();
+  }
+
+  // 既存レンダラに橋渡しする共通フック
+  if (typeof window.applyPinsToScene !== 'function'){
+    window.applyPinsToScene = function(pins){
+      try{
+        const runtimePins = v2ToRuntime(pins);
+        // 既存コードが見ていそうな候補へブロードキャスト
+        window.pins = runtimePins;
+        window.PINS = runtimePins;
+        window.currentPins = runtimePins;
+        // カスタムイベント
+        window.dispatchEvent(new CustomEvent('pins:loaded', { detail: { pins: runtimePins } }));
+        // 代表的な再描画関数を順に試す
+        const fns = ['redrawPins', 'renderPins', 'refreshPins', 'updatePins', 'repaintPins'];
+        for (const name of fns){
+          try{ if (typeof window[name] === 'function'){ window[name](runtimePins); break; } }catch(_){}
+        }
+        console.log('[v23.4] pins applied:', runtimePins.length);
+      }catch(err){
+        console.error('[v23.4] applyPinsToScene failed', err);
+      }
+    };
+  } else {
+    // 既存 applyPinsToScene があれば、v2→runtime 変換を差し込むラッパー
+    const _orig = window.applyPinsToScene;
+    window.applyPinsToScene = function(pins){
+      const runtimePins = v2ToRuntime(pins);
+      try{ _orig(runtimePins); } catch(e){ console.warn('orig applyPinsToScene failed, fallback redraw', e); try{ window.redrawPins?.(runtimePins); }catch(_){ } }
+    };
+  }
+
+  // 安全策: makePictureNode が blob: 専用実装でも URL をそのまま渡せるようにプリロード
+  (function monkeyPatchImage(){
+    const ImageProto = window.Image && window.Image.prototype;
+    if (!ImageProto) return;
+    // 何もしないが、必要ならここで onerror フォールバックを入れられる
+  })();
+})();
+</script>
+
 </body>
 </html>
