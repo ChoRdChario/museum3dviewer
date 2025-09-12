@@ -1822,25 +1822,36 @@ function redrawPins(){
     const wrap=document.createElement('details'); wrap.className='pin';
     const hid=`file_${pin.id}`;
     const driveLink = pin.imageDriveId ? `https://drive.google.com/file/d/${pin.imageDriveId}/view?usp=drive_link` : '';
-    wrap.innerHTML = `
-      <summary data-summary="${esc(pin.id)}">${esc(pin.title||'（無題）')} <span class="muted">@ ${esc(safePos(pin.position).map(n=>Number(n).toFixed(3)).join(', '))}</span></summary>
-      <div class="row"><input data-k="title" placeholder="タイトル" value="${esc(pin.title||'')}" ${esc(READ_ONLY?'disabled':'')} autocomplete="off"></div>
-      <div class="row"><textarea data-k="text" rows="3" placeholder="キャプション" ${esc(READ_ONLY?'disabled':'')}>${esc(pin.text||'')}</textarea></div>
-      <div class="row"><label class="pill small">色 <input type="color" data-k="color" value="${esc(pin.color||'#ee3333')}" ${esc(READ_ONLY?'disabled':'')}></label></div>
-      ${esc(READ_ONLY?'':`<input id="${hid)}" class="hidden" type="file" accept="image/*">`}
+    wrap.innerHTML = `      <summary data-summary="${esc(pin.id)}">
+        ${esc(pin.title||'（無題）')}
+        <span class="small">${esc([pin.position?.x, pin.position?.y, pin.position?.z].map(n=>Number(n).toFixed(3)).join(', '))}</span>
+      </summary>
       <div class="row">
-        ${esc(READ_ONLY?'':`<button data-act="choose">ローカルから</button>
-        <button data-act="pickDrive">フォルダから選ぶ</button>`)}
-        ${esc(pin.imageUrl||pin.imageDriveId?'<div class="pic-holder" data-pic="'+pin.id+'"></div>':'')}
-        ${esc(driveLink?`<a class="small" href="${esc(driveLink))}" target="_blank" rel="noopener">元画像を開く ↗</a>`:''}
-        ${esc(pin.imageDriveId?`<button data-act="copyPrev" title="Driveの埋め込み用URLをコピー">コピー：プレビューURL</button>
-        <button data-act="togglePub" title="公開/限定を切替">公開↔限定</button>`:'')}
+        <input data-k="title" placeholder="タイトル" value="${esc(pin.title||'')}" ${READ_ONLY?'disabled':''} autocomplete="off">
+      </div>
+      <div class="row">
+        <textarea data-k="text" rows="3" placeholder="説明" ${READ_ONLY?'disabled':''}>${esc(pin.text||'')}</textarea>
+      </div>
+      <div class="row">
+        <label class="pill small">色
+          <input type="color" data-k="color" value="${esc(pin.color||'#ee3333')}" ${READ_ONLY?'disabled':''}>
+        </label>
+      </div>
+      ${READ_ONLY ? '' : `<input id="${hid}" class="hidden" type="file" accept="image/*">`}
+      <div class="row">
+        ${READ_ONLY ? '' : `<button data-act="choose">ローカルから</button>
+        <button data-act="pickDrive">フォルダから選ぶ</button>`}
+        ${(pin.imageUrl||pin.imageDriveId) ? `<div class="pic-holder" data-pic="${esc(pin.id)}"></div>` : ''}
+        ${driveLink ? `<a class="small" href="${esc(driveLink)}" target="_blank" rel="noopener noreferrer">元画像を開く ↗</a>` : ''}
+        ${pin.imageDriveId ? `<button data-act="copyPrev" title="Driveの埋め込み用URLをコピー">コピー：プレビューURL</button>
+        <button data-act="togglePub" title="公開/限定を切替">公開↔限定</button>` : ''}
       </div>
       <div class="row">
         <button data-act="center">このピンへ移動</button>
         <button data-act="toggle">ポップアップ</button>
-        ${esc(READ_ONLY?'':`<button data-act="remove" class="warn">削除</button>`)}
-      </div>`;
+        ${READ_ONLY ? '' : `<button data-act="remove" class="warn">削除</button>`}
+      </div>
+        `;
     if (!READ_ONLY){
       wrap.addEventListener('input',(e)=>{
         const t=e.target;
