@@ -2,6 +2,14 @@
 
 <html lang="ja">
 <head>
+
+<!-- v23.8 early flags -->
+<script>
+  // Block legacy demo/default pins and enforce same-folder policy globally
+  window.__NO_DEFAULT_PINS__ = true;
+  window.__PIN_SAME_FOLDER_ONLY__ = true;
+</script>
+
 <meta charset="utf-8"/>
 <title>Drive GLB Viewer + Pins (v1.22.0-bg)</title>
 <link href="https://accounts.google.com" rel="preconnect"/>
@@ -5262,6 +5270,159 @@ const Overlay = (()=> {
       console.error('[v23.7] guard check failed', e);
     }
   }, { once:true });
+})();
+</script>
+
+
+<script>
+/* v23.8 — 強制ガード（GLB未解決でも外部ピンを止める）＋ ローダーのラップ */
+(function(){
+  // --- small utils ---
+  function log(){ try{ console.log.apply(console, arguments);}catch(_){ } }
+  function warn(){ try{ console.warn.apply(console, arguments);}catch(_){ } }
+  function err(){ try{ console.error.apply(console, arguments);}catch(_){ } }
+
+  async function waitGapi(maxWaitMs=12000){
+    const t0 = Date.now();
+    while(!(window.gapi && gapi.client?.drive) && (Date.now()-t0) < maxWaitMs){
+      await new Promise(r=>setTimeout(r, 80));
+    }
+    return !!(window.gapi && gapi.client?.drive);
+  }
+  async function getParentsSafe(id){
+    try{
+      const r = await gapi.client.drive.files.get({ fileId:id, fields:'parents' });
+      return r.result?.parents || [];
+    }catch(e){ warn('[v23.8] getParentsSafe failed', e); return []; }
+  }
+  function hex6(v){ 
+    if (!v) return '#cccccc';
+    if (/^#[0-9a-f]{3}$/i.test(v)) return '#'+v.slice(1).split('').map(x=>x+x).join('');
+    if (/^#[0-9a-f]{6}$/i.test(v)) return v;
+    return '#cccccc';
+  }
+  function clearPins(reason){
+    try{
+      const empty=[];
+      window.pins=empty; window.PINS=empty; window.currentPins=empty;
+      const fns=['redrawPins','renderPins','refreshPins','updatePins','repaintPins'];
+      for(const n of fns){ try{ if(typeof window[n]==='function'){ window[n](empty); break; } }catch(_){ } }
+      window.dispatchEvent?.(new CustomEvent('pins:loaded',{detail:{pins:empty, reason}}));
+      log('[v23.8] pins cleared:', reason);
+    }catch(e){ warn('[v23.8] clearPins failed', e); }
+  }
+
+  function resolveGlbIdSync(){
+    // 最優先: URL
+    try{
+      const u = new URL(location.href);
+      const q = u.searchParams.get('fileId'); if(q) return q.trim();
+    }catch(_){}
+    // hidden/name/data 属性
+    const cands = [
+      document.getElementById('fileId')?.value,
+      document.getElementById('glbId')?.value,
+      document.querySelector('input[name="fileId"]')?.value,
+      document.querySelector('input[name="glbId"]')?.value,
+      document.querySelector('[data-file-id]')?.getAttribute('data-file-id'),
+      document.querySelector('[data-glb-id]')?.getAttribute('data-glb-id'),
+      window.ModelState?.glbId,
+      window.__GLB_ID__,
+      window.model?.fileId,
+    ].filter(Boolean).map(String);
+    return (cands[0]||'').trim() || null;
+  }
+
+  // 0) カラーの短縮HEXを6桁化（警告抑止）
+  document.addEventListener('DOMContentLoaded', ()=>{
+    document.querySelectorAll('input[type="color"]').forEach(inp=>{
+      if (inp.value && /^#[0-9a-f]{3}$/i.test(inp.value)){ inp.value = hex6(inp.value); }
+      ['change','input'].forEach(ev=>inp.addEventListener(ev, e=>{
+        e.target.value = hex6(e.target.value);
+      }));
+    });
+  }, {once:true});
+
+  // 1) pins:loaded をインターセプトして「同一フォルダ制約」をかける
+  (function(){
+    const origDispatch = window.dispatchEvent?.bind(window);
+    window.addEventListener('pins:attempt-load', (e)=>{ /* noop hook for debugging */ });
+    // 既存コードが直接 pins を差し込むケースに備えて、Mutation でも拾う
+    const obs = new MutationObserver(()=>{
+      if (Array.isArray(window.pins) && window.__PIN_SAME_FOLDER_ONLY__){
+        // ここでは制約確認ができないため、gapi準備後に判定する
+      }
+    });
+    try{ obs.observe(document.documentElement, {childList:true,subtree:true}); }catch(_){}
+  })();
+
+  // 2) ローダーをラップ：loadPinsFromDrive / V2 を同一フォルダチェック付きに差し替え
+  (function wrapLoaders(){
+    const wrap = (fnName)=>{
+      const orig = window[fnName];
+      if (typeof orig !== 'function') return;
+      if (orig.__wrapped_v238) return;
+      const wrapped = async function(fileId){
+        window.dispatchEvent?.(new CustomEvent('pins:attempt-load',{detail:{fileId, via:fnName}}));
+        // GLBが不明なら拒否（これが今回の根本）
+        const glbId = resolveGlbIdSync();
+        if (!glbId){
+          warn('[v23.8] GLB id unresolved. Block pins load.');
+          clearPins('glb-unknown');
+          throw new Error('GLB fileId is not resolved; pins load is blocked.');
+        }
+        const ok = await waitGapi(10000);
+        if (!ok){
+          warn('[v23.8] gapi not ready. Block pins load.');
+          clearPins('gapi-not-ready');
+          throw new Error('gapi not ready; pins load is blocked.');
+        }
+        // 親フォルダ一致チェック
+        const [gp, pp] = await Promise.all([ getParentsSafe(glbId), getParentsSafe(fileId) ]);
+        const glbParent = gp[0] || null;
+        const pinsParent = pp[0] || null;
+        if (!glbParent || !pinsParent || glbParent !== pinsParent){
+          warn('[v23.8] same-folder check failed. Block pins load.', {glbParent, pinsParent});
+          clearPins('different-folder-or-missing');
+          throw new Error('pins.json is not in the same folder as GLB.');
+        }
+        // OK → ロード実行
+        return await orig.apply(this, arguments);
+      };
+      wrapped.__wrapped_v238 = true;
+      window[fnName] = wrapped;
+    };
+    wrap('loadPinsFromDrive');
+    wrap('loadPinsFromDriveV2');
+  })();
+
+  // 3) 起動時ガード（GLB未解決時も pins を空に）
+  document.addEventListener('DOMContentLoaded', async ()=>{
+    try{
+      if (!window.__PIN_SAME_FOLDER_ONLY__) return;
+      const glbId = resolveGlbIdSync();
+      if (!glbId){
+        // GLBの特定ができない時点でピンは表示しない
+        clearPins('glb-unknown-at-startup');
+        return;
+      }
+      const ok = await waitGapi(10000);
+      if (!ok){ clearPins('gapi-not-ready-at-startup'); return; }
+      const glbParents = await getParentsSafe(glbId);
+      const parent = glbParents[0] || null;
+      if (!parent){
+        clearPins('no-parent');
+        return;
+      }
+      // 同一フォルダにjsonが無い場合もクリア（v23.7相当）
+      try{
+        const q = `'${parent}' in parents and mimeType='application/json' and trashed=false`;
+        const res = await gapi.client.drive.files.list({ q, fields:'files(id,name)' });
+        const list = res.result?.files || [];
+        if (!list.length) clearPins('no-json-in-folder');
+      }catch(e){ warn('[v23.8] list json failed', e); }
+    }catch(e){ err('[v23.8] startup guard error', e); }
+  }, {once:true});
 })();
 </script>
 
