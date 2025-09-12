@@ -559,6 +559,14 @@ html.sheet-open, body.sheet-open { overflow: hidden !important; }
 }
 </style>
 
+<style>
+/* v1.22.1-bg.p1: improve hint contrast under overlay */
+.sheet .hint {
+  color: #fff !important;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.55);
+  opacity: 0.95;
+}
+</style>
 </head>
 <body>
 <div id="sheetScrim" class="scrim" hidden aria-hidden="true"></div>
@@ -1456,6 +1464,15 @@ try{ loadClose?.addEventListener('click', closeLoadSheet); }catch(_){}
 
 const loadInput = document.getElementById('loadInput');
 const loadStart = document.getElementById('loadStart');
+// v1.22.1-bg.p1: guard to prevent double-alert on empty fileId
+let __loadStartAlertedAt = 0;
+function shouldAlertOnce(){
+  const now = Date.now();
+  if (now - __loadStartAlertedAt < 800) return false;
+  __loadStartAlertedAt = now;
+  return true;
+}
+
 
 function openLoadSheet(){
   
@@ -1526,7 +1543,14 @@ function toLoadUrl(val){
 }
 
 loadStart?.addEventListener('click', ()=>{
-  const url = toLoadUrl(loadInput?.value||'');
+  
+  // Empty input guard (single alert)
+  const v = (loadInput?.value || '').trim();
+  if (!v){
+    if (shouldAlertOnce()) alert('URL または fileID を入力してください');
+    return;
+  }
+const url = toLoadUrl(loadInput?.value||'');
   if(!url){ alert('URLかfileIDを入力してください'); return; }
   // メッセージ更新＆読み込み開始
   if (typeof showLoading === 'function') showLoading('GLBを読み込み中…');
