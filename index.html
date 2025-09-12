@@ -485,28 +485,51 @@ html.sheet-open .floating-buttons{
 
 
 <style>
-/* v20: ensure clickable layering */
-.cap-sheet, #capSheet{ z-index: 1501 !important; pointer-events:auto !important; }
-.scrim{ z-index: 1200 !important; }
-.cap-header .cap-close{ position:relative; z-index:1600 !important; pointer-events:auto !important; }
+/* --- fix: sheets must sit above scrim overlay (compound selectors) --- */
+.scrim{ z-index:1200; } /* keep as-is for overlay */
+.sheet .sheet{ z-index:1400 !important; }
+.cap-sheet .cap-sheet{ z-index:1400 !important; }
+.load-sheet .load-sheet{ z-index:1400 !important; }
+.top-sheet .top-sheet{ z-index:1500 !important; } /* top tool sheet highest */
 </style>
 
 
 <style>
-/* v21: clickable layering + focus ring */
-.cap-sheet, #capSheet{ z-index:1501 !important; pointer-events:auto !important; }
+/* --- v3 fix: ensure sheets sit above scrim overlay --- */
+.scrim{ z-index:1200; }
+.sheet{ z-index:1400 !important; }
+.cap-sheet{ z-index:1400 !important; }
+.load-sheet{ z-index:1400 !important; }
+.top-sheet{ z-index:1500 !important; }
+</style>
+
+
+<style>
+/* --- v4: strongest stacking for sheets over scrim --- */
+.scrim{ z-index:1200; }
+.sheet{ z-index:1400 !important; }
+.cap-sheet{ z-index:1400 !important; }
+.load-sheet{ z-index:1400 !important; }
+.top-sheet{ z-index:1500 !important; }
+/* IDs as final safety */
+#capSheet{ z-index:1501 !important; }
+#loadSheet{ z-index:1501 !important; }
+#dockSheet{ z-index:1501 !important; }
+.cap-sheet, .sheet{ pointer-events:auto; }
+</style>
+
+
+<style>
+/* v18: Hide mobile loader on desktop; show only on mobile */
+#loadFab, #loadSheet { display: none !important; visibility: hidden !important; pointer-events: none !important; }
+@media (max-width: 768px){
+  #loadFab, #loadSheet { display: inline-flex !important; visibility: visible !important; pointer-events: auto !important; }
+}
+/* Sheets and modals above scrim */
 .scrim{ z-index:1200 !important; }
-.cap-header{ position:relative; z-index:1550; pointer-events:auto; }
-.cap-header .cap-close{ position:relative; z-index:1600 !important; pointer-events:auto !important; }
-.cap-header .cap-close:focus{ outline:2px solid rgba(0,0,0,.35); outline-offset:2px; }
-</style>
-
-
-<style>
-/* v22: hidden overlays never capture clicks */
-#sheetScrim[hidden], .scrim[hidden], .overlay[hidden], .backdrop[hidden], .modal-backdrop[hidden]{
-  pointer-events: none !important;
-  opacity: 0 !important;
+.cap-sheet, #capSheet, .sheet, .load-sheet, .top-sheet, #dockSheet, .modal {
+  z-index:1501 !important;
+  pointer-events:auto !important;
 }
 </style>
 
@@ -761,7 +784,7 @@ html.sheet-open .floating-buttons{
 <div class="cap-handle" title="ドラッグしてサイズ変更"></div>
 <header class="cap-header">
 <div class="cap-title">キャプション</div>
-<button class="cap-close" id="capClose" type="button" onclick="(function(btn){var root = document.getElementById('capSheet') || btn.closest('.cap-sheet,section,div');if(root){ root.removeAttribute('open'); root.hidden=true; root.setAttribute('aria-hidden','true'); }var s=document.getElementById('sheetScrim');if(s){ s.removeAttribute('open'); s.setAttribute('hidden',''); s.setAttribute('aria-hidden','true'); }document.documentElement.classList.remove('sheet-open');})(this)" aria-label="閉じる" tabindex="0">閉じる</button>
+<button class="cap-close" id="capClose">閉じる</button>
 </header>
 <div class="cap-body">
 <div class="cap-row"><input id="capTitle" placeholder="タイトル" type="text"/></div>
@@ -2581,7 +2604,7 @@ async function chooseDriveImageForPin(pin, opts={}){
       </div>
     `);
     const gridEl = document.getElementById('imgGrid');
-    document.getElementById('imgClose')?.addEventListener('click', (e)=>{ (closeModal) });
+    document.getElementById('imgClose')?.addEventListener('click', ()=> closeModal());
     function cardHTML(f){
       const t = new Date(f.modifiedTime||Date.now()).toLocaleDateString();
       const thumb = f.thumbnailLink ? f.thumbnailLink.replace(/=s220/,'=s400') : '';
@@ -3307,201 +3330,689 @@ document.getElementById('toolInlineBtn')?.addEventListener('click', ()=>{
 
 </script>
 
+<script>
+(function(){
+  const isMobile = ()=> window.matchMedia('(max-width: 960px)').matches;
+  if (!isMobile()) return;
 
+  // Neutralize global openers if present
+  const g = window;
+  const guard = fn => function(){ /* view-only on mobile */ };
+  ['openDock','toggleDock','openDockSheet','openToolDock','showTools'].forEach(n=>{
+    if (typeof g[n]==='function'){ try{ g[n] = guard(g[n]); }catch(_){ } }
+  });
+
+  // Block delegated clicks
+  document.addEventListener('click', (e)=>{
+    const t = e.target;
+    if (!t) return;
+    if (t.closest && t.closest('#dockFab, #editorDock, #materialsDock, #toolFab, #toolBtn, [data-open-dock], [data-role="tool-button"]')){
+      e.preventDefault(); e.stopPropagation();
+    }
+  }, {capture:true});
+})();
+</script>
 
 
 <script>
-/* v21: non-blocking close — allow focus/active, then close on next frame */
 (function(){
-  function findContainerFrom(el){
-    if (!el) return null;
-    if (el.closest) {
-      return el.closest('#capSheet,.cap-sheet,.modal,[role="dialog"],dialog') || document.getElementById('modalRoot');
-    }
-    return document.getElementById('capSheet') || document.querySelector('.cap-sheet');
-  }
-  function forceClose(el){
-    try{
-      var root = findContainerFrom(el) || document.getElementById('capSheet') || document.querySelector('.cap-sheet');
-      if(root){
-        if(typeof root.close==='function'){ try{ root.close(); }catch(e){} }
-        if(root.removeAttribute) root.removeAttribute('open');
-        root.hidden = true;
-        if(root.setAttribute) root.setAttribute('aria-hidden','true');
-        if(root.id==='modalRoot'){ root.innerHTML=''; root.classList.add('hidden'); }
-      }
-      var s=document.getElementById('sheetScrim');
-      if(s){ s.removeAttribute('open'); s.setAttribute('hidden',''); s.setAttribute('aria-hidden','true'); }
-      document.documentElement.classList.remove('sheet-open');
-    }catch(_){}
-  }
-  function isCloseLike(el){
-    if (!el) return false;
-    if (el.id === 'capClose' || el.id === 'pinsClose') return true;
-    if (el.matches && el.matches('[data-close], .close, .icon-close, button[aria-label="閉じる"], [aria-label="close"], [aria-label="Close"]')) return true;
-    var btn = el.closest && el.closest('#capClose, #pinsClose, [data-close], .close, .icon-close, button[aria-label="閉じる"], [aria-label="close"], [aria-label="Close"]');
-    return !!btn;
-  }
-  function closestCloseLike(el){
-    return el && (el.closest && el.closest('#capClose, #pinsClose, [data-close], .close, .icon-close, button[aria-label="閉じる"], [aria-label="close"], [aria-label="Close"]')) || el;
-  }
-  window.addEventListener('DOMContentLoaded', function(){
-    // CLICK: do not preventDefault — allow focus/active, then close shortly after
-    document.addEventListener('click', function(e){
-      var t = e.target;
-      if (isCloseLike(t)){
-        var btn = closestCloseLike(t);
-        try{ btn.focus && btn.focus(); }catch(_){}
-        setTimeout(function(){ forceClose(btn); }, 0);
-        e.stopPropagation();
-      }
-    }, true); // capture
-    
-    // MOUSEDOWN: ensure the button receives focus when pressed
-    document.addEventListener('mousedown', function(e){
-      var t = e.target;
-      if (isCloseLike(t)){
-        var btn = closestCloseLike(t);
-        try{ btn.focus && btn.focus(); }catch(_){}
-      }
-    }, true);
-
-    // KEYUP for Enter/Space: close after key is released (preserves pressed visual state)
-    document.addEventListener('keyup', function(e){
-      if (e.key === 'Enter' || e.key === ' ' || e.code === 'Space'){
-        var a = document.activeElement;
-        if (a && isCloseLike(a)){
-          e.stopPropagation();
-          forceClose(a);
-        }
-      }
-    }, true);
-
-    // KEYDOWN for Esc: immediate
-    document.addEventListener('keydown', function(e){
-      if (e.key === 'Escape'){
-        e.stopPropagation();
-        forceClose(document.activeElement || document.body);
-      }
-    }, true);
+  const btn = document.getElementById('loadFab');
+  if (!btn) return;
+  btn.addEventListener('click', ()=>{
+    // Prefer existing load flow if present
+    const openLoad = window.openLoadSheet || window.openLoadDialog || null;
+    const start = document.getElementById('loadStart');
+    const input = document.getElementById('loadInput') || document.getElementById('fileId');
+    if (openLoad){ try{ openLoad(); return; }catch(_){} }
+    if (input){ try{ input.scrollIntoView({behavior:'smooth', block:'center'}); input.focus(); }catch(_){} }
   });
 })();
 </script>
 
 
 <script>
-/* v22: overlay/scrim full cleanup so画面の暗転が確実に解除される */
 (function(){
-  function clearOverlays(){
-    // Hide/remove known scrim/overlay elements
-    var ids = ['sheetScrim','modalScrim','overlay','backdrop','modalBackdrop'];
-    ids.forEach(function(id){
-      var el = document.getElementById(id);
-      if(!el) return;
-      el.removeAttribute('open');
-      el.setAttribute && el.setAttribute('hidden','');
-      el.setAttribute && el.setAttribute('aria-hidden','true');
-      // also make sure it no longer blocks clicks
-      el.style.pointerEvents = 'none';
-      el.style.opacity = '0';
-      // if dynamically inserted, safe to remove from DOM
-      // (comment out if you need transitions)
-      // try{ el.parentNode && el.parentNode.removeChild(el); }catch(_){}
-    });
+  const cancel = document.getElementById('loadCancel');
+  if (!cancel) return;
+  cancel.addEventListener('click', (e)=>{
+    e.preventDefault();
+    // close known sheets/dialogs
+    try{ if (typeof closeLoadSheet==='function') closeLoadSheet(); }catch(_){}
+    try{ if (typeof closeDockSheet==='function') closeDockSheet(); }catch(_){}
+    // hide overlay if visible
+    try{ if (typeof hideLoading==='function') hideLoading(0); }catch(_){}
+    // also collapse any <dialog> used for loading
+    const dlg = document.getElementById('loadDialog');
+    if (dlg && typeof dlg.close==='function'){ try{ dlg.close(); }catch(_){ } }
+  });
+})();
+</script>
 
-    // Generic class-based overlays
-    var classes = ['scrim','overlay','backdrop','modal-backdrop','dim','is-dim','ui-dim','sheet-scrim'];
-    classes.forEach(function(cls){
-      document.querySelectorAll('.' + cls).forEach(function(el){
-        el.removeAttribute('open');
-        el.setAttribute && el.setAttribute('hidden','');
-        el.setAttribute && el.setAttribute('aria-hidden','true');
-        el.style.pointerEvents = 'none';
-        el.style.opacity = '0';
-      });
-    });
 
-    // Remove overlay-ish classes from <html> and <body>
-    var offClasses = ['sheet-open','modal-open','no-scroll','dim','is-dim','has-overlay','has-scrim'];
-    offClasses.forEach(function(c){
-      document.documentElement.classList.remove(c);
-      document.body && document.body.classList.remove(c);
-    });
+<script>
+(function(){
+  const btn = document.getElementById('loadFab');
+  if (!btn) return;
+  btn.addEventListener('click', ()=>{
+    if (typeof openLoadSheet==='function'){ openLoadSheet(); return; }
+    if (typeof openLoadDialog==='function'){ openLoadDialog(); return; }
+    const input = document.getElementById('loadInput') || document.getElementById('fileId');
+    if (input){ input.scrollIntoView({behavior:'smooth', block:'center'}); input.focus(); }
+  });
+})();
+</script>
 
-    // Restore scrolling / pointer events
-    try{ document.body.style.overflow = ''; }catch(_){}
-    try{ document.body.style.pointerEvents = ''; }catch(_){}
 
-    // Remove inert/aria-modal on main app containers
-    document.querySelectorAll('[inert], [aria-modal="true"]').forEach(function(el){
-      el.removeAttribute('inert');
-      if (el.getAttribute('aria-modal') === 'true') el.removeAttribute('aria-modal');
-    });
+<script>
+(function(){
+  function $(sel, root){ return (root||document).querySelector(sel); }
+  function all(sel, root){ return Array.from((root||document).querySelectorAll(sel)); }
 
-    // Re-enable tabindex on root app if it was disabled
-    var app = document.getElementById('app') || document.querySelector('#root, main, .app, .viewer');
-    if (app){ app.removeAttribute('inert'); app.style.pointerEvents = ''; }
-
-    // Give focus back to a safe element (e.g., the primary button)
-    var primary = document.querySelector('[autofocus], .primary, button, [role="button"], a, input, select, textarea');
-    try{ primary && primary.focus(); }catch(_){}
+  // Canonical open/close for Load UI
+  function openLoadUI(){
+    // Prefer existing functions
+    if (typeof window.openLoadSheet === 'function') return window.openLoadSheet();
+    if (typeof window.openLoadDialog === 'function') return window.openLoadDialog();
+    // Fallback: find a sheet/dialog that contains load controls
+    const panels = all('#loadSheet, #dockSheet, .sheet[role="dialog"], dialog, [data-load-panel]');
+    const target = panels.find(p => p.contains($('#loadStart')) || p.contains($('#loadInput')) || p.contains($('#fileId')));
+    if (target){
+      try{
+        // sheet style
+        target.dataset.snap = target.dataset.snap || 'full';
+        target.hidden = false; target.setAttribute('open',''); target.setAttribute('aria-hidden','false');
+        document.documentElement.classList.add('sheet-open');
+      }catch(_){}
+      try{ if (typeof target.showModal==='function') target.showModal(); }catch(_){}
+      return;
+    }
+    // If nothing, scroll to input as last resort
+    const input = $('#loadInput') || $('#fileId');
+    if (input){ input.scrollIntoView({behavior:'smooth', block:'center'}); input.focus(); }
   }
 
-  // Export for other scripts
-  window._clearOverlays = clearOverlays;
-
-  // Hook into existing close path by listening after our previous v21 handler
-  window.addEventListener('DOMContentLoaded', function(){
-    // When we detect any sheet/dialog is being closed, run overlay cleanup shortly after
-    var runCleanup = function(){ setTimeout(clearOverlays, 0); };
-
-    // Click on close-like controls
-    document.addEventListener('click', function(e){
-      var t = e.target;
-      if (!t) return;
-      var btn = t.closest && t.closest('#capClose, #pinsClose, [data-close], .close, .icon-close, button[aria-label="閉じる"], [aria-label="close"], [aria-label="Close"]');
-      if (btn){ runCleanup(); }
-    }, true);
-
-    // Key paths (Enter/Space/Escape)
-    document.addEventListener('keyup', function(e){
-      if (e.key === 'Enter' || e.key === ' ' || e.code === 'Space'){ runCleanup(); }
-    }, true);
-    document.addEventListener('keydown', function(e){
-      if (e.key === 'Escape'){ runCleanup(); }
-    }, true);
-
-    // Also scrub overlays if visibility changes on sheets
-    var mo = new MutationObserver(function(muts){
-      muts.forEach(function(m){
-        if (m.type === 'attributes' && (m.attributeName === 'open' || m.attributeName === 'class')){
-          var n = m.target;
-          if (n && (n.id === 'capSheet' || n.classList && n.classList.contains('cap-sheet'))){
-            // If sheet is now hidden, ensure overlays are gone
-            var hidden = n.hidden || !n.hasAttribute('open') || n.getAttribute('aria-hidden') === 'true';
-            if (hidden) clearOverlays();
-          }
-        }
-      });
+  function closeLoadUI(){
+    // Prefer existing close functions
+    if (typeof window.closeLoadSheet === 'function') try{ window.closeLoadSheet(); }catch(_){}
+    if (typeof window.closeDockSheet === 'function') try{ window.closeDockSheet(); }catch(_){}
+    // Fallback close: any visible panel that contains the controls
+    const panels = all('#loadSheet, #dockSheet, .sheet[role="dialog"], dialog, [data-load-panel]');
+    panels.forEach(p => {
+      if (p.contains($('#loadStart')) || p.contains($('#loadInput')) || p.contains($('#fileId'))){
+        try{ p.removeAttribute('open'); p.setAttribute('aria-hidden','true'); }catch(_){}
+        try{ p.hidden = true; }catch(_){}
+        try{ if (typeof p.close === 'function') p.close(); }catch(_){}
+      }
     });
-    try{
-      var targets = document.querySelectorAll('#capSheet, .cap-sheet');
-      targets.forEach(function(t){ mo.observe(t, { attributes:true }); });
-    }catch(_){}
+    document.documentElement.classList.remove('sheet-open');
+    // Clear inputs explicitly (this is the "URL入力そのものをキャンセル")
+    try{ const li = $('#loadInput'); if (li) li.value = ''; }catch(_){}
+    try{ const fi = $('#fileId'); if (fi) fi.value = ''; }catch(_){}
+    try{ const gi = $('#glbUrl'); if (gi) gi.value = ''; }catch(_){}
+    // Hide overlay if any
+    try{ if (typeof window.hideLoading === 'function') window.hideLoading(0); }catch(_){}
+    // Blur focus to avoid mobile keyboards lingering
+    try{ if (document.activeElement) document.activeElement.blur(); }catch(_){}
+  }
+
+  // Export for other scripts (optional)
+  window.openLoadUI = window.openLoadUI || openLoadUI;
+  window.closeLoadUI = window.closeLoadUI || closeLoadUI;
+
+  // Wire the bottom-right "読み込み" button to open the UI
+  const loadFab = document.getElementById('loadFab');
+  if (loadFab){
+    loadFab.addEventListener('click', function(ev){
+      ev.preventDefault();
+      openLoadUI();
+    });
+  }
+
+  // Wire Cancel explicitly
+  const loadCancel = document.getElementById('loadCancel');
+  if (loadCancel){
+    loadCancel.addEventListener('click', function(ev){
+      ev.preventDefault();
+      // Do NOT trigger any loading; just cancel and close
+      closeLoadUI();
+    });
+  }
+
+  // Also ensure "ツール"ボタンはモバイルで非表示＆動作しない
+  const isMobile = window.matchMedia('(max-width: 960px)').matches;
+  if (isMobile){
+    ['toolBtn','toolFab','dockFab','toolInlineBtn'].forEach(id=>{
+      const el = document.getElementById(id);
+      if (el){ el.style.display='none'; el.setAttribute('aria-hidden','true'); el.addEventListener('click', e=>{ e.preventDefault(); e.stopPropagation(); }, {capture:true}); }
+    });
+  }
+})();
+
+// === patch v2: robust closing & Drive pins chooser ===
+window.addEventListener('DOMContentLoaded', ()=>{
+  const sheetScrim = document.getElementById('sheetScrim');
+  const capClose = document.getElementById('capClose');
+  const pinsIdInput  = document.getElementById('pinsId');
+  const folderIdInput= document.getElementById('folderId');
+  const fileIdInput  = document.getElementById('fileId');
+  const btnPickPins  = document.getElementById('btnPickPins');
+
+  // Fallback close for caption sheet if not defined
+  if (typeof window.closeCaptionSheet !== 'function') {
+    window.closeCaptionSheet = function closeCaptionSheet(){
+      const cs = document.getElementById('capSheet');
+      if (!cs) return;
+      cs.removeAttribute('open');
+      cs.setAttribute('aria-hidden','true');
+      setTimeout(()=>{ cs.hidden = true; }, 160);
+      document.documentElement.classList.remove('sheet-open');
+      if (sheetScrim){
+        sheetScrim.removeAttribute('open');
+        sheetScrim.setAttribute('hidden','');
+        sheetScrim.setAttribute('aria-hidden','true');
+      }
+    };
+  }
+
+  capClose?.addEventListener('click', ()=> window.closeCaptionSheet());
+
+  // Clicking the scrim closes any open sheets
+  sheetScrim?.addEventListener('click', ()=>{
+    try{ window.closeDockSheet?.(); }catch(e){}
+    try{ window.closeLoadSheet?.(); }catch(e){}
+    try{ window.closeCaptionSheet?.(); }catch(e){}
   });
 
-  // Provide a global method that close handlers can call directly
-  window.closeAllSheetsAndOverlays = function(){
+  // Esc key closes sheets and modal
+  window.addEventListener('keydown', (e)=>{
+    if (e.key !== 'Escape') return;
+    try{ window.closeDockSheet?.(); }catch(e){}
+    try{ window.closeLoadSheet?.(); }catch(e){}
+    try{ window.closeCaptionSheet?.(); }catch(e){}
+    try{ window.closeModal?.(); }catch(e){}
+  });
+
+  // Pins chooser: list JSON in the same Drive folder as GLB (or folderIdInput)
+  async function openPinsChooser(){
     try{
-      var n = document.getElementById('capSheet') || document.querySelector('.cap-sheet');
-      if (n){
-        if (typeof n.close === 'function'){ try{ n.close(); }catch(_){}} 
-        n.removeAttribute('open'); n.hidden = true; n.setAttribute('aria-hidden','true');
+      const ensureToken = window.ensureToken;
+      const driveGetMetadata = window.driveGetMetadata;
+      const driveListFiles = window.driveListFiles;
+      const openModal = window.openModal;
+      const closeModal = window.closeModal;
+
+      if (!driveListFiles || !openModal || !closeModal) throw new Error('required helpers not found');
+      await ensureToken?.();
+
+      // Resolve target parent folder
+      const glbId = (fileIdInput?.value || '').trim();
+      let parentId = (folderIdInput?.value || '').trim();
+      if (!parentId && glbId && typeof driveGetMetadata === 'function'){
+        try{
+          const meta = await driveGetMetadata(glbId);
+          if (meta.parents && meta.parents.length) parentId = meta.parents[0];
+        }catch(e){ /* ignore */ }
       }
-    }catch(_){}
-    clearOverlays();
+
+      const hdr = parentId ? 'pins.json を選択（GLBと同じフォルダ）' : 'pins.json を選択（ドライブ全体検索）';
+      openModal(`
+        <div class="modal">
+          <header>
+            <strong>${hdr}</strong>
+            <div class="grow"></div>
+            <input id="pinsQuery" placeholder="名前でフィルタ（例：pins）" style="padding:6px 8px;border:1px solid #ddd;border-radius:8px;min-width:200px">
+            <button id="pinsSearchAll">ドライブ全体から検索</button>
+            <button id="pinsClose">閉じる</button>
+          </header>
+          <div class="body"><div class="grid" id="pinsGrid"><div>読み込み中…</div></div></div>
+          <footer><span class="muted">JSON（application/json）と pins.json を表示。最新順。</span></footer>
+        </div>
+      `);
+
+      const gridEl = document.getElementById('pinsGrid');
+      document.getElementById('pinsClose')?.addEventListener('click', ()=> closeModal());
+
+      function rowHTML(f){
+        const t = new Date(f.modifiedTime||Date.now()).toLocaleString();
+        const name = (f.name||'(名称なし)').replace(/"/g,'&quot;');
+        return `<div class="card">
+          <div class="title">${name}</div>
+          <div class="meta">${t}</div>
+          <button data-pick="${f.id}">このファイルを使う</button>
+        </div>`;
+      }
+
+      async function renderGrid(files){
+        if (!files?.length){ gridEl.innerHTML = `<div>候補がありません</div>`; return; }
+        gridEl.innerHTML = files.map(rowHTML).join('');
+        gridEl.querySelectorAll('[data-pick]').forEach(btn=>{
+          btn.onclick = ()=>{
+            const id = btn.getAttribute('data-pick');
+            const file = (files||[]).find(x=>x.id===id);
+            closeModal();
+            if (file && pinsIdInput){
+              pinsIdInput.value = file.id;
+              try{ window.loadedPinsName = file.name; }catch(e){}
+              try{ window.updatePinsInfo?.(); }catch(e){}
+            }
+          };
+        });
+      }
+
+      async function loadFolder(){
+        try{
+          let q = "trashed = false and (mimeType = 'application/json' or name = 'pins.json')";
+          if (parentId) q += " and '"+parentId+"' in parents";
+          const res = await driveListFiles({ q, pageSize: 100 });
+          await renderGrid(res.files||[]);
+        }catch(e){ gridEl.innerHTML = `<div>検索に失敗しました</div>`; }
+      }
+      await loadFolder();
+
+      document.getElementById('pinsSearchAll')?.addEventListener('click', async ()=>{
+        try{
+          const query = (document.getElementById('pinsQuery')?.value || '').trim();
+          let q = "trashed = false and (mimeType = 'application/json' or name = 'pins.json')";
+          if (query) q += " and name contains '"+query.replace(/'/g, "\'")+"'";
+          const res = await driveListFiles({ q, pageSize: 200 });
+          await renderGrid(res.files||[]);
+        }catch(e){ gridEl.innerHTML = `<div>検索に失敗しました</div>`; }
+      });
+    }catch(e){
+      console.warn('openPinsChooser failed:', e);
+      alert('pins.json の取得に失敗しました。サインイン/権限やネットワークをご確認ください。');
+    }
+  }
+
+  btnPickPins?.addEventListener('click', (e)=>{
+    e.preventDefault();
+    e.stopPropagation();
+    openPinsChooser();
+  });
+});
+
+
+// === patch v3: robust helpers + Drive pins chooser with fallbacks ===
+window.addEventListener('DOMContentLoaded', ()=>{
+  // --- Robust helper resolution ---
+  // Modal helpers (fallback if missing)
+  if (typeof window.openModal !== 'function' || typeof window.closeModal !== 'function') {
+    let _overlay = null;
+    window.openModal = (html)=>{
+      if (!_overlay){
+        _overlay = document.createElement('div');
+        _overlay.className = 'modal-overlay';
+        _overlay.id = 'modalRoot_patch';
+        document.body.appendChild(_overlay);
+      }
+      _overlay.className = 'modal-overlay';
+      _overlay.innerHTML = html;
+    };
+    window.closeModal = ()=>{
+      const root = document.getElementById('modalRoot_patch') || document.getElementById('modalRoot');
+      if (root){ root.className = 'hidden'; root.innerHTML = ''; }
+    };
+  }
+
+  // Drive list fallback using gapi if driveListFiles is missing
+  if (typeof window.driveListFiles !== 'function') {
+    window.driveListFiles = async function({ q='', pageSize=100, orderBy='modifiedTime desc', fields }={}){
+      // try gapi client directly
+      if (!window.gapi || !gapi.client?.drive?.files?.list) throw new Error('gapi drive client not ready');
+      if (typeof window.gapiReady === 'function') { try{ await window.gapiReady(); }catch(e){} }
+      const r = await gapi.client.drive.files.list({
+        q, pageSize, orderBy,
+        fields: fields || "files(id,name,mimeType,modifiedTime,parents,thumbnailLink),nextPageToken"
+      });
+      return r.result || { files:[] };
+    };
+  }
+
+  // Ensure ensureToken exists (no-op fallback)
+  if (typeof window.ensureToken !== 'function') {
+    window.ensureToken = async ()=>{};
+  }
+
+  const sheetScrim = document.getElementById('sheetScrim');
+  const capClose = document.getElementById('capClose');
+  const pinsIdInput  = document.getElementById('pinsId');
+  const folderIdInput= document.getElementById('folderId');
+  const fileIdInput  = document.getElementById('fileId');
+  const btnPickPins  = document.getElementById('btnPickPins');
+
+  // Fallback close for caption sheet if not defined
+  if (typeof window.closeCaptionSheet !== 'function') {
+    window.closeCaptionSheet = function closeCaptionSheet(){
+      const cs = document.getElementById('capSheet');
+      if (!cs) return;
+      cs.removeAttribute('open');
+      cs.setAttribute('aria-hidden','true');
+      setTimeout(()=>{ cs.hidden = true; }, 160);
+      document.documentElement.classList.remove('sheet-open');
+      if (sheetScrim){
+        sheetScrim.removeAttribute('open');
+        sheetScrim.setAttribute('hidden','');
+        sheetScrim.setAttribute('aria-hidden','true');
+      }
+    };
+  }
+
+  // Delegate clicks for any modal close button (more reliable)
+  document.addEventListener('click', (e)=>{
+    const t = e.target;
+    if (!t) return;
+    if (t.id === 'pinsClose' || t.id === 'helpClose1' || t.id === 'helpClose2' || t.id === 'helpClose3') {
+      try{ window.closeModal(); }catch(_){}
+    }
+    // 'このファイルを使う'
+    if (t.matches('[data-pick]')){
+      const id = t.getAttribute('data-pick');
+      const name = t.getAttribute('data-name') || '';
+      try{ window.closeModal(); }catch(_){}
+      if (pinsIdInput && id){ pinsIdInput.value = id; }
+      try{ window.loadedPinsName = name; }catch(_){}
+      try{ window.updatePinsInfo?.(); }catch(_){}
+    }
+  });
+
+  capClose?.addEventListener('click', ()=> window.closeCaptionSheet());
+
+  // Clicking the scrim closes any open sheets
+  sheetScrim?.addEventListener('click', ()=>{
+    try{ window.closeDockSheet?.(); }catch(e){}
+    try{ window.closeLoadSheet?.(); }catch(e){}
+    try{ window.closeCaptionSheet?.(); }catch(e){}
+  });
+
+  // Esc key closes sheets and modal
+  window.addEventListener('keydown', (e)=>{
+    if (e.key !== 'Escape') return;
+    try{ window.closeDockSheet?.(); }catch(e){}
+    try{ window.closeLoadSheet?.(); }catch(e){}
+    try{ window.closeCaptionSheet?.(); }catch(e){}
+    try{ window.closeModal?.(); }catch(e){}
+  });
+
+  // Pins chooser: list JSON in the same Drive folder as GLB (or folderIdInput)
+  async function openPinsChooser(){
+    try{
+      const ensureToken = window.ensureToken;
+      const driveGetMetadata = window.driveGetMetadata;
+      const driveListFiles = window.driveListFiles;
+      const openModal = window.openModal;
+
+      await ensureToken?.();
+
+      // Resolve target parent folder
+      const glbId = (fileIdInput?.value || '').trim();
+      let parentId = (folderIdInput?.value || '').trim();
+      if (!parentId && glbId && typeof driveGetMetadata === 'function'){
+        try{
+          const meta = await driveGetMetadata(glbId);
+          if (meta.parents && meta.parents.length) parentId = meta.parents[0];
+        }catch(e){ /* ignore */ }
+      }
+
+      const hdr = parentId ? 'pins.json を選択（GLBと同じフォルダ）' : 'pins.json を選択（ドライブ全体検索）';
+      openModal(`
+        <div class="modal">
+          <header>
+            <strong>${hdr}</strong>
+            <div class="grow"></div>
+            <input id="pinsQuery" placeholder="名前でフィルタ（例：pins）" style="padding:6px 8px;border:1px solid #ddd;border-radius:8px;min-width:200px">
+            <button id="pinsSearchAll">ドライブ全体から検索</button>
+            <button id="pinsClose">閉じる</button>
+          </header>
+          <div class="body"><div class="grid" id="pinsGrid"><div>読み込み中…</div></div></div>
+          <footer><span class="muted">JSON（application/json）と pins.json を表示。最新順。</span></footer>
+        </div>
+      `);
+
+      const gridEl = document.getElementById('pinsGrid');
+
+      function rowHTML(f){
+        const t = new Date(f.modifiedTime||Date.now()).toLocaleString();
+        const name = (f.name||'(名称なし)').replace(/"/g,'&quot;');
+        return `<div class="card">
+          <div class="title">${name}</div>
+          <div class="meta">${t}</div>
+          <button data-pick="${f.id}" data-name="${name}">このファイルを使う</button>
+        </div>`;
+      }
+
+      async function renderGrid(files){
+        if (!files?.length){ gridEl.innerHTML = `<div>候補がありません</div>`; return; }
+        gridEl.innerHTML = files.map(rowHTML).join('');
+      }
+
+      async function loadFolder(){
+        try{
+          let q = "trashed = false and (mimeType = 'application/json' or name = 'pins.json')";
+          if (parentId) q += " and '"+parentId+"' in parents";
+          const res = await driveListFiles({ q, pageSize: 100 });
+          await renderGrid(res.files||[]);
+        }catch(e){ console.warn(e); gridEl.innerHTML = `<div>検索に失敗しました</div>`; }
+      }
+      await loadFolder();
+
+      document.getElementById('pinsSearchAll')?.addEventListener('click', async ()=>{
+        try{
+          const query = (document.getElementById('pinsQuery')?.value || '').trim();
+          let q = "trashed = false and (mimeType = 'application/json' or name = 'pins.json')";
+          if (query) q += " and name contains '"+query.replace(/'/g, "\'")+"'";
+          const res = await driveListFiles({ q, pageSize: 200 });
+          await renderGrid(res.files||[]);
+        }catch(e){ console.warn(e); gridEl.innerHTML = `<div>検索に失敗しました</div>`; }
+      });
+    }catch(e){
+      console.warn('openPinsChooser failed:', e);
+      alert('pins.json の取得に失敗しました。サインイン/権限やネットワークをご確認ください。');
+    }
+  }
+
+  btnPickPins?.addEventListener('click', (e)=>{
+    e.preventDefault();
+    e.stopPropagation();
+    openPinsChooser();
+  });
+});
+
+
+// === patch v4: stronger close handling + direct module helpers ===
+window.addEventListener('DOMContentLoaded', ()=>{
+  const sheetScrim = document.getElementById('sheetScrim');
+  const pinsIdInput  = document.getElementById('pinsId');
+  const folderIdInput= document.getElementById('folderId');
+  const fileIdInput  = document.getElementById('fileId');
+  const btnPickPins  = document.getElementById('btnPickPins');
+
+  // Document-level capture for caption close (id=capClose)
+  document.addEventListener('click', (e)=>{
+    const t = e.target;
+    if (!t) return;
+    if (t.id === 'capClose'){
+      e.preventDefault();
+      e.stopPropagation();
+      try{ window.closeCaptionSheet?.(); }catch(_){}
+      // also hide scrim just in case
+      const s = document.getElementById('sheetScrim');
+      if (s){ s.removeAttribute('open'); s.setAttribute('aria-hidden','true'); s.setAttribute('hidden',''); }
+      document.documentElement.classList.remove('sheet-open');
+    }
+  }, true); // capture to win over overlays
+
+  // Esc key (capture) also closes everything
+  window.addEventListener('keydown', (e)=>{
+    if (e.key !== 'Escape') return;
+    try{ window.closeDockSheet?.(); }catch(e){}
+    try{ window.closeLoadSheet?.(); }catch(e){}
+    try{ window.closeCaptionSheet?.(); }catch(e){}
+    try{ window.closeModal?.(); }catch(e){}
+    const s = document.getElementById('sheetScrim');
+    if (s){ s.removeAttribute('open'); s.setAttribute('aria-hidden','true'); s.setAttribute('hidden',''); }
+    document.documentElement.classList.remove('sheet-open');
+  }, true);
+
+  // -------- Pins chooser (prefer module-local helpers) --------
+  async function openPinsChooser(){
+    try{
+      // Prefer direct references defined earlier in the same module
+      const _driveListFiles   = (typeof driveListFiles === 'function') ? driveListFiles : (window.driveListFiles || null);
+      const _driveGetMetadata = (typeof driveGetMetadata === 'function') ? driveGetMetadata : (window.driveGetMetadata || null);
+      const _openModal        = (typeof openModal === 'function') ? openModal : (window.openModal || null);
+      const _closeModal       = (typeof closeModal === 'function') ? closeModal : (window.closeModal || null);
+      const _ensureToken      = (typeof ensureToken === 'function') ? ensureToken : (window.ensureToken || (async()=>{}));
+
+      if (!_driveListFiles || !_openModal || !_closeModal){
+        console.error('pins chooser helpers missing', { _driveListFiles: !!_driveListFiles, _openModal: !!_openModal, _closeModal: !!_closeModal });
+        throw new Error('内部ヘルパー未初期化');
+      }
+
+      await _ensureToken?.();
+
+      // Resolve target parent folder (prefer explicit folderId, else parent of glb)
+      const glbId = (fileIdInput?.value || '').trim();
+      let parentId = (folderIdInput?.value || '').trim();
+      if (!parentId && glbId && typeof _driveGetMetadata === 'function'){
+        try{
+          const meta = await _driveGetMetadata(glbId, 'id,parents');
+          if (meta.parents && meta.parents.length) parentId = meta.parents[0];
+        }catch(e){ console.warn('getMetadata failed', e); }
+      }
+
+      const hdr = parentId ? 'pins.json を選択（GLBと同じフォルダ）' : 'pins.json を選択（ドライブ全体検索）';
+      _openModal(`
+        <div class="modal">
+          <header>
+            <strong>${hdr}</strong>
+            <div class="grow"></div>
+            <input id="pinsQuery" placeholder="名前でフィルタ（例：pins）" style="padding:6px 8px;border:1px solid #ddd;border-radius:8px;min-width:200px">
+            <button id="pinsSearchAll">ドライブ全体から検索</button>
+            <button id="pinsClose">閉じる</button>
+          </header>
+          <div class="body"><div class="grid" id="pinsGrid"><div>読み込み中…</div></div></div>
+          <footer><span class="muted">JSON（application/json）と pins.json を表示。最新順。</span></footer>
+        </div>
+      `);
+
+      const gridEl = document.getElementById('pinsGrid');
+
+      function rowHTML(f){
+        const t = new Date(f.modifiedTime||Date.now()).toLocaleString();
+        const name = (f.name||'(名称なし)').replace(/"/g,'&quot;');
+        return `<div class="card">
+          <div class="title">${name}</div>
+          <div class="meta">${t}</div>
+          <button data-pick="${f.id}" data-name="${name}">このファイルを使う</button>
+        </div>`;
+      }
+
+      async function renderGrid(files){
+        if (!files?.length){ gridEl.innerHTML = `<div>候補がありません</div>`; return; }
+        gridEl.innerHTML = files.map(rowHTML).join('');
+      }
+
+      async function loadFolder(){
+        try{
+          let q = "trashed = false and (mimeType = 'application/json' or name = 'pins.json')";
+          if (parentId) q += " and '"+parentId+"' in parents";
+          const res = await _driveListFiles({ q, pageSize: 100 });
+          await renderGrid(res.files||[]);
+        }catch(e){ console.error('loadFolder error', e); gridEl.innerHTML = `<div>検索に失敗しました</div>`; }
+      }
+      await loadFolder();
+
+      document.getElementById('pinsClose')?.addEventListener('click', (e)=>{ e.preventDefault(); _closeModal(); }, { once:true });
+      document.getElementById('pinsSearchAll')?.addEventListener('click', async ()=>{
+        try{
+          const query = (document.getElementById('pinsQuery')?.value || '').trim();
+          let q = "trashed = false and (mimeType = 'application/json' or name = 'pins.json')";
+          if (query) q += " and name contains '"+query.replace(/'/g, "\'")+"'";
+          const res = await _driveListFiles({ q, pageSize: 200 });
+          await renderGrid(res.files||[]);
+        }catch(e){ console.error('searchAll error', e); gridEl.innerHTML = `<div>検索に失敗しました</div>`; }
+      });
+
+      // Delegate pick handling (for dynamically rendered items)
+      document.addEventListener('click', (ev)=>{
+        const t = ev.target;
+        if (!t?.matches('[data-pick]')) return;
+        ev.preventDefault();
+        const id = t.getAttribute('data-pick');
+        const name = t.getAttribute('data-name') || '';
+        try{ _closeModal(); }catch(_){}
+        if (pinsIdInput && id){ pinsIdInput.value = id; }
+        try{ window.loadedPinsName = name; }catch(_){}
+        try{ window.updatePinsInfo?.(); }catch(_){}
+      }, { once:true, capture:true });
+
+    }catch(e){
+      console.error('openPinsChooser failed(v4):', e);
+      alert('pins.json の取得に失敗しました。サインイン・権限・ネットワーク状態をご確認ください。');
+    }
+  }
+
+  btnPickPins?.addEventListener('click', (e)=>{
+    e.preventDefault();
+    e.stopPropagation();
+    openPinsChooser();
+  });
+});
+
+// v18: universal close + desktop hide loader
+(function(){
+  window.forceCloseAllSheets = function(){
+    const sels = ['#capSheet','.cap-sheet','.sheet','.load-sheet','.top-sheet','#dockSheet','.modal','[role="dialog"]'];
+    document.querySelectorAll(sels.join(',')).forEach(el=>{
+      el.removeAttribute('open');
+      el.setAttribute?.('aria-hidden','true');
+      el.hidden = true;
+      if (el.id==='modalRoot'){ el.classList.add('hidden'); el.innerHTML=''; }
+    });
+    document.querySelectorAll('#sheetScrim,.scrim').forEach(s=>{
+      s.removeAttribute('open'); s.setAttribute?.('hidden',''); s.setAttribute?.('aria-hidden','true');
+    });
+    document.documentElement.classList.remove('sheet-open');
   };
+
+  window.addEventListener('DOMContentLoaded', ()=>{
+    // Close buttons capture
+    document.addEventListener('click',(e)=>{
+      const t=e.target;
+      if(!t) return;
+      const isClose = t.id==='pinsClose'||t.id==='capClose'||t.matches?.('[data-close],.close,.icon-close,button[aria-label="閉じる"],[aria-label="close"],[aria-label="Close"]');
+      if(isClose){
+        e.preventDefault(); e.stopPropagation();
+        try{ closeModal?.(); }catch(_){}
+        try{ closeCaptionSheet?.(); }catch(_){}
+        forceCloseAllSheets();
+      }
+    },true);
+    // Esc
+    window.addEventListener('keydown',(e)=>{
+      if(e.key!=='Escape') return;
+      try{ closeModal?.(); }catch(_){}
+      try{ closeCaptionSheet?.(); }catch(_){}
+      forceCloseAllSheets();
+    },true);
+    // Scrim
+    document.getElementById('sheetScrim')?.addEventListener('click',(e)=>{
+      e.preventDefault(); e.stopPropagation(); forceCloseAllSheets();
+    },true);
+
+    // Desktop: remove mobile loader UI
+    const kill=()=>{
+      if(!window.matchMedia('(min-width:769px)').matches) return;
+      document.getElementById('loadFab')?.remove();
+      document.getElementById('loadSheet')?.remove();
+      document.querySelectorAll('.load-fab,.mobile-load,[data-mobile-load]').forEach(el=>el.remove());
+    };
+    kill();
+    window.matchMedia('(min-width:769px)').addEventListener?.('change',kill);
+    new MutationObserver(kill).observe(document.documentElement,{childList:true,subtree:true});
+  });
 })();
+
 </script>
 
 </body>
