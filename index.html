@@ -3432,15 +3432,7 @@ document.getElementById('toolInlineBtn')?.addEventListener('click', ()=>{
     window.addEventListener('mousemove', onMove, {passive:false}); window.addEventListener('touchmove', onMove, {passive:false});
     window.addEventListener('mouseup', onUp); window.addEventListener('touchend', onUp);
   })();
-  loadStart?.addEventListener('click', ()=>{
-    const url = toLoadUrl(loadInput?.value||'');
-    if(!url){ alert('URLかfileIDを入力してください'); return; }
-    document.getElementById('fileId')?.focus();
-    const fileIdBox = document.getElementById('fileId');
-    if (fileIdBox){ fileIdBox.value = url.includes('googleusercontent.com') ? url : url; }
-    document.getElementById('btnLoad')?.click();
-    closeLoadSheet();
-  });
+  
 })();
 
 </script>
