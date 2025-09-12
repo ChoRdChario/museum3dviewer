@@ -608,11 +608,7 @@ if (typeof window.escAttr !== 'function') {
 
 
 
-<script>
-// v1.22.1-bg.p18: explicit OAuth client config
-window.CLIENT_ID = "595200751510-ncahnf7edci6b9925becn5to49r6cguv.apps.googleusercontent.com";
-window.ALL_SCOPES = "https://www.googleapis.com/auth/drive.readonly";
-</script>
+
 
 </head>
 <body>
@@ -4119,57 +4115,99 @@ document.getElementById('toolInlineBtn')?.addEventListener('click', ()=>{
 
 
 
+
+
+
 <script>
-// v1.22.1-bg.p18: Initialize GIS token client on window load
-window.addEventListener("load", ()=>{
-  try{
-    if (!window.google || !google.accounts || !google.accounts.oauth2){
-      console.error("GIS not available");
-      return;
-    }
-    const SCOPES = window.ALL_SCOPES;
-    const CLIENT_ID = window.CLIENT_ID;
-    let accessToken = '';
-    let expiresAt = 0;
-    function now(){ return Math.floor(Date.now()/1000); }
-    const tokenClient = google.accounts.oauth2.initTokenClient({
-      client_id: CLIENT_ID,
-      scope: SCOPES,
-      callback: (resp)=>{
-        if (resp && resp.access_token){
-          accessToken = resp.access_token;
-          expiresAt = now() + Number(resp.expires_in || 3600);
-          const gate = document.getElementById('signinGateWrap');
-          if (gate) gate.hidden = true;
+// v1.22.1-bg.p19: Robust GIS bootstrap with polling
+(function(){
+  const CLIENT_ID = window.CLIENT_ID;
+  const SCOPES = window.ALL_SCOPES || 'https://www.googleapis.com/auth/drive.readonly';
+  let accessToken = '';
+  let expiresAt = 0;
+  let tokenClient = null;
+
+  function now(){ return Math.floor(Date.now()/1000); }
+  function init(){
+    try{
+      if (!window.google || !google.accounts || !google.accounts.oauth2 || !CLIENT_ID) return false;
+      tokenClient = google.accounts.oauth2.initTokenClient({
+        client_id: CLIENT_ID,
+        scope: SCOPES,
+        callback: (resp)=>{
+          if (resp && resp.access_token){
+            accessToken = resp.access_token;
+            expiresAt = now() + Number(resp.expires_in || 3600);
+            const gate = document.getElementById('signinGateWrap');
+            if (gate) gate.hidden = true;
+          }
         }
-      }
-    });
-    window.requestTokenInteractive = function(scopes, cb){
-      try{
-        tokenClient.requestAccessToken({ prompt: 'consent', scope: scopes||SCOPES });
-      }catch(e){ console.error("requestAccessToken error", e); if(cb) cb({error:'failed'}); return; }
-      if (cb){
-        const start = Date.now();
-        const t = setInterval(()=>{
-          if (accessToken){ clearInterval(t); cb({access_token: accessToken}); }
-          else if (Date.now()-start > 60000){ clearInterval(t); cb({error:'timeout'}); }
-        },100);
-      }
-    };
-    window.ensureSignedInIfNeeded = function(){
-      return new Promise((resolve)=>{
-        if (accessToken && (expiresAt-now())>60){ resolve(true); return; }
-        try{ tokenClient.requestAccessToken({ prompt:'' }); }catch(e){ resolve(false); return; }
-        const start = Date.now();
-        const t = setInterval(()=>{
-          if (accessToken){ clearInterval(t); resolve(true); }
-          else if (Date.now()-start>2500){ clearInterval(t); resolve(false); }
-        },100);
       });
-    };
-    Object.defineProperty(window,'accessToken',{get:()=>accessToken});
-  }catch(e){ console.error("GIS init error", e); }
-});
+      // expose wrappers
+      window.requestTokenInteractive = function(scopes, cb){
+        try{
+          tokenClient.requestAccessToken({ prompt: 'consent', scope: scopes||SCOPES });
+        }catch(e){ console.warn('requestAccessToken error', e); cb && cb({error:'failed'}); return; }
+        if (cb){
+          const start = Date.now();
+          const t = setInterval(()=>{
+            if (accessToken){ clearInterval(t); cb({access_token: accessToken}); }
+            else if (Date.now()-start > 60000){ clearInterval(t); cb({error:'timeout'}); }
+          }, 100);
+        }
+      };
+      window.ensureSignedInIfNeeded = function(){
+        return new Promise((resolve)=>{
+          if (accessToken && (expiresAt-now()) > 60){ resolve(true); return; }
+          try{ tokenClient.requestAccessToken({ prompt: '' }); }catch(e){ resolve(false); return; }
+          const start = Date.now();
+          const t = setInterval(()=>{
+            if (accessToken){ clearInterval(t); resolve(true); }
+            else if (Date.now()-start > 2500){ clearInterval(t); resolve(false); }
+          }, 100);
+        });
+      };
+      Object.defineProperty(window, 'accessToken', { get: ()=> accessToken });
+      return true;
+    }catch(e){ console.error('GIS init error', e); return false; }
+  }
+
+  function pollInit(attempt=0){
+    if (init()) return;
+    if (attempt > 60) { console.error('GIS not available after waiting'); return; }
+    setTimeout(()=>pollInit(attempt+1), 250);
+  }
+
+  if (document.readyState === 'complete') pollInit();
+  else window.addEventListener('load', pollInit);
+})();
+</script>
+
+
+<script>
+// v1.22.1-bg.p19: Gate click handler (close immediately, then try GIS)
+(function(){
+  function hideGate(){ const g=document.getElementById('signinGateWrap'); if(g) g.hidden=true; }
+  function showGate(){ const g=document.getElementById('signinGateWrap'); if(g) g.hidden=false; }
+  const btn = document.getElementById('btnGateSignIn');
+  if (!btn) return;
+  btn.addEventListener('click', ()=>{
+    hideGate();
+    if (typeof requestTokenInteractive === 'function'){
+      requestTokenInteractive(undefined, (resp)=>{
+        if (resp && resp.access_token){
+          // success: keep hidden
+        }else{
+          showGate();
+        }
+      });
+    } else {
+      // GIS not ready yet; re-open and inform
+      showGate();
+      console.warn('GIS not ready: requestTokenInteractive not defined');
+    }
+  });
+})();
 </script>
 
 </body>
