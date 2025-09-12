@@ -4107,16 +4107,6 @@ document.addEventListener("DOMContentLoaded", ()=>{
   }
 });
 
-document.getElementById("btnGateSignIn")?.addEventListener("click", ()=>{
-  if (typeof requestTokenInteractive === 'function') {
-    requestTokenInteractive(ALL_SCOPES).then(()=>{
-      const gate = document.getElementById("signinGateWrap");
-      if (gate) gate.hidden = true;
-    }).catch(err=>{
-      console.warn("Sign-in failed or cancelled:", err);
-    });
-  }
-});
 </script>
 
 
@@ -4131,6 +4121,27 @@ document.getElementById("btnGateSignIn")?.addEventListener("click", ()=>{
     }).catch(err=>{
       console.warn("Sign-in failed or cancelled:", err);
     });
+  }
+});
+</script>
+
+
+<script>
+// v1.22.1-bg.p14: Sign-in gate handler (callback style)
+document.getElementById("btnGateSignIn")?.addEventListener("click", ()=>{
+  if (typeof requestTokenInteractive === 'function') {
+    try {
+      requestTokenInteractive(ALL_SCOPES, (resp)=>{
+        if (resp && resp.access_token) {
+          const gate = document.getElementById("signinGateWrap");
+          if (gate) gate.hidden = true;
+        } else {
+          console.warn("Sign-in failed or no token", resp);
+        }
+      });
+    } catch(err) {
+      console.error("Sign-in error", err);
+    }
   }
 });
 </script>
