@@ -5181,5 +5181,89 @@ const Overlay = (()=> {
 })();
 </script>
 
+
+<script>
+/* v23.7 — 「GLBと同じフォルダにjsonが無いときはピンを出さない」強制ガードを追加
+   ・自動ロードは維持（同一フォルダのみ許可：v23.6の仕様）
+   ・jsonが無い/外部由来の場合は pins を空にして再描画
+*/
+(function(){
+  async function waitGapi(maxWaitMs=8000){
+    const t0 = Date.now();
+    while(!(window.gapi && gapi.client?.drive) && (Date.now()-t0) < maxWaitMs){
+      await new Promise(r=>setTimeout(r, 100));
+    }
+    return !!(window.gapi && gapi.client?.drive);
+  }
+  async function getParents(id){
+    const r = await gapi.client.drive.files.get({ fileId:id, fields:'parents' });
+    return r.result.parents || [];
+  }
+  function applyPinsEmpty(){
+    try{
+      const empty = [];
+      window.pins = empty;
+      window.PINS = empty;
+      window.currentPins = empty;
+      window.dispatchEvent(new CustomEvent('pins:loaded', { detail: { pins: empty } }));
+      const fns = ['redrawPins','renderPins','refreshPins','updatePins','repaintPins'];
+      for (const n of fns){ try{ if (typeof window[n]==='function'){ window[n](empty); break; } }catch(_){ } }
+      console.log('[v23.7] forced clear pins (no json in folder).');
+    }catch(e){ console.warn('[v23.7] clear pins failed', e); }
+  }
+  async function resolveGlbId(){
+    try{
+      const u = new URL(location.href);
+      const urlId = u.searchParams.get('fileId');
+      if (urlId) return urlId.trim();
+    }catch(_){}
+    const ids = [
+      document.getElementById('fileId')?.value,
+      document.getElementById('glbId')?.value,
+      document.querySelector('input[name="fileId"]')?.value,
+      document.querySelector('input[name="glbId"]')?.value,
+      document.querySelector('[data-file-id]')?.getAttribute('data-file-id'),
+      document.querySelector('[data-glb-id]')?.getAttribute('data-glb-id'),
+      window.ModelState?.glbId
+    ].filter(Boolean).map(String);
+    return (ids[0]||'').trim() || null;
+  }
+  async function listJsonInSameFolder(glbId){
+    const parents = await getParents(glbId);
+    const parent = parents[0] || null;
+    if (!parent) return [];
+    const q = `'${parent}' in parents and mimeType='application/json' and trashed=false`;
+    const res = await gapi.client.drive.files.list({ q, fields:'files(id,name,modifiedTime,size,parents)', pageSize:200 });
+    const files = (res.result.files||[]).filter(f=>/\.json$/i.test(f.name));
+    return files;
+  }
+
+  // 起動後の整合チェック：
+  // 1) gapi準備 → 2) GLB親フォルダにjsonがあるかチェック → 3) 無ければ pins を強制クリア
+  document.addEventListener('DOMContentLoaded', async ()=>{
+    try{
+      const ok = await waitGapi(12000);
+      if (!ok){ console.warn('[v23.7] gapi not ready; skip guard'); return; }
+      const glbId = await resolveGlbId();
+      if (!glbId){ console.warn('[v23.7] glbId not found; skip guard'); return; }
+      const jsons = await listJsonInSameFolder(glbId);
+      if (!jsons.length){
+        // 旧コードがローカルストレージや埋め込みデモで pins を出していても上書きで空にする
+        try{
+          // よくありそうなキーを掃除（存在しなくてもOK）
+          const keys = ['pins','PINS','currentPins','museum3d_pins','storedPins','lastPins'];
+          keys.forEach(k=>{ try{ localStorage.removeItem(k);}catch(_){ } });
+        }catch(_){}
+        applyPinsEmpty();
+      }else{
+        console.log('[v23.7] json exists in same folder:', jsons.length);
+      }
+    }catch(e){
+      console.error('[v23.7] guard check failed', e);
+    }
+  }, { once:true });
+})();
+</script>
+
 </body>
 </html>
