@@ -503,20 +503,10 @@ html.sheet-open .floating-buttons{
 
 
 <style>
-/* v22: scrim/fullscreen overlay neutralization when not open */
-#sheetScrim:not([open]),
-#sheetScrim[hidden],
-.scrim[hidden],
-.scrim:not([open]),
-.mdc-dialog__scrim[hidden],
-.mdc-dialog__scrim:not([open]){
-  display: none !important;
-  opacity: 0 !important;
+/* v22: hidden overlays never capture clicks */
+#sheetScrim[hidden], .scrim[hidden], .overlay[hidden], .backdrop[hidden], .modal-backdrop[hidden]{
   pointer-events: none !important;
-}
-/* Safety: ensure main app regains clicks */
-#app, main, .viewer, .root {
-  pointer-events: auto !important;
+  opacity: 0 !important;
 }
 </style>
 
@@ -3400,84 +3390,117 @@ document.getElementById('toolInlineBtn')?.addEventListener('click', ()=>{
 
 
 <script>
-/* v22: fully clear dark overlay & unlock UI */
+/* v22: overlay/scrim full cleanup so画面の暗転が確実に解除される */
 (function(){
   function clearOverlays(){
-    try{
-      // Known scrim/overlay selectors
-      var sels = [
-        '#sheetScrim','.scrim','.modal-scrim','.mdc-dialog__scrim','.dialog-scrim',
-        '.overlay','.mdc-dialog__backdrop','.backdrop','.modal-backdrop'
-      ];
-      sels.forEach(function(sel){
-        document.querySelectorAll(sel).forEach(function(el){
-          try{
-            el.removeAttribute('open');
-            el.setAttribute('hidden','');
-            el.setAttribute('aria-hidden','true');
-            el.style.display = 'none';
-            el.style.opacity = '0';
-            el.style.pointerEvents = 'none';
-            el.classList.remove('open','opened','active','show','is-open');
-          }catch(_){}
-        });
+    // Hide/remove known scrim/overlay elements
+    var ids = ['sheetScrim','modalScrim','overlay','backdrop','modalBackdrop'];
+    ids.forEach(function(id){
+      var el = document.getElementById(id);
+      if(!el) return;
+      el.removeAttribute('open');
+      el.setAttribute && el.setAttribute('hidden','');
+      el.setAttribute && el.setAttribute('aria-hidden','true');
+      // also make sure it no longer blocks clicks
+      el.style.pointerEvents = 'none';
+      el.style.opacity = '0';
+      // if dynamically inserted, safe to remove from DOM
+      // (comment out if you need transitions)
+      // try{ el.parentNode && el.parentNode.removeChild(el); }catch(_){}
+    });
+
+    // Generic class-based overlays
+    var classes = ['scrim','overlay','backdrop','modal-backdrop','dim','is-dim','ui-dim','sheet-scrim'];
+    classes.forEach(function(cls){
+      document.querySelectorAll('.' + cls).forEach(function(el){
+        el.removeAttribute('open');
+        el.setAttribute && el.setAttribute('hidden','');
+        el.setAttribute && el.setAttribute('aria-hidden','true');
+        el.style.pointerEvents = 'none';
+        el.style.opacity = '0';
       });
-      // html/body flags commonly used to lock background
-      document.documentElement.classList.remove('sheet-open','modal-open','dialog-open','no-scroll','is-dimmed');
-      document.body.classList.remove('sheet-open','modal-open','dialog-open','no-scroll','is-dimmed');
-      // Remove inert/aria-hidden from app roots
-      var roots = document.querySelectorAll('#app, main, .viewer, .root, body > *:not(script):not(style)');
-      roots.forEach(function(n){
-        try{
-          n.inert = false;
-          n.removeAttribute('inert');
-          if(n !== document.getElementById('capSheet') && n !== document.querySelector('.cap-sheet')){
-            n.removeAttribute('aria-hidden');
-          }
-          n.style.pointerEvents = 'auto';
-        }catch(_){}
-      });
-    }catch(_){}
+    });
+
+    // Remove overlay-ish classes from <html> and <body>
+    var offClasses = ['sheet-open','modal-open','no-scroll','dim','is-dim','has-overlay','has-scrim'];
+    offClasses.forEach(function(c){
+      document.documentElement.classList.remove(c);
+      document.body && document.body.classList.remove(c);
+    });
+
+    // Restore scrolling / pointer events
+    try{ document.body.style.overflow = ''; }catch(_){}
+    try{ document.body.style.pointerEvents = ''; }catch(_){}
+
+    // Remove inert/aria-modal on main app containers
+    document.querySelectorAll('[inert], [aria-modal="true"]').forEach(function(el){
+      el.removeAttribute('inert');
+      if (el.getAttribute('aria-modal') === 'true') el.removeAttribute('aria-modal');
+    });
+
+    // Re-enable tabindex on root app if it was disabled
+    var app = document.getElementById('app') || document.querySelector('#root, main, .app, .viewer');
+    if (app){ app.removeAttribute('inert'); app.style.pointerEvents = ''; }
+
+    // Give focus back to a safe element (e.g., the primary button)
+    var primary = document.querySelector('[autofocus], .primary, button, [role="button"], a, input, select, textarea');
+    try{ primary && primary.focus(); }catch(_){}
   }
 
-  // Expose so existing close handlers can reuse
-  window.__clearOverlaysV22 = clearOverlays;
+  // Export for other scripts
+  window._clearOverlays = clearOverlays;
 
-  // Hook into existing v21 close pipeline if present
-  var oldForceClose = null;
-  try {
-    oldForceClose = window.forceClose;
-  } catch(_){}
-  // We don't overwrite window.forceClose (scoped), but we add global listeners
+  // Hook into existing close path by listening after our previous v21 handler
   window.addEventListener('DOMContentLoaded', function(){
-    // Scrim click also clears overlays
+    // When we detect any sheet/dialog is being closed, run overlay cleanup shortly after
+    var runCleanup = function(){ setTimeout(clearOverlays, 0); };
+
+    // Click on close-like controls
     document.addEventListener('click', function(e){
       var t = e.target;
-      if(!t) return;
-      if (t.id === 'sheetScrim' || (t.classList && (t.classList.contains('scrim') || t.classList.contains('mdc-dialog__scrim')))){
-        setTimeout(clearOverlays, 0);
-      }
+      if (!t) return;
+      var btn = t.closest && t.closest('#capClose, #pinsClose, [data-close], .close, .icon-close, button[aria-label="閉じる"], [aria-label="close"], [aria-label="Close"]');
+      if (btn){ runCleanup(); }
     }, true);
 
-    // After any click on close-like controls, ensure overlays are cleared next frame
-    document.addEventListener('click', function(e){
-      var t = e.target;
-      if(!t) return;
-      var closeLike = t.closest && t.closest('#capClose, #pinsClose, [data-close], .close, .icon-close, button[aria-label="閉じる"], [aria-label="close"], [aria-label="Close"]');
-      if (closeLike){
-        setTimeout(clearOverlays, 0);
-      }
+    // Key paths (Enter/Space/Escape)
+    document.addEventListener('keyup', function(e){
+      if (e.key === 'Enter' || e.key === ' ' || e.code === 'Space'){ runCleanup(); }
+    }, true);
+    document.addEventListener('keydown', function(e){
+      if (e.key === 'Escape'){ runCleanup(); }
     }, true);
 
-    // As a fail-safe, if no modal is open, keep scrims inert
-    var mo = new MutationObserver(function(){
-      var anyOpen = document.querySelector('#capSheet[open], .cap-sheet[open], [role="dialog"][open], dialog[open]');
-      if (!anyOpen){ clearOverlays(); }
+    // Also scrub overlays if visibility changes on sheets
+    var mo = new MutationObserver(function(muts){
+      muts.forEach(function(m){
+        if (m.type === 'attributes' && (m.attributeName === 'open' || m.attributeName === 'class')){
+          var n = m.target;
+          if (n && (n.id === 'capSheet' || n.classList && n.classList.contains('cap-sheet'))){
+            // If sheet is now hidden, ensure overlays are gone
+            var hidden = n.hidden || !n.hasAttribute('open') || n.getAttribute('aria-hidden') === 'true';
+            if (hidden) clearOverlays();
+          }
+        }
+      });
     });
     try{
-      mo.observe(document.documentElement, { subtree:true, attributes:true, attributeFilter:['open','class','hidden','style','aria-hidden']});
+      var targets = document.querySelectorAll('#capSheet, .cap-sheet');
+      targets.forEach(function(t){ mo.observe(t, { attributes:true }); });
     }catch(_){}
   });
+
+  // Provide a global method that close handlers can call directly
+  window.closeAllSheetsAndOverlays = function(){
+    try{
+      var n = document.getElementById('capSheet') || document.querySelector('.cap-sheet');
+      if (n){
+        if (typeof n.close === 'function'){ try{ n.close(); }catch(_){}} 
+        n.removeAttribute('open'); n.hidden = true; n.setAttribute('aria-hidden','true');
+      }
+    }catch(_){}
+    clearOverlays();
+  };
 })();
 </script>
 
