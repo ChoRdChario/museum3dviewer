@@ -491,6 +491,16 @@ html.sheet-open .floating-buttons{
 .cap-header .cap-close{ position:relative; z-index:1600 !important; pointer-events:auto !important; }
 </style>
 
+
+<style>
+/* v21: clickable layering + focus ring */
+.cap-sheet, #capSheet{ z-index:1501 !important; pointer-events:auto !important; }
+.scrim{ z-index:1200 !important; }
+.cap-header{ position:relative; z-index:1550; pointer-events:auto; }
+.cap-header .cap-close{ position:relative; z-index:1600 !important; pointer-events:auto !important; }
+.cap-header .cap-close:focus{ outline:2px solid rgba(0,0,0,.35); outline-offset:2px; }
+</style>
+
 </head>
 <body>
 <div id="sheetScrim" class="scrim" hidden aria-hidden="true"></div>
@@ -3288,195 +3298,81 @@ document.getElementById('toolInlineBtn')?.addEventListener('click', ()=>{
 
 </script>
 
+
+
+
 <script>
+/* v21: non-blocking close — allow focus/active, then close on next frame */
 (function(){
-  const isMobile = ()=> window.matchMedia('(max-width: 960px)').matches;
-  if (!isMobile()) return;
-
-  // Neutralize global openers if present
-  const g = window;
-  const guard = fn => function(){ /* view-only on mobile */ };
-  ['openDock','toggleDock','openDockSheet','openToolDock','showTools'].forEach(n=>{
-    if (typeof g[n]==='function'){ try{ g[n] = guard(g[n]); }catch(_){ } }
-  });
-
-  // Block delegated clicks
-  document.addEventListener('click', (e)=>{
-    const t = e.target;
-    if (!t) return;
-    if (t.closest && t.closest('#dockFab, #editorDock, #materialsDock, #toolFab, #toolBtn, [data-open-dock], [data-role="tool-button"]')){
-      e.preventDefault(); e.stopPropagation();
+  function findContainerFrom(el){
+    if (!el) return null;
+    if (el.closest) {
+      return el.closest('#capSheet,.cap-sheet,.modal,[role="dialog"],dialog') || document.getElementById('modalRoot');
     }
-  }, {capture:true});
-})();
-</script>
-
-
-<script>
-(function(){
-  const btn = document.getElementById('loadFab');
-  if (!btn) return;
-  btn.addEventListener('click', ()=>{
-    // Prefer existing load flow if present
-    const openLoad = window.openLoadSheet || window.openLoadDialog || null;
-    const start = document.getElementById('loadStart');
-    const input = document.getElementById('loadInput') || document.getElementById('fileId');
-    if (openLoad){ try{ openLoad(); return; }catch(_){} }
-    if (input){ try{ input.scrollIntoView({behavior:'smooth', block:'center'}); input.focus(); }catch(_){} }
-  });
-})();
-</script>
-
-
-<script>
-(function(){
-  const cancel = document.getElementById('loadCancel');
-  if (!cancel) return;
-  cancel.addEventListener('click', (e)=>{
-    e.preventDefault();
-    // close known sheets/dialogs
-    try{ if (typeof closeLoadSheet==='function') closeLoadSheet(); }catch(_){}
-    try{ if (typeof closeDockSheet==='function') closeDockSheet(); }catch(_){}
-    // hide overlay if visible
-    try{ if (typeof hideLoading==='function') hideLoading(0); }catch(_){}
-    // also collapse any <dialog> used for loading
-    const dlg = document.getElementById('loadDialog');
-    if (dlg && typeof dlg.close==='function'){ try{ dlg.close(); }catch(_){ } }
-  });
-})();
-</script>
-
-
-<script>
-(function(){
-  const btn = document.getElementById('loadFab');
-  if (!btn) return;
-  btn.addEventListener('click', ()=>{
-    if (typeof openLoadSheet==='function'){ openLoadSheet(); return; }
-    if (typeof openLoadDialog==='function'){ openLoadDialog(); return; }
-    const input = document.getElementById('loadInput') || document.getElementById('fileId');
-    if (input){ input.scrollIntoView({behavior:'smooth', block:'center'}); input.focus(); }
-  });
-})();
-</script>
-
-
-<script>
-(function(){
-  function $(sel, root){ return (root||document).querySelector(sel); }
-  function all(sel, root){ return Array.from((root||document).querySelectorAll(sel)); }
-
-  // Canonical open/close for Load UI
-  function openLoadUI(){
-    // Prefer existing functions
-    if (typeof window.openLoadSheet === 'function') return window.openLoadSheet();
-    if (typeof window.openLoadDialog === 'function') return window.openLoadDialog();
-    // Fallback: find a sheet/dialog that contains load controls
-    const panels = all('#loadSheet, #dockSheet, .sheet[role="dialog"], dialog, [data-load-panel]');
-    const target = panels.find(p => p.contains($('#loadStart')) || p.contains($('#loadInput')) || p.contains($('#fileId')));
-    if (target){
-      try{
-        // sheet style
-        target.dataset.snap = target.dataset.snap || 'full';
-        target.hidden = false; target.setAttribute('open',''); target.setAttribute('aria-hidden','false');
-        document.documentElement.classList.add('sheet-open');
-      }catch(_){}
-      try{ if (typeof target.showModal==='function') target.showModal(); }catch(_){}
-      return;
-    }
-    // If nothing, scroll to input as last resort
-    const input = $('#loadInput') || $('#fileId');
-    if (input){ input.scrollIntoView({behavior:'smooth', block:'center'}); input.focus(); }
+    return document.getElementById('capSheet') || document.querySelector('.cap-sheet');
   }
-
-  function closeLoadUI(){
-    // Prefer existing close functions
-    if (typeof window.closeLoadSheet === 'function') try{ window.closeLoadSheet(); }catch(_){}
-    if (typeof window.closeDockSheet === 'function') try{ window.closeDockSheet(); }catch(_){}
-    // Fallback close: any visible panel that contains the controls
-    const panels = all('#loadSheet, #dockSheet, .sheet[role="dialog"], dialog, [data-load-panel]');
-    panels.forEach(p => {
-      if (p.contains($('#loadStart')) || p.contains($('#loadInput')) || p.contains($('#fileId'))){
-        try{ p.removeAttribute('open'); p.setAttribute('aria-hidden','true'); }catch(_){}
-        try{ p.hidden = true; }catch(_){}
-        try{ if (typeof p.close === 'function') p.close(); }catch(_){}
+  function forceClose(el){
+    try{
+      var root = findContainerFrom(el) || document.getElementById('capSheet') || document.querySelector('.cap-sheet');
+      if(root){
+        if(typeof root.close==='function'){ try{ root.close(); }catch(e){} }
+        if(root.removeAttribute) root.removeAttribute('open');
+        root.hidden = true;
+        if(root.setAttribute) root.setAttribute('aria-hidden','true');
+        if(root.id==='modalRoot'){ root.innerHTML=''; root.classList.add('hidden'); }
       }
-    });
-    document.documentElement.classList.remove('sheet-open');
-    // Clear inputs explicitly (this is the "URL入力そのものをキャンセル")
-    try{ const li = $('#loadInput'); if (li) li.value = ''; }catch(_){}
-    try{ const fi = $('#fileId'); if (fi) fi.value = ''; }catch(_){}
-    try{ const gi = $('#glbUrl'); if (gi) gi.value = ''; }catch(_){}
-    // Hide overlay if any
-    try{ if (typeof window.hideLoading === 'function') window.hideLoading(0); }catch(_){}
-    // Blur focus to avoid mobile keyboards lingering
-    try{ if (document.activeElement) document.activeElement.blur(); }catch(_){}
+      var s=document.getElementById('sheetScrim');
+      if(s){ s.removeAttribute('open'); s.setAttribute('hidden',''); s.setAttribute('aria-hidden','true'); }
+      document.documentElement.classList.remove('sheet-open');
+    }catch(_){}
   }
-
-  // Export for other scripts (optional)
-  window.openLoadUI = window.openLoadUI || openLoadUI;
-  window.closeLoadUI = window.closeLoadUI || closeLoadUI;
-
-  // Wire the bottom-right "読み込み" button to open the UI
-  const loadFab = document.getElementById('loadFab');
-  if (loadFab){
-    loadFab.addEventListener('click', function(ev){
-      ev.preventDefault();
-      openLoadUI();
-    });
+  function isCloseLike(el){
+    if (!el) return false;
+    if (el.id === 'capClose' || el.id === 'pinsClose') return true;
+    if (el.matches && el.matches('[data-close], .close, .icon-close, button[aria-label="閉じる"], [aria-label="close"], [aria-label="Close"]')) return true;
+    var btn = el.closest && el.closest('#capClose, #pinsClose, [data-close], .close, .icon-close, button[aria-label="閉じる"], [aria-label="close"], [aria-label="Close"]');
+    return !!btn;
   }
-
-  // Wire Cancel explicitly
-  const loadCancel = document.getElementById('loadCancel');
-  if (loadCancel){
-    loadCancel.addEventListener('click', function(ev){
-      ev.preventDefault();
-      // Do NOT trigger any loading; just cancel and close
-      closeLoadUI();
-    });
-  }
-
-  // Also ensure "ツール"ボタンはモバイルで非表示＆動作しない
-  const isMobile = window.matchMedia('(max-width: 960px)').matches;
-  if (isMobile){
-    ['toolBtn','toolFab','dockFab','toolInlineBtn'].forEach(id=>{
-      const el = document.getElementById(id);
-      if (el){ el.style.display='none'; el.setAttribute('aria-hidden','true'); el.addEventListener('click', e=>{ e.preventDefault(); e.stopPropagation(); }, {capture:true}); }
-    });
-  }
-})();
-</script>
-
-
-<script>
-// v20: close capSheet by click/Enter/Space on #capClose, with capture-phase
-(function(){
-  function closeCap(){
-    var root = document.getElementById('capSheet') || document.querySelector('.cap-sheet');
-    if(root){ root.removeAttribute('open'); root.hidden = true; root.setAttribute('aria-hidden','true'); }
-    var s = document.getElementById('sheetScrim');
-    if(s){ s.removeAttribute('open'); s.setAttribute('hidden',''); s.setAttribute('aria-hidden','true'); }
-    document.documentElement.classList.remove('sheet-open');
+  function closestCloseLike(el){
+    return el && (el.closest && el.closest('#capClose, #pinsClose, [data-close], .close, .icon-close, button[aria-label="閉じる"], [aria-label="close"], [aria-label="Close"]')) || el;
   }
   window.addEventListener('DOMContentLoaded', function(){
+    // CLICK: do not preventDefault — allow focus/active, then close shortly after
     document.addEventListener('click', function(e){
       var t = e.target;
-      if (t && (t.id==='capClose' || (t.closest && t.closest('#capClose')))){
-        e.preventDefault(); e.stopPropagation();
-        closeCap();
+      if (isCloseLike(t)){
+        var btn = closestCloseLike(t);
+        try{ btn.focus && btn.focus(); }catch(_){}
+        setTimeout(function(){ forceClose(btn); }, 0);
+        e.stopPropagation();
+      }
+    }, true); // capture
+    
+    // MOUSEDOWN: ensure the button receives focus when pressed
+    document.addEventListener('mousedown', function(e){
+      var t = e.target;
+      if (isCloseLike(t)){
+        var btn = closestCloseLike(t);
+        try{ btn.focus && btn.focus(); }catch(_){}
       }
     }, true);
-    document.addEventListener('keydown', function(e){
-      if (e.key==='Enter' || e.key===' ' || e.code==='Space'){
+
+    // KEYUP for Enter/Space: close after key is released (preserves pressed visual state)
+    document.addEventListener('keyup', function(e){
+      if (e.key === 'Enter' || e.key === ' ' || e.code === 'Space'){
         var a = document.activeElement;
-        if (a && (a.id==='capClose' || (a.closest && a.closest('#capClose,.cap-header')))){
-          e.preventDefault(); e.stopPropagation();
-          closeCap();
+        if (a && isCloseLike(a)){
+          e.stopPropagation();
+          forceClose(a);
         }
       }
-      if (e.key==='Escape'){
-        e.preventDefault(); e.stopPropagation();
-        closeCap();
+    }, true);
+
+    // KEYDOWN for Esc: immediate
+    document.addEventListener('keydown', function(e){
+      if (e.key === 'Escape'){
+        e.stopPropagation();
+        forceClose(document.activeElement || document.body);
       }
     }, true);
   });
