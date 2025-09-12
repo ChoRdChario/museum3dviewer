@@ -369,7 +369,7 @@ function normalizeHex(c){
 #dock[data-open="true"] ~ main #view .tool-inline-btn{ display:none } /* Dock openなら隠す */
 
 /* === Mobile load FAB & sheet === */
-.load-fab{ position:fixed; right:14px; bottom:calc(14px + env(safe-area-inset-bottom,0)); z-index:1200; padding:12px 16px; border:1px solid #ddd; border-radius:999px; background:#fff; box-shadow:0 12px 28px rgba(0,0,0,.35); cursor:pointer; }
+.load-fab{ display:none;  position:fixed; right:14px; bottom:calc(14px + env(safe-area-inset-bottom,0)); z-index:1200; padding:12px 16px; border:1px solid #ddd; border-radius:999px; background:#fff; box-shadow:0 12px 28px rgba(0,0,0,.35); cursor:pointer; }
 @media (max-width: 960px){
   .load-fab{ position:fixed; right:14px; bottom:calc(14px + env(safe-area-inset-bottom,0)); z-index:1000; padding:12px 16px; border:1px solid #ddd; border-radius:999px; background:#fff; box-shadow:0 12px 28px rgba(0,0,0,.35); cursor:pointer; }
 }
@@ -396,7 +396,7 @@ function normalizeHex(c){
 .scrim[open]{ display:block }
 
 /* Raise sheet above any floating pills, ensure safe-area paddings */
-.sheet{ z-index:999; }
+.sheet{ z-index:1305; }
 .sheet .body{ padding-bottom: calc(16px + env(safe-area-inset-bottom, 0)); }
 
 /* Keep FABs above safe area; hide while a sheet is open */
@@ -493,6 +493,12 @@ html.sheet-open .floating-buttons{
   button[aria-label*="ツール"],
   .tool-btn, .btn-tool { display: none !important; }
   .load-fab{ display:block !important; }
+}
+
+
+/* Desktop: never show mobile load FAB */
+@media (min-width: 961px){
+  .load-fab{ display:none !important; visibility:hidden !important; pointer-events:none !important; }
 }
 
 </style>
