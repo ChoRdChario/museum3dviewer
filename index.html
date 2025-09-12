@@ -3571,5 +3571,173 @@ document.getElementById('toolInlineBtn')?.addEventListener('click', ()=>{
 })();
 </script>
 <!-- /Safe init patch -->
+
+
+<!-- Guardrails patch (Step 2): load race guard, fetchWithRetry, texture cleanup, dynamic device check -->
+<script>
+(function(){
+  'use strict';
+  // --- 0) Namespace ---
+  const W = window;
+
+  // --- 1) Dynamic device check: isMobile() ---
+  if (typeof W.isMobile !== 'function') {
+    W.isMobile = function(){
+      try {
+        return window.matchMedia('(max-width: 640px), (pointer: coarse)').matches;
+      } catch(e) {
+        return /Mobi|Android/i.test(navigator.userAgent);
+      }
+    };
+    // Optional: maintain a body class for CSS hooks
+    try {
+      const mq = window.matchMedia('(max-width: 640px), (pointer: coarse)');
+      const update = () => {
+        document.documentElement.classList.toggle('is-mobile', mq.matches);
+      };
+      mq.addEventListener ? mq.addEventListener('change', update) : mq.addListener(update);
+      update();
+    } catch(e){}
+  }
+
+  // --- 2) fetchWithRetry: backoff + token refresh ---
+  if (typeof W.fetchWithRetry !== 'function') {
+    W.fetchWithRetry = async function fetchWithRetry(input, init={}, opts={}){
+      const maxAttempts = opts.maxAttempts || 4;    // total attempts
+      const baseDelayMs = opts.baseDelayMs || 400;  // initial backoff
+      let triedRefresh = false;
+
+      for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        try {
+          const res = await fetch(input, init);
+          if (res.status === 401 || res.status === 403) {
+            // Try a one-time token refresh if available
+            if (!triedRefresh && typeof W.ensureToken === 'function') {
+              triedRefresh = true;
+              try { await W.ensureToken(); } catch(e){}
+              continue; // retry immediately after refresh
+            }
+            if (attempt >= maxAttempts) return res; // give up to caller
+          }
+          if (res.status === 429 || (res.status >= 500 && res.status <= 599)) {
+            // retryable
+          } else {
+            return res; // success or non-retryable status
+          }
+        } catch (netErr) {
+          // network error -> retry
+        }
+        // backoff
+        if (attempt < maxAttempts) {
+          const jitter = Math.floor(Math.random()*100);
+          const delayMs = Math.floor(baseDelayMs * Math.pow(2, attempt-1)) + jitter;
+          await new Promise(r => setTimeout(r, delayMs));
+          continue;
+        }
+      }
+      // Final try with normal fetch (shouldn't reach here in practice)
+      return fetch(input, init);
+    };
+  }
+
+  // --- 3) Texture cleanup helpers for inverted/temporary textures ---
+  if (!W.__tempTextures) { W.__tempTextures = new Set(); }
+  if (typeof W.registerTemporaryTexture !== 'function') {
+    W.registerTemporaryTexture = function(tex){
+      try { if (tex && typeof tex.dispose === 'function') W.__tempTextures.add(tex); } catch(e){}
+    };
+  }
+  if (typeof W.disposeTemporaryTextures !== 'function') {
+    W.disposeTemporaryTextures = function(){
+      try {
+        W.__tempTextures.forEach(tex => { try { tex.dispose(); } catch(e){} });
+        W.__tempTextures.clear();
+      } catch(e){}
+    };
+  }
+
+  // Monkey-patch THREE.CanvasTexture to auto-register (non-invasive; only if available)
+  try {
+    if (W.THREE && W.THREE.CanvasTexture && !W.THREE.CanvasTexture.__museumPatched) {
+      const CT = W.THREE.CanvasTexture;
+      const OldCtor = CT;
+      const Patched = function CanvasTexturePatched(canvas, mapping, wrapS, wrapT, magFilter, minFilter, format, type, anisotropy){
+        const tex = new OldCtor(canvas, mapping, wrapS, wrapT, magFilter, minFilter, format, type, anisotropy);
+        try { W.registerTemporaryTexture(tex); } catch(e){}
+        return tex;
+      };
+      Patched.prototype = OldCtor.prototype;
+      Patched.__proto__ = OldCtor.__proto__;
+      W.THREE.CanvasTexture = Patched;
+      W.THREE.CanvasTexture.__museumPatched = true;
+    }
+  } catch(e){}
+
+  // --- 4) GLTF load race guard (generation gate) ---
+  if (typeof W.__modelLoadGen !== 'number') { W.__modelLoadGen = 0; }
+
+  // Patch GLTFLoader.load so that late arrivals get ignored (no crashes)
+  try {
+    if (W.THREE && W.THREE.GLTFLoader && !W.THREE.GLTFLoader.__museumPatched) {
+      const L = W.THREE.GLTFLoader.prototype;
+      const origLoad = L.load;
+      L.load = function(url, onLoad, onProgress, onError){
+        // Before starting a new load, optionally cleanup temporary textures
+        try { W.disposeTemporaryTextures(); } catch(e){}
+        const myGen = ++W.__modelLoadGen;
+        const safeOnLoad = function(gltf){
+          if (myGen !== W.__modelLoadGen) {
+            try { console && console.warn && console.warn('[guard] Stale GLB load ignored:', url); } catch(_){}
+            // Best-effort cleanup of stale gltf scene
+            try {
+              if (gltf && gltf.scene) {
+                gltf.scene.traverse((o)=>{
+                  if (o.isMesh) {
+                    try {
+                      if (o.geometry) o.geometry.dispose();
+                      if (o.material) {
+                        const mats = Array.isArray(o.material)? o.material : [o.material];
+                        mats.forEach(m=>{
+                          try {
+                            if (m.map && m.map.dispose) m.map.dispose();
+                            if (m.dispose) m.dispose();
+                          } catch(e){}
+                        });
+                      }
+                    } catch(e){}
+                  }
+                });
+              }
+            } catch(e){}
+            return; // drop result
+          }
+          if (typeof onLoad === 'function') return onLoad(gltf);
+        };
+        const safeOnError = function(err){
+          if (myGen !== W.__modelLoadGen) return; // ignore errors from stale loads
+          if (typeof onError === 'function') return onError(err);
+          try { console && console.warn && console.warn('[GLTFLoader]', err); } catch(_){}
+        };
+        return origLoad.call(this, url, safeOnLoad, onProgress, safeOnError);
+      };
+      W.THREE.GLTFLoader.__museumPatched = true;
+    }
+  } catch(e){}
+
+  // Optional helpers to manually control generation, if app code wants to:
+  if (typeof W.beginNewModelLoad !== 'function') {
+    W.beginNewModelLoad = function(){
+      try { W.disposeTemporaryTextures(); } catch(e){}
+      return (++W.__modelLoadGen);
+    };
+  }
+  if (typeof W.currentModelLoadGen !== 'function') {
+    W.currentModelLoadGen = function(){ return W.__modelLoadGen|0; };
+  }
+
+})();
+</script>
+<!-- /Guardrails patch (Step 2) -->
+
 </body>
 </html>
