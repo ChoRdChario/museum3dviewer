@@ -4092,8 +4092,9 @@ document.getElementById('toolInlineBtn')?.addEventListener('click', ()=>{
 })();
 </script>
 
+
 <script>
-// v1.22.1-bg.p9: Sign-in gate control (safe)
+// v1.22.1-bg.p13: Corrected sign-in gate control and handler
 document.addEventListener("DOMContentLoaded", ()=>{
   const gate = document.getElementById("signinGateWrap");
   if (gate) gate.hidden = false; // show by default
@@ -4106,9 +4107,18 @@ document.addEventListener("DOMContentLoaded", ()=>{
   }
 });
 
-}
+document.getElementById("btnGateSignIn")?.addEventListener("click", ()=>{
+  if (typeof requestTokenInteractive === 'function') {
+    requestTokenInteractive(ALL_SCOPES).then(()=>{
+      const gate = document.getElementById("signinGateWrap");
+      if (gate) gate.hidden = true;
+    }).catch(err=>{
+      console.warn("Sign-in failed or cancelled:", err);
+    });
+  }
 });
 </script>
+
 
 
 <script>
