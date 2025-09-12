@@ -573,6 +573,37 @@ html.sheet-open, body.sheet-open { overflow: hidden !important; }
 function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 </script>
 
+
+<script>
+// v1.22.1-bg.p5: escape helpers
+if (typeof window.esc !== 'function') {
+  window.esc = function(s){ return String(s==null?'':s).replace(/[&<>"']/g, function(c){ return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]); }); };
+}
+if (typeof window.escAttr !== 'function') {
+  window.escAttr = function(s){ return window.esc(s); };
+}
+</script>
+
+<style>
+/* v1.22.1-bg.p6: cleanup & unification */
+/* Z-index variables for overlays */
+:root {
+  --z-scrim: 3100;
+  --z-sheet: 3200;
+  --z-modal: 3300;
+}
+.scrim { z-index: var(--z-scrim) !important; }
+.sheet { z-index: var(--z-sheet) !important; }
+.modal-overlay { z-index: var(--z-modal) !important; }
+
+/* Single-source visibility for mobile Load FAB */
+@media (max-width: 960.98px) {
+  .load-fab { display: flex !important; }
+}
+@media (min-width: 961px) {
+  .load-fab { display: none !important; }
+}
+</style>
 </head>
 <body>
 <div id="sheetScrim" class="scrim" hidden aria-hidden="true"></div>
@@ -1525,7 +1556,7 @@ document.documentElement.classList.remove('sheet-open');
 }
 
 
-loadClose?.addEventListener('click', closeLoadSheet);
+
 
 // drag (reuse caption logic style: handle only)
 (function(){
@@ -1792,23 +1823,23 @@ function redrawPins(){
     const hid=`file_${pin.id}`;
     const driveLink = pin.imageDriveId ? `https://drive.google.com/file/d/${pin.imageDriveId}/view?usp=drive_link` : '';
     wrap.innerHTML = `
-      <summary data-summary="${pin.id}">${esc(pin.title||'（無題）')} <span class="muted">@ ${safePos(pin.position).map(n=>Number(n).toFixed(3)).join(', ')}</span></summary>
-      <div class="row"><input data-k="title" placeholder="タイトル" value="${esc(pin.title||'')}" ${READ_ONLY?'disabled':''} autocomplete="off"></div>
-      <div class="row"><textarea data-k="text" rows="3" placeholder="キャプション" ${READ_ONLY?'disabled':''}>${esc(pin.text||'')}</textarea></div>
-      <div class="row"><label class="pill small">色 <input type="color" data-k="color" value="${pin.color||'#ee3333'}" ${READ_ONLY?'disabled':''}></label></div>
-      ${READ_ONLY?'':`<input id="${hid}" class="hidden" type="file" accept="image/*">`}
+      <summary data-summary="${esc(pin.id)}">${esc(pin.title||'（無題）')} <span class="muted">@ ${esc(safePos(pin.position).map(n=>Number(n).toFixed(3)).join(', '))}</span></summary>
+      <div class="row"><input data-k="title" placeholder="タイトル" value="${esc(pin.title||'')}" ${esc(READ_ONLY?'disabled':'')} autocomplete="off"></div>
+      <div class="row"><textarea data-k="text" rows="3" placeholder="キャプション" ${esc(READ_ONLY?'disabled':'')}>${esc(pin.text||'')}</textarea></div>
+      <div class="row"><label class="pill small">色 <input type="color" data-k="color" value="${esc(pin.color||'#ee3333')}" ${esc(READ_ONLY?'disabled':'')}></label></div>
+      ${esc(READ_ONLY?'':`<input id="${hid)}" class="hidden" type="file" accept="image/*">`}
       <div class="row">
-        ${READ_ONLY?'':`<button data-act="choose">ローカルから</button>
-        <button data-act="pickDrive">フォルダから選ぶ</button>`}
-        ${pin.imageUrl||pin.imageDriveId?'<div class="pic-holder" data-pic="'+pin.id+'"></div>':''}
-        ${driveLink?`<a class="small" href="${esc(driveLink)}" target="_blank" rel="noopener">元画像を開く ↗</a>`:''}
-        ${pin.imageDriveId?`<button data-act="copyPrev" title="Driveの埋め込み用URLをコピー">コピー：プレビューURL</button>
-        <button data-act="togglePub" title="公開/限定を切替">公開↔限定</button>`:''}
+        ${esc(READ_ONLY?'':`<button data-act="choose">ローカルから</button>
+        <button data-act="pickDrive">フォルダから選ぶ</button>`)}
+        ${esc(pin.imageUrl||pin.imageDriveId?'<div class="pic-holder" data-pic="'+pin.id+'"></div>':'')}
+        ${esc(driveLink?`<a class="small" href="${esc(driveLink))}" target="_blank" rel="noopener">元画像を開く ↗</a>`:''}
+        ${esc(pin.imageDriveId?`<button data-act="copyPrev" title="Driveの埋め込み用URLをコピー">コピー：プレビューURL</button>
+        <button data-act="togglePub" title="公開/限定を切替">公開↔限定</button>`:'')}
       </div>
       <div class="row">
         <button data-act="center">このピンへ移動</button>
         <button data-act="toggle">ポップアップ</button>
-        ${READ_ONLY?'':`<button data-act="remove" class="warn">削除</button>`}
+        ${esc(READ_ONLY?'':`<button data-act="remove" class="warn">削除</button>`)}
       </div>`;
     if (!READ_ONLY){
       wrap.addEventListener('input',(e)=>{
@@ -1873,7 +1904,7 @@ function updateListPositionSummary(id){
   const summary = document.querySelector(`summary[data-summary="${id}"]`);
   if (summary) {
     const title = (PINS.find(x=>x.id===id)?.title)||'（無題）';
-    summary.innerHTML = `${title} <span class="muted">@ ${[p.x,p.y,p.z].map(n=>n.toFixed(3)).join(', ')}</span>`;
+    summary.innerHTML = `${esc(title)} <span class="muted">@ ${esc([p.x,p.y,p.z].map(n=>n.toFixed(3)).join(', '))}</span>`;
   }
 }
 
@@ -2404,23 +2435,23 @@ function buildMaterialsUI(targetEl){
 
     const el=document.createElement('div'); el.className='mat';
     el.innerHTML = `
-      <div class="name">${name}</div>
-      <div class="row${hasMap?'':' disabled'}">
-        <label><input type="checkbox" data-k="invert" ${cfg.invert&&hasMap?'checked':''} ${READ_ONLY?'disabled':''}> 色反転（黒を透過）</label>
-        ${!hasMap?`<span class="muted">（テクスチャなし）</span>`:''}
+      <div class="name">${esc(name)}</div>
+      <div class="row${esc(hasMap?'':' disabled')}">
+        <label><input type="checkbox" data-k="invert" ${esc(cfg.invert&&hasMap?'checked':'')} ${esc(READ_ONLY?'disabled':'')}> 色反転（黒を透過）</label>
+        ${esc(!hasMap?`<span class="muted">（テクスチャなし）</span>`:'')}
       </div>
       <div class="row">
         <span class="muted">不透明度</span>
-        <input type="range" data-k="opacity" min="0" max="1" step="0.01" value="${cfg.opacity}" ${READ_ONLY?'disabled':''}>
-        <span class="muted" data-k="ov">${cfg.opacity.toFixed(2)}</span>
+        <input type="range" data-k="opacity" min="0" max="1" step="0.01" value="${esc(cfg.opacity)}" ${esc(READ_ONLY?'disabled':'')}>
+        <span class="muted" data-k="ov">${esc(cfg.opacity.toFixed(2))}</span>
       </div>
-      <div class="row${hasMap?'':' disabled'}">
+      <div class="row${esc(hasMap?'':' disabled')}">
         <span class="muted">黒しきい値</span>
-        <input type="range" data-k="black" min="0" max="0.5" step="0.01" value="${cfg.blackThreshold}" ${READ_ONLY?'disabled':''}>
-        <span class="muted" data-k="bv">${cfg.blackThreshold.toFixed(2)}</span>
+        <input type="range" data-k="black" min="0" max="0.5" step="0.01" value="${esc(cfg.blackThreshold)}" ${esc(READ_ONLY?'disabled':'')}>
+        <span class="muted" data-k="bv">${esc(cfg.blackThreshold.toFixed(2))}</span>
       </div>
       <div class="row">
-        <label><input type="checkbox" data-k="double" ${cfg.doubleSided?'checked':''} ${READ_ONLY?'disabled':''}> 両面表示（裏面も描画）</label>
+        <label><input type="checkbox" data-k="double" ${esc(cfg.doubleSided?'checked':'')} ${esc(READ_ONLY?'disabled':'')}> 両面表示（裏面も描画）</label>
       </div>
     `;
 
@@ -3424,8 +3455,8 @@ document.getElementById('toolInlineBtn')?.addEventListener('click', ()=>{
     if (s.includes('://')) return s;
     return 'https://drive.google.com/uc?id=' + encodeURIComponent(s);
   }
-  loadFab?.addEventListener('click', openLoadSheet);
-  loadClose?.addEventListener('click', closeLoadSheet);
+  
+  
   // simple handle drag (header only)
   (function(){
     let startY=0, startSnap='half', dragging=false;
@@ -3985,6 +4016,16 @@ document.getElementById('toolInlineBtn')?.addEventListener('click', ()=>{
   window.addEventListener('orientationchange', recomputeSheetHeight);
 })();
 
+</script>
+<script>
+// v1.22.1-bg.p6: ensure legacy IS_MOBILE reflects dynamic isMobile()
+(function(){
+  try{
+    if (!('IS_MOBILE' in window)) {
+      Object.defineProperty(window, 'IS_MOBILE', { get: ()=> (typeof isMobile==='function' ? isMobile() : (matchMedia('(max-width:640px), (pointer:coarse)').matches)), configurable: false });
+    }
+  }catch(_){}
+})();
 </script>
 </body>
 </html>
