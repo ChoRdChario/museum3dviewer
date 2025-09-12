@@ -4853,5 +4853,169 @@ const Overlay = (()=> {
 })();
 </script>
 
+
+<script>
+/* v23.5 — Robust pins.json loader (Drive alt=media), BOM-safe JSON parsing, v2→runtime mapping, redraw */
+(function(){
+  // --- helpers ---
+  function normalizeHex(c){
+    if (typeof c !== 'string') return '#ee3333';
+    c = c.trim();
+    const m = /^#([0-9a-fA-F])([0-9a-fA-F])([0-9a-fA-F])$/.exec(c);
+    if (m) return `#${m[1]}${m[1]}${m[2]}${m[2]}${m[3]}${m[3]}`.toLowerCase();
+    return c.toLowerCase();
+  }
+  function stripBOM(s){
+    if (typeof s !== 'string') return s;
+    // Remove UTF-8 BOM and invisible control chars that sometimes break JSON.parse
+    return s.replace(/^\uFEFF/, '').replace(/^\u200B+/, '');
+  }
+  function safeParseJSON(raw){
+    if (raw == null) throw new Error('No content returned');
+    if (typeof raw !== 'string'){
+      // Some environments give an object already
+      return raw;
+    }
+    let s = stripBOM(raw).trim();
+    try{
+      return JSON.parse(s);
+    }catch(e){
+      // Try to salvage by slicing to first "{" and last "}" (guards against stray logs around JSON)
+      const i = s.indexOf('{');
+      const j = s.lastIndexOf('}');
+      if (i >= 0 && j > i){
+        try{ return JSON.parse(s.slice(i, j+1)); }catch(_){}
+      }
+      throw e;
+    }
+  }
+
+  function v2ToRuntime(pins){
+    const out = [];
+    (pins||[]).forEach(p=>{
+      const pos = p.pos || p.position || [0,0,0];
+      const title = p.title || p.name || '';
+      const text = p.caption || p.text || '';
+      const color = normalizeHex(p.color || '#ee3333');
+      const imgId = p.imageDriveId || (p.image && p.image.id) || null;
+      const imgUrl = imgId ? `https://drive.google.com/uc?id=${imgId}` : (p.imageUrl || p.picture || undefined);
+      out.push({
+        id: p.id || title || Math.random().toString(36).slice(2),
+        position: pos,
+        rotation: p.rotation || [0,0,0],
+        scale: p.scale || 1,
+        title: title,
+        text: text,
+        caption: text,
+        color: color,
+        picture: imgUrl,
+        imageUrl: imgUrl,
+        imageDriveId: imgId || undefined
+      });
+    });
+    return out;
+  }
+
+  // Provide a single entrypoint to apply pins to the scene
+  function applyPins(runtimePins){
+    try{
+      // Broadcast to common globals
+      window.pins = runtimePins;
+      window.PINS = runtimePins;
+      window.currentPins = runtimePins;
+      window.dispatchEvent(new CustomEvent('pins:loaded', { detail: { pins: runtimePins } }));
+      // Try common redraw hooks
+      const fns = ['redrawPins', 'renderPins', 'refreshPins', 'updatePins', 'repaintPins'];
+      for (const name of fns){
+        try{ if (typeof window[name] === 'function'){ window[name](runtimePins); break; } }catch(_){}
+      }
+      console.log('[v23.5] pins applied:', runtimePins.length);
+    }catch(err){
+      console.error('[v23.5] applyPins failed', err);
+    }
+  }
+  window.applyPinsToScene = window.applyPinsToScene || function(pins){ applyPins(v2ToRuntime(pins)); };
+
+  // Normalize any color inputs still using 3-hex (prevents console noise)
+  window.addEventListener('DOMContentLoaded', ()=>{
+    document.querySelectorAll('input[type="color"]').forEach(inp=>{
+      const v = (inp.value||'').trim();
+      const m = /^#([0-9a-fA-F])([0-9a-fA-F])([0-9a-fA-F])$/.exec(v);
+      if (m){ inp.value = `#${m[1]}${m[1]}${m[2]}${m[2]}${m[3]}${m[3]}`; }
+    });
+  });
+
+  // --- Drive JSON loader (alt=media) ---
+  async function fetchJsonFromDrive(fileId){
+    if (!window.gapi || !gapi.client) throw new Error('gapi not ready');
+    // Try 1: official files.get with alt=media
+    try{
+      const r1 = await gapi.client.drive.files.get({ fileId, alt: 'media' });
+      const raw = (typeof r1.body !== 'undefined') ? r1.body : (typeof r1.result !== 'undefined' ? r1.result : r1);
+      return safeParseJSON(raw);
+    }catch(e){
+      console.warn('[v23.5] files.get alt=media failed, fallback to client.request', e);
+    }
+    // Try 2: generic client.request
+    try{
+      const r2 = await gapi.client.request({ path: `/drive/v3/files/${fileId}`, method: 'GET', params: { alt: 'media' } });
+      const raw = (typeof r2.body !== 'undefined') ? r2.body : (typeof r2.result !== 'undefined' ? r2.result : r2);
+      return safeParseJSON(raw);
+    }catch(e2){
+      console.error('[v23.5] client.request alt=media also failed', e2);
+      throw e2;
+    }
+  }
+
+  // Public APIs (override/define)
+  async function loadPinsGeneric(fileId){
+    const data = await fetchJsonFromDrive(fileId);
+    const arr = Array.isArray(data) ? data : (Array.isArray(data.pins) ? data.pins : []);
+    const runtimePins = v2ToRuntime(arr);
+    applyPins(runtimePins);
+    return runtimePins;
+  }
+
+  window.loadPinsFromDriveV2 = async function(fileId){
+    try{
+      const pins = await loadPinsGeneric(fileId);
+      console.log('[v23.5] loadPinsFromDriveV2 OK', pins.length);
+    }catch(err){
+      console.error('[v23.5] loadPinsFromDriveV2 failed', err);
+      alert('pins.json の読み込みに失敗しました: ' + err.message);
+    }
+  };
+  window.loadPinsFromDrive = async function(fileId){
+    try{
+      const pins = await loadPinsGeneric(fileId);
+      console.log('[v23.5] loadPinsFromDrive OK', pins.length);
+    }catch(err){
+      console.error('[v23.5] loadPinsFromDrive failed', err);
+      alert('pins.json の読み込みに失敗しました: ' + err.message);
+    }
+  };
+
+  // Auto-load if pinsId is present
+  async function autoLoadIfPresent(){
+    try{
+      const u = new URL(window.location.href);
+      const pid = u.searchParams.get('pinsId')
+              || document.getElementById('pinsId')?.value
+              || document.querySelector('input[name="pinsId"]')?.value;
+      if (pid){
+        let tries = 0;
+        while(!(window.gapi && gapi.client?.drive) && tries < 60){
+          await new Promise(r=>setTimeout(r, 100));
+          tries++;
+        }
+        if (window.gapi && gapi.client?.drive){
+          await window.loadPinsFromDriveV2(pid);
+        }
+      }
+    }catch(_){}
+  }
+  document.addEventListener('DOMContentLoaded', autoLoadIfPresent);
+})();
+</script>
 </body>
 </html>
