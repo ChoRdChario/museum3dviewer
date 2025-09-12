@@ -4106,15 +4106,24 @@ document.addEventListener("DOMContentLoaded", ()=>{
   }
 });
 
+
+});
+</script>
+
+
 document.getElementById("btnGateSignIn")?.addEventListener("click", ()=>{
   if (typeof requestTokenInteractive === 'function') {
+    let popupHandle;
+    try { popupHandle = window.open("about:blank","_blank","width=500,height=600"); } catch(e){}
     requestTokenInteractive(ALL_SCOPES).then(()=>{
       const gate = document.getElementById("signinGateWrap");
       if (gate) gate.hidden = true;
-    }).catch(()=>{});
+      try { popupHandle?.close(); } catch(e){}
+    }).catch(()=>{
+      try { popupHandle?.close(); } catch(e){}
+    });
   }
 });
-</script>
 
 </body>
 </html>
