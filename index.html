@@ -4106,24 +4106,24 @@ document.addEventListener("DOMContentLoaded", ()=>{
   }
 });
 
-
+}
 });
 </script>
 
 
+<script>
+// v1.22.1-bg.p12: Corrected sign-in handler without extra popup
 document.getElementById("btnGateSignIn")?.addEventListener("click", ()=>{
   if (typeof requestTokenInteractive === 'function') {
-    let popupHandle;
-    try { popupHandle = window.open("about:blank","_blank","width=500,height=600"); } catch(e){}
     requestTokenInteractive(ALL_SCOPES).then(()=>{
       const gate = document.getElementById("signinGateWrap");
       if (gate) gate.hidden = true;
-      try { popupHandle?.close(); } catch(e){}
-    }).catch(()=>{
-      try { popupHandle?.close(); } catch(e){}
+    }).catch(err=>{
+      console.warn("Sign-in failed or cancelled:", err);
     });
   }
 });
+</script>
 
 </body>
 </html>
