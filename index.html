@@ -578,6 +578,11 @@ html.sheet-open .floating-buttons{
   .iconbtn.help-chip::before { border-color: rgba(0,0,0,.35); }
 }
 </style>
+<style>
+/* v1.22.1-bg.p27: hide Save FolderId from pins group */
+#grpPins #folderId,
+#grpPins .tiny { display: none !important; }
+</style>
 </head>
 <body>
 <div id="sheetScrim" class="scrim" hidden aria-hidden="true"></div>
@@ -2572,38 +2577,49 @@ function updatePinsInfo(){
 const openModal = (html)=>{ modalRoot.className='modal-overlay'; modalRoot.innerHTML=html; };
 const closeModal = ()=>{ modalRoot.className='hidden'; modalRoot.innerHTML=''; };
 
+
 /* ヘルプモーダル */
 btnHelpModel?.addEventListener('click', ()=>{
   openModal(`
     <div class="modal">
-      <header><strong>モデル（GLB/GLTF）の指定について</strong><div class="grow"></div><button id="helpClose1">閉じる</button></header>
+      <header>
+        <strong>モデル（GLB/GLTF）の指定について</strong>
+        <div class="grow"></div>
+        <button id="helpClose">閉じる</button>
+      </header>
       <div class="body">
-        <p>Google Drive のファイルURL（例: https://drive.google.com/file/d/<b>FILE_ID</b>/view）から <b>FILE_ID</b> をコピーして『モデル』欄に入力し、<b>[読み込む]</b> を押してください。</p>
+        <p>Google Drive のファイルURL（例: https://drive.google.com/fil...w）から <b>FILE_ID</b> をコピーして『モデル』欄に入力し、<b>[読み込む]</b> を押してください。</p>
         <p>GLTF の場合は外部テクスチャを同一フォルダに配置してください。</p>
         <p>共有は『公開/限定』ボタンで切替できます（権限が必要）。</p>
       </div>
-      <footer><button id="helpClose2">閉じる</button></footer>
+      <footer><button id="helpClose">閉じる</button></footer>
     </div>
   `);
-  document.addEventListener('click', (e)=>{ if(e.target?.id==='helpClose1') closeModal(); });
-  document.addEventListener('click', (e)=>{ if(e.target?.id==='helpClose2') closeModal(); });
+  const close = ()=> closeModal();
+  // modal内の全ての #helpClose を閉じる動作に統一
+  document.querySelectorAll('#helpClose').forEach(el=> el.addEventListener('click', close));
 });
+
 btnHelpPins?.addEventListener('click', ()=>{
   openModal(`
     <div class="modal">
-      <header><strong>キャプション（pins.json）について</strong><div class="grow"></div><button id="helpClose3">閉じる</button></header>
+      <header>
+        <strong>キャプション（pins.json）について</strong>
+        <div class="grow"></div>
+        <button id="helpClose">閉じる</button>
+      </header>
       <div class="body">
         <p>ピン（位置・タイトル・本文・画像など）を保存する JSON ファイルです。未指定でも作業可能で、オートセーブONなら GLB と同じフォルダに自動作成されます。</p>
         <p>既存の pins.json を使う場合は fileId を『キャプション』欄に入力するか、[選択…] から選んでください。</p>
       </div>
-      <footer><button id="helpClose4">閉じる</button></footer>
+      <footer><button id="helpClose">閉じる</button></footer>
     </div>
   `);
-  document.addEventListener('click', (e)=>{ if(e.target?.id==='helpClose3') closeModal(); });
-  document.getElementById('helpClose4')?.addEventListener('click', (e)=>{ (closeModal) });
+  const close = ()=> closeModal();
+  document.querySelectorAll('#helpClose').forEach(el=> el.addEventListener('click', close));
 });
-
 /* 画像アップロード共通 */
+
 async function uploadAndAttachImage(file, pin, opts={}){
   try{
     await ensureToken();
@@ -3613,6 +3629,19 @@ document.addEventListener('DOMContentLoaded', ()=>{
   if (document.readyState === 'complete' || document.readyState === 'interactive') setTimeout(boot, 0);
   else document.addEventListener('DOMContentLoaded', boot);
 })();
+</script>
+
+
+<script>
+// v1.22.1-bg.p27: place helpPins next to pinsId
+document.addEventListener('DOMContentLoaded', ()=>{
+  const pins = document.getElementById('grpPins');
+  const inp  = document.getElementById('pinsId');
+  const help = document.getElementById('helpPins') || document.getElementById('btnHelpPins');
+  if (pins && inp && help) {
+    try { inp.insertAdjacentElement('afterend', help); } catch(_){}
+  }
+});
 </script>
 
 </body>
