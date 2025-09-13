@@ -693,6 +693,30 @@ input[type="text"], input[type="search"], input[type="url"], .pill, .iconbtn, bu
 button, .iconbtn { padding: 4px 8px; min-width: 0; }
 </style>
 
+
+<style>
+/* v1.22.1-bg.p32: smaller autosave pill & strict one-line caption row */
+#grpPins { grid-auto-rows: minmax(30px,auto); align-items: center; }
+#grpPins #pillAutosave {
+  grid-column: 4;
+  justify-self: start;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 6px;
+  min-width: 64px;
+  max-width: 88px;
+  width: auto;
+  height: 24px;
+  line-height: 1;
+  border-radius: 999px;
+  white-space: nowrap;
+  overflow: hidden;
+}
+#pillAutosave .state { font-size: 12px; }
+#pillAutosave .label, #pillAutosave #saveStatus { display: none !important; }
+</style>
+
 </head>
 <body>
 <div id="sheetScrim" class="scrim" hidden aria-hidden="true"></div>
@@ -3816,7 +3840,7 @@ document.addEventListener('DOMContentLoaded', ()=>{
   const pinIcon = pill.querySelector('.icon') || null;
   function update(){
     const on = !!(cb && cb.checked);
-    stateEl.textContent = on ? 'オートセーブON' : 'オートセーブOFF';
+    stateEl.textContent = on ? 'ON' : 'OFF';
   }
   update();
   cb && cb.addEventListener('change', update);
