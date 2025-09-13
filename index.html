@@ -679,6 +679,20 @@ input[type="text"], input[type="search"], input[type="url"], .pill, .iconbtn, bu
 #pillAutosave { padding: 3px 8px; }
 #grpShare .pill { padding: 3px 8px; }
 </style>
+
+<style>
+/* v1.22.1-bg.p31: autosave pill compact */
+#grpPins #pillAutosave { grid-column: 4; justify-self: start; display: inline-flex; align-items:center; gap:8px; width: max-content; }
+#pillAutosave .label, #pillAutosave #saveStatus { display: none !important; }
+#pillAutosave .state { font-size: 12px; }
+</style>
+
+
+<style>
+/* v1.22.1-bg.p31: compact buttons more */
+button, .iconbtn { padding: 4px 8px; min-width: 0; }
+</style>
+
 </head>
 <body>
 <div id="sheetScrim" class="scrim" hidden aria-hidden="true"></div>
@@ -918,6 +932,8 @@ input[type="text"], input[type="search"], input[type="url"], .pill, .iconbtn, bu
 </header>
 <div class="body">
 <div class="row"><input id="loadInput" placeholder="URL または Google DriveのfileID" type="text"/></div>
+<p id="loadError" role="alert" aria-live="polite" class="muted" style="color:#ff4d4d;margin:6px 0 0;"></p>
+<p id="loadInfo" class="muted" style="margin:4px 0 0;"></p>
 <div class="row">
 <button id="loadStart">読み込む</button>
 <button id="loadCancel" data-variant="secondary">キャンセル</button>
@@ -3902,6 +3918,97 @@ document.addEventListener('DOMContentLoaded', ()=>{
         })();
       });
     }
+  });
+})();
+</script>
+
+
+<script>
+// v1.22.1-bg.p31: robust mobile load-sheet flow & single handlers
+(function(){
+  const scrim = document.getElementById('sheetScrim');
+  const sheet = document.getElementById('loadSheet');
+  const fab   = document.getElementById('loadFab');
+  const input = document.getElementById('loadInput');
+  const btnStart  = document.getElementById('loadStart');
+  const btnClose  = document.getElementById('loadClose');
+  const btnCancel = document.getElementById('loadCancel');
+
+  function showSheet(){
+    document.documentElement.classList.add('sheet-open');
+    if (scrim){ scrim.removeAttribute('hidden'); scrim.setAttribute('open',''); scrim.classList.remove('hidden'); scrim.style.display='block'; }
+    if (sheet){ sheet.hidden=false; sheet.setAttribute('open',''); sheet.setAttribute('aria-hidden','false'); sheet.style.display='block'; sheet.classList.add('open','show'); sheet.dataset.snap = sheet.dataset.snap || 'half'; }
+    if (fab){ fab.style.visibility='hidden'; }
+    setTimeout(()=> input?.focus(), 50);
+  }
+  function hideSheet(){
+    document.documentElement.classList.remove('sheet-open');
+    if (scrim){ scrim.setAttribute('hidden',''); scrim.removeAttribute('open'); scrim.classList.add('hidden'); scrim.style.display='none'; }
+    if (sheet){ sheet.setAttribute('aria-hidden','true'); sheet.classList.remove('open','show'); sheet.style.display='none'; sheet.hidden=true; }
+    if (fab){ fab.style.visibility='visible'; }
+  }
+
+  // Replace possible old handlers by cloning nodes once
+  function replaceNode(id){
+    const el = document.getElementById(id);
+    if (!el) return null;
+    const clone = el.cloneNode(true);
+    if (el.parentNode) el.parentNode.replaceChild(clone, el);
+    return clone;
+  }
+
+  window.openLoadSheet = showSheet;
+  window.closeLoadSheet = hideSheet;
+
+  document.addEventListener('DOMContentLoaded', ()=>{
+    const start  = replaceNode('loadStart')  || btnStart;
+    const closeB = replaceNode('loadClose')  || btnClose;
+    const cancel = replaceNode('loadCancel') || btnCancel;
+    const fabBtn = replaceNode('loadFab')    || fab;
+
+    // Ensure button types to avoid form-submit default scroll
+    [start, closeB, cancel, fabBtn].forEach(b=>{ if (b && !b.getAttribute('type')) b.setAttribute('type','button'); });
+
+    // Open/close bindings
+    fabBtn && fabBtn.addEventListener('click', showSheet);
+    closeB && closeB.addEventListener('click', hideSheet);
+    cancel && cancel.addEventListener('click', hideSheet);
+
+    // Scrim click closes
+    scrim && scrim.addEventListener('click', (e)=>{ if (e.target===scrim) hideSheet(); });
+
+    // ESC closes
+    document.addEventListener('keydown', (e)=>{ if (e.key==='Escape') hideSheet(); });
+
+    const err = document.getElementById('loadError');
+    const info= document.getElementById('loadInfo');
+    function showErr(msg){ if (err){ err.textContent = msg || ''; err.style.display = msg? 'block':'none'; } }
+    function setInfo(msg){ if (info){ info.textContent = msg||''; } }
+
+    // Single "読み込む"
+    start && start.addEventListener('click', ()=>{
+      showErr('');
+      const raw = input?.value || '';
+      const url = (typeof toLoadUrl==='function') ? toLoadUrl(raw) : raw;
+      if (!url){ showErr('URLかfileIDを入力してください'); return; }
+      const nameGuess = (()=>{ try{ const u=new URL(url); const p=u.pathname.split('/').filter(Boolean); return p[p.length-1]||url; }catch(_){ return raw; }})();
+      setInfo(`📂 ${nameGuess} を読み込み中…`);
+      const restoreAlert = window.alert; window.alert = (m)=>console.warn('[suppressed alert]', m);
+      (async ()=>{
+        try{
+          if (typeof showLoading==='function') showLoading(`GLBを読み込み中… ${nameGuess}`);
+          await loadModel(url);
+          hideSheet();
+        }catch(e){
+          console.error(e);
+          showErr('読み込みに失敗しました。共有設定やURL/IDをご確認ください');
+        }finally{
+          if (typeof hideLoading==='function') hideLoading();
+          setInfo('');
+          window.alert = restoreAlert;
+        }
+      })();
+    });
   });
 })();
 </script>
