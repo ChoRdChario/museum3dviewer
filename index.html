@@ -508,282 +508,49 @@ html.sheet-open .floating-buttons{
 
 
 
+
 <style>
-/* v1.22.1-bg.p26 UI polish */
-/* Section title: label-like, not a button */
-.hgroup > .title {
-  display: inline-block;
-  font-size: 12px;
-  letter-spacing: .06em;
-  text-transform: uppercase;
-  color: #666;
-  margin-bottom: 6px;
-  padding: 0;
-  background: transparent;
-  border: none;
-  pointer-events: none;
-}
-@media (prefers-color-scheme: dark){
-  .hgroup > .title { color: #aaa; }
-}
-
-/* Inline layout so help sits right next to inputs */
-#grpModel, #grpPins {
-  display: grid;
-  grid-template-columns: 1fr auto auto auto;
-  gap: 8px;
+/* v1.22.1-bg.p36: global loading overlay */
+#globalLoading {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  background: rgba(0,0,0,0.45);
+  display: none;
   align-items: center;
+  justify-content: center;
+  -webkit-backdrop-filter: blur(2px);
+  backdrop-filter: blur(2px);
 }
-#grpModel .title, #grpPins .title { grid-column: 1 / -1; }
-#grpModel #fileId { grid-column: 1; }
-#grpModel #btnLoad { grid-column: 2; }
-#grpModel #helpModel { grid-column: 3; }
-#grpModel #status { grid-column: 4; justify-self: end; }
-
-#grpPins #pinsId { grid-column: 1; }
-#grpPins #btnPickPins { grid-column: 2; }
-#grpPins #helpPins { grid-column: 3; }
-#grpPins #btnClearPins { grid-column: 4; }
-#grpPins .sep { display: none; } /* 余計な区切りは省略 */
-
-/* Light "help chip" */
-.iconbtn.help-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 10px;
-  border-radius: 999px;
-  background: #fff;
-  color: #222;
-  border: 1px solid rgba(0,0,0,.2);
-  box-shadow: 0 1px 3px rgba(0,0,0,.08);
-  font-size: 12px;
-  line-height: 1;
-}
-.iconbtn.help-chip::before {
-  content: '？';
-  display: inline-block;
-  width: 16px; height: 16px;
+#globalLoading.show { display: flex; }
+#globalLoading .panel {
+  min-width: 240px;
+  max-width: 80vw;
+  padding: 16px 18px;
+  border-radius: 12px;
+  background: rgba(20,20,20,0.9);
+  color: #fff;
+  box-shadow: 0 10px 30px rgba(0,0,0,.3);
   text-align: center;
+  font-size: 14px;
+}
+#globalLoading .spinner {
+  width: 32px; height: 32px; margin: 6px auto 10px;
+  border: 3px solid rgba(255,255,255,.25);
+  border-top-color: #fff;
   border-radius: 50%;
-  border: 1px solid rgba(0,0,0,.25);
+  animation: glspin 0.9s linear infinite;
 }
-.iconbtn.help-chip:active { transform: translateY(1px); }
-@media (prefers-color-scheme: dark){
-  .iconbtn.help-chip {
-    background: #f5f5f5;
-    color: #111;
-    border-color: rgba(0,0,0,.3);
-  }
-  .iconbtn.help-chip::before { border-color: rgba(0,0,0,.35); }
+#globalLoading .msg { font-weight: 600; }
+#globalLoading .sub { font-size: 12px; opacity: .85; margin-top: 2px; }
+@keyframes glspin { to { transform: rotate(360deg); } }
+@media (prefers-color-scheme: light){
+  #globalLoading .panel { background: rgba(255,255,255,0.95); color: #111; }
+  #globalLoading .spinner { border-color: rgba(0,0,0,.15); border-top-color: #111; }
 }
 </style>
-<style>
-/* v1.22.1-bg.p27: hide Save FolderId from pins group */
-#grpPins #folderId,
-#grpPins .tiny { display: none !important; }
-</style>
-<style>
-/* v1.22.1-bg.p28: mobile sheet above scrim + sizing */
-.sheet { z-index: 1400 !important; }
-.scrim { z-index: 1200 !important; }
-@media (max-width: 960px){
-  .sheet {
-    position: fixed !important;
-    left: 0; right: 0; bottom: 0;
-    max-height: 82vh;
-    border-top-left-radius: 14px;
-    border-top-right-radius: 14px;
-  }
-}
-</style>
-<style>
-/* v1.22.1-bg.p28: tidy caption row */
-#grpPins {
-  display: grid;
-  grid-template-columns: 1fr auto auto;
-  grid-auto-rows: minmax(36px,auto);
-  gap: 8px;
-  align-items: center;
-}
-#grpPins .title { grid-column: 1 / -1; }
-#grpPins #pinsId { grid-column: 1; }
-#grpPins #btnPickPins { grid-column: 2; }
-#grpPins #helpPins { grid-column: 3; }
-#grpPins #btnClearPins { display: none !important; } /* remove Clear */
-#grpPins #pillAutosave {
-  grid-column: 1 / -1;
-  justify-self: start;
-  font-size: 12px;
-  padding: 4px 8px;
-  border-radius: 999px;
-}
-#grpPins #pillAutosave .checkbox, #grpPins #pillAutosave input[type="checkbox"] {
-  transform: scale(.9);
-  margin-right: 6px;
-}
-</style>
-
-<style>
-/* v1.22.1-bg.p29: unified one-line layout & compact controls */
-
-/* Common row layout for hgroup content */
-.hgroup { display: grid; grid-template-columns: 1fr auto auto auto 1fr; grid-auto-rows: minmax(36px,auto); gap: 8px; align-items: center; }
-.hgroup > .title { grid-column: 1 / -1; }
-
-/* Model row */
-#grpModel #fileId { grid-column: 1; }
-#grpModel #btnLoad { grid-column: 2; }
-#grpModel #helpModel { grid-column: 3; }
-#grpModel #status { grid-column: 4; justify-self: start; font-size: 12px; color: #777; }
-
-/* Caption row (single line) */
-#grpPins #pinsId { grid-column: 1; }
-#grpPins #btnPickPins { grid-column: 2; }
-#grpPins #helpPins { grid-column: 3; }
-#grpPins #pillAutosave { grid-column: 4 / 6; justify-self: start; }
-#grpPins #btnClearPins { display: none !important; }
-
-/* Share row unified */
-#grpShare .toolbar { grid-column: 1 / -1; display: grid; grid-template-columns: auto auto auto auto; gap: 8px; align-items: center; }
-#grpShare .toolbar > * { justify-self: start; }
-
-/* Compact buttons */
-button, .iconbtn {
-  padding: 6px 10px;
-  min-width: 0;
-}
-button.small, .iconbtn.small { padding: 4px 8px; font-size: 12px; }
-#grpPins #btnPickPins, #grpModel #btnLoad { min-width: 72px; }
-#grpShare button { min-width: 120px; }
-#grpShare .pill { padding: 4px 8px; font-size: 12px; }
-
-/* Autosave pill: show only ON/OFF text and pin icon */
-#pillAutosave { white-space: nowrap; }
-#pillAutosave .label { display: none; } /* hide static 'オートセーブ' label if present */
-#pillAutosave .state { margin-left: .25rem; }
-
-/* Help chip keep style from previous */
-.iconbtn.help-chip { padding: 4px 10px; font-size: 12px; }
-</style>
-
-<style>
-/* v1.22.1-bg.p30: compact spacing for larger workspace */
-.hgroup { grid-auto-rows: minmax(30px,auto); gap: 6px; }
-.hgroup > .title { margin-bottom: 4px; font-size: 11.5px; letter-spacing: .05em; }
-input[type="text"], input[type="search"], input[type="url"], .pill, .iconbtn, button {
-  padding: 4px 8px;
-  line-height: 1.2;
-}
-#status { font-size: 11.5px; }
-#pillAutosave { padding: 3px 8px; }
-#grpShare .pill { padding: 3px 8px; }
-</style>
-
-<style>
-/* v1.22.1-bg.p31: autosave pill compact */
-#grpPins #pillAutosave { grid-column: 4; justify-self: start; display: inline-flex; align-items:center; gap:8px; width: max-content; }
-#pillAutosave .label, #pillAutosave #saveStatus { display: none !important; }
-#pillAutosave .state { font-size: 12px; }
-</style>
-
-
-<style>
-/* v1.22.1-bg.p31: compact buttons more */
-button, .iconbtn { padding: 4px 8px; min-width: 0; }
-</style>
-
-
-<style>
-/* v1.22.1-bg.p32: smaller autosave pill & strict one-line caption row */
-#grpPins { grid-auto-rows: minmax(30px,auto); align-items: center; }
-#grpPins #pillAutosave {
-  grid-column: 4;
-  justify-self: start;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 2px 6px;
-  min-width: 64px;
-  max-width: 88px;
-  width: auto;
-  height: 24px;
-  line-height: 1;
-  border-radius: 999px;
-  white-space: nowrap;
-  overflow: hidden;
-}
-#pillAutosave .state { font-size: 12px; }
-#pillAutosave .label, #pillAutosave #saveStatus { display: none !important; }
-</style>
-
-
-<style>
-/* v1.22.1-bg.p33: readable autosave pill + share row height alignment */
-#grpPins #pillAutosave{
-  min-width: 72px;
-  max-width: 96px;
-  height: 24px;
-  padding: 2px 6px;
-  gap: 4px;
-}
-#pillAutosave .label{
-  display: inline-block !important;
-  font-size: 12px;
-  line-height: 1;
-  max-width: 32px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-#pillAutosave .state{ font-size: 12px; line-height: 1; }
-#pillAutosave #saveStatus{ display: none !important; }
-
-/* Share/permission toolbar: compact height to match other rows */
-#grpShare .toolbar > *{
-  height: 26px;
-  line-height: 24px;
-  padding: 3px 8px !important;
-  font-size: 12px;
-}
-#grpShare .pill{ height: 26px; line-height: 24px; padding: 3px 8px !important; }
-#grpShare button{ min-width: 0; }
-</style>
-
-
-<style>
-/* v1.22.1-bg.p34: autosave pill as minimal width "☑ オートセーブON/OFF" */
-#grpPins #pillAutosave{
-  grid-column: 4;
-  justify-self: start;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 2px 8px;
-  height: 24px;
-  font-size: 12px;
-  border-radius: 999px;
-  white-space: nowrap;
-  width: auto;
-  min-width: fit-content;
-  max-width: fit-content;
-}
-#pillAutosave .label, #pillAutosave .state, #pillAutosave #saveStatus { display: none !important; }
-#autosaveLabel { white-space: nowrap; }
-</style>
-
-
-<style>
-/* v1.22.1-bg.p35: lightweight toast */
-#toastHost{ position: fixed; left: 50%; transform: translateX(-50%); bottom: 20px; z-index: 5000; pointer-events:none; }
-.toast{ background: rgba(0,0,0,.85); color:#fff; padding:10px 14px; border-radius:999px; font-size:13px; margin-top:8px; opacity:0; transition:opacity .15s ease, transform .15s ease; transform: translateY(8px); }
-.toast.show{ opacity:1; transform: translateY(0); }
-@media (prefers-color-scheme: dark){
-  .toast{ background: rgba(255,255,255,.9); color:#111; }
-}
-</style>
-
 </head>
+
 <body>
 <div id="sheetScrim" class="scrim" hidden aria-hidden="true"></div>
 <!-- Desktop open-dock button (hidden on mobile) -->
@@ -805,7 +572,7 @@ button, .iconbtn { padding: 4px 8px; min-width: 0; }
 <span class="title">モデル</span>
 <input autocomplete="off" id="fileId" placeholder="GLBの fileId または 共有リンク"/>
 <button class="iconbtn" id="btnLoad">読み込む</button>
-<button class="iconbtn help-chip" id="helpModel" aria-label="モデル入力のヘルプ" title="モデル入力のヘルプ">ヘルプ</button>
+<button class="iconbtn" id="helpModel" title="対応形式など">？</button>
 <span class="tiny" id="status">未サインイン</span>
 </div>
 <!-- 📍 キャプション -->
@@ -817,7 +584,7 @@ button, .iconbtn { padding: 4px 8px; min-width: 0; }
 <span class="sep"></span>
 <span class="tiny">Save FolderId:</span>
 <input autocomplete="off" id="folderId" placeholder="（任意）保存先フォルダID"/>
-<button class="iconbtn help-chip" id="helpPins" aria-label="キャプション入力のヘルプ" title="キャプション入力のヘルプ">ヘルプ</button>
+<button class="iconbtn" id="helpPins" title="pins.jsonの説明">？</button>
 </div>
 <!-- 🔑 共有・権限 -->
 <div class="hgroup" id="grpShare">
@@ -1022,8 +789,6 @@ button, .iconbtn { padding: 4px 8px; min-width: 0; }
 </header>
 <div class="body">
 <div class="row"><input id="loadInput" placeholder="URL または Google DriveのfileID" type="text"/></div>
-<p id="loadError" role="alert" aria-live="polite" class="muted" style="color:#ff4d4d;margin:6px 0 0;"></p>
-<p id="loadInfo" class="muted" style="margin:4px 0 0;"></p>
 <div class="row">
 <button id="loadStart">読み込む</button>
 <button id="loadCancel" data-variant="secondary">キャンセル</button>
@@ -2779,48 +2544,38 @@ function updatePinsInfo(){
 const openModal = (html)=>{ modalRoot.className='modal-overlay'; modalRoot.innerHTML=html; };
 const closeModal = ()=>{ modalRoot.className='hidden'; modalRoot.innerHTML=''; };
 
-
-
 /* ヘルプモーダル */
 btnHelpModel?.addEventListener('click', ()=>{
   openModal(`
     <div class="modal">
-      <header>
-        <strong>モデル（GLB/GLTF）の指定について</strong>
-        <div class="grow"></div>
-        <button id="helpClose">閉じる</button>
-      </header>
+      <header><strong>モデル（GLB/GLTF）の指定について</strong><div class="grow"></div><button id="helpClose1">閉じる</button></header>
       <div class="body">
-        <p>Google Drive のファイルURL（例: https://drive.google.com/fil...w）から <b>FILE_ID</b> をコピーして『モデル』欄に入力し、<b>[読み込む]</b> を押してください。</p>
+        <p>Google Drive のファイルURL（例: https://drive.google.com/file/d/<b>FILE_ID</b>/view）から <b>FILE_ID</b> をコピーして『モデル』欄に入力し、<b>[読み込む]</b> を押してください。</p>
         <p>GLTF の場合は外部テクスチャを同一フォルダに配置してください。</p>
         <p>共有は『公開/限定』ボタンで切替できます（権限が必要）。</p>
       </div>
+      <footer><button id="helpClose2">閉じる</button></footer>
     </div>
   `);
-  const btn = document.getElementById('helpClose');
-  btn?.addEventListener('click', ()=> closeModal(), { once: true });
+  document.addEventListener('click', (e)=>{ if(e.target?.id==='helpClose1') closeModal(); });
+  document.addEventListener('click', (e)=>{ if(e.target?.id==='helpClose2') closeModal(); });
 });
-
 btnHelpPins?.addEventListener('click', ()=>{
   openModal(`
     <div class="modal">
-      <header>
-        <strong>キャプション（pins.json）について</strong>
-        <div class="grow"></div>
-        <button id="helpClose">閉じる</button>
-      </header>
+      <header><strong>キャプション（pins.json）について</strong><div class="grow"></div><button id="helpClose3">閉じる</button></header>
       <div class="body">
         <p>ピン（位置・タイトル・本文・画像など）を保存する JSON ファイルです。未指定でも作業可能で、オートセーブONなら GLB と同じフォルダに自動作成されます。</p>
         <p>既存の pins.json を使う場合は fileId を『キャプション』欄に入力するか、[選択…] から選んでください。</p>
       </div>
+      <footer><button id="helpClose4">閉じる</button></footer>
     </div>
   `);
-  const btn = document.getElementById('helpClose');
-  btn?.addEventListener('click', ()=> closeModal(), { once: true });
+  document.addEventListener('click', (e)=>{ if(e.target?.id==='helpClose3') closeModal(); });
+  document.getElementById('helpClose4')?.addEventListener('click', (e)=>{ (closeModal) });
 });
+
 /* 画像アップロード共通 */
-
-
 async function uploadAndAttachImage(file, pin, opts={}){
   try{
     await ensureToken();
@@ -3785,408 +3540,64 @@ document.getElementById('toolInlineBtn')?.addEventListener('click', ()=>{
 </script>
 
 
-<script>
-// v1.22.1-bg.p26: move autosave UI into caption group
-document.addEventListener('DOMContentLoaded', ()=>{
-  try {
-    const pill = document.getElementById('pillAutosave');
-    const pins = document.getElementById('grpPins');
-    if (pill && pins && pill.parentElement?.id !== 'grpPins') {
-      // place after pins input row
-      pins.appendChild(pill);
-    }
-  } catch(e){ console.warn(e); }
-});
-</script>
-
+<div id="globalLoading" aria-live="polite" aria-busy="true" hidden>
+  <div class="panel">
+    <div class="spinner" role="progressbar" aria-valuetext="loading"></div>
+    <div class="msg">モデルを読み込み中…</div>
+    <div class="sub" id="globalLoadingSub"></div>
+  </div>
+</div>
 
 <script>
-// v1.22.1-bg.p26: ensure sign-in gate visible on first load, then try silent sign-in
+// v1.22.1-bg.p36: showLoading/hideLoading + auto-hook loadModel
 (function(){
-  function hideGate(){
-    const g = document.getElementById('signinGateWrap');
-    if (!g) return;
-    try { g.hidden = true; } catch(_){}
-    g.classList.add('hidden');
-  }
-  function showGate(){
-    const g = document.getElementById('signinGateWrap');
-    if (!g) return;
-    try { g.hidden = false; } catch(_){}
-    g.classList.remove('hidden');
-  }
-  async function boot(){
-    showGate();
+  const host = document.getElementById('globalLoading');
+  const sub  = document.getElementById('globalLoadingSub');
+  function showLoading(msg, detail){
+    if (!host) return;
     try {
-      if (window.ensureGisReady) {
-        const ready = await window.ensureGisReady();
-        if (ready && typeof window.ensureSignedInIfNeeded === 'function'){
-          const ok = await window.ensureSignedInIfNeeded();
-          if (ok) hideGate();
+      host.querySelector('.msg').textContent = msg || 'モデルを読み込み中…';
+      if (sub) sub.textContent = detail || '';
+      host.classList.add('show');
+      host.removeAttribute('hidden');
+      document.body.style.pointerEvents = 'none';
+    } catch(_) {}
+  }
+  function hideLoading(){
+    if (!host) return;
+    try {
+      host.classList.remove('show');
+      host.setAttribute('hidden','');
+      if (sub) sub.textContent = '';
+      document.body.style.pointerEvents = '';
+    } catch(_) {}
+  }
+  window.showLoading = window.showLoading || showLoading;
+  window.hideLoading = window.hideLoading || hideLoading;
+
+  function hookLoadModel(){
+    const orig = window.loadModel;
+    if (typeof orig !== 'function' || orig.__wrapped) return;
+    const wrapped = async function(urlOrId, ...rest){
+      let name = '';
+      try {
+        if (typeof urlOrId === 'string'){
+          try { const u = new URL(urlOrId); const p=u.pathname.split('/').filter(Boolean); name = p[p.length-1]||urlOrId; }
+          catch { name = urlOrId; }
         }
-      }
-    } catch(_){ /* keep gate shown */ }
-  }
-  if (document.readyState === 'complete' || document.readyState === 'interactive') setTimeout(boot, 0);
-  else document.addEventListener('DOMContentLoaded', boot);
-})();
-</script>
-
-
-<script>
-// v1.22.1-bg.p27: place helpPins next to pinsId
-document.addEventListener('DOMContentLoaded', ()=>{
-  const pins = document.getElementById('grpPins');
-  const inp  = document.getElementById('pinsId');
-  const help = document.getElementById('helpPins') || document.getElementById('btnHelpPins');
-  if (pins && inp && help) {
-    try { inp.insertAdjacentElement('afterend', help); } catch(_){}
-  }
-});
-</script>
-
-<script>
-// v1.22.1-bg.p28: caption row DOM tidy
-document.addEventListener('DOMContentLoaded', ()=>{
-  try{
-    const grp = document.getElementById('grpPins');
-    const inp = document.getElementById('pinsId');
-    const pick = document.getElementById('btnPickPins');
-    const help = document.getElementById('helpPins') || document.getElementById('btnHelpPins');
-    const clr  = document.getElementById('btnClearPins');
-    if (inp && pick){ inp.insertAdjacentElement('afterend', pick); }
-    if (inp && help){ pick ? pick.insertAdjacentElement('afterend', help) : inp.insertAdjacentElement('afterend', help); }
-    if (clr && clr.parentElement){ clr.remove(); }
-  }catch(e){ console.warn(e); }
-});
-</script>
-
-<script>
-// v1.22.1-bg.p29: robustly close load sheet & scrim
-(function(){
-  function removeSheetOpen(){
-    document.documentElement.classList.remove('sheet-open');
-    document.body.classList.remove('sheet-open');
-    const scrim = document.querySelector('.scrim');
-    if (scrim) scrim.classList.add('hidden');
-    const sheet = document.getElementById('loadSheet');
-    if (sheet) sheet.setAttribute('aria-hidden','true');
-  }
-  // Patch closeLoadSheet if present
-  if (typeof window.closeLoadSheet === 'function'){
-    const _orig = window.closeLoadSheet;
-    window.closeLoadSheet = function(){
-      try { _orig.apply(this, arguments); } catch(e) {}
-      removeSheetOpen();
+      } catch(_) {}
+      showLoading('モデルを読み込み中…', name);
+      try { return await orig.call(this, urlOrId, ...rest); }
+      finally { hideLoading(); }
     };
+    wrapped.__wrapped = true;
+    window.loadModel = wrapped;
   }
-  // Bind to close/cancel buttons
-  document.addEventListener('click', (ev)=>{
-    const id = (ev.target && ev.target.id) || '';
-    if (id === 'loadCancel' || id === 'loadClose'){
-      setTimeout(removeSheetOpen, 0);
-    }
-  }, true);
-  // Hide scrim when ESC closes dialog/sheet
-  document.addEventListener('keydown', (e)=>{
-    if (e.key === 'Escape') setTimeout(removeSheetOpen, 0);
-  });
+  if (document.readyState === 'complete' || document.readyState === 'interactive') hookLoadModel();
+  else document.addEventListener('DOMContentLoaded', hookLoadModel);
 })();
 </script>
-
-
-<script>
-// v1.22.1-bg.p29: autosave pill shows only ON/OFF reflecting checkbox
-document.addEventListener('DOMContentLoaded', ()=>{
-  const pill = document.getElementById('pillAutosave');
-  if (!pill) return;
-  const cb = pill.querySelector('input[type="checkbox"]') || document.getElementById('autosaveToggle');
-  let stateEl = pill.querySelector('.state');
-  if (!stateEl){ stateEl = document.createElement('span'); stateEl.className='state'; pill.appendChild(stateEl); }
-  const pinIcon = pill.querySelector('.icon') || null;
-  function update(){
-    const on = !!(cb && cb.checked);
-    stateEl.textContent = on ? 'ON' : 'OFF';
-  }
-  update();
-  cb && cb.addEventListener('change', update);
-});
-</script>
-
-
-<script>
-// v1.22.1-bg.p29: enforce inline order for caption row
-document.addEventListener('DOMContentLoaded', ()=>{
-  const inp = document.getElementById('pinsId');
-  const pick = document.getElementById('btnPickPins');
-  const help = document.getElementById('helpPins') || document.getElementById('btnHelpPins');
-  if (inp && pick) inp.insertAdjacentElement('afterend', pick);
-  if (pick && help) pick.insertAdjacentElement('afterend', help);
-});
-</script>
-
-
-<script>
-// v1.22.1-bg.p30: overlay close fix + single load handler
-(function(){
-  function forceCloseSheet(){
-    document.documentElement.classList.remove('sheet-open');
-    document.body.classList.remove('sheet-open');
-    const scrims = document.querySelectorAll('.scrim');
-    scrims.forEach(s=>{ s.classList.add('hidden'); s.style.display='none'; });
-    const sheet = document.getElementById('loadSheet');
-    if (sheet){
-      sheet.setAttribute('aria-hidden','true');
-      sheet.classList.remove('open','show');
-      sheet.style.display='none';
-      sheet.hidden = true;
-    }
-  }
-  // Patch global closeLoadSheet if exists
-  if (typeof window.closeLoadSheet === 'function'){
-    const orig = window.closeLoadSheet;
-    window.closeLoadSheet = function(){
-      try{ orig.apply(this, arguments); }catch(_){}
-      forceCloseSheet();
-    };
-  }
-  // Cancel / Close buttons
-  document.addEventListener('click', (ev)=>{
-    const id = ev.target && ev.target.id;
-    if (id === 'loadCancel' || id === 'loadClose'){
-      forceCloseSheet();
-    }
-    // clicking scrim closes too
-    if ((ev.target && ev.target.classList && ev.target.classList.contains('scrim'))){
-      forceCloseSheet();
-    }
-  }, true);
-  // ESC key
-  document.addEventListener('keydown', (e)=>{
-    if (e.key === 'Escape') forceCloseSheet();
-  });
-
-  // Remove duplicate listeners on the Load button: replace with a clone
-  document.addEventListener('DOMContentLoaded', ()=>{
-    const btn = document.getElementById('loadStart');
-    if (btn){
-      const clone = btn.cloneNode(true);
-      btn.parentNode.replaceChild(clone, btn);
-      // Hook our single handler
-      const loadInput = document.getElementById('loadInput');
-      clone.addEventListener('click', ()=>{
-        const err = document.getElementById('loadError');
-        const info = document.getElementById('loadInfo');
-        if (err) err.textContent = '';
-        const raw = loadInput?.value || '';
-        const url = (typeof toLoadUrl==='function') ? toLoadUrl(raw) : raw;
-        if(!url){
-          if (err) err.textContent='URLかfileIDを入力してください';
-          // keep sheet open for correction (do not close)
-          return;
-        }
-        // prevent legacy alert while sheet is open
-        const _alert = window.alert;
-        window.alert = function(msg){ console.warn('[suppressed alert]', msg); };
-        const nameGuess = (()=>{ try{ const u=new URL(url); const p=u.pathname.split('/').filter(Boolean); return p[p.length-1]||url; }catch(_){ return raw; }})();
-        if (info) info.textContent = `📂 ${nameGuess} を読み込み中…`;
-        if (typeof showLoading === 'function') showLoading(`GLBを読み込み中… ${nameGuess}`);
-        (async ()=>{
-          try{
-            await loadModel(url);
-            // success -> close
-            if (typeof hideLoading==='function') hideLoading();
-            forceCloseSheet();
-          }catch(e){
-            console.error(e);
-            if (err) err.textContent='読み込みに失敗しました。共有設定やURL/IDをご確認ください';
-          }finally{
-            if (typeof hideLoading==='function') hideLoading();
-            if (info) info.textContent='';
-            window.alert = _alert;
-          }
-        })();
-      });
-    }
-  });
-})();
-</script>
-
-
-<script>
-// v1.22.1-bg.p31: robust mobile load-sheet flow & single handlers
-(function(){
-  const scrim = document.getElementById('sheetScrim');
-  const sheet = document.getElementById('loadSheet');
-  const fab   = document.getElementById('loadFab');
-  const input = document.getElementById('loadInput');
-  const btnStart  = document.getElementById('loadStart');
-  const btnClose  = document.getElementById('loadClose');
-  const btnCancel = document.getElementById('loadCancel');
-
-  function showSheet(){
-    document.documentElement.classList.add('sheet-open');
-    if (scrim){ scrim.removeAttribute('hidden'); scrim.setAttribute('open',''); scrim.classList.remove('hidden'); scrim.style.display='block'; }
-    if (sheet){ sheet.hidden=false; sheet.setAttribute('open',''); sheet.setAttribute('aria-hidden','false'); sheet.style.display='block'; sheet.classList.add('open','show'); sheet.dataset.snap = sheet.dataset.snap || 'half'; }
-    if (fab){ fab.style.visibility='hidden'; }
-    setTimeout(()=> input?.focus(), 50);
-  }
-  function hideSheet(){
-    document.documentElement.classList.remove('sheet-open');
-    if (scrim){ scrim.setAttribute('hidden',''); scrim.removeAttribute('open'); scrim.classList.add('hidden'); scrim.style.display='none'; }
-    if (sheet){ sheet.setAttribute('aria-hidden','true'); sheet.classList.remove('open','show'); sheet.style.display='none'; sheet.hidden=true; }
-    if (fab){ fab.style.visibility='visible'; }
-  }
-
-  // Replace possible old handlers by cloning nodes once
-  function replaceNode(id){
-    const el = document.getElementById(id);
-    if (!el) return null;
-    const clone = el.cloneNode(true);
-    if (el.parentNode) el.parentNode.replaceChild(clone, el);
-    return clone;
-  }
-
-  window.openLoadSheet = showSheet;
-  window.closeLoadSheet = hideSheet;
-
-  document.addEventListener('DOMContentLoaded', ()=>{
-    const start  = replaceNode('loadStart')  || btnStart;
-    const closeB = replaceNode('loadClose')  || btnClose;
-    const cancel = replaceNode('loadCancel') || btnCancel;
-    const fabBtn = replaceNode('loadFab')    || fab;
-
-    // Ensure button types to avoid form-submit default scroll
-    [start, closeB, cancel, fabBtn].forEach(b=>{ if (b && !b.getAttribute('type')) b.setAttribute('type','button'); });
-
-    // Open/close bindings
-    fabBtn && fabBtn.addEventListener('click', showSheet);
-    closeB && closeB.addEventListener('click', hideSheet);
-    cancel && cancel.addEventListener('click', hideSheet);
-
-    // Scrim click closes
-    scrim && scrim.addEventListener('click', (e)=>{ if (e.target===scrim) hideSheet(); });
-
-    // ESC closes
-    document.addEventListener('keydown', (e)=>{ if (e.key==='Escape') hideSheet(); });
-
-    const err = document.getElementById('loadError');
-    const info= document.getElementById('loadInfo');
-    function showErr(msg){ if (err){ err.textContent = msg || ''; err.style.display = msg? 'block':'none'; } }
-    function setInfo(msg){ if (info){ info.textContent = msg||''; } }
-
-    // Single "読み込む"
-    start && start.addEventListener('click', ()=>{
-      showErr('');
-      const raw = input?.value || '';
-      const url = (typeof toLoadUrl==='function') ? toLoadUrl(raw) : raw;
-      if (!url){ showErr('URLかfileIDを入力してください'); return; }
-      const nameGuess = (()=>{ try{ const u=new URL(url); const p=u.pathname.split('/').filter(Boolean); return p[p.length-1]||url; }catch(_){ return raw; }})();
-      setInfo(`📂 ${nameGuess} を読み込み中…`);
-      const restoreAlert = window.alert; window.alert = (m)=>console.warn('[suppressed alert]', m);
-      (async ()=>{
-        try{
-          if (typeof showLoading==='function') showLoading(`GLBを読み込み中… ${nameGuess}`);
-          await loadModel(url);
-          hideSheet();
-        }catch(e){
-          console.error(e);
-          showErr('読み込みに失敗しました。共有設定やURL/IDをご確認ください');
-        }finally{
-          if (typeof hideLoading==='function') hideLoading();
-          setInfo('');
-          window.alert = restoreAlert;
-        }
-      })();
-    });
-  });
-})();
-</script>
-
-
-
-
-
-<script>
-// v1.22.1-bg.p34: show "☑ オートセーブON/OFF" inside pill, minimal width
-document.addEventListener('DOMContentLoaded', ()=>{
-  const pill = document.getElementById('pillAutosave');
-  if (!pill) return;
-  // Reuse existing checkbox if present or create one
-  let cb = pill.querySelector('input[type="checkbox"]');
-  if (!cb){
-    cb = document.createElement('input');
-    cb.type = 'checkbox';
-    cb.id = 'autosaveToggle';
-    pill.insertBefore(cb, pill.firstChild);
-  } else {
-    cb.id = cb.id || 'autosaveToggle';
-  }
-  // Create/ensure label span
-  let lbl = pill.querySelector('#autosaveLabel');
-  if (!lbl){
-    lbl = document.createElement('span');
-    lbl.id = 'autosaveLabel';
-    pill.appendChild(lbl);
-  }
-  // Update text based on state
-  function update(){
-    lbl.textContent = 'オートセーブ' + (cb.checked ? 'ON' : 'OFF');
-  }
-  update();
-  cb.addEventListener('change', update);
-});
-</script>
-
-
-<div id="toastHost" aria-live="polite"></div>
-
-<script>
-// v1.22.1-bg.p35: toast + copyText override
-(function(){
-  function toast(msg, ms=1800){
-    const host = document.getElementById('toastHost');
-    if (!host) return alert(msg);
-    const el = document.createElement('div');
-    el.className = 'toast';
-    el.textContent = msg;
-    host.appendChild(el);
-    requestAnimationFrame(()=> el.classList.add('show'));
-    setTimeout(()=>{ el.classList.remove('show'); setTimeout(()=> el.remove(), 160); }, ms);
-  }
-  // Patch global
-  window.__toast = toast;
-  // Override copyText/fallbackCopy if they exist
-  const origAlert = window.alert;
-  function ok(msg){ if (window.__toast) window.__toast(msg); else origAlert(msg); }
-  window.copyText = function(text, okMsg='コピーしました'){
-    if (navigator.clipboard && window.isSecureContext){
-      navigator.clipboard.writeText(text).then(()=> ok(okMsg)).catch(()=> window.fallbackCopy(text, okMsg));
-    } else { window.fallbackCopy(text, okMsg); }
-  };
-  window.fallbackCopy = function(text, okMsg){
-    try{
-      if (navigator.clipboard && navigator.clipboard.writeText){
-        navigator.clipboard.writeText(text).then(()=> ok(okMsg)).catch(()=>{
-          // execCommand fallback
-          const ta = document.createElement('textarea');
-          ta.value = text; ta.style.position='fixed'; ta.style.opacity='0';
-          document.body.appendChild(ta); ta.focus(); ta.select();
-          try{ document.execCommand('copy'); ok(okMsg); }catch(e){ origAlert(okMsg); }
-          ta.remove();
-        });
-        return;
-      }
-    }catch(_){}
-    try{
-      const ta = document.createElement('textarea');
-      ta.value = text; ta.style.position='fixed'; ta.style.opacity='0';
-      document.body.appendChild(ta); ta.focus(); ta.select();
-      document.execCommand('copy'); ok(okMsg); ta.remove();
-    }catch(e){ origAlert(okMsg); }
-  };
-})();
-</script>
-
 </body>
+
+
 </html>
