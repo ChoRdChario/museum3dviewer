@@ -819,7 +819,7 @@ html.sheet-open .floating-buttons{
 <div class="hidden" id="modalRoot"></div>
 <script type="module">
 'use strict';
-console.log('drive_three_pins v1.22.0-bg');
+console.log('drive_three_pins v1.22.2-bg');
 
 
 /* === Loader helpers === */
@@ -3632,6 +3632,180 @@ document.getElementById('toolInlineBtn')?.addEventListener('click', ()=>{
   else document.addEventListener('DOMContentLoaded', bootGate);
 })();
 </script>
+
+<script>
+// v1.22.1-bg.p38: robust loader hook + unified showLoading/hideLoading with debug logs
+(function(){
+  // --- Loader DOM ---
+  const host = document.getElementById('globalLoading');
+  const sub  = document.getElementById('globalLoadingSub');
+
+  function __show(msg, detail){
+    if (!host) return;
+    try {
+      (host.querySelector('.msg')||{}).textContent = msg || 'モデルを読み込み中…';
+      if (sub) sub.textContent = detail || '';
+      host.classList.add('show');
+      host.removeAttribute('hidden');
+      document.body.style.pointerEvents = 'none';
+      console.debug('[loader] show', {msg, detail});
+    } catch(e){ console.warn('[loader] show failed', e); }
+  }
+  function __hide(){
+    if (!host) return;
+    try {
+      host.classList.remove('show');
+      host.setAttribute('hidden','');
+      if (sub) sub.textContent = '';
+      document.body.style.pointerEvents = '';
+      console.debug('[loader] hide');
+    } catch(e){ console.warn('[loader] hide failed', e); }
+  }
+  // Make these the single source of truth
+  window.showLoading = __show;
+  window.hideLoading = __hide;
+
+  // --- Wrap any existing loadModel immediately ---
+  function wrapLoadModel(fn){
+    if (typeof fn !== 'function') return fn;
+    if (fn.__wrapped) return fn;
+    const wrapped = async function(urlOrId, ...rest){
+      // derive short label
+      let name = '';
+      try{
+        if (typeof urlOrId === 'string'){
+          try{ const u = new URL(urlOrId); const p=u.pathname.split('/').filter(Boolean); name = p[p.length-1]||urlOrId; }
+          catch{ name = urlOrId; }
+        }
+      }catch(_){}
+      __show('モデルを読み込み中…', name);
+      try{
+        console.debug('[loader] loadModel start', {urlOrId});
+        const res = await fn.apply(this, [urlOrId, ...rest]);
+        console.debug('[loader] loadModel done');
+        return res;
+      }finally{
+        __hide();
+      }
+    };
+    wrapped.__wrapped = true;
+    return wrapped;
+  }
+
+  // If already present, wrap once
+  if (typeof window.loadModel === 'function'){
+    window.loadModel = wrapLoadModel(window.loadModel);
+  }
+
+  // --- Define a setter to wrap any future assignment to loadModel ---
+  try{
+    let __lm = window.loadModel;
+    Object.defineProperty(window, 'loadModel', {
+      configurable: true,
+      get(){ return __lm; },
+      set(v){
+        console.debug('[loader] loadModel assigned, wrapping');
+        __lm = wrapLoadModel(v);
+      }
+    });
+  }catch(e){
+    // Fallback: retry hook a few times if defineProperty is blocked
+    let retries = 12;
+    (function rehook(){
+      if (typeof window.loadModel === 'function' && !window.loadModel.__wrapped){
+        window.loadModel = wrapLoadModel(window.loadModel);
+        return;
+      }
+      if (retries-- > 0) setTimeout(rehook, 150);
+    })();
+  }
+})();
+</script>
+
+
+<!-- v1.22.2-bg.p40: unified loader shim + loadModel wrapper (fail-safe) -->
+<script>
+(function(){
+  try{
+    var host = document.getElementById('globalLoading');
+    var sub  = document.getElementById('globalLoadingSub');
+    function __show(msg, detail){
+      if (!host) return;
+      try{
+        var m = host.querySelector('.msg'); if (m) m.textContent = msg || 'モデルを読み込み中…';
+        if (sub) sub.textContent = detail || '';
+        host.classList.add('show'); host.removeAttribute('hidden');
+        document.body.style.pointerEvents = 'none';
+        console.debug('[loader] show', {msg, detail});
+      }catch(e){ console.warn('[loader] show failed', e); }
+    }
+    function __hide(){
+      if (!host) return;
+      try{
+        host.classList.remove('show'); host.setAttribute('hidden','');
+        if (sub) sub.textContent = '';
+        document.body.style.pointerEvents = '';
+        console.debug('[loader] hide');
+      }catch(e){ console.warn('[loader] hide failed', e); }
+    }
+    // Export once
+    window.showLoading = __show;
+    window.hideLoading = __hide;
+
+    // Wrap any existing/future loadModel
+    function wrapLoadModel(fn){
+      if (typeof fn !== 'function') return fn;
+      if (fn.__wrapped) return fn;
+      var wrapped = async function(urlOrId){
+        var name = '';
+        try{
+          if (typeof urlOrId === 'string'){
+            try{ var u = new URL(urlOrId); var ps = u.pathname.split('/').filter(Boolean); name = ps[ps.length-1] || urlOrId; }
+            catch(_){ name = urlOrId; }
+          }
+        }catch(_){}
+        __show('モデルを読み込み中…', name);
+        try{ return await fn.apply(this, arguments); }
+        finally{ __hide(); }
+      };
+      wrapped.__wrapped = true;
+      return wrapped;
+    }
+    if (typeof window.loadModel === 'function') window.loadModel = wrapLoadModel(window.loadModel);
+    try{
+      var __lm = window.loadModel;
+      Object.defineProperty(window, 'loadModel', {
+        configurable:true,
+        get(){ return __lm; },
+        set(v){ console.debug('[loader] loadModel assigned, wrapping'); __lm = wrapLoadModel(v); }
+      });
+    }catch(e){
+      // fallback rehook
+      var retries = 12;
+      (function rehook(){
+        if (typeof window.loadModel === 'function' && !window.loadModel.__wrapped){
+          window.loadModel = wrapLoadModel(window.loadModel); return;
+        }
+        if (retries-- > 0) setTimeout(rehook, 150);
+      })();
+    }
+
+    // Also hook header "読み込む" button, if present
+    try{
+      var btnLoad = document.getElementById('btnLoad');
+      if (btnLoad && !btnLoad.__patched){
+        btnLoad.addEventListener('click', function(){
+          try{ __show('モデルを読み込み中…'); }catch(_){}
+          setTimeout(function(){ /* hide will be called by wrapper after load completes */ }, 0);
+        }, {capture:true});
+        btnLoad.__patched = true;
+      }
+    }catch(_){}
+
+  }catch(e){ console.warn('loader shim patch failed:', e); }
+})();
+</script>
+
 </body>
 
 
