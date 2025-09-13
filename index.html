@@ -509,34 +509,73 @@ html.sheet-open .floating-buttons{
 
 
 <style>
-/* v1.22.1-bg.p25: inline help chip next to inputs */
-.hgroup#grpModel, .hgroup#grpPins { display: grid; grid-template-columns: 1fr auto auto auto; gap: 8px; align-items: center; }
-.hgroup#grpModel input#fileId { grid-column: 1 / 2; }
-.hgroup#grpModel #btnLoad { grid-column: 2 / 3; }
-.hgroup#grpModel #helpModel { grid-column: 3 / 4; }
-.hgroup#grpModel #status { grid-column: 4 / 5; justify-self: end; }
-
-#helpModel.help-chip, #btnHelpPins.help-chip {
-  display: inline-flex; align-items: center; gap: 6px;
-  padding: 4px 8px; border-radius: 999px; border: 1px solid rgba(0,0,0,.2);
-  background: rgba(255,255,255,.85); backdrop-filter: blur(4px);
-  font-size: 12px; line-height: 1; color: #222; cursor: pointer;
-}
-#helpModel.help-chip::before, #btnHelpPins.help-chip::before {
-  content: '？'; display: inline-block; width: 16px; height: 16px; text-align: center;
-  border-radius: 50%; border: 1px solid rgba(0,0,0,.25);
+/* v1.22.1-bg.p26 UI polish */
+/* Section title: label-like, not a button */
+.hgroup > .title {
+  display: inline-block;
+  font-size: 12px;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: #666;
+  margin-bottom: 6px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  pointer-events: none;
 }
 @media (prefers-color-scheme: dark){
-  #helpModel.help-chip, #btnHelpPins.help-chip { background: rgba(30,30,30,.7); color: #fff; border-color: rgba(255,255,255,.2); }
-  #helpModel.help-chip::before, #btnHelpPins.help-chip::before { border-color: rgba(255,255,255,.25); }
+  .hgroup > .title { color: #aaa; }
 }
 
-/* error text inside load sheet */
-#loadError {
-  color: #ff4d4d; font-size: 13px; margin-top: 8px;
+/* Inline layout so help sits right next to inputs */
+#grpModel, #grpPins {
+  display: grid;
+  grid-template-columns: 1fr auto auto auto;
+  gap: 8px;
+  align-items: center;
 }
-#loadInfo {
-  color: #888; font-size: 13px; margin-top: 6px;
+#grpModel .title, #grpPins .title { grid-column: 1 / -1; }
+#grpModel #fileId { grid-column: 1; }
+#grpModel #btnLoad { grid-column: 2; }
+#grpModel #helpModel { grid-column: 3; }
+#grpModel #status { grid-column: 4; justify-self: end; }
+
+#grpPins #pinsId { grid-column: 1; }
+#grpPins #btnPickPins { grid-column: 2; }
+#grpPins #helpPins { grid-column: 3; }
+#grpPins #btnClearPins { grid-column: 4; }
+#grpPins .sep { display: none; } /* 余計な区切りは省略 */
+
+/* Light "help chip" */
+.iconbtn.help-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: #fff;
+  color: #222;
+  border: 1px solid rgba(0,0,0,.2);
+  box-shadow: 0 1px 3px rgba(0,0,0,.08);
+  font-size: 12px;
+  line-height: 1;
+}
+.iconbtn.help-chip::before {
+  content: '？';
+  display: inline-block;
+  width: 16px; height: 16px;
+  text-align: center;
+  border-radius: 50%;
+  border: 1px solid rgba(0,0,0,.25);
+}
+.iconbtn.help-chip:active { transform: translateY(1px); }
+@media (prefers-color-scheme: dark){
+  .iconbtn.help-chip {
+    background: #f5f5f5;
+    color: #111;
+    border-color: rgba(0,0,0,.3);
+  }
+  .iconbtn.help-chip::before { border-color: rgba(0,0,0,.35); }
 }
 </style>
 </head>
@@ -573,7 +612,7 @@ html.sheet-open .floating-buttons{
 <span class="sep"></span>
 <span class="tiny">Save FolderId:</span>
 <input autocomplete="off" id="folderId" placeholder="（任意）保存先フォルダID"/>
-<button class="iconbtn" id="helpPins" title="pins.jsonの説明">？</button>
+<button class="iconbtn help-chip" id="helpPins" aria-label="キャプション入力のヘルプ" title="キャプション入力のヘルプ">ヘルプ</button>
 </div>
 <!-- 🔑 共有・権限 -->
 <div class="hgroup" id="grpShare">
@@ -778,10 +817,6 @@ html.sheet-open .floating-buttons{
 </header>
 <div class="body">
 <div class="row"><input id="loadInput" placeholder="URL または Google DriveのfileID" type="text"/></div>
-<p id="loadError" role="alert" aria-live="polite"></p>
-<p id="loadInfo" class="muted"></p>
-<p id="loadError" role="alert" aria-live="polite"></p>
-<p id="loadInfo" class="muted"></p>
 <div class="row">
 <button id="loadStart">読み込む</button>
 <button id="loadCancel" data-variant="secondary">キャンセル</button>
@@ -1478,28 +1513,19 @@ function toLoadUrl(val){
 }
 
 loadStart?.addEventListener('click', ()=>{
-  const err = document.getElementById('loadError');
-  const info = document.getElementById('loadInfo');
-  if (err) err.textContent = '';
-  const raw = loadInput?.value||'';
-  const url = toLoadUrl(raw);
-  if(!url){ if(err) err.textContent='URLかfileIDを入力してください'; return; }
-  // 推定ファイル名（URL末尾 or id）
-  const nameGuess = (()=>{ try{ const u=new URL(url); const p=u.pathname.split('/').filter(Boolean); return p[p.length-1]||url; }catch(_){ return raw; }})();
-  if (info) info.textContent = `📂 ${nameGuess} を読み込み中…`;
-  if (typeof showLoading === 'function') showLoading(`GLBを読み込み中… ${nameGuess}`);
+  const url = toLoadUrl(loadInput?.value||'');
+  if(!url){ alert('URLかfileIDを入力してください'); return; }
+  // メッセージ更新＆読み込み開始
+  if (typeof showLoading === 'function') showLoading('GLBを読み込み中…');
   (async ()=>{
     try{
       await loadModel(url);
     }catch(e){
       console.error(e);
-      if(err) err.textContent='読み込みに失敗しました。共有設定やURL/IDをご確認ください';
-      return;
+      alert('読み込みに失敗しました');
     }finally{
       if (typeof hideLoading === 'function') hideLoading();
-      // 成功時のみ閉じる（エラー表示のままにする）
-      if (!err || !err.textContent) closeLoadSheet();
-      if (info) info.textContent = '';
+      closeLoadSheet();
     }
   })();
 });
@@ -3538,6 +3564,54 @@ document.getElementById('toolInlineBtn')?.addEventListener('click', ()=>{
       if (el){ el.style.display='none'; el.setAttribute('aria-hidden','true'); el.addEventListener('click', e=>{ e.preventDefault(); e.stopPropagation(); }, {capture:true}); }
     });
   }
+})();
+</script>
+
+
+<script>
+// v1.22.1-bg.p26: move autosave UI into caption group
+document.addEventListener('DOMContentLoaded', ()=>{
+  try {
+    const pill = document.getElementById('pillAutosave');
+    const pins = document.getElementById('grpPins');
+    if (pill && pins && pill.parentElement?.id !== 'grpPins') {
+      // place after pins input row
+      pins.appendChild(pill);
+    }
+  } catch(e){ console.warn(e); }
+});
+</script>
+
+
+<script>
+// v1.22.1-bg.p26: ensure sign-in gate visible on first load, then try silent sign-in
+(function(){
+  function hideGate(){
+    const g = document.getElementById('signinGateWrap');
+    if (!g) return;
+    try { g.hidden = true; } catch(_){}
+    g.classList.add('hidden');
+  }
+  function showGate(){
+    const g = document.getElementById('signinGateWrap');
+    if (!g) return;
+    try { g.hidden = false; } catch(_){}
+    g.classList.remove('hidden');
+  }
+  async function boot(){
+    showGate();
+    try {
+      if (window.ensureGisReady) {
+        const ready = await window.ensureGisReady();
+        if (ready && typeof window.ensureSignedInIfNeeded === 'function'){
+          const ok = await window.ensureSignedInIfNeeded();
+          if (ok) hideGate();
+        }
+      }
+    } catch(_){ /* keep gate shown */ }
+  }
+  if (document.readyState === 'complete' || document.readyState === 'interactive') setTimeout(boot, 0);
+  else document.addEventListener('DOMContentLoaded', boot);
 })();
 </script>
 
