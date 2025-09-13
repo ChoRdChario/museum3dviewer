@@ -717,6 +717,39 @@ button, .iconbtn { padding: 4px 8px; min-width: 0; }
 #pillAutosave .label, #pillAutosave #saveStatus { display: none !important; }
 </style>
 
+
+<style>
+/* v1.22.1-bg.p33: readable autosave pill + share row height alignment */
+#grpPins #pillAutosave{
+  min-width: 72px;
+  max-width: 96px;
+  height: 24px;
+  padding: 2px 6px;
+  gap: 4px;
+}
+#pillAutosave .label{
+  display: inline-block !important;
+  font-size: 12px;
+  line-height: 1;
+  max-width: 32px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+#pillAutosave .state{ font-size: 12px; line-height: 1; }
+#pillAutosave #saveStatus{ display: none !important; }
+
+/* Share/permission toolbar: compact height to match other rows */
+#grpShare .toolbar > *{
+  height: 26px;
+  line-height: 24px;
+  padding: 3px 8px !important;
+  font-size: 12px;
+}
+#grpShare .pill{ height: 26px; line-height: 24px; padding: 3px 8px !important; }
+#grpShare button{ min-width: 0; }
+</style>
+
 </head>
 <body>
 <div id="sheetScrim" class="scrim" hidden aria-hidden="true"></div>
@@ -4035,6 +4068,35 @@ document.addEventListener('DOMContentLoaded', ()=>{
     });
   });
 })();
+</script>
+
+
+<script>
+// v1.22.1-bg.p33: autosave pill short label "自動" + ON/OFF
+document.addEventListener('DOMContentLoaded', ()=>{
+  const pill = document.getElementById('pillAutosave');
+  if (!pill) return;
+  let labelEl = pill.querySelector('.label');
+  let stateEl = pill.querySelector('.state');
+  const cb = pill.querySelector('input[type="checkbox"]') || document.getElementById('autosaveToggle');
+  if (!labelEl){
+    labelEl = document.createElement('span');
+    labelEl.className = 'label';
+    pill.insertBefore(labelEl, pill.firstChild);
+  }
+  if (!stateEl){
+    stateEl = document.createElement('span');
+    stateEl.className = 'state';
+    pill.appendChild(stateEl);
+  }
+  labelEl.textContent = '自動';
+  function update(){
+    const on = !!(cb && cb.checked);
+    stateEl.textContent = on ? 'ON' : 'OFF';
+  }
+  update();
+  cb && cb.addEventListener('change', update);
+});
 </script>
 
 </body>
