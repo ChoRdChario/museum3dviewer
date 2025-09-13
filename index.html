@@ -583,6 +583,46 @@ html.sheet-open .floating-buttons{
 #grpPins #folderId,
 #grpPins .tiny { display: none !important; }
 </style>
+<style>
+/* v1.22.1-bg.p28: mobile sheet above scrim + sizing */
+.sheet { z-index: 1400 !important; }
+.scrim { z-index: 1200 !important; }
+@media (max-width: 960px){
+  .sheet {
+    position: fixed !important;
+    left: 0; right: 0; bottom: 0;
+    max-height: 82vh;
+    border-top-left-radius: 14px;
+    border-top-right-radius: 14px;
+  }
+}
+</style>
+<style>
+/* v1.22.1-bg.p28: tidy caption row */
+#grpPins {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  grid-auto-rows: minmax(36px,auto);
+  gap: 8px;
+  align-items: center;
+}
+#grpPins .title { grid-column: 1 / -1; }
+#grpPins #pinsId { grid-column: 1; }
+#grpPins #btnPickPins { grid-column: 2; }
+#grpPins #helpPins { grid-column: 3; }
+#grpPins #btnClearPins { display: none !important; } /* remove Clear */
+#grpPins #pillAutosave {
+  grid-column: 1 / -1;
+  justify-self: start;
+  font-size: 12px;
+  padding: 4px 8px;
+  border-radius: 999px;
+}
+#grpPins #pillAutosave .checkbox, #grpPins #pillAutosave input[type="checkbox"] {
+  transform: scale(.9);
+  margin-right: 6px;
+}
+</style>
 </head>
 <body>
 <div id="sheetScrim" class="scrim" hidden aria-hidden="true"></div>
@@ -2578,6 +2618,7 @@ const openModal = (html)=>{ modalRoot.className='modal-overlay'; modalRoot.inner
 const closeModal = ()=>{ modalRoot.className='hidden'; modalRoot.innerHTML=''; };
 
 
+
 /* ヘルプモーダル */
 btnHelpModel?.addEventListener('click', ()=>{
   openModal(`
@@ -2592,12 +2633,10 @@ btnHelpModel?.addEventListener('click', ()=>{
         <p>GLTF の場合は外部テクスチャを同一フォルダに配置してください。</p>
         <p>共有は『公開/限定』ボタンで切替できます（権限が必要）。</p>
       </div>
-      <footer><button id="helpClose">閉じる</button></footer>
     </div>
   `);
-  const close = ()=> closeModal();
-  // modal内の全ての #helpClose を閉じる動作に統一
-  document.querySelectorAll('#helpClose').forEach(el=> el.addEventListener('click', close));
+  const btn = document.getElementById('helpClose');
+  btn?.addEventListener('click', ()=> closeModal(), { once: true });
 });
 
 btnHelpPins?.addEventListener('click', ()=>{
@@ -2612,13 +2651,13 @@ btnHelpPins?.addEventListener('click', ()=>{
         <p>ピン（位置・タイトル・本文・画像など）を保存する JSON ファイルです。未指定でも作業可能で、オートセーブONなら GLB と同じフォルダに自動作成されます。</p>
         <p>既存の pins.json を使う場合は fileId を『キャプション』欄に入力するか、[選択…] から選んでください。</p>
       </div>
-      <footer><button id="helpClose">閉じる</button></footer>
     </div>
   `);
-  const close = ()=> closeModal();
-  document.querySelectorAll('#helpClose').forEach(el=> el.addEventListener('click', close));
+  const btn = document.getElementById('helpClose');
+  btn?.addEventListener('click', ()=> closeModal(), { once: true });
 });
 /* 画像アップロード共通 */
+
 
 async function uploadAndAttachImage(file, pin, opts={}){
   try{
@@ -3644,5 +3683,20 @@ document.addEventListener('DOMContentLoaded', ()=>{
 });
 </script>
 
+<script>
+// v1.22.1-bg.p28: caption row DOM tidy
+document.addEventListener('DOMContentLoaded', ()=>{
+  try{
+    const grp = document.getElementById('grpPins');
+    const inp = document.getElementById('pinsId');
+    const pick = document.getElementById('btnPickPins');
+    const help = document.getElementById('helpPins') || document.getElementById('btnHelpPins');
+    const clr  = document.getElementById('btnClearPins');
+    if (inp && pick){ inp.insertAdjacentElement('afterend', pick); }
+    if (inp && help){ pick ? pick.insertAdjacentElement('afterend', help) : inp.insertAdjacentElement('afterend', help); }
+    if (clr && clr.parentElement){ clr.remove(); }
+  }catch(e){ console.warn(e); }
+});
+</script>
 </body>
 </html>
