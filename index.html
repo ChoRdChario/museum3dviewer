@@ -623,6 +623,50 @@ html.sheet-open .floating-buttons{
   margin-right: 6px;
 }
 </style>
+
+<style>
+/* v1.22.1-bg.p29: unified one-line layout & compact controls */
+
+/* Common row layout for hgroup content */
+.hgroup { display: grid; grid-template-columns: 1fr auto auto auto 1fr; grid-auto-rows: minmax(36px,auto); gap: 8px; align-items: center; }
+.hgroup > .title { grid-column: 1 / -1; }
+
+/* Model row */
+#grpModel #fileId { grid-column: 1; }
+#grpModel #btnLoad { grid-column: 2; }
+#grpModel #helpModel { grid-column: 3; }
+#grpModel #status { grid-column: 4; justify-self: start; font-size: 12px; color: #777; }
+
+/* Caption row (single line) */
+#grpPins #pinsId { grid-column: 1; }
+#grpPins #btnPickPins { grid-column: 2; }
+#grpPins #helpPins { grid-column: 3; }
+#grpPins #pillAutosave { grid-column: 4 / 6; justify-self: start; }
+#grpPins #btnClearPins { display: none !important; }
+
+/* Share row unified */
+#grpShare .toolbar { grid-column: 1 / -1; display: grid; grid-template-columns: auto auto auto auto; gap: 8px; align-items: center; }
+#grpShare .toolbar > * { justify-self: start; }
+
+/* Compact buttons */
+button, .iconbtn {
+  padding: 6px 10px;
+  min-width: 0;
+}
+button.small, .iconbtn.small { padding: 4px 8px; font-size: 12px; }
+#grpPins #btnPickPins, #grpModel #btnLoad { min-width: 72px; }
+#grpShare button { min-width: 120px; }
+#grpShare .pill { padding: 4px 8px; font-size: 12px; }
+
+/* Autosave pill: show only ON/OFF text and pin icon */
+#pillAutosave { white-space: nowrap; }
+#pillAutosave .label { display: none; } /* hide static 'オートセーブ' label if present */
+#pillAutosave .state { margin-left: .25rem; }
+
+/* Help chip keep style from previous */
+.iconbtn.help-chip { padding: 4px 10px; font-size: 12px; }
+</style>
+
 </head>
 <body>
 <div id="sheetScrim" class="scrim" hidden aria-hidden="true"></div>
@@ -3698,5 +3742,70 @@ document.addEventListener('DOMContentLoaded', ()=>{
   }catch(e){ console.warn(e); }
 });
 </script>
+
+<script>
+// v1.22.1-bg.p29: robustly close load sheet & scrim
+(function(){
+  function removeSheetOpen(){
+    document.documentElement.classList.remove('sheet-open');
+    document.body.classList.remove('sheet-open');
+    const scrim = document.querySelector('.scrim');
+    if (scrim) scrim.classList.add('hidden');
+    const sheet = document.getElementById('loadSheet');
+    if (sheet) sheet.setAttribute('aria-hidden','true');
+  }
+  // Patch closeLoadSheet if present
+  if (typeof window.closeLoadSheet === 'function'){
+    const _orig = window.closeLoadSheet;
+    window.closeLoadSheet = function(){
+      try { _orig.apply(this, arguments); } catch(e) {}
+      removeSheetOpen();
+    };
+  }
+  // Bind to close/cancel buttons
+  document.addEventListener('click', (ev)=>{
+    const id = (ev.target && ev.target.id) || '';
+    if (id === 'loadCancel' || id === 'loadClose'){
+      setTimeout(removeSheetOpen, 0);
+    }
+  }, true);
+  // Hide scrim when ESC closes dialog/sheet
+  document.addEventListener('keydown', (e)=>{
+    if (e.key === 'Escape') setTimeout(removeSheetOpen, 0);
+  });
+})();
+</script>
+
+
+<script>
+// v1.22.1-bg.p29: autosave pill shows only ON/OFF reflecting checkbox
+document.addEventListener('DOMContentLoaded', ()=>{
+  const pill = document.getElementById('pillAutosave');
+  if (!pill) return;
+  const cb = pill.querySelector('input[type="checkbox"]') || document.getElementById('autosaveToggle');
+  let stateEl = pill.querySelector('.state');
+  if (!stateEl){ stateEl = document.createElement('span'); stateEl.className='state'; pill.appendChild(stateEl); }
+  const pinIcon = pill.querySelector('.icon') || null;
+  function update(){
+    const on = !!(cb && cb.checked);
+    stateEl.textContent = on ? 'オートセーブON' : 'オートセーブOFF';
+  }
+  update();
+  cb && cb.addEventListener('change', update);
+});
+</script>
+
+
+<script>
+// v1.22.1-bg.p29: enforce inline order for caption row
+document.addEventListener('DOMContentLoaded', ()=>{
+  const inp = document.getElementById('pinsId');
+  const pick = document.getElementById('btnPickPins');
+  const help = document.getElementById('helpPins') || document.getElementById('btnHelpPins');
+  if (inp && pick) inp.insertAdjacentElement('afterend', pick);
+  if (pick && help) pick.insertAdjacentElement('afterend', help);
+});
+</script>
+
 </body>
 </html>
