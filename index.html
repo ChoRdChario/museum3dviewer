@@ -772,6 +772,17 @@ button, .iconbtn { padding: 4px 8px; min-width: 0; }
 #autosaveLabel { white-space: nowrap; }
 </style>
 
+
+<style>
+/* v1.22.1-bg.p35: lightweight toast */
+#toastHost{ position: fixed; left: 50%; transform: translateX(-50%); bottom: 20px; z-index: 5000; pointer-events:none; }
+.toast{ background: rgba(0,0,0,.85); color:#fff; padding:10px 14px; border-radius:999px; font-size:13px; margin-top:8px; opacity:0; transition:opacity .15s ease, transform .15s ease; transform: translateY(8px); }
+.toast.show{ opacity:1; transform: translateY(0); }
+@media (prefers-color-scheme: dark){
+  .toast{ background: rgba(255,255,255,.9); color:#111; }
+}
+</style>
+
 </head>
 <body>
 <div id="sheetScrim" class="scrim" hidden aria-hidden="true"></div>
@@ -4125,6 +4136,56 @@ document.addEventListener('DOMContentLoaded', ()=>{
   update();
   cb.addEventListener('change', update);
 });
+</script>
+
+
+<div id="toastHost" aria-live="polite"></div>
+
+<script>
+// v1.22.1-bg.p35: toast + copyText override
+(function(){
+  function toast(msg, ms=1800){
+    const host = document.getElementById('toastHost');
+    if (!host) return alert(msg);
+    const el = document.createElement('div');
+    el.className = 'toast';
+    el.textContent = msg;
+    host.appendChild(el);
+    requestAnimationFrame(()=> el.classList.add('show'));
+    setTimeout(()=>{ el.classList.remove('show'); setTimeout(()=> el.remove(), 160); }, ms);
+  }
+  // Patch global
+  window.__toast = toast;
+  // Override copyText/fallbackCopy if they exist
+  const origAlert = window.alert;
+  function ok(msg){ if (window.__toast) window.__toast(msg); else origAlert(msg); }
+  window.copyText = function(text, okMsg='コピーしました'){
+    if (navigator.clipboard && window.isSecureContext){
+      navigator.clipboard.writeText(text).then(()=> ok(okMsg)).catch(()=> window.fallbackCopy(text, okMsg));
+    } else { window.fallbackCopy(text, okMsg); }
+  };
+  window.fallbackCopy = function(text, okMsg){
+    try{
+      if (navigator.clipboard && navigator.clipboard.writeText){
+        navigator.clipboard.writeText(text).then(()=> ok(okMsg)).catch(()=>{
+          // execCommand fallback
+          const ta = document.createElement('textarea');
+          ta.value = text; ta.style.position='fixed'; ta.style.opacity='0';
+          document.body.appendChild(ta); ta.focus(); ta.select();
+          try{ document.execCommand('copy'); ok(okMsg); }catch(e){ origAlert(okMsg); }
+          ta.remove();
+        });
+        return;
+      }
+    }catch(_){}
+    try{
+      const ta = document.createElement('textarea');
+      ta.value = text; ta.style.position='fixed'; ta.style.opacity='0';
+      document.body.appendChild(ta); ta.focus(); ta.select();
+      document.execCommand('copy'); ok(okMsg); ta.remove();
+    }catch(e){ origAlert(okMsg); }
+  };
+})();
 </script>
 
 </body>
