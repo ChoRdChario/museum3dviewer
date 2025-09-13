@@ -4184,5 +4184,41 @@ document.getElementById('toolInlineBtn')?.addEventListener('click', ()=>{
 })();
 </script>
 
+
+<script>
+// v1.22.1-bg.p23: initial gate visibility control
+(function(){
+  function hideGate(){
+    const g = document.getElementById('signinGateWrap');
+    if (!g) return;
+    try { g.hidden = true; } catch(_){}
+    g.classList.add('hidden');
+  }
+  function showGate(){
+    const g = document.getElementById('signinGateWrap');
+    if (!g) return;
+    try { g.hidden = false; } catch(_){}
+    g.classList.remove('hidden');
+  }
+  async function boot(){
+    // 初期状態はゲート表示
+    showGate();
+    // GIS準備を待って、サイレントサインインが通るならゲートを閉じる
+    try {
+      const ready = await (window.ensureGisReady ? window.ensureGisReady() : Promise.resolve(false));
+      if (ready && typeof ensureSignedInIfNeeded === 'function'){
+        const ok = await ensureSignedInIfNeeded();
+        if (ok){ hideGate(); }
+      }
+    } catch(e){ /* ignore: ゲートは表示のまま */ }
+  }
+  if (document.readyState === 'complete' || document.readyState === 'interactive'){
+    setTimeout(boot, 0);
+  } else {
+    document.addEventListener('DOMContentLoaded', boot);
+  }
+})();
+</script>
+
 </body>
 </html>
