@@ -750,6 +750,28 @@ button, .iconbtn { padding: 4px 8px; min-width: 0; }
 #grpShare button{ min-width: 0; }
 </style>
 
+
+<style>
+/* v1.22.1-bg.p34: autosave pill as minimal width "☑ オートセーブON/OFF" */
+#grpPins #pillAutosave{
+  grid-column: 4;
+  justify-self: start;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px;
+  height: 24px;
+  font-size: 12px;
+  border-radius: 999px;
+  white-space: nowrap;
+  width: auto;
+  min-width: fit-content;
+  max-width: fit-content;
+}
+#pillAutosave .label, #pillAutosave .state, #pillAutosave #saveStatus { display: none !important; }
+#autosaveLabel { white-space: nowrap; }
+</style>
+
 </head>
 <body>
 <div id="sheetScrim" class="scrim" hidden aria-hidden="true"></div>
@@ -4071,31 +4093,37 @@ document.addEventListener('DOMContentLoaded', ()=>{
 </script>
 
 
+
+
+
 <script>
-// v1.22.1-bg.p33: autosave pill short label "自動" + ON/OFF
+// v1.22.1-bg.p34: show "☑ オートセーブON/OFF" inside pill, minimal width
 document.addEventListener('DOMContentLoaded', ()=>{
   const pill = document.getElementById('pillAutosave');
   if (!pill) return;
-  let labelEl = pill.querySelector('.label');
-  let stateEl = pill.querySelector('.state');
-  const cb = pill.querySelector('input[type="checkbox"]') || document.getElementById('autosaveToggle');
-  if (!labelEl){
-    labelEl = document.createElement('span');
-    labelEl.className = 'label';
-    pill.insertBefore(labelEl, pill.firstChild);
+  // Reuse existing checkbox if present or create one
+  let cb = pill.querySelector('input[type="checkbox"]');
+  if (!cb){
+    cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.id = 'autosaveToggle';
+    pill.insertBefore(cb, pill.firstChild);
+  } else {
+    cb.id = cb.id || 'autosaveToggle';
   }
-  if (!stateEl){
-    stateEl = document.createElement('span');
-    stateEl.className = 'state';
-    pill.appendChild(stateEl);
+  // Create/ensure label span
+  let lbl = pill.querySelector('#autosaveLabel');
+  if (!lbl){
+    lbl = document.createElement('span');
+    lbl.id = 'autosaveLabel';
+    pill.appendChild(lbl);
   }
-  labelEl.textContent = '自動';
+  // Update text based on state
   function update(){
-    const on = !!(cb && cb.checked);
-    stateEl.textContent = on ? 'ON' : 'OFF';
+    lbl.textContent = 'オートセーブ' + (cb.checked ? 'ON' : 'OFF');
   }
   update();
-  cb && cb.addEventListener('change', update);
+  cb.addEventListener('change', update);
 });
 </script>
 
