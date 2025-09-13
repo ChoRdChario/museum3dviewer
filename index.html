@@ -3,7 +3,7 @@
 <html lang="ja">
 <head>
 <meta charset="utf-8"/>
-<title>Drive GLB Viewer + Pins (v1.22.0-bg)</title>
+<title>LociMyu</title>
 <link href="https://accounts.google.com" rel="preconnect"/>
 <script async="" src="https://accounts.google.com/gsi/client">
 
@@ -510,7 +510,7 @@ html.sheet-open .floating-buttons{
 
 
 <style>
-/* v1.22.1-bg.p36: global loading overlay */
+/* v1.0.0 <!-- NOTE: Update version here on every release -->.p36: global loading overlay */
 #globalLoading {
   position: fixed;
   inset: 0;
@@ -605,7 +605,7 @@ html.sheet-open .floating-buttons{
 <!-- 右端ユーティリティ -->
 <div class="header-utils">
 <a class="iconbtn" href="./docs/museum3dviewer_user_guide.pdf" id="btnGuidePdf" rel="noopener" target="_blank">使い方ガイド（PDF）</a>
-<span class="tiny">v1.22.0-bg</span>
+<span class="tiny">v1.0.0</span>
 </div>
 </div>
 </header>
@@ -819,7 +819,7 @@ html.sheet-open .floating-buttons{
 <div class="hidden" id="modalRoot"></div>
 <script type="module">
 'use strict';
-console.log('drive_three_pins v1.22.2-bg');
+console.log('drive_three_pins v1.0.0');
 
 
 /* === Loader helpers === */
@@ -3549,7 +3549,7 @@ document.getElementById('toolInlineBtn')?.addEventListener('click', ()=>{
 </div>
 
 <script>
-// v1.22.1-bg.p36: showLoading/hideLoading
+// v1.0.0.p36: showLoading/hideLoading
 (function(){
   const host = document.getElementById('globalLoading');
   const sub  = document.getElementById('globalLoadingSub');
@@ -3577,7 +3577,7 @@ document.getElementById('toolInlineBtn')?.addEventListener('click', ()=>{
 })();
 </script>
 <script>
-// v1.22.1-bg.p37: robust hook for loadModel + sign-in gate initial show
+// v1.0.0.p37: robust hook for loadModel + sign-in gate initial show
 (function(){
   function tryHook(retries=12){
     const orig = window.loadModel;
@@ -3634,7 +3634,7 @@ document.getElementById('toolInlineBtn')?.addEventListener('click', ()=>{
 </script>
 
 <script>
-// v1.22.1-bg.p38: robust loader hook + unified showLoading/hideLoading with debug logs
+// v1.0.0.p38: robust loader hook + unified showLoading/hideLoading with debug logs
 (function(){
   // --- Loader DOM ---
   const host = document.getElementById('globalLoading');
@@ -3723,7 +3723,7 @@ document.getElementById('toolInlineBtn')?.addEventListener('click', ()=>{
 </script>
 
 
-<!-- v1.22.2-bg.p40: unified loader shim + loadModel wrapper (fail-safe) -->
+<!-- v1.0.0.p40: unified loader shim + loadModel wrapper (fail-safe) -->
 <script>
 (function(){
   try{
@@ -3808,7 +3808,7 @@ document.getElementById('toolInlineBtn')?.addEventListener('click', ()=>{
 
 
 <script>
-// v1.22.2-bg.p41: Refcounted loader with watchdog auto-hide
+// v1.0.0.p41: Refcounted loader with watchdog auto-hide
 (function(){
   var host = document.getElementById('globalLoading');
   var sub  = document.getElementById('globalLoadingSub');
