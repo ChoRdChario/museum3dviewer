@@ -667,6 +667,18 @@ button.small, .iconbtn.small { padding: 4px 8px; font-size: 12px; }
 .iconbtn.help-chip { padding: 4px 10px; font-size: 12px; }
 </style>
 
+<style>
+/* v1.22.1-bg.p30: compact spacing for larger workspace */
+.hgroup { grid-auto-rows: minmax(30px,auto); gap: 6px; }
+.hgroup > .title { margin-bottom: 4px; font-size: 11.5px; letter-spacing: .05em; }
+input[type="text"], input[type="search"], input[type="url"], .pill, .iconbtn, button {
+  padding: 4px 8px;
+  line-height: 1.2;
+}
+#status { font-size: 11.5px; }
+#pillAutosave { padding: 3px 8px; }
+#grpShare .pill { padding: 3px 8px; }
+</style>
 </head>
 <body>
 <div id="sheetScrim" class="scrim" hidden aria-hidden="true"></div>
@@ -3805,6 +3817,93 @@ document.addEventListener('DOMContentLoaded', ()=>{
   if (inp && pick) inp.insertAdjacentElement('afterend', pick);
   if (pick && help) pick.insertAdjacentElement('afterend', help);
 });
+</script>
+
+
+<script>
+// v1.22.1-bg.p30: overlay close fix + single load handler
+(function(){
+  function forceCloseSheet(){
+    document.documentElement.classList.remove('sheet-open');
+    document.body.classList.remove('sheet-open');
+    const scrims = document.querySelectorAll('.scrim');
+    scrims.forEach(s=>{ s.classList.add('hidden'); s.style.display='none'; });
+    const sheet = document.getElementById('loadSheet');
+    if (sheet){
+      sheet.setAttribute('aria-hidden','true');
+      sheet.classList.remove('open','show');
+      sheet.style.display='none';
+      sheet.hidden = true;
+    }
+  }
+  // Patch global closeLoadSheet if exists
+  if (typeof window.closeLoadSheet === 'function'){
+    const orig = window.closeLoadSheet;
+    window.closeLoadSheet = function(){
+      try{ orig.apply(this, arguments); }catch(_){}
+      forceCloseSheet();
+    };
+  }
+  // Cancel / Close buttons
+  document.addEventListener('click', (ev)=>{
+    const id = ev.target && ev.target.id;
+    if (id === 'loadCancel' || id === 'loadClose'){
+      forceCloseSheet();
+    }
+    // clicking scrim closes too
+    if ((ev.target && ev.target.classList && ev.target.classList.contains('scrim'))){
+      forceCloseSheet();
+    }
+  }, true);
+  // ESC key
+  document.addEventListener('keydown', (e)=>{
+    if (e.key === 'Escape') forceCloseSheet();
+  });
+
+  // Remove duplicate listeners on the Load button: replace with a clone
+  document.addEventListener('DOMContentLoaded', ()=>{
+    const btn = document.getElementById('loadStart');
+    if (btn){
+      const clone = btn.cloneNode(true);
+      btn.parentNode.replaceChild(clone, btn);
+      // Hook our single handler
+      const loadInput = document.getElementById('loadInput');
+      clone.addEventListener('click', ()=>{
+        const err = document.getElementById('loadError');
+        const info = document.getElementById('loadInfo');
+        if (err) err.textContent = '';
+        const raw = loadInput?.value || '';
+        const url = (typeof toLoadUrl==='function') ? toLoadUrl(raw) : raw;
+        if(!url){
+          if (err) err.textContent='URLかfileIDを入力してください';
+          // keep sheet open for correction (do not close)
+          return;
+        }
+        // prevent legacy alert while sheet is open
+        const _alert = window.alert;
+        window.alert = function(msg){ console.warn('[suppressed alert]', msg); };
+        const nameGuess = (()=>{ try{ const u=new URL(url); const p=u.pathname.split('/').filter(Boolean); return p[p.length-1]||url; }catch(_){ return raw; }})();
+        if (info) info.textContent = `📂 ${nameGuess} を読み込み中…`;
+        if (typeof showLoading === 'function') showLoading(`GLBを読み込み中… ${nameGuess}`);
+        (async ()=>{
+          try{
+            await loadModel(url);
+            // success -> close
+            if (typeof hideLoading==='function') hideLoading();
+            forceCloseSheet();
+          }catch(e){
+            console.error(e);
+            if (err) err.textContent='読み込みに失敗しました。共有設定やURL/IDをご確認ください';
+          }finally{
+            if (typeof hideLoading==='function') hideLoading();
+            if (info) info.textContent='';
+            window.alert = _alert;
+          }
+        })();
+      });
+    }
+  });
+})();
 </script>
 
 </body>
