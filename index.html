@@ -3806,6 +3806,94 @@ document.getElementById('toolInlineBtn')?.addEventListener('click', ()=>{
 })();
 </script>
 
+
+<script>
+// v1.22.2-bg.p41: Refcounted loader with watchdog auto-hide
+(function(){
+  var host = document.getElementById('globalLoading');
+  var sub  = document.getElementById('globalLoadingSub');
+  var _count = 0;
+  var _timer = null;
+  var MAX_MS = 30000; // 30s safety
+
+  function armWatchdog(){
+    if (_timer) { clearTimeout(_timer); _timer = null; }
+    _timer = setTimeout(function(){
+      console.warn('[loader] watchdog timeout -> force hide');
+      _count = 0;
+      forceHide();
+    }, MAX_MS);
+  }
+  function forceHide(){
+    if (!host) return;
+    host.classList.remove('show');
+    host.setAttribute('hidden','');
+    if (sub) sub.textContent = '';
+    document.body.style.pointerEvents = '';
+  }
+
+  function show(msg, detail){
+    if (!host) return;
+    (host.querySelector('.msg')||{}).textContent = msg || 'モデルを読み込み中…';
+    if (sub) sub.textContent = detail || '';
+    host.classList.add('show');
+    host.removeAttribute('hidden');
+    document.body.style.pointerEvents = 'none';
+    _count++;
+    armWatchdog();
+    console.debug('[loader] show (count=%d)', _count);
+  }
+  function hide(){
+    if (_count > 0) _count--;
+    console.debug('[loader] hide (count=%d)', _count);
+    if (_count === 0){
+      if (_timer) { clearTimeout(_timer); _timer = null; }
+      forceHide();
+    }
+  }
+  // expose
+  window.showLoading = show;
+  window.hideLoading = hide;
+
+  // Close on global failures/navigation just in case
+  window.addEventListener('error', function(){ hide(); }, true);
+  window.addEventListener('unhandledrejection', function(){ hide(); });
+  window.addEventListener('hashchange', function(){ hide(); });
+  window.addEventListener('popstate', function(){ hide(); });
+
+  // If sheet closes, also hide overlay (legacy flows)
+  document.addEventListener('click', function(ev){
+    var id = ev.target && ev.target.id;
+    if (id === 'loadCancel' || id === 'loadClose') { hide(); }
+  }, true);
+
+  // Wrap loadModel again to ensure balanced show/hide even on sync throws
+  try{
+    function wrap(fn){
+      if (typeof fn !== 'function' || fn.__wrappedP41) return fn;
+      var w = async function(urlOrId){
+        var name = '';
+        try{
+          if (typeof urlOrId === 'string'){
+            try{ var u = new URL(urlOrId); var ps = u.pathname.split('/').filter(Boolean); name = ps[ps.length-1] || urlOrId; }
+            catch(_){ name = urlOrId; }
+          }
+        }catch(_){}
+        show('モデルを読み込み中…', name);
+        try{ return await fn.apply(this, arguments); }
+        catch(e){ throw e; }
+        finally{ hide(); }
+      };
+      w.__wrappedP41 = true;
+      return w;
+    }
+    if (typeof window.loadModel === 'function') window.loadModel = wrap(window.loadModel);
+    var _lm = window.loadModel;
+    Object.defineProperty(window, 'loadModel', { configurable:true, get(){return _lm;}, set(v){ _lm = wrap(v);} });
+  }catch(e){ /* noop */ }
+})();
+</script>
+
 </body>
 
 
