@@ -514,7 +514,7 @@ html.sheet-open .floating-buttons{
 #globalLoading {
   position: fixed;
   inset: 0;
-  z-index: 2000;
+  z-index: 5000;
   background: rgba(0,0,0,0.45);
   display: none;
   align-items: center;
@@ -522,7 +522,7 @@ html.sheet-open .floating-buttons{
   -webkit-backdrop-filter: blur(2px);
   backdrop-filter: blur(2px);
 }
-#globalLoading.show { display: flex; }
+#globalLoading.show { display: flex !important; }
 #globalLoading .panel {
   min-width: 240px;
   max-width: 80vw;
@@ -3549,7 +3549,7 @@ document.getElementById('toolInlineBtn')?.addEventListener('click', ()=>{
 </div>
 
 <script>
-// v1.22.1-bg.p36: showLoading/hideLoading + auto-hook loadModel
+// v1.22.1-bg.p36: showLoading/hideLoading
 (function(){
   const host = document.getElementById('globalLoading');
   const sub  = document.getElementById('globalLoadingSub');
@@ -3574,27 +3574,62 @@ document.getElementById('toolInlineBtn')?.addEventListener('click', ()=>{
   }
   window.showLoading = window.showLoading || showLoading;
   window.hideLoading = window.hideLoading || hideLoading;
-
-  function hookLoadModel(){
+})();
+</script>
+<script>
+// v1.22.1-bg.p37: robust hook for loadModel + sign-in gate initial show
+(function(){
+  function tryHook(retries=12){
     const orig = window.loadModel;
-    if (typeof orig !== 'function' || orig.__wrapped) return;
-    const wrapped = async function(urlOrId, ...rest){
-      let name = '';
-      try {
-        if (typeof urlOrId === 'string'){
-          try { const u = new URL(urlOrId); const p=u.pathname.split('/').filter(Boolean); name = p[p.length-1]||urlOrId; }
-          catch { name = urlOrId; }
-        }
-      } catch(_) {}
-      showLoading('モデルを読み込み中…', name);
-      try { return await orig.call(this, urlOrId, ...rest); }
-      finally { hideLoading(); }
-    };
-    wrapped.__wrapped = true;
-    window.loadModel = wrapped;
+    if (typeof orig === 'function' && !orig.__wrapped){
+      const wrapped = async function(urlOrId, ...rest){
+        let name = '';
+        try {
+          if (typeof urlOrId === 'string'){
+            try { const u = new URL(urlOrId); const p=u.pathname.split('/').filter(Boolean); name = p[p.length-1]||urlOrId; }
+            catch { name = urlOrId; }
+          }
+        } catch(_) {}
+        if (typeof window.showLoading === 'function') window.showLoading('モデルを読み込み中…', name);
+        try { return await orig.call(this, urlOrId, ...rest); }
+        finally { if (typeof window.hideLoading === 'function') window.hideLoading(); }
+      };
+      wrapped.__wrapped = true;
+      window.loadModel = wrapped;
+      return true;
+    }
+    if (retries > 0) setTimeout(()=>tryHook(retries-1), 150);
+    return false;
   }
-  if (document.readyState === 'complete' || document.readyState === 'interactive') hookLoadModel();
-  else document.addEventListener('DOMContentLoaded', hookLoadModel);
+  if (document.readyState === 'complete' || document.readyState === 'interactive') tryHook();
+  else document.addEventListener('DOMContentLoaded', tryHook);
+
+  function hideGate(){
+    const g = document.getElementById('signinGateWrap');
+    if (!g) return;
+    g.hidden = true; g.classList.add('hidden');
+  }
+  function showGate(){
+    const g = document.getElementById('signinGateWrap');
+    if (!g) return;
+    g.hidden = false; g.classList.remove('hidden');
+  }
+  function bootGate(){
+    showGate();
+    Promise.resolve().then(async ()=>{
+      try{
+        if (window.ensureGisReady){
+          const ready = await window.ensureGisReady();
+          if (ready && typeof window.ensureSignedInIfNeeded === 'function'){
+            const ok = await window.ensureSignedInIfNeeded();
+            if (ok) hideGate();
+          }
+        }
+      }catch(e){ /* keep gate shown */ }
+    });
+  }
+  if (document.readyState === 'complete' || document.readyState === 'interactive') setTimeout(bootGate, 0);
+  else document.addEventListener('DOMContentLoaded', bootGate);
 })();
 </script>
 </body>
