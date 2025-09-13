@@ -3,11 +3,9 @@
 <html lang="ja">
 <head>
 <meta charset="utf-8"/>
-<title>Drive GLB Viewer + Pins (v1.22.1-bg)</title>
+<title>Drive GLB Viewer + Pins (v1.22.0-bg)</title>
 <link href="https://accounts.google.com" rel="preconnect"/>
-<script async="" src="https://accounts.google.com/gsi/client"></script>
-<script>
-
+<script async="" src="https://accounts.google.com/gsi/client">
 
 /** Hex color normalizer: supports #rgb -> #rrggbb and validates */
 function normalizeHex(c){
@@ -26,7 +24,6 @@ function normalizeHex(c){
   // Fallback safe default
   return '#000000';
 }
-
 </script>
 <script async="" src="https://apis.google.com/js/api.js"></script>
 <meta content="width=device-width, initial-scale=1" name="viewport"/>
@@ -511,116 +508,37 @@ html.sheet-open .floating-buttons{
 
 
 
-
 <style>
-/* ---- iOS Safari overlay ordering hardening ---- */
-.scrim { z-index: 3100 !important; }
-.sheet { z-index: 3200 !important; position: fixed !important; }
-.modal-overlay { z-index: 3300 !important; }
-/* Ensure sheet receives events over scrim */
-.sheet[open] { pointer-events: auto !important; }
-</style>
+/* v1.22.1-bg.p25: inline help chip next to inputs */
+.hgroup#grpModel, .hgroup#grpPins { display: grid; grid-template-columns: 1fr auto auto auto; gap: 8px; align-items: center; }
+.hgroup#grpModel input#fileId { grid-column: 1 / 2; }
+.hgroup#grpModel #btnLoad { grid-column: 2 / 3; }
+.hgroup#grpModel #helpModel { grid-column: 3 / 4; }
+.hgroup#grpModel #status { grid-column: 4 / 5; justify-self: end; }
 
-<style>
-/* ---- iOS Safari stacking & hit-test hardening (v2) ---- */
-html.sheet-open, body.sheet-open { overflow: hidden !important; }
-#sheetScrim.scrim { pointer-events: auto !important; }
-.sheet[open] { pointer-events: auto !important; }
-</style>
+#helpModel.help-chip, #btnHelpPins.help-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 4px 8px; border-radius: 999px; border: 1px solid rgba(0,0,0,.2);
+  background: rgba(255,255,255,.85); backdrop-filter: blur(4px);
+  font-size: 12px; line-height: 1; color: #222; cursor: pointer;
+}
+#helpModel.help-chip::before, #btnHelpPins.help-chip::before {
+  content: '？'; display: inline-block; width: 16px; height: 16px; text-align: center;
+  border-radius: 50%; border: 1px solid rgba(0,0,0,.25);
+}
+@media (prefers-color-scheme: dark){
+  #helpModel.help-chip, #btnHelpPins.help-chip { background: rgba(30,30,30,.7); color: #fff; border-color: rgba(255,255,255,.2); }
+  #helpModel.help-chip::before, #btnHelpPins.help-chip::before { border-color: rgba(255,255,255,.25); }
+}
 
-
-<style>
-/* --- v1.22.1-bg: Load Sheet fullscreen-first UX --- */
-.sheet {
-  position: fixed !important;
-  left: 0 !important;
-  right: 0 !important;
-  bottom: 0 !important;
-  width: 100% !important;
-  max-height: none !important;
-  overflow: auto !important;
+/* error text inside load sheet */
+#loadError {
+  color: #ff4d4d; font-size: 13px; margin-top: 8px;
 }
-/* Fullscreen-ish default when open */
-.sheet[open] {
-  height: calc(92vh + env(safe-area-inset-bottom, 0));
-}
-/* Ensure header/body padding respects safe area */
-.sheet .body {
-  padding-bottom: calc(16px + env(safe-area-inset-bottom, 0)) !important;
-}
-/* Desktop can remain more compact via media query if desired */
-@media (min-width: 961px) {
-  .sheet[open] {
-    max-width: 680px;
-    margin: 0 auto;
-    height: auto; /* desktop uses content height */
-    max-height: 560px;
-  }
+#loadInfo {
+  color: #888; font-size: 13px; margin-top: 6px;
 }
 </style>
-
-<style>
-/* v1.22.1-bg.p1: improve hint contrast under overlay */
-.sheet .hint {
-  color: #fff !important;
-  text-shadow: 0 1px 2px rgba(0,0,0,0.55);
-  opacity: 0.95;
-}
-</style>
-
-<script>
-// v1.22.1-bg.p3: minimal escape for HTML injection points
-function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
-</script>
-
-
-<script>
-// v1.22.1-bg.p5: escape helpers
-if (typeof window.esc !== 'function') {
-  window.esc = function(s){ return String(s==null?'':s).replace(/[&<>"']/g, function(c){ return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]); }); };
-}
-if (typeof window.escAttr !== 'function') {
-  window.escAttr = function(s){ return window.esc(s); };
-}
-</script>
-
-<style>
-/* v1.22.1-bg.p6: cleanup & unification */
-/* Z-index variables for overlays */
-:root {
-  --z-scrim: 3100;
-  --z-sheet: 3200;
-  --z-modal: 3300;
-}
-.scrim { z-index: var(--z-scrim) !important; }
-.sheet { z-index: var(--z-sheet) !important; }
-.modal-overlay { z-index: var(--z-modal) !important; }
-
-/* Single-source visibility for mobile Load FAB */
-@media (max-width: 960.98px) {
-  .load-fab { display: flex !important; }
-}
-@media (min-width: 961px) {
-  .load-fab { display: none !important; }
-}
-</style>
-
-
-
-
-
-
-<script>
-// v1.22.1-bg.p24: coordinates formatter with guards
-function fmtPos(p){
-  if (!p) return '';
-  // Accept either object {x,y,z} or array [x,y,z]
-  let x, y, z;
-  if (Array.isArray(p) && p.length>=3){ x = +p[0]; y = +p[1]; z = +p[2]; }
-  else { x = +p.x; y = +p.y; z = +p.z; }
-  return [x,y,z].every(Number.isFinite) ? [x,y,z].map(n=>n.toFixed(3)).join(', ') : '';
-}
-</script>
 </head>
 <body>
 <div id="sheetScrim" class="scrim" hidden aria-hidden="true"></div>
@@ -643,7 +561,7 @@ function fmtPos(p){
 <span class="title">モデル</span>
 <input autocomplete="off" id="fileId" placeholder="GLBの fileId または 共有リンク"/>
 <button class="iconbtn" id="btnLoad">読み込む</button>
-<button class="iconbtn" id="helpModel" title="対応形式など">？</button>
+<button class="iconbtn help-chip" id="helpModel" aria-label="モデル入力のヘルプ" title="モデル入力のヘルプ">ヘルプ</button>
 <span class="tiny" id="status">未サインイン</span>
 </div>
 <!-- 📍 キャプション -->
@@ -860,6 +778,10 @@ function fmtPos(p){
 </header>
 <div class="body">
 <div class="row"><input id="loadInput" placeholder="URL または Google DriveのfileID" type="text"/></div>
+<p id="loadError" role="alert" aria-live="polite"></p>
+<p id="loadInfo" class="muted"></p>
+<p id="loadError" role="alert" aria-live="polite"></p>
+<p id="loadInfo" class="muted"></p>
 <div class="row">
 <button id="loadStart">読み込む</button>
 <button id="loadCancel" data-variant="secondary">キャンセル</button>
@@ -890,7 +812,7 @@ function fmtPos(p){
 <div class="hidden" id="modalRoot"></div>
 <script type="module">
 'use strict';
-console.log('drive_three_pins v1.22.1-bg');
+console.log('drive_three_pins v1.22.0-bg');
 
 
 /* === Loader helpers === */
@@ -1400,7 +1322,6 @@ function openDockSheet(){
   try{ closeCaptionSheet?.(); }catch(_){}
 
   document.documentElement.classList.add('sheet-open');
-  try{ document.body.classList.add('sheet-open'); }catch(_){}
   document.getElementById('sheetScrim')?.setAttribute('open','');
   document.getElementById('sheetScrim')?.removeAttribute('hidden');
   dockSheet.dataset.snap = 'full';
@@ -1511,69 +1432,29 @@ const loadFab = document.getElementById('loadFab');
 const loadSheet = document.getElementById('loadSheet');
 const loadHandle = document.getElementById('loadHandle');
 const loadClose = document.getElementById('loadClose');
-// Attach listeners (after elements exist)
-try{ loadFab?.addEventListener('click', openLoadSheet); }catch(_){}
-try{ (document.getElementById('sheetScrim'))?.addEventListener('click', closeLoadSheet); }catch(_){}
-try{ loadClose?.addEventListener('click', closeLoadSheet); }catch(_){}
-
 const loadInput = document.getElementById('loadInput');
 const loadStart = document.getElementById('loadStart');
-// v1.22.1-bg.p1: guard to prevent double-alert on empty fileId
-let __loadStartAlertedAt = 0;
-function shouldAlertOnce(){
-  const now = Date.now();
-  if (now - __loadStartAlertedAt < 800) return false;
-  __loadStartAlertedAt = now;
-  return true;
-}
-
 
 function openLoadSheet(){
-  
-  // Ensure stacking order on iOS Safari by re-appending scrim then sheet as last children of <body>
-  try {
-    const scrim = document.getElementById('sheetScrim');
-    if (scrim && scrim.parentNode !== document.body) {
-      document.body.appendChild(scrim);
-    } else if (scrim) {
-      document.body.appendChild(scrim); // move to end to ensure paint order
-    }
-    if (loadSheet && loadSheet.parentNode !== document.body) {
-      document.body.appendChild(loadSheet);
-    } else if (loadSheet) {
-      document.body.appendChild(loadSheet); // move to end
-    }
-  } catch(e){}
-document.documentElement.classList.add('sheet-open');
+  document.documentElement.classList.add('sheet-open');
   document.getElementById('sheetScrim')?.setAttribute('open','');
   document.getElementById('sheetScrim')?.removeAttribute('hidden');
-  loadSheet.dataset.snap = 'full';
+  loadSheet.dataset.snap = 'half';
   loadSheet.hidden = false;
   loadSheet.setAttribute('open','');
   loadSheet.setAttribute('aria-hidden','false');
-  // Compute a robust fullscreen-ish height for mobile Safari
-  try {
-    var vh = window.innerHeight || document.documentElement.clientHeight || 640;
-    // Reserve a little margin to avoid Safari UI overlap
-    var h = Math.max(280, Math.floor(vh * 0.92));
-    loadSheet.style.height = h + 'px';
-    // For desktop wide screens, let CSS cap the height later
-  } catch(e){}
-
   setTimeout(()=> loadInput?.focus(), 50);
 }
 function closeLoadSheet(){
-    try{ document.documentElement.classList.remove('sheet-open'); }catch(_){}
-try{ document.body.classList.remove('sheet-open'); }catch(_){}
-document.documentElement.classList.remove('sheet-open');
+  document.documentElement.classList.remove('sheet-open');
   const s=document.getElementById('sheetScrim'); if(s){ s.removeAttribute('open'); s.setAttribute('aria-hidden','true'); s.setAttribute('hidden',''); }
   loadSheet.removeAttribute('open');
   loadSheet.setAttribute('aria-hidden','true');
   setTimeout(()=>{ loadSheet.hidden = true; }, 160);
 }
 
-
-
+loadFab?.addEventListener('click', openLoadSheet);
+loadClose?.addEventListener('click', closeLoadSheet);
 
 // drag (reuse caption logic style: handle only)
 (function(){
@@ -1597,26 +1478,28 @@ function toLoadUrl(val){
 }
 
 loadStart?.addEventListener('click', ()=>{
-  
-  // Empty input guard (single alert)
-  const v = (loadInput?.value || '').trim();
-  if (!v){
-    if (shouldAlertOnce()) alert('URL または fileID を入力してください');
-    return;
-  }
-const url = toLoadUrl(loadInput?.value||'');
-  if(!url){ alert('URLかfileIDを入力してください'); return; }
-  // メッセージ更新＆読み込み開始
-  if (typeof showLoading === 'function') showLoading('GLBを読み込み中…');
+  const err = document.getElementById('loadError');
+  const info = document.getElementById('loadInfo');
+  if (err) err.textContent = '';
+  const raw = loadInput?.value||'';
+  const url = toLoadUrl(raw);
+  if(!url){ if(err) err.textContent='URLかfileIDを入力してください'; return; }
+  // 推定ファイル名（URL末尾 or id）
+  const nameGuess = (()=>{ try{ const u=new URL(url); const p=u.pathname.split('/').filter(Boolean); return p[p.length-1]||url; }catch(_){ return raw; }})();
+  if (info) info.textContent = `📂 ${nameGuess} を読み込み中…`;
+  if (typeof showLoading === 'function') showLoading(`GLBを読み込み中… ${nameGuess}`);
   (async ()=>{
     try{
       await loadModel(url);
     }catch(e){
       console.error(e);
-      alert('読み込みに失敗しました');
+      if(err) err.textContent='読み込みに失敗しました。共有設定やURL/IDをご確認ください';
+      return;
     }finally{
       if (typeof hideLoading === 'function') hideLoading();
-      closeLoadSheet();
+      // 成功時のみ閉じる（エラー表示のままにする）
+      if (!err || !err.textContent) closeLoadSheet();
+      if (info) info.textContent = '';
     }
   })();
 });
@@ -1839,36 +1722,25 @@ function redrawPins(){
     const wrap=document.createElement('details'); wrap.className='pin';
     const hid=`file_${pin.id}`;
     const driveLink = pin.imageDriveId ? `https://drive.google.com/file/d/${pin.imageDriveId}/view?usp=drive_link` : '';
-    wrap.innerHTML = `      <summary data-summary="${esc(pin.id)}">
-        ${esc(pin.title||'（無題）')}
-        ${(()=>{const s=fmtPos(pin.position);return s?`<span class=\"small\">${esc(s)}</span>`:'';})()}
-      </summary>
+    wrap.innerHTML = `
+      <summary data-summary="${pin.id}">${pin.title||'（無題）'} <span class="muted">@ ${safePos(pin.position).map(n=>Number(n).toFixed(3)).join(', ')}</span></summary>
+      <div class="row"><input data-k="title" placeholder="タイトル" value="${pin.title||''}" ${READ_ONLY?'disabled':''} autocomplete="off"></div>
+      <div class="row"><textarea data-k="text" rows="3" placeholder="キャプション" ${READ_ONLY?'disabled':''}>${pin.text||''}</textarea></div>
+      <div class="row"><label class="pill small">色 <input type="color" data-k="color" value="${pin.color||'#ee3333'}" ${READ_ONLY?'disabled':''}></label></div>
+      ${READ_ONLY?'':`<input id="${hid}" class="hidden" type="file" accept="image/*">`}
       <div class="row">
-        <input data-k="title" placeholder="タイトル" value="${esc(pin.title||'')}" ${READ_ONLY?'disabled':''} autocomplete="off">
-      </div>
-      <div class="row">
-        <textarea data-k="text" rows="3" placeholder="説明" ${READ_ONLY?'disabled':''}>${esc(pin.text||'')}</textarea>
-      </div>
-      <div class="row">
-        <label class="pill small">色
-          <input type="color" data-k="color" value="${esc(pin.color||'#ee3333')}" ${READ_ONLY?'disabled':''}>
-        </label>
-      </div>
-      ${READ_ONLY ? '' : `<input id="${hid}" class="hidden" type="file" accept="image/*">`}
-      <div class="row">
-        ${READ_ONLY ? '' : `<button data-act="choose">ローカルから</button>
+        ${READ_ONLY?'':`<button data-act="choose">ローカルから</button>
         <button data-act="pickDrive">フォルダから選ぶ</button>`}
-        ${(pin.imageUrl||pin.imageDriveId) ? `<div class="pic-holder" data-pic="${esc(pin.id)}"></div>` : ''}
-        ${driveLink ? `<a class="small" href="${esc(driveLink)}" target="_blank" rel="noopener noreferrer">元画像を開く ↗</a>` : ''}
-        ${pin.imageDriveId ? `<button data-act="copyPrev" title="Driveの埋め込み用URLをコピー">コピー：プレビューURL</button>
-        <button data-act="togglePub" title="公開/限定を切替">公開↔限定</button>` : ''}
+        ${pin.imageUrl||pin.imageDriveId?'<div class="pic-holder" data-pic="'+pin.id+'"></div>':''}
+        ${driveLink?`<a class="small" href="${driveLink}" target="_blank" rel="noopener">元画像を開く ↗</a>`:''}
+        ${pin.imageDriveId?`<button data-act="copyPrev" title="Driveの埋め込み用URLをコピー">コピー：プレビューURL</button>
+        <button data-act="togglePub" title="公開/限定を切替">公開↔限定</button>`:''}
       </div>
       <div class="row">
         <button data-act="center">このピンへ移動</button>
         <button data-act="toggle">ポップアップ</button>
-        ${READ_ONLY ? '' : `<button data-act="remove" class="warn">削除</button>`}
-      </div>
-        `;
+        ${READ_ONLY?'':`<button data-act="remove" class="warn">削除</button>`}
+      </div>`;
     if (!READ_ONLY){
       wrap.addEventListener('input',(e)=>{
         const t=e.target;
@@ -1932,7 +1804,7 @@ function updateListPositionSummary(id){
   const summary = document.querySelector(`summary[data-summary="${id}"]`);
   if (summary) {
     const title = (PINS.find(x=>x.id===id)?.title)||'（無題）';
-    summary.innerHTML = `${esc(title)} <span class="muted">@ ${esc([p.x,p.y,p.z].map(n=>n.toFixed(3)).join(', '))}</span>`;
+    summary.innerHTML = `${title} <span class="muted">@ ${[p.x,p.y,p.z].map(n=>n.toFixed(3)).join(', ')}</span>`;
   }
 }
 
@@ -2463,23 +2335,23 @@ function buildMaterialsUI(targetEl){
 
     const el=document.createElement('div'); el.className='mat';
     el.innerHTML = `
-      <div class="name">${esc(name)}</div>
-      <div class="row${esc(hasMap?'':' disabled')}">
-        <label><input type="checkbox" data-k="invert" ${esc(cfg.invert&&hasMap?'checked':'')} ${esc(READ_ONLY?'disabled':'')}> 色反転（黒を透過）</label>
-        ${esc(!hasMap?`<span class="muted">（テクスチャなし）</span>`:'')}
+      <div class="name">${name}</div>
+      <div class="row${hasMap?'':' disabled'}">
+        <label><input type="checkbox" data-k="invert" ${cfg.invert&&hasMap?'checked':''} ${READ_ONLY?'disabled':''}> 色反転（黒を透過）</label>
+        ${!hasMap?`<span class="muted">（テクスチャなし）</span>`:''}
       </div>
       <div class="row">
         <span class="muted">不透明度</span>
-        <input type="range" data-k="opacity" min="0" max="1" step="0.01" value="${esc(cfg.opacity)}" ${esc(READ_ONLY?'disabled':'')}>
-        <span class="muted" data-k="ov">${esc(cfg.opacity.toFixed(2))}</span>
+        <input type="range" data-k="opacity" min="0" max="1" step="0.01" value="${cfg.opacity}" ${READ_ONLY?'disabled':''}>
+        <span class="muted" data-k="ov">${cfg.opacity.toFixed(2)}</span>
       </div>
-      <div class="row${esc(hasMap?'':' disabled')}">
+      <div class="row${hasMap?'':' disabled'}">
         <span class="muted">黒しきい値</span>
-        <input type="range" data-k="black" min="0" max="0.5" step="0.01" value="${esc(cfg.blackThreshold)}" ${esc(READ_ONLY?'disabled':'')}>
-        <span class="muted" data-k="bv">${esc(cfg.blackThreshold.toFixed(2))}</span>
+        <input type="range" data-k="black" min="0" max="0.5" step="0.01" value="${cfg.blackThreshold}" ${READ_ONLY?'disabled':''}>
+        <span class="muted" data-k="bv">${cfg.blackThreshold.toFixed(2)}</span>
       </div>
       <div class="row">
-        <label><input type="checkbox" data-k="double" ${esc(cfg.doubleSided?'checked':'')} ${esc(READ_ONLY?'disabled':'')}> 両面表示（裏面も描画）</label>
+        <label><input type="checkbox" data-k="double" ${cfg.doubleSided?'checked':''} ${READ_ONLY?'disabled':''}> 両面表示（裏面も描画）</label>
       </div>
     `;
 
@@ -2702,7 +2574,7 @@ btnHelpPins?.addEventListener('click', ()=>{
     </div>
   `);
   document.addEventListener('click', (e)=>{ if(e.target?.id==='helpClose3') closeModal(); });
-  document.getElementById('helpClose4')?.addEventListener('click', (e)=>{ closeModal(); });
+  document.getElementById('helpClose4')?.addEventListener('click', (e)=>{ (closeModal) });
 });
 
 /* 画像アップロード共通 */
@@ -2751,7 +2623,7 @@ async function chooseDriveImageForPin(pin, opts={}){
       </div>
     `);
     const gridEl = document.getElementById('imgGrid');
-    document.getElementById('imgClose')?.addEventListener('click', (e)=>{ closeModal(); });
+    document.getElementById('imgClose')?.addEventListener('click', (e)=>{ (closeModal) });
     function cardHTML(f){
       const t = new Date(f.modifiedTime||Date.now()).toLocaleDateString();
       const thumb = f.thumbnailLink ? f.thumbnailLink.replace(/=s220/,'=s400') : '';
@@ -3026,7 +2898,7 @@ btnPickPins.onclick = async ()=>{
         </footer>
       </div>
     `);
-    document.getElementById('pinsClose')?.addEventListener('click', (e)=>{ closeModal(); });
+    document.getElementById('pinsClose')?.addEventListener('click', (e)=>{ (closeModal) });
     const listEl = document.getElementById('pinsList');
 
     try{
@@ -3483,8 +3355,8 @@ document.getElementById('toolInlineBtn')?.addEventListener('click', ()=>{
     if (s.includes('://')) return s;
     return 'https://drive.google.com/uc?id=' + encodeURIComponent(s);
   }
-  
-  
+  loadFab?.addEventListener('click', openLoadSheet);
+  loadClose?.addEventListener('click', closeLoadSheet);
   // simple handle drag (header only)
   (function(){
     let startY=0, startSnap='half', dragging=false;
@@ -3497,7 +3369,15 @@ document.getElementById('toolInlineBtn')?.addEventListener('click', ()=>{
     window.addEventListener('mousemove', onMove, {passive:false}); window.addEventListener('touchmove', onMove, {passive:false});
     window.addEventListener('mouseup', onUp); window.addEventListener('touchend', onUp);
   })();
-  
+  loadStart?.addEventListener('click', ()=>{
+    const url = toLoadUrl(loadInput?.value||'');
+    if(!url){ alert('URLかfileIDを入力してください'); return; }
+    document.getElementById('fileId')?.focus();
+    const fileIdBox = document.getElementById('fileId');
+    if (fileIdBox){ fileIdBox.value = url.includes('googleusercontent.com') ? url : url; }
+    document.getElementById('btnLoad')?.click();
+    closeLoadSheet();
+  });
 })();
 
 </script>
@@ -3657,576 +3537,6 @@ document.getElementById('toolInlineBtn')?.addEventListener('click', ()=>{
       const el = document.getElementById(id);
       if (el){ el.style.display='none'; el.setAttribute('aria-hidden','true'); el.addEventListener('click', e=>{ e.preventDefault(); e.stopPropagation(); }, {capture:true}); }
     });
-  }
-})();
-</script>
-
-
-<!-- Safe init patch: aliases and stubs (auto-inserted) -->
-<script>
-(function(){
-  try {
-    // Compatibility aliases: showLoading/hideLoading -> showLoader/hideLoader
-    if (typeof window !== 'undefined') {
-      if (!('showLoading' in window)) {
-        window.showLoading = (typeof window.showLoader === 'function') ? window.showLoader : function(){ /* no-op */ };
-      }
-      if (!('hideLoading' in window)) {
-        window.hideLoading = (typeof window.hideLoader === 'function') ? window.hideLoader : function(){ /* no-op */ };
-      }
-    }
-
-    // Safe stubs for potentially undefined functions used by UI hooks
-    var stubNames = [
-      'loadModel',
-      'copyText',
-      'openImageViewer',
-      'explainShareError',
-      'uploadAndAttachImage',
-      'chooseDriveImageForPin'
-    ];
-
-    stubNames.forEach(function(name){
-      if (typeof window !== 'undefined' && typeof window[name] !== 'function') {
-        // Provide minimal, non-crashing implementations
-        if (name === 'copyText') {
-          window.copyText = function(t, msg){
-            try {
-              var s = (t==null) ? '' : String(t);
-              if (navigator.clipboard && navigator.clipboard.writeText) {
-                return navigator.clipboard.writeText(s).then(function(){
-                  if (msg) { try { alert(msg); } catch(e){} }
-                }).catch(function(){
-                  // Fallback: temporary textarea
-                  var ta = document.createElement('textarea');
-                  ta.value = s; document.body.appendChild(ta);
-                  ta.select(); try { document.execCommand('copy'); } catch(e){}
-                  document.body.removeChild(ta);
-                  if (msg) { try { alert(msg); } catch(e){} }
-                });
-              } else {
-                // Fallback path
-                var ta = document.createElement('textarea');
-                ta.value = s; document.body.appendChild(ta);
-                ta.select(); try { document.execCommand('copy'); } catch(e){}
-                document.body.removeChild(ta);
-                if (msg) { try { alert(msg); } catch(e){} }
-              }
-            } catch (e) {
-              console && console.warn && console.warn('copyText stub error:', e);
-            }
-          };
-        } else {
-          window[name] = function(){
-            // Non-fatal no-op with console notice
-            try {
-              console && console.warn && console.warn('[stub]', name + '() called but not implemented.');
-            } catch(e){}
-          };
-        }
-      }
-    });
-  } catch (e) {
-    try { console.warn('Safe init patch block failed:', e); } catch(_){}
-  }
-})();
-</script>
-<!-- /Safe init patch -->
-
-
-<!-- Guardrails patch (Step 2): load race guard, fetchWithRetry, texture cleanup, dynamic device check -->
-<script>
-(function(){
-  'use strict';
-  // --- 0) Namespace ---
-  const W = window;
-
-  // --- 1) Dynamic device check: isMobile() ---
-  if (typeof W.isMobile !== 'function') {
-    W.isMobile = function(){
-      try {
-        return window.matchMedia('(max-width: 640px), (pointer: coarse)').matches;
-      } catch(e) {
-        return /Mobi|Android/i.test(navigator.userAgent);
-      }
-    };
-    // Optional: maintain a body class for CSS hooks
-    try {
-      const mq = window.matchMedia('(max-width: 640px), (pointer: coarse)');
-      const update = () => {
-        document.documentElement.classList.toggle('is-mobile', mq.matches);
-      };
-      mq.addEventListener ? mq.addEventListener('change', update) : mq.addListener(update);
-      update();
-    } catch(e){}
-  }
-
-  // --- 2) fetchWithRetry: backoff + token refresh ---
-  if (typeof W.fetchWithRetry !== 'function') {
-    W.fetchWithRetry = async function fetchWithRetry(input, init={}, opts={}){
-      const maxAttempts = opts.maxAttempts || 4;    // total attempts
-      const baseDelayMs = opts.baseDelayMs || 400;  // initial backoff
-      let triedRefresh = false;
-
-      for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-        try {
-          const res = await fetch(input, init);
-          if (res.status === 401 || res.status === 403) {
-            // Try a one-time token refresh if available
-            if (!triedRefresh && typeof W.ensureToken === 'function') {
-              triedRefresh = true;
-              try { await W.ensureToken(); } catch(e){}
-              continue; // retry immediately after refresh
-            }
-            if (attempt >= maxAttempts) return res; // give up to caller
-          }
-          if (res.status === 429 || (res.status >= 500 && res.status <= 599)) {
-            // retryable
-          } else {
-            return res; // success or non-retryable status
-          }
-        } catch (netErr) {
-          // network error -> retry
-        }
-        // backoff
-        if (attempt < maxAttempts) {
-          const jitter = Math.floor(Math.random()*100);
-          const delayMs = Math.floor(baseDelayMs * Math.pow(2, attempt-1)) + jitter;
-          await new Promise(r => setTimeout(r, delayMs));
-          continue;
-        }
-      }
-      // Final try with normal fetch (shouldn't reach here in practice)
-      return fetch(input, init);
-    };
-  }
-
-  // --- 3) Texture cleanup helpers for inverted/temporary textures ---
-  if (!W.__tempTextures) { W.__tempTextures = new Set(); }
-  if (typeof W.registerTemporaryTexture !== 'function') {
-    W.registerTemporaryTexture = function(tex){
-      try { if (tex && typeof tex.dispose === 'function') W.__tempTextures.add(tex); } catch(e){}
-    };
-  }
-  if (typeof W.disposeTemporaryTextures !== 'function') {
-    W.disposeTemporaryTextures = function(){
-      try {
-        W.__tempTextures.forEach(tex => { try { tex.dispose(); } catch(e){} });
-        W.__tempTextures.clear();
-      } catch(e){}
-    };
-  }
-
-  // Monkey-patch THREE.CanvasTexture to auto-register (non-invasive; only if available)
-  try {
-    if (W.THREE && W.THREE.CanvasTexture && !W.THREE.CanvasTexture.__museumPatched) {
-      const CT = W.THREE.CanvasTexture;
-      const OldCtor = CT;
-      const Patched = function CanvasTexturePatched(canvas, mapping, wrapS, wrapT, magFilter, minFilter, format, type, anisotropy){
-        const tex = new OldCtor(canvas, mapping, wrapS, wrapT, magFilter, minFilter, format, type, anisotropy);
-        try { W.registerTemporaryTexture(tex); } catch(e){}
-        return tex;
-      };
-      Patched.prototype = OldCtor.prototype;
-      Patched.__proto__ = OldCtor.__proto__;
-      W.THREE.CanvasTexture = Patched;
-      W.THREE.CanvasTexture.__museumPatched = true;
-    }
-  } catch(e){}
-
-  // --- 4) GLTF load race guard (generation gate) ---
-  if (typeof W.__modelLoadGen !== 'number') { W.__modelLoadGen = 0; }
-
-  // Patch GLTFLoader.load so that late arrivals get ignored (no crashes)
-  try {
-    if (W.THREE && W.THREE.GLTFLoader && !W.THREE.GLTFLoader.__museumPatched) {
-      const L = W.THREE.GLTFLoader.prototype;
-      const origLoad = L.load;
-      L.load = function(url, onLoad, onProgress, onError){
-        // Before starting a new load, optionally cleanup temporary textures
-        try { W.disposeTemporaryTextures(); } catch(e){}
-        const myGen = ++W.__modelLoadGen;
-        const safeOnLoad = function(gltf){
-          if (myGen !== W.__modelLoadGen) {
-            try { console && console.warn && console.warn('[guard] Stale GLB load ignored:', url); } catch(_){}
-            // Best-effort cleanup of stale gltf scene
-            try {
-              if (gltf && gltf.scene) {
-                gltf.scene.traverse((o)=>{
-                  if (o.isMesh) {
-                    try {
-                      if (o.geometry) o.geometry.dispose();
-                      if (o.material) {
-                        const mats = Array.isArray(o.material)? o.material : [o.material];
-                        mats.forEach(m=>{
-                          try {
-                            if (m.map && m.map.dispose) m.map.dispose();
-                            if (m.dispose) m.dispose();
-                          } catch(e){}
-                        });
-                      }
-                    } catch(e){}
-                  }
-                });
-              }
-            } catch(e){}
-            return; // drop result
-          }
-          if (typeof onLoad === 'function') return onLoad(gltf);
-        };
-        const safeOnError = function(err){
-          if (myGen !== W.__modelLoadGen) return; // ignore errors from stale loads
-          if (typeof onError === 'function') return onError(err);
-          try { console && console.warn && console.warn('[GLTFLoader]', err); } catch(_){}
-        };
-        return origLoad.call(this, url, safeOnLoad, onProgress, safeOnError);
-      };
-      W.THREE.GLTFLoader.__museumPatched = true;
-    }
-  } catch(e){}
-
-  // Optional helpers to manually control generation, if app code wants to:
-  if (typeof W.beginNewModelLoad !== 'function') {
-    W.beginNewModelLoad = function(){
-      try { W.disposeTemporaryTextures(); } catch(e){}
-      return (++W.__modelLoadGen);
-    };
-  }
-  if (typeof W.currentModelLoadGen !== 'function') {
-    W.currentModelLoadGen = function(){ return W.__modelLoadGen|0; };
-  }
-
-})();
-</script>
-<!-- /Guardrails patch (Step 2) -->
-
-
-<script>
-/* ---- AuthManager: reduce repeated sign-in prompts on iOS Safari ---- */
-(function(){
-  'use strict';
-  const W = window;
-  // If an ensureToken already exists, wrap it with de-dup + silent prompt.
-  const originalEnsure = W.ensureToken;
-
-  let tokenInfo = { access_token: '', expires_at: 0 };
-  let pending = null;
-  let tokenClient = null;
-
-  function now(){ return Math.floor(Date.now()/1000); }
-  function nearExpiry(){ return (tokenInfo.expires_at - now()) < 60; }
-
-  function initTokenClient(){
-    if (tokenClient || !W.google || !google.accounts || !google.accounts.oauth2) return tokenClient;
-    try {
-      tokenClient = google.accounts.oauth2.initTokenClient({
-        client_id: (W.CLIENT_ID || W.GOOGLE_CLIENT_ID || ''),
-        scope: (W.ALL_SCOPES || 'https://www.googleapis.com/auth/drive.readonly'),
-        callback: (resp)=>{
-          if (resp && resp.access_token){
-            tokenInfo.access_token = resp.access_token;
-            // GIS does not give expires_in in callback for token client; assume 1h if present.
-            const exp = Number(resp.expires_in || 3600);
-            tokenInfo.expires_at = now() + exp;
-          }
-        }
-      });
-    } catch(e) {}
-    return tokenClient;
-  }
-
-  async function silentToken(){
-    initTokenClient();
-    if (!tokenClient) throw new Error('tokenClient init failed');
-    return new Promise((resolve, reject)=>{
-      try {
-        tokenClient.requestAccessToken({ prompt: '' });
-        // resolve happens via callback; poll tokenInfo change
-        const start = Date.now();
-        const t = setInterval(()=>{
-          if (tokenInfo.access_token){
-            clearInterval(t); resolve(tokenInfo.access_token);
-          } else if (Date.now() - start > 3000){
-            clearInterval(t); reject(new Error('silent timeout'));
-          }
-        }, 50);
-      } catch(e) { reject(e); }
-    });
-  }
-
-  async function interactiveToken(){
-    initTokenClient();
-    if (!tokenClient) throw new Error('tokenClient init failed');
-    return new Promise((resolve, reject)=>{
-      try {
-        const prev = tokenInfo.access_token;
-        tokenClient.requestAccessToken({ prompt: 'consent' });
-        const start = Date.now();
-        const t = setInterval(()=>{
-          if (tokenInfo.access_token && tokenInfo.access_token !== prev){
-            clearInterval(t); resolve(tokenInfo.access_token);
-          } else if (Date.now() - start > 60000){
-            clearInterval(t); reject(new Error('interactive timeout'));
-          }
-        }, 100);
-      } catch(e) { reject(e); }
-    });
-  }
-
-  async function ensureTokenSafe(){
-    if (pending) return pending;
-    pending = (async()=>{
-      // If we already have a valid token, return it.
-      if (tokenInfo.access_token && !nearExpiry()) return tokenInfo.access_token;
-      // Try original ensure first (if present)
-      if (typeof originalEnsure === 'function'){
-        try {
-          const res = await originalEnsure();
-          // If original populated a token on window, prefer that.
-          if (W.accessToken || (res && typeof res === 'string')){
-            pending = null; return W.accessToken || res;
-          }
-        } catch(e){ /* fallthrough to GIS */ }
-      }
-      // Silent first
-      try {
-        const t = await silentToken();
-        pending = null; return t;
-      } catch(e){ /* need interaction */ }
-      // Defer interactive prompt to a user gesture if possible
-      // If we are inside a click handler, this will proceed; otherwise throw so caller can trigger via UI
-      const t = await interactiveToken();
-      pending = null; return t;
-    })();
-    try {
-      return await pending;
-    } finally {
-      pending = null;
-    }
-  }
-
-  // Expose
-  if (typeof W.ensureToken !== 'function') {
-    W.ensureToken = ensureTokenSafe;
-  } else {
-    // Wrap existing to add de-dup and silent-first behavior
-    const orig = W.ensureToken;
-    W.ensureToken = async function(){
-      if (pending) return pending;
-      pending = (async()=>{
-        try {
-          const r = await orig();
-          if (r) return r;
-        } catch(e){}
-        try { return await silentToken(); } catch(e){}
-        return await interactiveToken();
-      })();
-      try { return await pending; } finally { pending = null; }
-    };
-  }
-})();
-</script>
-
-<script>
-
-// v1.22.1-bg: Recompute sheet height on viewport changes (iOS Safari safe)
-(function(){
-  function recomputeSheetHeight(){
-    try{
-      var el = document.getElementById('loadSheet');
-      if (!el || !el.hasAttribute('open')) return;
-      var vh = window.innerHeight || document.documentElement.clientHeight || 640;
-      var h  = Math.max(280, Math.floor(vh * 0.92));
-      el.style.height = h + 'px';
-    }catch(e){}
-  }
-  window.addEventListener('resize', recomputeSheetHeight);
-  window.addEventListener('orientationchange', recomputeSheetHeight);
-})();
-
-</script>
-<script>
-// v1.22.1-bg.p6: ensure legacy IS_MOBILE reflects dynamic isMobile()
-(function(){
-  try{
-    if (!('IS_MOBILE' in window)) {
-      Object.defineProperty(window, 'IS_MOBILE', { get: ()=> (typeof isMobile==='function' ? isMobile() : (matchMedia('(max-width:640px), (pointer:coarse)').matches)), configurable: false });
-    }
-  }catch(_){}
-})();
-</script>
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-<script>
-// v1.22.1-bg.p20: GIS readiness promise + auto-init
-(function(){
-  const CLIENT_ID = window.CLIENT_ID;
-  const SCOPES = window.ALL_SCOPES || 'https://www.googleapis.com/auth/drive.readonly';
-  let accessToken = '';
-  let expiresAt = 0;
-  let tokenClient = null;
-  let readyResolve;
-  const readyPromise = new Promise(res => readyResolve = res);
-  window.ensureGisReady = () => readyPromise;
-
-  function now(){ return Math.floor(Date.now()/1000); }
-  function init(){
-    if (!window.google || !google.accounts || !google.accounts.oauth2 || !CLIENT_ID) return false;
-    tokenClient = google.accounts.oauth2.initTokenClient({
-      client_id: CLIENT_ID,
-      scope: SCOPES,
-      callback: (resp)=>{
-        if (resp && resp.access_token){
-          accessToken = resp.access_token;
-          expiresAt = now() + Number(resp.expires_in || 3600);
-          const gate = document.getElementById('signinGateWrap');
-          if (gate) gate.hidden = true;
-        }
-      }
-    });
-    // expose wrappers
-    window.requestTokenInteractive = function(scopes, cb){
-      try{
-        tokenClient.requestAccessToken({ prompt: 'consent', scope: scopes||SCOPES });
-      }catch(e){ console.warn('requestAccessToken error', e); cb && cb({error:'failed'}); return; }
-      if (cb){
-        const start = Date.now();
-        const t = setInterval(()=>{
-          if (accessToken){ clearInterval(t); cb({access_token: accessToken}); }
-          else if (Date.now()-start > 60000){ clearInterval(t); cb({error:'timeout'}); }
-        }, 100);
-      }
-    };
-    window.ensureSignedInIfNeeded = function(){
-      return new Promise((resolve)=>{
-        if (accessToken && (expiresAt-now()) > 60){ resolve(true); return; }
-        try{ tokenClient.requestAccessToken({ prompt: '' }); }catch(e){ resolve(false); return; }
-        const start = Date.now();
-        const t = setInterval(()=>{
-          if (accessToken){ clearInterval(t); resolve(true); }
-          else if (Date.now()-start > 2500){ clearInterval(t); resolve(false); }
-        }, 100);
-      });
-    };
-    Object.defineProperty(window, 'accessToken', { get: ()=> accessToken });
-    readyResolve(true);
-    return true;
-  }
-
-  function pollInit(attempt=0){
-    if (init()) return;
-    if (attempt > 120) { console.error('GIS not available after waiting'); readyResolve(false); return; }
-    setTimeout(()=>pollInit(attempt+1), 125);
-  }
-
-  if (document.readyState === 'complete') pollInit();
-  else window.addEventListener('load', pollInit);
-})();
-</script>
-
-
-
-
-
-<script>
-// v1.22.1-bg.p22: Gate handler toggling class "hidden"
-(function(){
-  function hideGate(){
-    const g = document.getElementById('signinGateWrap');
-    if (!g) return;
-    try { g.hidden = true; } catch(_){}
-    g.classList.add('hidden');
-  }
-  function showGate(){
-    const g = document.getElementById('signinGateWrap');
-    if (!g) return;
-    try { g.hidden = false; } catch(_){}
-    g.classList.remove('hidden');
-  }
-  const btn = document.getElementById('btnGateSignIn');
-  if (!btn) return;
-  btn.addEventListener('click', async ()=>{
-    hideGate();
-    try{
-      const ok = await (window.ensureGisReady ? window.ensureGisReady() : Promise.resolve(false));
-      if (!ok || typeof requestTokenInteractive !== 'function'){
-        showGate();
-        console.warn('GIS not ready (await)');
-        return;
-      }
-      requestTokenInteractive(undefined, (resp)=>{
-        if (resp && resp.access_token){
-          hideGate();
-        }else{
-          showGate();
-          console.warn('Sign-in failed or no token', resp);
-        }
-      });
-    }catch(e){
-      showGate();
-      console.warn('Sign-in error', e);
-    }
-  });
-})();
-</script>
-
-
-<script>
-// v1.22.1-bg.p23: initial gate visibility control
-(function(){
-  function hideGate(){
-    const g = document.getElementById('signinGateWrap');
-    if (!g) return;
-    try { g.hidden = true; } catch(_){}
-    g.classList.add('hidden');
-  }
-  function showGate(){
-    const g = document.getElementById('signinGateWrap');
-    if (!g) return;
-    try { g.hidden = false; } catch(_){}
-    g.classList.remove('hidden');
-  }
-  async function boot(){
-    // 初期状態はゲート表示
-    showGate();
-    // GIS準備を待って、サイレントサインインが通るならゲートを閉じる
-    try {
-      const ready = await (window.ensureGisReady ? window.ensureGisReady() : Promise.resolve(false));
-      if (ready && typeof ensureSignedInIfNeeded === 'function'){
-        const ok = await ensureSignedInIfNeeded();
-        if (ok){ hideGate(); }
-      }
-    } catch(e){ /* ignore: ゲートは表示のまま */ }
-  }
-  if (document.readyState === 'complete' || document.readyState === 'interactive'){
-    setTimeout(boot, 0);
-  } else {
-    document.addEventListener('DOMContentLoaded', boot);
   }
 })();
 </script>
