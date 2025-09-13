@@ -610,6 +610,17 @@ if (typeof window.escAttr !== 'function') {
 
 
 
+<script>
+// v1.22.1-bg.p24: coordinates formatter with guards
+function fmtPos(p){
+  if (!p) return '';
+  // Accept either object {x,y,z} or array [x,y,z]
+  let x, y, z;
+  if (Array.isArray(p) && p.length>=3){ x = +p[0]; y = +p[1]; z = +p[2]; }
+  else { x = +p.x; y = +p.y; z = +p.z; }
+  return [x,y,z].every(Number.isFinite) ? [x,y,z].map(n=>n.toFixed(3)).join(', ') : '';
+}
+</script>
 </head>
 <body>
 <div id="sheetScrim" class="scrim" hidden aria-hidden="true"></div>
@@ -1830,7 +1841,7 @@ function redrawPins(){
     const driveLink = pin.imageDriveId ? `https://drive.google.com/file/d/${pin.imageDriveId}/view?usp=drive_link` : '';
     wrap.innerHTML = `      <summary data-summary="${esc(pin.id)}">
         ${esc(pin.title||'（無題）')}
-        <span class="small">${esc([pin.position?.x, pin.position?.y, pin.position?.z].map(n=>Number(n).toFixed(3)).join(', '))}</span>
+        ${(()=>{const s=fmtPos(pin.position);return s?`<span class=\"small\">${esc(s)}</span>`:'';})()}
       </summary>
       <div class="row">
         <input data-k="title" placeholder="タイトル" value="${esc(pin.title||'')}" ${READ_ONLY?'disabled':''} autocomplete="off">
