@@ -2,21 +2,6 @@
 
 <html lang="ja">
 <head>
-
-<script>
-(function() {
-  var cid = '595200751510-ncahnf7edci6b9925becn5to49r6cguv.apps.googleusercontent.com';
-  if (cid) {
-    try { window.GIS_CLIENT_ID = window.GIS_CLIENT_ID || cid; } catch(_){}
-    try { window.CLIENT_ID = window.CLIENT_ID || cid; } catch(_){}
-    try { window.GOOGLE_CLIENT_ID = window.GOOGLE_CLIENT_ID || cid; } catch(_){}
-    try { window.CLIENT_ID_WEB = window.CLIENT_ID_WEB || cid; } catch(_){}
-  }
-  try { document.documentElement.setAttribute("data-lm-unified-bar","on"); } catch(_){}
-})();
-</script>
-
-
 <meta charset="utf-8"/>
 <title>LociMyu</title>
 <link href="https://accounts.google.com" rel="preconnect"/>
@@ -567,62 +552,6 @@ html.sheet-open .floating-buttons{
 </head>
 
 <body>
-
-  <style>
-    /* Hide legacy caption toolbars if any */
-    [data-lm-unified-bar="on"] #pins-toolbar,
-    [data-lm-unified-bar="on"] #pins-json-toolbar,
-    [data-lm-unified-bar="on"] .pins-toolbar,
-    [data-lm-unified-bar="on"] [data-role="pins-toolbar"] { display: none !important; }
-
-    /* Unified caption panel */
-    #lm-caption-panel { margin:.75rem 0; border:1px solid var(--muted,#999); border-radius:.75rem; overflow:hidden; background:var(--card,#fff); }
-    #lm-caption-header { display:flex; align-items:center; gap:.5rem; padding:.5rem .75rem; background:var(--toolbar,#f5f5f5); border-bottom:1px solid var(--muted,#ccc); }
-    #lm-caption-header strong { margin-right:.25rem; }
-    #lm-caption-header .seg { display:flex; align-items:center; gap:.5rem; }
-    #lm-caption-header .seg[data-mode] { display:none; }
-    #lm-caption-header .seg.show { display:flex; }
-    #lm-caption-hint { font-size:.88rem; opacity:.8; margin-left:auto; }
-
-    /* Attach to caption area if exists */
-    .lm-attached { border-top-left-radius: .75rem; border-top-right-radius: .75rem; }
-
-    /* Model highlight pulse */
-    .lm-pulse { animation: lmPulse 1.2s ease-in-out infinite; }
-    @keyframes lmPulse { 0%{box-shadow:0 0 0 0 rgba(255,115,0,.7)} 70%{box-shadow:0 0 0 12px rgba(255,115,0,0)} 100%{box-shadow:0 0 0 0 rgba(255,115,0,0)} }
-    .lm-outline { outline: 3px solid #ff7300; outline-offset: 4px; border-radius: 8px; }
-  </style>
-
-  <div id="lm-caption-panel">
-    <div id="lm-caption-header">
-      <strong>キャプションデータ:</strong>
-      <select id="lm_source">
-        <option value="drive-json">Drive: pins.json</option>
-        <option value="sheets">Google Sheets</option>
-      </select>
-
-      <!-- Drive JSON segment -->
-      <div class="seg" id="lm_seg_json" data-mode="drive-json">
-        <button id="lm_json_pick" title="pins.json を選択">pins.json を選択</button>
-        <button id="lm_json_reload" title="再読込">再読込</button>
-        <button id="lm_json_export" title="エクスポート（pins.json）">エクスポート</button>
-      </div>
-
-      <!-- Sheets segment -->
-      <div class="seg" id="lm_seg_sheets" data-mode="sheets">
-        <label for="lm_sheet_id" title="スプレッドシートID（/d/〜/edit の間）">Spreadsheet ID:</label>
-        <input id="lm_sheet_id" placeholder="1AbCdEf..." style="min-width:22rem;">
-        <button id="lm_sheet_connect" title="シートから読み込み">接続/再読込</button>
-        <button id="lm_sheet_create" title="新規作成">新規作成</button>
-        <button id="lm_sheet_force" title="モデル未読み込みでも作成" style="display:none;">作成を強行する</button>
-        <a id="lm_sheet_open" href="#" target="_blank" style="display:none;">開く↗</a>
-      </div>
-
-      <span id="lm-caption-hint"></span>
-    </div>
-  </div>
-
-
 <div id="sheetScrim" class="scrim" hidden aria-hidden="true"></div>
 <!-- Desktop open-dock button (hidden on mobile) -->
 <!-- Global loader overlay -->
@@ -649,7 +578,7 @@ html.sheet-open .floating-buttons{
 <!-- 📍 キャプション -->
 <div class="hgroup" id="grpPins">
 <span class="title">キャプション</span>
-<input autocomplete="off" id="pinsId" placeholder="（任意）pins.json の fileId / 共有リンク"/>
+<input autocomplete="off" id="pinsId" placeholder="（任意）（推奨）スプレッドシートID / pins.json の fileId"/>
 <button class="iconbtn" id="btnPickPins">選択…</button>
 <button class="iconbtn" id="btnClearPins">クリア</button>
 <span class="sep"></span>
@@ -795,7 +724,7 @@ html.sheet-open .floating-buttons{
 <div class="row" id="pinActions">
 <button disabled="" id="btnUndo">元に戻す (Ctrl+Z)</button>
 <button disabled="" id="btnRedo">やり直す (Ctrl+Shift+Z)</button>
-<button id="btnSavePins">ピンをDriveに保存（リネーム）</button>
+<button id="btnSavePins">ピンをスプレッドシートに保存（新規シート）</button>
 <button id="btnAddPin">ピン追加（画面中央）</button>
 <label class="pill" id="pillMove" title="Gキーでも切替"><input id="moveMode" type="checkbox"/> 移動モード（ギズモ）</label>
 </div>
@@ -3966,343 +3895,397 @@ document.getElementById('toolInlineBtn')?.addEventListener('click', ()=>{
 </script>
 
 
+<!-- === Sheets Backend Patch (client-side only) === -->
+<script type="module">
+(() => {
+  // This patch overrides the existing pins.json storage with Google Sheets storage.
+  // It keeps the original UI/flow and auto-save hooks intact.
 
-<script>
-/* ===== Unified Caption Data Module (authfix9) ===== */
-(function(){
-  const $ = (id)=>document.getElementById(id);
-  const ui = {
-    panel: $("lm-caption-panel"),
-    header: $("lm-caption-header"),
-    hint: $("lm-caption-hint"),
-    source: $("lm_source"),
-    // JSON
-    jsonPick: $("lm_json_pick"),
-    jsonReload: $("lm_json_reload"),
-    jsonExport: $("lm_json_export"),
-    // Sheets
-    segJson: $("lm_seg_json"),
-    segSheets: $("lm_seg_sheets"),
-    sheetId: $("lm_sheet_id"),
-    sheetConnect: $("lm_sheet_connect"),
-    sheetCreate: $("lm_sheet_create"),
-    sheetForce: $("lm_sheet_force"),
-    sheetOpen: $("lm_sheet_open")
+  // ---- Minimal guards (work only if the original globals exist) ----
+  const g = window;
+  if (!('fetch' in window)) return;
+
+  // Utilities
+  const sleep = (ms)=> new Promise(r=>setTimeout(r, ms));
+  const safe = (fn, fb=null)=>{ try{ return fn(); }catch{ return fb } };
+  const dbg = (...args) => (console.debug && console.debug('[sheets]', ...args));
+
+  // DOM refs (best-effort)
+  const pinsInfoEl   = document.getElementById('pinsInfo');
+  const saveStatusEl = document.getElementById('saveStatus');
+  const autoSaveEl   = document.getElementById('autoSave');
+  const fileIdInput  = document.getElementById('fileId');
+  const folderIdInput= document.getElementById('folderId');
+  const btnSavePins  = document.getElementById('btnSavePins');
+  const scopeWarnEl  = document.getElementById('scopeWarn');
+
+  // Data refs from original app
+  const PINSref = () => g.PINS || [];
+  const MATERIALSref = () => g.MATERIALS || {};
+
+  // OAuth helpers already exist in original app:
+  // - ensureToken() -> fills window.accessToken
+  // - gapiReady() -> gapi loaded, Drive discovery added
+  async function ensureSheetsReady(){
+    // Ensure we have a token that includes the spreadsheets scope
+    try{
+      if (window.google?.accounts?.oauth2 && window.CLIENT_ID){
+        const client = google.accounts.oauth2.initTokenClient({
+          client_id: window.CLIENT_ID,
+          scope: (window.ALL_SCOPES ? (window.ALL_SCOPES + ' ') : '') + 'https://www.googleapis.com/auth/spreadsheets',
+          prompt: '',
+          callback: (resp)=>{
+            try{
+              if (resp?.access_token){
+                window.accessToken = resp.access_token;
+                const ttlMs = Math.max(60_000, (Number(resp.expires_in)||3600) * 1000);
+                window.accessTokenExpiresAt = Date.now() + ttlMs;
+              }
+            }catch(_){}
+          }
+        });
+        client.requestAccessToken();
+      }
+    }catch(_){}
+
+    // Ensure gapi client has Sheets v4 loaded
+    await (g.gapiReady ? g.gapiReady() : Promise.resolve());
+    try{
+      if (!g.gapi?.client?.sheets) {
+        await g.gapi.client.load('sheets', 'v4');
+      }
+    }catch(e){
+      console.warn('Sheets load failed', e);
+      throw e;
+    }
+  }
+
+  // Drive helpers (reuse originals if present)
+  const driveGetMetadata = async (id) => {
+    if (g.driveGetMetadata) return await g.driveGetMetadata(id);
+    // Fallback to Drive v3 files.get (metadata only)
+    await ensureGapiDrive();
+    const r = await g.gapi.client.drive.files.get({ fileId:id, fields:"id,name,parents,mimeType" });
+    return r.result;
   };
+  async function ensureGapiDrive(){
+    await (g.gapiReady ? g.gapiReady() : Promise.resolve());
+  }
 
-  // Attach header above caption area if found
-  (function attachToCaptionArea(){
-    const candidates = ["#captions","#pins-panel",".pins-panel","#pin-editor","#caption-area",".caption-area"];
-    for (const sel of candidates){
-      const el = document.querySelector(sel);
-      if (el && ui.panel && !ui.panel.dataset.attached){
-        el.parentNode.insertBefore(ui.panel, el);
-        ui.panel.classList.add("lm-attached");
-        ui.panel.dataset.attached = "1";
-        break;
+  // ---- Sheets storage layout ----
+  // Spreadsheet title: <GLB_FILE_NAME>_pins (or user-provided folder)
+  // Tab "Pins" columns (A:N):
+  // id, x, y, z, rx, ry, rz, title, body, color, imageId, createdAt, updatedAt
+  // Tab "Materials" columns (A:C): name, key, value(JSON string)
+
+  const SHEET_TAB_PINS = 'Pins';
+  const SHEET_TAB_MATS = 'Materials';
+
+  // Remember last sheet per GLB in localStorage (similar to original map)
+  const MAP_KEY = 'pins_autosave_sheet_map_v1';
+  function loadMap(){ try { return JSON.parse(localStorage.getItem(MAP_KEY) || '{}'); } catch { return {}; } }
+  function rememberSheet(glbId, sheetId){ try{ const m=loadMap(); m[glbId]=sheetId; localStorage.setItem(MAP_KEY, JSON.stringify(m)); }catch{} }
+
+  // ---- Create / find spreadsheet next to GLB ----
+  async function ensureSpreadsheetForGlb(glbId){
+    await g.ensureToken?.(); // ensure accessToken
+    await ensureSheetsReady();
+
+    // 1) Try local map
+    const map = loadMap();
+    if (map[glbId]) return { spreadsheetId: map[glbId], title: '(cached)' };
+
+    // 2) Resolve parent folder and GLB base name
+    const meta = await driveGetMetadata(glbId);
+    const parentId = safe(()=> meta.parents[0], '');
+    const baseName = safe(()=> (meta.name||'model').replace(/\.(gltf|glb)$/i,''), 'model');
+
+    // 3) Search for spreadsheet in the same folder with name "<base>_pins"
+    let spreadsheetId = '';
+    let title         = `${baseName}_pins`;
+    try{
+      // Drive query for spreadsheets in folder
+      const q = `'${parentId}' in parents and trashed = false and mimeType = 'application/vnd.google-apps.spreadsheet' and name = '${title.replace(/'/g,"\'")}'`;
+      const r = await g.gapi.client.drive.files.list({ q, fields: "files(id,name)" });
+      if (r.result?.files?.length){
+        spreadsheetId = r.result.files[0].id;
+        title = r.result.files[0].name;
+      }
+    }catch(e){ console.warn('search spreadsheet failed', e); }
+
+    // 4) Create if not found
+    if (!spreadsheetId){
+      const cr = await g.gapi.client.sheets.spreadsheets.create({
+        properties: { title },
+        sheets: [
+          { properties: { title: SHEET_TAB_PINS } },
+          { properties: { title: SHEET_TAB_MATS } }
+        ]
+      });
+      spreadsheetId = cr.result.spreadsheetId;
+      // Move into parent folder (Sheets API can't set parents; use Drive)
+      if (parentId){
+        await g.gapi.client.drive.files.update({ fileId: spreadsheetId, addParents: parentId });
       }
     }
-  })();
 
-  // Persisted config
-  const CFG_KEY = "locimyu.unifiedCaption.v2";
-  const cfg = Object.assign({ mode:"drive-json" }, JSON.parse(localStorage.getItem(CFG_KEY)||"{}"));
-  if (ui.source) ui.source.value = cfg.mode || "drive-json";
-  if (cfg.spreadsheetId && ui.sheetId) ui.sheetId.value = cfg.spreadsheetId;
-  refreshSegments(); refreshOpenLink(); saveCfg();
-
-  function saveCfg(){
-    localStorage.setItem(CFG_KEY, JSON.stringify({
-      mode: ui.source ? ui.source.value : "drive-json",
-      spreadsheetId: (ui.sheetId && ui.sheetId.value || "").trim()
-    }));
-  }
-  function refreshSegments(){
-    const m = ui.source ? ui.source.value : "drive-json";
-    ui.segJson && ui.segJson.classList.toggle("show", m==="drive-json");
-    ui.segSheets && ui.segSheets.classList.toggle("show", m==="sheets");
-    if (ui.hint) ui.hint.textContent = (m==="sheets") ? "Google Sheets に保存／共有" : "Drive の pins.json を使用";
-  }
-  function refreshOpenLink(){
-    if (!ui.sheetOpen || !ui.sheetId) return;
-    const sid = (ui.sheetId.value||"").trim();
-    ui.sheetOpen.style.display = sid ? "inline-block" : "none";
-    if (sid) ui.sheetOpen.href = "https://docs.google.com/spreadsheets/d/"+sid+"/edit";
-  }
-  if (ui.source) ui.source.addEventListener("change", ()=>{ refreshSegments(); saveCfg(); });
-
-  // ===== Model detection & highlight (no picker modal) =====
-  function getModelId(){
-    const ids = [window.currentModelFileId, window.modelFileId, window.currentModelDriveId];
-    for (const v of ids){ if (v && String(v).trim()) return String(v).trim(); }
-    return "";
-  }
-  function isModelLoaded(){
-    if (getModelId()) return true;
-    if (window.loadedModelUrl && String(window.loadedModelUrl).trim()) return true;
-    try {
-      const canvas = document.querySelector("canvas#three, #three-canvas, canvas.threejs, [data-model-loaded='true']");
-      if (canvas && (canvas.getAttribute("data-loaded")==="true" || canvas.dataset.loaded==="true")) return true;
-    } catch(e){}
-    return false;
-  }
-  function highlightModelArea(){
-    const targets = ["#model-dropzone", "#dropzone", ".dropzone", "#viewer", "#three-canvas", "canvas#three", ".three-canvas"];
-    let el = null;
-    for (const sel of targets){ el = document.querySelector(sel); if (el) break; }
-    if (!el) { ui.hint && (ui.hint.textContent = "先にGLBモデルを読み込んでください。"); return; }
-    el.classList.add("lm-outline","lm-pulse");
-    setTimeout(()=>{ el.classList.remove("lm-pulse"); }, 5000);
+    rememberSheet(glbId, spreadsheetId);
+    return { spreadsheetId, title };
   }
 
-  // ===== GIS & gapi helpers =====
-  const SHEETS_SCOPE = "https://www.googleapis.com/auth/spreadsheets";
-  function getClientId(){ return (window.GIS_CLIENT_ID || window.CLIENT_ID || window.GOOGLE_CLIENT_ID || window.CLIENT_ID_WEB || ""); }
-  async function ensureGapiClient(){
-    if (!window.gapi) await new Promise(res=>{ const t=setInterval(()=>{ if (window.gapi){clearInterval(t);res();}},30);});
-    if (!gapi.client) await new Promise(res=> gapi.load("client", res));
-  }
-  async function ensureSheetsDiscovery(){
-    await ensureGapiClient();
-    if (!gapi.client.sheets) {
-      try { await gapi.client.load("sheets","v4"); }
-      catch(e){ await gapi.client.init({ discoveryDocs: ["https://sheets.googleapis.com/$discovery/rest?version=v4"] }); }
+  // ---- Load from Sheets into in-memory PINS/MATERIALS ----
+  async function sheetsLoadAll(spreadsheetId){
+    await ensureSheetsReady();
+    const r = await g.gapi.client.sheets.spreadsheets.values.batchGet({
+      spreadsheetId,
+      ranges: [`${SHEET_TAB_PINS}!A2:N`, `${SHEET_TAB_MATS}!A2:C`]
+    });
+    const valsPins = r.result.valueRanges?.[0]?.values || [];
+    const valsMats = r.result.valueRanges?.[1]?.values || [];
+
+    // Convert rows -> objects
+    const pins = valsPins.map((row, i)=>{
+      const [id,x,y,z,rx,ry,rz,title,body,color,imageId,createdAt,updatedAt] = [
+        row[0]||String(i+1),
+        parseFloat(row[1]||0), parseFloat(row[2]||0), parseFloat(row[3]||0),
+        parseFloat(row[4]||0), parseFloat(row[5]||0), parseFloat(row[6]||0),
+        row[7]||'', row[8]||'', row[9]||'#ee3333', row[10]||'',
+        row[11]||'', row[12]||''
+      ];
+      return { id, pos:{x,y,z}, rot:{x:rx,y:ry,z:rz}, title, text:body, color, imageId, createdAt, updatedAt };
+    });
+
+    const matObj = {};
+    for (const row of valsMats){
+      const [name,key,val] = [row[0]||'', row[1]||'', row[2]||''];
+      if (!name || !key) continue;
+      const parsed = safe(()=> JSON.parse(val), val);
+      matObj[name] = matObj[name] || {};
+      matObj[name][key] = parsed;
     }
+
+    return { pins, materials: matObj };
   }
-  async function ensureDriveDiscovery(){
-    await ensureGapiClient();
-    if (!gapi.client.drive) {
-      await gapi.client.init({ discoveryDocs: ["https://www.googleapis.com/discovery/v1/apis/drive/v3/rest"] });
-    }
+
+  // ---- Save in-memory PINS/MATERIALS to Sheets ----
+  function nowIso(){
+    try{
+      const z = new Date();
+      const p = (n,l=2)=> String(n).padStart(l,'0');
+      return `${z.getFullYear()}-${p(z.getMonth()+1)}-${p(z.getDate())} ${p(z.getHours())}:${p(z.getMinutes())}:${p(z.getSeconds())}`;
+    }catch{ return '' }
   }
-  async function ensureSheetsTokenInteractive(){
-    const base = (window.ALL_SCOPES || "").trim();
-    const want = (base ? base+" " : "") + SHEETS_SCOPE;
-    if (typeof window.ensureToken === "function") { try{ await window.ensureToken(); }catch(e){} }
-    if (typeof window.requestTokenInteractive === "function") {
-      await window.requestTokenInteractive(want);
-      if (window.accessToken) try { gapi.client.setToken({ access_token: window.accessToken }); } catch(_){}
-      return;
-    }
-    if (!window.google?.accounts?.oauth2) throw new Error("Google Identity Services が未ロードです");
-    const client_id = getClientId();
-    if (!client_id) throw new Error("CLIENT_ID の検出に失敗しました");
-    await new Promise((resolve, reject)=>{
-      const tokenClient = google.accounts.oauth2.initTokenClient({
-        client_id, scope: want, prompt: "consent",
-        callback: (resp)=> resp?.access_token ? (gapi.client.setToken({access_token:resp.access_token}), resolve()) : reject(new Error("アクセストークン取得に失敗"))
-      });
-      tokenClient.requestAccessToken({ prompt:"consent" });
+
+  function pinsToRows(pins){
+    return (pins||[]).map((p,i)=>{
+      const pos = p.pos||{}; const rot = p.rot||{};
+      return [
+        p.id || String(i+1),
+        Number(pos.x||0), Number(pos.y||0), Number(pos.z||0),
+        Number(rot.x||0), Number(rot.y||0), Number(rot.z||0),
+        p.title||'', p.text||'', p.color||'#ee3333', p.imageId||'',
+        p.createdAt||'', nowIso()
+      ];
     });
   }
-  function asMessage(err){
+  function matsToRows(mats){
+    const rows = [];
     try{
-      if (err && err.result && err.result.error && err.result.error.message) return err.result.error.message;
-      if (err && err.message) return err.message;
-      return String(err);
-    }catch(_){ return "Unknown error"; }
-  }
-
-  // ===== Sheets helper =====
-  const LmSheets = {
-    get spreadsheetId(){ return (ui.sheetId && ui.sheetId.value || "").trim(); },
-    get range(){ return "pins!A:I"; },
-
-    async readAll(){
-      await ensureSheetsDiscovery();
-      await ensureSheetsTokenInteractive();
-      if (!this.spreadsheetId) throw new Error("Spreadsheet ID 未設定です");
-      const resp = await gapi.client.sheets.spreadsheets.values.get({
-        spreadsheetId: this.spreadsheetId,
-        range: this.range,
-        valueRenderOption: "UNFORMATTED_VALUE",
-        dateTimeRenderOption: "FORMATTED_STRING"
-      });
-      const values = resp.result.values || [];
-      const hasHeader = Array.isArray(values[0]) && String(values[0][0]).trim() === "pinId";
-      const rows = hasHeader ? values.slice(1) : values;
-      return rows.filter(r=>r.length>0).map(rowToPin);
-    },
-
-    async batchUpsert(pins){
-      await ensureSheetsDiscovery();
-      await ensureSheetsTokenInteractive();
-      const all = await this.readAll();
-      const rowById = new Map(all.map((p,idx)=>[p.pinId, idx+2]));
-      const updates = [];
-      const appends = [];
-      for (const p of pins) {
-        const row = pinToRow(p);
-        if (rowById.has(p.pinId)) {
-          const r = rowById.get(p.pinId);
-          updates.push({ range: `pins!A${r}:I${r}`, values:[row] });
-        } else {
-          appends.push(row);
+      for (const name of Object.keys(mats||{})){
+        const cfg = mats[name]||{};
+        for (const k of Object.keys(cfg)){
+          const v = cfg[k];
+          rows.push([name, k, (typeof v==='string') ? v : JSON.stringify(v)]);
         }
       }
-      if (updates.length) {
-        await gapi.client.sheets.spreadsheets.values.batchUpdate({
-          spreadsheetId: this.spreadsheetId,
-          resource: { valueInputOption: "RAW", data: updates }
-        });
-      }
-      if (appends.length) {
-        await gapi.client.sheets.spreadsheets.values.append({
-          spreadsheetId: this.spreadsheetId,
-          range: this.range,
-          valueInputOption: "RAW",
-          insertDataOption: "INSERT_ROWS",
-          resource: { values: appends }
-        });
-      }
-    },
+    }catch{}
+    return rows;
+  }
 
-    async reloadFromSheets(){
-      const pins = await this.readAll();
-      if (typeof window.replaceAllPinsFromExternal === "function") {
-        window.replaceAllPinsFromExternal(pins.filter(p=>!p.deleted));
-      } else {
-        console.warn("[Sheets] replaceAllPinsFromExternal 未定義。読み込み結果:", pins);
-      }
+  async function sheetsSaveAll(spreadsheetId, {pins, materials}, {createNewSheetTitle=null}={}){
+    await ensureSheetsReady();
+
+    // If requested, add a new sheet tab and write only pins there (snapshot export)
+    if (createNewSheetTitle){
+      try{
+        await g.gapi.client.sheets.spreadsheets.batchUpdate({
+          spreadsheetId,
+          requests: [{ addSheet: { properties: { title: createNewSheetTitle } } }]
+        });
+        await g.gapi.client.sheets.spreadsheets.values.update({
+          spreadsheetId,
+          range: `${createNewSheetTitle}!A1:N1`,
+          valueInputOption: 'RAW',
+          includeValuesInResponse: false,
+          resource: { values: [[
+            'id','x','y','z','rx','ry','rz','title','body','color','imageId','createdAt','updatedAt'
+          ]] }
+        });
+        await g.gapi.client.sheets.spreadsheets.values.update({
+          spreadsheetId,
+          range: `${createNewSheetTitle}!A2:N`,
+          valueInputOption: 'RAW',
+          resource: { values: pinsToRows(pins) }
+        });
+      }catch(e){ console.warn('snapshot sheet create failed', e); }
+      return;
+    }
+
+    // Normal path: overwrite Pins + Materials tabs
+    // Header rows
+    await g.gapi.client.sheets.spreadsheets.values.update({
+      spreadsheetId,
+      range: `${SHEET_TAB_PINS}!A1:N1`,
+      valueInputOption: 'RAW',
+      includeValuesInResponse: false,
+      resource: { values: [[
+        'id','x','y','z','rx','ry','rz','title','body','color','imageId','createdAt','updatedAt'
+      ]] }
+    });
+    await g.gapi.client.sheets.spreadsheets.values.update({
+      spreadsheetId,
+      range: `${SHEET_TAB_PINS}!A2:N`,
+      valueInputOption: 'RAW',
+      resource: { values: pinsToRows(pins) }
+    });
+    await g.gapi.client.sheets.spreadsheets.values.update({
+      spreadsheetId,
+      range: `${SHEET_TAB_MATS}!A1:C1`,
+      valueInputOption: 'RAW',
+      includeValuesInResponse: false,
+      resource: { values: [['name','key','value']] }
+    });
+    await g.gapi.client.sheets.spreadsheets.values.update({
+      spreadsheetId,
+      range: `${SHEET_TAB_MATS}!A2:C`,
+      valueInputOption: 'RAW',
+      resource: { values: matsToRows(materials) }
+    });
+  }
+
+  // ---- Override original pins storage hooks ----
+  let SHEET_ID = '';
+  let SHEET_TITLE = '';
+
+  function setSaveStatus(state, msg=''){
+    if (!saveStatusEl) return;
+    if (state==='ok'){ saveStatusEl.textContent=msg||'保存済み'; saveStatusEl.className='save-ok'; }
+    else if (state==='pending'){ saveStatusEl.textContent=msg||'保存中…'; saveStatusEl.className='save-pending'; }
+    else if (state==='fail'){ saveStatusEl.textContent=msg||'保存失敗'; saveStatusEl.className='save-fail'; }
+    else { saveStatusEl.textContent=msg||'待機中'; saveStatusEl.className='muted'; }
+  }
+  function updatePinsInfo(){
+    if (!pinsInfoEl) return;
+    const glbLoaded = safe(()=> fileIdInput.value.trim(), '');
+    const loaded = glbLoaded ? `読み込み: GLB(${glbLoaded.slice(0,8)}…)` : '読み込み: なし';
+    const auto   = SHEET_ID ? `オートセーブ: ${SHEET_TITLE||'pins'} (${SHEET_ID})` : 'オートセーブ: スプレッドシート未作成';
+    pinsInfoEl.textContent = loaded + ' / ' + auto;
+  }
+
+  // Override ensureAutosaveTarget to resolve a spreadsheet instead of pins.json
+  const _origEnsureAutosaveTarget = g.ensureAutosaveTarget;
+  g.ensureAutosaveTarget = async function ensureAutosaveTarget_sheet(glbId){
+    try{
+      await g.ensureToken?.();
+      const { spreadsheetId, title } = await ensureSpreadsheetForGlb(glbId);
+      SHEET_ID = spreadsheetId; SHEET_TITLE = title;
+      updatePinsInfo();
+      return SHEET_ID;
+    }catch(e){
+      console.warn('ensureAutosaveTarget(sheet) failed', e);
+      return _origEnsureAutosaveTarget ? await _origEnsureAutosaveTarget(glbId) : '';
     }
   };
 
-  function rowToPin(r){
-    const h = ["pinId","x","y","z","text","tags","author","updatedAt","deleted"];
-    const m = {}; h.forEach((k,i)=>m[k]=r[i] ?? "");
-    return {
-      pinId: m.pinId || (crypto?.randomUUID ? crypto.randomUUID() : ("pin_"+Math.random().toString(36).slice(2))),
-      x: num(m.x), y: num(m.y), z: num(m.z),
-      text: m.text || "", tags: m.tags || "",
-      author: m.author || "", updatedAt: m.updatedAt || "",
-      deleted: String(m.deleted).toLowerCase()==="true"
+  // Replace autoSaveNow to write to Sheets
+  const _origAutoSaveNow = g.autoSaveNow;
+  g.autoSaveNow = async function autoSaveNow_sheet(){
+    try{
+      if (!autoSaveEl?.checked) return;
+      setSaveStatus('pending','保存中…');
+      const glbId = safe(()=> fileIdInput.value.trim(), '');
+      if (!SHEET_ID && glbId){
+        await g.ensureAutosaveTarget(glbId);
+      }
+      if (!SHEET_ID){
+        throw new Error('Sheet not resolved');
+      }
+      await ensureSheetsReady();
+      await sheetsSaveAll(SHEET_ID, { pins: PINSref(), materials: MATERIALSref() });
+      const t=new Date(), hh=String(t.getHours()).padStart(2,'0'), mm=String(t.getMinutes()).padStart(2,'0'), ss=String(t.getSeconds()).padStart(2,'0');
+      setSaveStatus('ok', `保存済み ${hh}:${mm}:${ss}`);
+      scopeWarnEl && (scopeWarnEl.style.display='none');
+      updatePinsInfo();
+    }catch(e){
+      console.warn('autoSave(sheet) failed', e);
+      setSaveStatus('fail','オートセーブ失敗（権限？）');
+      scopeWarnEl && (scopeWarnEl.style.display='block');
+      // As a fallback: call original autosave to pins.json
+      try{ return _origAutoSaveNow?.(); }catch{}
+    }
+  };
+
+  // Replace manual save to do a snapshot sheet (new tab)
+  if (btnSavePins){
+    const _origBtnSave = btnSavePins.onclick;
+    btnSavePins.onclick = async ()=>{
+      try{
+        await g.ensureToken?.();
+        const glbId = safe(()=> fileIdInput.value.trim(), '');
+        if (!SHEET_ID && glbId){
+          await g.ensureAutosaveTarget(glbId);
+        }
+        if (!SHEET_ID) throw new Error('Sheet not resolved');
+
+        const now = new Date();
+        const def = `pins_${now.getFullYear()}${String(now.getMonth()+1).padStart(2,'0')}${String(now.getDate()).padStart(2,'0')}_${String(now.getHours()).padStart(2,'0')}${String(now.getMinutes()).padStart(2,'0')}`;
+        const name = prompt('新規シート名（スプレッドシート内タブ）を入力してください', def);
+        if (!name) return;
+
+        try{
+          await sheetsSaveAll(SHEET_ID, { pins: PINSref(), materials: MATERIALSref() }, { createNewSheetTitle: name });
+        }catch(e403){
+          // Try once with explicit consent to add spreadsheets scope (must be in user gesture)
+          try{
+            if (window.google?.accounts?.oauth2 && window.CLIENT_ID){
+              const client2 = google.accounts.oauth2.initTokenClient({
+                client_id: window.CLIENT_ID,
+                scope: (window.ALL_SCOPES ? (window.ALL_SCOPES + ' ') : '') + 'https://www.googleapis.com/auth/spreadsheets',
+                prompt: 'consent',
+                callback: ()=>{}
+              });
+              client2.requestAccessToken();
+              await sheetsSaveAll(SHEET_ID, { pins: PINSref(), materials: MATERIALSref() }, { createNewSheetTitle: name });
+            }else{
+              throw e403;
+            }
+          }catch(e2){ throw e2; }
+        }
+        alert(`スプレッドシートにスナップショット保存しました。
+シート名: ${name}
+Spreadsheet ID: ${SHEET_ID}`);
+        updatePinsInfo();
+      }catch(e){
+        console.error(e);
+        alert('保存に失敗しました。権限（spreadsheets, drive.file）をご確認ください。');
+        setSaveStatus('fail','手動保存失敗');
+        try{ _origBtnSave?.(); }catch{}
+      }
     };
   }
-  function pinToRow(pin){
-    return [
-      pin.pinId,
-      num(pin.x), num(pin.y), num(pin.z),
-      pin.text ?? "", pin.tags ?? "",
-      pin.author ?? (window.currentUserEmail||""),
-      pin.updatedAt ?? new Date().toISOString(),
-      pin.deleted ? "TRUE":"FALSE"
-    ];
-  }
-  function num(v){ const n = Number(v); return Number.isFinite(n) ? n : 0; }
 
-  async function moveIntoModelFolder(fileId){
-    try {
-      await ensureDriveDiscovery();
-      const modelId = getModelId();
-      if (!modelId) return;
-      const model = await gapi.client.drive.files.get({ fileId: modelId, fields: "parents" });
-      const parents = model.result.parents || [];
-      if (parents.length) {
-        await gapi.client.drive.files.update({ fileId, addParents: parents[0], fields: "id, parents" });
-      }
-    } catch(e){ console.warn("フォルダ移動はスキップ:", asMessage(e)); }
-  }
+  // Try to pre-resolve sheet when GLB id is present (after a tiny delay to let original init run)
+  setTimeout(async () => {
+    try{
+      const glbId = safe(()=> fileIdInput.value.trim(), '');
+      if (glbId) await g.ensureAutosaveTarget(glbId);
+    }catch{}
+  }, 1500);
 
-  function waitForModelAndMove(fileId, timeoutMs=120000){
-    const started = Date.now();
-    const iv = setInterval(async ()=>{
-      if (isModelLoaded()){
-        clearInterval(iv);
-        try { await moveIntoModelFolder(fileId); console.log("[Sheets] モデルフォルダへ移動完了"); } catch(e){ console.warn("移動失敗:", asMessage(e)); }
-      } else if (Date.now() - started > timeoutMs){
-        clearInterval(iv);
-        console.warn("[Sheets] モデルが読み込まれず、移動はタイムアウトしました");
-      }
-    }, 2000);
-  }
-
-  async function createSpreadsheetAndConnect({force=false}={}){
-    if (!force && !isModelLoaded()){
-      ui.hint && (ui.hint.textContent = "先にGLBモデルを読み込んでください（同じフォルダに作成します）");
-      highlightModelArea();
-      ui.sheetForce && (ui.sheetForce.style.display = "inline-block");
-      return;
-    }
-    ui.sheetForce && (ui.sheetForce.style.display = "none");
-    await ensureSheetsDiscovery();
-    await ensureSheetsTokenInteractive();
-    const title = `LociMyu pins ${new Date().toISOString().slice(0,19).replace(/[:T]/g,'-')}`;
-    const resp = await gapi.client.sheets.spreadsheets.create({
-      properties: { title },
-      sheets: [{ properties: { title: "pins" } }]
-    });
-    const spreadsheetId = resp.result.spreadsheetId;
-    await gapi.client.sheets.spreadsheets.values.update({
-      spreadsheetId,
-      range: "pins!A1:I1",
-      valueInputOption: "RAW",
-      resource: { values: [["pinId","x","y","z","text","tags","author","updatedAt","deleted"]] }
-    });
-
-    if (isModelLoaded()) {
-      await moveIntoModelFolder(spreadsheetId);
-    } else {
-      waitForModelAndMove(spreadsheetId);
-    }
-
-    if (ui.sheetId) ui.sheetId.value = spreadsheetId;
-    refreshOpenLink(); saveCfg();
-    await LmSheets.reloadFromSheets().catch(e=> console.warn("Initial read failed:", asMessage(e)));
-    alert("新規スプレッドシートを作成し、接続しました。共有設定をご確認ください。");
-  }
-
-  // Wire buttons
-  if (ui.jsonPick) ui.jsonPick.addEventListener("click", async ()=>{
-    if (typeof window.openPinsJsonPicker === "function") {
-      try { await window.openPinsJsonPicker(); return; } catch(e){ console.warn("openPinsJsonPicker failed:", e); }
-    }
-    const input = prompt("pins.json のファイルURLまたはIDを入力してください（簡易モード）:");
-    if (!input) return;
-    const id = input.includes("/d/") ? input.split("/d/")[1].split(/[/?#]/)[0] : input.trim();
-    try {
-      await ensureDriveDiscovery();
-      const file = await gapi.client.drive.files.get({ fileId:id, alt:"media" });
-      const pins = JSON.parse(file.body || JSON.stringify(file.result||[]));
-      if (typeof window.replaceAllPinsFromExternal === "function") {
-        window.replaceAllPinsFromExternal(pins.filter(p=>!p.deleted));
-      }
-      ui.hint && (ui.hint.textContent = "pins.json を読み込みました");
-    } catch(e){ alert("pins.json の読み込みに失敗: " + asMessage(e)); }
-  });
-  if (ui.jsonReload) ui.jsonReload.addEventListener("click", async ()=>{
-    if (typeof window.reloadFromDrivePins === "function") {
-      try{ await window.reloadFromDrivePins(); ui.hint && (ui.hint.textContent = "pins.json を再読込しました"); }
-      catch(e){ alert("再読込に失敗: "+asMessage(e)); }
-    } else alert("reloadFromDrivePins が未実装です");
-  });
-  if (ui.jsonExport) ui.jsonExport.addEventListener("click", async ()=>{
-    if (typeof window.exportPinsJson === "function") {
-      try{ await window.exportPinsJson(); ui.hint && (ui.hint.textContent = "pins.json をエクスポートしました"); }
-      catch(e){ alert("エクスポートに失敗: "+asMessage(e)); }
-    } else alert("exportPinsJson が未実装です");
-  });
-
-  if (ui.sheetConnect) ui.sheetConnect.addEventListener("click", async ()=>{
-    saveCfg();
-    try { await LmSheets.reloadFromSheets(); ui.hint && (ui.hint.textContent = "シートを読み込みました"); }
-    catch(e){ alert("シート読み込みに失敗: "+asMessage(e)); }
-  });
-  if (ui.sheetCreate) ui.sheetCreate.addEventListener("click", async ()=>{
-    try { await createSpreadsheetAndConnect({force:false}); } catch(e){ console.error(e); }
-  });
-  if (ui.sheetForce) ui.sheetForce.addEventListener("click", async ()=>{
-    try { await createSpreadsheetAndConnect({force:true}); } catch(e){ console.error(e); }
-  });
-
-  window.addEventListener("load", ()=>{
-    if (ui.source && ui.source.value === "sheets" && ui.sheetId && (ui.sheetId.value||"").trim()) {
-      LmSheets.reloadFromSheets().catch(console.warn);
-    }
-  });
+  // Ensure status shows the new backend
+  setTimeout(updatePinsInfo, 1000);
 })();
 </script>
 
 </body>
-
-
 </html>
