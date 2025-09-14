@@ -3903,6 +3903,73 @@ document.getElementById('toolInlineBtn')?.addEventListener('click', ()=>{
 
   // ---- Minimal guards (work only if the original globals exist) ----
 
+  // === OAuth helpers & redirect fallback ===
+  function parseHashToken(){
+    try{
+      const h = new URLSearchParams((location.hash||'').replace(/^#/,''));
+      const at = h.get('access_token');
+      const exp = h.get('expires_in');
+      if (at){
+        window.accessToken = at;
+        window.accessTokenExpiresAt = Date.now() + (Number(exp||3600) * 1000);
+        // clean hash (preserve others if needed)
+        history.replaceState(null, '', location.pathname + location.search);
+        dbg('token(from-hash) acquired');
+      }
+    }catch{}
+  }
+  parseHashToken();
+
+  function getClientId(){
+    return window.CLIENT_ID || (window.CONFIG && window.CONFIG.CLIENT_ID) || "";
+  }
+  function getAllScopes(){
+    const sheets = "https://www.googleapis.com/auth/spreadsheets";
+    const driveFile = "https://www.googleapis.com/auth/drive.file";
+    const driveRo   = "https://www.googleapis.com/auth/drive.readonly";
+    const s = (window.ALL_SCOPES || (window.SCOPES) || `${driveFile} ${driveRo} ${sheets}`);
+    return s.includes("spreadsheets") ? s : (s + " " + sheets);
+  }
+  function hasToken(){
+    return !!window.accessToken && (!window.accessTokenExpiresAt || Date.now() < window.accessTokenExpiresAt - 5000);
+  }
+  async function ensureTokenInteractive(){
+    if (hasToken()) return true;
+    if (!(window.google && google.accounts && google.accounts.oauth2)) throw new Error("GIS not loaded");
+    const cid = getClientId();
+    if (!cid) throw new Error("CLIENT_ID not set");
+    return await new Promise((resolve)=>{
+      try{
+        const tc = google.accounts.oauth2.initTokenClient({
+          client_id: cid,
+          scope: getAllScopes(),
+          prompt: 'consent',
+          callback: (resp)=>{
+            if (resp && resp.access_token){ window.accessToken = resp.access_token; window.accessTokenExpiresAt = Date.now()+((Number(resp.expires_in)||3600)*1000); resolve(true); }
+            else resolve(false);
+          },
+          error_callback: ()=> resolve(false)
+        });
+        tc.requestAccessToken();
+      }catch{ resolve(false); }
+    });
+  }
+  function redirectOAuth(){
+    const cid = getClientId();
+    const scopes = getAllScopes();
+    if (!cid){ alert("CLIENT_ID が設定されていません"); return; }
+    const redir = location.origin + location.pathname + location.search; // same tab
+    const authUrl = "https://accounts.google.com/o/oauth2/v2/auth"
+      + "?client_id=" + encodeURIComponent(cid)
+      + "&redirect_uri=" + encodeURIComponent(redir)
+      + "&response_type=token"
+      + "&scope=" + encodeURIComponent(scopes)
+      + "&include_granted_scopes=true"
+      + "&prompt=consent";
+    location.assign(authUrl);
+  }
+
+
   // === Fallback helpers ===
   function _fallbackExtractDriveId(s){
     if (!s) return '';
@@ -3949,467 +4016,11 @@ document.getElementById('toolInlineBtn')?.addEventListener('click', ()=>{
   // - ensureToken() -> fills window.accessToken
   // - gapiReady() -> gapi loaded, Drive discovery added
   async function ensureSheetsReady(){
-    // Ensure we have a token that includes the spreadsheets scope
-    try{
-      if (window.google?.accounts?.oauth2 && window.CLIENT_ID){
-        const client = google.accounts.oauth2.initTokenClient({
-          client_id: window.CLIENT_ID,
-          scope: (window.ALL_SCOPES ? (window.ALL_SCOPES + ' ') : '') + 'https://www.googleapis.com/auth/spreadsheets',
-          prompt: '',
-          callback: (resp)=>{
-            try{
-              if (resp?.access_token){
-                window.accessToken = resp.access_token;
-                const ttlMs = Math.max(60_000, (Number(resp.expires_in)||3600) * 1000);
-                window.accessTokenExpiresAt = Date.now() + ttlMs;
-              }
-            }catch(_){}
-          }
-        });
-        client.requestAccessToken();
-      }
-    }catch(_){}
-
-    // Ensure gapi client has Sheets v4 loaded
     await (g.gapiReady ? g.gapiReady() : Promise.resolve());
-    try{
-      if (!g.gapi?.client?.sheets) {
-        await g.gapi.client.load('sheets', 'v4');
-      }
-    }catch(e){
-      console.warn('Sheets load failed', e);
-      throw e;
+    if (!g.gapi?.client?.sheets) {
+      await g.gapi.client.load('sheets', 'v4');
     }
   }
-
-  // Drive helpers (reuse originals if present)
-  const driveGetMetadata = async (id) => {
-    if (g.driveGetMetadata) return await g.driveGetMetadata(id);
-    // Fallback to Drive v3 files.get (metadata only)
-    await ensureGapiDrive();
-    const r = await g.gapi.client.drive.files.get({ fileId:id, fields:"id,name,parents,mimeType" });
-    return r.result;
-  };
-  async function ensureGapiDrive(){
-    await (g.gapiReady ? g.gapiReady() : Promise.resolve());
-  }
-
-  // ---- Sheets storage layout ----
-  // Spreadsheet title: <GLB_FILE_NAME>_pins (or user-provided folder)
-  // Tab "Pins" columns (A:N):
-  // id, x, y, z, rx, ry, rz, title, body, color, imageId, createdAt, updatedAt
-  // Tab "Materials" columns (A:C): name, key, value(JSON string)
-
-  const SHEET_TAB_PINS = 'Pins';
-  const SHEET_TAB_MATS = 'Materials';
-
-  // Remember last sheet per GLB in localStorage (similar to original map)
-  const MAP_KEY = 'pins_autosave_sheet_map_v1';
-  function loadMap(){ try { return JSON.parse(localStorage.getItem(MAP_KEY) || '{}'); } catch { return {}; } }
-  function rememberSheet(glbId, sheetId){ try{ const m=loadMap(); m[glbId]=sheetId; localStorage.setItem(MAP_KEY, JSON.stringify(m)); }catch{} }
-
-  // ---- Create / find spreadsheet next to GLB ----
-  async function ensureSpreadsheetForGlb(glbId){
-    await g.ensureToken?.(); // ensure accessToken
-    await ensureSheetsReady();
-
-    // 1) Try local map
-    const map = loadMap();
-    if (map[glbId]) return { spreadsheetId: map[glbId], title: '(cached)' };
-
-    // 2) Resolve parent folder and GLB base name
-    const meta = await driveGetMetadata(glbId);
-    const parentId = safe(()=> meta.parents[0], '');
-    const baseName = safe(()=> (meta.name||'model').replace(/\.(gltf|glb)$/i,''), 'model');
-
-    // 3) Search for spreadsheet in the same folder with name "<base>_pins"
-    let spreadsheetId = '';
-    let title         = `${baseName}_pins`;
-    try{
-      // Drive query for spreadsheets in folder
-      const q = `'${parentId}' in parents and trashed = false and mimeType = 'application/vnd.google-apps.spreadsheet' and name = '${title.replace(/'/g,"\'")}'`;
-      const r = await g.gapi.client.drive.files.list({ q, fields: "files(id,name)" });
-      if (r.result?.files?.length){
-        spreadsheetId = r.result.files[0].id;
-        title = r.result.files[0].name;
-      }
-    }catch(e){ console.warn('search spreadsheet failed', e); }
-
-    // 4) Create if not found
-    if (!spreadsheetId){
-      const cr = await g.gapi.client.sheets.spreadsheets.create({
-        properties: { title },
-        sheets: [
-          { properties: { title: SHEET_TAB_PINS } },
-          { properties: { title: SHEET_TAB_MATS } }
-        ]
-      });
-      spreadsheetId = cr.result.spreadsheetId;
-      // Move into parent folder (Sheets API can't set parents; use Drive)
-      if (parentId){
-        await g.gapi.client.drive.files.update({ fileId: spreadsheetId, addParents: parentId });
-      }
-    }
-
-    rememberSheet(glbId, spreadsheetId);
-    return { spreadsheetId, title };
-  }
-
-  // ---- Load from Sheets into in-memory PINS/MATERIALS ----
-  async function sheetsLoadAll(spreadsheetId){
-    await ensureSheetsReady();
-    const r = await g.gapi.client.sheets.spreadsheets.values.batchGet({
-      spreadsheetId,
-      ranges: [`${SHEET_TAB_PINS}!A2:N`, `${SHEET_TAB_MATS}!A2:C`]
-    });
-    const valsPins = r.result.valueRanges?.[0]?.values || [];
-    const valsMats = r.result.valueRanges?.[1]?.values || [];
-
-    // Convert rows -> objects
-    const pins = valsPins.map((row, i)=>{
-      const [id,x,y,z,rx,ry,rz,title,body,color,imageId,createdAt,updatedAt] = [
-        row[0]||String(i+1),
-        parseFloat(row[1]||0), parseFloat(row[2]||0), parseFloat(row[3]||0),
-        parseFloat(row[4]||0), parseFloat(row[5]||0), parseFloat(row[6]||0),
-        row[7]||'', row[8]||'', row[9]||'#ee3333', row[10]||'',
-        row[11]||'', row[12]||''
-      ];
-      return { id, pos:{x,y,z}, rot:{x:rx,y:ry,z:rz}, title, text:body, color, imageId, createdAt, updatedAt };
-    });
-
-    const matObj = {};
-    for (const row of valsMats){
-      const [name,key,val] = [row[0]||'', row[1]||'', row[2]||''];
-      if (!name || !key) continue;
-      const parsed = safe(()=> JSON.parse(val), val);
-      matObj[name] = matObj[name] || {};
-      matObj[name][key] = parsed;
-    }
-
-    return { pins, materials: matObj };
-  }
-
-  // ---- Save in-memory PINS/MATERIALS to Sheets ----
-  function nowIso(){
-    try{
-      const z = new Date();
-      const p = (n,l=2)=> String(n).padStart(l,'0');
-      return `${z.getFullYear()}-${p(z.getMonth()+1)}-${p(z.getDate())} ${p(z.getHours())}:${p(z.getMinutes())}:${p(z.getSeconds())}`;
-    }catch{ return '' }
-  }
-
-  function pinsToRows(pins){
-    return (pins||[]).map((p,i)=>{
-      const pos = p.pos||{}; const rot = p.rot||{};
-      return [
-        p.id || String(i+1),
-        Number(pos.x||0), Number(pos.y||0), Number(pos.z||0),
-        Number(rot.x||0), Number(rot.y||0), Number(rot.z||0),
-        p.title||'', p.text||'', p.color||'#ee3333', p.imageId||'',
-        p.createdAt||'', nowIso()
-      ];
-    });
-  }
-  function matsToRows(mats){
-    const rows = [];
-    try{
-      for (const name of Object.keys(mats||{})){
-        const cfg = mats[name]||{};
-        for (const k of Object.keys(cfg)){
-          const v = cfg[k];
-          rows.push([name, k, (typeof v==='string') ? v : JSON.stringify(v)]);
-        }
-      }
-    }catch{}
-    return rows;
-  }
-
-  async function sheetsSaveAll(spreadsheetId, {pins, materials}, {createNewSheetTitle=null}={}){
-    await ensureSheetsReady();
-
-    // If requested, add a new sheet tab and write only pins there (snapshot export)
-    if (createNewSheetTitle){
-      try{
-        await g.gapi.client.sheets.spreadsheets.batchUpdate({
-          spreadsheetId,
-          requests: [{ addSheet: { properties: { title: createNewSheetTitle } } }]
-        });
-        await g.gapi.client.sheets.spreadsheets.values.update({
-          spreadsheetId,
-          range: `${createNewSheetTitle}!A1:N1`,
-          valueInputOption: 'RAW',
-          includeValuesInResponse: false,
-          resource: { values: [[
-            'id','x','y','z','rx','ry','rz','title','body','color','imageId','createdAt','updatedAt'
-          ]] }
-        });
-        await g.gapi.client.sheets.spreadsheets.values.update({
-          spreadsheetId,
-          range: `${createNewSheetTitle}!A2:N`,
-          valueInputOption: 'RAW',
-          resource: { values: pinsToRows(pins) }
-        });
-      }catch(e){ console.warn('snapshot sheet create failed', e); }
-      return;
-    }
-
-    // Normal path: overwrite Pins + Materials tabs
-    // Header rows
-    await g.gapi.client.sheets.spreadsheets.values.update({
-      spreadsheetId,
-      range: `${SHEET_TAB_PINS}!A1:N1`,
-      valueInputOption: 'RAW',
-      includeValuesInResponse: false,
-      resource: { values: [[
-        'id','x','y','z','rx','ry','rz','title','body','color','imageId','createdAt','updatedAt'
-      ]] }
-    });
-    await g.gapi.client.sheets.spreadsheets.values.update({
-      spreadsheetId,
-      range: `${SHEET_TAB_PINS}!A2:N`,
-      valueInputOption: 'RAW',
-      resource: { values: pinsToRows(pins) }
-    });
-    await g.gapi.client.sheets.spreadsheets.values.update({
-      spreadsheetId,
-      range: `${SHEET_TAB_MATS}!A1:C1`,
-      valueInputOption: 'RAW',
-      includeValuesInResponse: false,
-      resource: { values: [['name','key','value']] }
-    });
-    await g.gapi.client.sheets.spreadsheets.values.update({
-      spreadsheetId,
-      range: `${SHEET_TAB_MATS}!A2:C`,
-      valueInputOption: 'RAW',
-      resource: { values: matsToRows(materials) }
-    });
-  }
-
-  // ---- Override original pins storage hooks ----
-  let SHEET_ID = '';
-  let SHEET_TITLE = '';
-
-  function setSaveStatus(state, msg=''){
-    if (!saveStatusEl) return;
-    if (state==='ok'){ saveStatusEl.textContent=msg||'保存済み'; saveStatusEl.className='save-ok'; }
-    else if (state==='pending'){ saveStatusEl.textContent=msg||'保存中…'; saveStatusEl.className='save-pending'; }
-    else if (state==='fail'){ saveStatusEl.textContent=msg||'保存失敗'; saveStatusEl.className='save-fail'; }
-    else { saveStatusEl.textContent=msg||'待機中'; saveStatusEl.className='muted'; }
-  }
-  function updatePinsInfo(){
-    if (!pinsInfoEl) return;
-    const glbLoaded = safe(()=> fileIdInput.value.trim(), '');
-    const loaded = glbLoaded ? `読み込み: GLB(${glbLoaded.slice(0,8)}…)` : '読み込み: なし';
-    const auto   = SHEET_ID ? `オートセーブ: ${SHEET_TITLE||'pins'} (${SHEET_ID})` : 'オートセーブ: スプレッドシート未作成';
-    pinsInfoEl.textContent = loaded + ' / ' + auto;
-  }
-
-  // Override ensureAutosaveTarget to resolve a spreadsheet instead of pins.json
-  const _origEnsureAutosaveTarget = g.ensureAutosaveTarget;
-  g.ensureAutosaveTarget = async function ensureAutosaveTarget_sheet(glbId){
-    try{
-      await g.ensureToken?.();
-      const { spreadsheetId, title } = await ensureSpreadsheetForGlb(glbId);
-      SHEET_ID = spreadsheetId; SHEET_TITLE = title;
-      updatePinsInfo();
-      return SHEET_ID;
-    }catch(e){
-      console.warn('ensureAutosaveTarget(sheet) failed', e);
-      return _origEnsureAutosaveTarget ? await _origEnsureAutosaveTarget(glbId) : '';
-    }
-  };
-
-  // Replace autoSaveNow to write to Sheets
-  const _origAutoSaveNow = g.autoSaveNow;
-  g.autoSaveNow = async function autoSaveNow_sheet(){
-    try{
-      if (!autoSaveEl?.checked) return;
-      setSaveStatus('pending','保存中…');
-      const glbId = safe(()=> fileIdInput.value.trim(), '');
-      if (!SHEET_ID && glbId){
-        await g.ensureAutosaveTarget(glbId);
-      }
-      if (!SHEET_ID){
-        throw new Error('Sheet not resolved');
-      }
-      await ensureSheetsReady();
-      await sheetsSaveAll(SHEET_ID, { pins: PINSref(), materials: MATERIALSref() });
-      const t=new Date(), hh=String(t.getHours()).padStart(2,'0'), mm=String(t.getMinutes()).padStart(2,'0'), ss=String(t.getSeconds()).padStart(2,'0');
-      setSaveStatus('ok', `保存済み ${hh}:${mm}:${ss}`);
-      scopeWarnEl && (scopeWarnEl.style.display='none');
-      updatePinsInfo();
-    }catch(e){
-      console.warn('autoSave(sheet) failed', e);
-      setSaveStatus('fail','オートセーブ失敗（権限？）');
-      scopeWarnEl && (scopeWarnEl.style.display='block');
-      // As a fallback: call original autosave to pins.json
-      try{ return _origAutoSaveNow?.(); }catch{}
-    }
-  };
-
-  // Replace manual save to do a snapshot sheet (new tab)
-  if (btnSavePins){
-    const _origBtnSave = btnSavePins.onclick;
-    btnSavePins.onclick = async ()=>{
-      try{
-        await g.ensureToken?.();
-        const glbId = safe(()=> fileIdInput.value.trim(), '');
-        if (!SHEET_ID && glbId){
-          await g.ensureAutosaveTarget(glbId);
-        }
-        if (!SHEET_ID) throw new Error('Sheet not resolved');
-
-        const now = new Date();
-        const def = `pins_${now.getFullYear()}${String(now.getMonth()+1).padStart(2,'0')}${String(now.getDate()).padStart(2,'0')}_${String(now.getHours()).padStart(2,'0')}${String(now.getMinutes()).padStart(2,'0')}`;
-        const name = prompt('新規シート名（スプレッドシート内タブ）を入力してください', def);
-        if (!name) return;
-
-        try{
-          await sheetsSaveAll(SHEET_ID, { pins: PINSref(), materials: MATERIALSref() }, { createNewSheetTitle: name });
-        }catch(e403){
-          // Try once with explicit consent to add spreadsheets scope (must be in user gesture)
-          try{
-            if (window.google?.accounts?.oauth2 && window.CLIENT_ID){
-              const client2 = google.accounts.oauth2.initTokenClient({
-                client_id: window.CLIENT_ID,
-                scope: (window.ALL_SCOPES ? (window.ALL_SCOPES + ' ') : '') + 'https://www.googleapis.com/auth/spreadsheets',
-                prompt: 'consent',
-                callback: ()=>{}
-              });
-              client2.requestAccessToken();
-              await sheetsSaveAll(SHEET_ID, { pins: PINSref(), materials: MATERIALSref() }, { createNewSheetTitle: name });
-            }else{
-              throw e403;
-            }
-          }catch(e2){ throw e2; }
-        }
-        alert(`スプレッドシートにスナップショット保存しました。
-シート名: ${name}
-Spreadsheet ID: ${SHEET_ID}`);
-        updatePinsInfo();
-      }catch(e){
-        console.error(e);
-        alert('保存に失敗しました。権限（spreadsheets, drive.file）をご確認ください。');
-        setSaveStatus('fail','手動保存失敗');
-        try{ _origBtnSave?.(); }catch{}
-      }
-    };
-  }
-
-  // Try to pre-resolve sheet when GLB id is present (after a tiny delay to let original init run)
-  setTimeout(async () => {
-    try{
-      const glbId = safe(()=> fileIdInput.value.trim(), '');
-      if (glbId) await g.ensureAutosaveTarget(glbId);
-    }catch{}
-  }, 1500);
-
-  
-// === Override: キャプション「選択…」→ スプレッドシートから読み込む ===
-if (btnPickPins){
-  btnPickPins.onclick = async () => {
-    try{
-      await g.ensureToken?.();
-      await ensureSheetsReady();
-      const glbId = (fileIdInput && fileIdInput.value) ? extractId(fileIdInput.value) : '';
-      let parentId = '';
-      if (glbId){
-        const meta = await driveGetMetadata(glbId);
-        parentId = (meta.parents && meta.parents[0]) || '';
-      }
-      openModal(`
-        <div class="modal">
-          <header>
-            <strong>スプレッドシートを選択（同フォルダ推奨）</strong>
-            <div class="grow"></div>
-            <button id="pinsClose">閉じる</button>
-          </header>
-          <div class="body">
-            <div class="list" id="pinsList"><div class="rowi">読み込み中…</div></div>
-          </div>
-          <footer>
-            <button id="pinsUseAutosave">新規（オートセーブに任せる）</button>
-          </footer>
-        </div>
-      `);
-      document.getElementById('pinsClose')?.addEventListener('click', ()=>{ closeModal && closeModal(); });
-      const listEl = document.getElementById('pinsList');
-      // クエリ：同フォルダ内のスプレッドシート（_pins優先）
-      const q = parentId
-        ? `'${parentId}' in parents and trashed = false and mimeType = 'application/vnd.google-apps.spreadsheet'`
-        : `mimeType = 'application/vnd.google-apps.spreadsheet' and trashed = false`;
-      const res = await g.gapi.client.drive.files.list({ q, pageSize: 200, orderBy: 'modifiedTime desc', fields: 'files(id,name,modifiedTime)' });
-      const all = res.result?.files || [];
-      const pinsLike = all.filter(f => /(^|[^a-z])pins$/i.test(f.name) || /_pins$/i.test(f.name) || /pins/i.test(f.name));
-      const files = pinsLike.length ? pinsLike : all;
-
-      if (!files.length){
-        listEl.innerHTML = `<div class="rowi">スプレッドシートが見つかりませんでした</div>`;
-      } else {
-        listEl.innerHTML = files.map(f=>{
-          const t = new Date(f.modifiedTime||Date.now()).toLocaleString();
-          return `<div class="rowi">
-            <div class="name">${f.name}</div>
-            <div class="meta">${t}</div>
-            <div><button data-pick="${f.id}">これを使う</button></div>
-          </div>`;
-        }).join('');
-
-        listEl.querySelectorAll('[data-pick]').forEach(btn=>{
-          btn.onclick = async ()=>{
-            const id = btn.getAttribute('data-pick');
-            pinsIdInput && (pinsIdInput.value = id);
-            closeModal && closeModal();
-            // Sheetsからロード
-            try{
-              statusEl && (statusEl.textContent='Pins 読込中…');
-            }catch{}
-            try{
-              const { pins, materials } = await sheetsLoadAll(id);
-              // 既存グローバルへ反映
-              g.PINS = pins.map(p => ({
-                id: p.id, title: p.title, text: p.text, color: p.color || '#ee3333',
-                position: { x: p.pos?.x || p.pos?.x || 0, y: p.pos?.y || 0, z: p.pos?.z || 0 }
-              }));
-              g.MATERIALS = materials || {};
-              g.loadedPinsId = id;
-              try{ const m=await driveGetMetadata(id); g.loadedPinsName = m.name||''; }catch{}
-              if (g.redrawPins) g.redrawPins();
-              if (Array.isArray(g.materialList)){
-                for (const {name, material} of g.materialList){
-                  const cfg = g.MATERIALS[name]; if (cfg && g.applyMaterialConfig) g.applyMaterialConfig(material, cfg);
-                }
-              }
-              if (g.buildMaterialsUI) g.buildMaterialsUI(materialsDockEl);
-              if (g.resetHistoryBaseline) g.resetHistoryBaseline();
-              if (g.syncDockMoveToggle) g.syncDockMoveToggle();
-              if (typeof updatePinsInfo === 'function') updatePinsInfo();
-              if (g.refreshShareButtons) g.refreshShareButtons();
-              setSaveStatus('ok','読み込み完了');
-            }catch(e){
-              console.error(e);
-              setSaveStatus('fail','スプレッドシート読み込み失敗');
-            }
-          };
-        });
-      }
-
-      document.getElementById('pinsUseAutosave')?.addEventListener('click', async ()=>{
-        closeModal && closeModal();
-        // GLBに紐づくスプレッドシートを自動作成→オートセーブへ
-        const glbId2 = (fileIdInput && fileIdInput.value) ? extractId(fileIdInput.value) : '';
-        if (!glbId2){ alert('先にGLBを読み込んでください'); return; }
-        const { spreadsheetId } = await ensureSpreadsheetForGlb(glbId2);
-        pinsIdInput && (pinsIdInput.value = spreadsheetId);
-        SHEET_ID = spreadsheetId;
-        updatePinsInfo();
-      });
-    }catch(e){
-      console.error(e);
-      alert('スプレッドシートの取得に失敗しました');
-    }
-  };
-}
 
 
   // === Sheets-first startup load ===
@@ -4463,6 +4074,25 @@ if (btnPickPins){
   }, 10000);
 
   setTimeout(updatePinsInfo, 1000);
+
+// === Enhance Sign-In button to use interactive and redirect fallback ===
+try{
+  const btnAuth = document.getElementById('btnAuth') || document.getElementById('btnSignIn');
+  if (btnAuth){
+    btnAuth.addEventListener('click', async (ev)=>{
+      ev.preventDefault();
+      const ok = await ensureTokenInteractive();
+      if (!ok){
+        // Popup blocked or failure: fallback to redirect
+        alert('ポップアップがブロックされたか、サインインに失敗しました。リダイレクトで再試行します。');
+        redirectOAuth();
+      } else {
+        setSaveStatus && setSaveStatus('ok','サインイン完了');
+      }
+    }, { once:false });
+  }
+}catch{}
+
 })();
 </script>
 
