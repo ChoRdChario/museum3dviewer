@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>LociMyu v0.9.1 (View swap + Drive image preview)</title>
+  <title>LociMyu v0.9.2 (Connector + pin toggle + small pins)</title>
   <link rel="icon" href='data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><circle cx="32" cy="32" r="28" fill="%230b0f14"/><text x="32" y="39" font-size="28" text-anchor="middle" fill="%2353b7ff" font-family="Arial">L</text></svg>'>
   <style>
     :root{ --bg:#0b0f14; --panel:#121922; --text:#e6edf3; --accent:#53b7ff; --muted:#8fa3bd; --radius:16px;}
@@ -23,6 +23,10 @@
     .panel .body{padding:10px;overflow:auto}
     #viewer{position:relative}
     #viewerCanvas{display:block;width:100%;height:100%;background:#0a0f16;border-radius:var(--radius)}
+    /* connector overlay */
+    #connector{position:absolute;left:0;top:0;width:100%;height:100%;pointer-events:none}
+    #connector line{stroke:#7cc4ff;stroke-width:2;stroke-opacity:.9;filter:url(#dropshadow)}
+    #connector circle{fill:#7cc4ff;opacity:.9}
     .hud{position:absolute;left:10px;bottom:10px;display:flex;gap:8px}
     .chip{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);padding:6px 10px;border-radius:999px}
     .spinner{position:absolute;inset:0;display:grid;place-items:center;background:linear-gradient(180deg, rgba(10,15,22,.75), rgba(10,15,22,.75));backdrop-filter: blur(2px);}
@@ -95,6 +99,7 @@
         <div class="flex" style="margin-top:6px;margin-bottom:6px">
           <button id="btnAddPin" disabled>＋ ピン追加モード</button>
           <button id="btnGizmo" disabled>ギズモ: OFF</button>
+          <button id="btnTogglePins" disabled>ピン表示: ON</button>
           <button id="btnUndo" disabled>Ctrl+Z</button>
         </div>
 
@@ -136,6 +141,17 @@
     <section class="panel" id="viewer">
       <div class="spinner" id="loading" hidden><div class="lds"></div></div>
       <canvas id="viewerCanvas"></canvas>
+      <!-- connector SVG -->
+      <svg id="connector">
+        <defs>
+          <filter id="dropshadow" x="-20%" y="-20%" width="140%" height="140%">
+            <feDropShadow dx="0" dy="0" stdDeviation="2" flood-color="#001a33" flood-opacity="0.9"/>
+          </filter>
+        </defs>
+        <line id="connLine" x1="0" y1="0" x2="0" y2="0" style="display:none"/>
+        <circle id="connDot" r="3" cx="0" cy="0" style="display:none"/>
+      </svg>
+
       <div id="viewerPreview" class="hidden">
         <img id="previewImg" alt="preview"/>
         <div class="cap" id="previewCap"></div>
@@ -251,6 +267,7 @@ const el = {
   btnDeletePin: document.getElementById('btnDeletePin'),
   btnAddPin: document.getElementById('btnAddPin'),
   btnGizmo: document.getElementById('btnGizmo'),
+  btnTogglePins: document.getElementById('btnTogglePins'),
   btnUndo: document.getElementById('btnUndo'),
   modeLabel: document.getElementById('modeLabel'),
   btnSignIn: document.getElementById('btnSignIn'),
@@ -281,6 +298,10 @@ const el = {
   viewBottom: document.getElementById('viewBottom'),
   projOrtho: document.getElementById('projOrtho'),
   bgColor: document.getElementById('bgColor'),
+  // connector
+  connector: document.getElementById('connector'),
+  connLine: document.getElementById('connLine'),
+  connDot: document.getElementById('connDot'),
   // modal
   pickerModal: document.getElementById('pickerModal'),
   pickerGrid: document.getElementById('pickerGrid'),
@@ -347,13 +368,8 @@ async function resolveImageURL(url){
   }
   // plain URL
   if(imageBlobCache.has(url)) return imageBlobCache.get(url);
-  try{
-    const obj = url; // try direct
-    imageBlobCache.set(url, obj);
-    return obj;
-  }catch{
-    return url;
-  }
+  imageBlobCache.set(url, url);
+  return url;
 }
 async function driveFileToObjectURL(fileId){
   const dlUrl = `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`;
@@ -384,7 +400,7 @@ function maybeReady(){
       accessToken = resp.access_token;
       if(accessToken){
         el.gate.style.display = 'none';
-        setDisabled(['btnLoad','btnAddPin','btnGizmo','btnUndo','btnSavePin','btnDeletePin','btnAttach','btnPickFromFolder'], false);
+        setDisabled(['btnLoad','btnAddPin','btnGizmo','btnTogglePins','btnUndo','btnSavePin','btnDeletePin','btnAttach','btnPickFromFolder'], false);
         el.statusLabel.textContent = 'Ready';
         if(viewOnly){
           document.getElementById('leftToolbox').classList.add('hidden');
@@ -429,7 +445,7 @@ function buildControls(){
   tcontrols = new TransformControls(camera, el.viewerCanvas);
   tcontrols.setSize(0.9); tcontrols.setSpace('world');
   tcontrols.addEventListener('dragging-changed', e=>{ controls.enabled = !e.value; });
-  scene.add(tcontrols); tcontrols.visible=false; // default OFF
+  scene.add(tcontrols); tcontrols.visible=false; tcontrols.enabled=false; // default OFF
 }
 function resize(){
   const w = el.viewerCanvas.clientWidth || el.viewerCanvas.parentElement.clientWidth;
@@ -444,8 +460,8 @@ function resize(){
   }
   camera.updateProjectionMatrix();
 }
-function animate(){ requestAnimationFrame(animate); renderer.render(scene,camera); }
-function renderNow(){ renderer.render(scene,camera); }
+function animate(){ requestAnimationFrame(animate); renderer.render(scene,camera); updateConnector(); }
+function renderNow(){ renderer.render(scene,camera); updateConnector(); }
 viewerInit();
 
 function sceneBounds(){
@@ -497,7 +513,7 @@ function switchProjection(useOrtho){
   tcontrols.camera = camera;
   resize(); renderNow();
 }
-// Remapped camera directions: rotate +90° around Y (and swap Left/Right)
+// Remapped camera directions with Left/Right swapped
 function setNamedView(name){
   const { center, radius } = sceneBounds();
   const d = radius*2.2;
@@ -505,8 +521,8 @@ function setNamedView(name){
   switch(name){
     case 'front': dir.set(d,0,0); break;     // +X
     case 'back':  dir.set(-d,0,0); break;    // -X
-    case 'left':  dir.set(0,0,-d); break;    // -Z  <-- swapped
-    case 'right': dir.set(0,0,d); break;     // +Z  <-- swapped
+    case 'left':  dir.set(0,0,-d); break;    // -Z
+    case 'right': dir.set(0,0,d); break;     // +Z
     case 'top':   dir.set(0,d,0); break;
     case 'bottom':dir.set(0,-d,0); break;
   }
@@ -515,6 +531,45 @@ function setNamedView(name){
   controls.update();
   if(!camera.isPerspectiveCamera){ updateOrthoFrustum(); }
   renderNow();
+}
+
+// ====== Connector (pin -> preview) ======
+function getCanvasRelativePointFromWorld(world){
+  const v = world.clone().project(camera);
+  const rect = el.viewerCanvas.getBoundingClientRect();
+  const x = (v.x + 1) / 2 * rect.width;
+  const y = (1 - (v.y + 1) / 2) * rect.height;
+  return { x, y };
+}
+function getPreviewAnchor(){
+  if(el.viewerPreview.classList.contains('hidden')) return null;
+  const rectCanvas = el.viewerCanvas.getBoundingClientRect();
+  const rectPrev = el.viewerPreview.getBoundingClientRect();
+  const x = (rectPrev.left - rectCanvas.left); // left edge center
+  const y = (rectPrev.top - rectCanvas.top) + rectPrev.height/2;
+  return { x, y };
+}
+function updateConnector(){
+  const p = pins.find(x=>x.id===selectedPinId);
+  if(!p || !p.mesh || el.viewerPreview.classList.contains('hidden') || !pinGroup.visible){
+    el.connLine.style.display = 'none';
+    el.connDot.style.display = 'none';
+    return;
+  }
+  const a = getCanvasRelativePointFromWorld(p.pos);
+  const b = getPreviewAnchor();
+  if(!b){ el.connLine.style.display = 'none'; el.connDot.style.display = 'none'; return; }
+
+  const svg = el.connector;
+  const rect = el.viewerCanvas.getBoundingClientRect();
+  svg.setAttribute('viewBox', `0 0 ${rect.width} ${rect.height}`);
+
+  el.connLine.setAttribute('x1', a.x); el.connLine.setAttribute('y1', a.y);
+  el.connLine.setAttribute('x2', b.x); el.connLine.setAttribute('y2', b.y);
+  el.connLine.style.display = 'block';
+
+  el.connDot.setAttribute('cx', a.x); el.connDot.setAttribute('cy', a.y);
+  el.connDot.style.display = 'block';
 }
 
 // ====== Pins ======
@@ -541,7 +596,7 @@ function onPointerDown(e){
   }
   const rect=el.viewerCanvas.getBoundingClientRect();
   pointer.x=((e.clientX-rect.left)/rect.width)*2-1;
-  pointer.y=-((e.clientY-rect-top)/rect.height)*2+1;
+  pointer.y=-((e.clientY-rect.top)/rect.height)*2+1;
   raycaster.setFromCamera(pointer,camera);
   const hits=raycaster.intersectObjects(pinGroup.children,false);
   if(hits.length){ selectPin(hits[0].object.userData.pinId, {fly:true}); }
@@ -549,7 +604,14 @@ function onPointerDown(e){
 function addUndo(u){ undoStack.push(u); }
 function undo(){ const u = undoStack.pop(); if(!u) return; if(u.type==='move'){ const p=pins.find(x=>x.id===u.id); if(p){ p.pos.copy(u.from); placePinMesh(p); selectPin(p.id); renderNow(); } } else if(u.type==='add'){ removePin(u.id,{silent:true}); } else if(u.type==='delete'){ pins.push(u.pin); placePinMesh(u.pin); refreshPinsList(); selectPin(u.pin.id); renderNow(); } }
 function createPin(pos,color){ const id=`p_${Date.now()}_${Math.random().toString(36).slice(2,7)}`; const pin={id,pos:pos.clone(),color:color||'#ff6b6b',title:'',body:'',images:[],mesh:null}; pins.push(pin); placePinMesh(pin); refreshPinsList(); selectPin(id); addUndo({type:'add',id}); }
-function placePinMesh(pin){ if(pin.mesh){ pinGroup.remove(pin.mesh); pin.mesh.geometry.dispose(); pin.mesh.material.dispose(); pin.mesh=null; } const geo=new THREE.SphereGeometry(0.01,16,16); const mat=new THREE.MeshBasicMaterial({color:new THREE.Color(pin.color)}); const mesh=new THREE.Mesh(geo,mat); mesh.position.copy(pin.pos); mesh.userData.pinId=pin.id; pin.mesh=mesh; pinGroup.add(mesh); }
+function placePinMesh(pin){
+  if(pin.mesh){ pinGroup.remove(pin.mesh); pin.mesh.geometry.dispose(); pin.mesh.material.dispose(); pin.mesh=null; }
+  const geo=new THREE.SphereGeometry(0.006,16,16);
+  const mat=new THREE.MeshBasicMaterial({color:new THREE.Color(pin.color)});
+  const mesh=new THREE.Mesh(geo,mat);
+  mesh.position.copy(pin.pos); mesh.userData.pinId=pin.id;
+  pin.mesh=mesh; pinGroup.add(mesh);
+}
 function selectPin(id,{fly}={}){
   selectedPinId=id;
   const p=pins.find(x=>x.id===id);
@@ -560,7 +622,7 @@ function selectPin(id,{fly}={}){
   renderThumbs(p);
   updateViewerPreviewForPin(p);
   tcontrols.attach(p.mesh);
-  tcontrols.visible = false; // keep OFF by default even after attach
+  tcontrols.visible = false; tcontrols.enabled = false; // keep OFF by default
   document.getElementById('btnGizmo').textContent = 'ギズモ: OFF';
   if(fly){ flyTo(p.pos); } else { controls.target.copy(p.pos); controls.update(); }
 }
@@ -1012,8 +1074,14 @@ document.getElementById('btnAddPin').addEventListener('click', ()=> setAddPinMod
 document.getElementById('btnGizmo').addEventListener('click', ()=>{
   if(!selectedPinId){ toast('ピンを選択してください'); return; }
   tcontrols.visible = !tcontrols.visible;
+  tcontrols.enabled = tcontrols.visible;
   document.getElementById('btnGizmo').textContent = 'ギズモ: ' + (tcontrols.visible?'ON':'OFF');
   el.modeLabel.textContent = tcontrols.visible ? 'Gizmo' : 'Orbit';
+});
+document.getElementById('btnTogglePins').addEventListener('click', ()=>{
+  pinGroup.visible = !pinGroup.visible;
+  document.getElementById('btnTogglePins').textContent = 'ピン表示: ' + (pinGroup.visible? 'ON' : 'OFF');
+  renderNow();
 });
 document.getElementById('btnUndo').addEventListener('click', ()=> undo());
 document.getElementById('capTitle').addEventListener('input', ()=>{ const p=pins.find(x=>x.id===selectedPinId); if(p){ p.title=el.capTitle.value; refreshPinsList(); debounceSave(); updateViewerPreviewForPin(p); } });
@@ -1021,7 +1089,7 @@ document.getElementById('capBody').addEventListener('input', ()=>{ const p=pins.
 
 // Track gizmo move → update pin pos
 tcontrols.addEventListener('objectChange', ()=>{
-  if(!selectedPinId || !tcontrols.object) return;
+  if(!selectedPinId || !tcontrols.object || !tcontrols.visible) return;
   const p=pins.find(x=>x.id===selectedPinId);
   if(!p) return;
   const prev = p.pos.clone();
@@ -1029,6 +1097,7 @@ tcontrols.addEventListener('objectChange', ()=>{
   addUndo({type:'move', id:p.id, from:prev});
   debounceSave();
 });
+
 document.getElementById('btnDeletePin').addEventListener('click', ()=>{ if(!selectedPinId) return; const id=selectedPinId; removePin(id); debounceSave(); });
 
 </script>
