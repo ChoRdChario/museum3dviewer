@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>LociMyu v0.9.4 (Preview UI fix + Color Filter)</title>
+  <title>LociMyu v0.9.5 (Preview overlap fix + Thumb delete + Robust image load)</title>
   <link rel="icon" href='data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><circle cx="32" cy="32" r="28" fill="%230b0f14"/><text x="32" y="39" font-size="28" text-anchor="middle" fill="%2353b7ff" font-family="Arial">L</text></svg>'>
   <style>
     :root{ --bg:#0b0f14; --panel:#121922; --text:#e6edf3; --accent:#53b7ff; --muted:#8fa3bd; --radius:16px; --shadow:0 10px 30px rgba(0,0,0,.3);}
@@ -46,7 +46,10 @@
     .small{font-size:.85rem;color:#a9b8cf}
     .grid2{display:grid;grid-template-columns:1fr auto;gap:8px;align-items:center}
     .thumbs{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
-    .thumbs img{width:72px;height:72px;object-fit:cover;border-radius:10px;border:1px solid #223146}
+    .thumb{position:relative}
+    .thumb img{width:72px;height:72px;object-fit:cover;border-radius:10px;border:1px solid #223146;display:block}
+    .thumb .del{position:absolute;top:-6px;right:-6px;width:20px;height:20px;border-radius:50%;background:#1e2a3b;border:1px solid #334966;color:#e8f0ff;line-height:18px;text-align:center;font-weight:700;cursor:pointer}
+    .thumb .del:hover{background:#2a3b55}
     .hidden{display:none !important}
     .field{display:flex;gap:8px;align-items:center;margin:8px 0}
     .field label{min-width:120px;color:#a9b8cf}
@@ -61,13 +64,15 @@
     .modal .cell{background:#0c1118;border:1px solid #223146;border-radius:12px;padding:8px;cursor:pointer;display:flex;flex-direction:column;gap:6px}
     .modal .cell img{width:100%;height:110px;object-fit:cover;border-radius:8px}
     .modal .cell:hover{background:#132035}
-    /* Reworked preview layout */
-    #viewerPreview{position:absolute;top:10px;right:10px;max-height:60%;border:1px solid #203049;border-radius:8px;background:#0a0f16cc;backdrop-filter: blur(2px);padding:6px;display:grid;grid-template-rows:auto 1fr auto;gap:6px;resize:both;overflow:hidden;min-width:180px}
+    .modal .cell.error{opacity:.5;pointer-events:none}
+    /* Reworked preview layout: header sticky, image scroll area */
+    #viewerPreview{position:absolute;top:10px;right:10px;max-height:60%;border:1px solid #203049;border-radius:8px;background:#0a0f16cc;backdrop-filter: blur(2px);display:grid;grid-template-rows:auto 1fr auto;gap:6px;resize:both;overflow:hidden;min-width:220px;min-height:180px;padding:0}
     #viewerPreview.hidden{display:none}
-    #previewControls{display:flex;gap:8px;align-items:center;flex-wrap:wrap;z-index:1}
-    #previewWrap{position:relative;overflow:auto;border-radius:6px;background:#0b1018}
-    #previewWrap img{display:block;transform-origin:center center;max-width:none;max-height:none}
-    #viewerPreview .cap{font-size:.8rem;color:#a9b8cf}
+    #previewControls{position:sticky;top:0;background:#0a0f16f0;border-bottom:1px solid #203049;padding:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;z-index:1}
+    #previewWrap{position:relative;overflow:auto;padding:8px}
+    #previewInner{transform-origin: top left;}
+    #previewInner img{display:block;max-width:none;max-height:none;border-radius:6px}
+    #viewerPreview .cap{font-size:.8rem;color:#a9b8cf;border-top:1px solid #203049;padding:6px 8px;background:#0a0f16f0}
     @media (max-width: 1100px){ .main{grid-template-columns:1fr; grid-template-rows: 360px 1fr 480px} }
     /* Color filter dropdown */
     .dropdown{position:relative;display:inline-block}
@@ -162,16 +167,14 @@
 
       <div id="viewerPreview" class="hidden">
         <div id="previewControls">
-          <span class="small">サイズ</span>
-          <input id="previewSize" type="range" min="15" max="60" step="1" value="28">
-          <span id="previewSizeVal" class="small">28%</span>
-          <span class="small" style="margin-left:8px">倍率</span>
+          <span class="small">倍率</span>
           <input id="previewZoom" type="range" min="0.25" max="3" step="0.05" value="1">
           <span id="previewZoomVal" class="small">1.00×</span>
           <button id="previewReset">リセット</button>
+          <span id="previewErr" class="small" style="margin-left:auto;color:#ffb4b4;display:none">画像を読み込めませんでした</span>
         </div>
         <div id="previewWrap">
-          <img id="previewImg" alt="preview"/>
+          <div id="previewInner"><img id="previewImg" alt="preview"/></div>
         </div>
         <div class="cap" id="previewCap"></div>
       </div>
@@ -293,13 +296,13 @@ const el = {
   viewerCanvas: document.getElementById('viewerCanvas'),
   viewerPreview: document.getElementById('viewerPreview'),
   previewWrap: document.getElementById('previewWrap'),
+  previewInner: document.getElementById('previewInner'),
   previewImg: document.getElementById('previewImg'),
   previewCap: document.getElementById('previewCap'),
-  previewSize: document.getElementById('previewSize'),
-  previewSizeVal: document.getElementById('previewSizeVal'),
   previewZoom: document.getElementById('previewZoom'),
   previewZoomVal: document.getElementById('previewZoomVal'),
   previewReset: document.getElementById('previewReset'),
+  previewErr: document.getElementById('previewErr'),
   pinsList: document.getElementById('pinsList'),
   rightNoSel: document.getElementById('noSelection'),
   rightEditor: document.getElementById('editor'),
@@ -408,7 +411,6 @@ function setDisabled(ids, on){ ids.forEach(id=>{ const b=document.getElementById
 function debounceSave(){ clearTimeout(autosaveTimer); autosaveTimer=setTimeout(()=> upsertPinToSheet().catch(console.error), 1200); }
 function fmt(n){ return typeof n==='number'? Number(n.toFixed(6)) : n; }
 function ensureArray(x){ return Array.isArray(x)?x:[]; }
-function hex(c){ return new THREE.Color(c).getHexString(); }
 function normalizeHex(c){ const cc = new THREE.Color(c).getStyle(); const t = new THREE.Color(cc); return '#' + t.getHexString(); }
 
 // Resolve image URL with OAuth fetch if needed
@@ -640,33 +642,20 @@ function updateConnector(){
 const ro = new ResizeObserver(()=> updateConnector());
 window.addEventListener('load', ()=>{ ro.observe(el.viewerPreview); });
 
-// ====== Preview zoom/size controls ======
-let previewSizePct = 28; // initial
+// ====== Preview zoom (size slider removed; use box resize) ======
 let previewZoom = 1.0;
-function applyPreviewSize(){
-  const canvasRect = el.viewerCanvas.getBoundingClientRect();
-  const w = Math.max(180, Math.min(canvasRect.width * (previewSizePct/100), canvasRect.width*0.95));
-  el.viewerPreview.style.width = w + 'px';
-  updateConnector();
-}
 function applyPreviewZoom(){
-  el.previewImg.style.transform = `scale(${previewZoom})`;
+  el.previewInner.style.transform = `scale(${previewZoom})`;
 }
-el.previewSize.addEventListener('input', ()=>{
-  previewSizePct = parseInt(el.previewSize.value,10)||28;
-  el.previewSizeVal.textContent = previewSizePct + '%';
-  applyPreviewSize();
-});
 el.previewZoom.addEventListener('input', ()=>{
   previewZoom = parseFloat(el.previewZoom.value)||1;
   el.previewZoomVal.textContent = previewZoom.toFixed(2) + '×';
   applyPreviewZoom();
 });
 el.previewReset.addEventListener('click', ()=>{
-  previewSizePct = 28; previewZoom = 1;
-  el.previewSize.value = 28; el.previewSizeVal.textContent = '28%';
+  previewZoom = 1;
   el.previewZoom.value = 1; el.previewZoomVal.textContent = '1.00×';
-  applyPreviewSize(); applyPreviewZoom();
+  applyPreviewZoom();
 });
 
 // ====== Pins ======
@@ -693,7 +682,7 @@ function onPointerDown(e){
   }
   const rect=el.viewerCanvas.getBoundingClientRect();
   pointer.x=((e.clientX-rect.left)/rect.width)*2-1;
-  pointer.y=-((e.clientY-rect.top)/rect.height)*2+1;
+  pointer.y=-((e.clientY-rect.top)/rect.height)/2*2+1;
   raycaster.setFromCamera(pointer,camera);
   const hits=raycaster.intersectObjects(pinGroup.children,false);
   if(hits.length){ selectPin(hits[0].object.userData.pinId, {fly:true}); }
@@ -766,26 +755,50 @@ function removePin(id,{silent}={}){
 }
 function renderThumbs(p){
   const thumbs=document.getElementById('thumbs'); thumbs.innerHTML='';
-  ensureArray(p.images).forEach(async (url)=>{
+  ensureArray(p.images).forEach(async (url, idx)=>{
+    const wrap=document.createElement('div'); wrap.className='thumb'; thumbs.appendChild(wrap);
     const img=document.createElement('img'); img.alt = 'thumb';
-    thumbs.appendChild(img);
+    const del=document.createElement('div'); del.className='del'; del.textContent='×'; del.title='この画像をキャプションから外す';
+    del.addEventListener('click', (ev)=>{
+      ev.stopPropagation();
+      const wasPreview = (el.previewImg.src && el.previewImg.src.includes(url));
+      p.images.splice(idx,1);
+      renderThumbs(p);
+      if(wasPreview){
+        const next = p.images[0] || null;
+        setPreview(next, p.title||'');
+      }
+      debounceSave();
+    });
+    wrap.appendChild(img); wrap.appendChild(del);
     try{
-      img.src = await resolveImageURL(url);
+      const resolved = await resolveImageURL(url);
+      img.src = resolved;
+      img.addEventListener('error', ()=>{
+        wrap.classList.add('error');
+        wrap.title = '画像を読み込めませんでした';
+      });
       img.addEventListener('click', async ()=>{ const src = await resolveImageURL(url); setPreview(src, p.title||''); });
-    }catch{ img.remove(); }
+    }catch{
+      wrap.classList.add('error');
+      wrap.title = '画像を読み込めませんでした';
+    }
   });
 }
 async function setPreview(url, cap){
   if(!url){ el.viewerPreview.classList.add('hidden'); return; }
   try{
+    el.previewErr.style.display='none';
     const src = await resolveImageURL(url);
     el.previewImg.src = src;
+    el.previewImg.onerror = ()=>{ el.previewErr.style.display='inline'; };
     el.previewCap.textContent = cap||'';
     el.viewerPreview.classList.remove('hidden');
-    applyPreviewSize(); applyPreviewZoom(); updateConnector();
+    applyPreviewZoom(); updateConnector();
   }catch(e){
     console.warn('preview failed', e);
-    el.viewerPreview.classList.add('hidden');
+    el.previewErr.style.display='inline';
+    el.viewerPreview.classList.remove('hidden');
   }
 }
 function updateViewerPreviewForPin(p){ setPreview(p && p.images && p.images[0] ? p.images[0] : null, p?.title); }
@@ -828,13 +841,11 @@ function buildColorFilter(){
     row.appendChild(cb); row.appendChild(sw); row.appendChild(name);
     cb.addEventListener('change', ()=>{
       if(cb.checked) filterColors.add(c); else filterColors.delete(c);
-      // If none selected -> treat as "all"
       if(filterColors.size===0){ colors.forEach(k=> filterColors.add(k)); }
       applyPinVisibilityFilter();
     });
     list.appendChild(row);
   });
-  // Initialize to "all" on first build
   if(filterColors.size===0){ colors.forEach(k=> filterColors.add(k)); }
   applyPinVisibilityFilter();
 }
@@ -846,7 +857,6 @@ function applyPinVisibilityFilter(){
   pins.forEach(p=>{
     if(p.mesh){ p.mesh.visible = pinGroup.visible && pinPassesFilter(p); }
   });
-  // If the selected pin became hidden, clear selection and preview/connector
   const curr = pins.find(x=>x.id===selectedPinId);
   if(curr && (!pinGroup.visible || !pinPassesFilter(curr))){
     selectedPinId = null;
@@ -1203,7 +1213,7 @@ async function loadFolderImages(){
     for(const parent of glbParents){
       const q = `'${parent}' in parents and trashed=false and (mimeType contains 'image/')`;
       const resp = await gapi.client.drive.files.list({
-        q, pageSize: 100, fields: 'files(id,name,mimeType)'
+        q, pageSize: 200, fields: 'files(id,name,mimeType)'
       });
       const files = resp.result.files || [];
       for(const f of files){
@@ -1211,11 +1221,18 @@ async function loadFolderImages(){
         const url = `https://drive.google.com/uc?id=${id}`;
         const cell = document.createElement('div'); cell.className='cell';
         const img = document.createElement('img'); img.alt = f.name;
-        // resolve via OAuth to avoid 403
-        resolveImageURL(url).then(objUrl => { img.src = objUrl; }).catch(()=>{});
+        resolveImageURL(url).then(objUrl => {
+          img.src = objUrl;
+        }).catch(()=>{
+          cell.classList.add('error');
+        });
+        img.onerror = ()=> cell.classList.add('error');
         const cap = document.createElement('div'); cap.textContent = f.name; cap.className='small';
         cell.appendChild(img); cell.appendChild(cap);
-        cell.addEventListener('click', ()=> chooseFolderImage(url));
+        cell.addEventListener('click', ()=>{
+          if(cell.classList.contains('error')) return;
+          chooseFolderImage(url);
+        });
         cells.push(cell);
       }
     }
