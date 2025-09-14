@@ -4,7 +4,6 @@
 <head>
 
 <script>
-// Auto-expose inline const CLIENT_ID to window.* for GIS usage
 (function() {
   var cid = '595200751510-ncahnf7edci6b9925becn5to49r6cguv.apps.googleusercontent.com';
   if (cid) {
@@ -13,7 +12,6 @@
     try { window.GOOGLE_CLIENT_ID = window.GOOGLE_CLIENT_ID || cid; } catch(_){}
     try { window.CLIENT_ID_WEB = window.CLIENT_ID_WEB || cid; } catch(_){}
   }
-  // Mark that unified bar is injected
   try { document.documentElement.setAttribute("data-lm-unified-bar","on"); } catch(_){}
 })();
 </script>
@@ -571,18 +569,23 @@ html.sheet-open .floating-buttons{
 <body>
 
   <style>
-    /* Hide likely legacy bars when unified bar is on (best-effort, non-breaking) */
+    /* Hide legacy caption toolbars if any */
     [data-lm-unified-bar="on"] #pins-toolbar,
     [data-lm-unified-bar="on"] #pins-json-toolbar,
     [data-lm-unified-bar="on"] .pins-toolbar,
     [data-lm-unified-bar="on"] [data-role="pins-toolbar"] { display: none !important; }
 
-    /* Unified bar styles */
-    #lm-caption-bar { display:flex; flex-wrap:wrap; gap:.5rem; align-items:center; margin:.75rem 0; padding:.5rem .75rem; border:1px solid var(--muted,#999); border-radius:.5rem; background:var(--card,#f9f9f9); }
-    #lm-caption-bar .seg { display:flex; align-items:center; gap:.5rem; }
-    #lm-caption-bar .seg[data-mode] { display:none; }
-    #lm-caption-bar .seg.show { display:flex; }
-    #lm-caption-bar .hint { font-size:.88rem; opacity:.8; }
+    /* Unified caption panel */
+    #lm-caption-panel { margin:.75rem 0; border:1px solid var(--muted,#999); border-radius:.75rem; overflow:hidden; background:var(--card,#fff); }
+    #lm-caption-header { display:flex; align-items:center; gap:.5rem; padding:.5rem .75rem; background:var(--toolbar,#f5f5f5); border-bottom:1px solid var(--muted,#ccc); }
+    #lm-caption-header strong { margin-right:.25rem; }
+    #lm-caption-header .seg { display:flex; align-items:center; gap:.5rem; }
+    #lm-caption-header .seg[data-mode] { display:none; }
+    #lm-caption-header .seg.show { display:flex; }
+    #lm-caption-hint { font-size:.88rem; opacity:.8; margin-left:auto; }
+
+    /* Attach to caption area if exists */
+    .lm-attached { border-top-left-radius: .75rem; border-top-right-radius: .75rem; }
 
     /* Model highlight pulse */
     .lm-pulse { animation: lmPulse 1.2s ease-in-out infinite; }
@@ -590,30 +593,32 @@ html.sheet-open .floating-buttons{
     .lm-outline { outline: 3px solid #ff7300; outline-offset: 4px; border-radius: 8px; }
   </style>
 
-  <!-- === LociMyu: Unified Caption Data Bar === -->
-  <div id="lm-caption-bar">
-    <strong>キャプションデータ:</strong>
-    <select id="lm_source">
-      <option value="drive-json">Drive: pins.json</option>
-      <option value="sheets">Google Sheets</option>
-    </select>
+  <div id="lm-caption-panel">
+    <div id="lm-caption-header">
+      <strong>キャプションデータ:</strong>
+      <select id="lm_source">
+        <option value="drive-json">Drive: pins.json</option>
+        <option value="sheets">Google Sheets</option>
+      </select>
 
-    <!-- Drive JSON segment -->
-    <div class="seg" id="lm_seg_json" data-mode="drive-json">
-      <button id="lm_json_pick" title="pins.json を選択">pins.json を選択</button>
-      <button id="lm_json_reload" title="再読込">再読込</button>
-      <button id="lm_json_export" title="エクスポート（pins.json）">エクスポート</button>
-      <span class="hint" id="lm_json_hint"></span>
-    </div>
+      <!-- Drive JSON segment -->
+      <div class="seg" id="lm_seg_json" data-mode="drive-json">
+        <button id="lm_json_pick" title="pins.json を選択">pins.json を選択</button>
+        <button id="lm_json_reload" title="再読込">再読込</button>
+        <button id="lm_json_export" title="エクスポート（pins.json）">エクスポート</button>
+      </div>
 
-    <!-- Sheets segment -->
-    <div class="seg" id="lm_seg_sheets" data-mode="sheets">
-      <label for="lm_sheet_id" title="スプレッドシートID（/d/〜/edit の間）">Spreadsheet ID:</label>
-      <input id="lm_sheet_id" placeholder="1AbCdEf...">
-      <button id="lm_sheet_connect" title="シートから読み込み">接続/再読込</button>
-      <button id="lm_sheet_create" title="新しいスプレッドシートを作成して接続">新規シート作成</button>
-      <a id="lm_sheet_open" href="#" target="_blank" style="display:none;">シートを開く↗</a>
-      <span class="hint" id="lm_sheet_hint"></span>
+      <!-- Sheets segment -->
+      <div class="seg" id="lm_seg_sheets" data-mode="sheets">
+        <label for="lm_sheet_id" title="スプレッドシートID（/d/〜/edit の間）">Spreadsheet ID:</label>
+        <input id="lm_sheet_id" placeholder="1AbCdEf..." style="min-width:22rem;">
+        <button id="lm_sheet_connect" title="シートから読み込み">接続/再読込</button>
+        <button id="lm_sheet_create" title="新規作成">新規作成</button>
+        <button id="lm_sheet_force" title="モデル未読み込みでも作成" style="display:none;">作成を強行する</button>
+        <a id="lm_sheet_open" href="#" target="_blank" style="display:none;">開く↗</a>
+      </div>
+
+      <span id="lm-caption-hint"></span>
     </div>
   </div>
 
@@ -3963,37 +3968,48 @@ document.getElementById('toolInlineBtn')?.addEventListener('click', ()=>{
 
 
 <script>
-/* ===== Unified Caption Data Module (authfix8) ===== */
+/* ===== Unified Caption Data Module (authfix9) ===== */
 (function(){
   const $ = (id)=>document.getElementById(id);
   const ui = {
-    bar: $("lm-caption-bar"),
+    panel: $("lm-caption-panel"),
+    header: $("lm-caption-header"),
+    hint: $("lm-caption-hint"),
     source: $("lm_source"),
-    segJson: $("lm_seg_json"),
-    segSheets: $("lm_seg_sheets"),
-    // Drive JSON
+    // JSON
     jsonPick: $("lm_json_pick"),
     jsonReload: $("lm_json_reload"),
     jsonExport: $("lm_json_export"),
-    jsonHint: $("lm_json_hint"),
     // Sheets
+    segJson: $("lm_seg_json"),
+    segSheets: $("lm_seg_sheets"),
     sheetId: $("lm_sheet_id"),
     sheetConnect: $("lm_sheet_connect"),
     sheetCreate: $("lm_sheet_create"),
-    sheetOpen: $("lm_sheet_open"),
-    sheetHint: $("lm_sheet_hint")
+    sheetForce: $("lm_sheet_force"),
+    sheetOpen: $("lm_sheet_open")
   };
 
-  // Persisted config
-  const CFG_KEY = "locimyu.unifiedCaption.v1";
-  const cfg = Object.assign({ mode:"drive-json" }, JSON.parse(localStorage.getItem(CFG_KEY)||"{}"));
+  // Attach header above caption area if found
+  (function attachToCaptionArea(){
+    const candidates = ["#captions","#pins-panel",".pins-panel","#pin-editor","#caption-area",".caption-area"];
+    for (const sel of candidates){
+      const el = document.querySelector(sel);
+      if (el && ui.panel && !ui.panel.dataset.attached){
+        el.parentNode.insertBefore(ui.panel, el);
+        ui.panel.classList.add("lm-attached");
+        ui.panel.dataset.attached = "1";
+        break;
+      }
+    }
+  })();
 
-  // Initialize UI
+  // Persisted config
+  const CFG_KEY = "locimyu.unifiedCaption.v2";
+  const cfg = Object.assign({ mode:"drive-json" }, JSON.parse(localStorage.getItem(CFG_KEY)||"{}"));
   if (ui.source) ui.source.value = cfg.mode || "drive-json";
   if (cfg.spreadsheetId && ui.sheetId) ui.sheetId.value = cfg.spreadsheetId;
-  refreshSegments();
-  refreshSheetOpenLink();
-  saveCfg(); // ensure persist initial
+  refreshSegments(); refreshOpenLink(); saveCfg();
 
   function saveCfg(){
     localStorage.setItem(CFG_KEY, JSON.stringify({
@@ -4003,11 +4019,11 @@ document.getElementById('toolInlineBtn')?.addEventListener('click', ()=>{
   }
   function refreshSegments(){
     const m = ui.source ? ui.source.value : "drive-json";
-    [ui.segJson, ui.segSheets].forEach(seg=> seg && seg.classList.remove("show"));
-    if (m === "drive-json") ui.segJson && ui.segJson.classList.add("show");
-    if (m === "sheets") ui.segSheets && ui.segSheets.classList.add("show");
+    ui.segJson && ui.segJson.classList.toggle("show", m==="drive-json");
+    ui.segSheets && ui.segSheets.classList.toggle("show", m==="sheets");
+    if (ui.hint) ui.hint.textContent = (m==="sheets") ? "Google Sheets に保存／共有" : "Drive の pins.json を使用";
   }
-  function refreshSheetOpenLink(){
+  function refreshOpenLink(){
     if (!ui.sheetOpen || !ui.sheetId) return;
     const sid = (ui.sheetId.value||"").trim();
     ui.sheetOpen.style.display = sid ? "inline-block" : "none";
@@ -4016,36 +4032,32 @@ document.getElementById('toolInlineBtn')?.addEventListener('click', ()=>{
   if (ui.source) ui.source.addEventListener("change", ()=>{ refreshSegments(); saveCfg(); });
 
   // ===== Model detection & highlight (no picker modal) =====
+  function getModelId(){
+    const ids = [window.currentModelFileId, window.modelFileId, window.currentModelDriveId];
+    for (const v of ids){ if (v && String(v).trim()) return String(v).trim(); }
+    return "";
+  }
   function isModelLoaded(){
-    try{
-      if (window.currentModelFileId && String(window.currentModelFileId).trim()) return true;
-      if (window.modelFileId && String(window.modelFileId).trim()) return true;
-      if (window.currentModelDriveId && String(window.currentModelDriveId).trim()) return true;
-      if (window.loadedModelUrl && String(window.loadedModelUrl).trim()) return true;
+    if (getModelId()) return true;
+    if (window.loadedModelUrl && String(window.loadedModelUrl).trim()) return true;
+    try {
       const canvas = document.querySelector("canvas#three, #three-canvas, canvas.threejs, [data-model-loaded='true']");
       if (canvas && (canvas.getAttribute("data-loaded")==="true" || canvas.dataset.loaded==="true")) return true;
-    }catch(e){}
+    } catch(e){}
     return false;
   }
   function highlightModelArea(){
-    const targets = [
-      "#model-dropzone", "#dropzone", ".dropzone", "#viewer", "#three-canvas", "canvas#three", ".three-canvas"
-    ];
+    const targets = ["#model-dropzone", "#dropzone", ".dropzone", "#viewer", "#three-canvas", "canvas#three", ".three-canvas"];
     let el = null;
-    for (const sel of targets){
-      el = document.querySelector(sel);
-      if (el) break;
-    }
-    if (!el) { ui.sheetHint && (ui.sheetHint.textContent = "先にGLBモデルを読み込み、同じフォルダに作成します。"); return; }
+    for (const sel of targets){ el = document.querySelector(sel); if (el) break; }
+    if (!el) { ui.hint && (ui.hint.textContent = "先にGLBモデルを読み込んでください。"); return; }
     el.classList.add("lm-outline","lm-pulse");
     setTimeout(()=>{ el.classList.remove("lm-pulse"); }, 5000);
   }
 
-  // ===== GIS token helpers (reusing app client_id if exposed) =====
+  // ===== GIS & gapi helpers =====
   const SHEETS_SCOPE = "https://www.googleapis.com/auth/spreadsheets";
-  function getClientId(){
-    return (window.GIS_CLIENT_ID || window.CLIENT_ID || window.GOOGLE_CLIENT_ID || window.CLIENT_ID_WEB || "");
-  }
+  function getClientId(){ return (window.GIS_CLIENT_ID || window.CLIENT_ID || window.GOOGLE_CLIENT_ID || window.CLIENT_ID_WEB || ""); }
   async function ensureGapiClient(){
     if (!window.gapi) await new Promise(res=>{ const t=setInterval(()=>{ if (window.gapi){clearInterval(t);res();}},30);});
     if (!gapi.client) await new Promise(res=> gapi.load("client", res));
@@ -4091,7 +4103,7 @@ document.getElementById('toolInlineBtn')?.addEventListener('click', ()=>{
     }catch(_){ return "Unknown error"; }
   }
 
-  // ===== Sheets helper: fixed range pins!A:I (no UI) =====
+  // ===== Sheets helper =====
   const LmSheets = {
     get spreadsheetId(){ return (ui.sheetId && ui.sheetId.value || "").trim(); },
     get range(){ return "pins!A:I"; },
@@ -4178,13 +4190,40 @@ document.getElementById('toolInlineBtn')?.addEventListener('click', ()=>{
   }
   function num(v){ const n = Number(v); return Number.isFinite(n) ? n : 0; }
 
-  async function createSpreadsheetAndConnect(){
-    if (!isModelLoaded()){
-      // Don't block forever; just instruct with highlight
-      if (ui.sheetHint) ui.sheetHint.textContent = "先にGLBモデルを読み込んでください（同じフォルダにシートを作成します）";
+  async function moveIntoModelFolder(fileId){
+    try {
+      await ensureDriveDiscovery();
+      const modelId = getModelId();
+      if (!modelId) return;
+      const model = await gapi.client.drive.files.get({ fileId: modelId, fields: "parents" });
+      const parents = model.result.parents || [];
+      if (parents.length) {
+        await gapi.client.drive.files.update({ fileId, addParents: parents[0], fields: "id, parents" });
+      }
+    } catch(e){ console.warn("フォルダ移動はスキップ:", asMessage(e)); }
+  }
+
+  function waitForModelAndMove(fileId, timeoutMs=120000){
+    const started = Date.now();
+    const iv = setInterval(async ()=>{
+      if (isModelLoaded()){
+        clearInterval(iv);
+        try { await moveIntoModelFolder(fileId); console.log("[Sheets] モデルフォルダへ移動完了"); } catch(e){ console.warn("移動失敗:", asMessage(e)); }
+      } else if (Date.now() - started > timeoutMs){
+        clearInterval(iv);
+        console.warn("[Sheets] モデルが読み込まれず、移動はタイムアウトしました");
+      }
+    }, 2000);
+  }
+
+  async function createSpreadsheetAndConnect({force=false}={}){
+    if (!force && !isModelLoaded()){
+      ui.hint && (ui.hint.textContent = "先にGLBモデルを読み込んでください（同じフォルダに作成します）");
       highlightModelArea();
+      ui.sheetForce && (ui.sheetForce.style.display = "inline-block");
       return;
     }
+    ui.sheetForce && (ui.sheetForce.style.display = "none");
     await ensureSheetsDiscovery();
     await ensureSheetsTokenInteractive();
     const title = `LociMyu pins ${new Date().toISOString().slice(0,19).replace(/[:T]/g,'-')}`;
@@ -4200,47 +4239,26 @@ document.getElementById('toolInlineBtn')?.addEventListener('click', ()=>{
       resource: { values: [["pinId","x","y","z","text","tags","author","updatedAt","deleted"]] }
     });
 
-    // Try to place into same folder as model (if model file id available)
-    try {
-      await ensureDriveDiscovery();
-      const modelId = (window.currentModelFileId || window.modelFileId || window.currentModelDriveId || "").trim();
-      if (modelId) {
-        const model = await gapi.client.drive.files.get({ fileId: modelId, fields: "parents" });
-        const parents = model.result.parents || [];
-        if (parents.length) {
-          await gapi.client.drive.files.update({ fileId: spreadsheetId, addParents: parents[0], fields: "id, parents" });
-        }
-      } else {
-        console.warn("モデルのDrive IDが見つからず、同一フォルダ移動をスキップしました。");
-      }
-    } catch(e){ console.warn("フォルダ移動はスキップ:", asMessage(e)); }
+    if (isModelLoaded()) {
+      await moveIntoModelFolder(spreadsheetId);
+    } else {
+      waitForModelAndMove(spreadsheetId);
+    }
 
     if (ui.sheetId) ui.sheetId.value = spreadsheetId;
-    refreshSheetOpenLink();
-    saveCfg();
+    refreshOpenLink(); saveCfg();
     await LmSheets.reloadFromSheets().catch(e=> console.warn("Initial read failed:", asMessage(e)));
     alert("新規スプレッドシートを作成し、接続しました。共有設定をご確認ください。");
   }
 
-  // === Drive JSON segment handlers ===
-  function parseDriveIdFromInput(urlOrId){
-    if (!urlOrId) return "";
-    const s = String(urlOrId).trim();
-    const m = s.match(/[-\\w]{{25,}}/); // crude id match
-    if (s.includes("/d/")) {
-      const mm = s.split("/d/")[1].split(/[/?#]/)[0];
-      return mm;
-    }
-    return m ? m[0] : s;
-  }
-
-  async function pickPinsJson(){
+  // Wire buttons
+  if (ui.jsonPick) ui.jsonPick.addEventListener("click", async ()=>{
     if (typeof window.openPinsJsonPicker === "function") {
       try { await window.openPinsJsonPicker(); return; } catch(e){ console.warn("openPinsJsonPicker failed:", e); }
     }
     const input = prompt("pins.json のファイルURLまたはIDを入力してください（簡易モード）:");
     if (!input) return;
-    const id = parseDriveIdFromInput(input);
+    const id = input.includes("/d/") ? input.split("/d/")[1].split(/[/?#]/)[0] : input.trim();
     try {
       await ensureDriveDiscovery();
       const file = await gapi.client.drive.files.get({ fileId:id, alt:"media" });
@@ -4248,33 +4266,34 @@ document.getElementById('toolInlineBtn')?.addEventListener('click', ()=>{
       if (typeof window.replaceAllPinsFromExternal === "function") {
         window.replaceAllPinsFromExternal(pins.filter(p=>!p.deleted));
       }
-      ui.jsonHint && (ui.jsonHint.textContent = "選択中: " + id.slice(0,8) + "…");
-    } catch(e){
-      alert("pins.json の読み込みに失敗: " + asMessage(e));
-    }
-  }
-
-  // Wire buttons
-  if (ui.jsonPick) ui.jsonPick.addEventListener("click", pickPinsJson);
+      ui.hint && (ui.hint.textContent = "pins.json を読み込みました");
+    } catch(e){ alert("pins.json の読み込みに失敗: " + asMessage(e)); }
+  });
   if (ui.jsonReload) ui.jsonReload.addEventListener("click", async ()=>{
-    if (typeof window.reloadFromDrivePins === "function") { try{ await window.reloadFromDrivePins(); }catch(e){ alert("再読込に失敗: "+asMessage(e)); } }
-    else alert("reloadFromDrivePins が未実装です");
+    if (typeof window.reloadFromDrivePins === "function") {
+      try{ await window.reloadFromDrivePins(); ui.hint && (ui.hint.textContent = "pins.json を再読込しました"); }
+      catch(e){ alert("再読込に失敗: "+asMessage(e)); }
+    } else alert("reloadFromDrivePins が未実装です");
   });
   if (ui.jsonExport) ui.jsonExport.addEventListener("click", async ()=>{
-    if (typeof window.exportPinsJson === "function") { try{ await window.exportPinsJson(); }catch(e){ alert("エクスポートに失敗: "+asMessage(e)); } }
-    else alert("exportPinsJson が未実装です");
+    if (typeof window.exportPinsJson === "function") {
+      try{ await window.exportPinsJson(); ui.hint && (ui.hint.textContent = "pins.json をエクスポートしました"); }
+      catch(e){ alert("エクスポートに失敗: "+asMessage(e)); }
+    } else alert("exportPinsJson が未実装です");
   });
 
-  // Sheets wiring
   if (ui.sheetConnect) ui.sheetConnect.addEventListener("click", async ()=>{
     saveCfg();
-    try { await LmSheets.reloadFromSheets(); } catch(e){ alert("シート読み込みに失敗: "+asMessage(e)); }
+    try { await LmSheets.reloadFromSheets(); ui.hint && (ui.hint.textContent = "シートを読み込みました"); }
+    catch(e){ alert("シート読み込みに失敗: "+asMessage(e)); }
   });
   if (ui.sheetCreate) ui.sheetCreate.addEventListener("click", async ()=>{
-    try { await createSpreadsheetAndConnect(); } catch(e){ console.error(e); }
+    try { await createSpreadsheetAndConnect({force:false}); } catch(e){ console.error(e); }
+  });
+  if (ui.sheetForce) ui.sheetForce.addEventListener("click", async ()=>{
+    try { await createSpreadsheetAndConnect({force:true}); } catch(e){ console.error(e); }
   });
 
-  // On load, if sheets selected and id present, auto-load
   window.addEventListener("load", ()=>{
     if (ui.source && ui.source.value === "sheets" && ui.sheetId && (ui.sheetId.value||"").trim()) {
       LmSheets.reloadFromSheets().catch(console.warn);
