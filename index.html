@@ -3918,7 +3918,7 @@ document.getElementById('toolInlineBtn')?.addEventListener('click', ()=>{
 
 
 <script>
-/* ===== LociMyu Sheets Mode + Auto-create Module (non-destructive) ===== */
+/* ===== LociMyu Sheets Mode + Auto-create Module (robust auth) ===== */
 (function(){
   const $ = (id)=>document.getElementById(id);
   const ui = {
@@ -3963,36 +3963,91 @@ document.getElementById('toolInlineBtn')?.addEventListener('click', ()=>{
 
   const SCOPES_SHEETS = "https://www.googleapis.com/auth/spreadsheets";
   const SCOPES_DRIVE_FILE = "https://www.googleapis.com/auth/drive.file";
-  let _sheetsLoaded = false;
 
   async function ensureGapiClient(){
-    if (!window.gapi || !gapi.client) throw new Error("gapi client is not available yet.");
+    if (!window.gapi || !gapi.client) throw new Error("gapi client is not available yet. 先にサインインUIでログインしてください。");
   }
   async function ensureSheetsDiscovery(){
     await ensureGapiClient();
-    if (_sheetsLoaded) return;
+    if (gapi.client.sheets) return;
     try {
-      if (gapi.client.sheets) { _sheetsLoaded = true; return; }
       await gapi.client.load("sheets", "v4");
-      _sheetsLoaded = true;
     } catch(e){
       await gapi.client.init({ discoveryDocs:["https://sheets.googleapis.com/$discovery/rest?version=v4"] });
-      _sheetsLoaded = true;
     }
   }
-  function hasScope(scope){
-    try {
-      const auth = gapi.auth2.getAuthInstance();
-      const user = auth.currentUser.get();
-      const granted = user.getGrantedScopes() || "";
-      return granted.split(" ").includes(scope);
-    } catch(e){ return false; }
+
+  function getClientId(){
+    return window.CLIENT_ID || window.GOOGLE_CLIENT_ID || window.GIS_CLIENT_ID || window.CLIENT_ID_WEB || "";
   }
+
+  function hasAuth2(){
+    return !!(gapi.auth2 && typeof gapi.auth2.getAuthInstance === "function");
+  }
+  function getGrantedScopesAuth2(){
+    try{
+      const inst = gapi.auth2.getAuthInstance && gapi.auth2.getAuthInstance();
+      if (!inst) return "";
+      const user = inst.currentUser.get();
+      return (user && user.getGrantedScopes && user.getGrantedScopes()) || "";
+    }catch(e){ return ""; }
+  }
+
+  async function ensureScopeWithAuth2(scope){
+    // Initialize auth2 if needed
+    let inst = (hasAuth2() && gapi.auth2.getAuthInstance()) || null;
+    if (!inst && gapi.auth2 && typeof gapi.auth2.init === "function") {
+      const client_id = getClientId();
+      if (client_id) {
+        inst = await gapi.auth2.init({ client_id, scope });
+      }
+    }
+    if (!inst) return false; // not available
+    const granted = getGrantedScopesAuth2().split(" ");
+    if (!granted.includes(scope)) {
+      await inst.signIn({scope});
+    }
+    return true;
+  }
+
+  function hasGIS(){
+    return !!(window.google && google.accounts && google.accounts.oauth2);
+  }
+  async function ensureScopeWithGIS(scope){
+    if (!hasGIS()) return false;
+    const client_id = getClientId();
+    if (!client_id) return false;
+    await new Promise((resolve, reject)=>{
+      const tokenClient = google.accounts.oauth2.initTokenClient({
+        client_id,
+        scope,
+        prompt: 'consent',
+        callback: (resp)=>{
+          if (resp && resp.access_token) {
+            gapi.client.setToken({ access_token: resp.access_token });
+            resolve();
+          } else {
+            reject(new Error("Token request failed"));
+          }
+        }
+      });
+      tokenClient.requestAccessToken({ prompt:'consent' });
+    });
+    return true;
+  }
+
   async function ensureScope(scope){
     await ensureGapiClient();
-    if (!hasScope(scope)) {
-      await gapi.auth2.getAuthInstance().signIn({scope});
+    // 1) Try existing app's sign-in helper if present
+    if (typeof window.ensureSignedInIfNeeded === "function") {
+      try { await window.ensureSignedInIfNeeded(scope); } catch(e){ /* continue */ }
     }
+    // 2) Try gapi.auth2
+    if (await ensureScopeWithAuth2(scope)) return;
+    // 3) Try GIS
+    if (await ensureScopeWithGIS(scope)) return;
+    // 4) As a last resort, tell user to sign in
+    throw new Error("認証が初期化されていません。先にツール上のサインインを完了させてからお試しください。");
   }
 
   const Sheets = {
@@ -4022,7 +4077,6 @@ document.getElementById('toolInlineBtn')?.addEventListener('click', ()=>{
       const rowById = new Map(all.map((p,idx)=>[p.pinId, idx+2]));
       const updates = [];
       const appends = [];
-
       for (const p of pins) {
         const row = pinToRow(p);
         if (rowById.has(p.pinId)) {
@@ -4069,9 +4123,8 @@ document.getElementById('toolInlineBtn')?.addEventListener('click', ()=>{
   };
 
   function rowToPin(r){
-    const h = ["pinId","x","y","z","text","tags","author","updatedAt","deleted"];
     const m = {};
-    for (let i=0;i<h.length;i++){ m[h[i]] = r[i] ?? ""; }
+    HEADERS.forEach((h,i)=>m[h]=r[i] ?? "");
     return {
       pinId: m.pinId || (crypto?.randomUUID ? crypto.randomUUID() : ("pin_"+Math.random().toString(36).slice(2))),
       x: num(m.x), y: num(m.y), z: num(m.z),
@@ -4105,10 +4158,10 @@ document.getElementById('toolInlineBtn')?.addEventListener('click', ()=>{
       spreadsheetId,
       range: "pins!A1:I1",
       valueInputOption: "RAW",
-      resource: { values: [["pinId","x","y","z","text","tags","author","updatedAt","deleted"]] }
+      resource: { values: [HEADERS] }
     });
 
-    // Optional: move the sheet into same folder as current model (if available)
+    // Optional: move into same Drive folder as model
     try {
       const modelId = (window.currentModelFileId||"").trim();
       if (modelId) {
