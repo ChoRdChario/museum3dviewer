@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>LociMyu v0.1 Starter</title>
+  <title>LociMyu v0.1 Starter (patched)</title>
   <link rel="icon" href="./favicon.ico">
   <style>
     :root{
@@ -13,8 +13,6 @@
     html,body{height:100%;}
     body{margin:0;background:var(--bg);color:var(--text);font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", "Apple Color Emoji", "Segoe UI Emoji";}
     .app{display:grid;grid-template-rows:auto 1fr; height:100vh;}
-
-    /* Header */
     header{display:flex;gap:.75rem;align-items:center;padding:10px 12px;background:linear-gradient(180deg,#0e1520,#0b0f14);border-bottom:1px solid #1e2837;}
     header .brand{display:flex;align-items:center;gap:.5rem;font-weight:700;letter-spacing:.3px}
     .pill{background:rgba(255,255,255,.06);padding:6px 10px;border-radius:999px;border:1px solid rgba(255,255,255,.08);}
@@ -22,41 +20,28 @@
     button{background:#152133;color:var(--text);border:1px solid #223146;border-radius:10px;padding:8px 12px;cursor:pointer;}
     button:hover{background:#1a2b45}
     .accent{border-color:#2c82c9}
-
-    /* Layout */
     .main{display:grid;grid-template-columns: 280px 1fr 320px;gap:10px;padding:10px;height:calc(100vh - 58px);}
     .panel{background:var(--panel);border:1px solid #1e2837;border-radius:var(--radius);overflow:hidden;display:flex;flex-direction:column;min-height:0}
     .panel h3{margin:0;padding:10px 12px;border-bottom:1px solid #203049;background:#0f1722;font-size:.95rem;font-weight:600}
     .panel .body{padding:10px;overflow:auto}
-
-    /* Viewer */
     #viewer{position:relative}
     #viewerCanvas{display:block;width:100%;height:100%;background:#0a0f16;border-radius:var(--radius)}
     .hud{position:absolute;left:10px;bottom:10px;display:flex;gap:8px}
     .chip{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);padding:6px 10px;border-radius:999px}
-
-    /* Spinner */
     .spinner{position:absolute;inset:0;display:grid;place-items:center;background:linear-gradient(180deg, rgba(10,15,22,.75), rgba(10,15,22,.75));backdrop-filter: blur(2px);}
     .lds{width:64px;height:64px;border-radius:50%;border:6px solid rgba(255,255,255,.12);border-top-color:var(--accent);animation:spin 1s linear infinite}
     @keyframes spin{to{transform:rotate(360deg)}}
-
-    /* Sign-in gate */
     .signin-gate{position:fixed;inset:0;display:grid;place-items:center;background:radial-gradient(1200px 600px at 50% 15%, rgba(83,183,255,.08), transparent 60%), linear-gradient(180deg,#0a0f16,#05070b);z-index:20}
     .card{width:min(560px,92vw);background:#0c1118;border:1px solid #1d2a3d;border-radius:24px;box-shadow:0 10px 30px rgba(0,0,0,.3);padding:20px}
     .card h1{margin:4px 0 8px;font-size:1.35rem}
     .card p{color:#c2d0e2;opacity:.9}
-
-    /* Lists */
     .list{display:flex;flex-direction:column;gap:8px}
     .list .row{display:flex;align-items:center;justify-content:space-between;gap:8px;background:#0f1722;border:1px solid #203049;border-radius:12px;padding:10px}
     .row .title{font-weight:600}
     .row .meta{color:#a9b8cf;font-size:.85rem}
-
     .toolbar{display:flex;gap:8px;flex-wrap:wrap}
     .colors{display:flex;gap:6px}
     .sw{width:18px;height:18px;border-radius:999px;border:1px solid rgba(255,255,255,.3);cursor:pointer}
-
-    /* Mobile */
     @media (max-width: 900px){
       .main{grid-template-columns:1fr; grid-template-rows: 300px 1fr 300px}
     }
@@ -79,7 +64,6 @@
   </header>
 
   <div class="main">
-    <!-- Left: Pins list -->
     <section class="panel" id="left">
       <h3>キャプション / Pins</h3>
       <div class="body">
@@ -99,7 +83,6 @@
       </div>
     </section>
 
-    <!-- Center: 3D Viewer -->
     <section class="panel" id="viewer">
       <div class="spinner" id="loading" hidden><div class="lds"></div></div>
       <canvas id="viewerCanvas"></canvas>
@@ -109,7 +92,6 @@
       </div>
     </section>
 
-    <!-- Right: Caption editor -->
     <section class="panel" id="right">
       <h3>キャプション編集</h3>
       <div class="body">
@@ -135,23 +117,16 @@
   </div>
 </div>
 
-<!-- Sign-in gate (Google Identity Services) -->
-<div class="signin-gate" id="gate">
-  <div class="card">
-    <h1>Googleにサインイン</h1>
-    <p>本ツールは Google Drive / Google Sheets を使用します。先にサインインしてください。</p>
-    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
-      <button id="btnSignIn" class="accent" style="font-weight:700">🔐 Sign in with Google</button>
-      <span class="meta" style="opacity:.8">OAuth2 (Drive.file / Sheets)</span>
-    </div>
-    <div style="margin-top:10px;color:#9eb2c8;font-size:.9rem">
-      <div>⚙️ <b>設定が必要:</b> 下記の定数をあなたのプロジェクト値に差し替えてください。</div>
-      <code id="neededConsts"></code>
-    </div>
-  </div>
-</div>
+<!-- Define global callbacks BEFORE loading Google scripts -->
+<script>
+  window._gapiReady = false;
+  window._gisReady = false;
+  // These must exist globally so onload= can call them safely
+  window.gapiLoaded = function(){ window._gapiReady = true; if (window._initGapiClient) window._initGapiClient(); };
+  window.gisLoaded  = function(){ window._gisReady  = true; if (window._initGisReady)  window._initGisReady();  };
+</script>
 
-<!-- Google APIs scripts with onload callbacks -->
+<!-- Google APIs scripts with onload callbacks (safe now) -->
 <script async defer src="https://accounts.google.com/gsi/client" onload="gisLoaded()"></script>
 <script async defer src="https://apis.google.com/js/api.js" onload="gapiLoaded()"></script>
 
@@ -162,7 +137,7 @@ import { OrbitControls } from 'https://unpkg.com/three@0.157.0/examples/jsm/cont
 import { GLTFLoader } from 'https://unpkg.com/three@0.157.0/examples/jsm/loaders/GLTFLoader.js';
 import { TransformControls } from 'https://unpkg.com/three@0.157.0/examples/jsm/controls/TransformControls.js';
 
-// ====== CONFIG: Replace with your own ======
+// ====== CONFIG ======
 const CLIENT_ID = '595200751510-ncahnf7edci6b9925becn5to49r6cguv.apps.googleusercontent.com';
 const API_KEY   = 'AIzaSyCUnTCr5yWUWPdEXST9bKP1LpgawU5rIbI';
 const DISCOVERY_DOCS = [
@@ -175,21 +150,13 @@ const SCOPES = [
   'https://www.googleapis.com/auth/drive.metadata.readonly',
   'https://www.googleapis.com/auth/spreadsheets'
 ].join(' ');
-
-// Show missing consts in gate
-document.getElementById('neededConsts').textContent = `CLIENT_ID=${CLIENT_ID}\nAPI_KEY=${API_KEY}`;
+document.getElementById('neededConsts')?.appendChild(document.createTextNode(`CLIENT_ID=${CLIENT_ID}\nAPI_KEY=${API_KEY}`));
 
 // ====== State ======
-let tokenClient; // GIS
-let gapiInited = false, gisInited = false;
-let accessToken = null;
-
-let renderer, scene, camera, controls, tcontrols; // 3D
-let raycaster = new THREE.Raycaster();
-let pointer = new THREE.Vector2();
-let loader = new GLTFLoader();
-let currentModel = null;
-
+let tokenClient; let gapiInited = false, gisInited = false; let accessToken = null;
+let renderer, scene, camera, controls, tcontrols;
+let raycaster = new THREE.Raycaster(); let pointer = new THREE.Vector2();
+let loader = new GLTFLoader(); let currentModel = null;
 const el = {
   gate: document.getElementById('gate'),
   btnSignIn: document.getElementById('btnSignIn'),
@@ -218,40 +185,30 @@ const el = {
   colorPalette: document.getElementById('colorPalette'),
 };
 
-// ====== Pins model (in-memory for v0.1) ======
-let pins = []; // {id, pos:THREE.Vector3, color:string, title, body, images:[{fileId, name, mime}]}
-let selectedPinId = null;
-let undoStack = []; // simple command stack for Ctrl+Z
-
+// Pins
+let pins = []; let selectedPinId = null; let undoStack = [];
 function addUndo(entry){ undoStack.push(entry); }
-function undo(){
-  const u = undoStack.pop(); if(!u) return;
-  if(u.type==='move'){
-    const p = pins.find(x=>x.id===u.id); if(p){ p.pos.copy(u.from); placePinMesh(p); selectPin(p.id); renderNow(); }
-  } else if(u.type==='add'){
-    removePin(u.id, {silent:true});
-  } else if(u.type==='delete'){
-    pins.push(u.pin); placePinMesh(u.pin); refreshPinsList(); selectPin(u.pin.id); renderNow();
-  }
+function undo(){ const u = undoStack.pop(); if(!u) return;
+  if(u.type==='move'){ const p = pins.find(x=>x.id===u.id); if(p){ p.pos.copy(u.from); placePinMesh(p); selectPin(p.id); renderNow(); } }
+  else if(u.type==='add'){ removePin(u.id, {silent:true}); }
+  else if(u.type==='delete'){ pins.push(u.pin); placePinMesh(u.pin); refreshPinsList(); selectPin(u.pin.id); renderNow(); }
 }
 
 // ====== Google APIs init ======
-async function initGapiClient(){
-  await gapi.client.init({ apiKey: API_KEY, discoveryDocs: DISCOVERY_DOCS });
-  gapiInited = true; maybeReady();
-}
-
-function maybeReady(){
-  if(!gapiInited || !gisInited) return;
+async function initGapiClient(){ await gapi.client.init({ apiKey: API_KEY, discoveryDocs: DISCOVERY_DOCS }); gapiInited = true; maybeReady(); }
+function maybeReady(){ if(!gapiInited || !gisInited) return;
   tokenClient = google.accounts.oauth2.initTokenClient({
-    client_id: CLIENT_ID,
-    scope: SCOPES,
-    callback: (resp) => {
-      accessToken = resp.access_token;
-      if(accessToken){ el.gate.style.display='none'; el.statusLabel.textContent='Signed in'; }
-    },
+    client_id: CLIENT_ID, scope: SCOPES,
+    callback: (resp) => { accessToken = resp.access_token; if(accessToken){ el.gate.style.display='none'; el.statusLabel.textContent='Signed in'; } },
   });
 }
+// Make global initializers that the non-module stub will call
+window._initGapiClient = () => { if(window.gapi) gapi.load('client', initGapiClient); };
+window._initGisReady  = () => { gisInited = true; maybeReady(); };
+
+// In case scripts already loaded before this module executed
+if (window._gapiReady) window._initGapiClient();
+if (window._gisReady)  window._initGisReady();
 
 // Button: Sign-In
 el.btnSignIn.addEventListener('click', () => {
@@ -261,235 +218,76 @@ el.btnSignIn.addEventListener('click', () => {
 
 // ====== 3D Viewer setup ======
 const pinGroup = new THREE.Group();
-
 const rendererInit = () => {
   renderer = new THREE.WebGLRenderer({ canvas: el.viewerCanvas, antialias:true });
-  scene = new THREE.Scene();
-  scene.add(pinGroup);
+  scene = new THREE.Scene(); scene.add(pinGroup);
   scene.background = new THREE.Color(0x0a0f16);
-  camera = new THREE.PerspectiveCamera(60, 2, 0.1, 2000);
-  camera.position.set(2.8, 1.6, 3.6);
-
+  camera = new THREE.PerspectiveCamera(60, 2, 0.1, 2000); camera.position.set(2.8, 1.6, 3.6);
   const hemi = new THREE.HemisphereLight(0xffffff, 0x223355, 0.6); scene.add(hemi);
   const dir = new THREE.DirectionalLight(0xffffff, 1.0); dir.position.set(3,5,4); scene.add(dir);
-
   controls = new OrbitControls(camera, el.viewerCanvas); controls.target.set(0,1,0); controls.update();
   tcontrols = new TransformControls(camera, el.viewerCanvas); tcontrols.setSize(0.9); tcontrols.setSpace('world'); tcontrols.addEventListener('dragging-changed', e=>{ controls.enabled = !e.value; }); scene.add(tcontrols); tcontrols.visible=false;
-
   window.addEventListener('resize', resize);
   el.viewerCanvas.addEventListener('pointerdown', onPointerDown);
-  resize();
-  animate();
+  resize(); animate();
 };
-
-function resize(){
-  const w = el.viewerCanvas.clientWidth || el.viewerCanvas.parentElement.clientWidth;
-  const h = el.viewerCanvas.clientHeight || el.viewerCanvas.parentElement.clientHeight;
-  renderer.setSize(w,h,false); camera.aspect = w/h; camera.updateProjectionMatrix();
-}
-
+function resize(){ const w = el.viewerCanvas.clientWidth || el.viewerCanvas.parentElement.clientWidth; const h = el.viewerCanvas.clientHeight || el.viewerCanvas.parentElement.clientHeight; renderer.setSize(w,h,false); camera.aspect = w/h; camera.updateProjectionMatrix(); }
 function animate(){ requestAnimationFrame(animate); renderer.render(scene,camera); }
 function renderNow(){ renderer.render(scene,camera); }
 
-// ====== Load GLB from Drive (fileId -> webContentLink) ======
+// ====== Load GLB from Drive ======
 async function loadGLBByFileId(fileId){
   if(!accessToken){ alert('先にサインインしてください'); return; }
   try{
     el.loading.hidden=false; el.statusLabel.textContent='Loading GLB…';
-    // Get file metadata & download URL (supports public/private)
     const meta = await gapi.client.drive.files.get({ fileId, fields:'id,name,mimeType,parents' });
     const dlUrl = `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`;
     const glbArrayBuffer = await fetch(dlUrl, { headers:{ Authorization:`Bearer ${accessToken}` } }).then(r=>r.arrayBuffer());
-
-    // Clear old model
-    if(currentModel){
-      scene.remove(currentModel);
-      currentModel.traverse(o=>{ if(o.geometry) o.geometry.dispose(); if(o.material) { if(Array.isArray(o.material)) o.material.forEach(m=>m.dispose()); else o.material.dispose(); } });
-      currentModel=null;
-    }
-
-    // Load GLB
-    await new Promise((resolve,reject)=>{
-      loader.parse(glbArrayBuffer, '', (gltf)=>{ currentModel = gltf.scene; scene.add(currentModel); fitToScene(); resolve(); }, reject);
-    });
+    if(currentModel){ scene.remove(currentModel); currentModel.traverse(o=>{ if(o.geometry) o.geometry.dispose(); if(o.material){ if(Array.isArray(o.material)) o.material.forEach(m=>m.dispose()); else o.material.dispose(); } }); currentModel=null; }
+    await new Promise((resolve,reject)=>{ loader.parse(glbArrayBuffer, '', (gltf)=>{ currentModel = gltf.scene; scene.add(currentModel); fitToScene(); resolve(); }, reject); });
     el.statusLabel.textContent = `Loaded: ${meta.result.name}`;
-  }catch(err){
-    console.error(err); alert('GLB読込に失敗しました');
-  }finally{ el.loading.hidden=true; }
+  }catch(err){ console.error(err); alert('GLB読込に失敗しました'); }
+  finally{ el.loading.hidden=true; }
 }
+function fitToScene(){ if(!currentModel) return; const box = new THREE.Box3().setFromObject(currentModel); const size = box.getSize(new THREE.Vector3()); const center = box.getCenter(new THREE.Vector3()); const maxDim = Math.max(size.x,size.y,size.z)||1; const dist = maxDim*1.6; camera.position.copy(center.clone().add(new THREE.Vector3(dist, dist*0.7, dist))); controls.target.copy(center); controls.update(); }
 
-function fitToScene(){
-  if(!currentModel) return;
-  const box = new THREE.Box3().setFromObject(currentModel);
-  const size = box.getSize(new THREE.Vector3());
-  const center = box.getCenter(new THREE.Vector3());
-  const maxDim = Math.max(size.x,size.y,size.z) || 1;
-  const dist = maxDim * 1.6;
-  camera.position.copy(center.clone().add(new THREE.Vector3(dist, dist*0.7, dist)));
-  controls.target.copy(center); controls.update();
-}
+// ====== Pins ======
+function createPin(pos, color){ const id = `p_${Date.now()}_${Math.random().toString(36).slice(2,7)}`; const pin = { id, pos: pos.clone(), color: color || '#ff6b6b', title:'', body:'', images:[], mesh:null }; pins.push(pin); placePinMesh(pin); refreshPinsList(); selectPin(id); addUndo({type:'add', id}); }
+function placePinMesh(pin){ if(pin.mesh){ pinGroup.remove(pin.mesh); pin.mesh.geometry.dispose(); pin.mesh.material.dispose(); pin.mesh=null; } const geo = new THREE.SphereGeometry(0.01, 16, 16); const mat = new THREE.MeshBasicMaterial({ color: new THREE.Color(pin.color) }); const mesh = new THREE.Mesh(geo, mat); mesh.position.copy(pin.pos); mesh.userData.pinId = pin.id; pin.mesh = mesh; pinGroup.add(mesh); }
+function selectPin(id){ selectedPinId = id; const p = pins.find(x=>x.id===id); if(!p){ el.rightEditor.hidden=true; el.rightNoSel.hidden=false; return; } el.rightNoSel.hidden=true; el.rightEditor.hidden=false; el.capTitle.value = p.title || ''; el.capBody.value = p.body || ''; el.coords.textContent = `${p.pos.x.toFixed(3)}, ${p.pos.y.toFixed(3)}, ${p.pos.z.toFixed(3)}`; tcontrols.attach(p.mesh); controls.target.copy(p.pos); controls.update(); }
+function refreshPinsList(){ el.pinsList.innerHTML=''; pins.forEach(p=>{ const row = document.createElement('div'); row.className='row'; row.dataset.id=p.id; const left = document.createElement('div'); left.style.display='flex'; left.style.alignItems='center'; left.style.gap='8px'; const dot = document.createElement('div'); dot.style.width='10px'; dot.style.height='10px'; dot.style.borderRadius='999px'; dot.style.background=p.color; left.appendChild(dot); const title = document.createElement('div'); title.className='title'; title.textContent = p.title || '(無題)'; left.appendChild(title); const meta = document.createElement('div'); meta.className='meta'; meta.textContent = `x:${p.pos.x.toFixed(2)} y:${p.pos.y.toFixed(2)} z:${p.pos.z.toFixed(2)}`; row.appendChild(left); row.appendChild(meta); row.addEventListener('click',()=> selectPin(p.id)); el.pinsList.appendChild(row); }); }
+function removePin(id, {silent}={}){ const idx = pins.findIndex(x=>x.id===id); if(idx<0) return; const pin = pins[idx]; if(pin.mesh){ pinGroup.remove(pin.mesh); pin.mesh.geometry.dispose(); pin.mesh.material.dispose(); } pins.splice(idx,1); if(!silent) addUndo({type:'delete', pin}); refreshPinsList(); el.rightEditor.hidden=true; el.rightNoSel.hidden=false; selectedPinId=null; }
 
-// ====== Pins: 3D spheres + selection ======
-function createPin(pos, color){
-  const id = `p_${Date.now()}_${Math.random().toString(36).slice(2,7)}`;
-  const pin = { id, pos: pos.clone(), color: color || '#ff6b6b', title:'', body:'', images:[], mesh:null };
-  pins.push(pin); placePinMesh(pin); refreshPinsList(); selectPin(id);
-  addUndo({type:'add', id});
-}
-
-function placePinMesh(pin){
-  if(pin.mesh){ pinGroup.remove(pin.mesh); pin.mesh.geometry.dispose(); pin.mesh.material.dispose(); pin.mesh=null; }
-  const geo = new THREE.SphereGeometry(0.01, 16, 16);
-  const mat = new THREE.MeshBasicMaterial({ color: new THREE.Color(pin.color) });
-  const mesh = new THREE.Mesh(geo, mat); mesh.position.copy(pin.pos); mesh.userData.pinId = pin.id; pin.mesh = mesh; pinGroup.add(mesh);
-}
-
-function selectPin(id){
-  selectedPinId = id; const p = pins.find(x=>x.id===id); if(!p){ el.rightEditor.hidden=true; el.rightNoSel.hidden=false; return; }
-  el.rightNoSel.hidden=true; el.rightEditor.hidden=false;
-  el.capTitle.value = p.title || '';
-  el.capBody.value = p.body || '';
-  el.coords.textContent = `${p.pos.x.toFixed(3)}, ${p.pos.y.toFixed(3)}, ${p.pos.z.toFixed(3)}`;
-  tcontrols.attach(p.mesh); if(tcontrols.visible){ /* keep */ } else { /* gizmo off */ }
-  // focus camera
-  controls.target.copy(p.pos); controls.update();
-}
-
-function refreshPinsList(){
-  el.pinsList.innerHTML = '';
-  pins.forEach(p=>{
-    const row = document.createElement('div'); row.className='row'; row.dataset.id = p.id;
-    const left = document.createElement('div'); left.style.display='flex'; left.style.alignItems='center'; left.style.gap='8px';
-    const dot = document.createElement('div'); dot.style.width='10px'; dot.style.height='10px'; dot.style.borderRadius='999px'; dot.style.background=p.color; left.appendChild(dot);
-    const title = document.createElement('div'); title.className='title'; title.textContent = p.title || '(無題)'; left.appendChild(title);
-    const meta = document.createElement('div'); meta.className='meta'; meta.textContent = `x:${p.pos.x.toFixed(2)} y:${p.pos.y.toFixed(2)} z:${p.pos.z.toFixed(2)}`;
-    row.appendChild(left); row.appendChild(meta);
-    row.addEventListener('click',()=> selectPin(p.id));
-    el.pinsList.appendChild(row);
-  });
-}
-
-function removePin(id, {silent}={}){
-  const idx = pins.findIndex(x=>x.id===id); if(idx<0) return;
-  const pin = pins[idx];
-  if(pin.mesh){ pinGroup.remove(pin.mesh); pin.mesh.geometry.dispose(); pin.mesh.material.dispose(); }
-  pins.splice(idx,1);
-  if(!silent) addUndo({type:'delete', pin});
-  refreshPinsList(); el.rightEditor.hidden=true; el.rightNoSel.hidden=false; selectedPinId=null;
-}
-
-// ====== Pointer & picking ======
-function getIntersectPoint(event){
-  const rect = el.viewerCanvas.getBoundingClientRect();
-  pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
-  pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
-  raycaster.setFromCamera(pointer, camera);
-  const hits = currentModel ? raycaster.intersectObject(currentModel, true) : [];
-  if(hits.length) return hits[0].point.clone();
-  return null;
-}
-
-function onPointerDown(e){
-  if(!currentModel) return;
-  if(tcontrols.dragging) return;
-
-  if(addPinMode){
-    const pt = getIntersectPoint(e);
-    if(pt){ createPin(pt, currentColor); setAddPinMode(false); }
-  } else {
-    const rect = el.viewerCanvas.getBoundingClientRect();
-    pointer.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
-    pointer.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
-    raycaster.setFromCamera(pointer, camera);
-    const hits = raycaster.intersectObjects(pinGroup.children, false);
-    if(hits.length){ selectPin(hits[0].object.userData.pinId); }
-  }
-}
-
-// ====== Gizmo movement ======
-let addPinMode = false;
-let currentColor = '#ff6b6b';
-
-el.btnAddPin.addEventListener('click', () => setAddPinMode(true));
+// ====== Picking & Gizmo ======
+function getIntersectPoint(event){ const rect = el.viewerCanvas.getBoundingClientRect(); pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1; pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1; raycaster.setFromCamera(pointer, camera); const hits = currentModel ? raycaster.intersectObject(currentModel, true) : []; return hits.length ? hits[0].point.clone() : null; }
+function onPointerDown(e){ if(!currentModel) return; if(tcontrols.dragging) return; if(addPinMode){ const pt = getIntersectPoint(e); if(pt){ createPin(pt, currentColor); setAddPinMode(false); } } else { const rect = el.viewerCanvas.getBoundingClientRect(); pointer.x = ((e.clientX - rect.left) / rect.width) * 2 - 1; pointer.y = -((e.clientY - rect.top) / rect.height) * 2 + 1; raycaster.setFromCamera(pointer, camera); const hits = raycaster.intersectObjects(pinGroup.children, false); if(hits.length){ selectPin(hits[0].object.userData.pinId); } } }
+let addPinMode=false; let currentColor='#ff6b6b';
+el.btnAddPin.addEventListener('click', ()=> setAddPinMode(true));
 function setAddPinMode(on){ addPinMode = on; el.modeLabel.textContent = on ? 'Add Pin: Click model' : (tcontrols.visible ? 'Gizmo' : 'Orbit'); }
+el.btnGizmo.addEventListener('click', ()=>{ const p = pins.find(x=>x.id===selectedPinId); if(!p){ alert('ピンを選択してください'); return; } tcontrols.visible = !tcontrols.visible; el.btnGizmo.textContent = `ギズモ: ${tcontrols.visible? 'ON':'OFF'}`; el.modeLabel.textContent = tcontrols.visible ? 'Gizmo' : 'Orbit'; tcontrols.setMode(nextTransformMode()); });
+function nextTransformMode(){ const order=['translate','rotate','scale']; const idx=order.indexOf(tcontrols.getMode()); const next=order[(idx+1)%order.length]; tcontrols.setMode(next); return next; }
+let lastPos=null;
+tcontrols.addEventListener('mouseDown', ()=>{ const p = pins.find(x=>x.id===selectedPinId); if(p){ lastPos=p.pos.clone(); } });
+tcontrols.addEventListener('objectChange', ()=>{ const p = pins.find(x=>x.id===selectedPinId); if(!p) return; p.pos.copy(p.mesh.position); el.coords.textContent = `${p.pos.x.toFixed(3)}, ${p.pos.y.toFixed(3)}, ${p.pos.z.toFixed(3)}`; renderNow(); });
+tcontrols.addEventListener('mouseUp', ()=>{ const p = pins.find(x=>x.id===selectedPinId); if(p && lastPos){ addUndo({type:'move', id:p.id, from:lastPos.clone(), to:p.pos.clone()}); lastPos=null; } });
 
-el.btnGizmo.addEventListener('click', () => {
-  const p = pins.find(x=>x.id===selectedPinId); if(!p){ alert('ピンを選択してください'); return; }
-  tcontrols.visible = !tcontrols.visible;
-  el.btnGizmo.textContent = `ギズモ: ${tcontrols.visible? 'ON':'OFF'}`;
-  el.modeLabel.textContent = tcontrols.visible ? 'Gizmo' : 'Orbit';
-  tcontrols.setMode(nextTransformMode());
-});
-
-function nextTransformMode(){
-  const order = ['translate','rotate','scale'];
-  const idx = order.indexOf(tcontrols.getMode());
-  const next = order[(idx+1)%order.length];
-  tcontrols.setMode(next); return next;
-}
-
-// Track moves for undo and apply to pin
-let lastPos = null;
-
-tcontrols.addEventListener('mouseDown', ()=>{
-  const p = pins.find(x=>x.id===selectedPinId); if(p){ lastPos = p.pos.clone(); }
-});
-
-tcontrols.addEventListener('objectChange', ()=>{
-  const p = pins.find(x=>x.id===selectedPinId); if(!p) return;
-  p.pos.copy(p.mesh.position); el.coords.textContent = `${p.pos.x.toFixed(3)}, ${p.pos.y.toFixed(3)}, ${p.pos.z.toFixed(3)}`; renderNow();
-});
-
-tcontrols.addEventListener('mouseUp', ()=>{
-  const p = pins.find(x=>x.id===selectedPinId); if(p && lastPos){ addUndo({type:'move', id:p.id, from:lastPos.clone(), to:p.pos.clone()}); lastPos=null; }
-});
-
-// ====== UI wiring ======
-el.btnLoad.addEventListener('click', ()=>{
-  const fid = el.inputGLB.value.trim(); if(!fid){ alert('GLBの fileId を入力してください'); return; }
-  loadGLBByFileId(fid);
-});
-
+// ====== UI events ======
+el.btnLoad.addEventListener('click', ()=>{ const fid = el.inputGLB.value.trim(); if(!fid){ alert('GLBの fileId を入力してください'); return; } loadGLBByFileId(fid); });
 el.btnUndo.addEventListener('click', undo);
-
 el.capTitle.addEventListener('input', ()=>{ const p = pins.find(x=>x.id===selectedPinId); if(!p) return; p.title = el.capTitle.value; refreshPinsList(); });
 el.capBody.addEventListener('input', ()=>{ const p = pins.find(x=>x.id===selectedPinId); if(!p) return; p.body  = el.capBody.value; });
-
-// Color palette
-el.colorPalette.querySelectorAll('.sw').forEach(s=>{
-  s.addEventListener('click',()=>{ currentColor = s.dataset.color; const p = pins.find(x=>x.id===selectedPinId); if(!p) return; p.color = currentColor; placePinMesh(p); refreshPinsList(); renderNow(); });
-});
-
-// Delete pin
-el.btnDeletePin.addEventListener('click', ()=>{ if(!selectedPinId) return; const id=selectedPinId; removePin(id); });
-
-// Save pin (Sheets) — stub for v0.1
+el.colorPalette.querySelectorAll('.sw').forEach(s=>{ s.addEventListener('click',()=>{ currentColor = s.dataset.color; const p = pins.find(x=>x.id===selectedPinId); if(!p) return; p.color = currentColor; placePinMesh(p); refreshPinsList(); renderNow(); }); });
+el.btnDeletePin.addEventListener('click', ()=>{ if(!selectedPinId) return; removePin(selectedPinId); });
 el.btnSavePin.addEventListener('click', async ()=>{
   const sheetId = el.inputSheet.value.trim(); if(!sheetId){ alert('Spreadsheet ID が未設定です'); return; }
   const p = pins.find(x=>x.id===selectedPinId); if(!p){ alert('ピンを選択してください'); return; }
   try{
-    // v0.1: naive append; v0.2+: upsert with row keys
     const values = [[p.id, p.title, p.body, p.pos.x, p.pos.y, p.pos.z, p.color, JSON.stringify(p.images||[]), Date.now()]];
-    await gapi.client.sheets.spreadsheets.values.append({
-      spreadsheetId: sheetId, range: 'pins!A1', valueInputOption:'RAW', resource:{ values }
-    });
+    await gapi.client.sheets.spreadsheets.values.append({ spreadsheetId: sheetId, range: 'pins!A1', valueInputOption:'RAW', resource:{ values } });
     toast('保存しました（仮: append）');
   }catch(e){ console.error(e); alert('保存に失敗しました'); }
 });
-
 function toast(msg){ el.statusLabel.textContent = msg; setTimeout(()=>{ el.statusLabel.textContent='Ready'; }, 2000); }
-
-// Local image attach (future: upload to same Drive folder as GLB)
-el.localImage.addEventListener('change', async (ev)=>{
-  const file = ev.target.files?.[0]; if(!file) return; const p = pins.find(x=>x.id===selectedPinId); if(!p) return;
-  // For preview only in v0.1
-  const url = URL.createObjectURL(file);
-  const card = document.createElement('div'); card.className='row'; card.innerHTML = `<div class="title">\${file.name}</div><div class="meta">ローカルプレビューのみ</div>`;
-  el.thumbs.appendChild(card);
-  p.images = p.images||[]; p.images.push({fileId:null,name:file.name,mime:file.type,local:url});
-});
-
-// View-only link (disable editing via query param)
 document.getElementById('btnViewOnly').addEventListener('click', ()=>{
   const url = new URL(location.href);
   url.searchParams.set('view','1');
@@ -498,15 +296,12 @@ document.getElementById('btnViewOnly').addEventListener('click', ()=>{
   navigator.clipboard.writeText(url.toString());
   toast('閲覧リンクをコピーしました');
 });
-
-// Respect view-only mode
 (function(){
   const q = new URLSearchParams(location.search);
   const viewOnly = q.get('view')==='1';
   if(q.get('fileId')) el.inputGLB.value = q.get('fileId');
   if(q.get('sheetId')) el.inputSheet.value = q.get('sheetId');
   if(viewOnly){
-    // Disable editing controls
     [el.btnAddPin, el.btnGizmo, el.btnUndo, el.btnSavePin, el.btnDeletePin, el.btnAttachDrive, el.localImage].forEach(b=> b?.setAttribute('disabled','true'));
     document.querySelectorAll('input,textarea,button').forEach(x=>{
       if(x.id==='btnLoad' || x.id==='btnPick' || x.id==='btnViewOnly' || x.id==='btnSignIn' || x.id==='inputGLB' || x.id==='inputSheet') return; x.setAttribute('disabled','true');
@@ -514,21 +309,10 @@ document.getElementById('btnViewOnly').addEventListener('click', ()=>{
     document.title += ' (View Only)';
   }
 })();
-
 // Boot
 rendererInit();
-
-// Expose global callbacks expected by Google scripts
-window.gapiLoaded = () => { gapi.load('client', initGapiClient); };
-window.gisLoaded  = () => { gisInited = true; maybeReady(); };
-
 // Keyboard shortcuts
-window.addEventListener('keydown', (e)=>{
-  if((e.ctrlKey||e.metaKey) && e.key.toLowerCase()==='z'){
-    e.preventDefault();
-    document.querySelector('#btnUndo')?.click();
-  }
-});
+window.addEventListener('keydown', (e)=>{ if((e.ctrlKey||e.metaKey) && e.key.toLowerCase()==='z'){ e.preventDefault(); document.querySelector('#btnUndo')?.click(); } });
 </script>
 </body>
 </html>
