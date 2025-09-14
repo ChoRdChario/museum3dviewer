@@ -3933,7 +3933,10 @@ document.getElementById('toolInlineBtn')?.addEventListener('click', ()=>{
 
 
 <script>
-/* ===== LociMyu Sheets Mode + Auto-create (fallback w/ Drive) ===== */
+/* ===== LociMyu Sheets Mode + Auto-create (authfix7) =====
+   - Precondition: require model loaded before creating sheet (for folder placement)
+   - Rename helper object to LmSheets to avoid collisions
+*/
 (function(){
   const $ = (id)=>document.getElementById(id);
   const ui = {
@@ -3946,7 +3949,7 @@ document.getElementById('toolInlineBtn')?.addEventListener('click', ()=>{
   };
   const HEADERS = ["pinId","x","y","z","text","tags","author","updatedAt","deleted"];
   const SHEETS_SCOPE = "https://www.googleapis.com/auth/spreadsheets";
-  const CFG_KEY = "locimyu.sheetsCfg.v6";
+  const CFG_KEY = "locimyu.sheetsCfg.v7";
   const cfg = Object.assign({mode:"drive-json", range:"pins!A:I"}, JSON.parse(localStorage.getItem(CFG_KEY)||"{}"));
 
   if (ui.sel) ui.sel.value = cfg.mode || "drive-json";
@@ -3970,6 +3973,7 @@ document.getElementById('toolInlineBtn')?.addEventListener('click', ()=>{
   }
   ["sel","id","range"].forEach(k=> ui[k] && ui[k].addEventListener("change", saveCfg));
 
+  // --- gapi helpers
   async function ensureGapiClient(){
     if (!window.gapi) await new Promise(res=>{ const t=setInterval(()=>{ if (window.gapi){clearInterval(t);res();}},30);});
     if (!gapi.client) await new Promise(res=> gapi.load("client", res));
@@ -3987,14 +3991,12 @@ document.getElementById('toolInlineBtn')?.addEventListener('click', ()=>{
       await gapi.client.init({ discoveryDocs: ["https://www.googleapis.com/discovery/v1/apis/drive/v3/rest"] });
     }
   }
-
   function getClientId(){
     return (window.GIS_CLIENT_ID || window.CLIENT_ID || window.GOOGLE_CLIENT_ID || window.CLIENT_ID_WEB || "");
   }
   async function ensureSheetsTokenInteractive(){
     const base = (window.ALL_SCOPES || "").trim();
     const want = (base ? base+" " : "") + SHEETS_SCOPE;
-    // If app helper exists, use it to refresh; otherwise GIS
     if (typeof window.ensureToken === "function") { try{ await window.ensureToken(); }catch(e){} }
     if (typeof window.requestTokenInteractive === "function") {
       await window.requestTokenInteractive(want);
@@ -4021,7 +4023,8 @@ document.getElementById('toolInlineBtn')?.addEventListener('click', ()=>{
     }catch(_){ return "Unknown error"; }
   }
 
-  const Sheets = {
+  // Rename helper to avoid conflicts
+  const LmSheets = {
     get spreadsheetId(){ return (ui.id && ui.id.value || "").trim(); },
     get range(){ return (ui.range && ui.range.value || "pins!A:I").trim(); },
 
@@ -4029,24 +4032,16 @@ document.getElementById('toolInlineBtn')?.addEventListener('click', ()=>{
       await ensureSheetsDiscovery();
       await ensureSheetsTokenInteractive();
       if (!this.spreadsheetId) throw new Error("Spreadsheet ID 未設定です");
-      try {
-        const resp = await gapi.client.sheets.spreadsheets.values.get({
-          spreadsheetId: this.spreadsheetId,
-          range: this.range,
-          valueRenderOption: "UNFORMATTED_VALUE",
-          dateTimeRenderOption: "FORMATTED_STRING"
-        });
-        const values = resp.result.values || [];
-        const hasHeader = Array.isArray(values[0]) && String(values[0][0]).trim() === "pinId";
-        const rows = hasHeader ? values.slice(1) : values;
-        return rows.filter(r=>r.length>0).map(rowToPin);
-      } catch(e){
-        const msg = asMessage(e);
-        if (/has not been used in project|not enabled|insufficient/i.test(msg)) {
-          alert("Sheets API が無効かスコープ不足の可能性があります。\n\n対処:\n1) Google Cloud Console で「Google Sheets API」を有効化\n2) ツールで再サインイン（Sheets権限を許可）");
-        }
-        throw e;
-      }
+      const resp = await gapi.client.sheets.spreadsheets.values.get({
+        spreadsheetId: this.spreadsheetId,
+        range: this.range,
+        valueRenderOption: "UNFORMATTED_VALUE",
+        dateTimeRenderOption: "FORMATTED_STRING"
+      });
+      const values = resp.result.values || [];
+      const hasHeader = Array.isArray(values[0]) && String(values[0][0]).trim() === "pinId";
+      const rows = hasHeader ? values.slice(1) : values;
+      return rows.filter(r=>r.length>0).map(rowToPin);
     },
 
     async batchUpsert(pins){
@@ -4065,28 +4060,38 @@ document.getElementById('toolInlineBtn')?.addEventListener('click', ()=>{
           appends.push(row);
         }
       }
-      try {
-        if (updates.length) {
-          await gapi.client.sheets.spreadsheets.values.batchUpdate({
-            spreadsheetId: this.spreadsheetId,
-            resource: { valueInputOption: "RAW", data: updates }
-          });
-        }
-        if (appends.length) {
-          await gapi.client.sheets.spreadsheets.values.append({
-            spreadsheetId: this.spreadsheetId,
-            range: this.range,
-            valueInputOption: "RAW",
-            insertDataOption: "INSERT_ROWS",
-            resource: { values: appends }
-          });
-        }
-      } catch(e){
-        const msg = asMessage(e);
-        if (/has not been used in project|not enabled|insufficient/i.test(msg)) {
-          alert("Sheets API への書き込みで 403 が発生しました。\nAPIを有効化し、再度権限を許可してください。\n\n詳細: "+msg);
-        }
-        throw e;
+      if (updates.length) {
+        await gapi.client.sheets.spreadsheets.values.batchUpdate({
+          spreadsheetId: this.spreadsheetId,
+          resource: { valueInputOption: "RAW", data: updates }
+        });
+      }
+      if (appends.length) {
+        await gapi.client.sheets.spreadsheets.values.append({
+          spreadsheetId: this.spreadsheetId,
+          range: this.range,
+          valueInputOption: "RAW",
+          insertDataOption: "INSERT_ROWS",
+          resource: { values: appends }
+        });
+      }
+    },
+
+    async markDeleted(pinId){
+      const pins = await this.readAll();
+      const p = pins.find(x=>x.pinId===pinId);
+      if (!p) return;
+      p.deleted = true;
+      p.updatedAt = new Date().toISOString();
+      await this.batchUpsert([p]);
+    },
+
+    async reloadFromSheets(){
+      const pins = await this.readAll();
+      if (typeof window.replaceAllPinsFromExternal === "function") {
+        window.replaceAllPinsFromExternal(pins.filter(p=>!p.deleted));
+      } else {
+        console.warn("[Sheets] replaceAllPinsFromExternal 未定義。読み込み結果:", pins);
       }
     }
   };
@@ -4120,7 +4125,6 @@ document.getElementById('toolInlineBtn')?.addEventListener('click', ()=>{
       sheets: [{ properties: { title: "pins" } }]
     });
     const spreadsheetId = resp.result.spreadsheetId;
-    // header
     await gapi.client.sheets.spreadsheets.values.update({
       spreadsheetId,
       range: "pins!A1:I1",
@@ -4128,37 +4132,6 @@ document.getElementById('toolInlineBtn')?.addEventListener('click', ()=>{
       resource: { values: [HEADERS] }
     });
     return spreadsheetId;
-  }
-
-  async function createViaDriveAPI(title){
-    // Create a Google Sheet with initial CSV content as header
-    await ensureDriveDiscovery();
-    // Build CSV data
-    const csv = "pinId,x,y,z,text,tags,author,updatedAt,deleted\n";
-    const boundary = "-------314159265358979323846";
-    const delimiter = "\r\n--" + boundary + "\r\n";
-    const close_delim = "\r\n--" + boundary + "--";
-    const metadata = {
-      name: title,
-      mimeType: "application/vnd.google-apps.spreadsheet"
-    };
-    const multipartRequestBody =
-      delimiter + "Content-Type: application/json; charset=UTF-8\r\n\r\n" +
-      JSON.stringify(metadata) +
-      delimiter + "Content-Type: text/csv\r\n\r\n" +
-      csv + close_delim;
-
-    const resp = await gapi.client.request({
-      path: "/upload/drive/v3/files?uploadType=multipart",
-      method: "POST",
-      headers: { "Content-Type": 'multipart/related; boundary="' + boundary + '"' },
-      body: multipartRequestBody
-    });
-    // The response includes the file ID (spreadsheet file). We need its id.
-    const fileId = (resp.result && resp.result.id) || (resp.body && JSON.parse(resp.body).id) || null;
-    if (!fileId) throw new Error("Drive API からファイルIDを取得できませんでした");
-    // Convert file id (already a Google Sheet). For consistency, return as spreadsheetId
-    return fileId;
   }
 
   async function moveIntoModelFolder(fileId){
@@ -4176,44 +4149,48 @@ document.getElementById('toolInlineBtn')?.addEventListener('click', ()=>{
     } catch(e){ console.warn("フォルダ移動はスキップ:", e); }
   }
 
+  // === Precondition: require model file before creating ===
+  async function ensureModelLoadedOrGuide(){
+    const modelId = (window.currentModelFileId||"").trim();
+    if (modelId) return true;
+    // Try to guide user into model loader if available
+    const guided = confirm("モデル（GLB）が未読み込みです。モデルと同じフォルダにシートを作成するため、先にモデルを読み込んでください。\n\n今すぐモデルの読み込み画面を開きますか？");
+    if (guided) {
+      try {
+        if (typeof window.openModelPicker === "function") { window.openModelPicker(); return false; }
+        if (typeof window.showOpenModelDialog === "function") { window.showOpenModelDialog(); return false; }
+        const btn = document.querySelector('#openModelBtn, [data-action="open-model"], .js-open-model');
+        if (btn) { btn.click(); }
+      } catch(e){ /* ignore */ }
+    }
+    return false;
+  }
+
   async function createSpreadsheetAndConnect(){
-    const title = `LociMyu pins ${new Date().toISOString().slice(0,19).replace(/[:T]/g,'-')}`;
+    if (!(await ensureModelLoadedOrGuide())) return; // block creation until model is loaded
+
     await ensureSheetsDiscovery();
-    await ensureSheetsTokenInteractive(); // includes Drive scopes too
+    await ensureSheetsTokenInteractive();
+    const title = `LociMyu pins ${new Date().toISOString().slice(0,19).replace(/[:T]/g,'-')}`;
     let spreadsheetId = null;
     try {
       spreadsheetId = await createViaSheetsAPI(title);
     } catch(e){
       const msg = asMessage(e);
-      console.warn("Sheets API create failed:", msg, e);
-      if (/has not been used in project|not enabled|insufficient/i.test(msg) || /403/.test(String(e.status||""))) {
-        // Fallback: Drive API create + CSV
-        try {
-          spreadsheetId = await createViaDriveAPI(title);
-          alert("Sheets APIが無効のため、Drive経由でシートを作成しました。必要なら Cloud Console で「Google Sheets API」を有効にしてください。");
-        } catch(e2){
-          alert("シート作成（Drive経由）にも失敗しました: " + asMessage(e2));
-          throw e2;
-        }
-      } else {
-        alert("シート作成に失敗しました: " + msg);
-        throw e;
-      }
+      alert("シート作成に失敗しました: " + msg + "\n\nSheets APIの権限/設定をご確認ください。");
+      throw e;
     }
 
-    // Move to same folder as model and connect
     await moveIntoModelFolder(spreadsheetId);
     if (ui.id) ui.id.value = spreadsheetId;
     if (ui.sel) ui.sel.value = "sheets";
     localStorage.setItem(CFG_KEY, JSON.stringify(Object.assign(JSON.parse(localStorage.getItem(CFG_KEY)||"{}"), { spreadsheetId })));
     try {
-      await Sheets.reloadFromSheets();
+      await LmSheets.reloadFromSheets();
     } catch(e){
-      const msg = asMessage(e);
-      // If read fails due to Sheets API disabled, we still leave it connected (the file exists)
-      console.warn("Initial read failed:", msg);
+      console.warn("Initial read failed:", asMessage(e));
     }
-    alert("新規スプレッドシートを作成し、接続しました。\n共同編集者の共有設定をご確認ください。");
+    alert("新規スプレッドシートを作成し、接続しました。共有設定をご確認ください。");
   }
 
   const orig = {
@@ -4227,8 +4204,8 @@ document.getElementById('toolInlineBtn')?.addEventListener('click', ()=>{
     if (ui.sel && ui.sel.value === "sheets") {
       pin.updatedAt = new Date().toISOString();
       pin.author = (window.currentUserEmail||"");
-      await Sheets.batchUpsert([pin]);
-      await Sheets.reloadFromSheets();
+      await LmSheets.batchUpsert([pin]);
+      await LmSheets.reloadFromSheets();
     } else if (typeof orig.onPinAdded === "function") {
       return orig.onPinAdded(pin);
     }
@@ -4237,16 +4214,16 @@ document.getElementById('toolInlineBtn')?.addEventListener('click', ()=>{
     if (ui.sel && ui.sel.value === "sheets") {
       pin.updatedAt = new Date().toISOString();
       pin.author = (window.currentUserEmail||"");
-      await Sheets.batchUpsert([pin]);
-      await Sheets.reloadFromSheets();
+      await LmSheets.batchUpsert([pin]);
+      await LmSheets.reloadFromSheets();
     } else if (typeof orig.onPinUpdated === "function") {
       return orig.onPinUpdated(pin);
     }
   };
   window.onPinDeleted = async function(pinId){
     if (ui.sel && ui.sel.value === "sheets") {
-      await Sheets.markDeleted(pinId);
-      await Sheets.reloadFromSheets();
+      await LmSheets.markDeleted(pinId);
+      await LmSheets.reloadFromSheets();
     } else if (typeof orig.onPinDeleted === "function") {
       return orig.onPinDeleted(pinId);
     }
@@ -4256,7 +4233,7 @@ document.getElementById('toolInlineBtn')?.addEventListener('click', ()=>{
       if (typeof orig.exportPinsJson === "function") return orig.exportPinsJson();
       return;
     }
-    const pins = (await Sheets.readAll()).filter(p=>!p.deleted);
+    const pins = (await LmSheets.readAll()).filter(p=>!p.deleted);
     if (typeof window.saveJsonToDrive === "function") {
       await window.saveJsonToDrive(pins, `pins.export.${new Date().toISOString().slice(0,16).replace(/[:T]/g,'-')}.json`);
       alert("pins.json をエクスポートしました（Drive）");
@@ -4269,18 +4246,18 @@ document.getElementById('toolInlineBtn')?.addEventListener('click', ()=>{
   if (ui.btnConnect) ui.btnConnect.addEventListener("click", async ()=>{
     saveCfg();
     if (ui.sel && ui.sel.value === "sheets") {
-      try { await Sheets.reloadFromSheets(); } catch(e){ alert("シート読み込みに失敗: "+asMessage(e)); }
+      try { await LmSheets.reloadFromSheets(); } catch(e){ alert("シート読み込みに失敗: "+asMessage(e)); }
     } else if (typeof window.reloadFromDrivePins === "function") {
       await window.reloadFromDrivePins();
     }
   });
   if (ui.btnCreate) ui.btnCreate.addEventListener("click", async ()=>{
-    try { await createSpreadsheetAndConnect(); } catch(e){ console.error(e); /* alert() already shown */ }
+    try { await createSpreadsheetAndConnect(); } catch(e){ console.error(e); /* alert already shown */ }
   });
 
   window.addEventListener("load", ()=>{
     if (ui.sel && ui.sel.value === "sheets" && ui.id && (ui.id.value||"").trim()) {
-      Sheets.reloadFromSheets().catch(console.warn);
+      LmSheets.reloadFromSheets().catch(console.warn);
     }
   });
 })();
