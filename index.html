@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>LociMyu v0.2 (ESM + static gate)</title>
+  <title>LociMyu v0.3 (ESM + import map)</title>
   <link rel="icon" href='data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><circle cx="32" cy="32" r="28" fill="%230b0f14"/><text x="32" y="39" font-size="28" text-anchor="middle" fill="%2353b7ff" font-family="Arial">L</text></svg>'>
   <style>
     :root{ --bg:#0b0f14; --panel:#121922; --text:#e6edf3; --accent:#53b7ff; --muted:#8fa3bd; --radius:16px;}
@@ -39,6 +39,16 @@
     .row .meta{color:#a9b8cf;font-size:.85rem}
     @media (max-width: 900px){ .main{grid-template-columns:1fr; grid-template-rows: 300px 1fr 300px} }
   </style>
+
+  <!-- Import map: resolves any bare 'three' or 'three/examples/jsm/*' imports on the page -->
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://unpkg.com/three@0.157.0/build/three.module.js",
+      "three/examples/jsm/": "https://unpkg.com/three@0.157.0/examples/jsm/"
+    }
+  }
+  </script>
 </head>
 <body>
 <div class="app">
@@ -110,10 +120,10 @@
 <script async defer src="https://apis.google.com/js/api.js" onload="onGapi()"></script>
 
 <script type="module">
-import * as THREE from 'https://unpkg.com/three@0.157.0/build/three.module.js';
-import { OrbitControls } from 'https://unpkg.com/three@0.157.0/examples/jsm/controls/OrbitControls.js';
-import { GLTFLoader } from 'https://unpkg.com/three@0.157.0/examples/jsm/loaders/GLTFLoader.js';
-import { TransformControls } from 'https://unpkg.com/three@0.157.0/examples/jsm/controls/TransformControls.js';
+import * as THREE from 'three';
+import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js';
 
 // ====== CONFIG ======
 const CLIENT_ID = '595200751510-ncahnf7edci6b9925becn5to49r6cguv.apps.googleusercontent.com';
@@ -191,13 +201,17 @@ function maybeReady(){
       accessToken = resp.access_token;
       if(accessToken){
         el.gate.style.display = 'none';
-        // enable UI after auth (three is already ready because ESM imports are synchronous)
         ['btnLoad','btnAddPin','btnGizmo','btnUndo','btnSavePin','btnDeletePin'].forEach(id=>{
           const b = document.getElementById(id); if(b) b.removeAttribute('disabled');
         });
         el.statusLabel.textContent = 'Ready';
       }
     }
+  });
+  // bind the static gate button
+  el.btnSignIn.addEventListener('click', ()=>{
+    if(!tokenClient){ alert('Google API 初期化中。少し待って再試行'); return; }
+    tokenClient.requestAccessToken({ prompt:'consent' });
   });
 }
 
@@ -231,7 +245,6 @@ async function loadGLBByFileId(fileId){
   el.loading.hidden = false;
   try{
     el.statusLabel.textContent = 'GLBを読み込み中…';
-    // probe metadata (for name)
     const meta = await gapi.client.drive.files.get({ fileId, fields:'id,name,mimeType' });
     const dlUrl = `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`;
     const res = await fetch(dlUrl, { headers:{ Authorization:`Bearer ${accessToken}` } });
@@ -241,7 +254,6 @@ async function loadGLBByFileId(fileId){
       throw new Error(`Drive download failed: ${res.status} ${res.statusText} ${hint}`);
     }
     const ab = await res.arrayBuffer();
-    // dispose previous
     if(currentModel){
       scene.remove(currentModel);
       currentModel.traverse(o=>{ if(o.geometry) o.geometry.dispose(); if(o.material){ if(Array.isArray(o.material)) o.material.forEach(m=>m.dispose()); else o.material.dispose(); } });
