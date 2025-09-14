@@ -3,10 +3,10 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>LociMyu v0.9.3 (Live connector + pin toggle moved + preview zoom)</title>
+  <title>LociMyu v0.9.4 (Preview UI fix + Color Filter)</title>
   <link rel="icon" href='data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><circle cx="32" cy="32" r="28" fill="%230b0f14"/><text x="32" y="39" font-size="28" text-anchor="middle" fill="%2353b7ff" font-family="Arial">L</text></svg>'>
   <style>
-    :root{ --bg:#0b0f14; --panel:#121922; --text:#e6edf3; --accent:#53b7ff; --muted:#8fa3bd; --radius:16px;}
+    :root{ --bg:#0b0f14; --panel:#121922; --text:#e6edf3; --accent:#53b7ff; --muted:#8fa3bd; --radius:16px; --shadow:0 10px 30px rgba(0,0,0,.3);}
     html,body{height:100%}
     body{margin:0;background:var(--bg);color:var(--text);font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;}
     .app{display:grid;grid-template-rows:auto 1fr;height:100vh}
@@ -34,7 +34,7 @@
     .lds{width:64px;height:64px;border-radius:50%;border:6px solid rgba(255,255,255,.12);border-top-color:var(--accent);animation:spin 1s linear infinite}
     @keyframes spin{to{transform:rotate(360deg)}}
     .signin-gate{position:fixed;inset:0;display:grid;place-items:center;background:radial-gradient(1200px 600px at 50% 15%, rgba(83,183,255,.08), transparent 60%), linear-gradient(180deg,#0a0f16,#05070b);z-index:20}
-    .card{width:min(560px,92vw);background:#0c1118;border:1px solid #1d2a3d;border-radius:24px;box-shadow:0 10px 30px rgba(0,0,0,.3);padding:20px}
+    .card{width:min(560px,92vw);background:#0c1118;border:1px solid #1d2a3d;border-radius:24px;box-shadow:var(--shadow);padding:20px}
     .card h1{margin:4px 0 8px;font-size:1.35rem}
     .card p{color:#c2d0e2;opacity:.9}
     .list{display:flex;flex-direction:column;gap:8px}
@@ -61,13 +61,20 @@
     .modal .cell{background:#0c1118;border:1px solid #223146;border-radius:12px;padding:8px;cursor:pointer;display:flex;flex-direction:column;gap:6px}
     .modal .cell img{width:100%;height:110px;object-fit:cover;border-radius:8px}
     .modal .cell:hover{background:#132035}
-    #viewerPreview{position:absolute;top:10px;right:10px;max-height:60%;border:1px solid #203049;border-radius:8px;background:#0a0f16cc;backdrop-filter: blur(2px);padding:6px;display:flex;flex-direction:column;gap:4px;resize:both;overflow:auto}
+    /* Reworked preview layout */
+    #viewerPreview{position:absolute;top:10px;right:10px;max-height:60%;border:1px solid #203049;border-radius:8px;background:#0a0f16cc;backdrop-filter: blur(2px);padding:6px;display:grid;grid-template-rows:auto 1fr auto;gap:6px;resize:both;overflow:hidden;min-width:180px}
     #viewerPreview.hidden{display:none}
-    #viewerPreview img{max-width:100%;max-height:none;border-radius:6px;display:block;transform-origin:center center}
+    #previewControls{display:flex;gap:8px;align-items:center;flex-wrap:wrap;z-index:1}
+    #previewWrap{position:relative;overflow:auto;border-radius:6px;background:#0b1018}
+    #previewWrap img{display:block;transform-origin:center center;max-width:none;max-height:none}
     #viewerPreview .cap{font-size:.8rem;color:#a9b8cf}
-    #previewControls{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:4px}
-    #previewControls .small{opacity:.85}
     @media (max-width: 1100px){ .main{grid-template-columns:1fr; grid-template-rows: 360px 1fr 480px} }
+    /* Color filter dropdown */
+    .dropdown{position:relative;display:inline-block}
+    .dropdown-panel{position:absolute;top:100%;right:0;background:#0f1722;border:1px solid #203049;border-radius:10px;box-shadow:var(--shadow);padding:10px;min-width:220px;z-index:15}
+    .dropdown-panel[hidden]{display:none}
+    .color-row{display:flex;align-items:center;gap:8px;margin:4px 0}
+    .swatch{width:14px;height:14px;border-radius:50%;border:2px solid #223146;display:inline-block}
   </style>
 
   <script type="importmap">
@@ -154,7 +161,6 @@
       </svg>
 
       <div id="viewerPreview" class="hidden">
-        <img id="previewImg" alt="preview"/>
         <div id="previewControls">
           <span class="small">サイズ</span>
           <input id="previewSize" type="range" min="15" max="60" step="1" value="28">
@@ -163,6 +169,9 @@
           <input id="previewZoom" type="range" min="0.25" max="3" step="0.05" value="1">
           <span id="previewZoomVal" class="small">1.00×</span>
           <button id="previewReset">リセット</button>
+        </div>
+        <div id="previewWrap">
+          <img id="previewImg" alt="preview"/>
         </div>
         <div class="cap" id="previewCap"></div>
       </div>
@@ -175,7 +184,21 @@
       <div class="body">
         <div class="flex" style="justify-content:space-between;align-items:center;margin-bottom:6px">
           <div class="small">ピン一覧</div>
-          <button id="btnTogglePins" disabled>ピン表示: ON</button>
+          <div class="flex" style="gap:6px;align-items:center">
+            <div class="dropdown">
+              <button id="btnColorFilter" disabled>色フィルタ ▾</button>
+              <div id="colorFilterPanel" class="dropdown-panel" hidden>
+                <div class="small" style="margin-bottom:6px">表示する色を選択（複数可）</div>
+                <div id="colorFilterList"></div>
+                <div class="flex" style="justify-content:flex-end;margin-top:8px">
+                  <button id="btnFilterAll">すべて</button>
+                  <button id="btnFilterNone">なし</button>
+                  <button id="btnFilterClose">閉じる</button>
+                </div>
+              </div>
+            </div>
+            <button id="btnTogglePins" disabled>ピン表示: ON</button>
+          </div>
         </div>
         <div id="pinsList" class="list" style="margin:8px 0 14px"></div>
         <div id="noSelection">ピンを選択してください</div>
@@ -269,6 +292,7 @@ const el = {
   loading: document.getElementById('loading'),
   viewerCanvas: document.getElementById('viewerCanvas'),
   viewerPreview: document.getElementById('viewerPreview'),
+  previewWrap: document.getElementById('previewWrap'),
   previewImg: document.getElementById('previewImg'),
   previewCap: document.getElementById('previewCap'),
   previewSize: document.getElementById('previewSize'),
@@ -325,6 +349,13 @@ const el = {
   pickerGrid: document.getElementById('pickerGrid'),
   btnPickerReload: document.getElementById('btnPickerReload'),
   btnPickerClose: document.getElementById('btnPickerClose'),
+  // color filter
+  btnColorFilter: document.getElementById('btnColorFilter'),
+  colorFilterPanel: document.getElementById('colorFilterPanel'),
+  colorFilterList: document.getElementById('colorFilterList'),
+  btnFilterAll: document.getElementById('btnFilterAll'),
+  btnFilterNone: document.getElementById('btnFilterNone'),
+  btnFilterClose: document.getElementById('btnFilterClose'),
 };
 const viewOnly = new URLSearchParams(location.search).get('view') === '1';
 let tokenClient; let gapiInited=false; let gisInited=false; let accessToken=null;
@@ -342,6 +373,9 @@ let isOrtho=false;
 
 // Image blob cache
 const imageBlobCache = new Map(); // key: driveFileId or url string -> objectURL
+
+// Color filter state: Set of allowed colors (hex); empty => all
+let filterColors = new Set();
 
 // ====== Helpers ======
 function extractDriveFileId(input){
@@ -374,6 +408,8 @@ function setDisabled(ids, on){ ids.forEach(id=>{ const b=document.getElementById
 function debounceSave(){ clearTimeout(autosaveTimer); autosaveTimer=setTimeout(()=> upsertPinToSheet().catch(console.error), 1200); }
 function fmt(n){ return typeof n==='number'? Number(n.toFixed(6)) : n; }
 function ensureArray(x){ return Array.isArray(x)?x:[]; }
+function hex(c){ return new THREE.Color(c).getHexString(); }
+function normalizeHex(c){ const cc = new THREE.Color(c).getStyle(); const t = new THREE.Color(cc); return '#' + t.getHexString(); }
 
 // Resolve image URL with OAuth fetch if needed
 async function resolveImageURL(url){
@@ -418,7 +454,7 @@ function maybeReady(){
       accessToken = resp.access_token;
       if(accessToken){
         el.gate.style.display = 'none';
-        setDisabled(['btnLoad','btnAddPin','btnGizmo','btnTogglePins','btnUndo','btnSavePin','btnDeletePin','btnAttach','btnPickFromFolder'], false);
+        setDisabled(['btnLoad','btnAddPin','btnGizmo','btnTogglePins','btnUndo','btnSavePin','btnDeletePin','btnAttach','btnPickFromFolder','btnColorFilter'], false);
         el.statusLabel.textContent = 'Ready';
         if(viewOnly){
           document.getElementById('leftToolbox').classList.add('hidden');
@@ -580,7 +616,7 @@ function getPreviewAnchor(){
 }
 function updateConnector(){
   const p = pins.find(x=>x.id===selectedPinId);
-  if(!p || !p.mesh || el.viewerPreview.classList.contains('hidden') || !pinGroup.visible){
+  if(!p || !p.mesh || el.viewerPreview.classList.contains('hidden') || !pinGroup.visible || !p.mesh.visible){
     el.connLine.style.display = 'none';
     el.connDot.style.display = 'none';
     return;
@@ -609,7 +645,7 @@ let previewSizePct = 28; // initial
 let previewZoom = 1.0;
 function applyPreviewSize(){
   const canvasRect = el.viewerCanvas.getBoundingClientRect();
-  const w = Math.max(150, Math.min(canvasRect.width * (previewSizePct/100), canvasRect.width*0.95));
+  const w = Math.max(180, Math.min(canvasRect.width * (previewSizePct/100), canvasRect.width*0.95));
   el.viewerPreview.style.width = w + 'px';
   updateConnector();
 }
@@ -664,7 +700,7 @@ function onPointerDown(e){
 }
 function addUndo(u){ undoStack.push(u); }
 function undo(){ const u = undoStack.pop(); if(!u) return; if(u.type==='move'){ const p=pins.find(x=>x.id===u.id); if(p){ p.pos.copy(u.from); placePinMesh(p); selectPin(p.id); renderNow(); } } else if(u.type==='add'){ removePin(u.id,{silent:true}); } else if(u.type==='delete'){ pins.push(u.pin); placePinMesh(u.pin); refreshPinsList(); selectPin(u.pin.id); renderNow(); } }
-function createPin(pos,color){ const id=`p_${Date.now()}_${Math.random().toString(36).slice(2,7)}`; const pin={id,pos:pos.clone(),color:color||'#ff6b6b',title:'',body:'',images:[],mesh:null}; pins.push(pin); placePinMesh(pin); refreshPinsList(); selectPin(id); addUndo({type:'add',id}); }
+function createPin(pos,color){ const id=`p_${Date.now()}_${Math.random().toString(36).slice(2,7)}`; const pin={id,pos:pos.clone(),color:normalizeHex(color||'#ff6b6b'),title:'',body:'',images:[],mesh:null}; pins.push(pin); placePinMesh(pin); refreshPinsList(); selectPin(id); addUndo({type:'add',id}); buildColorFilter(); }
 function placePinMesh(pin){
   if(pin.mesh){ pinGroup.remove(pin.mesh); pin.mesh.geometry.dispose(); pin.mesh.material.dispose(); pin.mesh=null; }
   const geo=new THREE.SphereGeometry(0.006,16,16);
@@ -672,6 +708,7 @@ function placePinMesh(pin){
   const mesh=new THREE.Mesh(geo,mat);
   mesh.position.copy(pin.pos); mesh.userData.pinId=pin.id;
   pin.mesh=mesh; pinGroup.add(mesh);
+  applyPinVisibilityFilter();
 }
 function selectPin(id,{fly}={}){
   selectedPinId=id;
@@ -707,7 +744,7 @@ function flyTo(target){
 }
 function refreshPinsList(){
   el.pinsList.innerHTML='';
-  pins.forEach(p=>{
+  pins.filter(pinPassesFilter).forEach(p=>{
     const row=document.createElement('div'); row.className='row'; row.dataset.id=p.id;
     const left=document.createElement('div'); left.style.display='flex'; left.style.alignItems='center'; left.style.gap='8px';
     const dot=document.createElement('div'); dot.style.width='10px'; dot.style.height='10px'; dot.style.borderRadius='999px'; dot.style.background=p.color;
@@ -724,7 +761,8 @@ function removePin(id,{silent}={}){
   const pin=pins[idx]; if(pin.mesh){ pinGroup.remove(pin.mesh); pin.mesh.geometry.dispose(); pin.mesh.material.dispose(); }
   pins.splice(idx,1);
   if(!silent) addUndo({type:'delete',pin});
-  refreshPinsList(); el.rightEditor.classList.add('hidden'); el.rightNoSel.classList.remove('hidden'); selectedPinId=null; updateViewerPreviewForPin(null);
+  refreshPinsList(); buildColorFilter();
+  el.rightEditor.classList.add('hidden'); el.rightNoSel.classList.remove('hidden'); selectedPinId=null; updateViewerPreviewForPin(null);
 }
 function renderThumbs(p){
   const thumbs=document.getElementById('thumbs'); thumbs.innerHTML='';
@@ -759,14 +797,84 @@ function buildColorPresets(){
   el.colorPresets.innerHTML='';
   PRESET_COLORS.forEach(c=>{
     const b=document.createElement('button'); b.style.width='18px'; b.style.height='18px'; b.style.borderRadius='999px'; b.style.border='2px solid #223146'; b.style.background=c; b.title=c;
-    b.addEventListener('click',()=>{ currentColor=c; if(el.colorPicker) el.colorPicker.value=c; if(selectedPinId){ const p=pins.find(x=>x.id===selectedPinId); p.color=c; placePinMesh(p); refreshPinsList(); debounceSave(); } });
+    b.addEventListener('click',()=>{ currentColor=c; if(el.colorPicker) el.colorPicker.value=c; if(selectedPinId){ const p=pins.find(x=>x.id===selectedPinId); p.color=normalizeHex(c); placePinMesh(p); refreshPinsList(); debounceSave(); buildColorFilter(); } });
     el.colorPresets.appendChild(b);
   });
   if(el.colorPicker){
-    el.colorPicker.addEventListener('input', ()=>{ currentColor=el.colorPicker.value; if(selectedPinId){ const p=pins.find(x=>x.id===selectedPinId); p.color=currentColor; placePinMesh(p); refreshPinsList(); debounceSave(); } });
+    el.colorPicker.addEventListener('input', ()=>{ currentColor=el.colorPicker.value; if(selectedPinId){ const p=pins.find(x=>x.id===selectedPinId); p.color=normalizeHex(currentColor); placePinMesh(p); refreshPinsList(); debounceSave(); buildColorFilter(); } });
   }
 }
 buildColorPresets();
+
+// ====== Color Filter UI ======
+function uniquePinColors(){
+  const set = new Set();
+  pins.forEach(p=> set.add(normalizeHex(p.color)));
+  return Array.from(set);
+}
+function buildColorFilter(){
+  const list = el.colorFilterList; if(!list) return;
+  list.innerHTML='';
+  const colors = uniquePinColors().sort();
+  if(colors.length===0){
+    list.innerHTML = '<div class="small">ピンがありません</div>';
+    return;
+  }
+  colors.forEach(c=>{
+    const row = document.createElement('label'); row.className='color-row';
+    const sw = document.createElement('span'); sw.className='swatch'; sw.style.background=c;
+    const cb = document.createElement('input'); cb.type='checkbox'; cb.value=c; cb.checked = (filterColors.size===0 || filterColors.has(c));
+    const name = document.createElement('span'); name.textContent = c;
+    row.appendChild(cb); row.appendChild(sw); row.appendChild(name);
+    cb.addEventListener('change', ()=>{
+      if(cb.checked) filterColors.add(c); else filterColors.delete(c);
+      // If none selected -> treat as "all"
+      if(filterColors.size===0){ colors.forEach(k=> filterColors.add(k)); }
+      applyPinVisibilityFilter();
+    });
+    list.appendChild(row);
+  });
+  // Initialize to "all" on first build
+  if(filterColors.size===0){ colors.forEach(k=> filterColors.add(k)); }
+  applyPinVisibilityFilter();
+}
+function pinPassesFilter(p){
+  if(filterColors.size===0) return true;
+  return filterColors.has(normalizeHex(p.color));
+}
+function applyPinVisibilityFilter(){
+  pins.forEach(p=>{
+    if(p.mesh){ p.mesh.visible = pinGroup.visible && pinPassesFilter(p); }
+  });
+  // If the selected pin became hidden, clear selection and preview/connector
+  const curr = pins.find(x=>x.id===selectedPinId);
+  if(curr && (!pinGroup.visible || !pinPassesFilter(curr))){
+    selectedPinId = null;
+    el.rightEditor.classList.add('hidden'); el.rightNoSel.classList.remove('hidden');
+    updateViewerPreviewForPin(null);
+  }
+  refreshPinsList();
+  renderNow();
+}
+el.btnColorFilter.addEventListener('click', ()=>{
+  el.colorFilterPanel.hidden = !el.colorFilterPanel.hidden;
+});
+el.btnFilterAll.addEventListener('click', ()=>{
+  filterColors.clear();
+  uniquePinColors().forEach(c=> filterColors.add(c));
+  buildColorFilter();
+});
+el.btnFilterNone.addEventListener('click', ()=>{
+  filterColors.clear();
+  applyPinVisibilityFilter();
+  buildColorFilter();
+});
+el.btnFilterClose.addEventListener('click', ()=> el.colorFilterPanel.hidden = true);
+document.addEventListener('click', (e)=>{
+  if(!el.colorFilterPanel.contains(e.target) && e.target !== el.btnColorFilter){
+    el.colorFilterPanel.hidden = true;
+  }
+});
 
 // ====== GLB load ======
 document.getElementById('btnLoad').addEventListener('click', ()=>{
@@ -1144,6 +1252,7 @@ document.getElementById('btnGizmo').addEventListener('click', ()=>{
 document.getElementById('btnTogglePins').addEventListener('click', ()=>{
   pinGroup.visible = !pinGroup.visible;
   document.getElementById('btnTogglePins').textContent = 'ピン表示: ' + (pinGroup.visible? 'ON' : 'OFF');
+  applyPinVisibilityFilter();
   renderNow();
 });
 document.getElementById('btnUndo').addEventListener('click', ()=> undo());
