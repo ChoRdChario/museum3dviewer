@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>LociMyu v0.5.2 (Material Editor – hotfix2)</title>
+  <title>LociMyu v0.6 (Toolbox left + Shift-Click pin)</title>
   <link rel="icon" href='data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><circle cx="32" cy="32" r="28" fill="%230b0f14"/><text x="32" y="39" font-size="28" text-anchor="middle" fill="%2353b7ff" font-family="Arial">L</text></svg>'>
   <style>
     :root{ --bg:#0b0f14; --panel:#121922; --text:#e6edf3; --accent:#53b7ff; --muted:#8fa3bd; --radius:16px;}
@@ -12,12 +12,12 @@
     .app{display:grid;grid-template-rows:auto 1fr;height:100vh}
     header{display:flex;gap:.75rem;align-items:center;padding:10px 12px;background:linear-gradient(180deg,#0e1520,#0b0f14);border-bottom:1px solid #1e2837}
     .pill{background:rgba(255,255,255,.06);padding:6px 10px;border-radius:999px;border:1px solid rgba(255,255,255,.08);font-weight:700}
-    input[type=text], select{background:#0f1722;border:1px solid #203049;color:var(--text);border-radius:10px;padding:8px 10px;min-width:260px}
+    input[type=text], select, textarea{background:#0f1722;border:1px solid #203049;color:var(--text);border-radius:10px;padding:8px 10px;min-width:260px}
     button{background:#152133;color:var(--text);border:1px solid #223146;border-radius:10px;padding:8px 12px;cursor:pointer}
     button[disabled]{opacity:.5;cursor:not-allowed}
     button:hover{background:#1a2b45}
     .accent{border-color:#2c82c9}
-    .main{display:grid;grid-template-columns:280px 1fr 380px;gap:10px;padding:10px;height:calc(100vh - 58px)}
+    .main{display:grid;grid-template-columns:340px 1fr 420px;gap:10px;padding:10px;height:calc(100vh - 58px)}
     .panel{background:#121922;border:1px solid #1e2837;border-radius:var(--radius);overflow:hidden;display:flex;flex-direction:column;min-height:0}
     .panel h3{margin:0;padding:10px 12px;border-bottom:1px solid #203049;background:#0f1722;font-size:.95rem;font-weight:600}
     .panel .body{padding:10px;overflow:auto}
@@ -47,7 +47,8 @@
     .field{display:flex;gap:8px;align-items:center;margin:8px 0}
     .field label{min-width:120px;color:#a9b8cf}
     input[type="range"]{width:160px}
-    @media (max-width: 980px){ .main{grid-template-columns:1fr; grid-template-rows: 320px 1fr 420px} }
+    .subtle{opacity:.8}
+    @media (max-width: 1100px){ .main{grid-template-columns:1fr; grid-template-rows: 340px 1fr 460px} }
   </style>
 
   <script type="importmap">
@@ -73,33 +74,51 @@
     </div>
   </header>
   <div class="main">
-    <section class="panel" id="left">
-      <h3>キャプション / Pins</h3>
+    <!-- LEFT: Toolbox (always-visible materials + pin tools) -->
+    <section class="panel" id="leftToolbox">
+      <h3>ツールボックス（マテリアル & ピン）</h3>
       <div class="body">
-        <div class="flex" style="margin-bottom:8px">
-          <button id="btnAddPin" disabled>＋ ピン追加</button>
+        <div class="small subtle">※ Shift + クリック でピンを即配置</div>
+        <div class="flex" style="margin-top:6px;margin-bottom:6px">
+          <button id="btnAddPin" disabled>＋ ピン追加モード</button>
           <button id="btnGizmo" disabled>ギズモ: OFF</button>
           <button id="btnUndo" disabled>Ctrl+Z</button>
-          <span class="small" id="pinCount">0 pins</span>
         </div>
         <div class="flex">
-          <div class="small">色:</div>
+          <div class="small">ピン色:</div>
           <div id="colorPresets" class="flex"></div>
           <input id="colorPicker" type="color" value="#ff6b6b" />
         </div>
-        <div id="pinsList" class="list" style="margin-top:10px"></div>
+
+        <hr style="border-color:#203049;border-width:1px 0;margin:12px 0">
+        <div class="small" style="margin:4px 0 6px">マテリアル編集（常時表示）</div>
+        <div class="field"><label>対象</label><select id="matSelect"><option value="__all__">（全マテリアル）</option></select></div>
+        <div class="field"><label>透明</label><input id="matTransparent" type="checkbox"><span class="small">ONで不透明度適用</span></div>
+        <div class="field"><label>不透明度</label><input id="matOpacity" type="range" min="0" max="1" step="0.01" value="1"><span id="matOpacityVal" class="small">1.00</span></div>
+        <div class="field"><label>テクスチャ反転</label><input id="matInvert" type="checkbox"><span class="small">色を反転</span></div>
+        <div class="field"><label>白→透明</label><input id="matWhiteTransparent" type="checkbox"><span class="small">白ほど透明（α化）</span></div>
+        <div class="field"><label>閾値（αTest）</label><input id="matThreshold" type="range" min="0" max="1" step="0.01" value="0"><span id="matThresholdVal" class="small">0.00</span></div>
+        <div class="flex">
+          <button id="matApply" class="accent" disabled>適用</button>
+          <button id="matReset" disabled>リセット</button>
+        </div>
+        <div class="small subtle" style="margin-top:6px">GLBの埋込テクスチャに対してブラウザ内で加工（CanvasTexture）</div>
       </div>
     </section>
 
+    <!-- CENTER: Viewer -->
     <section class="panel" id="viewer">
       <div class="spinner" id="loading" hidden><div class="lds"></div></div>
       <canvas id="viewerCanvas"></canvas>
       <div class="hud"><div class="chip" id="modeLabel">Orbit</div></div>
     </section>
 
-    <section class="panel" id="right">
-      <h3>キャプション編集 & マテリアル</h3>
+    <!-- RIGHT: Caption box (pins list + editor) -->
+    <section class="panel" id="rightCaption">
+      <h3>キャプション</h3>
       <div class="body">
+        <div class="small">ピン一覧</div>
+        <div id="pinsList" class="list" style="margin:8px 0 14px"></div>
         <div id="noSelection">ピンを選択してください</div>
         <div id="editor" class="hidden">
           <div class="grid2">
@@ -116,20 +135,7 @@
             <button id="btnDeletePin" style="border-color:#5a1f26;color:#ffb4b4" disabled>ピン削除</button>
             <span class="small" id="autosaveTip">入力は数秒後に自動保存</span>
           </div>
-
-          <hr style="border-color:#203049;border-width:1px 0;margin:10px 0">
-          <div class="small" style="margin:4px 0 6px">マテリアル編集</div>
-          <div class="field"><label>対象</label><select id="matSelect"><option value="__all__">（全マテリアル）</option></select></div>
-          <div class="field"><label>透明</label><input id="matTransparent" type="checkbox"><span class="small">ONで不透明度適用</span></div>
-          <div class="field"><label>不透明度</label><input id="matOpacity" type="range" min="0" max="1" step="0.01" value="1"><span id="matOpacityVal" class="small">1.00</span></div>
-          <div class="field"><label>テクスチャ反転</label><input id="matInvert" type="checkbox"><span class="small">色を反転</span></div>
-          <div class="field"><label>白→透明</label><input id="matWhiteTransparent" type="checkbox"><span class="small">白ほど透明（α化）</span></div>
-          <div class="field"><label>閾値（αTest）</label><input id="matThreshold" type="range" min="0" max="1" step="0.01" value="0"><span id="matThresholdVal" class="small">0.00</span></div>
-          <div class="flex">
-            <button id="matApply" class="accent">適用</button>
-            <button id="matReset">リセット</button>
-          </div>
-          <div class="small" style="opacity:.8;margin-top:6px">※ GLBの埋込テクスチャに対してブラウザ内で加工（CanvasTexture）します</div>
+          <div class="small subtle">※ ピン選択でビューが自動で寄ります</div>
         </div>
       </div>
     </section>
@@ -203,9 +209,8 @@ const el = {
   imgLocal: document.getElementById('imgLocal'),
   btnAttach: document.getElementById('btnAttach'),
   thumbs: document.getElementById('thumbs'),
-  pinCount: document.getElementById('pinCount'),
   autosaveTip: document.getElementById('autosaveTip'),
-  // material
+  // material (left toolbox)
   matSelect: document.getElementById('matSelect'),
   matTransparent: document.getElementById('matTransparent'),
   matOpacity: document.getElementById('matOpacity'),
@@ -225,9 +230,9 @@ let addPinMode=false, currentColor='#ff6b6b';
 let pins=[], selectedPinId=null, undoStack=[];
 let glbParents=[];
 let autosaveTimer=null;
-// material state (single declaration here)
-let materials=[], materialMap=new Map();
-let matOriginals=new WeakMap();
+// material state
+let materials=[], materialMap=new Map(); // name -> material
+let matOriginals=new WeakMap(); // material -> backup
 
 // ====== Helpers ======
 function extractDriveFileId(input){
@@ -274,8 +279,8 @@ function maybeReady(){
         setDisabled(['btnLoad','btnAddPin','btnGizmo','btnUndo','btnSavePin','btnDeletePin','btnAttach','matApply','matReset'], false);
         el.statusLabel.textContent = 'Ready';
         if(viewOnly){
-          document.getElementById('left').classList.add('hidden');
-          document.getElementById('right').classList.add('hidden');
+          document.getElementById('leftToolbox').classList.add('hidden');
+          document.getElementById('rightCaption').classList.add('hidden');
         }
       }
     }
@@ -311,7 +316,7 @@ function renderNow(){ renderer.render(scene,camera); }
 viewerInit();
 
 // ====== Pins ======
-function setAddPinMode(on){ addPinMode=on; el.modeLabel.textContent=on?'Add Pin: Click model':(tcontrols.visible?'Gizmo':'Orbit'); }
+function setAddPinMode(on){ addPinMode=on; el.modeLabel.textContent=on?'Add Pin: Click model (または Shift+クリック)':(tcontrols.visible?'Gizmo':'Orbit'); }
 function getIntersectPoint(event){
   const rect=el.viewerCanvas.getBoundingClientRect();
   pointer.x=((event.clientX-rect.left)/rect.width)*2-1;
@@ -323,6 +328,11 @@ function getIntersectPoint(event){
 function onPointerDown(e){
   if(!currentModel || viewOnly) return;
   if(tcontrols.dragging) return;
+  // SHIFT+CLICK: quick add
+  if(e.shiftKey){
+    const pt=getIntersectPoint(e);
+    if(pt){ createPin(pt,currentColor); return; }
+  }
   if(addPinMode){
     const pt=getIntersectPoint(e);
     if(pt){ createPin(pt,currentColor); setAddPinMode(false); }
@@ -344,7 +354,8 @@ function selectPin(id,{fly}={}){
   const p=pins.find(x=>x.id===id);
   if(!p){ el.rightEditor.classList.add('hidden'); el.rightNoSel.classList.remove('hidden'); return; }
   el.rightNoSel.classList.add('hidden'); el.rightEditor.classList.remove('hidden');
-  el.capTitle.value=p.title||''; el.capBody.value=p.body||'';
+  document.getElementById('capTitle').value=p.title||'';
+  document.getElementById('capBody').value=p.body||'';
   renderThumbs(p);
   tcontrols.attach(p.mesh);
   if(fly){ flyTo(p.pos); } else { controls.target.copy(p.pos); controls.update(); }
@@ -379,7 +390,6 @@ function refreshPinsList(){
     row.addEventListener('click',()=>selectPin(p.id,{fly:true}));
     el.pinsList.appendChild(row);
   });
-  el.pinCount.textContent = `${pins.length} pins`;
 }
 function removePin(id,{silent}={}){
   const idx=pins.findIndex(x=>x.id===id); if(idx<0) return;
@@ -389,9 +399,9 @@ function removePin(id,{silent}={}){
   refreshPinsList(); el.rightEditor.classList.add('hidden'); el.rightNoSel.classList.remove('hidden'); selectedPinId=null;
 }
 function renderThumbs(p){
-  el.thumbs.innerHTML='';
+  const thumbs=document.getElementById('thumbs'); thumbs.innerHTML='';
   ensureArray(p.images).forEach(url=>{
-    const img=document.createElement('img'); img.src=url; img.title=url; el.thumbs.appendChild(img);
+    const img=document.createElement('img'); img.src=url; img.title=url; thumbs.appendChild(img);
   });
 }
 
@@ -409,7 +419,7 @@ function buildColorPresets(){
 buildColorPresets();
 
 // ====== GLB load ======
-el.btnLoad.addEventListener('click', ()=>{
+document.getElementById('btnLoad').addEventListener('click', ()=>{
   const fid = extractDriveFileId(el.inputGLB.value.trim());
   el.inputGLB.value = fid;
   loadGLBByFileId(fid);
@@ -462,7 +472,7 @@ async function loadGLBByFileId(fileId){
 }
 function fitToScene(){ if(!currentModel) return; const box = new THREE.Box3().setFromObject(currentModel); const size = box.getSize(new THREE.Vector3()); const center = box.getCenter(new THREE.Vector3()); const maxDim = Math.max(size.x,size.y,size.z)||1; const dist = maxDim*1.6; camera.position.copy(center.clone().add(new THREE.Vector3(dist, dist*0.7, dist))); controls.target.copy(center); controls.update(); }
 
-// ====== Materials ======
+// ====== Materials (always visible) ======
 function collectMaterials(){
   materials=[]; materialMap.clear();
   const set = new Set();
@@ -480,6 +490,9 @@ function collectMaterials(){
       matOriginals.set(m, { map:m.map||null, alphaMap:m.alphaMap||null, transparent:!!m.transparent, opacity:(m.opacity??1), alphaTest:(m.alphaTest??0) });
     }
   });
+  // enable material buttons once collected
+  el.matApply.removeAttribute('disabled');
+  el.matReset.removeAttribute('disabled');
 }
 function getSelectedMaterials(){
   const key=el.matSelect.value;
@@ -601,10 +614,10 @@ async function upsertPinToSheet(){
     setTimeout(()=> el.autosaveTip.textContent='入力は数秒後に自動保存', 1500);
   }catch(e){ console.error(e); }
 }
-el.btnSavePin.addEventListener('click', ()=> upsertPinToSheet());
+document.getElementById('btnSavePin').addEventListener('click', ()=> upsertPinToSheet());
 
 // ====== Image attach & Drive upload ======
-el.btnAttach.addEventListener('click', async ()=>{
+document.getElementById('btnAttach').addEventListener('click', async ()=>{
   const file = el.imgLocal.files?.[0]; const p = pins.find(x=>x.id===selectedPinId);
   if(!file || !p){ alert('画像とピンを確認してください'); return; }
   try{
@@ -642,8 +655,29 @@ async function driveMultipartUpload(blob, name, parents){
   return await res.json();
 }
 
-// ====== Keyboard ======
-window.addEventListener('keydown', (e)=>{ if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='z'){ e.preventDefault(); el.btnUndo?.click(); } });
+// ====== Gizmo & Inputs ======
+document.getElementById('btnAddPin').addEventListener('click', ()=> setAddPinMode(!addPinMode));
+document.getElementById('btnGizmo').addEventListener('click', ()=>{
+  if(!selectedPinId){ toast('ピンを選択してください'); return; }
+  tcontrols.visible = !tcontrols.visible;
+  document.getElementById('btnGizmo').textContent = 'ギズモ: ' + (tcontrols.visible?'ON':'OFF');
+  el.modeLabel.textContent = tcontrols.visible ? 'Gizmo' : 'Orbit';
+});
+document.getElementById('btnUndo').addEventListener('click', ()=> undo());
+document.getElementById('capTitle').addEventListener('input', ()=>{ const p=pins.find(x=>x.id===selectedPinId); if(p){ p.title=el.capTitle.value; refreshPinsList(); debounceSave(); } });
+document.getElementById('capBody').addEventListener('input', ()=>{ const p=pins.find(x=>x.id===selectedPinId); if(p){ p.body=el.capBody.value; debounceSave(); } });
+
+// Track gizmo move → update pin pos
+tcontrols.addEventListener('objectChange', ()=>{
+  if(!selectedPinId || !tcontrols.object) return;
+  const p=pins.find(x=>x.id===selectedPinId);
+  if(!p) return;
+  const prev = p.pos.clone();
+  p.pos.copy(tcontrols.object.position);
+  addUndo({type:'move', id:p.id, from:prev});
+  debounceSave();
+});
+document.getElementById('btnDeletePin').addEventListener('click', ()=>{ if(!selectedPinId) return; const id=selectedPinId; removePin(id); debounceSave(); });
 
 </script>
 </body>
