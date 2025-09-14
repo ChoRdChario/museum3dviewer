@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>LociMyu v0.1 (ESM definitive)</title>
+  <title>LociMyu v0.1 (Hardened UMD)</title>
   <!-- Inline favicon to avoid 404 -->
   <link rel="icon" href='data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><circle cx="32" cy="32" r="28" fill="%230b0f14"/><text x="32" y="39" font-size="28" text-anchor="middle" fill="%2353b7ff" font-family="Arial">L</text></svg>'>
   <style>
@@ -87,22 +87,34 @@
   </div>
 </div>
 
-<!-- Define tiny global onload hooks BEFORE loading Google scripts -->
+<!-- Static Sign-in Gate (visible until token acquired) -->
+<div class="signin-gate" id="gate">
+  <div class="card">
+    <h1>Googleにサインイン</h1>
+    <p>本ツールは Google Drive / Google Sheets を使用します。先にサインインしてください。</p>
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+      <button id="btnSignIn" class="accent" style="font-weight:700">🔐 Sign in with Google</button>
+      <span class="meta" style="opacity:.8">OAuth2 (Drive.file / Sheets)</span>
+    </div>
+  </div>
+</div>
+
+<!-- Google flags -->
 <script>
-  window.__flags = { gapi:false, gis:false };
-  window.onGapiLoaded = function(){ window.__flags.gapi = true; };
-  window.onGisLoaded  = function(){ window.__flags.gis  = true; };
+  window.__gm = { gapi:false, gis:false };
+  function onGapi(){ window.__gm.gapi = true; }
+  function onGis(){  window.__gm.gis  = true; }
 </script>
-<!-- Google scripts -->
-<script async defer src="https://accounts.google.com/gsi/client" onload="onGisLoaded()"></script>
-<script async defer src="https://apis.google.com/js/api.js" onload="onGapiLoaded()"></script>
+<script async defer src="https://accounts.google.com/gsi/client" onload="onGis()"></script>
+<script async defer src="https://apis.google.com/js/api.js" onload="onGapi()"></script>
 
-<script type="module">
-import * as THREE from 'https://unpkg.com/three@0.157.0/build/three.module.js';
-import { OrbitControls } from 'https://unpkg.com/three@0.157.0/examples/jsm/controls/OrbitControls.js';
-import { GLTFLoader } from 'https://unpkg.com/three@0.157.0/examples/jsm/loaders/GLTFLoader.js';
-import { TransformControls } from 'https://unpkg.com/three@0.157.0/examples/jsm/controls/TransformControls.js';
+<!-- THREE UMD r0.152.2 (examples/js) -->
+<script src="https://unpkg.com/three@0.152.2/build/three.min.js"></script>
+<script src="https://unpkg.com/three@0.152.2/examples/js/controls/OrbitControls.js"></script>
+<script src="https://unpkg.com/three@0.152.2/examples/js/loaders/GLTFLoader.js"></script>
+<script src="https://unpkg.com/three@0.152.2/examples/js/controls/TransformControls.js"></script>
 
+<script>
 // ====== CONFIG ======
 const CLIENT_ID = '595200751510-ncahnf7edci6b9925becn5to49r6cguv.apps.googleusercontent.com';
 const API_KEY   = 'AIzaSyCUnTCr5yWUWPdEXST9bKP1LpgawU5rIbI';
@@ -139,42 +151,88 @@ function extractSpreadsheetId(input){
   return input.trim();
 }
 
-// ====== Elements ======
-const el = {
-  statusLabel: document.getElementById('statusLabel'),
-  inputGLB: document.getElementById('inputGLB'),
-  inputSheet: document.getElementById('inputSheet'),
-  btnLoad: document.getElementById('btnLoad'),
-  loading: document.getElementById('loading'),
-  viewerCanvas: document.getElementById('viewerCanvas'),
-  pinsList: document.getElementById('pinsList'),
-  rightNoSel: document.getElementById('noSelection'),
-  rightEditor: document.getElementById('editor'),
-  capTitle: document.getElementById('capTitle'),
-  capBody: document.getElementById('capBody'),
-  btnSavePin: document.getElementById('btnSavePin'),
-  btnDeletePin: document.getElementById('btnDeletePin'),
-  btnAddPin: document.getElementById('btnAddPin'),
-  btnGizmo: document.getElementById('btnGizmo'),
-  btnUndo: document.getElementById('btnUndo'),
-  modeLabel: document.getElementById('modeLabel'),
-};
+// ====== Globals ======
+let tokenClient; let gapiInited=false, gisInited=false; let accessToken=null;
+let renderer, scene, camera, controls, tcontrols, pinGroup;
+let raycaster, pointer, loader, currentModel=null;
+const el = {};
 
-// ====== Google init (poll flags safely) ======
-let tokenClient; let gapiInited=false; let gisInited=false; let accessToken=null;
-const waitGoogle = setInterval(()=>{
-  if(!gapiInited && window.__flags.gapi && window.gapi){ gapi.load('client', initGapiClient); }
-  if(!gisInited && window.__flags.gis){ gisInited = true; maybeReady(); }
-  if(gapiInited && gisInited){ clearInterval(waitGoogle); }
-}, 200);
+// ====== DOM ready ======
+document.addEventListener('DOMContentLoaded', () => {
+  Object.assign(el, {
+    gate: document.getElementById('gate'),
+    statusLabel: document.getElementById('statusLabel'),
+    inputGLB: document.getElementById('inputGLB'),
+    inputSheet: document.getElementById('inputSheet'),
+    btnLoad: document.getElementById('btnLoad'),
+    loading: document.getElementById('loading'),
+    viewerCanvas: document.getElementById('viewerCanvas'),
+    pinsList: document.getElementById('pinsList'),
+    rightNoSel: document.getElementById('noSelection'),
+    rightEditor: document.getElementById('editor'),
+    capTitle: document.getElementById('capTitle'),
+    capBody: document.getElementById('capBody'),
+    btnSavePin: document.getElementById('btnSavePin'),
+    btnDeletePin: document.getElementById('btnDeletePin'),
+    btnAddPin: document.getElementById('btnAddPin'),
+    btnGizmo: document.getElementById('btnGizmo'),
+    btnUndo: document.getElementById('btnUndo'),
+    modeLabel: document.getElementById('modeLabel'),
+    btnSignIn: document.getElementById('btnSignIn'),
+  });
 
+  // Google init polling (load order agnostic)
+  const tick = setInterval(()=>{
+    if(window.__gm.gapi && window.gapi && !gapiInited){ gapi.load('client', initGapiClient); }
+    if(window.__gm.gis && !gisInited){ gisInited = true; maybeReady(); }
+    if(gapiInited && gisInited){ clearInterval(tick); }
+  }, 200);
+
+  el.btnSignIn.addEventListener('click', ()=>{
+    if(!tokenClient){ alert('Google API 初期化中。少し待って再試行'); return; }
+    tokenClient.requestAccessToken({ prompt:'consent' });
+  });
+
+  // Viewer init
+  viewerInit();
+
+  // Restore from query
+  const q = new URLSearchParams(location.search);
+  if(q.get('fileId')) el.inputGLB.value = q.get('fileId');
+  if(q.get('sheetId')) el.inputSheet.value = q.get('sheetId');
+
+  // UI events
+  el.btnLoad && el.btnLoad.addEventListener('click', ()=>{
+    const fid = extractDriveFileId(el.inputGLB.value.trim());
+    const sid = extractSpreadsheetId(el.inputSheet.value.trim());
+    el.inputGLB.value = fid; el.inputSheet.value = sid;
+    loadGLBByFileId(fid);
+  });
+  el.btnUndo && el.btnUndo.addEventListener('click', undo);
+  el.capTitle && el.capTitle.addEventListener('input', ()=>{ const p=pins.find(x=>x.id===selectedPinId); if(!p) return; p.title=el.capTitle.value; refreshPinsList(); });
+  el.capBody && el.capBody.addEventListener('input',  ()=>{ const p=pins.find(x=>x.id===selectedPinId); if(!p) return; p.body =el.capBody.value; });
+  el.btnDeletePin && el.btnDeletePin.addEventListener('click', ()=>{ if(!selectedPinId) return; removePin(selectedPinId); });
+  el.btnSavePin && el.btnSavePin.addEventListener('click', savePinToSheet);
+  document.getElementById('btnViewOnly')?.addEventListener('click', ()=>{
+    const fid = extractDriveFileId(el.inputGLB.value.trim());
+    const sid = extractSpreadsheetId(el.inputSheet.value.trim());
+    const url = new URL(location.href); url.searchParams.set('view','1'); url.searchParams.set('fileId', fid); url.searchParams.set('sheetId', sid);
+    navigator.clipboard.writeText(url.toString()); toast('閲覧リンクをコピーしました');
+  });
+
+  // Keyboard
+  window.addEventListener('keydown', (e)=>{ if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='z'){ e.preventDefault(); el.btnUndo?.click(); } });
+});
+
+// ====== Google init ======
 async function initGapiClient(){
   try{
     await gapi.client.init({ apiKey: API_KEY, discoveryDocs: DISCOVERY_DOCS });
     gapiInited = true; maybeReady();
-  }catch(e){ console.error('gapi init failed', e); }
+  }catch(e){
+    console.error('gapi init failed', e);
+  }
 }
-
 function maybeReady(){
   if(!gapiInited || !gisInited) return;
   tokenClient = google.accounts.oauth2.initTokenClient({
@@ -182,39 +240,14 @@ function maybeReady(){
     callback: (resp)=>{
       accessToken = resp.access_token;
       if(accessToken){
-        document.querySelector('.signin-gate')?.remove();
+        el.gate.style.display='none';
         toast('Signed in');
       }
     }
   });
 }
 
-// ====== Gate ======
-addGate();
-function addGate(){
-  const gate = document.createElement('div'); gate.className='signin-gate'; gate.innerHTML = `
-    <div class="card">
-      <h1>Googleにサインイン</h1>
-      <p>本ツールは Google Drive / Google Sheets を使用します。先にサインインしてください。</p>
-      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
-        <button id="btnSignIn" class="accent" style="font-weight:700">🔐 Sign in with Google</button>
-        <span class="meta" style="opacity:.8">OAuth2 (Drive.file / Sheets)</span>
-      </div>
-      <div style="margin-top:10px;color:#9eb2c8;font-size:.9rem"><code>CLIENT_ID configured • API_KEY configured</code></div>
-    </div>`;
-  document.body.appendChild(gate);
-  document.getElementById('btnSignIn').addEventListener('click', ()=>{
-    if(!tokenClient){ alert('Google API 初期化中。少し待って再試行'); return; }
-    tokenClient.requestAccessToken({ prompt:'consent' });
-  });
-}
-
-// ====== Three.js viewer ======
-let renderer, scene, camera, controls, tcontrols, pinGroup;
-let raycaster = new THREE.Raycaster(), pointer = new THREE.Vector2();
-let loader = new GLTFLoader(), currentModel=null;
-viewerInit();
-
+// ====== Viewer (UMD) ======
 function viewerInit(){
   renderer = new THREE.WebGLRenderer({ canvas: el.viewerCanvas, antialias:true });
   scene = new THREE.Scene();
@@ -223,9 +256,11 @@ function viewerInit(){
   camera.position.set(2.8,1.6,3.6);
   const hemi = new THREE.HemisphereLight(0xffffff, 0x223355, 0.6); scene.add(hemi);
   const dir = new THREE.DirectionalLight(0xffffff, 1.0); dir.position.set(3,5,4); scene.add(dir);
-  controls = new OrbitControls(camera, el.viewerCanvas); controls.target.set(0,1,0); controls.update();
-  tcontrols = new TransformControls(camera, el.viewerCanvas); tcontrols.setSize(0.9); tcontrols.setSpace('world'); tcontrols.addEventListener('dragging-changed', e=>{ controls.enabled = !e.value; }); scene.add(tcontrols); tcontrols.visible=false;
+  controls = new THREE.OrbitControls(camera, el.viewerCanvas); controls.target.set(0,1,0); controls.update();
+  tcontrols = new THREE.TransformControls(camera, el.viewerCanvas); tcontrols.setSize(0.9); tcontrols.setSpace('world'); tcontrols.addEventListener('dragging-changed', e=>{ controls.enabled = !e.value; }); scene.add(tcontrols); tcontrols.visible=false;
   pinGroup = new THREE.Group(); scene.add(pinGroup);
+  raycaster = new THREE.Raycaster(); pointer = new THREE.Vector2();
+  loader = new THREE.GLTFLoader();
   window.addEventListener('resize', resize); el.viewerCanvas.addEventListener('pointerdown', onPointerDown);
   resize(); animate();
 }
@@ -281,21 +316,8 @@ async function savePinToSheet(){
     toast('保存しました（append）');
   }catch(e){ console.error(e); alert('保存に失敗しました'); }
 }
-el.btnSavePin?.addEventListener('click', savePinToSheet);
 
-// ====== UI misc ======
-document.getElementById('btnViewOnly')?.addEventListener('click', ()=>{
-  const fid = extractDriveFileId(el.inputGLB.value.trim());
-  const sid = extractSpreadsheetId(el.inputSheet.value.trim());
-  const url = new URL(location.href); url.searchParams.set('view','1'); url.searchParams.set('fileId', fid); url.searchParams.set('sheetId', sid);
-  navigator.clipboard.writeText(url.toString()); toast('閲覧リンクをコピーしました');
-});
-(function(){
-  const q = new URLSearchParams(location.search);
-  if(q.get('fileId')) el.inputGLB.value = q.get('fileId');
-  if(q.get('sheetId')) el.inputSheet.value = q.get('sheetId');
-})();
-
+// ====== Utils ======
 function toast(msg){ el.statusLabel.textContent=msg; setTimeout(()=> el.statusLabel.textContent='Ready', 2000); }
 </script>
 </body>
