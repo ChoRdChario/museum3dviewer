@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>LociMyu v0.1 (UMD hotfix)</title>
+  <title>LociMyu v0.2 (ESM + static gate)</title>
   <link rel="icon" href='data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><circle cx="32" cy="32" r="28" fill="%230b0f14"/><text x="32" y="39" font-size="28" text-anchor="middle" fill="%2353b7ff" font-family="Arial">L</text></svg>'>
   <style>
     :root{ --bg:#0b0f14; --panel:#121922; --text:#e6edf3; --accent:#53b7ff; --muted:#8fa3bd; --radius:16px;}
@@ -26,6 +26,7 @@
     .hud{position:absolute;left:10px;bottom:10px;display:flex;gap:8px}
     .chip{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);padding:6px 10px;border-radius:999px}
     .spinner{position:absolute;inset:0;display:grid;place-items:center;background:linear-gradient(180deg, rgba(10,15,22,.75), rgba(10,15,22,.75));backdrop-filter: blur(2px);}
+    .spinner[hidden]{display:none}
     .lds{width:64px;height:64px;border-radius:50%;border:6px solid rgba(255,255,255,.12);border-top-color:var(--accent);animation:spin 1s linear infinite}
     @keyframes spin{to{transform:rotate(360deg)}}
     .signin-gate{position:fixed;inset:0;display:grid;place-items:center;background:radial-gradient(1200px 600px at 50% 15%, rgba(83,183,255,.08), transparent 60%), linear-gradient(180deg,#0a0f16,#05070b);z-index:20}
@@ -48,7 +49,7 @@
       <input id="inputSheet" type="text" placeholder="SpreadsheetId or share URL" />
       <button id="btnLoad" class="accent" disabled>GLBを読み込む</button>
       <button id="btnViewOnly">閲覧リンクを生成</button>
-      <span id="statusLabel" class="chip">初期化中…</span>
+      <span id="statusLabel" class="chip">サインイン待ち…</span>
     </div>
   </header>
   <div class="main">
@@ -87,6 +88,7 @@
   </div>
 </div>
 
+<!-- Static Sign-in Gate -->
 <div class="signin-gate" id="gate">
   <div class="card">
     <h1>Googleにサインイン</h1>
@@ -98,21 +100,22 @@
   </div>
 </div>
 
+<!-- Google flags -->
 <script>
-  window.__gm = { gapi:false, gis:false };
-  function onGapi(){ window.__gm.gapi = true; }
-  function onGis(){  window.__gm.gis  = true; }
+  window.__flags = { gapi:false, gis:false };
+  function onGapi(){ window.__flags.gapi = true; }
+  function onGis(){  window.__flags.gis  = true; }
 </script>
 <script async defer src="https://accounts.google.com/gsi/client" onload="onGis()"></script>
 <script async defer src="https://apis.google.com/js/api.js" onload="onGapi()"></script>
 
-<!-- THREE UMD r0.152.2 -->
-<script src="https://unpkg.com/three@0.152.2/build/three.min.js"></script>
-<script src="https://unpkg.com/three@0.152.2/examples/js/controls/OrbitControls.js"></script>
-<script src="https://unpkg.com/three@0.152.2/examples/js/loaders/GLTFLoader.js"></script>
-<script src="https://unpkg.com/three@0.152.2/examples/js/controls/TransformControls.js"></script>
+<script type="module">
+import * as THREE from 'https://unpkg.com/three@0.157.0/build/three.module.js';
+import { OrbitControls } from 'https://unpkg.com/three@0.157.0/examples/jsm/controls/OrbitControls.js';
+import { GLTFLoader } from 'https://unpkg.com/three@0.157.0/examples/jsm/loaders/GLTFLoader.js';
+import { TransformControls } from 'https://unpkg.com/three@0.157.0/examples/jsm/controls/TransformControls.js';
 
-<script>
+// ====== CONFIG ======
 const CLIENT_ID = '595200751510-ncahnf7edci6b9925becn5to49r6cguv.apps.googleusercontent.com';
 const API_KEY   = 'AIzaSyCUnTCr5yWUWPdEXST9bKP1LpgawU5rIbI';
 const DISCOVERY_DOCS = [
@@ -126,6 +129,30 @@ const SCOPES = [
   'https://www.googleapis.com/auth/spreadsheets'
 ].join(' ');
 
+// ====== Elements ======
+const el = {
+  gate: document.getElementById('gate'),
+  statusLabel: document.getElementById('statusLabel'),
+  inputGLB: document.getElementById('inputGLB'),
+  inputSheet: document.getElementById('inputSheet'),
+  btnLoad: document.getElementById('btnLoad'),
+  loading: document.getElementById('loading'),
+  viewerCanvas: document.getElementById('viewerCanvas'),
+  pinsList: document.getElementById('pinsList'),
+  rightNoSel: document.getElementById('noSelection'),
+  rightEditor: document.getElementById('editor'),
+  capTitle: document.getElementById('capTitle'),
+  capBody: document.getElementById('capBody'),
+  btnSavePin: document.getElementById('btnSavePin'),
+  btnDeletePin: document.getElementById('btnDeletePin'),
+  btnAddPin: document.getElementById('btnAddPin'),
+  btnGizmo: document.getElementById('btnGizmo'),
+  btnUndo: document.getElementById('btnUndo'),
+  modeLabel: document.getElementById('modeLabel'),
+  btnSignIn: document.getElementById('btnSignIn'),
+};
+
+// ====== Helper: share-link → ID ======
 function extractDriveFileId(input){
   if(!input) return '';
   const m1 = input.match(/\/file\/d\/([a-zA-Z0-9_-]{10,})/); if(m1) return m1[1];
@@ -141,112 +168,21 @@ function extractSpreadsheetId(input){
   return input.trim();
 }
 
-let tokenClient; let gapiInited=false, gisInited=false; let accessToken=null;
-let renderer, scene, camera, controls, tcontrols, pinGroup;
-let raycaster, pointer, loader, currentModel=null;
-let flags = { three:false, auth:false };
+// ====== Google init ======
+let tokenClient; let gapiInited=false; let gisInited=false; let accessToken=null;
+const waitGoogle = setInterval(()=>{
+  if(!gapiInited && window.__flags.gapi && window.gapi){ gapi.load('client', initGapiClient); }
+  if(!gisInited && window.__flags.gis){ gisInited = true; maybeReady(); }
+  if(gapiInited && gisInited){ clearInterval(waitGoogle); }
+}, 200);
 
-const el = {};
-
-document.addEventListener('DOMContentLoaded', () => {
-  Object.assign(el, {
-    gate: document.getElementById('gate'),
-    statusLabel: document.getElementById('statusLabel'),
-    inputGLB: document.getElementById('inputGLB'),
-    inputSheet: document.getElementById('inputSheet'),
-    btnLoad: document.getElementById('btnLoad'),
-    loading: document.getElementById('loading'),
-    viewerCanvas: document.getElementById('viewerCanvas'),
-    pinsList: document.getElementById('pinsList'),
-    rightNoSel: document.getElementById('noSelection'),
-    rightEditor: document.getElementById('editor'),
-    capTitle: document.getElementById('capTitle'),
-    capBody: document.getElementById('capBody'),
-    btnSavePin: document.getElementById('btnSavePin'),
-    btnDeletePin: document.getElementById('btnDeletePin'),
-    btnAddPin: document.getElementById('btnAddPin'),
-    btnGizmo: document.getElementById('btnGizmo'),
-    btnUndo: document.getElementById('btnUndo'),
-    modeLabel: document.getElementById('modeLabel'),
-    btnSignIn: document.getElementById('btnSignIn'),
-  });
-
-  // Google init polling
-  const tick = setInterval(()=>{
-    if(window.__gm.gapi && window.gapi && !gapiInited){ gapi.load('client', initGapiClient); }
-    if(window.__gm.gis && !gisInited){ gisInited = true; maybeReady(); }
-    if(gapiInited && gisInited){ clearInterval(tick); }
-  }, 200);
-
-  el.btnSignIn.addEventListener('click', ()=>{
-    if(!tokenClient){ alert('Google API 初期化中。少し待って再試行'); return; }
-    tokenClient.requestAccessToken({ prompt:'consent' });
-  });
-
-  // Wait for THREE extras then init viewer
-  waitForThreeExtras(()=>{
-    viewerInit();
-    flags.three = true;
-    updateUi();
-    toast('3D初期化完了');
-  });
-
-  // Query seed
-  const q = new URLSearchParams(location.search);
-  if(q.get('fileId')) el.inputGLB.value = q.get('fileId');
-  if(q.get('sheetId')) el.inputSheet.value = q.get('sheetId');
-
-  // UI events
-  el.btnLoad.addEventListener('click', ()=>{
-    if(!(flags.three && flags.auth)){ alert('サインインと初期化が完了してから実行してください'); return; }
-    const fid = extractDriveFileId(el.inputGLB.value.trim());
-    const sid = extractSpreadsheetId(el.inputSheet.value.trim());
-    if(!fid){ alert('GLBの fileId または共有URLを入力してください'); return; }
-    el.inputGLB.value = fid; el.inputSheet.value = sid || el.inputSheet.value;
-    loadGLBByFileId(fid);
-  });
-  el.btnUndo.addEventListener('click', undo);
-  el.capTitle && el.capTitle.addEventListener('input', ()=>{ const p=pins.find(x=>x.id===selectedPinId); if(!p) return; p.title=el.capTitle.value; refreshPinsList(); });
-  el.capBody && el.capBody.addEventListener('input',  ()=>{ const p=pins.find(x=>x.id===selectedPinId); if(!p) return; p.body =el.capBody.value; });
-  el.btnDeletePin && el.btnDeletePin.addEventListener('click', ()=>{ if(!selectedPinId) return; removePin(selectedPinId); });
-  el.btnSavePin && el.btnSavePin.addEventListener('click', savePinToSheet);
-  document.getElementById('btnViewOnly')?.addEventListener('click', ()=>{
-    const fid = extractDriveFileId(el.inputGLB.value.trim());
-    const sid = extractSpreadsheetId(el.inputSheet.value.trim());
-    const url = new URL(location.href); url.searchParams.set('view','1'); if(fid) url.searchParams.set('fileId', fid); if(sid) url.searchParams.set('sheetId', sid);
-    navigator.clipboard.writeText(url.toString()); toast('閲覧リンクをコピーしました');
-  });
-
-  // Keyboard
-  window.addEventListener('keydown', (e)=>{ if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='z'){ e.preventDefault(); el.btnUndo?.click(); } });
-});
-
-function updateUi(){
-  const enable = flags.three && flags.auth;
-  ['btnLoad','btnAddPin','btnGizmo','btnUndo','btnSavePin','btnDeletePin'].forEach(id=>{
-    const b = document.getElementById(id); if(!b) return;
-    if(enable) b.removeAttribute('disabled'); else b.setAttribute('disabled','true');
-  });
-  el.statusLabel.textContent = enable ? 'Ready' : '初期化中…';
-}
-
-// Wait for extras
-function waitForThreeExtras(cb){
-  const ok = () => window.THREE && (THREE.OrbitControls||window.OrbitControls) && (THREE.GLTFLoader||window.GLTFLoader) && (THREE.TransformControls||window.TransformControls);
-  if(ok()) return cb();
-  const iv = setInterval(()=>{ if(ok()){ clearInterval(iv); cb(); } }, 100);
-}
-function ctor_OrbitControls(){ return THREE.OrbitControls || window.OrbitControls; }
-function ctor_TransformControls(){ return THREE.TransformControls || window.TransformControls; }
-function ctor_GLTFLoader(){ return THREE.GLTFLoader || window.GLTFLoader; }
-
-// Google init
 async function initGapiClient(){
   try{
     await gapi.client.init({ apiKey: API_KEY, discoveryDocs: DISCOVERY_DOCS });
     gapiInited = true; maybeReady();
   }catch(e){ console.error('gapi init failed', e); }
 }
+
 function maybeReady(){
   if(!gapiInited || !gisInited) return;
   tokenClient = google.accounts.oauth2.initTokenClient({
@@ -254,14 +190,19 @@ function maybeReady(){
     callback: (resp)=>{
       accessToken = resp.access_token;
       if(accessToken){
-        el.gate.style.display='none'; flags.auth = true; updateUi();
-        toast('Signed in');
+        el.gate.style.display = 'none';
+        // enable UI after auth (three is already ready because ESM imports are synchronous)
+        ['btnLoad','btnAddPin','btnGizmo','btnUndo','btnSavePin','btnDeletePin'].forEach(id=>{
+          const b = document.getElementById(id); if(b) b.removeAttribute('disabled');
+        });
+        el.statusLabel.textContent = 'Ready';
       }
     }
   });
 }
 
-// Viewer
+// ====== Three viewer ======
+let renderer, scene, camera, controls, tcontrols, pinGroup, loader, currentModel=null;
 function viewerInit(){
   renderer = new THREE.WebGLRenderer({ canvas: el.viewerCanvas, antialias:true });
   scene = new THREE.Scene();
@@ -270,41 +211,37 @@ function viewerInit(){
   camera.position.set(2.8,1.6,3.6);
   const hemi = new THREE.HemisphereLight(0xffffff, 0x223355, 0.6); scene.add(hemi);
   const dir = new THREE.DirectionalLight(0xffffff, 1.0); dir.position.set(3,5,4); scene.add(dir);
-
-  const OrbitCtor = ctor_OrbitControls();
-  const TransformCtor = ctor_TransformControls();
-  controls = new OrbitCtor(camera, el.viewerCanvas); controls.target.set(0,1,0); controls.update();
-  tcontrols = new TransformCtor(camera, el.viewerCanvas); tcontrols.setSize(0.9); tcontrols.setSpace('world'); tcontrols.addEventListener('dragging-changed', e=>{ controls.enabled = !e.value; }); scene.add(tcontrols); tcontrols.visible=false;
-
+  controls = new OrbitControls(camera, el.viewerCanvas); controls.target.set(0,1,0); controls.update();
+  tcontrols = new TransformControls(camera, el.viewerCanvas); tcontrols.setSize(0.9); tcontrols.setSpace('world'); tcontrols.addEventListener('dragging-changed', e=>{ controls.enabled = !e.value; }); scene.add(tcontrols); tcontrols.visible=false;
   pinGroup = new THREE.Group(); scene.add(pinGroup);
-  raycaster = new THREE.Raycaster(); pointer = new THREE.Vector2();
-  const LoaderCtor = ctor_GLTFLoader(); loader = new LoaderCtor();
-
-  window.addEventListener('resize', resize); el.viewerCanvas.addEventListener('pointerdown', onPointerDown);
+  loader = new GLTFLoader();
+  window.addEventListener('resize', resize);
+  el.viewerCanvas.addEventListener('pointerdown', onPointerDown);
   resize(); animate();
 }
 function resize(){ const w = el.viewerCanvas.clientWidth || el.viewerCanvas.parentElement.clientWidth; const h = el.viewerCanvas.clientHeight || el.viewerCanvas.parentElement.clientHeight; renderer.setSize(w,h,false); camera.aspect=w/h; camera.updateProjectionMatrix(); }
 function animate(){ requestAnimationFrame(animate); renderer.render(scene,camera); }
 function renderNow(){ renderer.render(scene,camera); }
+viewerInit();
 
-// GLB load
+// ====== GLB load ======
 async function loadGLBByFileId(fileId){
   if(!accessToken){ alert('先にサインインしてください'); return; }
-  // Ensure loader is constructed (extra guard)
-  if(!loader){
-    const LoaderCtor = ctor_GLTFLoader();
-    if(!LoaderCtor){ alert('3Dライブラリ初期化中です。数秒後に再試行してください。'); return; }
-    loader = new LoaderCtor();
-  }
+  if(!fileId){ alert('GLBの fileId または共有URLを入力してください'); return; }
   el.loading.hidden = false;
   try{
-    toast('GLBを読み込み中…');
+    el.statusLabel.textContent = 'GLBを読み込み中…';
+    // probe metadata (for name)
     const meta = await gapi.client.drive.files.get({ fileId, fields:'id,name,mimeType' });
     const dlUrl = `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`;
     const res = await fetch(dlUrl, { headers:{ Authorization:`Bearer ${accessToken}` } });
-    if(!res.ok){ throw new Error('Drive download failed: ' + res.status + ' ' + res.statusText); }
+    if(!res.ok){
+      let hint = '';
+      if(res.status === 403 || res.status === 404){ hint = '（IDや共有設定を確認してください）'; }
+      throw new Error(`Drive download failed: ${res.status} ${res.statusText} ${hint}`);
+    }
     const ab = await res.arrayBuffer();
-    // Dispose previous
+    // dispose previous
     if(currentModel){
       scene.remove(currentModel);
       currentModel.traverse(o=>{ if(o.geometry) o.geometry.dispose(); if(o.material){ if(Array.isArray(o.material)) o.material.forEach(m=>m.dispose()); else o.material.dispose(); } });
@@ -315,17 +252,18 @@ async function loadGLBByFileId(fileId){
         loader.parse(ab, '', (gltf)=>{ currentModel = gltf.scene; scene.add(currentModel); fitToScene(); resolve(); }, (err)=> reject(err||new Error('parse failed')) );
       }catch(err){ reject(err); }
     });
-    toast(`Loaded: ${meta.result.name}`);
+    el.statusLabel.textContent = `Loaded: ${meta.result.name}`;
   }catch(err){
     console.error(err);
-    alert('GLB読み込みに失敗しました（詳細はコンソールを確認）');
+    el.statusLabel.textContent = 'Load failed';
+    alert('GLB読み込みに失敗しました：' + (err?.message || 'unknown error'));
   }finally{
     el.loading.hidden = true;
   }
 }
 function fitToScene(){ if(!currentModel) return; const box = new THREE.Box3().setFromObject(currentModel); const size = box.getSize(new THREE.Vector3()); const center = box.getCenter(new THREE.Vector3()); const maxDim = Math.max(size.x,size.y,size.z)||1; const dist = maxDim*1.6; camera.position.copy(center.clone().add(new THREE.Vector3(dist, dist*0.7, dist))); controls.target.copy(center); controls.update(); }
 
-// Pins (short)
+// ====== Pins (short) ======
 let pins=[]; let selectedPinId=null; let undoStack=[];
 function addUndo(u){ undoStack.push(u); }
 function undo(){ const u = undoStack.pop(); if(!u) return; if(u.type==='move'){ const p=pins.find(x=>x.id===u.id); if(p){ p.pos.copy(u.from); placePinMesh(p); selectPin(p.id); renderNow(); } } else if(u.type==='add'){ removePin(u.id,{silent:true}); } else if(u.type==='delete'){ pins.push(u.pin); placePinMesh(u.pin); refreshPinsList(); selectPin(u.pin.id); renderNow(); } }
@@ -335,18 +273,22 @@ function selectPin(id){ selectedPinId=id; const p=pins.find(x=>x.id===id); if(!p
 function refreshPinsList(){ el.pinsList.innerHTML=''; pins.forEach(p=>{ const row=document.createElement('div'); row.className='row'; row.dataset.id=p.id; const left=document.createElement('div'); left.style.display='flex'; left.style.alignItems='center'; left.style.gap='8px'; const dot=document.createElement('div'); dot.style.width='10px'; dot.style.height='10px'; dot.style.borderRadius='999px'; dot.style.background=p.color; left.appendChild(dot); const title=document.createElement('div'); title.className='title'; title.textContent=p.title||'(無題)'; left.appendChild(title); const meta=document.createElement('div'); meta.className='meta'; meta.textContent=`x:${p.pos.x.toFixed(2)} y:${p.pos.y.toFixed(2)} z:${p.pos.z.toFixed(2)}`; row.appendChild(left); row.appendChild(meta); row.addEventListener('click',()=>selectPin(p.id)); el.pinsList.appendChild(row); }); }
 function removePin(id,{silent}={}){ const idx=pins.findIndex(x=>x.id===id); if(idx<0) return; const pin=pins[idx]; if(pin.mesh){ pinGroup.remove(pin.mesh); pin.mesh.geometry.dispose(); pin.mesh.material.dispose(); } pins.splice(idx,1); if(!silent) addUndo({type:'delete',pin}); refreshPinsList(); el.rightEditor.hidden=true; el.rightNoSel.hidden=false; selectedPinId=null; }
 
-// Sheets save
-async function savePinToSheet(){
-  const sheetId = extractSpreadsheetId(el.inputSheet.value.trim()); if(!sheetId){ alert('Spreadsheet ID が未設定です'); return; }
-  const p = pins.find(x=>x.id===selectedPinId); if(!p){ alert('ピンを選択してください'); return; }
-  try{
-    const values = [[p.id, p.title, p.body, p.pos.x, p.pos.y, p.pos.z, p.color, JSON.stringify(p.images||[]), Date.now()]];
-    await gapi.client.sheets.spreadsheets.values.append({ spreadsheetId: sheetId, range: 'pins!A1', valueInputOption:'RAW', resource:{ values } });
-    toast('保存しました（append）');
-  }catch(e){ console.error(e); alert('保存に失敗しました'); }
-}
+// ====== UI wires ======
+document.getElementById('btnViewOnly')?.addEventListener('click', ()=>{
+  const fid = extractDriveFileId(el.inputGLB.value.trim());
+  const sid = extractSpreadsheetId(el.inputSheet.value.trim());
+  const url = new URL(location.href); url.searchParams.set('view','1'); if(fid) url.searchParams.set('fileId', fid); if(sid) url.searchParams.set('sheetId', sid);
+  navigator.clipboard.writeText(url.toString()); el.statusLabel.textContent='閲覧リンクをコピーしました'; setTimeout(()=> el.statusLabel.textContent='Ready', 1500);
+});
+el.btnLoad.addEventListener('click', ()=>{
+  const fid = extractDriveFileId(el.inputGLB.value.trim());
+  el.inputGLB.value = fid;
+  loadGLBByFileId(fid);
+});
 
-function toast(msg){ el.statusLabel.textContent=msg; setTimeout(()=> el.statusLabel.textContent='Ready', 2000); }
+// ====== Keyboard ======
+window.addEventListener('keydown', (e)=>{ if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='z'){ e.preventDefault(); document.getElementById('btnUndo')?.click(); } });
+
 </script>
 </body>
 </html>
