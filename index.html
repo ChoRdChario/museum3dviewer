@@ -2750,7 +2750,7 @@ btnGateSignIn?.addEventListener('click', async ()=>{
     statusEl.textContent='サインイン完了';
     hideSignInGate();
     scopeWarnEl.style.display = 'none';
-    if (extractDriveId(fileIdInput.value)) { btnLoad.click(); }
+    if (extractId(fileIdInput.value)) { btnLoad.click(); }
   }catch(e){
     console.error(e);
     statusEl.textContent='サインイン失敗';
@@ -2778,7 +2778,7 @@ btnAuth.onclick = async ()=>{
 };
 
 btnLoad.onclick = async ()=>{
-  const glbId = extractDriveId(fileIdInput.value);
+  const glbId = extractId(fileIdInput.value);
   const manualPinsId = extractDriveId(pinsIdInput.value);
   if(!glbId){ alert('GLBの fileId / 共有リンクを入力してください'); return; }
 
@@ -2873,7 +2873,7 @@ autoSaveEl.onchange = ()=>{ if (READ_ONLY) return; if (autoSaveEl.checked) sched
 btnPickPins.onclick = async ()=>{
   try{
     await ensureToken();
-    const glbId = extractDriveId(fileIdInput.value);
+    const glbId = extractId(fileIdInput.value);
     if(!glbId){
       alert('先にGLBを読み込んでください');
       return;
@@ -2968,7 +2968,7 @@ btnPickPins.onclick = async ()=>{
 };
 btnClearPins.onclick = ()=>{ pinsIdInput.value=''; loadedPinsId=''; loadedPinsName=''; updatePinsInfo(); refreshShareButtons(); };
 btnCopyReadonlyUrl.onclick = ()=>{
-  const glb = extractDriveId(fileIdInput.value);
+  const glb = extractId(fileIdInput.value);
   const pins = extractDriveId(pinsIdInput.value) || loadedPinsId || autosaveId || '';
   if (!glb){ alert('まずGLBのfileIdを設定してください'); return; }
   const url = new URL(window.location.href);
@@ -2978,7 +2978,7 @@ btnCopyReadonlyUrl.onclick = ()=>{
   copyText(url.toString(), '閲覧専用URLをコピーしました（限定ファイルは閲覧者の権限が必要です）');
 };
 btnToggleGlbPublic.onclick = async ()=>{
-  const glb = extractDriveId(fileIdInput.value);
+  const glb = extractId(fileIdInput.value);
   if (!glb){ alert('GLBのfileIdが未設定です'); return; }
   try{
     await ensureToken();
@@ -3902,6 +3902,28 @@ document.getElementById('toolInlineBtn')?.addEventListener('click', ()=>{
   // It keeps the original UI/flow and auto-save hooks intact.
 
   // ---- Minimal guards (work only if the original globals exist) ----
+
+  // === Fallback helpers ===
+  function _fallbackExtractDriveId(s){
+    if (!s) return '';
+    // Match /d/<id> or id parameter or plain 25+ char id
+    const m1 = String(s).match(/\/d\/([a-zA-Z0-9_-]{20,})/);
+    if (m1) return m1[1];
+    const m2 = String(s).match(/[?&](?:id|fileId)=([a-zA-Z0-9_-]{20,})/);
+    if (m2) return m2[1];
+    const m3 = String(s).match(/([a-zA-Z0-9_-]{25,})/);
+    return m3 ? m3[1] : '';
+  }
+  const extractId = (v) => (typeof window.extractDriveId === 'function') ? window.extractDriveId(v) : _fallbackExtractDriveId(v);
+
+  // === Disable legacy JSON backend hard ===
+  try{
+    window.loadPinsFromJson = ()=>{};
+    window.savePinsToJson = ()=>{};
+    window.ensurePinsJsonTarget = ()=>Promise.resolve('');
+    window.JSON_BACKEND_DISABLED = true;
+  }catch{}
+
   const g = window;
   if (!('fetch' in window)) return;
 
@@ -4289,7 +4311,7 @@ if (btnPickPins){
     try{
       await g.ensureToken?.();
       await ensureSheetsReady();
-      const glbId = (fileIdInput && fileIdInput.value) ? extractDriveId(fileIdInput.value) : '';
+      const glbId = (fileIdInput && fileIdInput.value) ? extractId(fileIdInput.value) : '';
       let parentId = '';
       if (glbId){
         const meta = await driveGetMetadata(glbId);
@@ -4375,7 +4397,7 @@ if (btnPickPins){
       document.getElementById('pinsUseAutosave')?.addEventListener('click', async ()=>{
         closeModal && closeModal();
         // GLBに紐づくスプレッドシートを自動作成→オートセーブへ
-        const glbId2 = (fileIdInput && fileIdInput.value) ? extractDriveId(fileIdInput.value) : '';
+        const glbId2 = (fileIdInput && fileIdInput.value) ? extractId(fileIdInput.value) : '';
         if (!glbId2){ alert('先にGLBを読み込んでください'); return; }
         const { spreadsheetId } = await ensureSpreadsheetForGlb(glbId2);
         pinsIdInput && (pinsIdInput.value = spreadsheetId);
@@ -4388,6 +4410,47 @@ if (btnPickPins){
     }
   };
 }
+
+
+  // === Sheets-first startup load ===
+  setTimeout(async ()=>{
+    try{
+      const sidRaw = pinsIdInput ? pinsIdInput.value : '';
+      const sid = sidRaw ? extractId(sidRaw) : '';
+      if (sid){
+        try{
+          statusEl && (statusEl.textContent='Pins 読込中…');
+        }catch{}
+        const { pins, materials } = await sheetsLoadAll(sid);
+        g.PINS = pins.map(p => ({
+          id: p.id, title: p.title, text: p.text, color: p.color || '#ee3333',
+          position: { x: p.pos?.x || 0, y: p.pos?.y || 0, z: p.pos?.z || 0 }
+        }));
+        g.MATERIALS = materials || {};
+        g.loadedPinsId = sid;
+        try{ const m=await driveGetMetadata(sid); g.loadedPinsName = m.name||''; }catch{}
+        if (g.redrawPins) g.redrawPins();
+        if (Array.isArray(g.materialList)){
+          for (const {name, material} of g.materialList){
+            const cfg = g.MATERIALS[name]; if (cfg && g.applyMaterialConfig) g.applyMaterialConfig(material, cfg);
+          }
+        }
+        if (g.buildMaterialsUI) g.buildMaterialsUI(materialsDockEl);
+        if (g.resetHistoryBaseline) g.resetHistoryBaseline();
+        if (g.syncDockMoveToggle) g.syncDockMoveToggle();
+        if (typeof updatePinsInfo === 'function') updatePinsInfo();
+        if (g.refreshShareButtons) g.refreshShareButtons();
+        setSaveStatus('ok','読み込み完了');
+      } else {
+        // If JSON was preloaded by legacy code, clear it to avoid confusion
+        if (Array.isArray(g.PINS) && g.PINS.length && window.JSON_BACKEND_DISABLED){
+          g.PINS = []; g.MATERIALS = {};
+          if (g.redrawPins) g.redrawPins();
+          setSaveStatus('muted','Sheets未選択（JSONは無効化）');
+        }
+      }
+    }catch(e){ console.warn('sheets-first startup failed', e); }
+  }, 800);
 
   // Ensure status shows the new backend
   // === Heartbeat autosave every 10s when enabled and sheet resolved ===
