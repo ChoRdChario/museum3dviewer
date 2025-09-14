@@ -4,6 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>LociMyu v0.1 Starter</title>
+  <link rel="icon" href="./favicon.ico">
   <style>
     :root{
       --bg:#0b0f14; --panel:#121922; --muted:#5d718a; --text:#e6edf3; --accent:#53b7ff; --good:#2ecc71; --warn:#f1c40f; --bad:#e74c3c;
@@ -150,9 +151,9 @@
   </div>
 </div>
 
-<!-- Google APIs scripts -->
-<script src="https://accounts.google.com/gsi/client" async defer></script>
-<script src="https://apis.google.com/js/api.js" async defer></script>
+<!-- Google APIs scripts with onload callbacks -->
+<script async defer src="https://accounts.google.com/gsi/client" onload="gisLoaded()"></script>
+<script async defer src="https://apis.google.com/js/api.js" onload="gapiLoaded()"></script>
 
 <script type="module">
 // ====== Imports (Three.js via ESM CDN) ======
@@ -235,11 +236,6 @@ function undo(){
 }
 
 // ====== Google APIs init ======
-window.addEventListener('load', () => {
-  window.gapiLoaded = () => { gapi.load('client', initGapiClient); };
-  window.gisLoaded = () => { gisInited = true; maybeReady(); };
-});
-
 async function initGapiClient(){
   await gapi.client.init({ apiKey: API_KEY, discoveryDocs: DISCOVERY_DOCS });
   gapiInited = true; maybeReady();
@@ -257,16 +253,6 @@ function maybeReady(){
   });
 }
 
-// Defer attach until scripts present
-const chk = setInterval(()=>{
-  if(window.google && window.google.accounts && window.gapi){
-    clearInterval(chk);
-    // hook global script callbacks
-    if(!window.gapiLoaded){ window.gapiLoaded = ()=>{} }
-    if(!window.gisLoaded){ window.gisLoaded = ()=>{} }
-  }
-}, 300);
-
 // Button: Sign-In
 el.btnSignIn.addEventListener('click', () => {
   if(!tokenClient){ alert('Google API 初期化中です。数秒後に再試行してください。'); return; }
@@ -274,10 +260,12 @@ el.btnSignIn.addEventListener('click', () => {
 });
 
 // ====== 3D Viewer setup ======
+const pinGroup = new THREE.Group();
+
 const rendererInit = () => {
   renderer = new THREE.WebGLRenderer({ canvas: el.viewerCanvas, antialias:true });
-  resize();
   scene = new THREE.Scene();
+  scene.add(pinGroup);
   scene.background = new THREE.Color(0x0a0f16);
   camera = new THREE.PerspectiveCamera(60, 2, 0.1, 2000);
   camera.position.set(2.8, 1.6, 3.6);
@@ -290,11 +278,14 @@ const rendererInit = () => {
 
   window.addEventListener('resize', resize);
   el.viewerCanvas.addEventListener('pointerdown', onPointerDown);
+  resize();
   animate();
 };
 
 function resize(){
-  const w = el.viewerCanvas.clientWidth; const h = el.viewerCanvas.clientHeight; renderer.setSize(w,h,false); camera.aspect = w/h; camera.updateProjectionMatrix();
+  const w = el.viewerCanvas.clientWidth || el.viewerCanvas.parentElement.clientWidth;
+  const h = el.viewerCanvas.clientHeight || el.viewerCanvas.parentElement.clientHeight;
+  renderer.setSize(w,h,false); camera.aspect = w/h; camera.updateProjectionMatrix();
 }
 
 function animate(){ requestAnimationFrame(animate); renderer.render(scene,camera); }
@@ -306,12 +297,16 @@ async function loadGLBByFileId(fileId){
   try{
     el.loading.hidden=false; el.statusLabel.textContent='Loading GLB…';
     // Get file metadata & download URL (supports public/private)
-    const meta = await gapi.client.drive.files.get({ fileId, fields:'id,name,mimeType,webContentLink' });
+    const meta = await gapi.client.drive.files.get({ fileId, fields:'id,name,mimeType,parents' });
     const dlUrl = `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`;
     const glbArrayBuffer = await fetch(dlUrl, { headers:{ Authorization:`Bearer ${accessToken}` } }).then(r=>r.arrayBuffer());
 
     // Clear old model
-    if(currentModel){ scene.remove(currentModel); currentModel.traverse(o=>{ if(o.geometry) o.geometry.dispose(); if(o.material) { if(Array.isArray(o.material)) o.material.forEach(m=>m.dispose()); else o.material.dispose(); } }); currentModel=null; }
+    if(currentModel){
+      scene.remove(currentModel);
+      currentModel.traverse(o=>{ if(o.geometry) o.geometry.dispose(); if(o.material) { if(Array.isArray(o.material)) o.material.forEach(m=>m.dispose()); else o.material.dispose(); } });
+      currentModel=null;
+    }
 
     // Load GLB
     await new Promise((resolve,reject)=>{
@@ -324,18 +319,17 @@ async function loadGLBByFileId(fileId){
 }
 
 function fitToScene(){
+  if(!currentModel) return;
   const box = new THREE.Box3().setFromObject(currentModel);
   const size = box.getSize(new THREE.Vector3());
   const center = box.getCenter(new THREE.Vector3());
-  const maxDim = Math.max(size.x,size.y,size.z);
+  const maxDim = Math.max(size.x,size.y,size.z) || 1;
   const dist = maxDim * 1.6;
   camera.position.copy(center.clone().add(new THREE.Vector3(dist, dist*0.7, dist)));
   controls.target.copy(center); controls.update();
 }
 
 // ====== Pins: 3D spheres + selection ======
-const pinGroup = new THREE.Group(); scene?.add?.(pinGroup);
-
 function createPin(pos, color){
   const id = `p_${Date.now()}_${Math.random().toString(36).slice(2,7)}`;
   const pin = { id, pos: pos.clone(), color: color || '#ff6b6b', title:'', body:'', images:[], mesh:null };
@@ -397,14 +391,12 @@ function getIntersectPoint(event){
 
 function onPointerDown(e){
   if(!currentModel) return;
-  // If transform controls taking the drag, ignore
   if(tcontrols.dragging) return;
 
   if(addPinMode){
     const pt = getIntersectPoint(e);
     if(pt){ createPin(pt, currentColor); setAddPinMode(false); }
   } else {
-    // selection by clicking sphere
     const rect = el.viewerCanvas.getBoundingClientRect();
     pointer.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
     pointer.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
@@ -492,7 +484,7 @@ el.localImage.addEventListener('change', async (ev)=>{
   const file = ev.target.files?.[0]; if(!file) return; const p = pins.find(x=>x.id===selectedPinId); if(!p) return;
   // For preview only in v0.1
   const url = URL.createObjectURL(file);
-  const card = document.createElement('div'); card.className='row'; card.innerHTML = `<div class="title">${file.name}</div><div class="meta">ローカルプレビューのみ</div>`;
+  const card = document.createElement('div'); card.className='row'; card.innerHTML = `<div class="title">\${file.name}</div><div class="meta">ローカルプレビューのみ</div>`;
   el.thumbs.appendChild(card);
   p.images = p.images||[]; p.images.push({fileId:null,name:file.name,mime:file.type,local:url});
 });
@@ -526,42 +518,17 @@ document.getElementById('btnViewOnly').addEventListener('click', ()=>{
 // Boot
 rendererInit();
 
-</script>
+// Expose global callbacks expected by Google scripts
+window.gapiLoaded = () => { gapi.load('client', initGapiClient); };
+window.gisLoaded  = () => { gisInited = true; maybeReady(); };
 
-<!-- Notes: Data Schema (Google Sheets)
-Spreadsheet (spreadsheetId)
-  Sheet name: pins
-  Header Row (A1:J1):
-    id | title | body | x | y | z | color | images_json | updated_at_ms | author_email
-- Future: one sheet per save-set (pins_20250914 etc.) and an index sheet listing sets.
-- Concurrency (v0.3+):
-    - Each row also has rev number; app reads row, compares rev before update (best-effort CAS using read-modify-write with batchUpdate).
-    - Polling every ~5s to refresh list, show presence (Presence sheet: session_id, user, last_seen_ms).
-
-Permissions (OAuth scopes):
-  drive.file, drive.readonly, drive.metadata.readonly, spreadsheets
-
-Drive Uploads (v0.2+):
-  - Determine parent folder of GLB via Drive files.get(fields: parents)
-  - Upload images to same parent via multipart upload; record fileId in images_json.
-
-HEIC (v0.2+):
-  - Client-side convert using a pure JS lib (e.g., heic2any) before upload + preview.
-
-Undo (Ctrl+Z):
-  - add / move / delete actions pushed to undoStack; on keydown Ctrl+Z -> undo().
-
-Transform Controls:
-  - Click ギズモ to cycle translate/rotate/scale.
-
--->
-
-<script>
-// global callbacks expected by Google scripts
-function gapiLoaded(){ if(window.gapi && window.gapi.load){ window.gapiLoaded(); } }
-function gisLoaded(){ if(window.gisLoaded){ window.gisLoaded(); } }
 // Keyboard shortcuts
-window.addEventListener('keydown', (e)=>{ if((e.ctrlKey||e.metaKey) && e.key.toLowerCase()==='z'){ e.preventDefault(); const mod = document.querySelector('#right'); const btn = document.querySelector('#btnUndo'); if(btn) btn.click(); } });
+window.addEventListener('keydown', (e)=>{
+  if((e.ctrlKey||e.metaKey) && e.key.toLowerCase()==='z'){
+    e.preventDefault();
+    document.querySelector('#btnUndo')?.click();
+  }
+});
 </script>
 </body>
 </html>
