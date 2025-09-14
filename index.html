@@ -3,572 +3,565 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>GLB Viewer + Sheets Pins (ESM)</title>
+  <title>LociMyu v0.1 Starter</title>
   <style>
-    :root{--bg:#0b0f14;--panel:#101823;--muted:#9bb0c6;--text:#e9f1fb;--line:#1f2a3a;--accent:#4cc9f0;--ok:#4caf50;--warn:#fbc02d;--err:#ef5350}
-    html,body{height:100%;margin:0;background:var(--bg);color:var(--text);font:14px/1.6 system-ui,"Segoe UI",Roboto,"Noto Sans JP",sans-serif;overflow:hidden}
-    header{display:flex;gap:10px;align-items:center;padding:8px 12px;background:#0c141e;border-bottom:1px solid var(--line)}
-    .pill{padding:4px 10px;border:1px solid var(--line);border-radius:999px;color:#cfe3ff;background:#132135}
-    .muted{color:var(--muted)}
-    .btn{background:#162134;border:1px solid #273247;color:#d9e9ff;border-radius:10px;padding:6px 10px;cursor:pointer}
-    .btn[disabled]{opacity:.55;cursor:not-allowed}
-    .ok{background:#14301a;border-color:#27552c}
-    .warn{background:#332909;border-color:#5b4f1a}
-    .err{background:#3a1111;border-color:#5b1c1c}
-    .layout{display:grid; grid-template-columns: 1fr 360px; grid-template-rows: auto 1fr; height:calc(100% - 48px)}
-    .toolbar{grid-column:1/3; display:flex; gap:10px; align-items:center; padding:8px; border-bottom:1px solid var(--line); background:#0c1624}
-    .panel{background:var(--panel); border-left:1px solid var(--line); display:flex; flex-direction:column}
-    .viewer{position:relative; background:#060a10}
-    canvas{display:block}
-    .kv{display:grid; grid-template-columns: 140px 1fr; gap:8px; align-items:center; padding:8px}
-    input, select, textarea{background:#0e1520;border:1px solid #243047;color:#e6f2ff;border-radius:10px;padding:6px 8px;width:100%; font:inherit}
-    textarea{min-height:64px; resize:vertical}
-    .row{display:flex; gap:8px; align-items:center}
-    .sep{flex:1}
-    .tiny{font-size:12px;color:var(--muted)}
-    .status{min-width:140px;text-align:center;padding:4px 8px;border-radius:999px;border:1px solid #273247;background:#132135}
-    .list{flex:1; overflow:auto; padding:8px}
-    table{width:100%; border-collapse:collapse}
-    th,td{border-bottom:1px solid #223046; padding:6px 8px; font-size:12px; vertical-align:top}
-    th{position:sticky; top:0; background:#142034; color:#cfe3ff; text-align:left; z-index:1}
-    .log{white-space:pre-wrap;background:#0a1018;border-top:1px solid #1d293a;padding:8px;max-height:160px;overflow:auto}
-    .pinRow.selected{background:#13263f}
-    .badge{display:inline-block; padding:2px 6px; border-radius:999px; background:#18253a; border:1px solid #273247; font-size:11px; color:#cfe3ff}
+    :root{
+      --bg:#0b0f14; --panel:#121922; --muted:#5d718a; --text:#e6edf3; --accent:#53b7ff; --good:#2ecc71; --warn:#f1c40f; --bad:#e74c3c;
+      --radius:16px;
+    }
+    html,body{height:100%;}
+    body{margin:0;background:var(--bg);color:var(--text);font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", "Apple Color Emoji", "Segoe UI Emoji";}
+    .app{display:grid;grid-template-rows:auto 1fr; height:100vh;}
+
+    /* Header */
+    header{display:flex;gap:.75rem;align-items:center;padding:10px 12px;background:linear-gradient(180deg,#0e1520,#0b0f14);border-bottom:1px solid #1e2837;}
+    header .brand{display:flex;align-items:center;gap:.5rem;font-weight:700;letter-spacing:.3px}
+    .pill{background:rgba(255,255,255,.06);padding:6px 10px;border-radius:999px;border:1px solid rgba(255,255,255,.08);}
+    input[type=text]{background:#0f1722;border:1px solid #203049;color:var(--text);border-radius:10px;padding:8px 10px;min-width:260px}
+    button{background:#152133;color:var(--text);border:1px solid #223146;border-radius:10px;padding:8px 12px;cursor:pointer;}
+    button:hover{background:#1a2b45}
+    .accent{border-color:#2c82c9}
+
+    /* Layout */
+    .main{display:grid;grid-template-columns: 280px 1fr 320px;gap:10px;padding:10px;height:calc(100vh - 58px);}
+    .panel{background:var(--panel);border:1px solid #1e2837;border-radius:var(--radius);overflow:hidden;display:flex;flex-direction:column;min-height:0}
+    .panel h3{margin:0;padding:10px 12px;border-bottom:1px solid #203049;background:#0f1722;font-size:.95rem;font-weight:600}
+    .panel .body{padding:10px;overflow:auto}
+
+    /* Viewer */
+    #viewer{position:relative}
+    #viewerCanvas{display:block;width:100%;height:100%;background:#0a0f16;border-radius:var(--radius)}
+    .hud{position:absolute;left:10px;bottom:10px;display:flex;gap:8px}
+    .chip{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);padding:6px 10px;border-radius:999px}
+
+    /* Spinner */
+    .spinner{position:absolute;inset:0;display:grid;place-items:center;background:linear-gradient(180deg, rgba(10,15,22,.75), rgba(10,15,22,.75));backdrop-filter: blur(2px);}
+    .lds{width:64px;height:64px;border-radius:50%;border:6px solid rgba(255,255,255,.12);border-top-color:var(--accent);animation:spin 1s linear infinite}
+    @keyframes spin{to{transform:rotate(360deg)}}
+
+    /* Sign-in gate */
+    .signin-gate{position:fixed;inset:0;display:grid;place-items:center;background:radial-gradient(1200px 600px at 50% 15%, rgba(83,183,255,.08), transparent 60%), linear-gradient(180deg,#0a0f16,#05070b);z-index:20}
+    .card{width:min(560px,92vw);background:#0c1118;border:1px solid #1d2a3d;border-radius:24px;box-shadow:0 10px 30px rgba(0,0,0,.3);padding:20px}
+    .card h1{margin:4px 0 8px;font-size:1.35rem}
+    .card p{color:#c2d0e2;opacity:.9}
+
+    /* Lists */
+    .list{display:flex;flex-direction:column;gap:8px}
+    .list .row{display:flex;align-items:center;justify-content:space-between;gap:8px;background:#0f1722;border:1px solid #203049;border-radius:12px;padding:10px}
+    .row .title{font-weight:600}
+    .row .meta{color:#a9b8cf;font-size:.85rem}
+
+    .toolbar{display:flex;gap:8px;flex-wrap:wrap}
+    .colors{display:flex;gap:6px}
+    .sw{width:18px;height:18px;border-radius:999px;border:1px solid rgba(255,255,255,.3);cursor:pointer}
+
+    /* Mobile */
+    @media (max-width: 900px){
+      .main{grid-template-columns:1fr; grid-template-rows: 300px 1fr 300px}
+    }
   </style>
-  <script src="https://accounts.google.com/gsi/client" async defer></script>
-  <script src="https://apis.google.com/js/api.js" async defer></script>
 </head>
 <body>
-<header>
-  <div class="pill">GLB Viewer + Sheets Pins (ESM)</div>
-  <div id="authStatus" class="tiny">未サインイン</div>
-  <div class="sep"></div>
-  <button id="btnSignIn" class="btn">Googleにサインイン</button>
-  <button id="btnSignOut" class="btn warn" disabled>サインアウト</button>
-</header>
-
-<div class="layout">
-  <div class="toolbar">
-    <div class="row" style="gap:6px;">
-      <span class="tiny">GLB</span>
-      <input id="inpGlbId" placeholder="GLB fileId / 共有リンク" style="width:360px">
-      <button id="btnLoadGlb" class="btn">読み込む</button>
+<div class="app">
+  <header>
+    <div class="brand">
+      <span class="pill">LociMyu</span>
+      <span style="opacity:.8">v0.1 • GLB + Sheets Pins</span>
     </div>
-    <div class="row" style="gap:6px; margin-left:16px;">
-      <span class="tiny">シートID</span>
-      <input id="inpSheetId" placeholder="空なら同階層に &lt;GLB名&gt;_pins を自動作成" style="width:340px">
-      <button id="btnFindOrCreate" class="btn ok">検出/作成</button>
-      <button id="btnOpenSheet" class="btn" disabled>開く</button>
+    <div class="toolbar">
+      <input id="inputGLB" type="text" placeholder="GLB fileId (Google Drive)" />
+      <input id="inputSheet" type="text" placeholder="Pins spreadsheetId (Google Sheets)" />
+      <button id="btnLoad" class="accent">GLBを読み込む</button>
+      <button id="btnPick" title="(後日) Drive Picker">📁 ピッカー</button>
+      <button id="btnViewOnly">閲覧リンクを生成</button>
     </div>
-    <div class="sep"></div>
-    <label class="row tiny"><input type="checkbox" id="chkAutosave"> オートセーブ</label>
-    <span id="saveStatus" class="status">待機中</span>
-  </div>
+  </header>
 
-  <div class="viewer" id="viewer"></div>
-
-  <aside class="panel">
-    <div class="kv">
-      <label>選択ピン</label>
-      <div><span id="selPinId" class="badge">-</span></div>
-      <label>タイトル</label>
-      <input id="pinTitle" placeholder="Title">
-      <label>本文</label>
-      <textarea id="pinBody" placeholder="Body"></textarea>
-      <label>色 (#rrggbb)</label>
-      <input id="pinColor" placeholder="#ffcc00" value="#ffcc00">
-      <div class="row" style="grid-column:1/3; gap:8px;">
-        <button id="btnAddPin" class="btn">クリックで配置モード</button>
-        <button id="btnDelPin" class="btn warn">削除フラグ</button>
-        <div class="sep"></div>
-        <button id="btnSave" class="btn ok">差分を保存</button>
-        <button id="btnSnapshot" class="btn">スナップショット</button>
+  <div class="main">
+    <!-- Left: Pins list -->
+    <section class="panel" id="left">
+      <h3>キャプション / Pins</h3>
+      <div class="body">
+        <div class="toolbar" style="margin-bottom:8px">
+          <button id="btnAddPin">＋ ピン追加</button>
+          <button id="btnGizmo">ギズモ: OFF</button>
+          <button id="btnUndo">Ctrl+Z</button>
+          <div class="colors" id="colorPalette" title="ピン色">
+            <div class="sw" data-color="#ff6b6b" style="background:#ff6b6b"></div>
+            <div class="sw" data-color="#ffd166" style="background:#ffd166"></div>
+            <div class="sw" data-color="#06d6a0" style="background:#06d6a0"></div>
+            <div class="sw" data-color="#118ab2" style="background:#118ab2"></div>
+            <div class="sw" data-color="#c77dff" style="background:#c77dff"></div>
+          </div>
+        </div>
+        <div id="pinsList" class="list"></div>
       </div>
-    </div>
-    <div class="list">
-      <table>
-        <thead><tr><th>id</th><th>title</th><th>pos</th><th>v</th></tr></thead>
-        <tbody id="tblPins"></tbody>
-      </table>
-    </div>
-    <div id="log" class="log"></div>
-  </aside>
+    </section>
+
+    <!-- Center: 3D Viewer -->
+    <section class="panel" id="viewer">
+      <div class="spinner" id="loading" hidden><div class="lds"></div></div>
+      <canvas id="viewerCanvas"></canvas>
+      <div class="hud">
+        <div class="chip" id="modeLabel">Orbit</div>
+        <div class="chip" id="statusLabel">Ready</div>
+      </div>
+    </section>
+
+    <!-- Right: Caption editor -->
+    <section class="panel" id="right">
+      <h3>キャプション編集</h3>
+      <div class="body">
+        <div id="noSelection">ピンを選択してください</div>
+        <div id="editor" hidden>
+          <div style="display:flex;flex-direction:column;gap:8px">
+            <label>タイトル<input id="capTitle" type="text" placeholder="タイトル" /></label>
+            <label>本文<textarea id="capBody" rows="7" placeholder="キャプション本文"></textarea></label>
+            <div style="display:flex;gap:8px;align-items:center">
+              <button id="btnAttachDrive">Drive画像を添付</button>
+              <input id="localImage" type="file" accept="image/*,.heic,.heif" />
+            </div>
+            <div id="thumbs" class="list"></div>
+            <div style="opacity:.7;font-size:.9rem">座標: <span id="coords"></span></div>
+            <div style="display:flex;gap:8px;justify-content:space-between;align-items:center">
+              <button id="btnSavePin" class="accent">保存（Sheets）</button>
+              <button id="btnDeletePin" style="border-color:#5a1f26;color:#ffb4b4">削除</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </div>
 </div>
 
-<script type="module">
-import * as THREE from "https://unpkg.com/three@0.160.0/build/three.module.js";
-import { OrbitControls } from "https://unpkg.com/three@0.160.0/examples/jsm/controls/OrbitControls.js";
-import { GLTFLoader } from "https://unpkg.com/three@0.160.0/examples/jsm/loaders/GLTFLoader.js";
+<!-- Sign-in gate (Google Identity Services) -->
+<div class="signin-gate" id="gate">
+  <div class="card">
+    <h1>Googleにサインイン</h1>
+    <p>本ツールは Google Drive / Google Sheets を使用します。先にサインインしてください。</p>
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+      <button id="btnSignIn" class="accent" style="font-weight:700">🔐 Sign in with Google</button>
+      <span class="meta" style="opacity:.8">OAuth2 (Drive.file / Sheets)</span>
+    </div>
+    <div style="margin-top:10px;color:#9eb2c8;font-size:.9rem">
+      <div>⚙️ <b>設定が必要:</b> 下記の定数をあなたのプロジェクト値に差し替えてください。</div>
+      <code id="neededConsts"></code>
+    </div>
+  </div>
+</div>
 
-/* ============================== Config ============================== */
-const CONFIG = {
-  API_KEY: "YOUR_API_KEY_HERE",
-  CLIENT_ID: "YOUR_CLIENT_ID.apps.googleusercontent.com",
-};
+<!-- Google APIs scripts -->
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+<script src="https://apis.google.com/js/api.js" async defer></script>
+
+<script type="module">
+// ====== Imports (Three.js via ESM CDN) ======
+import * as THREE from 'https://unpkg.com/three@0.157.0/build/three.module.js';
+import { OrbitControls } from 'https://unpkg.com/three@0.157.0/examples/jsm/controls/OrbitControls.js';
+import { GLTFLoader } from 'https://unpkg.com/three@0.157.0/examples/jsm/loaders/GLTFLoader.js';
+import { TransformControls } from 'https://unpkg.com/three@0.157.0/examples/jsm/controls/TransformControls.js';
+
+// ====== CONFIG: Replace with your own ======
+const CLIENT_ID = '595200751510-ncahnf7edci6b9925becn5to49r6cguv.apps.googleusercontent.com';
+const API_KEY   = 'AIzaSyCUnTCr5yWUWPdEXST9bKP1LpgawU5rIbI';
 const DISCOVERY_DOCS = [
-  "https://www.googleapis.com/discovery/v1/apis/drive/v3/rest",
-  "https://sheets.googleapis.com/$discovery/rest?version=v4"
+  'https://www.googleapis.com/discovery/v1/apis/drive/v3/rest',
+  'https://www.googleapis.com/discovery/v1/apis/sheets/v4/rest'
 ];
 const SCOPES = [
-  "https://www.googleapis.com/auth/drive.file",
-  "https://www.googleapis.com/auth/drive.readonly",
-  "https://www.googleapis.com/auth/spreadsheets"
-].join(" ");
+  'https://www.googleapis.com/auth/drive.file',
+  'https://www.googleapis.com/auth/drive.readonly',
+  'https://www.googleapis.com/auth/drive.metadata.readonly',
+  'https://www.googleapis.com/auth/spreadsheets'
+].join(' ');
 
-/* ============================== State ============================== */
-let accessToken=null, tokenClient=null, gapiReady=false;
-let scene, camera, renderer, controls;
-let glbRoot=null, raycaster, mouse=new THREE.Vector2(), addMode=false;
-const markers = new Map(); // id -> THREE.Mesh
-let current = { glbId:"", glbName:"", parentId:"", sheetId:"" };
-let pins = [];          // in-memory
-let indexById = new Map();
-let dirty = new Set();
-let autosaveTimer = null;
-let selectedId = null;
+// Show missing consts in gate
+document.getElementById('neededConsts').textContent = `CLIENT_ID=${CLIENT_ID}\nAPI_KEY=${API_KEY}`;
 
-/* ============================== Utils ============================== */
-const $ = s=>document.querySelector(s);
-const esc = s => String(s??"").replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-const nowIso = () => new Date().toISOString();
-const log = s => { const el=$("#log"); el.textContent += s + "\\n"; el.scrollTop=el.scrollHeight; };
-const setAuth = t => $("#authStatus").textContent = t;
-function setSaveState(kind,msg){
-  const el=$("#saveStatus");
-  el.textContent = msg||({ok:"保存済み",pending:"保存中…",fail:"保存失敗",muted:"待機中"}[kind]||"");
-  el.style.background = {ok:"#14301a",pending:"#1f2637",fail:"#3a1111",muted:"#132135"}[kind]||"#132135";
-  el.style.borderColor = {ok:"#27552c",pending:"#273247",fail:"#5b1c1c",muted:"#273247"}[kind]||"#273247";
-}
-function extractId(s){
-  if(!s) return "";
-  const str=String(s);
-  const m1 = str.match(/\/d\/([a-zA-Z0-9_-]{20,})/); if(m1) return m1[1];
-  const m2 = str.match(/[?&](?:id|fileId)=([a-zA-Z0-9_-]{20,})/); if(m2) return m2[1];
-  const m3 = str.match(/([a-zA-Z0-9_-]{25,})/); return m3?m3[1]:"";
-}
-function cryptoRandomId(){ const a=new Uint8Array(16); crypto.getRandomValues(a); return [...a].map(b=>b.toString(16).padStart(2,"0")).join(""); }
+// ====== State ======
+let tokenClient; // GIS
+let gapiInited = false, gisInited = false;
+let accessToken = null;
 
-/* ============================== Boot ============================== */
-window.addEventListener("load", async ()=>{
-  initViewer();
-  bindUI();
-  // gapi
-  if (window.gapi){
-    gapi.load("client", async ()=>{
-      await gapi.client.init({ apiKey: CONFIG.API_KEY, discoveryDocs: DISCOVERY_DOCS });
-      gapiReady = true; log("gapi ready");
-    });
+let renderer, scene, camera, controls, tcontrols; // 3D
+let raycaster = new THREE.Raycaster();
+let pointer = new THREE.Vector2();
+let loader = new GLTFLoader();
+let currentModel = null;
+
+const el = {
+  gate: document.getElementById('gate'),
+  btnSignIn: document.getElementById('btnSignIn'),
+  btnLoad: document.getElementById('btnLoad'),
+  btnPick: document.getElementById('btnPick'),
+  btnAddPin: document.getElementById('btnAddPin'),
+  btnGizmo: document.getElementById('btnGizmo'),
+  btnUndo: document.getElementById('btnUndo'),
+  btnSavePin: document.getElementById('btnSavePin'),
+  btnDeletePin: document.getElementById('btnDeletePin'),
+  btnAttachDrive: document.getElementById('btnAttachDrive'),
+  localImage: document.getElementById('localImage'),
+  inputGLB: document.getElementById('inputGLB'),
+  inputSheet: document.getElementById('inputSheet'),
+  pinsList: document.getElementById('pinsList'),
+  loading: document.getElementById('loading'),
+  modeLabel: document.getElementById('modeLabel'),
+  statusLabel: document.getElementById('statusLabel'),
+  rightNoSel: document.getElementById('noSelection'),
+  rightEditor: document.getElementById('editor'),
+  capTitle: document.getElementById('capTitle'),
+  capBody: document.getElementById('capBody'),
+  coords: document.getElementById('coords'),
+  thumbs: document.getElementById('thumbs'),
+  viewerCanvas: document.getElementById('viewerCanvas'),
+  colorPalette: document.getElementById('colorPalette'),
+};
+
+// ====== Pins model (in-memory for v0.1) ======
+let pins = []; // {id, pos:THREE.Vector3, color:string, title, body, images:[{fileId, name, mime}]}
+let selectedPinId = null;
+let undoStack = []; // simple command stack for Ctrl+Z
+
+function addUndo(entry){ undoStack.push(entry); }
+function undo(){
+  const u = undoStack.pop(); if(!u) return;
+  if(u.type==='move'){
+    const p = pins.find(x=>x.id===u.id); if(p){ p.pos.copy(u.from); placePinMesh(p); selectPin(p.id); renderNow(); }
+  } else if(u.type==='add'){
+    removePin(u.id, {silent:true});
+  } else if(u.type==='delete'){
+    pins.push(u.pin); placePinMesh(u.pin); refreshPinsList(); selectPin(u.pin.id); renderNow();
   }
-  // GIS
-  if (window.google?.accounts?.oauth2){
-    tokenClient = google.accounts.oauth2.initTokenClient({
-      client_id: CONFIG.CLIENT_ID, scope: SCOPES, prompt:"",
-      callback: (resp)=>{
-        if (resp?.access_token){
-          accessToken = resp.access_token; setAuth("サインイン済み");
-          $("#btnSignOut").disabled=false; $("#btnSignIn").disabled=true; log("token acquired");
-        }
-      }
-    });
-  }
-  // hash token
-  try{
-    const h=new URLSearchParams((location.hash||"").replace(/^#/,""));
-    if (h.get("access_token")){ accessToken=h.get("access_token"); setAuth("サインイン済み"); history.replaceState(null,"",location.pathname+location.search); }
-  }catch{}
+}
+
+// ====== Google APIs init ======
+window.addEventListener('load', () => {
+  window.gapiLoaded = () => { gapi.load('client', initGapiClient); };
+  window.gisLoaded = () => { gisInited = true; maybeReady(); };
 });
 
-/* ============================== Viewer ============================== */
-function initViewer(){
-  const el = $("#viewer");
-  renderer = new THREE.WebGLRenderer({ antialias:true });
-  renderer.setSize(el.clientWidth, el.clientHeight);
-  el.appendChild(renderer.domElement);
+async function initGapiClient(){
+  await gapi.client.init({ apiKey: API_KEY, discoveryDocs: DISCOVERY_DOCS });
+  gapiInited = true; maybeReady();
+}
 
+function maybeReady(){
+  if(!gapiInited || !gisInited) return;
+  tokenClient = google.accounts.oauth2.initTokenClient({
+    client_id: CLIENT_ID,
+    scope: SCOPES,
+    callback: (resp) => {
+      accessToken = resp.access_token;
+      if(accessToken){ el.gate.style.display='none'; el.statusLabel.textContent='Signed in'; }
+    },
+  });
+}
+
+// Defer attach until scripts present
+const chk = setInterval(()=>{
+  if(window.google && window.google.accounts && window.gapi){
+    clearInterval(chk);
+    // hook global script callbacks
+    if(!window.gapiLoaded){ window.gapiLoaded = ()=>{} }
+    if(!window.gisLoaded){ window.gisLoaded = ()=>{} }
+  }
+}, 300);
+
+// Button: Sign-In
+el.btnSignIn.addEventListener('click', () => {
+  if(!tokenClient){ alert('Google API 初期化中です。数秒後に再試行してください。'); return; }
+  tokenClient.requestAccessToken({ prompt: 'consent' });
+});
+
+// ====== 3D Viewer setup ======
+const rendererInit = () => {
+  renderer = new THREE.WebGLRenderer({ canvas: el.viewerCanvas, antialias:true });
+  resize();
   scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x0a0f14);
-  camera = new THREE.PerspectiveCamera(60, el.clientWidth/el.clientHeight, 0.01, 1000);
-  camera.position.set(2.8, 1.6, 2.8);
+  scene.background = new THREE.Color(0x0a0f16);
+  camera = new THREE.PerspectiveCamera(60, 2, 0.1, 2000);
+  camera.position.set(2.8, 1.6, 3.6);
 
-  controls = new OrbitControls(camera, renderer.domElement);
-  controls.enableDamping = true;
+  const hemi = new THREE.HemisphereLight(0xffffff, 0x223355, 0.6); scene.add(hemi);
+  const dir = new THREE.DirectionalLight(0xffffff, 1.0); dir.position.set(3,5,4); scene.add(dir);
 
-  scene.add(new THREE.HemisphereLight(0xffffff, 0x223344, 1.0));
-  const dir = new THREE.DirectionalLight(0xffffff, 0.8); dir.position.set(3,4,5); scene.add(dir);
+  controls = new OrbitControls(camera, el.viewerCanvas); controls.target.set(0,1,0); controls.update();
+  tcontrols = new TransformControls(camera, el.viewerCanvas); tcontrols.setSize(0.9); tcontrols.setSpace('world'); tcontrols.addEventListener('dragging-changed', e=>{ controls.enabled = !e.value; }); scene.add(tcontrols); tcontrols.visible=false;
 
-  const grid = new THREE.GridHelper(20, 20); grid.material.opacity=0.15; grid.material.transparent=true; scene.add(grid);
+  window.addEventListener('resize', resize);
+  el.viewerCanvas.addEventListener('pointerdown', onPointerDown);
+  animate();
+};
 
-  raycaster = new THREE.Raycaster();
-  window.addEventListener("resize", ()=>{
-    renderer.setSize(el.clientWidth, el.clientHeight);
-    camera.aspect = el.clientWidth/el.clientHeight; camera.updateProjectionMatrix();
-  });
-
-  renderer.setAnimationLoop(()=>{
-    controls.update();
-    renderer.render(scene, camera);
-  });
+function resize(){
+  const w = el.viewerCanvas.clientWidth; const h = el.viewerCanvas.clientHeight; renderer.setSize(w,h,false); camera.aspect = w/h; camera.updateProjectionMatrix();
 }
 
-async function loadGlbByDriveId(fileId){
-  if (!accessToken) throw new Error("サインインしてください");
-  const url = "https://www.googleapis.com/drive/v3/files/"+encodeURIComponent(fileId)+"?alt=media";
-  const res = await fetch(url, { headers:{ "Authorization":"Bearer "+accessToken }});
-  if (!res.ok) throw new Error("GLBダウンロード失敗: "+res.status);
-  const ab = await res.arrayBuffer();
-  const blob = new Blob([ab], { type:"model/gltf-binary" });
-  const objUrl = URL.createObjectURL(blob);
-  const loader = new GLTFLoader();
-  return await new Promise((resolve, reject)=>{
-    loader.load(objUrl, (gltf)=>{
-      URL.revokeObjectURL(objUrl);
-      resolve(gltf);
-    }, undefined, (e)=>{ URL.revokeObjectURL(objUrl); reject(e); });
-  });
+function animate(){ requestAnimationFrame(animate); renderer.render(scene,camera); }
+function renderNow(){ renderer.render(scene,camera); }
+
+// ====== Load GLB from Drive (fileId -> webContentLink) ======
+async function loadGLBByFileId(fileId){
+  if(!accessToken){ alert('先にサインインしてください'); return; }
+  try{
+    el.loading.hidden=false; el.statusLabel.textContent='Loading GLB…';
+    // Get file metadata & download URL (supports public/private)
+    const meta = await gapi.client.drive.files.get({ fileId, fields:'id,name,mimeType,webContentLink' });
+    const dlUrl = `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`;
+    const glbArrayBuffer = await fetch(dlUrl, { headers:{ Authorization:`Bearer ${accessToken}` } }).then(r=>r.arrayBuffer());
+
+    // Clear old model
+    if(currentModel){ scene.remove(currentModel); currentModel.traverse(o=>{ if(o.geometry) o.geometry.dispose(); if(o.material) { if(Array.isArray(o.material)) o.material.forEach(m=>m.dispose()); else o.material.dispose(); } }); currentModel=null; }
+
+    // Load GLB
+    await new Promise((resolve,reject)=>{
+      loader.parse(glbArrayBuffer, '', (gltf)=>{ currentModel = gltf.scene; scene.add(currentModel); fitToScene(); resolve(); }, reject);
+    });
+    el.statusLabel.textContent = `Loaded: ${meta.result.name}`;
+  }catch(err){
+    console.error(err); alert('GLB読込に失敗しました');
+  }finally{ el.loading.hidden=true; }
 }
 
-function clearModel(){
-  if (glbRoot){ scene.remove(glbRoot); glbRoot.traverse(o=>{ if(o.geometry) o.geometry.dispose(); if(o.material){ if(Array.isArray(o.material)) o.material.forEach(m=>m.dispose()); else o.material.dispose(); } }); glbRoot=null; }
-  for (const [id,mesh] of markers){ scene.remove(mesh); }
-  markers.clear();
-}
-
-function addMarker(id, pos, color="#ffcc00"){
-  const geo = new THREE.SphereGeometry(0.02, 16, 16);
-  const mat = new THREE.MeshStandardMaterial({ color: new THREE.Color(color) });
-  const m = new THREE.Mesh(geo, mat);
-  m.position.set(pos[0], pos[1], pos[2]);
-  m.userData.pinId = id;
-  scene.add(m);
-  markers.set(id, m);
-  return m;
-}
-
-/* ============================== UI ============================== */
-function bindUI(){
-  $("#btnSignIn").onclick = async ()=>{
-    if (!tokenClient){ alert("GIS未ロード"); return; }
-    tokenClient.requestAccessToken({ prompt:"consent" });
-    setTimeout(()=>{ if(!accessToken) redirectOAuth(); }, 700);
-  };
-  $("#btnSignOut").onclick = ()=>{
-    if (accessToken) google.accounts.oauth2.revoke(accessToken);
-    accessToken=null; setAuth("未サインイン"); $("#btnSignOut").disabled=true; $("#btnSignIn").disabled=false;
-  };
-  $("#btnLoadGlb").onclick = async ()=>{
-    try{
-      await ensureSigned();
-      const glbRaw = $("#inpGlbId").value.trim(); const glbId = extractId(glbRaw);
-      if (!glbId) throw new Error("GLB id/リンクを入力");
-      const meta = await driveGetFile(glbId, "id,name,parents");
-      current.glbId = meta.id; current.glbName=(meta.name||"model").replace(/\.[^.]+$/,""); current.parentId=(meta.parents&&meta.parents[0])||"";
-      clearModel();
-      const gltf = await loadGlbByDriveId(glbId);
-      glbRoot = gltf.scene; scene.add(glbRoot);
-      fitCameraToObject(glbRoot, camera, controls);
-      log("GLB読み込みOK: "+meta.name);
-    }catch(e){ log("loadGlb: "+e.message); }
-  };
-
-  $("#btnFindOrCreate").onclick = findOrCreateSheet;
-  $("#btnOpenSheet").onclick = ()=>{ if (current.sheetId) window.open(`https://docs.google.com/spreadsheets/d/${current.sheetId}/edit`,"_blank"); };
-
-  $("#btnAddPin").onclick = ()=>{
-    if (!glbRoot){ alert("先にGLBを読み込んでください"); return; }
-    addMode = !addMode;
-    $("#btnAddPin").textContent = addMode ? "表示中：クリックでピン設置（Escで終了）" : "クリックで配置モード";
-  };
-  $("#btnDelPin").onclick = ()=>{
-    if (!selectedId) return;
-    const p = pins[indexById.get(selectedId)]; if (!p) return;
-    p.deleted = true; dirty.add(p.id);
-    if (markers.get(p.id)){ scene.remove(markers.get(p.id)); markers.delete(p.id); }
-    renderPinTable();
-  };
-  $("#pinTitle").oninput = ()=>{ if(!selectedId) return; const p=pins[indexById.get(selectedId)]; p.title=$("#pinTitle").value; dirty.add(p.id); };
-  $("#pinBody").oninput  = ()=>{ if(!selectedId) return; const p=pins[indexById.get(selectedId)]; p.body=$("#pinBody").value; dirty.add(p.id); };
-  $("#pinColor").onchange= ()=>{ if(!selectedId) return; const p=pins[indexById.get(selectedId)]; p.color_hex=$("#pinColor").value; dirty.add(p.id); if(markers.get(p.id)) markers.get(p.id).material.color.set(p.color_hex); };
-
-  $("#btnSave").onclick = saveChanges;
-  $("#btnSnapshot").onclick = snapshotSave;
-  $("#chkAutosave").onchange = ()=>{ $("#chkAutosave").checked ? startHeartbeat() : stopHeartbeat(); };
-
-  $("#viewer").addEventListener("pointerdown", onPointerDown);
-  window.addEventListener("keydown", (e)=>{ if(e.key==="Escape" && addMode){ addMode=false; $("#btnAddPin").textContent="クリックで配置モード"; }});
-}
-
-function fitCameraToObject(obj, camera, controls){
-  const box = new THREE.Box3().setFromObject(obj);
-  const size = box.getSize(new THREE.Vector3()).length();
+function fitToScene(){
+  const box = new THREE.Box3().setFromObject(currentModel);
+  const size = box.getSize(new THREE.Vector3());
   const center = box.getCenter(new THREE.Vector3());
-  controls.reset();
-  obj.position.sub(center);
-  controls.maxDistance = size*10;
-  camera.near = size/100; camera.far = size*10; camera.updateProjectionMatrix();
-  camera.position.copy(center).add(new THREE.Vector3(size/2, size/5, size/2));
-  controls.target.copy(center);
-  controls.update();
+  const maxDim = Math.max(size.x,size.y,size.z);
+  const dist = maxDim * 1.6;
+  camera.position.copy(center.clone().add(new THREE.Vector3(dist, dist*0.7, dist)));
+  controls.target.copy(center); controls.update();
 }
 
-function onPointerDown(ev){
-  const rect = renderer.domElement.getBoundingClientRect();
-  mouse.x = ((ev.clientX - rect.left) / rect.width) * 2 - 1;
-  mouse.y = -((ev.clientY - rect.top) / rect.height) * 2 + 1;
-  raycaster = raycaster || new THREE.Raycaster();
-  raycaster.setFromCamera(mouse, camera);
-  const objs = []; glbRoot && glbRoot.traverse(o=>{ if (o.isMesh) objs.push(o); });
-  const hits = raycaster.intersectObjects(objs, true);
-  if (!hits.length) return;
-  const hit = hits[0];
-  if (addMode){
-    const id = cryptoRandomId();
-    const p = { id, title:"", body:"", color_hex: $("#pinColor").value || "#ffcc00",
-      pos:[hit.point.x, hit.point.y, hit.point.z], rot:[0,0,0], order:pins.length, deleted:false, updated_at:"", updated_by:"", version:0 };
-    indexById.set(id, pins.length); pins.push(p); dirty.add(id);
-    addMarker(id, p.pos, p.color_hex);
-    addMode=false; $("#btnAddPin").textContent="クリックで配置モード";
-    selectPin(id);
-    renderPinTable();
-  } else {
-    const world = hit.point;
-    let nearestId=null, nearestDist=1e9;
-    for (const [id,mesh] of markers){
-      const d = mesh.position.distanceTo(world);
-      if (d < nearestDist){ nearestDist=d; nearestId=id; }
-    }
-    if (nearestId && nearestDist<0.15) selectPin(nearestId);
-  }
+// ====== Pins: 3D spheres + selection ======
+const pinGroup = new THREE.Group(); scene?.add?.(pinGroup);
+
+function createPin(pos, color){
+  const id = `p_${Date.now()}_${Math.random().toString(36).slice(2,7)}`;
+  const pin = { id, pos: pos.clone(), color: color || '#ff6b6b', title:'', body:'', images:[], mesh:null };
+  pins.push(pin); placePinMesh(pin); refreshPinsList(); selectPin(id);
+  addUndo({type:'add', id});
 }
 
-function renderPinTable(){
-  const tb=$("#tblPins"); tb.innerHTML="";
-  for (const p of pins){
-    if (p.deleted) continue;
-    const tr=document.createElement("tr"); tr.className="pinRow"; tr.dataset.id=p.id;
-    if (p.id===selectedId) tr.classList.add("selected");
-    tr.innerHTML = `<td class="tiny">${esc(p.id.slice(0,8))}</td><td>${esc(p.title||"(無題)")}</td><td class="tiny">${p.pos.map(n=>n.toFixed(2)).join(",")}</td><td>${p.version|0}</td>`;
-    tr.onclick = ()=> selectPin(p.id);
-    tb.appendChild(tr);
-  }
+function placePinMesh(pin){
+  if(pin.mesh){ pinGroup.remove(pin.mesh); pin.mesh.geometry.dispose(); pin.mesh.material.dispose(); pin.mesh=null; }
+  const geo = new THREE.SphereGeometry(0.01, 16, 16);
+  const mat = new THREE.MeshBasicMaterial({ color: new THREE.Color(pin.color) });
+  const mesh = new THREE.Mesh(geo, mat); mesh.position.copy(pin.pos); mesh.userData.pinId = pin.id; pin.mesh = mesh; pinGroup.add(mesh);
 }
 
 function selectPin(id){
-  selectedId = id;
-  const p = pins[indexById.get(id)];
-  $("#selPinId").textContent = id.slice(0,8);
-  $("#pinTitle").value = p.title||"";
-  $("#pinBody").value  = p.body||"";
-  $("#pinColor").value = p.color_hex||"#ffcc00";
-  renderPinTable();
+  selectedPinId = id; const p = pins.find(x=>x.id===id); if(!p){ el.rightEditor.hidden=true; el.rightNoSel.hidden=false; return; }
+  el.rightNoSel.hidden=true; el.rightEditor.hidden=false;
+  el.capTitle.value = p.title || '';
+  el.capBody.value = p.body || '';
+  el.coords.textContent = `${p.pos.x.toFixed(3)}, ${p.pos.y.toFixed(3)}, ${p.pos.z.toFixed(3)}`;
+  tcontrols.attach(p.mesh); if(tcontrols.visible){ /* keep */ } else { /* gizmo off */ }
+  // focus camera
+  controls.target.copy(p.pos); controls.update();
 }
 
-/* ============================== Drive ============================== */
-async function ensureSigned(){
-  if (accessToken) return true;
-  if (!tokenClient) throw new Error("GIS未ロード");
-  return await new Promise((ok)=>{
-    tokenClient.callback=(resp)=>{ if(resp?.access_token){ accessToken=resp.access_token; setAuth("サインイン済み"); ok(true);} else ok(false); };
-    tokenClient.requestAccessToken({ prompt:"consent" });
-    setTimeout(()=>{ if(!accessToken){ redirectOAuth(); } }, 700);
+function refreshPinsList(){
+  el.pinsList.innerHTML = '';
+  pins.forEach(p=>{
+    const row = document.createElement('div'); row.className='row'; row.dataset.id = p.id;
+    const left = document.createElement('div'); left.style.display='flex'; left.style.alignItems='center'; left.style.gap='8px';
+    const dot = document.createElement('div'); dot.style.width='10px'; dot.style.height='10px'; dot.style.borderRadius='999px'; dot.style.background=p.color; left.appendChild(dot);
+    const title = document.createElement('div'); title.className='title'; title.textContent = p.title || '(無題)'; left.appendChild(title);
+    const meta = document.createElement('div'); meta.className='meta'; meta.textContent = `x:${p.pos.x.toFixed(2)} y:${p.pos.y.toFixed(2)} z:${p.pos.z.toFixed(2)}`;
+    row.appendChild(left); row.appendChild(meta);
+    row.addEventListener('click',()=> selectPin(p.id));
+    el.pinsList.appendChild(row);
   });
 }
-function redirectOAuth(){
-  const redir = location.origin+location.pathname+location.search;
-  const url = "https://accounts.google.com/o/oauth2/v2/auth"
-    + "?client_id=" + encodeURIComponent(CONFIG.CLIENT_ID)
-    + "&redirect_uri=" + encodeURIComponent(redir)
-    + "&response_type=token"
-    + "&scope=" + encodeURIComponent(SCOPES)
-    + "&include_granted_scopes=true"
-    + "&prompt=consent";
-  location.assign(url);
+
+function removePin(id, {silent}={}){
+  const idx = pins.findIndex(x=>x.id===id); if(idx<0) return;
+  const pin = pins[idx];
+  if(pin.mesh){ pinGroup.remove(pin.mesh); pin.mesh.geometry.dispose(); pin.mesh.material.dispose(); }
+  pins.splice(idx,1);
+  if(!silent) addUndo({type:'delete', pin});
+  refreshPinsList(); el.rightEditor.hidden=true; el.rightNoSel.hidden=false; selectedPinId=null;
 }
-async function driveGetFile(fileId, fields="id,name,parents,mimeType"){
-  if(!gapiReady) throw new Error("gapi not ready");
-  const r = await gapi.client.drive.files.get({ fileId, fields });
-  return r.result;
+
+// ====== Pointer & picking ======
+function getIntersectPoint(event){
+  const rect = el.viewerCanvas.getBoundingClientRect();
+  pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+  pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+  raycaster.setFromCamera(pointer, camera);
+  const hits = currentModel ? raycaster.intersectObject(currentModel, true) : [];
+  if(hits.length) return hits[0].point.clone();
+  return null;
 }
-async function driveList(q, fields="files(id,name,modifiedTime)", pageToken){
-  if(!gapiReady) throw new Error("gapi not ready");
-  const r = await gapi.client.drive.files.list({ q, fields, pageSize: 200, pageToken });
-  return r.result;
-}
-async function driveCreateSpreadsheet(name, parentId){
-  if(!accessToken) throw new Error("no token");
-  const meta = { name, mimeType:"application/vnd.google-apps.spreadsheet" };
-  const boundary = "-------314159265358979323846";
-  const body = `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(meta)}\r\n--${boundary}--`;
-  const res = await fetch("https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart", {
-    method:"POST",
-    headers:{ "Authorization":"Bearer "+accessToken, "Content-Type":"multipart/related; boundary="+boundary },
-    body
-  });
-  const j = await res.json();
-  if (parentId){
-    await gapi.client.drive.files.update({ fileId: j.id, addParents: parentId });
+
+function onPointerDown(e){
+  if(!currentModel) return;
+  // If transform controls taking the drag, ignore
+  if(tcontrols.dragging) return;
+
+  if(addPinMode){
+    const pt = getIntersectPoint(e);
+    if(pt){ createPin(pt, currentColor); setAddPinMode(false); }
+  } else {
+    // selection by clicking sphere
+    const rect = el.viewerCanvas.getBoundingClientRect();
+    pointer.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+    pointer.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+    raycaster.setFromCamera(pointer, camera);
+    const hits = raycaster.intersectObjects(pinGroup.children, false);
+    if(hits.length){ selectPin(hits[0].object.userData.pinId); }
   }
-  return j;
 }
 
-/* ============================== Sheets ============================== */
-async function sheetsValuesGet(id, range){
-  const r = await gapi.client.sheets.spreadsheets.values.get({ spreadsheetId:id, range });
-  return r.result;
+// ====== Gizmo movement ======
+let addPinMode = false;
+let currentColor = '#ff6b6b';
+
+el.btnAddPin.addEventListener('click', () => setAddPinMode(true));
+function setAddPinMode(on){ addPinMode = on; el.modeLabel.textContent = on ? 'Add Pin: Click model' : (tcontrols.visible ? 'Gizmo' : 'Orbit'); }
+
+el.btnGizmo.addEventListener('click', () => {
+  const p = pins.find(x=>x.id===selectedPinId); if(!p){ alert('ピンを選択してください'); return; }
+  tcontrols.visible = !tcontrols.visible;
+  el.btnGizmo.textContent = `ギズモ: ${tcontrols.visible? 'ON':'OFF'}`;
+  el.modeLabel.textContent = tcontrols.visible ? 'Gizmo' : 'Orbit';
+  tcontrols.setMode(nextTransformMode());
+});
+
+function nextTransformMode(){
+  const order = ['translate','rotate','scale'];
+  const idx = order.indexOf(tcontrols.getMode());
+  const next = order[(idx+1)%order.length];
+  tcontrols.setMode(next); return next;
 }
-async function sheetsValuesUpdate(id, range, values, opt="RAW"){
-  const r = await gapi.client.sheets.spreadsheets.values.update({ spreadsheetId:id, range, valueInputOption:opt, resource:{ values:Array.isArray(values[0])?values:[values] } });
-  return r.result;
-}
-async function sheetsValuesAppend(id, range, values, opt="RAW"){
-  const r = await gapi.client.sheets.spreadsheets.values.append({ spreadsheetId:id, range, valueInputOption:opt, insertDataOption:"INSERT_ROWS", resource:{ values:Array.isArray(values[0])?values:[values] } });
-  return r.result;
-}
-async function sheetsBatchUpdate(id, requests){
-  const r = await gapi.client.sheets.spreadsheets.batchUpdate({ spreadsheetId:id, resource:{ requests } });
-  return r.result;
-}
-async function setupSheet(id){
-  const ss = await gapi.client.sheets.spreadsheets.get({ spreadsheetId:id });
-  const titles = new Set((ss.result.sheets||[]).map(s=>s.properties.title));
-  const needs = [];
-  for (const t of ["Pins","Materials","AuditLog","Meta"]){
-    if (!titles.has(t)) needs.push({ addSheet:{ properties:{ title:t, gridProperties:{ frozenRowCount:1 }}}});
+
+// Track moves for undo and apply to pin
+let lastPos = null;
+
+tcontrols.addEventListener('mouseDown', ()=>{
+  const p = pins.find(x=>x.id===selectedPinId); if(p){ lastPos = p.pos.clone(); }
+});
+
+tcontrols.addEventListener('objectChange', ()=>{
+  const p = pins.find(x=>x.id===selectedPinId); if(!p) return;
+  p.pos.copy(p.mesh.position); el.coords.textContent = `${p.pos.x.toFixed(3)}, ${p.pos.y.toFixed(3)}, ${p.pos.z.toFixed(3)}`; renderNow();
+});
+
+tcontrols.addEventListener('mouseUp', ()=>{
+  const p = pins.find(x=>x.id===selectedPinId); if(p && lastPos){ addUndo({type:'move', id:p.id, from:lastPos.clone(), to:p.pos.clone()}); lastPos=null; }
+});
+
+// ====== UI wiring ======
+el.btnLoad.addEventListener('click', ()=>{
+  const fid = el.inputGLB.value.trim(); if(!fid){ alert('GLBの fileId を入力してください'); return; }
+  loadGLBByFileId(fid);
+});
+
+el.btnUndo.addEventListener('click', undo);
+
+el.capTitle.addEventListener('input', ()=>{ const p = pins.find(x=>x.id===selectedPinId); if(!p) return; p.title = el.capTitle.value; refreshPinsList(); });
+el.capBody.addEventListener('input', ()=>{ const p = pins.find(x=>x.id===selectedPinId); if(!p) return; p.body  = el.capBody.value; });
+
+// Color palette
+el.colorPalette.querySelectorAll('.sw').forEach(s=>{
+  s.addEventListener('click',()=>{ currentColor = s.dataset.color; const p = pins.find(x=>x.id===selectedPinId); if(!p) return; p.color = currentColor; placePinMesh(p); refreshPinsList(); renderNow(); });
+});
+
+// Delete pin
+el.btnDeletePin.addEventListener('click', ()=>{ if(!selectedPinId) return; const id=selectedPinId; removePin(id); });
+
+// Save pin (Sheets) — stub for v0.1
+el.btnSavePin.addEventListener('click', async ()=>{
+  const sheetId = el.inputSheet.value.trim(); if(!sheetId){ alert('Spreadsheet ID が未設定です'); return; }
+  const p = pins.find(x=>x.id===selectedPinId); if(!p){ alert('ピンを選択してください'); return; }
+  try{
+    // v0.1: naive append; v0.2+: upsert with row keys
+    const values = [[p.id, p.title, p.body, p.pos.x, p.pos.y, p.pos.z, p.color, JSON.stringify(p.images||[]), Date.now()]];
+    await gapi.client.sheets.spreadsheets.values.append({
+      spreadsheetId: sheetId, range: 'pins!A1', valueInputOption:'RAW', resource:{ values }
+    });
+    toast('保存しました（仮: append）');
+  }catch(e){ console.error(e); alert('保存に失敗しました'); }
+});
+
+function toast(msg){ el.statusLabel.textContent = msg; setTimeout(()=>{ el.statusLabel.textContent='Ready'; }, 2000); }
+
+// Local image attach (future: upload to same Drive folder as GLB)
+el.localImage.addEventListener('change', async (ev)=>{
+  const file = ev.target.files?.[0]; if(!file) return; const p = pins.find(x=>x.id===selectedPinId); if(!p) return;
+  // For preview only in v0.1
+  const url = URL.createObjectURL(file);
+  const card = document.createElement('div'); card.className='row'; card.innerHTML = `<div class="title">${file.name}</div><div class="meta">ローカルプレビューのみ</div>`;
+  el.thumbs.appendChild(card);
+  p.images = p.images||[]; p.images.push({fileId:null,name:file.name,mime:file.type,local:url});
+});
+
+// View-only link (disable editing via query param)
+document.getElementById('btnViewOnly').addEventListener('click', ()=>{
+  const url = new URL(location.href);
+  url.searchParams.set('view','1');
+  url.searchParams.set('fileId', el.inputGLB.value.trim());
+  url.searchParams.set('sheetId', el.inputSheet.value.trim());
+  navigator.clipboard.writeText(url.toString());
+  toast('閲覧リンクをコピーしました');
+});
+
+// Respect view-only mode
+(function(){
+  const q = new URLSearchParams(location.search);
+  const viewOnly = q.get('view')==='1';
+  if(q.get('fileId')) el.inputGLB.value = q.get('fileId');
+  if(q.get('sheetId')) el.inputSheet.value = q.get('sheetId');
+  if(viewOnly){
+    // Disable editing controls
+    [el.btnAddPin, el.btnGizmo, el.btnUndo, el.btnSavePin, el.btnDeletePin, el.btnAttachDrive, el.localImage].forEach(b=> b?.setAttribute('disabled','true'));
+    document.querySelectorAll('input,textarea,button').forEach(x=>{
+      if(x.id==='btnLoad' || x.id==='btnPick' || x.id==='btnViewOnly' || x.id==='btnSignIn' || x.id==='inputGLB' || x.id==='inputSheet') return; x.setAttribute('disabled','true');
+    });
+    document.title += ' (View Only)';
   }
-  if (needs.length) await sheetsBatchUpdate(id, needs);
-  await sheetsValuesUpdate(id, "Pins!A1:Q1", [["id","title","body","color_hex","pos_x","pos_y","pos_z","rot_x","rot_y","rot_z","order","deleted","updated_at","updated_by","version","",""]]);
-  await sheetsValuesUpdate(id, "Materials!A1:C1", [["name","key","value"]]);
-  await sheetsValuesUpdate(id, "AuditLog!A1:G1", [["when","who","pin_id","field","old","new","client_rev"]]);
-  await sheetsValuesUpdate(id, "Meta!A1:B1", [["key","value"]]);
-  await sheetsValuesUpdate(id, "Meta!A2:B2", [["app_version","viewer-sheets-esm-1.0"]]);
-}
+})();
 
-/* ============================== Pins (load/save) ============================== */
-$("#btnFindOrCreate").disabled = false;
-async function findOrCreateSheet(){
-  try{
-    await ensureSigned();
-    const manual = extractId($("#inpSheetId").value.trim());
-    if (manual){
-      current.sheetId = manual; $("#btnOpenSheet").disabled=false;
-      await setupSheet(current.sheetId);
-      log("指定シートを使用: "+current.sheetId);
-      return;
-    }
-    if (!current.parentId || !current.glbName) throw new Error("先にGLBを読み込んで親フォルダを確定してください");
-    const q = `'${current.parentId}' in parents and trashed=false and mimeType='application/vnd.google-apps.spreadsheet' and name='${current.glbName.replace(/'/g,"\\'")}_pins'`;
-    const res = await driveList(q, "files(id,name,modifiedTime)");
-    if (res.files && res.files.length){ current.sheetId = res.files[0].id; }
-    else { const created = await driveCreateSpreadsheet(`${current.glbName}_pins`, current.parentId); current.sheetId = created.id; }
-    $("#inpSheetId").value = current.sheetId; $("#btnOpenSheet").disabled=false;
-    await setupSheet(current.sheetId);
-    log("シート準備OK: "+current.sheetId);
-  }catch(e){ log("findOrCreateSheet: "+e.message); }
-}
+// Boot
+rendererInit();
 
-async function loadPins(){
-  try{
-    if (!current.sheetId){ const id=extractId($("#inpSheetId").value.trim()); if(!id) throw new Error("シートID未設定"); current.sheetId=id; }
-    const val = await sheetsValuesGet(current.sheetId, "Pins!A2:Q");
-    pins = []; indexById.clear(); dirty.clear();
-    for (const [id,m] of markers){ scene.remove(m); } markers.clear();
-    for (const row of (val.values||[])){
-      const get=(i,d="")=>(i<row.length?row[i]:d);
-      const num=(i,d=0)=>{ const v=get(i,""); const n=parseFloat(v); return Number.isFinite(n)?n:d; };
-      const p={
-        id:get(0), title:get(1), body:get(2), color_hex:get(3)||"#ffcc00",
-        pos:[num(4),num(5),num(6)], rot:[num(7),num(8),num(9)],
-        order:parseInt(get(10)||"0",10), deleted:(get(11)||"0")==="1"||(get(11)||"FALSE")==="TRUE",
-        updated_at:get(12)||"", updated_by:get(13)||"", version:parseInt(get(14)||"0",10)
-      };
-      if (!p.deleted){
-        indexById.set(p.id, pins.length); pins.push(p);
-        addMarker(p.id, p.pos, p.color_hex);
-      }
-    }
-    renderPinTable();
-    log(`Pins 読込: ${pins.length}件`);
-  }catch(e){ log("loadPins: "+e.message); }
-}
+</script>
 
-function pinToRow(p){
-  return [
-    p.id, p.title, p.body, p.color_hex,
-    p.pos?.[0]??0, p.pos?.[1]??0, p.pos?.[2]??0,
-    p.rot?.[0]??0, p.rot?.[1]??0, p.rot?.[2]??0,
-    p.order|0, p.deleted?1:0, p.updated_at||"", p.updated_by||"", p.version|0, "", ""
-  ];
-}
+<!-- Notes: Data Schema (Google Sheets)
+Spreadsheet (spreadsheetId)
+  Sheet name: pins
+  Header Row (A1:J1):
+    id | title | body | x | y | z | color | images_json | updated_at_ms | author_email
+- Future: one sheet per save-set (pins_20250914 etc.) and an index sheet listing sets.
+- Concurrency (v0.3+):
+    - Each row also has rev number; app reads row, compares rev before update (best-effort CAS using read-modify-write with batchUpdate).
+    - Polling every ~5s to refresh list, show presence (Presence sheet: session_id, user, last_seen_ms).
 
-async function saveChanges(){
-  try{
-    if (!current.sheetId) throw new Error("先にシートIDを設定/作成してください");
-    if (!dirty.size){ setSaveState("muted","保存対象なし"); return; }
-    setSaveState("pending","保存中…");
+Permissions (OAuth scopes):
+  drive.file, drive.readonly, drive.metadata.readonly, spreadsheets
 
-    const cur = await sheetsValuesGet(current.sheetId, "Pins!A2:Q");
-    const rows = cur.values || [];
-    const rowIndexById = new Map();
-    for (let i=0;i<rows.length;i++){ const id=rows[i][0]; if(id) rowIndexById.set(id, i+2); }
+Drive Uploads (v0.2+):
+  - Determine parent folder of GLB via Drive files.get(fields: parents)
+  - Upload images to same parent via multipart upload; record fileId in images_json.
 
-    for (const id of [...dirty]){
-      const p = pins[indexById.get(id)]; if(!p) continue;
-      if (!rowIndexById.has(p.id)){
-        p.version=1; p.updated_at=nowIso(); p.updated_by=await whoami();
-        await sheetsValuesAppend(current.sheetId, "Pins!A:Q", [pinToRow(p)]);
-        await appendAudit({pin_id:p.id, field:"__create__", old:"", new:JSON.stringify(p)});
-      } else {
-        const rowIndex = rowIndexById.get(p.id);
-        const curRow = rows[rowIndex-2] || [];
-        const curVer = parseInt(curRow[14]||"0",10);
-        const curAt  = curRow[12]||"";
-        if (curVer !== (p.version|0) || curAt !== (p.updated_at||"")){
-          await appendAudit({pin_id:p.id, field:"__conflict__", old:JSON.stringify({version:curVer,updated_at:curAt}), new:JSON.stringify({version:p.version,updated_at:p.updated_at})});
-        }
-        p.version = Math.max(curVer, p.version|0) + 1;
-        p.updated_at = nowIso(); p.updated_by = await whoami();
-        await sheetsValuesUpdate(current.sheetId, `Pins!A${rowIndex}:Q${rowIndex}`, [pinToRow(p)]);
-        await appendAudit({pin_id:p.id, field:"__update__", old:"", new:JSON.stringify(p)});
-      }
-    }
-    dirty.clear();
-    await loadPins();
-    setSaveState("ok");
-  }catch(e){ setSaveState("fail","保存失敗"); log("saveChanges: "+e.message); }
-}
+HEIC (v0.2+):
+  - Client-side convert using a pure JS lib (e.g., heic2any) before upload + preview.
 
-async function snapshotSave(){
-  try{
-    if (!current.sheetId) throw new Error("sheet未設定");
-    const nm = prompt("新規シート名（タブ名）を入力してください", "pins_"+new Date().toISOString().replace(/[:T]/g,"").slice(0,12));
-    if(!nm) return;
-    await sheetsBatchUpdate(current.sheetId, [{ addSheet:{ properties:{ title:nm }}}]);
-    await sheetsValuesUpdate(current.sheetId, `${nm}!A1:Q1`, [["id","title","body","color_hex","pos_x","pos_y","pos_z","rot_x","rot_y","rot_z","order","deleted","updated_at","updated_by","version","",""]]);
-    const rows = pins.map(pinToRow);
-    if (rows.length) await sheetsValuesUpdate(current.sheetId, `${nm}!A2:Q`, rows);
-    alert("スナップショット保存しました");
-  }catch(e){ alert("スナップショット保存に失敗: "+e.message); }
-}
+Undo (Ctrl+Z):
+  - add / move / delete actions pushed to undoStack; on keydown Ctrl+Z -> undo().
 
-async function appendAudit({pin_id, field, old, new:newVal}){
-  try{
-    const who = await whoami();
-    await sheetsValuesAppend(current.sheetId, "AuditLog!A:G", [[nowIso(), who, pin_id, field, String(old||""), String(newVal||""), "web"]]);
-  }catch{}
-}
-async function whoami(){
-  try{
-    const r = await fetch("https://www.googleapis.com/oauth2/v3/userinfo", { headers:{ "Authorization":"Bearer "+accessToken }});
-    if (!r.ok) return "";
-    const j = await r.json(); return j.email || j.sub || "";
-  }catch{ return ""; }
-}
+Transform Controls:
+  - Click ギズモ to cycle translate/rotate/scale.
 
-function startHeartbeat(){
-  stopHeartbeat();
-  autosaveTimer=setInterval(async()=>{ if(dirty.size) await saveChanges(); },10000);
-  setSaveState("muted","オートセーブON");
-}
-function stopHeartbeat(){ if(autosaveTimer){ clearInterval(autosaveTimer); autosaveTimer=null; setSaveState("muted","オートセーブOFF"); } }
+-->
+
+<script>
+// global callbacks expected by Google scripts
+function gapiLoaded(){ if(window.gapi && window.gapi.load){ window.gapiLoaded(); } }
+function gisLoaded(){ if(window.gisLoaded){ window.gisLoaded(); } }
+// Keyboard shortcuts
+window.addEventListener('keydown', (e)=>{ if((e.ctrlKey||e.metaKey) && e.key.toLowerCase()==='z'){ e.preventDefault(); const mod = document.querySelector('#right'); const btn = document.querySelector('#btnUndo'); if(btn) btn.click(); } });
 </script>
 </body>
 </html>
