@@ -2,6 +2,21 @@
 
 <html lang="ja">
 <head>
+
+<script>
+// Expose inline consts to window for downstream modules (auto-injected)
+(function(){
+  var cid = '595200751510-ncahnf7edci6b9925becn5to49r6cguv.apps.googleusercontent.com';
+  if (cid) {
+    try { window.GIS_CLIENT_ID = window.GIS_CLIENT_ID || cid; } catch(_){}
+    try { window.CLIENT_ID = window.CLIENT_ID || cid; } catch(_){}
+    try { window.GOOGLE_CLIENT_ID = window.GOOGLE_CLIENT_ID || cid; } catch(_){}
+    try { window.CLIENT_ID_WEB = window.CLIENT_ID_WEB || cid; } catch(_){}
+  }
+})();
+</script>
+
+
 <meta charset="utf-8"/>
 <title>LociMyu</title>
 <link href="https://accounts.google.com" rel="preconnect"/>
@@ -567,9 +582,8 @@ html.sheet-open .floating-buttons{
     <label for="lm_sheet_range" title="範囲（ヘッダは pinId..deleted の9列。既定: pins!A:I）">Range:</label>
     <input id="lm_sheet_range" value="pins!A:I" style="width:10rem" />
 
-    <label for="lm_client_id" title="OAuth クライアントID（必要時のみ）">OAuth Client ID:</label>
-    <input id="lm_client_id" placeholder="xxxxxxxxxxxx-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.apps.googleusercontent.com" style="min-width:28rem;max-width:60vw;" />
-
+    <!-- OAuth Client ID is auto-detected; keep a hidden fallback field -->
+    <input id="lm_client_id" style="display:none" />
     <button id="lm_btn_connect" title="シートから読み込み">接続/再読込</button>
     <button id="lm_btn_create" title="新しいスプレッドシートを作成して接続">新規シート作成</button>
     <a id="lm_btn_open" href="#" target="_blank" style="margin-left:auto;display:none;">シートを開く↗</a>
@@ -3921,7 +3935,7 @@ document.getElementById('toolInlineBtn')?.addEventListener('click', ()=>{
 
 
 <script>
-/* ===== LociMyu Sheets Mode + Auto-create (GIS with optional Client ID input) ===== */
+/* ===== LociMyu Sheets Mode + Auto-create (auto-detect CLIENT_ID) ===== */
 (function(){
   const $ = (id)=>document.getElementById(id);
   const ui = {
@@ -3934,13 +3948,19 @@ document.getElementById('toolInlineBtn')?.addEventListener('click', ()=>{
     btnOpen: $("lm_btn_open")
   };
   const HEADERS = ["pinId","x","y","z","text","tags","author","updatedAt","deleted"];
-  const CFG_KEY = "locimyu.sheetsCfg.v4";
+  const CFG_KEY = "locimyu.sheetsCfg.v5";
   const cfg = Object.assign({mode:"drive-json", range:"pins!A:I"}, JSON.parse(localStorage.getItem(CFG_KEY)||"{}"));
+
+  // Auto-fill client id from window.* if present
+  (function initClientId(){
+    const cid = (window.GIS_CLIENT_ID || window.CLIENT_ID || window.GOOGLE_CLIENT_ID || window.CLIENT_ID_WEB || "");
+    if (cid && ui.clientId) ui.clientId.value = cid;
+  })();
+
   if (ui.sel) ui.sel.value = cfg.mode || "drive-json";
   if (cfg.spreadsheetId && ui.id) ui.id.value = cfg.spreadsheetId;
   if (cfg.range && ui.range) ui.range.value = cfg.range;
-  if (cfg.clientId && ui.clientId) ui.clientId.value = cfg.clientId;
-  refreshOpenLink();
+  if (cfg.clientId && ui.clientId && !ui.clientId.value) ui.clientId.value = cfg.clientId;
 
   function saveCfg(){
     localStorage.setItem(CFG_KEY, JSON.stringify({
@@ -3958,6 +3978,7 @@ document.getElementById('toolInlineBtn')?.addEventListener('click', ()=>{
     if (sid) ui.btnOpen.href = "https://docs.google.com/spreadsheets/d/"+sid+"/edit";
   }
   ["sel","id","range","clientId"].forEach(k=> ui[k] && ui[k].addEventListener("change", saveCfg));
+  refreshOpenLink();
 
   const SHEETS_SCOPE = "https://www.googleapis.com/auth/spreadsheets";
 
@@ -3980,23 +4001,20 @@ document.getElementById('toolInlineBtn')?.addEventListener('click', ()=>{
   }
 
   function resolveClientId(){
-    // Prefer user-provided field; else try several globals
-    const cid = (ui.clientId && ui.clientId.value || "").trim()
-      || (window.CLIENT_ID || window.GOOGLE_CLIENT_ID || window.GIS_CLIENT_ID || window.CLIENT_ID_WEB || "");
-    return cid.trim();
+    // Prefer auto-detected/window-exposed; field is hidden but used as fallback
+    const cid = (window.GIS_CLIENT_ID || window.CLIENT_ID || window.GOOGLE_CLIENT_ID || window.CLIENT_ID_WEB || (ui.clientId && ui.clientId.value) || "").trim();
+    return cid;
   }
 
   async function requestScopesInteractive(scopes){
-    // 1) Prefer app's own helper if available
     if (typeof window.requestTokenInteractive === "function") {
       await window.requestTokenInteractive(scopes);
       if (window.accessToken) try { gapi.client.setToken({ access_token: window.accessToken }); } catch(_){}
       return;
     }
-    // 2) Use GIS directly with provided or detected client id
     if (!window.google?.accounts?.oauth2) throw new Error("Google Identity Services が読み込まれていません");
     const client_id = resolveClientId();
-    if (!client_id) throw new Error("CLIENT_ID が定義されていません。UIの OAuth Client ID 欄に貼り付けてください。");
+    if (!client_id) throw new Error("内部CLIENT_IDの自動検出に失敗しました（index内の const CLIENT_ID を window へ露出できていない可能性）。");
     await new Promise((resolve, reject)=>{
       const tokenClient = google.accounts.oauth2.initTokenClient({
         client_id, scope: scopes, prompt: "consent",
@@ -4009,9 +4027,7 @@ document.getElementById('toolInlineBtn')?.addEventListener('click', ()=>{
   async function ensureSheetsTokenInteractive(){
     const baseScopes = (window.ALL_SCOPES || "").trim();
     const want = (baseScopes ? baseScopes+" " : "") + SHEETS_SCOPE;
-    // Drive token refresh if app provides helper
     if (typeof window.ensureToken === "function") { try{ await window.ensureToken(); }catch(e){} }
-    // Incremental consent to include Sheets
     await requestScopesInteractive(want);
   }
 
@@ -4111,7 +4127,7 @@ document.getElementById('toolInlineBtn')?.addEventListener('click', ()=>{
 
   async function createSpreadsheetAndConnect(){
     await ensureSheetsDiscovery();
-    await ensureSheetsTokenInteractive(); // interactive – must be inside click handler
+    await ensureSheetsTokenInteractive();
     const title = `LociMyu pins ${new Date().toISOString().slice(0,19).replace(/[:T]/g,'-')}`;
     const createResp = await gapi.client.sheets.spreadsheets.create({
       properties: { title },
@@ -4125,12 +4141,10 @@ document.getElementById('toolInlineBtn')?.addEventListener('click', ()=>{
       resource: { values: [HEADERS] }
     });
 
-    // Optionally move into the model's Drive folder
     try {
       const modelId = (window.currentModelFileId||"").trim();
       if (modelId) {
         await ensureDriveDiscovery();
-        // ensure token still valid (Drive scopes are part of 'want')
         await ensureSheetsTokenInteractive();
         const model = await gapi.client.drive.files.get({ fileId: modelId, fields: "parents" });
         const parents = model.result.parents || [];
@@ -4146,7 +4160,7 @@ document.getElementById('toolInlineBtn')?.addEventListener('click', ()=>{
 
     if (ui.id) ui.id.value = spreadsheetId;
     if (ui.sel) ui.sel.value = "sheets";
-    saveCfg();
+    localStorage.setItem(CFG_KEY, JSON.stringify(Object.assign(JSON.parse(localStorage.getItem(CFG_KEY)||"{}"), { spreadsheetId })));
     await Sheets.reloadFromSheets();
     alert("新規スプレッドシートを作成し、接続しました。共有設定をご確認ください。");
   }
