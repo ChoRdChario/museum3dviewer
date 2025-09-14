@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>LociMyu v0.9.5 (Preview overlap fix + Thumb delete + Robust image load)</title>
+  <title>LociMyu v0.9.6 (HEIC runtime表示 + Pin→Caption選択)</title>
   <link rel="icon" href='data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><circle cx="32" cy="32" r="28" fill="%230b0f14"/><text x="32" y="39" font-size="28" text-anchor="middle" fill="%2353b7ff" font-family="Arial">L</text></svg>'>
   <style>
     :root{ --bg:#0b0f14; --panel:#121922; --text:#e6edf3; --accent:#53b7ff; --muted:#8fa3bd; --radius:16px; --shadow:0 10px 30px rgba(0,0,0,.3);}
@@ -62,10 +62,10 @@
     .modal header{display:flex;justify-content:space-between;align-items:center;padding:10px 12px;background:#0c131d;border-bottom:1px solid #203049}
     .modal .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:10px;padding:10px;overflow:auto}
     .modal .cell{background:#0c1118;border:1px solid #223146;border-radius:12px;padding:8px;cursor:pointer;display:flex;flex-direction:column;gap:6px}
-    .modal .cell img{width:100%;height:110px;object-fit:cover;border-radius:8px}
-    .modal .cell:hover{background:#132035}
     .modal .cell.error{opacity:.5;pointer-events:none}
-    /* Reworked preview layout: header sticky, image scroll area */
+    .modal .cell img{width:100%;height:110px;object-fit:cover;border-radius:8px}
+    .modal .cell .tag{font-size:.75rem;color:#a9b8cf}
+    /* Preview layout */
     #viewerPreview{position:absolute;top:10px;right:10px;max-height:60%;border:1px solid #203049;border-radius:8px;background:#0a0f16cc;backdrop-filter: blur(2px);display:grid;grid-template-rows:auto 1fr auto;gap:6px;resize:both;overflow:hidden;min-width:220px;min-height:180px;padding:0}
     #viewerPreview.hidden{display:none}
     #previewControls{position:sticky;top:0;background:#0a0f16f0;border-bottom:1px solid #203049;padding:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;z-index:1}
@@ -370,17 +370,16 @@ let pins=[], selectedPinId=null, undoStack=[];
 let glbParents=[];
 let autosaveTimer=null;
 // materials
-let materials=[], materialMap=new Map(); // key -> ORIGINAL material
-let matOriginals=new WeakMap(); // ORIGINAL material -> {props}
+let materials=[], materialMap=new Map();
+let matOriginals=new WeakMap();
 let isOrtho=false;
 
 // Image blob cache
-const imageBlobCache = new Map(); // key: driveFileId or url string -> objectURL
+const imageBlobCache = new Map(); // keys: url | "drive:<id>|<mime>"
 
-// Color filter state: Set of allowed colors (hex); empty => all
 let filterColors = new Set();
 
-// ====== Helpers ======
+// ====== Helpers for images ======
 function extractDriveFileId(input){
   if(!input) return '';
   const m1 = input.match(/\/file\/d\/([a-zA-Z0-9_-]{10,})/); if(m1) return m1[1];
@@ -395,45 +394,65 @@ function extractSpreadsheetId(input){
   const m3 = input.match(/^([a-zA-Z0-9_-]{20,})$/);                if(m3) return m3[1];
   return input.trim();
 }
-function driveIdFromUrlMaybe(url){
-  if(!url) return null;
-  if(/^https?:\/\/drive\.google\.com\//.test(url)){
-    return extractDriveFileId(url);
+function isHeicMime(m){ return !!m && /heic|heif/i.test(m); }
+function parseImageRef(ref){
+  // returns { kind: 'drive'|'url', id?, mime?, url? }
+  if(typeof ref === 'string' && ref.startsWith('drive:')){
+    const [, rest] = ref.split(':'); // id|mime?
+    const [id, mime] = rest.split('|');
+    return { kind:'drive', id, mime: mime||null };
   }
-  if(/^https?:\/\/(?:www\.)?google\.com\/uc/.test(url)){
-    const u = new URL(url);
-    const id = u.searchParams.get('id'); if(id) return id;
+  if(typeof ref === 'string'){
+    // Try Drive URL
+    const id = extractDriveFileId(ref);
+    if(id){ return { kind:'drive', id, mime:null }; }
+    return { kind:'url', url: ref };
   }
-  return null;
+  // fallback unknown
+  return { kind:'url', url: String(ref) };
 }
+async function driveFileFetchBlob(fileId){
+  const dlUrl = `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`;
+  const res = await fetch(dlUrl, { headers:{ Authorization:`Bearer ${accessToken}` } });
+  if(!res.ok) throw new Error('image fetch failed '+res.status);
+  return await res.blob();
+}
+async function resolveImageObjectURL(ref){
+  const key = typeof ref==='string'?ref:JSON.stringify(ref);
+  if(imageBlobCache.has(key)) return imageBlobCache.get(key);
+
+  const info = parseImageRef(ref);
+  let objUrl;
+  if(info.kind==='drive'){
+    try{
+      const blob = await driveFileFetchBlob(info.id);
+      const mime = info.mime || blob.type || '';
+      if(isHeicMime(mime)){
+        // convert via heic2any → JPEG
+        const jpegBlob = await window.heic2any({ blob, toType:'image/jpeg', quality:0.9 });
+        const jpg = new Blob([jpegBlob], { type:'image/jpeg' });
+        objUrl = URL.createObjectURL(jpg);
+      }else{
+        objUrl = URL.createObjectURL(blob);
+      }
+    }catch(e){
+      throw e;
+    }
+  }else{
+    // http(s) URL - let the <img> handle CORS/load
+    objUrl = info.url;
+  }
+  imageBlobCache.set(key, objUrl);
+  return objUrl;
+}
+function makeDriveRef(id, mime){ return `drive:${id}|${mime||''}`; }
+
 function toast(msg){ el.statusLabel.textContent=msg; setTimeout(()=> el.statusLabel.textContent='Ready', 2000); }
 function setDisabled(ids, on){ ids.forEach(id=>{ const b=document.getElementById(id); if(b){ if(on) b.setAttribute('disabled','true'); else b.removeAttribute('disabled'); } }); }
 function debounceSave(){ clearTimeout(autosaveTimer); autosaveTimer=setTimeout(()=> upsertPinToSheet().catch(console.error), 1200); }
 function fmt(n){ return typeof n==='number'? Number(n.toFixed(6)) : n; }
 function ensureArray(x){ return Array.isArray(x)?x:[]; }
 function normalizeHex(c){ const cc = new THREE.Color(c).getStyle(); const t = new THREE.Color(cc); return '#' + t.getHexString(); }
-
-// Resolve image URL with OAuth fetch if needed
-async function resolveImageURL(url){
-  const did = driveIdFromUrlMaybe(url);
-  if(did){
-    if(imageBlobCache.has(did)) return imageBlobCache.get(did);
-    const obj = await driveFileToObjectURL(did);
-    imageBlobCache.set(did, obj);
-    return obj;
-  }
-  // plain URL
-  if(imageBlobCache.has(url)) return imageBlobCache.get(url);
-  imageBlobCache.set(url, url);
-  return url;
-}
-async function driveFileToObjectURL(fileId){
-  const dlUrl = `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`;
-  const res = await fetch(dlUrl, { headers:{ Authorization:`Bearer ${accessToken}` } });
-  if(!res.ok) throw new Error('image fetch failed '+res.status);
-  const blob = await res.blob();
-  return URL.createObjectURL(blob);
-}
 
 // ====== Google init ======
 const waitGoogle = setInterval(()=>{
@@ -502,7 +521,6 @@ function buildControls(){
   tcontrols = new TransformControls(camera, el.viewerCanvas);
   tcontrols.setSize(0.9); tcontrols.setSpace('world');
   tcontrols.addEventListener('dragging-changed', e=>{ controls.enabled = !e.value; });
-  // Sync pin position continuously while dragging
   tcontrols.addEventListener('change', ()=>{
     if(!selectedPinId || !tcontrols.object || !tcontrols.visible) return;
     const p=pins.find(x=>x.id===selectedPinId);
@@ -510,7 +528,7 @@ function buildControls(){
     p.pos.copy(tcontrols.object.position);
     renderNow();
   });
-  scene.add(tcontrols); tcontrols.visible=false; tcontrols.enabled=false; // default OFF
+  scene.add(tcontrols); tcontrols.visible=false; tcontrols.enabled=false;
 }
 function resize(){
   const w = el.viewerCanvas.clientWidth || el.viewerCanvas.parentElement.clientWidth;
@@ -580,16 +598,15 @@ function switchProjection(useOrtho){
   tcontrols.camera = camera;
   resize(); renderNow();
 }
-// Remapped camera directions with Left/Right swapped
 function setNamedView(name){
   const { center, radius } = sceneBounds();
   const d = radius*2.2;
   let dir = new THREE.Vector3(0,0,d);
   switch(name){
-    case 'front': dir.set(d,0,0); break;     // +X
-    case 'back':  dir.set(-d,0,0); break;    // -X
-    case 'left':  dir.set(0,0,-d); break;    // -Z
-    case 'right': dir.set(0,0,d); break;     // +Z
+    case 'front': dir.set(d,0,0); break;
+    case 'back':  dir.set(-d,0,0); break;
+    case 'left':  dir.set(0,0,-d); break;
+    case 'right': dir.set(0,0,d); break;
     case 'top':   dir.set(0,d,0); break;
     case 'bottom':dir.set(0,-d,0); break;
   }
@@ -600,7 +617,7 @@ function setNamedView(name){
   renderNow();
 }
 
-// ====== Connector (pin -> preview) ======
+// ====== Connector ======
 function getCanvasRelativePointFromWorld(world){
   const v = world.clone().project(camera);
   const rect = el.viewerCanvas.getBoundingClientRect();
@@ -612,7 +629,7 @@ function getPreviewAnchor(){
   if(el.viewerPreview.classList.contains('hidden')) return null;
   const rectCanvas = el.viewerCanvas.getBoundingClientRect();
   const rectPrev = el.viewerPreview.getBoundingClientRect();
-  const x = (rectPrev.left - rectCanvas.left); // left edge center
+  const x = (rectPrev.left - rectCanvas.left);
   const y = (rectPrev.top - rectCanvas.top) + rectPrev.height/2;
   return { x, y };
 }
@@ -626,39 +643,25 @@ function updateConnector(){
   const a = getCanvasRelativePointFromWorld(p.pos);
   const b = getPreviewAnchor();
   if(!b){ el.connLine.style.display = 'none'; el.connDot.style.display = 'none'; return; }
-
   const svg = el.connector;
   const rect = el.viewerCanvas.getBoundingClientRect();
   svg.setAttribute('viewBox', `0 0 ${rect.width} ${rect.height}`);
-
   el.connLine.setAttribute('x1', a.x); el.connLine.setAttribute('y1', a.y);
   el.connLine.setAttribute('x2', b.x); el.connLine.setAttribute('y2', b.y);
   el.connLine.style.display = 'block';
-
   el.connDot.setAttribute('cx', a.x); el.connDot.setAttribute('cy', a.y);
   el.connDot.style.display = 'block';
 }
-// React to preview box resize/move (ResizeObserver)
 const ro = new ResizeObserver(()=> updateConnector());
 window.addEventListener('load', ()=>{ ro.observe(el.viewerPreview); });
 
-// ====== Preview zoom (size slider removed; use box resize) ======
+// ====== Preview zoom ======
 let previewZoom = 1.0;
-function applyPreviewZoom(){
-  el.previewInner.style.transform = `scale(${previewZoom})`;
-}
-el.previewZoom.addEventListener('input', ()=>{
-  previewZoom = parseFloat(el.previewZoom.value)||1;
-  el.previewZoomVal.textContent = previewZoom.toFixed(2) + '×';
-  applyPreviewZoom();
-});
-el.previewReset.addEventListener('click', ()=>{
-  previewZoom = 1;
-  el.previewZoom.value = 1; el.previewZoomVal.textContent = '1.00×';
-  applyPreviewZoom();
-});
+function applyPreviewZoom(){ el.previewInner.style.transform = `scale(${previewZoom})`; }
+el.previewZoom.addEventListener('input', ()=>{ previewZoom = parseFloat(el.previewZoom.value)||1; el.previewZoomVal.textContent = previewZoom.toFixed(2) + '×'; applyPreviewZoom(); });
+el.previewReset.addEventListener('click', ()=>{ previewZoom = 1; el.previewZoom.value = 1; el.previewZoomVal.textContent = '1.00×'; applyPreviewZoom(); });
 
-// ====== Pins ======
+// ====== Pin logic ======
 function setAddPinMode(on){ addPinMode=on; el.modeLabel.textContent=on?'Add Pin: Click model (または Shift+クリック)':(tcontrols.visible?'Gizmo':'Orbit'); }
 function getIntersectPoint(event){
   const rect=el.viewerCanvas.getBoundingClientRect();
@@ -671,21 +674,24 @@ function getIntersectPoint(event){
 function onPointerDown(e){
   if(!currentModel || viewOnly) return;
   if(tcontrols.dragging) return;
-  if(e.shiftKey){
-    const pt=getIntersectPoint(e);
-    if(pt){ createPin(pt,currentColor); return; }
-  }
-  if(addPinMode){
-    const pt=getIntersectPoint(e);
-    if(pt){ createPin(pt,currentColor); setAddPinMode(false); }
-    return;
-  }
   const rect=el.viewerCanvas.getBoundingClientRect();
   pointer.x=((e.clientX-rect.left)/rect.width)*2-1;
-  pointer.y=-((e.clientY-rect.top)/rect.height)/2*2+1;
+  pointer.y=-((e.clientY-rect.top)/rect.height)*2+1; // ← 修正
   raycaster.setFromCamera(pointer,camera);
-  const hits=raycaster.intersectObjects(pinGroup.children,false);
-  if(hits.length){ selectPin(hits[0].object.userData.pinId, {fly:true}); }
+
+  if(e.shiftKey || addPinMode){
+    const hitModel = currentModel? raycaster.intersectObject(currentModel,true): [];
+    if(hitModel.length){
+      const pt = hitModel[0].point.clone();
+      createPin(pt,currentColor);
+      if(addPinMode) setAddPinMode(false);
+      return;
+    }
+  }
+
+  // Click on pin → select caption
+  const hitsPins = raycaster.intersectObjects(pinGroup.children,false);
+  if(hitsPins.length){ selectPin(hitsPins[0].object.userData.pinId, {fly:true}); return; }
 }
 function addUndo(u){ undoStack.push(u); }
 function undo(){ const u = undoStack.pop(); if(!u) return; if(u.type==='move'){ const p=pins.find(x=>x.id===u.id); if(p){ p.pos.copy(u.from); placePinMesh(p); selectPin(p.id); renderNow(); } } else if(u.type==='add'){ removePin(u.id,{silent:true}); } else if(u.type==='delete'){ pins.push(u.pin); placePinMesh(u.pin); refreshPinsList(); selectPin(u.pin.id); renderNow(); } }
@@ -709,7 +715,7 @@ function selectPin(id,{fly}={}){
   renderThumbs(p);
   updateViewerPreviewForPin(p);
   tcontrols.attach(p.mesh);
-  tcontrols.visible = false; tcontrols.enabled = false; // keep OFF by default
+  tcontrols.visible = false; tcontrols.enabled = false;
   document.getElementById('btnGizmo').textContent = 'ギズモ: OFF';
   if(fly){ flyTo(p.pos); } else { controls.target.copy(p.pos); controls.update(); }
   updateConnector();
@@ -755,13 +761,13 @@ function removePin(id,{silent}={}){
 }
 function renderThumbs(p){
   const thumbs=document.getElementById('thumbs'); thumbs.innerHTML='';
-  ensureArray(p.images).forEach(async (url, idx)=>{
+  ensureArray(p.images).forEach(async (ref, idx)=>{
     const wrap=document.createElement('div'); wrap.className='thumb'; thumbs.appendChild(wrap);
     const img=document.createElement('img'); img.alt = 'thumb';
     const del=document.createElement('div'); del.className='del'; del.textContent='×'; del.title='この画像をキャプションから外す';
     del.addEventListener('click', (ev)=>{
       ev.stopPropagation();
-      const wasPreview = (el.previewImg.src && el.previewImg.src.includes(url));
+      const wasPreview = (el.previewImg.src && el.previewImg.src === img.src);
       p.images.splice(idx,1);
       renderThumbs(p);
       if(wasPreview){
@@ -772,24 +778,20 @@ function renderThumbs(p){
     });
     wrap.appendChild(img); wrap.appendChild(del);
     try{
-      const resolved = await resolveImageURL(url);
-      img.src = resolved;
-      img.addEventListener('error', ()=>{
-        wrap.classList.add('error');
-        wrap.title = '画像を読み込めませんでした';
-      });
-      img.addEventListener('click', async ()=>{ const src = await resolveImageURL(url); setPreview(src, p.title||''); });
+      const src = await resolveImageObjectURL(ref);
+      img.src = src;
+      img.addEventListener('error', ()=>{ wrap.classList.add('error'); wrap.title = '画像を読み込めませんでした'; });
+      img.addEventListener('click', async ()=>{ const s2 = await resolveImageObjectURL(ref); setPreview(s2, p.title||''); });
     }catch{
-      wrap.classList.add('error');
-      wrap.title = '画像を読み込めませんでした';
+      wrap.classList.add('error'); wrap.title = '画像を読み込めませんでした';
     }
   });
 }
-async function setPreview(url, cap){
-  if(!url){ el.viewerPreview.classList.add('hidden'); return; }
+async function setPreview(ref, cap){
+  if(!ref){ el.viewerPreview.classList.add('hidden'); return; }
   try{
     el.previewErr.style.display='none';
-    const src = await resolveImageURL(url);
+    const src = await resolveImageObjectURL(ref);
     el.previewImg.src = src;
     el.previewImg.onerror = ()=>{ el.previewErr.style.display='inline'; };
     el.previewCap.textContent = cap||'';
@@ -803,7 +805,7 @@ async function setPreview(url, cap){
 }
 function updateViewerPreviewForPin(p){ setPreview(p && p.images && p.images[0] ? p.images[0] : null, p?.title); }
 
-// ====== Colors ======
+// ====== Colors / Filter ======
 const PRESET_COLORS = ['#ff6b6b','#ffd166','#06d6a0','#118ab2','#ef476f','#f72585','#b5179e','#7209b7','#3a0ca3','#4361ee','#4cc9f0'];
 function buildColorPresets(){
   if(!el.colorPresets) return;
@@ -819,20 +821,14 @@ function buildColorPresets(){
 }
 buildColorPresets();
 
-// ====== Color Filter UI ======
 function uniquePinColors(){
-  const set = new Set();
-  pins.forEach(p=> set.add(normalizeHex(p.color)));
-  return Array.from(set);
+  const set = new Set(); pins.forEach(p=> set.add(normalizeHex(p.color))); return Array.from(set);
 }
 function buildColorFilter(){
   const list = el.colorFilterList; if(!list) return;
   list.innerHTML='';
   const colors = uniquePinColors().sort();
-  if(colors.length===0){
-    list.innerHTML = '<div class="small">ピンがありません</div>';
-    return;
-  }
+  if(colors.length===0){ list.innerHTML = '<div class="small">ピンがありません</div>'; return; }
   colors.forEach(c=>{
     const row = document.createElement('label'); row.className='color-row';
     const sw = document.createElement('span'); sw.className='swatch'; sw.style.background=c;
@@ -849,42 +845,20 @@ function buildColorFilter(){
   if(filterColors.size===0){ colors.forEach(k=> filterColors.add(k)); }
   applyPinVisibilityFilter();
 }
-function pinPassesFilter(p){
-  if(filterColors.size===0) return true;
-  return filterColors.has(normalizeHex(p.color));
-}
+function pinPassesFilter(p){ if(filterColors.size===0) return true; return filterColors.has(normalizeHex(p.color)); }
 function applyPinVisibilityFilter(){
-  pins.forEach(p=>{
-    if(p.mesh){ p.mesh.visible = pinGroup.visible && pinPassesFilter(p); }
-  });
+  pins.forEach(p=>{ if(p.mesh){ p.mesh.visible = pinGroup.visible && pinPassesFilter(p); } });
   const curr = pins.find(x=>x.id===selectedPinId);
   if(curr && (!pinGroup.visible || !pinPassesFilter(curr))){
-    selectedPinId = null;
-    el.rightEditor.classList.add('hidden'); el.rightNoSel.classList.remove('hidden');
-    updateViewerPreviewForPin(null);
+    selectedPinId = null; el.rightEditor.classList.add('hidden'); el.rightNoSel.classList.remove('hidden'); updateViewerPreviewForPin(null);
   }
-  refreshPinsList();
-  renderNow();
+  refreshPinsList(); renderNow();
 }
-el.btnColorFilter.addEventListener('click', ()=>{
-  el.colorFilterPanel.hidden = !el.colorFilterPanel.hidden;
-});
-el.btnFilterAll.addEventListener('click', ()=>{
-  filterColors.clear();
-  uniquePinColors().forEach(c=> filterColors.add(c));
-  buildColorFilter();
-});
-el.btnFilterNone.addEventListener('click', ()=>{
-  filterColors.clear();
-  applyPinVisibilityFilter();
-  buildColorFilter();
-});
+el.btnColorFilter.addEventListener('click', ()=>{ el.colorFilterPanel.hidden = !el.colorFilterPanel.hidden; });
+el.btnFilterAll.addEventListener('click', ()=>{ filterColors.clear(); uniquePinColors().forEach(c=> filterColors.add(c)); buildColorFilter(); });
+el.btnFilterNone.addEventListener('click', ()=>{ filterColors.clear(); applyPinVisibilityFilter(); buildColorFilter(); });
 el.btnFilterClose.addEventListener('click', ()=> el.colorFilterPanel.hidden = true);
-document.addEventListener('click', (e)=>{
-  if(!el.colorFilterPanel.contains(e.target) && e.target !== el.btnColorFilter){
-    el.colorFilterPanel.hidden = true;
-  }
-});
+document.addEventListener('click', (e)=>{ if(!el.colorFilterPanel.contains(e.target) && e.target !== el.btnColorFilter){ el.colorFilterPanel.hidden = true; } });
 
 // ====== GLB load ======
 document.getElementById('btnLoad').addEventListener('click', ()=>{
@@ -939,7 +913,8 @@ async function loadGLBByFileId(fileId){
   }
 }
 
-// ====== Materials (always visible) ======
+// ====== Materials ======
+let materials=[], materialMap=new Map(), matOriginals=new WeakMap();
 function collectMaterials(){
   materials=[]; materialMap.clear();
   const set = new Set();
@@ -954,7 +929,7 @@ function collectMaterials(){
     materialMap.set(name, m);
     const opt=document.createElement('option'); opt.value=name; opt.textContent=name; el.matSelect.appendChild(opt);
   });
-  applyMaterialLive(); // ensure controls reflect
+  applyMaterialLive();
 }
 function ensureMatRecord(m){
   if(matOriginals.has(m)) return;
@@ -1038,7 +1013,6 @@ async function applyMaterialLive(){
     ensureMatRecord(origM);
     const rec = matOriginals.get(origM);
 
-    // Unlit swap (carry .color)
     if(wantUnlit && !rec.wasUnlit){
       const active = getActiveMaterialFor(origM);
       const um = new THREE.MeshBasicMaterial();
@@ -1068,46 +1042,27 @@ async function applyMaterialLive(){
     }
 
     const mat = getActiveMaterialFor(origM);
-
-    // Side
     mat.side = wantDouble ? THREE.DoubleSide : THREE.FrontSide;
-
-    // Transparency & opacity
     mat.transparent = wantTransparent || whiteToAlpha || (opacity < 1.0);
     mat.opacity = opacity;
     mat.alphaTest = thresh;
     mat.depthWrite = !mat.transparent || thresh>0;
 
-    // Texture processing
     if((invert || whiteToAlpha) && rec.map){
       try{
         const processed = await processTextureToCanvasTextureFromOriginal(rec.map, { invertRGB: invert, alphaFromWhite: whiteToAlpha, threshold: thresh });
         if(processed){ mat.map = processed; mat.map.needsUpdate = true; }
       }catch(e){ console.warn('texture process failed', e); }
     }else if(!invert && !whiteToAlpha){
-      // restore original map if existed; otherwise keep color-only
       mat.map = rec.map || null;
       if(mat.map) mat.map.needsUpdate = true;
     }
-
-    // Ensure color is preserved even if map is null
     if(!mat.color && rec.color){ mat.color = rec.color.clone(); }
     if(mat.color) mat.color.needsUpdate = true;
-
     mat.needsUpdate = true;
   }
   renderNow();
 }
-
-// UI events for material (live)
-el.matOpacity.addEventListener('input', ()=>{ el.matOpacityVal.textContent = parseFloat(el.matOpacity.value).toFixed(2); applyMaterialLive(); });
-el.matThreshold.addEventListener('input', ()=>{ el.matThresholdVal.textContent = parseFloat(el.matThreshold.value).toFixed(2); applyMaterialLive(); });
-el.matTransparent.addEventListener('change', ()=> applyMaterialLive());
-el.matInvert.addEventListener('change', ()=> applyMaterialLive());
-el.matWhiteTransparent.addEventListener('change', ()=> applyMaterialLive());
-el.matUnlit.addEventListener('change', ()=> applyMaterialLive());
-el.matDoubleSided.addEventListener('change', ()=> applyMaterialLive());
-el.matSelect.addEventListener('change', ()=> applyMaterialLive());
 
 // ====== Camera tools ======
 el.viewFront.addEventListener('click', ()=> setNamedView('front'));
@@ -1119,7 +1074,7 @@ el.viewBottom.addEventListener('click', ()=> setNamedView('bottom'));
 el.projOrtho.addEventListener('change', ()=> switchProjection(el.projOrtho.checked));
 el.bgColor.addEventListener('input', ()=>{ scene.background = new THREE.Color(el.bgColor.value); renderNow(); });
 
-// ====== Sheets: ensure + upsert ======
+// ====== Sheets ======
 async function ensureSpreadsheet(glbName){
   const title = `LociMyu - ${glbName}`;
   const resp = await gapi.client.sheets.spreadsheets.create({
@@ -1141,6 +1096,7 @@ async function upsertPinToSheet(){
     const rows = col.result.values || [];
     let rowIndex = -1;
     for(let i=0;i<rows.length;i++){ if(rows[i][0]===p.id){ rowIndex=i; break; } }
+    // images: array of refs (strings like 'drive:<id>|<mime>' or urls)
     const values = [[ p.id, p.title||'', p.body||'', fmt(p.pos.x), fmt(p.pos.y), fmt(p.pos.z), p.color, JSON.stringify(ensureArray(p.images)), new Date().toISOString() ]];
     if(rowIndex>=0){
       const range = `pins!A${rowIndex+1}:I${rowIndex+1}`;
@@ -1154,17 +1110,17 @@ async function upsertPinToSheet(){
 }
 document.getElementById('btnSavePin').addEventListener('click', ()=> upsertPinToSheet());
 
-// ====== Image attach & Drive upload / folder picker ======
+// ====== Attach & Picker ======
 document.getElementById('btnAttach').addEventListener('click', async ()=>{
   const file = el.imgLocal.files?.[0]; const p = pins.find(x=>x.id===selectedPinId);
   if(!file || !p){ alert('画像とピンを確認してください'); return; }
   try{
     const blob = await toUploadableBlob(file);
     const uploaded = await driveMultipartUpload(blob, sanitizeName(file.name), glbParents);
-    const url = `https://drive.google.com/uc?id=${uploaded.id}`;
-    p.images = ensureArray(p.images); p.images.push(url);
+    const ref = makeDriveRef(uploaded.id, blob.type || 'image/jpeg');
+    p.images = ensureArray(p.images); p.images.push(ref);
     renderThumbs(p);
-    setPreview(url, p.title||'');
+    setPreview(ref, p.title||'');
     debounceSave();
     toast('画像をアップロードしました');
   }catch(err){ console.error(err); alert('画像アップロードに失敗しました'); }
@@ -1195,7 +1151,7 @@ async function driveMultipartUpload(blob, name, parents){
   return await res.json();
 }
 
-// Folder picker
+// Picker
 el.btnPickFromFolder.addEventListener('click', openPickerModal);
 el.btnPickerClose.addEventListener('click', ()=> el.pickerModal.hidden = true);
 el.btnPickerReload.addEventListener('click', loadFolderImages);
@@ -1213,26 +1169,24 @@ async function loadFolderImages(){
     for(const parent of glbParents){
       const q = `'${parent}' in parents and trashed=false and (mimeType contains 'image/')`;
       const resp = await gapi.client.drive.files.list({
-        q, pageSize: 200, fields: 'files(id,name,mimeType)'
+        q, pageSize: 200, fields: 'files(id,name,mimeType,fileExtension)'
       });
       const files = resp.result.files || [];
       for(const f of files){
         const id = f.id;
-        const url = `https://drive.google.com/uc?id=${id}`;
+        const mime = f.mimeType || '';
+        const isHeic = isHeicMime(mime) || /heic|heif/i.test(f.fileExtension||'');
+        const ref = makeDriveRef(id, mime);
         const cell = document.createElement('div'); cell.className='cell';
         const img = document.createElement('img'); img.alt = f.name;
-        resolveImageURL(url).then(objUrl => {
-          img.src = objUrl;
-        }).catch(()=>{
-          cell.classList.add('error');
-        });
+        const tag = document.createElement('div'); tag.className='tag'; tag.textContent = isHeic ? 'HEIC/HEIF (変換表示)' : (mime||'image');
+        try{
+          resolveImageObjectURL(ref).then(objUrl => { img.src = objUrl; }).catch(()=>{ cell.classList.add('error'); });
+        }catch{ cell.classList.add('error'); }
         img.onerror = ()=> cell.classList.add('error');
         const cap = document.createElement('div'); cap.textContent = f.name; cap.className='small';
-        cell.appendChild(img); cell.appendChild(cap);
-        cell.addEventListener('click', ()=>{
-          if(cell.classList.contains('error')) return;
-          chooseFolderImage(url);
-        });
+        cell.appendChild(img); cell.appendChild(cap); cell.appendChild(tag);
+        cell.addEventListener('click', ()=>{ if(cell.classList.contains('error')) return; chooseFolderImage(ref); });
         cells.push(cell);
       }
     }
@@ -1247,13 +1201,13 @@ async function loadFolderImages(){
     el.pickerGrid.innerHTML = '<div class="small">読み込みに失敗しました。</div>';
   }
 }
-function chooseFolderImage(url){
+function chooseFolderImage(ref){
   el.pickerModal.hidden = true;
   const p = pins.find(x=>x.id===selectedPinId);
   if(!p){ alert('先にピンを選択してください'); return; }
-  p.images = ensureArray(p.images); p.images.push(url);
+  p.images = ensureArray(p.images); p.images.push(ref);
   renderThumbs(p);
-  setPreview(url, p.title||'');
+  setPreview(ref, p.title||'');
   debounceSave();
 }
 
@@ -1276,7 +1230,6 @@ document.getElementById('btnUndo').addEventListener('click', ()=> undo());
 document.getElementById('capTitle').addEventListener('input', ()=>{ const p=pins.find(x=>x.id===selectedPinId); if(p){ p.title=el.capTitle.value; refreshPinsList(); debounceSave(); updateViewerPreviewForPin(p); } });
 document.getElementById('capBody').addEventListener('input', ()=>{ const p=pins.find(x=>x.id===selectedPinId); if(p){ p.body=el.capBody.value; debounceSave(); } });
 
-// Track gizmo move → update pin pos (already synced in 'change')
 tcontrols.addEventListener('objectChange', ()=>{
   if(!selectedPinId || !tcontrols.object || !tcontrols.visible) return;
   const p=pins.find(x=>x.id===selectedPinId);
