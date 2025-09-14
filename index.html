@@ -3918,7 +3918,7 @@ document.getElementById('toolInlineBtn')?.addEventListener('click', ()=>{
 
 
 <script>
-/* ===== LociMyu Sheets Mode + Auto-create Module (robust auth) ===== */
+/* ===== LociMyu Sheets Mode + Auto-create Module (GIS-native auth) ===== */
 (function(){
   const $ = (id)=>document.getElementById(id);
   const ui = {
@@ -3931,7 +3931,7 @@ document.getElementById('toolInlineBtn')?.addEventListener('click', ()=>{
     btnOpen: $("lm_btn_open")
   };
   const HEADERS = ["pinId","x","y","z","text","tags","author","updatedAt","deleted"];
-  const CFG_KEY = "locimyu.sheetsCfg.v1";
+  const CFG_KEY = "locimyu.sheetsCfg.v2";
   const cfg = Object.assign({mode:"drive-json", range:"pins!A:I"}, JSON.parse(localStorage.getItem(CFG_KEY)||"{}"));
   if (ui.sel) ui.sel.value = cfg.mode || "drive-json";
   if (cfg.spreadsheetId && ui.id) ui.id.value = cfg.spreadsheetId;
@@ -3961,93 +3961,86 @@ document.getElementById('toolInlineBtn')?.addEventListener('click', ()=>{
   if (ui.id) ui.id.addEventListener("change", saveCfg);
   if (ui.range) ui.range.addEventListener("change", saveCfg);
 
-  const SCOPES_SHEETS = "https://www.googleapis.com/auth/spreadsheets";
-  const SCOPES_DRIVE_FILE = "https://www.googleapis.com/auth/drive.file";
-
+  // --- Reuse app's GIS token & gapi client ---
+  const SHEETS_SCOPE = "https://www.googleapis.com/auth/spreadsheets";
   async function ensureGapiClient(){
-    if (!window.gapi || !gapi.client) throw new Error("gapi client is not available yet. 先にサインインUIでログインしてください。");
+    // The app already loads gapi (Drive discovery). Wait until available.
+    if (!window.gapi) {
+      // fall back to the app's own loader if present
+      if (typeof window.loadGapi === "function") { await window.loadGapi(); }
+      // else spin until gapi arrives
+      await new Promise((resolve)=>{
+        const t = setInterval(()=>{ if (window.gapi){ clearInterval(t); resolve(); } }, 30);
+      });
+    }
+    if (!gapi.client) {
+      await new Promise(res=> gapi.load("client", res));
+    }
   }
   async function ensureSheetsDiscovery(){
     await ensureGapiClient();
-    if (gapi.client.sheets) return;
-    try {
-      await gapi.client.load("sheets", "v4");
-    } catch(e){
-      await gapi.client.init({ discoveryDocs:["https://sheets.googleapis.com/$discovery/rest?version=v4"] });
+    if (!gapi.client.sheets) {
+      try { await gapi.client.load("sheets","v4"); }
+      catch(e){ await gapi.client.init({ discoveryDocs: ["https://sheets.googleapis.com/$discovery/rest?version=v4"] }); }
     }
   }
-
-  function getClientId(){
-    return window.CLIENT_ID || window.GOOGLE_CLIENT_ID || window.GIS_CLIENT_ID || window.CLIENT_ID_WEB || "";
-  }
-
-  function hasAuth2(){
-    return !!(gapi.auth2 && typeof gapi.auth2.getAuthInstance === "function");
-  }
-  function getGrantedScopesAuth2(){
-    try{
-      const inst = gapi.auth2.getAuthInstance && gapi.auth2.getAuthInstance();
-      if (!inst) return "";
-      const user = inst.currentUser.get();
-      return (user && user.getGrantedScopes && user.getGrantedScopes()) || "";
-    }catch(e){ return ""; }
-  }
-
-  async function ensureScopeWithAuth2(scope){
-    // Initialize auth2 if needed
-    let inst = (hasAuth2() && gapi.auth2.getAuthInstance()) || null;
-    if (!inst && gapi.auth2 && typeof gapi.auth2.init === "function") {
-      const client_id = getClientId();
-      if (client_id) {
-        inst = await gapi.auth2.init({ client_id, scope });
-      }
-    }
-    if (!inst) return false; // not available
-    const granted = getGrantedScopesAuth2().split(" ");
-    if (!granted.includes(scope)) {
-      await inst.signIn({scope});
-    }
-    return true;
-  }
-
-  function hasGIS(){
-    return !!(window.google && google.accounts && google.accounts.oauth2);
-  }
-  async function ensureScopeWithGIS(scope){
-    if (!hasGIS()) return false;
-    const client_id = getClientId();
-    if (!client_id) return false;
-    await new Promise((resolve, reject)=>{
-      const tokenClient = google.accounts.oauth2.initTokenClient({
-        client_id,
-        scope,
-        prompt: 'consent',
-        callback: (resp)=>{
-          if (resp && resp.access_token) {
-            gapi.client.setToken({ access_token: resp.access_token });
-            resolve();
-          } else {
-            reject(new Error("Token request failed"));
-          }
-        }
-      });
-      tokenClient.requestAccessToken({ prompt:'consent' });
-    });
-    return true;
-  }
-
-  async function ensureScope(scope){
+  async function ensureDriveDiscovery(){
     await ensureGapiClient();
-    // 1) Try existing app's sign-in helper if present
-    if (typeof window.ensureSignedInIfNeeded === "function") {
-      try { await window.ensureSignedInIfNeeded(scope); } catch(e){ /* continue */ }
+    if (!gapi.client.drive) {
+      await gapi.client.init({ discoveryDocs: ["https://www.googleapis.com/discovery/v1/apis/drive/v3/rest"] });
     }
-    // 2) Try gapi.auth2
-    if (await ensureScopeWithAuth2(scope)) return;
-    // 3) Try GIS
-    if (await ensureScopeWithGIS(scope)) return;
-    // 4) As a last resort, tell user to sign in
-    throw new Error("認証が初期化されていません。先にツール上のサインインを完了させてからお試しください。");
+  }
+  function getClientId(){
+    return (window.CLIENT_ID || window.GOOGLE_CLIENT_ID || window.GIS_CLIENT_ID || window.CLIENT_ID_WEB || "");
+  }
+
+  // Borrow the app's ensureToken() to get a Drive token, then upgrade to include Sheets if needed.
+  async function ensureSheetsToken(){
+    if (typeof window.ensureToken === "function") {
+      await window.ensureToken(); // fetch Drive token into window.accessToken
+    }
+    // Always request an updated token that includes Sheets scope (incremental consent). Using GIS.
+    if (!window.google?.accounts?.oauth2) {
+      throw new Error("Google Identity Services (GSI) が未ロードです");
+    }
+    const clientId = getClientId();
+    if (!clientId) throw new Error("CLIENT_ID が定義されていません");
+    const scopes = (window.ALL_SCOPES ? (window.ALL_SCOPES + " ") : "") + SHEETS_SCOPE;
+    const accessToken = await new Promise((resolve, reject)=>{
+      try{
+        const tokenClient = google.accounts.oauth2.initTokenClient({
+          client_id: clientId,
+          scope: scopes,
+          prompt: "", // try silent first
+          callback: (resp)=>{
+            if (resp && resp.access_token) return resolve(resp.access_token);
+            reject(new Error("アクセストークンが取得できませんでした"));
+          }
+        });
+        tokenClient.requestAccessToken({ prompt: "" });
+      }catch(e){ reject(e); }
+    }).catch(async (e)=>{
+      // Retry with consent prompt (user interaction needed)
+      return await new Promise((resolve, reject)=>{
+        const tokenClient = google.accounts.oauth2.initTokenClient({
+          client_id: clientId,
+          scope: scopes,
+          prompt: "consent",
+          callback: (resp)=>{
+            if (resp && resp.access_token) return resolve(resp.access_token);
+            reject(new Error("アクセストークン取得に失敗（consent）"));
+          }
+        });
+        tokenClient.requestAccessToken({ prompt: "consent" });
+      });
+    });
+    // Set token for gapi client calls
+    try { gapi.client.setToken({ access_token: accessToken }); } catch(_){}
+    // Also update app globals if present
+    try {
+      window.accessToken = accessToken;
+      window.accessTokenExpiresAt = Date.now() + 55*60*1000;
+    } catch(_){}
   }
 
   const Sheets = {
@@ -4056,7 +4049,7 @@ document.getElementById('toolInlineBtn')?.addEventListener('click', ()=>{
 
     async readAll(){
       await ensureSheetsDiscovery();
-      await ensureScope(SCOPES_SHEETS);
+      await ensureSheetsToken();
       if (!this.spreadsheetId) throw new Error("Spreadsheet ID 未設定です");
       const resp = await gapi.client.sheets.spreadsheets.values.get({
         spreadsheetId: this.spreadsheetId,
@@ -4072,7 +4065,7 @@ document.getElementById('toolInlineBtn')?.addEventListener('click', ()=>{
 
     async batchUpsert(pins){
       await ensureSheetsDiscovery();
-      await ensureScope(SCOPES_SHEETS);
+      await ensureSheetsToken();
       const all = await this.readAll();
       const rowById = new Map(all.map((p,idx)=>[p.pinId, idx+2]));
       const updates = [];
@@ -4147,7 +4140,7 @@ document.getElementById('toolInlineBtn')?.addEventListener('click', ()=>{
 
   async function createSpreadsheetAndConnect(){
     await ensureSheetsDiscovery();
-    await ensureScope(SCOPES_SHEETS + " " + SCOPES_DRIVE_FILE);
+    await ensureSheetsToken();
     const title = `LociMyu pins ${new Date().toISOString().slice(0,19).replace(/[:T]/g,'-')}`;
     const createResp = await gapi.client.sheets.spreadsheets.create({
       properties: { title },
@@ -4161,14 +4154,12 @@ document.getElementById('toolInlineBtn')?.addEventListener('click', ()=>{
       resource: { values: [HEADERS] }
     });
 
-    // Optional: move into same Drive folder as model
+    // Optional: move into same Drive folder as model file
     try {
       const modelId = (window.currentModelFileId||"").trim();
       if (modelId) {
-        if (!gapi.client.drive || !gapi.client.drive.files) {
-          await gapi.client.load("drive","v3");
-        }
-        await ensureScope(SCOPES_DRIVE_FILE);
+        await ensureDriveDiscovery();
+        await ensureSheetsToken(); // drive.file scope already included
         const model = await gapi.client.drive.files.get({ fileId: modelId, fields: "parents" });
         const parents = model.result.parents || [];
         if (parents.length) {
