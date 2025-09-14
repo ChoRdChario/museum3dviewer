@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>LociMyu v0.5 (Material Editor)</title>
+  <title>LociMyu v0.5.1 (Material Editor – hotfix)</title>
   <link rel="icon" href='data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><circle cx="32" cy="32" r="28" fill="%230b0f14"/><text x="32" y="39" font-size="28" text-anchor="middle" fill="%2353b7ff" font-family="Arial">L</text></svg>'>
   <style>
     :root{ --bg:#0b0f14; --panel:#121922; --text:#e6edf3; --accent:#53b7ff; --muted:#8fa3bd; --radius:16px;}
@@ -225,8 +225,8 @@ let addPinMode=false, currentColor='#ff6b6b';
 let pins=[], selectedPinId=null, undoStack=[];
 let glbParents=[];
 let autosaveTimer=null;
-let materials=[], materialMap=new Map(); // name -> material
-let matOriginals=new WeakMap(); // material -> {map:Texture, alphaMap:Texture, transparent:boolean, opacity:number, alphaTest:number}
+let materials=[], materialMap=new Map();
+let matOriginals=new WeakMap();
 
 // ====== Helpers ======
 function extractDriveFileId(input){
@@ -310,11 +310,11 @@ function renderNow(){ renderer.render(scene,camera); }
 viewerInit();
 
 // ====== Pins ======
-let addPinMode=false, currentColor='#ff6b6b';
 function setAddPinMode(on){ addPinMode=on; el.modeLabel.textContent=on?'Add Pin: Click model':(tcontrols.visible?'Gizmo':'Orbit'); }
 function getIntersectPoint(event){
   const rect=el.viewerCanvas.getBoundingClientRect();
   pointer.x=((event.clientX-rect.left)/rect.width)*2-1;
+  pointer.y=-((event.clientY-rect.top)/rect.height)/2+0.5*2 -1; // corrected: keep -1..1
   pointer.y=-((event.clientY-rect.top)/rect.height)*2+1;
   raycaster.setFromCamera(pointer,camera);
   const hits=currentModel?raycaster.intersectObject(currentModel,true):[];
@@ -463,6 +463,8 @@ async function loadGLBByFileId(fileId){
 function fitToScene(){ if(!currentModel) return; const box = new THREE.Box3().setFromObject(currentModel); const size = box.getSize(new THREE.Vector3()); const center = box.getCenter(new THREE.Vector3()); const maxDim = Math.max(size.x,size.y,size.z)||1; const dist = maxDim*1.6; camera.position.copy(center.clone().add(new THREE.Vector3(dist, dist*0.7, dist))); controls.target.copy(center); controls.update(); }
 
 // ====== Materials ======
+let materials=[], materialMap=new Map(); // name -> material
+let matOriginals=new WeakMap();
 function collectMaterials(){
   materials=[]; materialMap.clear();
   const set = new Set();
@@ -510,13 +512,11 @@ async function applyMaterialEdits(){
   const thresh = parseFloat(el.matThreshold.value);
 
   for(const m of mats){
-    // basic transparency
     m.transparent = wantTransparent || whiteToAlpha || (opacity < 1.0);
     m.opacity = opacity;
-    m.alphaTest = thresh; // clip small alpha to avoid sorting artifacts
-    m.depthWrite = !m.transparent || thresh>0; // improve sorting when alphaTest is used
+    m.alphaTest = thresh;
+    m.depthWrite = !m.transparent || thresh>0;
 
-    // process color/alpha from map if any
     if(m.map && (invert || whiteToAlpha)){
       try{
         const processed = await processTextureToCanvasTexture(m.map, { invertRGB: invert, alphaFromWhite: whiteToAlpha, threshold: thresh });
@@ -525,8 +525,6 @@ async function applyMaterialEdits(){
           m.map.needsUpdate = true;
         }
       }catch(e){ console.warn('texture process failed', e); }
-    }else if(!m.map && whiteToAlpha){
-      // nothing to convert; just rely on opacity/transparent
     }
     m.needsUpdate = true;
   }
@@ -536,31 +534,25 @@ function clamp01(x){ return Math.min(1, Math.max(0, x)); }
 async function processTextureToCanvasTexture(tex, { invertRGB=false, alphaFromWhite=false, threshold=0 }){
   const image = tex.image;
   if(!image){ return null; }
-  let w = image.width || image.videoWidth || 0;
-  let h = image.height || image.videoHeight || 0;
+  const w = image.width || image.videoWidth || 0;
+  const h = image.height || image.videoHeight || 0;
   if(!w || !h){ return null; }
 
   const canvas = document.createElement('canvas'); canvas.width = w; canvas.height = h;
   const ctx = canvas.getContext('2d');
   try{ ctx.drawImage(image, 0, 0, w, h); }
-  catch(e){ console.warn('drawImage failed, trying createImageBitmap', e); 
-    try{ const bmp = await createImageBitmap(image); ctx.drawImage(bmp,0,0,w,h); }
-    catch(e2){ console.warn('imageBitmap failed', e2); return null; }
-  }
+  catch(e){ try{ const bmp = await createImageBitmap(image); ctx.drawImage(bmp,0,0,w,h); }
+    catch(e2){ return null; } }
   const img = ctx.getImageData(0,0,w,h);
   const data = img.data;
   for(let i=0;i<data.length;i+=4){
     let r=data[i], g=data[i+1], b=data[i+2], a=data[i+3];
-    if(invertRGB){
-      r=255-r; g=255-g; b=255-b;
-    }
+    if(invertRGB){ r=255-r; g=255-g; b=255-b; }
     let alpha=a;
     if(alphaFromWhite){
-      const L = (0.2126*r + 0.7152*g + 0.0722*b)/255; // 0=black, 1=white
-      let alf = 1 - L; // white→0 (transparent), black→1 (opaque)
-      if(threshold>0){
-        alf = (alf >= threshold) ? alf : 0;
-      }
+      const L = (0.2126*r + 0.7152*g + 0.0722*b)/255;
+      let alf = 1 - L;
+      if(threshold>0){ alf = (alf >= threshold) ? alf : 0; }
       alpha = Math.round(clamp01(alf) * 255);
     }
     data[i]=r; data[i+1]=g; data[i+2]=b; data[i+3]=alpha;
