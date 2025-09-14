@@ -3,8 +3,8 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>LociMyu v0.1 (Hardened UMD)</title>
-  <!-- Inline favicon to avoid 404 -->
+  <title>LociMyu v0.1 (UMD + robust controls)</title>
+  <!-- Inline favicon -->
   <link rel="icon" href='data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><circle cx="32" cy="32" r="28" fill="%230b0f14"/><text x="32" y="39" font-size="28" text-anchor="middle" fill="%2353b7ff" font-family="Arial">L</text></svg>'>
   <style>
     :root{ --bg:#0b0f14; --panel:#121922; --text:#e6edf3; --accent:#53b7ff; --muted:#8fa3bd; --radius:16px;}
@@ -87,7 +87,7 @@
   </div>
 </div>
 
-<!-- Static Sign-in Gate (visible until token acquired) -->
+<!-- Static Sign-in Gate -->
 <div class="signin-gate" id="gate">
   <div class="card">
     <h1>Googleにサインイン</h1>
@@ -181,7 +181,7 @@ document.addEventListener('DOMContentLoaded', () => {
     btnSignIn: document.getElementById('btnSignIn'),
   });
 
-  // Google init polling (load order agnostic)
+  // Google init polling
   const tick = setInterval(()=>{
     if(window.__gm.gapi && window.gapi && !gapiInited){ gapi.load('client', initGapiClient); }
     if(window.__gm.gis && !gisInited){ gisInited = true; maybeReady(); }
@@ -193,8 +193,8 @@ document.addEventListener('DOMContentLoaded', () => {
     tokenClient.requestAccessToken({ prompt:'consent' });
   });
 
-  // Viewer init
-  viewerInit();
+  // Wait for THREE extras to attach (UMD sometimes races on slow nets)
+  waitForThreeExtras(initAfterThree);
 
   // Restore from query
   const q = new URLSearchParams(location.search);
@@ -223,6 +223,27 @@ document.addEventListener('DOMContentLoaded', () => {
   // Keyboard
   window.addEventListener('keydown', (e)=>{ if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='z'){ e.preventDefault(); el.btnUndo?.click(); } });
 });
+
+// ====== Wait for THREE extras ======
+function waitForThreeExtras(cb){
+  const ok = () => {
+    return window.THREE && (THREE.OrbitControls || window.OrbitControls)
+      && (THREE.GLTFLoader || window.GLTFLoader)
+      && (THREE.TransformControls || window.TransformControls);
+  };
+  if(ok()) return cb();
+  const iv = setInterval(()=>{
+    if(ok()){ clearInterval(iv); cb(); }
+  }, 100);
+}
+
+function ctor_OrbitControls(){ return THREE.OrbitControls || window.OrbitControls; }
+function ctor_TransformControls(){ return THREE.TransformControls || window.TransformControls; }
+function ctor_GLTFLoader(){ return THREE.GLTFLoader || window.GLTFLoader; }
+
+function initAfterThree(){
+  viewerInit();
+}
 
 // ====== Google init ======
 async function initGapiClient(){
@@ -256,11 +277,16 @@ function viewerInit(){
   camera.position.set(2.8,1.6,3.6);
   const hemi = new THREE.HemisphereLight(0xffffff, 0x223355, 0.6); scene.add(hemi);
   const dir = new THREE.DirectionalLight(0xffffff, 1.0); dir.position.set(3,5,4); scene.add(dir);
-  controls = new THREE.OrbitControls(camera, el.viewerCanvas); controls.target.set(0,1,0); controls.update();
-  tcontrols = new THREE.TransformControls(camera, el.viewerCanvas); tcontrols.setSize(0.9); tcontrols.setSpace('world'); tcontrols.addEventListener('dragging-changed', e=>{ controls.enabled = !e.value; }); scene.add(tcontrols); tcontrols.visible=false;
+
+  const OrbitCtor = ctor_OrbitControls();
+  const TransformCtor = ctor_TransformControls();
+  controls = new OrbitCtor(camera, el.viewerCanvas); controls.target.set(0,1,0); controls.update();
+  tcontrols = new TransformCtor(camera, el.viewerCanvas); tcontrols.setSize(0.9); tcontrols.setSpace('world'); tcontrols.addEventListener('dragging-changed', e=>{ controls.enabled = !e.value; }); scene.add(tcontrols); tcontrols.visible=false;
+
   pinGroup = new THREE.Group(); scene.add(pinGroup);
   raycaster = new THREE.Raycaster(); pointer = new THREE.Vector2();
-  loader = new THREE.GLTFLoader();
+  const LoaderCtor = ctor_GLTFLoader(); loader = new LoaderCtor();
+
   window.addEventListener('resize', resize); el.viewerCanvas.addEventListener('pointerdown', onPointerDown);
   resize(); animate();
 }
