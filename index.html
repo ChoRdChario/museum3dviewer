@@ -3,25 +3,22 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>LociMyu v0.1 Starter (patched)</title>
-  <link rel="icon" href="./favicon.ico">
+  <title>LociMyu v0.1 Legacy (no-ESM)</title>
+  <!-- Inline favicon to avoid 404 -->
+  <link rel="icon" href='data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><circle cx="32" cy="32" r="28" fill="%230b0f14"/><text x="32" y="39" font-size="28" text-anchor="middle" fill="%2353b7ff" font-family="Arial">L</text></svg>'>
   <style>
-    :root{
-      --bg:#0b0f14; --panel:#121922; --muted:#5d718a; --text:#e6edf3; --accent:#53b7ff; --good:#2ecc71; --warn:#f1c40f; --bad:#e74c3c;
-      --radius:16px;
-    }
-    html,body{height:100%;}
-    body{margin:0;background:var(--bg);color:var(--text);font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", "Apple Color Emoji", "Segoe UI Emoji";}
-    .app{display:grid;grid-template-rows:auto 1fr; height:100vh;}
-    header{display:flex;gap:.75rem;align-items:center;padding:10px 12px;background:linear-gradient(180deg,#0e1520,#0b0f14);border-bottom:1px solid #1e2837;}
-    header .brand{display:flex;align-items:center;gap:.5rem;font-weight:700;letter-spacing:.3px}
-    .pill{background:rgba(255,255,255,.06);padding:6px 10px;border-radius:999px;border:1px solid rgba(255,255,255,.08);}
+    :root{ --bg:#0b0f14; --panel:#121922; --text:#e6edf3; --accent:#53b7ff; --muted:#8fa3bd; --radius:16px;}
+    html,body{height:100%}
+    body{margin:0;background:var(--bg);color:var(--text);font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;}
+    .app{display:grid;grid-template-rows:auto 1fr;height:100vh}
+    header{display:flex;gap:.75rem;align-items:center;padding:10px 12px;background:linear-gradient(180deg,#0e1520,#0b0f14);border-bottom:1px solid #1e2837}
+    .pill{background:rgba(255,255,255,.06);padding:6px 10px;border-radius:999px;border:1px solid rgba(255,255,255,.08);font-weight:700}
     input[type=text]{background:#0f1722;border:1px solid #203049;color:var(--text);border-radius:10px;padding:8px 10px;min-width:260px}
-    button{background:#152133;color:var(--text);border:1px solid #223146;border-radius:10px;padding:8px 12px;cursor:pointer;}
+    button{background:#152133;color:var(--text);border:1px solid #223146;border-radius:10px;padding:8px 12px;cursor:pointer}
     button:hover{background:#1a2b45}
     .accent{border-color:#2c82c9}
-    .main{display:grid;grid-template-columns: 280px 1fr 320px;gap:10px;padding:10px;height:calc(100vh - 58px);}
-    .panel{background:var(--panel);border:1px solid #1e2837;border-radius:var(--radius);overflow:hidden;display:flex;flex-direction:column;min-height:0}
+    .main{display:grid;grid-template-columns:280px 1fr 320px;gap:10px;padding:10px;height:calc(100vh - 58px)}
+    .panel{background:#121922;border:1px solid #1e2837;border-radius:var(--radius);overflow:hidden;display:flex;flex-direction:column;min-height:0}
     .panel h3{margin:0;padding:10px 12px;border-bottom:1px solid #203049;background:#0f1722;font-size:.95rem;font-weight:600}
     .panel .body{padding:10px;overflow:auto}
     #viewer{position:relative}
@@ -39,59 +36,38 @@
     .list .row{display:flex;align-items:center;justify-content:space-between;gap:8px;background:#0f1722;border:1px solid #203049;border-radius:12px;padding:10px}
     .row .title{font-weight:600}
     .row .meta{color:#a9b8cf;font-size:.85rem}
-    .toolbar{display:flex;gap:8px;flex-wrap:wrap}
-    .colors{display:flex;gap:6px}
-    .sw{width:18px;height:18px;border-radius:999px;border:1px solid rgba(255,255,255,.3);cursor:pointer}
-    @media (max-width: 900px){
-      .main{grid-template-columns:1fr; grid-template-rows: 300px 1fr 300px}
-    }
+    @media (max-width: 900px){ .main{grid-template-columns:1fr; grid-template-rows: 300px 1fr 300px} }
   </style>
 </head>
 <body>
 <div class="app">
   <header>
-    <div class="brand">
-      <span class="pill">LociMyu</span>
-      <span style="opacity:.8">v0.1 • GLB + Sheets Pins</span>
-    </div>
-    <div class="toolbar">
-      <input id="inputGLB" type="text" placeholder="GLB fileId (Google Drive)" />
-      <input id="inputSheet" type="text" placeholder="Pins spreadsheetId (Google Sheets)" />
+    <span class="pill">LociMyu</span>
+    <div class="toolbar" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+      <input id="inputGLB" type="text" placeholder="GLB fileId or share URL" />
+      <input id="inputSheet" type="text" placeholder="SpreadsheetId or share URL" />
       <button id="btnLoad" class="accent">GLBを読み込む</button>
-      <button id="btnPick" title="(後日) Drive Picker">📁 ピッカー</button>
       <button id="btnViewOnly">閲覧リンクを生成</button>
+      <span id="statusLabel" class="chip">Ready</span>
     </div>
   </header>
-
   <div class="main">
     <section class="panel" id="left">
       <h3>キャプション / Pins</h3>
       <div class="body">
-        <div class="toolbar" style="margin-bottom:8px">
+        <div style="display:flex;gap:8px;margin-bottom:8px">
           <button id="btnAddPin">＋ ピン追加</button>
           <button id="btnGizmo">ギズモ: OFF</button>
           <button id="btnUndo">Ctrl+Z</button>
-          <div class="colors" id="colorPalette" title="ピン色">
-            <div class="sw" data-color="#ff6b6b" style="background:#ff6b6b"></div>
-            <div class="sw" data-color="#ffd166" style="background:#ffd166"></div>
-            <div class="sw" data-color="#06d6a0" style="background:#06d6a0"></div>
-            <div class="sw" data-color="#118ab2" style="background:#118ab2"></div>
-            <div class="sw" data-color="#c77dff" style="background:#c77dff"></div>
-          </div>
         </div>
         <div id="pinsList" class="list"></div>
       </div>
     </section>
-
     <section class="panel" id="viewer">
       <div class="spinner" id="loading" hidden><div class="lds"></div></div>
       <canvas id="viewerCanvas"></canvas>
-      <div class="hud">
-        <div class="chip" id="modeLabel">Orbit</div>
-        <div class="chip" id="statusLabel">Ready</div>
-      </div>
+      <div class="hud"><div class="chip" id="modeLabel">Orbit</div></div>
     </section>
-
     <section class="panel" id="right">
       <h3>キャプション編集</h3>
       <div class="body">
@@ -100,12 +76,6 @@
           <div style="display:flex;flex-direction:column;gap:8px">
             <label>タイトル<input id="capTitle" type="text" placeholder="タイトル" /></label>
             <label>本文<textarea id="capBody" rows="7" placeholder="キャプション本文"></textarea></label>
-            <div style="display:flex;gap:8px;align-items:center">
-              <button id="btnAttachDrive">Drive画像を添付</button>
-              <input id="localImage" type="file" accept="image/*,.heic,.heif" />
-            </div>
-            <div id="thumbs" class="list"></div>
-            <div style="opacity:.7;font-size:.9rem">座標: <span id="coords"></span></div>
             <div style="display:flex;gap:8px;justify-content:space-between;align-items:center">
               <button id="btnSavePin" class="accent">保存（Sheets）</button>
               <button id="btnDeletePin" style="border-color:#5a1f26;color:#ffb4b4">削除</button>
@@ -117,26 +87,24 @@
   </div>
 </div>
 
-<!-- Define global callbacks BEFORE loading Google scripts -->
+<!-- Google global callbacks FIRST -->
 <script>
-  window._gapiReady = false;
-  window._gisReady = false;
-  // These must exist globally so onload= can call them safely
-  window.gapiLoaded = function(){ window._gapiReady = true; if (window._initGapiClient) window._initGapiClient(); };
-  window.gisLoaded  = function(){ window._gisReady  = true; if (window._initGisReady)  window._initGisReady();  };
+  // Make onload receivers present before script tags below
+  function gapiLoaded(){ if(window.gapi) gapi.load('client', initGapiClient); }
+  function gisLoaded(){ gisInited = true; maybeReady(); }
 </script>
 
-<!-- Google APIs scripts with onload callbacks (safe now) -->
+<!-- Google APIs -->
 <script async defer src="https://accounts.google.com/gsi/client" onload="gisLoaded()"></script>
 <script async defer src="https://apis.google.com/js/api.js" onload="gapiLoaded()"></script>
 
-<script type="module">
-// ====== Imports (Three.js via ESM CDN) ======
-import * as THREE from 'https://unpkg.com/three@0.157.0/build/three.module.js';
-import { OrbitControls } from 'https://unpkg.com/three@0.157.0/examples/jsm/controls/OrbitControls.js';
-import { GLTFLoader } from 'https://unpkg.com/three@0.157.0/examples/jsm/loaders/GLTFLoader.js';
-import { TransformControls } from 'https://unpkg.com/three@0.157.0/examples/jsm/controls/TransformControls.js';
+<!-- THREE (UMD, no modules) -->
+<script src="https://unpkg.com/three@0.157.0/build/three.min.js"></script>
+<script src="https://unpkg.com/three@0.157.0/examples/js/controls/OrbitControls.js"></script>
+<script src="https://unpkg.com/three@0.157.0/examples/js/loaders/GLTFLoader.js"></script>
+<script src="https://unpkg.com/three@0.157.0/examples/js/controls/TransformControls.js"></script>
 
+<script>
 // ====== CONFIG ======
 const CLIENT_ID = '595200751510-ncahnf7edci6b9925becn5to49r6cguv.apps.googleusercontent.com';
 const API_KEY   = 'AIzaSyCUnTCr5yWUWPdEXST9bKP1LpgawU5rIbI';
@@ -150,97 +118,109 @@ const SCOPES = [
   'https://www.googleapis.com/auth/drive.metadata.readonly',
   'https://www.googleapis.com/auth/spreadsheets'
 ].join(' ');
-document.getElementById('neededConsts')?.appendChild(document.createTextNode(`CLIENT_ID=${CLIENT_ID}\nAPI_KEY=${API_KEY}`));
+
+// ====== Share URL -> ID extract ======
+function extractDriveFileId(input){
+  if(!input) return '';
+  // Patterns: /file/d/{id}/, open?id=, uc?id=, id=
+  const m1 = input.match(/\/file\/d\/([a-zA-Z0-9_-]{10,})/);
+  if(m1) return m1[1];
+  const m2 = input.match(/[?&]id=([a-zA-Z0-9_-]{10,})/);
+  if(m2) return m2[1];
+  // Raw ID
+  const m3 = input.match(/^([a-zA-Z0-9_-]{20,})$/);
+  if(m3) return m3[1];
+  return input.trim();
+}
+function extractSpreadsheetId(input){
+  if(!input) return '';
+  // docs.google.com/spreadsheets/d/{id}/
+  const m1 = input.match(/spreadsheets\/d\/([a-zA-Z0-9_-]{10,})/);
+  if(m1) return m1[1];
+  const m2 = input.match(/[?&]id=([a-zA-Z0-9_-]{10,})/);
+  if(m2) return m2[1];
+  const m3 = input.match(/^([a-zA-Z0-9_-]{20,})$/);
+  if(m3) return m3[1];
+  return input.trim();
+}
 
 // ====== State ======
-let tokenClient; let gapiInited = false, gisInited = false; let accessToken = null;
-let renderer, scene, camera, controls, tcontrols;
-let raycaster = new THREE.Raycaster(); let pointer = new THREE.Vector2();
-let loader = new GLTFLoader(); let currentModel = null;
+let tokenClient; let gapiInited=false, gisInited=false; let accessToken=null;
+let renderer, scene, camera, controls, tcontrols, pinGroup;
+let raycaster, pointer, loader, currentModel=null;
 const el = {
-  gate: document.getElementById('gate'),
-  btnSignIn: document.getElementById('btnSignIn'),
-  btnLoad: document.getElementById('btnLoad'),
-  btnPick: document.getElementById('btnPick'),
-  btnAddPin: document.getElementById('btnAddPin'),
-  btnGizmo: document.getElementById('btnGizmo'),
-  btnUndo: document.getElementById('btnUndo'),
-  btnSavePin: document.getElementById('btnSavePin'),
-  btnDeletePin: document.getElementById('btnDeletePin'),
-  btnAttachDrive: document.getElementById('btnAttachDrive'),
-  localImage: document.getElementById('localImage'),
+  statusLabel: document.getElementById('statusLabel'),
   inputGLB: document.getElementById('inputGLB'),
   inputSheet: document.getElementById('inputSheet'),
-  pinsList: document.getElementById('pinsList'),
+  btnLoad: document.getElementById('btnLoad'),
   loading: document.getElementById('loading'),
-  modeLabel: document.getElementById('modeLabel'),
-  statusLabel: document.getElementById('statusLabel'),
+  viewerCanvas: document.getElementById('viewerCanvas'),
+  pinsList: document.getElementById('pinsList'),
   rightNoSel: document.getElementById('noSelection'),
   rightEditor: document.getElementById('editor'),
   capTitle: document.getElementById('capTitle'),
   capBody: document.getElementById('capBody'),
-  coords: document.getElementById('coords'),
-  thumbs: document.getElementById('thumbs'),
-  viewerCanvas: document.getElementById('viewerCanvas'),
-  colorPalette: document.getElementById('colorPalette'),
+  btnSavePin: document.getElementById('btnSavePin'),
+  btnDeletePin: document.getElementById('btnDeletePin'),
+  btnAddPin: document.getElementById('btnAddPin'),
+  btnGizmo: document.getElementById('btnGizmo'),
+  btnUndo: document.getElementById('btnUndo'),
+  modeLabel: document.getElementById('modeLabel'),
 };
 
-// Pins
-let pins = []; let selectedPinId = null; let undoStack = [];
-function addUndo(entry){ undoStack.push(entry); }
-function undo(){ const u = undoStack.pop(); if(!u) return;
-  if(u.type==='move'){ const p = pins.find(x=>x.id===u.id); if(p){ p.pos.copy(u.from); placePinMesh(p); selectPin(p.id); renderNow(); } }
-  else if(u.type==='add'){ removePin(u.id, {silent:true}); }
-  else if(u.type==='delete'){ pins.push(u.pin); placePinMesh(u.pin); refreshPinsList(); selectPin(u.pin.id); renderNow(); }
-}
-
-// ====== Google APIs init ======
+// ====== Google init ======
 async function initGapiClient(){ await gapi.client.init({ apiKey: API_KEY, discoveryDocs: DISCOVERY_DOCS }); gapiInited = true; maybeReady(); }
 function maybeReady(){ if(!gapiInited || !gisInited) return;
-  tokenClient = google.accounts.oauth2.initTokenClient({
-    client_id: CLIENT_ID, scope: SCOPES,
-    callback: (resp) => { accessToken = resp.access_token; if(accessToken){ el.gate.style.display='none'; el.statusLabel.textContent='Signed in'; } },
-  });
+  tokenClient = google.accounts.oauth2.initTokenClient({ client_id: CLIENT_ID, scope: SCOPES, callback: (resp)=>{ accessToken = resp.access_token; if(accessToken){ document.querySelector('.signin-gate')?.remove(); el.statusLabel.textContent='Signed in'; } } });
 }
-// Make global initializers that the non-module stub will call
-window._initGapiClient = () => { if(window.gapi) gapi.load('client', initGapiClient); };
-window._initGisReady  = () => { gisInited = true; maybeReady(); };
-
-// In case scripts already loaded before this module executed
-if (window._gapiReady) window._initGapiClient();
-if (window._gisReady)  window._initGisReady();
-
-// Button: Sign-In
-el.btnSignIn.addEventListener('click', () => {
-  if(!tokenClient){ alert('Google API 初期化中です。数秒後に再試行してください。'); return; }
-  tokenClient.requestAccessToken({ prompt: 'consent' });
+document.addEventListener('click', (e)=>{
+  const btn = e.target.closest('#btnSignIn'); if(btn){ if(!tokenClient){ alert('Google API 初期化中。少し待って再試行'); return; } tokenClient.requestAccessToken({ prompt:'consent' }); }
 });
 
-// ====== 3D Viewer setup ======
-const pinGroup = new THREE.Group();
-const rendererInit = () => {
+// ====== Simple Sign-in gate (DOM only, no framework) ======
+(function addGate(){
+  const gate = document.createElement('div'); gate.className='signin-gate'; gate.innerHTML = `
+    <div class="card">
+      <h1>Googleにサインイン</h1>
+      <p>本ツールは Google Drive / Google Sheets を使用します。先にサインインしてください。</p>
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+        <button id="btnSignIn" class="accent" style="font-weight:700">🔐 Sign in with Google</button>
+        <span class="meta" style="opacity:.8">OAuth2 (Drive.file / Sheets)</span>
+      </div>
+      <div style="margin-top:10px;color:#9eb2c8;font-size:.9rem">
+        <code>CLIENT_ID configured • API_KEY configured</code>
+      </div>
+    </div>`;
+  document.body.appendChild(gate);
+})();
+
+// ====== 3D viewer (legacy THREE globals) ======
+function viewerInit(){
   renderer = new THREE.WebGLRenderer({ canvas: el.viewerCanvas, antialias:true });
-  scene = new THREE.Scene(); scene.add(pinGroup);
+  scene = new THREE.Scene();
   scene.background = new THREE.Color(0x0a0f16);
-  camera = new THREE.PerspectiveCamera(60, 2, 0.1, 2000); camera.position.set(2.8, 1.6, 3.6);
+  camera = new THREE.PerspectiveCamera(60, 2, 0.1, 2000);
+  camera.position.set(2.8,1.6,3.6);
   const hemi = new THREE.HemisphereLight(0xffffff, 0x223355, 0.6); scene.add(hemi);
   const dir = new THREE.DirectionalLight(0xffffff, 1.0); dir.position.set(3,5,4); scene.add(dir);
-  controls = new OrbitControls(camera, el.viewerCanvas); controls.target.set(0,1,0); controls.update();
-  tcontrols = new TransformControls(camera, el.viewerCanvas); tcontrols.setSize(0.9); tcontrols.setSpace('world'); tcontrols.addEventListener('dragging-changed', e=>{ controls.enabled = !e.value; }); scene.add(tcontrols); tcontrols.visible=false;
-  window.addEventListener('resize', resize);
-  el.viewerCanvas.addEventListener('pointerdown', onPointerDown);
+  controls = new THREE.OrbitControls(camera, el.viewerCanvas); controls.target.set(0,1,0); controls.update();
+  tcontrols = new THREE.TransformControls(camera, el.viewerCanvas); tcontrols.setSize(0.9); tcontrols.setSpace('world'); tcontrols.addEventListener('dragging-changed', e=>{ controls.enabled = !e.value; }); scene.add(tcontrols); tcontrols.visible=false;
+  pinGroup = new THREE.Group(); scene.add(pinGroup);
+  raycaster = new THREE.Raycaster(); pointer = new THREE.Vector2();
+  loader = new THREE.GLTFLoader();
+  window.addEventListener('resize', resize); el.viewerCanvas.addEventListener('pointerdown', onPointerDown);
   resize(); animate();
-};
-function resize(){ const w = el.viewerCanvas.clientWidth || el.viewerCanvas.parentElement.clientWidth; const h = el.viewerCanvas.clientHeight || el.viewerCanvas.parentElement.clientHeight; renderer.setSize(w,h,false); camera.aspect = w/h; camera.updateProjectionMatrix(); }
+}
+function resize(){ const w = el.viewerCanvas.clientWidth || el.viewerCanvas.parentElement.clientWidth; const h = el.viewerCanvas.clientHeight || el.viewerCanvas.parentElement.clientHeight; renderer.setSize(w,h,false); camera.aspect=w/h; camera.updateProjectionMatrix(); }
 function animate(){ requestAnimationFrame(animate); renderer.render(scene,camera); }
 function renderNow(){ renderer.render(scene,camera); }
 
-// ====== Load GLB from Drive ======
+// ====== GLB load from Drive ======
 async function loadGLBByFileId(fileId){
   if(!accessToken){ alert('先にサインインしてください'); return; }
   try{
     el.loading.hidden=false; el.statusLabel.textContent='Loading GLB…';
-    const meta = await gapi.client.drive.files.get({ fileId, fields:'id,name,mimeType,parents' });
+    const meta = await gapi.client.drive.files.get({ fileId, fields:'id,name,mimeType' });
     const dlUrl = `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`;
     const glbArrayBuffer = await fetch(dlUrl, { headers:{ Authorization:`Bearer ${accessToken}` } }).then(r=>r.arrayBuffer());
     if(currentModel){ scene.remove(currentModel); currentModel.traverse(o=>{ if(o.geometry) o.geometry.dispose(); if(o.material){ if(Array.isArray(o.material)) o.material.forEach(m=>m.dispose()); else o.material.dispose(); } }); currentModel=null; }
@@ -251,68 +231,66 @@ async function loadGLBByFileId(fileId){
 }
 function fitToScene(){ if(!currentModel) return; const box = new THREE.Box3().setFromObject(currentModel); const size = box.getSize(new THREE.Vector3()); const center = box.getCenter(new THREE.Vector3()); const maxDim = Math.max(size.x,size.y,size.z)||1; const dist = maxDim*1.6; camera.position.copy(center.clone().add(new THREE.Vector3(dist, dist*0.7, dist))); controls.target.copy(center); controls.update(); }
 
-// ====== Pins ======
-function createPin(pos, color){ const id = `p_${Date.now()}_${Math.random().toString(36).slice(2,7)}`; const pin = { id, pos: pos.clone(), color: color || '#ff6b6b', title:'', body:'', images:[], mesh:null }; pins.push(pin); placePinMesh(pin); refreshPinsList(); selectPin(id); addUndo({type:'add', id}); }
-function placePinMesh(pin){ if(pin.mesh){ pinGroup.remove(pin.mesh); pin.mesh.geometry.dispose(); pin.mesh.material.dispose(); pin.mesh=null; } const geo = new THREE.SphereGeometry(0.01, 16, 16); const mat = new THREE.MeshBasicMaterial({ color: new THREE.Color(pin.color) }); const mesh = new THREE.Mesh(geo, mat); mesh.position.copy(pin.pos); mesh.userData.pinId = pin.id; pin.mesh = mesh; pinGroup.add(mesh); }
-function selectPin(id){ selectedPinId = id; const p = pins.find(x=>x.id===id); if(!p){ el.rightEditor.hidden=true; el.rightNoSel.hidden=false; return; } el.rightNoSel.hidden=true; el.rightEditor.hidden=false; el.capTitle.value = p.title || ''; el.capBody.value = p.body || ''; el.coords.textContent = `${p.pos.x.toFixed(3)}, ${p.pos.y.toFixed(3)}, ${p.pos.z.toFixed(3)}`; tcontrols.attach(p.mesh); controls.target.copy(p.pos); controls.update(); }
-function refreshPinsList(){ el.pinsList.innerHTML=''; pins.forEach(p=>{ const row = document.createElement('div'); row.className='row'; row.dataset.id=p.id; const left = document.createElement('div'); left.style.display='flex'; left.style.alignItems='center'; left.style.gap='8px'; const dot = document.createElement('div'); dot.style.width='10px'; dot.style.height='10px'; dot.style.borderRadius='999px'; dot.style.background=p.color; left.appendChild(dot); const title = document.createElement('div'); title.className='title'; title.textContent = p.title || '(無題)'; left.appendChild(title); const meta = document.createElement('div'); meta.className='meta'; meta.textContent = `x:${p.pos.x.toFixed(2)} y:${p.pos.y.toFixed(2)} z:${p.pos.z.toFixed(2)}`; row.appendChild(left); row.appendChild(meta); row.addEventListener('click',()=> selectPin(p.id)); el.pinsList.appendChild(row); }); }
-function removePin(id, {silent}={}){ const idx = pins.findIndex(x=>x.id===id); if(idx<0) return; const pin = pins[idx]; if(pin.mesh){ pinGroup.remove(pin.mesh); pin.mesh.geometry.dispose(); pin.mesh.material.dispose(); } pins.splice(idx,1); if(!silent) addUndo({type:'delete', pin}); refreshPinsList(); el.rightEditor.hidden=true; el.rightNoSel.hidden=false; selectedPinId=null; }
+// ====== Pins (same as before but using THREE global) ======
+let pins=[]; let selectedPinId=null; let undoStack=[];
+function addUndo(u){ undoStack.push(u); }
+function undo(){ const u = undoStack.pop(); if(!u) return; if(u.type==='move'){ const p=pins.find(x=>x.id===u.id); if(p){ p.pos.copy(u.from); placePinMesh(p); selectPin(p.id); renderNow(); } } else if(u.type==='add'){ removePin(u.id,{silent:true}); } else if(u.type==='delete'){ pins.push(u.pin); placePinMesh(u.pin); refreshPinsList(); selectPin(u.pin.id); renderNow(); } }
+function createPin(pos,color){ const id=`p_${Date.now()}_${Math.random().toString(36).slice(2,7)}`; const pin={id,pos:pos.clone(),color:color||'#ff6b6b',title:'',body:'',images:[],mesh:null}; pins.push(pin); placePinMesh(pin); refreshPinsList(); selectPin(id); addUndo({type:'add',id}); }
+function placePinMesh(pin){ if(pin.mesh){ pinGroup.remove(pin.mesh); pin.mesh.geometry.dispose(); pin.mesh.material.dispose(); pin.mesh=null; } const geo=new THREE.SphereGeometry(0.01,16,16); const mat=new THREE.MeshBasicMaterial({color:new THREE.Color(pin.color)}); const mesh=new THREE.Mesh(geo,mat); mesh.position.copy(pin.pos); mesh.userData.pinId=pin.id; pin.mesh=mesh; pinGroup.add(mesh); }
+function selectPin(id){ selectedPinId=id; const p=pins.find(x=>x.id===id); if(!p){ el.rightEditor.hidden=true; el.rightNoSel.hidden=false; return; } el.rightNoSel.hidden=true; el.rightEditor.hidden=false; el.capTitle.value=p.title||''; el.capBody.value=p.body||''; document.getElementById('coords')?.replaceChildren(document.createTextNode(`${p.pos.x.toFixed(3)}, ${p.pos.y.toFixed(3)}, ${p.pos.z.toFixed(3)}`)); tcontrols.attach(p.mesh); controls.target.copy(p.pos); controls.update(); }
+function refreshPinsList(){ el.pinsList.innerHTML=''; pins.forEach(p=>{ const row=document.createElement('div'); row.className='row'; row.dataset.id=p.id; const left=document.createElement('div'); left.style.display='flex'; left.style.alignItems='center'; left.style.gap='8px'; const dot=document.createElement('div'); dot.style.width='10px'; dot.style.height='10px'; dot.style.borderRadius='999px'; dot.style.background=p.color; left.appendChild(dot); const title=document.createElement('div'); title.className='title'; title.textContent=p.title||'(無題)'; left.appendChild(title); const meta=document.createElement('div'); meta.className='meta'; meta.textContent=`x:${p.pos.x.toFixed(2)} y:${p.pos.y.toFixed(2)} z:${p.pos.z.toFixed(2)}`; row.appendChild(left); row.appendChild(meta); row.addEventListener('click',()=>selectPin(p.id)); el.pinsList.appendChild(row); }); }
+function removePin(id,{silent}={}){ const idx=pins.findIndex(x=>x.id===id); if(idx<0) return; const pin=pins[idx]; if(pin.mesh){ pinGroup.remove(pin.mesh); pin.mesh.geometry.dispose(); pin.mesh.material.dispose(); } pins.splice(idx,1); if(!silent) addUndo({type:'delete',pin}); refreshPinsList(); el.rightEditor.hidden=true; el.rightNoSel.hidden=false; selectedPinId=null; }
 
-// ====== Picking & Gizmo ======
-function getIntersectPoint(event){ const rect = el.viewerCanvas.getBoundingClientRect(); pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1; pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1; raycaster.setFromCamera(pointer, camera); const hits = currentModel ? raycaster.intersectObject(currentModel, true) : []; return hits.length ? hits[0].point.clone() : null; }
-function onPointerDown(e){ if(!currentModel) return; if(tcontrols.dragging) return; if(addPinMode){ const pt = getIntersectPoint(e); if(pt){ createPin(pt, currentColor); setAddPinMode(false); } } else { const rect = el.viewerCanvas.getBoundingClientRect(); pointer.x = ((e.clientX - rect.left) / rect.width) * 2 - 1; pointer.y = -((e.clientY - rect.top) / rect.height) * 2 + 1; raycaster.setFromCamera(pointer, camera); const hits = raycaster.intersectObjects(pinGroup.children, false); if(hits.length){ selectPin(hits[0].object.userData.pinId); } } }
-let addPinMode=false; let currentColor='#ff6b6b';
+// Picking & Gizmo
+let addPinMode=false; let currentColor='#ff6b6b'; let lastPos=null;
+function getIntersectPoint(event){ const rect=el.viewerCanvas.getBoundingClientRect(); pointer.x=((event.clientX-rect.left)/rect.width)*2-1; pointer.y=-((event.clientY-rect.top)/rect.height)*2+1; raycaster.setFromCamera(pointer,camera); const hits=currentModel?raycaster.intersectObject(currentModel,true):[]; return hits.length?hits[0].point.clone():null; }
+function onPointerDown(e){ if(!currentModel) return; if(tcontrols.dragging) return; if(addPinMode){ const pt=getIntersectPoint(e); if(pt){ createPin(pt,currentColor); setAddPinMode(false);} } else { const rect=el.viewerCanvas.getBoundingClientRect(); pointer.x=((e.clientX-rect.left)/rect.width)*2-1; pointer.y=-((e.clientY-rect.top)/rect.height)*2+1; raycaster.setFromCamera(pointer,camera); const hits=raycaster.intersectObjects(pinGroup.children,false); if(hits.length){ selectPin(hits[0].object.userData.pinId); } } }
+function setAddPinMode(on){ addPinMode=on; el.modeLabel.textContent=on?'Add Pin: Click model':(tcontrols.visible?'Gizmo':'Orbit'); }
 el.btnAddPin.addEventListener('click', ()=> setAddPinMode(true));
-function setAddPinMode(on){ addPinMode = on; el.modeLabel.textContent = on ? 'Add Pin: Click model' : (tcontrols.visible ? 'Gizmo' : 'Orbit'); }
-el.btnGizmo.addEventListener('click', ()=>{ const p = pins.find(x=>x.id===selectedPinId); if(!p){ alert('ピンを選択してください'); return; } tcontrols.visible = !tcontrols.visible; el.btnGizmo.textContent = `ギズモ: ${tcontrols.visible? 'ON':'OFF'}`; el.modeLabel.textContent = tcontrols.visible ? 'Gizmo' : 'Orbit'; tcontrols.setMode(nextTransformMode()); });
+el.btnGizmo.addEventListener('click', ()=>{ const p=pins.find(x=>x.id===selectedPinId); if(!p){ alert('ピンを選択してください'); return; } tcontrols.visible=!tcontrols.visible; el.btnGizmo.textContent=`ギズモ: ${tcontrols.visible?'ON':'OFF'}`; el.modeLabel.textContent=tcontrols.visible?'Gizmo':'Orbit'; tcontrols.setMode(nextTransformMode()); });
 function nextTransformMode(){ const order=['translate','rotate','scale']; const idx=order.indexOf(tcontrols.getMode()); const next=order[(idx+1)%order.length]; tcontrols.setMode(next); return next; }
-let lastPos=null;
-tcontrols.addEventListener('mouseDown', ()=>{ const p = pins.find(x=>x.id===selectedPinId); if(p){ lastPos=p.pos.clone(); } });
-tcontrols.addEventListener('objectChange', ()=>{ const p = pins.find(x=>x.id===selectedPinId); if(!p) return; p.pos.copy(p.mesh.position); el.coords.textContent = `${p.pos.x.toFixed(3)}, ${p.pos.y.toFixed(3)}, ${p.pos.z.toFixed(3)}`; renderNow(); });
-tcontrols.addEventListener('mouseUp', ()=>{ const p = pins.find(x=>x.id===selectedPinId); if(p && lastPos){ addUndo({type:'move', id:p.id, from:lastPos.clone(), to:p.pos.clone()}); lastPos=null; } });
+tcontrols.addEventListener('mouseDown', ()=>{ const p=pins.find(x=>x.id===selectedPinId); if(p){ lastPos=p.pos.clone(); } });
+tcontrols.addEventListener('objectChange', ()=>{ const p=pins.find(x=>x.id===selectedPinId); if(!p) return; p.pos.copy(p.mesh.position); renderNow(); });
+tcontrols.addEventListener('mouseUp', ()=>{ const p=pins.find(x=>x.id===selectedPinId); if(p && lastPos){ addUndo({type:'move',id:p.id,from:lastPos.clone(),to:p.pos.clone()}); lastPos=null; } });
 
-// ====== UI events ======
-el.btnLoad.addEventListener('click', ()=>{ const fid = el.inputGLB.value.trim(); if(!fid){ alert('GLBの fileId を入力してください'); return; } loadGLBByFileId(fid); });
+// UI events
+el.btnLoad.addEventListener('click', ()=>{
+  const fid = extractDriveFileId(el.inputGLB.value.trim());
+  const sid = extractSpreadsheetId(el.inputSheet.value.trim());
+  el.inputGLB.value = fid; el.inputSheet.value = sid;
+  loadGLBByFileId(fid);
+});
 el.btnUndo.addEventListener('click', undo);
-el.capTitle.addEventListener('input', ()=>{ const p = pins.find(x=>x.id===selectedPinId); if(!p) return; p.title = el.capTitle.value; refreshPinsList(); });
-el.capBody.addEventListener('input', ()=>{ const p = pins.find(x=>x.id===selectedPinId); if(!p) return; p.body  = el.capBody.value; });
-el.colorPalette.querySelectorAll('.sw').forEach(s=>{ s.addEventListener('click',()=>{ currentColor = s.dataset.color; const p = pins.find(x=>x.id===selectedPinId); if(!p) return; p.color = currentColor; placePinMesh(p); refreshPinsList(); renderNow(); }); });
+el.capTitle?.addEventListener('input', ()=>{ const p=pins.find(x=>x.id===selectedPinId); if(!p) return; p.title=el.capTitle.value; refreshPinsList(); });
+el.capBody?.addEventListener('input', ()=>{ const p=pins.find(x=>x.id===selectedPinId); if(!p) return; p.body=el.capBody.value; });
 el.btnDeletePin.addEventListener('click', ()=>{ if(!selectedPinId) return; removePin(selectedPinId); });
 el.btnSavePin.addEventListener('click', async ()=>{
-  const sheetId = el.inputSheet.value.trim(); if(!sheetId){ alert('Spreadsheet ID が未設定です'); return; }
+  const sheetId = extractSpreadsheetId(el.inputSheet.value.trim()); if(!sheetId){ alert('Spreadsheet ID が未設定です'); return; }
   const p = pins.find(x=>x.id===selectedPinId); if(!p){ alert('ピンを選択してください'); return; }
   try{
     const values = [[p.id, p.title, p.body, p.pos.x, p.pos.y, p.pos.z, p.color, JSON.stringify(p.images||[]), Date.now()]];
     await gapi.client.sheets.spreadsheets.values.append({ spreadsheetId: sheetId, range: 'pins!A1', valueInputOption:'RAW', resource:{ values } });
-    toast('保存しました（仮: append）');
+    el.statusLabel.textContent='保存しました（append）'; setTimeout(()=> el.statusLabel.textContent='Ready', 2000);
   }catch(e){ console.error(e); alert('保存に失敗しました'); }
 });
-function toast(msg){ el.statusLabel.textContent = msg; setTimeout(()=>{ el.statusLabel.textContent='Ready'; }, 2000); }
 document.getElementById('btnViewOnly').addEventListener('click', ()=>{
+  const fid = extractDriveFileId(el.inputGLB.value.trim());
+  const sid = extractSpreadsheetId(el.inputSheet.value.trim());
   const url = new URL(location.href);
-  url.searchParams.set('view','1');
-  url.searchParams.set('fileId', el.inputGLB.value.trim());
-  url.searchParams.set('sheetId', el.inputSheet.value.trim());
+  url.searchParams.set('view','1'); url.searchParams.set('fileId', fid); url.searchParams.set('sheetId', sid);
   navigator.clipboard.writeText(url.toString());
-  toast('閲覧リンクをコピーしました');
+  el.statusLabel.textContent='閲覧リンクをコピーしました'; setTimeout(()=> el.statusLabel.textContent='Ready', 2000);
 });
-(function(){
+(function seedFromQuery(){
   const q = new URLSearchParams(location.search);
-  const viewOnly = q.get('view')==='1';
   if(q.get('fileId')) el.inputGLB.value = q.get('fileId');
   if(q.get('sheetId')) el.inputSheet.value = q.get('sheetId');
-  if(viewOnly){
-    [el.btnAddPin, el.btnGizmo, el.btnUndo, el.btnSavePin, el.btnDeletePin, el.btnAttachDrive, el.localImage].forEach(b=> b?.setAttribute('disabled','true'));
-    document.querySelectorAll('input,textarea,button').forEach(x=>{
-      if(x.id==='btnLoad' || x.id==='btnPick' || x.id==='btnViewOnly' || x.id==='btnSignIn' || x.id==='inputGLB' || x.id==='inputSheet') return; x.setAttribute('disabled','true');
-    });
-    document.title += ' (View Only)';
-  }
 })();
+
 // Boot
-rendererInit();
-// Keyboard shortcuts
-window.addEventListener('keydown', (e)=>{ if((e.ctrlKey||e.metaKey) && e.key.toLowerCase()==='z'){ e.preventDefault(); document.querySelector('#btnUndo')?.click(); } });
+viewerInit();
+// Keyboard
+window.addEventListener('keydown', (e)=>{ if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='z'){ e.preventDefault(); el.btnUndo.click(); } });
 </script>
 </body>
 </html>
