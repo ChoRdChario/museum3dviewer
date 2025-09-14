@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>LociMyu v0.7 (Unlit + Live apply)</title>
+  <title>LociMyu v0.8 (Views + Ortho + BG + DoubleSide)</title>
   <link rel="icon" href='data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><circle cx="32" cy="32" r="28" fill="%230b0f14"/><text x="32" y="39" font-size="28" text-anchor="middle" fill="%2353b7ff" font-family="Arial">L</text></svg>'>
   <style>
     :root{ --bg:#0b0f14; --panel:#121922; --text:#e6edf3; --accent:#53b7ff; --muted:#8fa3bd; --radius:16px;}
@@ -12,22 +12,22 @@
     .app{display:grid;grid-template-rows:auto 1fr;height:100vh}
     header{display:flex;gap:.75rem;align-items:center;padding:10px 12px;background:linear-gradient(180deg,#0e1520,#0b0f14);border-bottom:1px solid #1e2837}
     .pill{background:rgba(255,255,255,.06);padding:6px 10px;border-radius:999px;border:1px solid rgba(255,255,255,.08);font-weight:700}
-    input[type=text], select, textarea{background:#0f1722;border:1px solid #203049;color:#e6edf3;border-radius:10px;padding:8px 10px;min-width:260px}
-    button{background:#152133;color:#e6edf3;border:1px solid #223146;border-radius:10px;padding:8px 12px;cursor:pointer}
+    input[type=text], select, textarea{background:#0f1722;border:1px solid #203049;color:var(--text);border-radius:10px;padding:8px 10px;min-width:260px}
+    button{background:#152133;color:var(--text);border:1px solid #223146;border-radius:10px;padding:8px 12px;cursor:pointer}
     button[disabled]{opacity:.5;cursor:not-allowed}
     button:hover{background:#1a2b45}
     .accent{border-color:#2c82c9}
-    .main{display:grid;grid-template-columns:340px 1fr 420px;gap:10px;padding:10px;height:calc(100vh - 58px)}
-    .panel{background:#121922;border:1px solid #1e2837;border-radius:16px;overflow:hidden;display:flex;flex-direction:column;min-height:0}
+    .main{display:grid;grid-template-columns:360px 1fr 420px;gap:10px;padding:10px;height:calc(100vh - 58px)}
+    .panel{background:#121922;border:1px solid #1e2837;border-radius:var(--radius);overflow:hidden;display:flex;flex-direction:column;min-height:0}
     .panel h3{margin:0;padding:10px 12px;border-bottom:1px solid #203049;background:#0f1722;font-size:.95rem;font-weight:600}
     .panel .body{padding:10px;overflow:auto}
     #viewer{position:relative}
-    #viewerCanvas{display:block;width:100%;height:100%;background:#0a0f16;border-radius:16px}
+    #viewerCanvas{display:block;width:100%;height:100%;background:#0a0f16;border-radius:var(--radius)}
     .hud{position:absolute;left:10px;bottom:10px;display:flex;gap:8px}
     .chip{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);padding:6px 10px;border-radius:999px}
     .spinner{position:absolute;inset:0;display:grid;place-items:center;background:linear-gradient(180deg, rgba(10,15,22,.75), rgba(10,15,22,.75));backdrop-filter: blur(2px);}
     .spinner[hidden]{display:none}
-    .lds{width:64px;height:64px;border-radius:50%;border:6px solid rgba(255,255,255,.12);border-top-color:#53b7ff;animation:spin 1s linear infinite}
+    .lds{width:64px;height:64px;border-radius:50%;border:6px solid rgba(255,255,255,.12);border-top-color:var(--accent);animation:spin 1s linear infinite}
     @keyframes spin{to{transform:rotate(360deg)}}
     .signin-gate{position:fixed;inset:0;display:grid;place-items:center;background:radial-gradient(1200px 600px at 50% 15%, rgba(83,183,255,.08), transparent 60%), linear-gradient(180deg,#0a0f16,#05070b);z-index:20}
     .card{width:min(560px,92vw);background:#0c1118;border:1px solid #1d2a3d;border-radius:24px;box-shadow:0 10px 30px rgba(0,0,0,.3);padding:20px}
@@ -48,14 +48,17 @@
     .field label{min-width:120px;color:#a9b8cf}
     input[type="range"]{width:160px}
     .subtle{opacity:.8}
-    @media (max-width: 1100px){ .main{grid-template-columns:1fr; grid-template-rows: 340px 1fr 460px} }
+    .viewgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
+    @media (max-width: 1100px){ .main{grid-template-columns:1fr; grid-template-rows: 360px 1fr 460px} }
   </style>
 
   <script type="importmap">
-  {"imports": {
-    "three": "https://unpkg.com/three@0.157.0/build/three.module.js",
-    "three/examples/jsm/": "https://unpkg.com/three@0.157.0/examples/jsm/"
-  }}
+  {
+    "imports": {
+      "three": "https://unpkg.com/three@0.157.0/build/three.module.js",
+      "three/examples/jsm/": "https://unpkg.com/three@0.157.0/examples/jsm/"
+    }
+  }
   </script>
   <script src="https://unpkg.com/heic2any@0.0.4/dist/heic2any.min.js"></script>
 </head>
@@ -72,8 +75,9 @@
     </div>
   </header>
   <div class="main">
+    <!-- LEFT: Toolbox -->
     <section class="panel" id="leftToolbox">
-      <h3>ツールボックス（マテリアル & ピン）</h3>
+      <h3>ツールボックス（マテリアル & カメラ & ピン）</h3>
       <div class="body">
         <div class="small subtle">Shift + クリック でピンを配置</div>
         <div class="flex" style="margin-top:6px;margin-bottom:6px">
@@ -81,31 +85,43 @@
           <button id="btnGizmo" disabled>ギズモ: OFF</button>
           <button id="btnUndo" disabled>Ctrl+Z</button>
         </div>
-        <div class="flex">
-          <div class="small">ピン色:</div>
-          <div id="colorPresets" class="flex"></div>
-          <input id="colorPicker" type="color" value="#ff6b6b" />
-        </div>
 
         <hr style="border-color:#203049;border-width:1px 0;margin:12px 0">
-        <div class="small" style="margin:4px 0 6px">マテリアル編集（常時表示）</div>
+
+        <div class="small" style="margin:4px 0 6px">マテリアル編集</div>
         <div class="field"><label>対象</label><select id="matSelect"><option value="__all__">（全マテリアル）</option></select></div>
-        <div class="field"><label>Unlit</label><input id="matUnlit" type="checkbox"><span class="small">明暗なし（照明の影響を受けない）</span></div>
+        <div class="field"><label>Unlit</label><input id="matUnlit" type="checkbox"><span class="small">明暗なし</span></div>
+        <div class="field"><label>裏面描画</label><input id="matDoubleSided" type="checkbox"><span class="small">DoubleSide</span></div>
         <div class="field"><label>透明</label><input id="matTransparent" type="checkbox"><span class="small">ONで不透明度適用</span></div>
         <div class="field"><label>不透明度</label><input id="matOpacity" type="range" min="0" max="1" step="0.01" value="1"><span id="matOpacityVal" class="small">1.00</span></div>
         <div class="field"><label>テクスチャ反転</label><input id="matInvert" type="checkbox"><span class="small">色を反転</span></div>
-        <div class="field"><label>白→透明</label><input id="matWhiteTransparent" type="checkbox"><span class="small">白ほど透明（α化）</span></div>
+        <div class="field"><label>白→透明</label><input id="matWhiteTransparent" type="checkbox"><span class="small">白ほど透明</span></div>
         <div class="field"><label>閾値（αTest）</label><input id="matThreshold" type="range" min="0" max="1" step="0.01" value="0"><span id="matThresholdVal" class="small">0.00</span></div>
-        <div class="small subtle" style="margin-top:6px">操作は即時反映。必要なら「リセット」ボタンを後で戻せます。</div>
+
+        <hr style="border-color:#203049;border-width:1px 0;margin:12px 0">
+
+        <div class="small" style="margin:4px 0 6px">ビュー</div>
+        <div class="viewgrid" style="margin-bottom:8px">
+          <button id="viewFront">前面</button>
+          <button id="viewTop">上面</button>
+          <button id="viewRight">右面</button>
+          <button id="viewLeft">左面</button>
+          <button id="viewBottom">下面</button>
+          <button id="viewBack">背面</button>
+        </div>
+        <div class="field"><label>平行投影</label><input id="projOrtho" type="checkbox"><span class="small">ON: Orthographic</span></div>
+        <div class="field"><label>背景色</label><input id="bgColor" type="color" value="#0a0f16"></div>
       </div>
     </section>
 
+    <!-- CENTER: Viewer -->
     <section class="panel" id="viewer">
       <div class="spinner" id="loading" hidden><div class="lds"></div></div>
       <canvas id="viewerCanvas"></canvas>
       <div class="hud"><div class="chip" id="modeLabel">Orbit</div></div>
     </section>
 
+    <!-- RIGHT: Caption box -->
     <section class="panel" id="rightCaption">
       <h3>キャプション</h3>
       <div class="body">
@@ -134,6 +150,7 @@
   </div>
 </div>
 
+<!-- Sign-in Gate -->
 <div class="signin-gate" id="gate">
   <div class="card">
     <h1>Googleにサインイン</h1>
@@ -145,13 +162,14 @@
   </div>
 </div>
 
+<!-- Google flags -->
 <script>
   window.__flags = { gapi:false, gis:false };
   function onGapi(){ window.__flags.gapi = true; }
   function onGis(){  window.__flags.gis  = true; }
 </script>
-<script async defer src="https://accounts.google.com/gsi/client" onload="onGis()"></script>
-<script async defer src="https://apis.google.com/js/api.js" onload="onGapi()"></script>
+<script async defer src="https://accounts.google.com/gsi/client" onload="onGis"></script>
+<script async defer src="https://apis.google.com/js/api.js" onload="onGapi"></script>
 
 <script type="module">
 import * as THREE from 'three';
@@ -159,6 +177,7 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js';
 
+// ====== CONFIG ======
 const CLIENT_ID = '595200751510-ncahnf7edci6b9925becn5to49r6cguv.apps.googleusercontent.com';
 const API_KEY   = 'AIzaSyCUnTCr5yWUWPdEXST9bKP1LpgawU5rIbI';
 const DISCOVERY_DOCS = [
@@ -172,6 +191,7 @@ const SCOPES = [
   'https://www.googleapis.com/auth/spreadsheets'
 ].join(' ');
 
+// ====== Elements & State ======
 const el = {
   gate: document.getElementById('gate'),
   statusLabel: document.getElementById('statusLabel'),
@@ -198,8 +218,10 @@ const el = {
   btnAttach: document.getElementById('btnAttach'),
   thumbs: document.getElementById('thumbs'),
   autosaveTip: document.getElementById('autosaveTip'),
+  // material
   matSelect: document.getElementById('matSelect'),
   matUnlit: document.getElementById('matUnlit'),
+  matDoubleSided: document.getElementById('matDoubleSided'),
   matTransparent: document.getElementById('matTransparent'),
   matOpacity: document.getElementById('matOpacity'),
   matOpacityVal: document.getElementById('matOpacityVal'),
@@ -207,18 +229,31 @@ const el = {
   matWhiteTransparent: document.getElementById('matWhiteTransparent'),
   matThreshold: document.getElementById('matThreshold'),
   matThresholdVal: document.getElementById('matThresholdVal'),
+  // camera/tools
+  viewFront: document.getElementById('viewFront'),
+  viewBack: document.getElementById('viewBack'),
+  viewLeft: document.getElementById('viewLeft'),
+  viewRight: document.getElementById('viewRight'),
+  viewTop: document.getElementById('viewTop'),
+  viewBottom: document.getElementById('viewBottom'),
+  projOrtho: document.getElementById('projOrtho'),
+  bgColor: document.getElementById('bgColor'),
 };
 const viewOnly = new URLSearchParams(location.search).get('view') === '1';
 let tokenClient; let gapiInited=false; let gisInited=false; let accessToken=null;
 let renderer, scene, camera, controls, tcontrols, pinGroup, loader, currentModel=null;
+let perspCam, orthoCam;
 let raycaster, pointer;
 let addPinMode=false, currentColor='#ff6b6b';
 let pins=[], selectedPinId=null, undoStack=[];
 let glbParents=[];
 let autosaveTimer=null;
-let materials=[], materialMap=new Map();
-let matOriginals=new WeakMap();
+// materials
+let materials=[], materialMap=new Map(); // key -> ORIGINAL material
+let matOriginals=new WeakMap(); // ORIGINAL material -> {props}
+let isOrtho=false;
 
+// ====== Helpers ======
 function extractDriveFileId(input){
   if(!input) return '';
   const m1 = input.match(/\/file\/d\/([a-zA-Z0-9_-]{10,})/); if(m1) return m1[1];
@@ -239,6 +274,7 @@ function debounceSave(){ clearTimeout(autosaveTimer); autosaveTimer=setTimeout((
 function fmt(n){ return typeof n==='number'? Number(n.toFixed(6)) : n; }
 function ensureArray(x){ return Array.isArray(x)?x:[]; }
 
+// ====== Google init ======
 const waitGoogle = setInterval(()=>{
   if(!gapiInited && window.__flags.gapi && window.gapi){ gapi.load('client', initGapiClient); }
   if(!gisInited && window.__flags.gis){ gisInited = true; maybeReady(); }
@@ -247,22 +283,14 @@ const waitGoogle = setInterval(()=>{
 
 async function initGapiClient(){
   try{
-    await gapi.client.init({ apiKey: API_KEY, discoveryDocs: [
-      'https://www.googleapis.com/discovery/v1/apis/drive/v3/rest',
-      'https://www.googleapis.com/discovery/v1/apis/sheets/v4/rest'
-    ] });
+    await gapi.client.init({ apiKey: API_KEY, discoveryDocs: DISCOVERY_DOCS });
     gapiInited = true; maybeReady();
   }catch(e){ console.error('gapi init failed', e); }
 }
 function maybeReady(){
   if(!gapiInited || !gisInited) return;
   tokenClient = google.accounts.oauth2.initTokenClient({
-    client_id: CLIENT_ID, scope: [
-      'https://www.googleapis.com/auth/drive.file',
-      'https://www.googleapis.com/auth/drive.readonly',
-      'https://www.googleapis.com/auth/drive.metadata.readonly',
-      'https://www.googleapis.com/auth/spreadsheets'
-    ].join(' '),
+    client_id: CLIENT_ID, scope: SCOPES,
     callback: (resp)=>{
       accessToken = resp.access_token;
       if(accessToken){
@@ -282,16 +310,21 @@ function maybeReady(){
   });
 }
 
+// ====== Three viewer & cameras ======
 function viewerInit(){
   renderer = new THREE.WebGLRenderer({ canvas: el.viewerCanvas, antialias:true });
   scene = new THREE.Scene();
   scene.background = new THREE.Color(0x0a0f16);
-  camera = new THREE.PerspectiveCamera(60, 2, 0.1, 2000);
-  camera.position.set(2.8,1.6,3.6);
+  perspCam = new THREE.PerspectiveCamera(60, 2, 0.1, 5000);
+  perspCam.position.set(2.8,1.6,3.6);
+  orthoCam = new THREE.OrthographicCamera(-2,2,2,-2, -5000, 5000);
+  camera = perspCam;
+
   const hemi = new THREE.HemisphereLight(0xffffff, 0x223355, 0.6); scene.add(hemi);
   const dir = new THREE.DirectionalLight(0xffffff, 1.0); dir.position.set(3,5,4); scene.add(dir);
-  controls = new OrbitControls(camera, el.viewerCanvas); controls.target.set(0,1,0); controls.update();
-  tcontrols = new TransformControls(camera, el.viewerCanvas); tcontrols.setSize(0.9); tcontrols.setSpace('world'); tcontrols.addEventListener('dragging-changed', e=>{ controls.enabled = !e.value; }); scene.add(tcontrols); tcontrols.visible=false;
+
+  buildControls();
+
   pinGroup = new THREE.Group(); scene.add(pinGroup);
   loader = new GLTFLoader();
   raycaster = new THREE.Raycaster();
@@ -300,11 +333,101 @@ function viewerInit(){
   el.viewerCanvas.addEventListener('pointerdown', onPointerDown);
   resize(); animate();
 }
-function resize(){ const w = el.viewerCanvas.clientWidth || el.viewerCanvas.parentElement.clientWidth; const h = el.viewerCanvas.clientHeight || el.viewerCanvas.parentElement.clientHeight; renderer.setSize(w,h,false); camera.aspect=w/h; camera.updateProjectionMatrix(); }
+function buildControls(){
+  if(controls){ controls.dispose(); }
+  controls = new OrbitControls(camera, el.viewerCanvas); controls.target.set(0,1,0); controls.update();
+  if(tcontrols){ scene.remove(tcontrols); }
+  tcontrols = new TransformControls(camera, el.viewerCanvas);
+  tcontrols.setSize(0.9); tcontrols.setSpace('world');
+  tcontrols.addEventListener('dragging-changed', e=>{ controls.enabled = !e.value; });
+  scene.add(tcontrols); tcontrols.visible=false;
+}
+function resize(){
+  const w = el.viewerCanvas.clientWidth || el.viewerCanvas.parentElement.clientWidth;
+  const h = el.viewerCanvas.clientHeight || el.viewerCanvas.parentElement.clientHeight;
+  renderer.setSize(w,h,false);
+  if(camera.isPerspectiveCamera){
+    camera.aspect = w/h;
+  }else{
+    const aspect = w/h;
+    const halfH = (orthoCam.top - orthoCam.bottom)/2 || 1;
+    orthoCam.left = -halfH*aspect; orthoCam.right = halfH*aspect;
+  }
+  camera.updateProjectionMatrix();
+}
 function animate(){ requestAnimationFrame(animate); renderer.render(scene,camera); }
 function renderNow(){ renderer.render(scene,camera); }
 viewerInit();
 
+function sceneBounds(){
+  if(!currentModel){ return { center:new THREE.Vector3(0,0,0), radius: 2 }; }
+  const box = new THREE.Box3().setFromObject(currentModel);
+  const size = box.getSize(new THREE.Vector3());
+  const center = box.getCenter(new THREE.Vector3());
+  const radius = Math.max(size.x,size.y,size.z)/2 || 1;
+  return { center, radius: radius*1.2 };
+}
+function fitToScene(){
+  const { center, radius } = sceneBounds();
+  if(camera.isPerspectiveCamera){
+    const dist = radius*2.2;
+    const dir = new THREE.Vector3(1,0.6,1).normalize();
+    camera.position.copy(center.clone().addScaledVector(dir, dist));
+    controls.target.copy(center); controls.update();
+  }else{
+    updateOrthoFrustum();
+    camera.position.set(center.x + 1, center.y + 0.6, center.z + 1);
+    controls.target.copy(center); controls.update();
+  }
+}
+function updateOrthoFrustum(){
+  const { radius } = sceneBounds();
+  const rect = el.viewerCanvas.getBoundingClientRect();
+  const aspect = (rect.width||1)/(rect.height||1);
+  const halfH = radius;
+  orthoCam.top =  halfH;
+  orthoCam.bottom = -halfH;
+  orthoCam.left = -halfH*aspect;
+  orthoCam.right = halfH*aspect;
+  orthoCam.zoom = 1;
+  orthoCam.updateProjectionMatrix();
+}
+function switchProjection(useOrtho){
+  const pos = camera.position.clone();
+  const tar = controls.target.clone();
+  isOrtho = !!useOrtho;
+  if(isOrtho){
+    updateOrthoFrustum();
+    camera = orthoCam;
+  }else{
+    camera = perspCam;
+  }
+  camera.position.copy(pos);
+  buildControls();
+  controls.target.copy(tar); controls.update();
+  tcontrols.camera = camera; // keep transform controls consistent
+  resize(); renderNow();
+}
+function setNamedView(name){
+  const { center, radius } = sceneBounds();
+  const d = radius*2.2;
+  let dir = new THREE.Vector3(0,0,d);
+  switch(name){
+    case 'front': dir.set(0,0,d); break;    // +Z
+    case 'back':  dir.set(0,0,-d); break;   // -Z
+    case 'left':  dir.set(-d,0,0); break;   // -X
+    case 'right': dir.set(d,0,0); break;    // +X
+    case 'top':   dir.set(0,d,0); break;    // +Y
+    case 'bottom':dir.set(0,-d,0); break;   // -Y
+  }
+  camera.position.copy(center.clone().add(dir));
+  controls.target.copy(center);
+  controls.update();
+  if(!camera.isPerspectiveCamera){ updateOrthoFrustum(); }
+  renderNow();
+}
+
+// ====== Pins ======
 function setAddPinMode(on){ addPinMode=on; el.modeLabel.textContent=on?'Add Pin: Click model (または Shift+クリック)':(tcontrols.visible?'Gizmo':'Orbit'); }
 function getIntersectPoint(event){
   const rect=el.viewerCanvas.getBoundingClientRect();
@@ -393,6 +516,7 @@ function renderThumbs(p){
   });
 }
 
+// ====== Colors ======
 const PRESET_COLORS = ['#ff6b6b','#ffd166','#06d6a0','#118ab2','#ef476f','#f72585','#b5179e','#7209b7','#3a0ca3','#4361ee','#4cc9f0'];
 function buildColorPresets(){
   el.colorPresets.innerHTML='';
@@ -405,6 +529,7 @@ function buildColorPresets(){
 }
 buildColorPresets();
 
+// ====== GLB load ======
 document.getElementById('btnLoad').addEventListener('click', ()=>{
   const fid = extractDriveFileId(el.inputGLB.value.trim());
   el.inputGLB.value = fid;
@@ -456,8 +581,21 @@ async function loadGLBByFileId(fileId){
     el.loading.hidden = true;
   }
 }
-function fitToScene(){ if(!currentModel) return; const box = new THREE.Box3().setFromObject(currentModel); const size = box.getSize(new THREE.Vector3()); const center = box.getCenter(new THREE.Vector3()); const maxDim = Math.max(size.x,size.y,size.z)||1; const dist = maxDim*1.6; camera.position.copy(center.clone().add(new THREE.Vector3(dist, dist*0.7, dist))); controls.target.copy(center); controls.update(); }
+function fitToScene(){ // override previous
+  const { center, radius } = sceneBounds();
+  if(camera.isPerspectiveCamera){
+    const dist = radius*2.2;
+    const dir = new THREE.Vector3(1,0.6,1).normalize();
+    camera.position.copy(center.clone().addScaledVector(dir, dist));
+    controls.target.copy(center); controls.update();
+  }else{
+    updateOrthoFrustum();
+    camera.position.copy(center.clone().add(new THREE.Vector3(1,0.6,1)));
+    controls.target.copy(center); controls.update();
+  }
+}
 
+// ====== Materials (always visible) ======
 function collectMaterials(){
   materials=[]; materialMap.clear();
   const set = new Set();
@@ -472,7 +610,6 @@ function collectMaterials(){
     materialMap.set(name, m);
     const opt=document.createElement('option'); opt.value=name; opt.textContent=name; el.matSelect.appendChild(opt);
   });
-  applyMaterialLive();
 }
 function ensureMatRecord(m){
   if(matOriginals.has(m)) return;
@@ -482,7 +619,7 @@ function ensureMatRecord(m){
     transparent: !!m.transparent,
     opacity: (m.opacity ?? 1),
     alphaTest: (m.alphaTest ?? 0),
-    side: m.side,
+    side: m.side ?? THREE.FrontSide,
     depthWrite: m.depthWrite,
     depthTest: m.depthTest,
     blending: m.blending,
@@ -543,6 +680,7 @@ async function processTextureToCanvasTextureFromOriginal(originalTex, { invertRG
 }
 async function applyMaterialLive(){
   const wantUnlit = el.matUnlit.checked;
+  const wantDouble = el.matDoubleSided.checked;
   const wantTransparent = el.matTransparent.checked;
   const opacity = parseFloat(el.matOpacity.value);
   const invert = el.matInvert.checked;
@@ -554,9 +692,11 @@ async function applyMaterialLive(){
     ensureMatRecord(origM);
     const rec = matOriginals.get(origM);
 
+    // Unlit swap
     if(wantUnlit && !rec.wasUnlit){
       const active = getActiveMaterialFor(origM);
       const um = new THREE.MeshBasicMaterial();
+      // carry over
       um.map = active.map || rec.map || null;
       um.transparent = active.transparent;
       um.opacity = active.opacity;
@@ -567,6 +707,7 @@ async function applyMaterialLive(){
       um.blending = active.blending;
       um.toneMapped = false;
       rec.unlitMat = um; rec.wasUnlit = true;
+      // swap in scene
       currentModel.traverse(obj=>{
         const m=obj.material;
         if(m===origM || m===active){ obj.material = um; }
@@ -583,17 +724,23 @@ async function applyMaterialLive(){
 
     const mat = getActiveMaterialFor(origM);
 
+    // Side
+    mat.side = wantDouble ? THREE.DoubleSide : THREE.FrontSide;
+
+    // Transparency & opacity
     mat.transparent = wantTransparent || whiteToAlpha || (opacity < 1.0);
     mat.opacity = opacity;
     mat.alphaTest = thresh;
     mat.depthWrite = !mat.transparent || thresh>0;
 
+    // Texture processing: always start from ORIGINAL baseColor map
     if((invert || whiteToAlpha) && rec.map){
       try{
         const processed = await processTextureToCanvasTextureFromOriginal(rec.map, { invertRGB: invert, alphaFromWhite: whiteToAlpha, threshold: thresh });
         if(processed){ mat.map = processed; mat.map.needsUpdate = true; }
       }catch(e){ console.warn('texture process failed', e); }
     }else if(!invert && !whiteToAlpha && rec.map){
+      // restore original
       mat.map = rec.map; if(mat.map) mat.map.needsUpdate = true;
     }
 
@@ -601,14 +748,28 @@ async function applyMaterialLive(){
   }
   renderNow();
 }
+
+// UI events for material (live)
 el.matOpacity.addEventListener('input', ()=>{ el.matOpacityVal.textContent = parseFloat(el.matOpacity.value).toFixed(2); applyMaterialLive(); });
 el.matThreshold.addEventListener('input', ()=>{ el.matThresholdVal.textContent = parseFloat(el.matThreshold.value).toFixed(2); applyMaterialLive(); });
 el.matTransparent.addEventListener('change', ()=> applyMaterialLive());
 el.matInvert.addEventListener('change', ()=> applyMaterialLive());
 el.matWhiteTransparent.addEventListener('change', ()=> applyMaterialLive());
 el.matUnlit.addEventListener('change', ()=> applyMaterialLive());
+el.matDoubleSided.addEventListener('change', ()=> applyMaterialLive());
 el.matSelect.addEventListener('change', ()=> applyMaterialLive());
 
+// ====== Camera tools ======
+el.viewFront.addEventListener('click', ()=> setNamedView('front'));
+el.viewBack.addEventListener('click', ()=> setNamedView('back'));
+el.viewLeft.addEventListener('click', ()=> setNamedView('left'));
+el.viewRight.addEventListener('click', ()=> setNamedView('right'));
+el.viewTop.addEventListener('click', ()=> setNamedView('top'));
+el.viewBottom.addEventListener('click', ()=> setNamedView('bottom'));
+el.projOrtho.addEventListener('change', ()=> switchProjection(el.projOrtho.checked));
+el.bgColor.addEventListener('input', ()=>{ scene.background = new THREE.Color(el.bgColor.value); renderNow(); });
+
+// ====== Sheets: ensure + upsert ======
 async function ensureSpreadsheet(glbName){
   const title = `LociMyu - ${glbName}`;
   const resp = await gapi.client.sheets.spreadsheets.create({
@@ -643,6 +804,7 @@ async function upsertPinToSheet(){
 }
 document.getElementById('btnSavePin').addEventListener('click', ()=> upsertPinToSheet());
 
+// ====== Image attach & Drive upload ======
 document.getElementById('btnAttach').addEventListener('click', async ()=>{
   const file = el.imgLocal.files?.[0]; const p = pins.find(x=>x.id===selectedPinId);
   if(!file || !p){ alert('画像とピンを確認してください'); return; }
@@ -668,15 +830,9 @@ async function driveMultipartUpload(blob, name, parents){
   const meta = { name, parents: parents && parents.length ? parents : undefined };
   const boundary = '-------loci' + Math.random().toString(36).slice(2);
   const bufMeta = new TextEncoder().encode(
-    `
---${boundary}
-Content-Type: application/json; charset=UTF-8
-
-${JSON.stringify(meta)}
-`
+    `\r\n--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(meta)}\r\n`
   );
-  const bufTail = new TextEncoder().encode(`
---${boundary}--`);
+  const bufTail = new TextEncoder().encode(`\r\n--${boundary}--`);
   const stream = new Blob([ bufMeta, blob, bufTail ], { type: 'multipart/related; boundary='+boundary });
   const res = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
     method: 'POST',
@@ -687,6 +843,7 @@ ${JSON.stringify(meta)}
   return await res.json();
 }
 
+// ====== Gizmo & Inputs ======
 document.getElementById('btnAddPin').addEventListener('click', ()=> setAddPinMode(!addPinMode));
 document.getElementById('btnGizmo').addEventListener('click', ()=>{
   if(!selectedPinId){ toast('ピンを選択してください'); return; }
@@ -697,6 +854,8 @@ document.getElementById('btnGizmo').addEventListener('click', ()=>{
 document.getElementById('btnUndo').addEventListener('click', ()=> undo());
 document.getElementById('capTitle').addEventListener('input', ()=>{ const p=pins.find(x=>x.id===selectedPinId); if(p){ p.title=el.capTitle.value; refreshPinsList(); debounceSave(); } });
 document.getElementById('capBody').addEventListener('input', ()=>{ const p=pins.find(x=>x.id===selectedPinId); if(p){ p.body=el.capBody.value; debounceSave(); } });
+
+// Track gizmo move → update pin pos
 tcontrols.addEventListener('objectChange', ()=>{
   if(!selectedPinId || !tcontrols.object) return;
   const p=pins.find(x=>x.id===selectedPinId);
@@ -707,6 +866,7 @@ tcontrols.addEventListener('objectChange', ()=>{
   debounceSave();
 });
 document.getElementById('btnDeletePin').addEventListener('click', ()=>{ if(!selectedPinId) return; const id=selectedPinId; removePin(id); debounceSave(); });
+
 </script>
 </body>
 </html>
