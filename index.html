@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>LociMyu v0.5.1 (Material Editor – hotfix)</title>
+  <title>LociMyu v0.5.2 (Material Editor – hotfix2)</title>
   <link rel="icon" href='data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><circle cx="32" cy="32" r="28" fill="%230b0f14"/><text x="32" y="39" font-size="28" text-anchor="middle" fill="%2353b7ff" font-family="Arial">L</text></svg>'>
   <style>
     :root{ --bg:#0b0f14; --panel:#121922; --text:#e6edf3; --accent:#53b7ff; --muted:#8fa3bd; --radius:16px;}
@@ -225,6 +225,7 @@ let addPinMode=false, currentColor='#ff6b6b';
 let pins=[], selectedPinId=null, undoStack=[];
 let glbParents=[];
 let autosaveTimer=null;
+// material state (single declaration here)
 let materials=[], materialMap=new Map();
 let matOriginals=new WeakMap();
 
@@ -314,7 +315,6 @@ function setAddPinMode(on){ addPinMode=on; el.modeLabel.textContent=on?'Add Pin:
 function getIntersectPoint(event){
   const rect=el.viewerCanvas.getBoundingClientRect();
   pointer.x=((event.clientX-rect.left)/rect.width)*2-1;
-  pointer.y=-((event.clientY-rect.top)/rect.height)/2+0.5*2 -1; // corrected: keep -1..1
   pointer.y=-((event.clientY-rect.top)/rect.height)*2+1;
   raycaster.setFromCamera(pointer,camera);
   const hits=currentModel?raycaster.intersectObject(currentModel,true):[];
@@ -463,8 +463,6 @@ async function loadGLBByFileId(fileId){
 function fitToScene(){ if(!currentModel) return; const box = new THREE.Box3().setFromObject(currentModel); const size = box.getSize(new THREE.Vector3()); const center = box.getCenter(new THREE.Vector3()); const maxDim = Math.max(size.x,size.y,size.z)||1; const dist = maxDim*1.6; camera.position.copy(center.clone().add(new THREE.Vector3(dist, dist*0.7, dist))); controls.target.copy(center); controls.update(); }
 
 // ====== Materials ======
-let materials=[], materialMap=new Map(); // name -> material
-let matOriginals=new WeakMap();
 function collectMaterials(){
   materials=[]; materialMap.clear();
   const set = new Set();
