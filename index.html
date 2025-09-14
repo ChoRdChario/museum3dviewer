@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>LociMyu v0.1 (UMD strict guards)</title>
+  <title>LociMyu v0.1 (UMD hotfix)</title>
   <link rel="icon" href='data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><circle cx="32" cy="32" r="28" fill="%230b0f14"/><text x="32" y="39" font-size="28" text-anchor="middle" fill="%2353b7ff" font-family="Arial">L</text></svg>'>
   <style>
     :root{ --bg:#0b0f14; --panel:#121922; --text:#e6edf3; --accent:#53b7ff; --muted:#8fa3bd; --radius:16px;}
@@ -144,7 +144,7 @@ function extractSpreadsheetId(input){
 let tokenClient; let gapiInited=false, gisInited=false; let accessToken=null;
 let renderer, scene, camera, controls, tcontrols, pinGroup;
 let raycaster, pointer, loader, currentModel=null;
-let threeReady=false;
+let flags = { three:false, auth:false };
 
 const el = {};
 
@@ -186,22 +186,23 @@ document.addEventListener('DOMContentLoaded', () => {
   // Wait for THREE extras then init viewer
   waitForThreeExtras(()=>{
     viewerInit();
-    threeReady = true;
-    enableUi();
+    flags.three = true;
+    updateUi();
     toast('3D初期化完了');
   });
 
   // Query seed
   const q = new URLSearchParams(location.search);
   if(q.get('fileId')) el.inputGLB.value = q.get('fileId');
-  if(q.get('sheetId')) el.inputSheet.value = q.get('sheetId'));
+  if(q.get('sheetId')) el.inputSheet.value = q.get('sheetId');
 
   // UI events
   el.btnLoad.addEventListener('click', ()=>{
-    if(!threeReady){ alert('3Dライブラリ初期化中です。数秒後に再試行してください。'); return; }
+    if(!(flags.three && flags.auth)){ alert('サインインと初期化が完了してから実行してください'); return; }
     const fid = extractDriveFileId(el.inputGLB.value.trim());
     const sid = extractSpreadsheetId(el.inputSheet.value.trim());
-    el.inputGLB.value = fid; el.inputSheet.value = sid;
+    if(!fid){ alert('GLBの fileId または共有URLを入力してください'); return; }
+    el.inputGLB.value = fid; el.inputSheet.value = sid || el.inputSheet.value;
     loadGLBByFileId(fid);
   });
   el.btnUndo.addEventListener('click', undo);
@@ -212,7 +213,7 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('btnViewOnly')?.addEventListener('click', ()=>{
     const fid = extractDriveFileId(el.inputGLB.value.trim());
     const sid = extractSpreadsheetId(el.inputSheet.value.trim());
-    const url = new URL(location.href); url.searchParams.set('view','1'); url.searchParams.set('fileId', fid); url.searchParams.set('sheetId', sid);
+    const url = new URL(location.href); url.searchParams.set('view','1'); if(fid) url.searchParams.set('fileId', fid); if(sid) url.searchParams.set('sheetId', sid);
     navigator.clipboard.writeText(url.toString()); toast('閲覧リンクをコピーしました');
   });
 
@@ -220,11 +221,13 @@ document.addEventListener('DOMContentLoaded', () => {
   window.addEventListener('keydown', (e)=>{ if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='z'){ e.preventDefault(); el.btnUndo?.click(); } });
 });
 
-function enableUi(){
+function updateUi(){
+  const enable = flags.three && flags.auth;
   ['btnLoad','btnAddPin','btnGizmo','btnUndo','btnSavePin','btnDeletePin'].forEach(id=>{
-    const b = document.getElementById(id); if(b) b.removeAttribute('disabled');
+    const b = document.getElementById(id); if(!b) return;
+    if(enable) b.removeAttribute('disabled'); else b.setAttribute('disabled','true');
   });
-  el.statusLabel.textContent='Ready';
+  el.statusLabel.textContent = enable ? 'Ready' : '初期化中…';
 }
 
 // Wait for extras
@@ -250,7 +253,10 @@ function maybeReady(){
     client_id: CLIENT_ID, scope: SCOPES,
     callback: (resp)=>{
       accessToken = resp.access_token;
-      if(accessToken){ el.gate.style.display='none'; toast('Signed in'); }
+      if(accessToken){
+        el.gate.style.display='none'; flags.auth = true; updateUi();
+        toast('Signed in');
+      }
     }
   });
 }
@@ -267,15 +273,12 @@ function viewerInit(){
 
   const OrbitCtor = ctor_OrbitControls();
   const TransformCtor = ctor_TransformControls();
-  if(!OrbitCtor || !TransformCtor){ console.error('Three extras not ready'); return; }
   controls = new OrbitCtor(camera, el.viewerCanvas); controls.target.set(0,1,0); controls.update();
   tcontrols = new TransformCtor(camera, el.viewerCanvas); tcontrols.setSize(0.9); tcontrols.setSpace('world'); tcontrols.addEventListener('dragging-changed', e=>{ controls.enabled = !e.value; }); scene.add(tcontrols); tcontrols.visible=false;
 
   pinGroup = new THREE.Group(); scene.add(pinGroup);
   raycaster = new THREE.Raycaster(); pointer = new THREE.Vector2();
-  const LoaderCtor = ctor_GLTFLoader();
-  if(!LoaderCtor){ console.error('GLTFLoader not ready'); return; }
-  loader = new LoaderCtor();
+  const LoaderCtor = ctor_GLTFLoader(); loader = new LoaderCtor();
 
   window.addEventListener('resize', resize); el.viewerCanvas.addEventListener('pointerdown', onPointerDown);
   resize(); animate();
@@ -287,16 +290,21 @@ function renderNow(){ renderer.render(scene,camera); }
 // GLB load
 async function loadGLBByFileId(fileId){
   if(!accessToken){ alert('先にサインインしてください'); return; }
-  if(!loader){ alert('3Dライブラリ初期化中です。数秒後に再試行してください。'); return; }
+  // Ensure loader is constructed (extra guard)
+  if(!loader){
+    const LoaderCtor = ctor_GLTFLoader();
+    if(!LoaderCtor){ alert('3Dライブラリ初期化中です。数秒後に再試行してください。'); return; }
+    loader = new LoaderCtor();
+  }
+  el.loading.hidden = false;
   try{
-    el.loading.hidden = false;
     toast('GLBを読み込み中…');
     const meta = await gapi.client.drive.files.get({ fileId, fields:'id,name,mimeType' });
     const dlUrl = `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`;
-    const ab = await fetch(dlUrl, { headers:{ Authorization:`Bearer ${accessToken}` } }).then(r=>{
-      if(!r.ok) throw new Error('Drive download failed: ' + r.status);
-      return r.arrayBuffer();
-    });
+    const res = await fetch(dlUrl, { headers:{ Authorization:`Bearer ${accessToken}` } });
+    if(!res.ok){ throw new Error('Drive download failed: ' + res.status + ' ' + res.statusText); }
+    const ab = await res.arrayBuffer();
+    // Dispose previous
     if(currentModel){
       scene.remove(currentModel);
       currentModel.traverse(o=>{ if(o.geometry) o.geometry.dispose(); if(o.material){ if(Array.isArray(o.material)) o.material.forEach(m=>m.dispose()); else o.material.dispose(); } });
@@ -317,7 +325,7 @@ async function loadGLBByFileId(fileId){
 }
 function fitToScene(){ if(!currentModel) return; const box = new THREE.Box3().setFromObject(currentModel); const size = box.getSize(new THREE.Vector3()); const center = box.getCenter(new THREE.Vector3()); const maxDim = Math.max(size.x,size.y,size.z)||1; const dist = maxDim*1.6; camera.position.copy(center.clone().add(new THREE.Vector3(dist, dist*0.7, dist))); controls.target.copy(center); controls.update(); }
 
-// Pins (snip: same as before)
+// Pins (short)
 let pins=[]; let selectedPinId=null; let undoStack=[];
 function addUndo(u){ undoStack.push(u); }
 function undo(){ const u = undoStack.pop(); if(!u) return; if(u.type==='move'){ const p=pins.find(x=>x.id===u.id); if(p){ p.pos.copy(u.from); placePinMesh(p); selectPin(p.id); renderNow(); } } else if(u.type==='add'){ removePin(u.id,{silent:true}); } else if(u.type==='delete'){ pins.push(u.pin); placePinMesh(u.pin); refreshPinsList(); selectPin(u.pin.id); renderNow(); } }
