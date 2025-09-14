@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>LociMyu v0.8.1 (Views + Ortho + BG + DoubleSide)</title>
+  <title>LociMyu v0.8.2 (Views + Ortho + BG + DoubleSide)</title>
   <link rel="icon" href='data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><circle cx="32" cy="32" r="28" fill="%230b0f14"/><text x="32" y="39" font-size="28" text-anchor="middle" fill="%2353b7ff" font-family="Arial">L</text></svg>'>
   <style>
     :root{ --bg:#0b0f14; --panel:#121922; --text:#e6edf3; --accent:#53b7ff; --muted:#8fa3bd; --radius:16px;}
@@ -84,6 +84,13 @@
           <button id="btnAddPin" disabled>＋ ピン追加モード</button>
           <button id="btnGizmo" disabled>ギズモ: OFF</button>
           <button id="btnUndo" disabled>Ctrl+Z</button>
+        </div>
+
+        <!-- Pin color presets (restored) -->
+        <div class="flex">
+          <div class="small">ピン色:</div>
+          <div id="colorPresets" class="flex"></div>
+          <input id="colorPicker" type="color" value="#ff6b6b" />
         </div>
 
         <hr style="border-color:#203049;border-width:1px 0;margin:12px 0">
@@ -432,7 +439,7 @@ function setAddPinMode(on){ addPinMode=on; el.modeLabel.textContent=on?'Add Pin:
 function getIntersectPoint(event){
   const rect=el.viewerCanvas.getBoundingClientRect();
   pointer.x=((event.clientX-rect.left)/rect.width)*2-1;
-  pointer.y=-((event.clientY-rect.top)/rect.height)/2*2+1;
+  pointer.y=-((event.clientY-rect.top)/rect.height)*2+1; // fixed formula
   raycaster.setFromCamera(pointer,camera);
   const hits=currentModel?raycaster.intersectObject(currentModel,true):[];
   return hits.length?hits[0].point.clone():null;
@@ -519,13 +526,16 @@ function renderThumbs(p){
 // ====== Colors ======
 const PRESET_COLORS = ['#ff6b6b','#ffd166','#06d6a0','#118ab2','#ef476f','#f72585','#b5179e','#7209b7','#3a0ca3','#4361ee','#4cc9f0'];
 function buildColorPresets(){
+  if(!el.colorPresets) return; // guard
   el.colorPresets.innerHTML='';
   PRESET_COLORS.forEach(c=>{
     const b=document.createElement('button'); b.style.width='18px'; b.style.height='18px'; b.style.borderRadius='999px'; b.style.border='2px solid #223146'; b.style.background=c; b.title=c;
-    b.addEventListener('click',()=>{ currentColor=c; el.colorPicker.value=c; if(selectedPinId){ const p=pins.find(x=>x.id===selectedPinId); p.color=c; placePinMesh(p); refreshPinsList(); debounceSave(); } });
+    b.addEventListener('click',()=>{ currentColor=c; if(el.colorPicker) el.colorPicker.value=c; if(selectedPinId){ const p=pins.find(x=>x.id===selectedPinId); p.color=c; placePinMesh(p); refreshPinsList(); debounceSave(); } });
     el.colorPresets.appendChild(b);
   });
-  el.colorPicker.addEventListener('input', ()=>{ currentColor=el.colorPicker.value; if(selectedPinId){ const p=pins.find(x=>x.id===selectedPinId); p.color=currentColor; placePinMesh(p); refreshPinsList(); debounceSave(); } });
+  if(el.colorPicker){
+    el.colorPicker.addEventListener('input', ()=>{ currentColor=el.colorPicker.value; if(selectedPinId){ const p=pins.find(x=>x.id===selectedPinId); p.color=currentColor; placePinMesh(p); refreshPinsList(); debounceSave(); } });
+  }
 }
 buildColorPresets();
 
@@ -597,6 +607,7 @@ function collectMaterials(){
     materialMap.set(name, m);
     const opt=document.createElement('option'); opt.value=name; opt.textContent=name; el.matSelect.appendChild(opt);
   });
+  applyMaterialLive(); // ensure controls reflect
 }
 function ensureMatRecord(m){
   if(matOriginals.has(m)) return;
