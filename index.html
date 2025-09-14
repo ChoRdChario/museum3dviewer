@@ -2531,7 +2531,7 @@ async function autoSaveNow(){
     lastSavedJson = JSON.stringify(payload);
     const t=new Date(), hh=String(t.getHours()).padStart(2,'0'), mm=String(t.getMinutes()).padStart(2,'0'), ss=String(t.getSeconds()).padStart(2,'0');
     setSaveStatus('ok', `保存済み ${hh}:${mm}:${ss}`); scopeWarnEl.style.display='none';
-    updatePinsInfo();
+    if (typeof updatePinsInfo === 'function') updatePinsInfo();
   }catch(e){ console.warn('autoSave failed', e); setSaveStatus('fail','オートセーブ失敗（権限？）'); scopeWarnEl.style.display='block'; }
 }
 function updatePinsInfo(){
@@ -2827,7 +2827,7 @@ btnLoad.onclick = async ()=>{
     resetHistoryBaseline();
     syncDockMoveToggle();
 
-    updatePinsInfo();
+    if (typeof updatePinsInfo === 'function') updatePinsInfo();
     refreshShareButtons();
 
     // カメラ/背景UIの同期
@@ -2863,7 +2863,7 @@ btnSavePins.onclick = async ()=>{
     if(!name) return;
     const created=await driveCreateFile({name, mimeType:'application/json', parents:parentId?[parentId]:[], dataBlob:json});
     alert(`保存しました: ${name}\nfileId: ${created.id}`);
-    updatePinsInfo();
+    if (typeof updatePinsInfo === 'function') updatePinsInfo();
     refreshShareButtons();
   }catch(e){ scopeWarnEl.style.display='block'; console.error(e); alert('保存に失敗しました。権限（drive.file）とフォルダIDをご確認ください。'); setSaveStatus('fail','手動保存失敗'); }
 };
@@ -2944,7 +2944,7 @@ btnPickPins.onclick = async ()=>{
               }
               lastSavedJson = JSON.stringify({pins:PINS,materials:MATERIALS});
               setSaveStatus('ok','読み込み完了');
-              updatePinsInfo(); refreshShareButtons();
+              if (typeof updatePinsInfo === 'function') updatePinsInfo(); refreshShareButtons();
             }catch(e){
               console.error(e);
               alert('読み込みに失敗しました');
@@ -2966,7 +2966,7 @@ btnPickPins.onclick = async ()=>{
     alert('サインインが必要です');
   }
 };
-btnClearPins.onclick = ()=>{ pinsIdInput.value=''; loadedPinsId=''; loadedPinsName=''; updatePinsInfo(); refreshShareButtons(); };
+btnClearPins.onclick = ()=>{ pinsIdInput.value=''; loadedPinsId=''; loadedPinsName=''; if (typeof updatePinsInfo === 'function') updatePinsInfo(); refreshShareButtons(); };
 btnCopyReadonlyUrl.onclick = ()=>{
   const glb = extractId(fileIdInput.value);
   const pins = extractDriveId(pinsIdInput.value) || loadedPinsId || autosaveId || '';
@@ -3903,6 +3903,12 @@ document.getElementById('toolInlineBtn')?.addEventListener('click', ()=>{
 
   // ---- Minimal guards (work only if the original globals exist) ----
 
+  // === Safe DOM & function helpers ===
+  const $id = (s)=> document.getElementById(s);
+  const hasFn = (name) => (typeof window[name] === 'function');
+  const callIf = (name, ...args) => { try{ if (hasFn(name)) return window[name](...args); }catch(e){} };
+
+
   // === OAuth helpers & redirect fallback ===
   function parseHashToken(){
     try{
@@ -3971,6 +3977,26 @@ document.getElementById('toolInlineBtn')?.addEventListener('click', ()=>{
 
 
   // === Fallback helpers ===
+
+  // === Safe fallbacks for missing globals ===
+  if (typeof window.updatePinsInfo !== 'function'){
+    window.updatePinsInfo = function(){ try{
+      const el = document.getElementById('pinsInfo');
+      if (el){ el.textContent = 'Pins情報未定義'; }
+    }catch{} };
+  }
+  if (typeof window.pinsIdInput === 'undefined'){
+    window.pinsIdInput = document.getElementById('pinsId');
+  }
+  if (typeof window.extractId !== 'function'){
+    window.extractId = function(v){ 
+      if (!v) return '';
+      const m1 = String(v).match(/\/d\/([a-zA-Z0-9_-]{20,})/); if (m1) return m1[1];
+      const m2 = String(v).match(/[?&](?:id|fileId)=([a-zA-Z0-9_-]{20,})/); if (m2) return m2[1];
+      const m3 = String(v).match(/([a-zA-Z0-9_-]{25,})/); return m3 ? m3[1] : '';
+    };
+  }
+
   function _fallbackExtractDriveId(s){
     if (!s) return '';
     // Match /d/<id> or id parameter or plain 25+ char id
@@ -3981,7 +4007,7 @@ document.getElementById('toolInlineBtn')?.addEventListener('click', ()=>{
     const m3 = String(s).match(/([a-zA-Z0-9_-]{25,})/);
     return m3 ? m3[1] : '';
   }
-  const extractId = (v) => (typeof window.extractDriveId === 'function') ? window.extractDriveId(v) : _fallbackExtractDriveId(v);
+  function extractId(v){ return (typeof window.extractDriveId === 'function') ? window.extractDriveId(v) : _fallbackExtractDriveId(v); }
 
   // === Disable legacy JSON backend hard ===
   try{
@@ -4026,11 +4052,11 @@ document.getElementById('toolInlineBtn')?.addEventListener('click', ()=>{
   // === Sheets-first startup load ===
   setTimeout(async ()=>{
     try{
-      const sidRaw = pinsIdInput ? pinsIdInput.value : '';
+      const pinsIdInput0 = $id('pinsId'); const sidRaw = pinsIdInput0 ? pinsIdInput0.value : '';
       const sid = sidRaw ? extractId(sidRaw) : '';
       if (sid){
         try{
-          statusEl && (statusEl.textContent='Pins 読込中…');
+          const statusElLocal = $id('status'); if (statusElLocal) statusElLocal.textContent = 'Pins 読込中…';
         }catch{}
         const { pins, materials } = await sheetsLoadAll(sid);
         g.PINS = pins.map(p => ({
@@ -4046,10 +4072,10 @@ document.getElementById('toolInlineBtn')?.addEventListener('click', ()=>{
             const cfg = g.MATERIALS[name]; if (cfg && g.applyMaterialConfig) g.applyMaterialConfig(material, cfg);
           }
         }
-        if (g.buildMaterialsUI) g.buildMaterialsUI(materialsDockEl);
+        const materialsDockElLocal = $id('materialsDock'); if (g.buildMaterialsUI) g.buildMaterialsUI(materialsDockElLocal);
         if (g.resetHistoryBaseline) g.resetHistoryBaseline();
         if (g.syncDockMoveToggle) g.syncDockMoveToggle();
-        if (typeof updatePinsInfo === 'function') updatePinsInfo();
+        if (typeof updatePinsInfo === 'function') if (typeof updatePinsInfo === 'function') updatePinsInfo();
         if (g.refreshShareButtons) g.refreshShareButtons();
         setSaveStatus('ok','読み込み完了');
       } else {
