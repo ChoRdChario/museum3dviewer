@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>GLB Viewer + Sheets Pins (All-in-One)</title>
+  <title>GLB Viewer + Sheets Pins (ESM)</title>
   <style>
     :root{--bg:#0b0f14;--panel:#101823;--muted:#9bb0c6;--text:#e9f1fb;--line:#1f2a3a;--accent:#4cc9f0;--ok:#4caf50;--warn:#fbc02d;--err:#ef5350}
     html,body{height:100%;margin:0;background:var(--bg);color:var(--text);font:14px/1.6 system-ui,"Segoe UI",Roboto,"Noto Sans JP",sans-serif;overflow:hidden}
@@ -37,13 +37,10 @@
   </style>
   <script src="https://accounts.google.com/gsi/client" async defer></script>
   <script src="https://apis.google.com/js/api.js" async defer></script>
-  <script src="https://unpkg.com/three@0.160.0/build/three.min.js"></script>
-  <script src="https://unpkg.com/three@0.160.0/examples/js/controls/OrbitControls.js"></script>
-  <script src="https://unpkg.com/three@0.160.0/examples/js/loaders/GLTFLoader.js"></script>
 </head>
 <body>
 <header>
-  <div class="pill">GLB Viewer + Sheets Pins</div>
+  <div class="pill">GLB Viewer + Sheets Pins (ESM)</div>
   <div id="authStatus" class="tiny">未サインイン</div>
   <div class="sep"></div>
   <button id="btnSignIn" class="btn">Googleにサインイン</button>
@@ -98,7 +95,11 @@
   </aside>
 </div>
 
-<script>
+<script type="module">
+import * as THREE from "https://unpkg.com/three@0.160.0/build/three.module.js";
+import { OrbitControls } from "https://unpkg.com/three@0.160.0/examples/jsm/controls/OrbitControls.js";
+import { GLTFLoader } from "https://unpkg.com/three@0.160.0/examples/jsm/loaders/GLTFLoader.js";
+
 /* ============================== Config ============================== */
 const CONFIG = {
   API_KEY: "YOUR_API_KEY_HERE",
@@ -189,7 +190,7 @@ function initViewer(){
   camera = new THREE.PerspectiveCamera(60, el.clientWidth/el.clientHeight, 0.01, 1000);
   camera.position.set(2.8, 1.6, 2.8);
 
-  controls = new THREE.OrbitControls(camera, renderer.domElement);
+  controls = new OrbitControls(camera, renderer.domElement);
   controls.enableDamping = true;
 
   scene.add(new THREE.HemisphereLight(0xffffff, 0x223344, 1.0));
@@ -217,7 +218,7 @@ async function loadGlbByDriveId(fileId){
   const ab = await res.arrayBuffer();
   const blob = new Blob([ab], { type:"model/gltf-binary" });
   const objUrl = URL.createObjectURL(blob);
-  const loader = new THREE.GLTFLoader();
+  const loader = new GLTFLoader();
   return await new Promise((resolve, reject)=>{
     loader.load(objUrl, (gltf)=>{
       URL.revokeObjectURL(objUrl);
@@ -228,7 +229,6 @@ async function loadGlbByDriveId(fileId){
 
 function clearModel(){
   if (glbRoot){ scene.remove(glbRoot); glbRoot.traverse(o=>{ if(o.geometry) o.geometry.dispose(); if(o.material){ if(Array.isArray(o.material)) o.material.forEach(m=>m.dispose()); else o.material.dispose(); } }); glbRoot=null; }
-  // remove markers
   for (const [id,mesh] of markers){ scene.remove(mesh); }
   markers.clear();
 }
@@ -293,7 +293,6 @@ function bindUI(){
   $("#btnSnapshot").onclick = snapshotSave;
   $("#chkAutosave").onchange = ()=>{ $("#chkAutosave").checked ? startHeartbeat() : stopHeartbeat(); };
 
-  // click to place / select pins
   $("#viewer").addEventListener("pointerdown", onPointerDown);
   window.addEventListener("keydown", (e)=>{ if(e.key==="Escape" && addMode){ addMode=false; $("#btnAddPin").textContent="クリックで配置モード"; }});
 }
@@ -315,6 +314,7 @@ function onPointerDown(ev){
   const rect = renderer.domElement.getBoundingClientRect();
   mouse.x = ((ev.clientX - rect.left) / rect.width) * 2 - 1;
   mouse.y = -((ev.clientY - rect.top) / rect.height) * 2 + 1;
+  raycaster = raycaster || new THREE.Raycaster();
   raycaster.setFromCamera(mouse, camera);
   const objs = []; glbRoot && glbRoot.traverse(o=>{ if (o.isMesh) objs.push(o); });
   const hits = raycaster.intersectObjects(objs, true);
@@ -330,7 +330,6 @@ function onPointerDown(ev){
     selectPin(id);
     renderPinTable();
   } else {
-    // select nearest marker if clicked
     const world = hit.point;
     let nearestId=null, nearestDist=1e9;
     for (const [id,mesh] of markers){
@@ -440,7 +439,7 @@ async function setupSheet(id){
   await sheetsValuesUpdate(id, "Materials!A1:C1", [["name","key","value"]]);
   await sheetsValuesUpdate(id, "AuditLog!A1:G1", [["when","who","pin_id","field","old","new","client_rev"]]);
   await sheetsValuesUpdate(id, "Meta!A1:B1", [["key","value"]]);
-  await sheetsValuesUpdate(id, "Meta!A2:B2", [["app_version","viewer-sheets-1.0"]]);
+  await sheetsValuesUpdate(id, "Meta!A2:B2", [["app_version","viewer-sheets-esm-1.0"]]);
 }
 
 /* ============================== Pins (load/save) ============================== */
@@ -471,7 +470,6 @@ async function loadPins(){
     if (!current.sheetId){ const id=extractId($("#inpSheetId").value.trim()); if(!id) throw new Error("シートID未設定"); current.sheetId=id; }
     const val = await sheetsValuesGet(current.sheetId, "Pins!A2:Q");
     pins = []; indexById.clear(); dirty.clear();
-    // remove markers
     for (const [id,m] of markers){ scene.remove(m); } markers.clear();
     for (const row of (val.values||[])){
       const get=(i,d="")=>(i<row.length?row[i]:d);
