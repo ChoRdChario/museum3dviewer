@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>LociMyu v0.9.0 (Views remap + Folder Picker + Color fix)</title>
+  <title>LociMyu v0.9.1 (View swap + Drive image preview)</title>
   <link rel="icon" href='data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><circle cx="32" cy="32" r="28" fill="%230b0f14"/><text x="32" y="39" font-size="28" text-anchor="middle" fill="%2353b7ff" font-family="Arial">L</text></svg>'>
   <style>
     :root{ --bg:#0b0f14; --panel:#121922; --text:#e6edf3; --accent:#53b7ff; --muted:#8fa3bd; --radius:16px;}
@@ -301,6 +301,9 @@ let materials=[], materialMap=new Map(); // key -> ORIGINAL material
 let matOriginals=new WeakMap(); // ORIGINAL material -> {props}
 let isOrtho=false;
 
+// Image blob cache
+const imageBlobCache = new Map(); // key: driveFileId or url string -> objectURL
+
 // ====== Helpers ======
 function extractDriveFileId(input){
   if(!input) return '';
@@ -316,11 +319,49 @@ function extractSpreadsheetId(input){
   const m3 = input.match(/^([a-zA-Z0-9_-]{20,})$/);                if(m3) return m3[1];
   return input.trim();
 }
+function driveIdFromUrlMaybe(url){
+  if(!url) return null;
+  if(/^https?:\/\/drive\.google\.com\//.test(url)){
+    return extractDriveFileId(url);
+  }
+  if(/^https?:\/\/(?:www\.)?google\.com\/uc/.test(url)){
+    const u = new URL(url);
+    const id = u.searchParams.get('id'); if(id) return id;
+  }
+  return null;
+}
 function toast(msg){ el.statusLabel.textContent=msg; setTimeout(()=> el.statusLabel.textContent='Ready', 2000); }
 function setDisabled(ids, on){ ids.forEach(id=>{ const b=document.getElementById(id); if(b){ if(on) b.setAttribute('disabled','true'); else b.removeAttribute('disabled'); } }); }
 function debounceSave(){ clearTimeout(autosaveTimer); autosaveTimer=setTimeout(()=> upsertPinToSheet().catch(console.error), 1200); }
 function fmt(n){ return typeof n==='number'? Number(n.toFixed(6)) : n; }
 function ensureArray(x){ return Array.isArray(x)?x:[]; }
+
+// Resolve image URL with OAuth fetch if needed
+async function resolveImageURL(url){
+  const did = driveIdFromUrlMaybe(url);
+  if(did){
+    if(imageBlobCache.has(did)) return imageBlobCache.get(did);
+    const obj = await driveFileToObjectURL(did);
+    imageBlobCache.set(did, obj);
+    return obj;
+  }
+  // plain URL
+  if(imageBlobCache.has(url)) return imageBlobCache.get(url);
+  try{
+    const obj = url; // try direct
+    imageBlobCache.set(url, obj);
+    return obj;
+  }catch{
+    return url;
+  }
+}
+async function driveFileToObjectURL(fileId){
+  const dlUrl = `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`;
+  const res = await fetch(dlUrl, { headers:{ Authorization:`Bearer ${accessToken}` } });
+  if(!res.ok) throw new Error('image fetch failed '+res.status);
+  const blob = await res.blob();
+  return URL.createObjectURL(blob);
+}
 
 // ====== Google init ======
 const waitGoogle = setInterval(()=>{
@@ -388,7 +429,7 @@ function buildControls(){
   tcontrols = new TransformControls(camera, el.viewerCanvas);
   tcontrols.setSize(0.9); tcontrols.setSpace('world');
   tcontrols.addEventListener('dragging-changed', e=>{ controls.enabled = !e.value; });
-  scene.add(tcontrols); tcontrols.visible=false;
+  scene.add(tcontrols); tcontrols.visible=false; // default OFF
 }
 function resize(){
   const w = el.viewerCanvas.clientWidth || el.viewerCanvas.parentElement.clientWidth;
@@ -456,16 +497,16 @@ function switchProjection(useOrtho){
   tcontrols.camera = camera;
   resize(); renderNow();
 }
-// Remapped camera directions: rotate +90° around Y compared to previous
+// Remapped camera directions: rotate +90° around Y (and swap Left/Right)
 function setNamedView(name){
   const { center, radius } = sceneBounds();
   const d = radius*2.2;
   let dir = new THREE.Vector3(0,0,d);
   switch(name){
-    case 'front': dir.set(d,0,0); break;     // +X (was +Z)
-    case 'back':  dir.set(-d,0,0); break;    // -X (was -Z)
-    case 'left':  dir.set(0,0,d); break;     // +Z (was -X)
-    case 'right': dir.set(0,0,-d); break;    // -Z (was +X)
+    case 'front': dir.set(d,0,0); break;     // +X
+    case 'back':  dir.set(-d,0,0); break;    // -X
+    case 'left':  dir.set(0,0,-d); break;    // -Z  <-- swapped
+    case 'right': dir.set(0,0,d); break;     // +Z  <-- swapped
     case 'top':   dir.set(0,d,0); break;
     case 'bottom':dir.set(0,-d,0); break;
   }
@@ -500,7 +541,7 @@ function onPointerDown(e){
   }
   const rect=el.viewerCanvas.getBoundingClientRect();
   pointer.x=((e.clientX-rect.left)/rect.width)*2-1;
-  pointer.y=-((e.clientY-rect.top)/rect.height)*2+1;
+  pointer.y=-((e.clientY-rect-top)/rect.height)*2+1;
   raycaster.setFromCamera(pointer,camera);
   const hits=raycaster.intersectObjects(pinGroup.children,false);
   if(hits.length){ selectPin(hits[0].object.userData.pinId, {fly:true}); }
@@ -519,6 +560,8 @@ function selectPin(id,{fly}={}){
   renderThumbs(p);
   updateViewerPreviewForPin(p);
   tcontrols.attach(p.mesh);
+  tcontrols.visible = false; // keep OFF by default even after attach
+  document.getElementById('btnGizmo').textContent = 'ギズモ: OFF';
   if(fly){ flyTo(p.pos); } else { controls.target.copy(p.pos); controls.update(); }
 }
 function flyTo(target){
@@ -561,15 +604,26 @@ function removePin(id,{silent}={}){
 }
 function renderThumbs(p){
   const thumbs=document.getElementById('thumbs'); thumbs.innerHTML='';
-  ensureArray(p.images).forEach(url=>{
-    const img=document.createElement('img'); img.src=url; img.title=url; img.addEventListener('click', ()=>{ setPreview(url, p.title||''); }); thumbs.appendChild(img);
+  ensureArray(p.images).forEach(async (url)=>{
+    const img=document.createElement('img'); img.alt = 'thumb';
+    thumbs.appendChild(img);
+    try{
+      img.src = await resolveImageURL(url);
+      img.addEventListener('click', async ()=>{ const src = await resolveImageURL(url); setPreview(src, p.title||''); });
+    }catch{ img.remove(); }
   });
 }
-function setPreview(url, cap){
+async function setPreview(url, cap){
   if(!url){ el.viewerPreview.classList.add('hidden'); return; }
-  el.previewImg.src = url;
-  el.previewCap.textContent = cap||'';
-  el.viewerPreview.classList.remove('hidden');
+  try{
+    const src = await resolveImageURL(url);
+    el.previewImg.src = src;
+    el.previewCap.textContent = cap||'';
+    el.viewerPreview.classList.remove('hidden');
+  }catch(e){
+    console.warn('preview failed', e);
+    el.viewerPreview.classList.add('hidden');
+  }
 }
 function updateViewerPreviewForPin(p){ setPreview(p && p.images && p.images[0] ? p.images[0] : null, p?.title); }
 
@@ -864,8 +918,8 @@ document.getElementById('btnAttach').addEventListener('click', async ()=>{
   try{
     const blob = await toUploadableBlob(file);
     const uploaded = await driveMultipartUpload(blob, sanitizeName(file.name), glbParents);
-    p.images = ensureArray(p.images); const url = `https://drive.google.com/uc?id=${uploaded.id}`;
-    p.images.push(url);
+    const url = `https://drive.google.com/uc?id=${uploaded.id}`;
+    p.images = ensureArray(p.images); p.images.push(url);
     renderThumbs(p);
     setPreview(url, p.title||'');
     debounceSave();
@@ -916,14 +970,16 @@ async function loadFolderImages(){
     for(const parent of glbParents){
       const q = `'${parent}' in parents and trashed=false and (mimeType contains 'image/')`;
       const resp = await gapi.client.drive.files.list({
-        q, pageSize: 100, fields: 'files(id,name,mimeType,thumbnailLink)'
+        q, pageSize: 100, fields: 'files(id,name,mimeType)'
       });
       const files = resp.result.files || [];
       for(const f of files){
         const id = f.id;
         const url = `https://drive.google.com/uc?id=${id}`;
         const cell = document.createElement('div'); cell.className='cell';
-        const img = document.createElement('img'); img.src = f.thumbnailLink || url; img.alt = f.name;
+        const img = document.createElement('img'); img.alt = f.name;
+        // resolve via OAuth to avoid 403
+        resolveImageURL(url).then(objUrl => { img.src = objUrl; }).catch(()=>{});
         const cap = document.createElement('div'); cap.textContent = f.name; cap.className='small';
         cell.appendChild(img); cell.appendChild(cap);
         cell.addEventListener('click', ()=> chooseFolderImage(url));
