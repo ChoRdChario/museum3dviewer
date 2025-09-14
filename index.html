@@ -4282,7 +4282,123 @@ Spreadsheet ID: ${SHEET_ID}`);
     }catch{}
   }, 1500);
 
+  
+// === Override: キャプション「選択…」→ スプレッドシートから読み込む ===
+if (btnPickPins){
+  btnPickPins.onclick = async () => {
+    try{
+      await g.ensureToken?.();
+      await ensureSheetsReady();
+      const glbId = (fileIdInput && fileIdInput.value) ? extractDriveId(fileIdInput.value) : '';
+      let parentId = '';
+      if (glbId){
+        const meta = await driveGetMetadata(glbId);
+        parentId = (meta.parents && meta.parents[0]) || '';
+      }
+      openModal(`
+        <div class="modal">
+          <header>
+            <strong>スプレッドシートを選択（同フォルダ推奨）</strong>
+            <div class="grow"></div>
+            <button id="pinsClose">閉じる</button>
+          </header>
+          <div class="body">
+            <div class="list" id="pinsList"><div class="rowi">読み込み中…</div></div>
+          </div>
+          <footer>
+            <button id="pinsUseAutosave">新規（オートセーブに任せる）</button>
+          </footer>
+        </div>
+      `);
+      document.getElementById('pinsClose')?.addEventListener('click', ()=>{ closeModal && closeModal(); });
+      const listEl = document.getElementById('pinsList');
+      // クエリ：同フォルダ内のスプレッドシート（_pins優先）
+      const q = parentId
+        ? `'${parentId}' in parents and trashed = false and mimeType = 'application/vnd.google-apps.spreadsheet'`
+        : `mimeType = 'application/vnd.google-apps.spreadsheet' and trashed = false`;
+      const res = await g.gapi.client.drive.files.list({ q, pageSize: 200, orderBy: 'modifiedTime desc', fields: 'files(id,name,modifiedTime)' });
+      const all = res.result?.files || [];
+      const pinsLike = all.filter(f => /(^|[^a-z])pins$/i.test(f.name) || /_pins$/i.test(f.name) || /pins/i.test(f.name));
+      const files = pinsLike.length ? pinsLike : all;
+
+      if (!files.length){
+        listEl.innerHTML = `<div class="rowi">スプレッドシートが見つかりませんでした</div>`;
+      } else {
+        listEl.innerHTML = files.map(f=>{
+          const t = new Date(f.modifiedTime||Date.now()).toLocaleString();
+          return `<div class="rowi">
+            <div class="name">${f.name}</div>
+            <div class="meta">${t}</div>
+            <div><button data-pick="${f.id}">これを使う</button></div>
+          </div>`;
+        }).join('');
+
+        listEl.querySelectorAll('[data-pick]').forEach(btn=>{
+          btn.onclick = async ()=>{
+            const id = btn.getAttribute('data-pick');
+            pinsIdInput && (pinsIdInput.value = id);
+            closeModal && closeModal();
+            // Sheetsからロード
+            try{
+              statusEl && (statusEl.textContent='Pins 読込中…');
+            }catch{}
+            try{
+              const { pins, materials } = await sheetsLoadAll(id);
+              // 既存グローバルへ反映
+              g.PINS = pins.map(p => ({
+                id: p.id, title: p.title, text: p.text, color: p.color || '#ee3333',
+                position: { x: p.pos?.x || p.pos?.x || 0, y: p.pos?.y || 0, z: p.pos?.z || 0 }
+              }));
+              g.MATERIALS = materials || {};
+              g.loadedPinsId = id;
+              try{ const m=await driveGetMetadata(id); g.loadedPinsName = m.name||''; }catch{}
+              if (g.redrawPins) g.redrawPins();
+              if (Array.isArray(g.materialList)){
+                for (const {name, material} of g.materialList){
+                  const cfg = g.MATERIALS[name]; if (cfg && g.applyMaterialConfig) g.applyMaterialConfig(material, cfg);
+                }
+              }
+              if (g.buildMaterialsUI) g.buildMaterialsUI(materialsDockEl);
+              if (g.resetHistoryBaseline) g.resetHistoryBaseline();
+              if (g.syncDockMoveToggle) g.syncDockMoveToggle();
+              if (typeof updatePinsInfo === 'function') updatePinsInfo();
+              if (g.refreshShareButtons) g.refreshShareButtons();
+              setSaveStatus('ok','読み込み完了');
+            }catch(e){
+              console.error(e);
+              setSaveStatus('fail','スプレッドシート読み込み失敗');
+            }
+          };
+        });
+      }
+
+      document.getElementById('pinsUseAutosave')?.addEventListener('click', async ()=>{
+        closeModal && closeModal();
+        // GLBに紐づくスプレッドシートを自動作成→オートセーブへ
+        const glbId2 = (fileIdInput && fileIdInput.value) ? extractDriveId(fileIdInput.value) : '';
+        if (!glbId2){ alert('先にGLBを読み込んでください'); return; }
+        const { spreadsheetId } = await ensureSpreadsheetForGlb(glbId2);
+        pinsIdInput && (pinsIdInput.value = spreadsheetId);
+        SHEET_ID = spreadsheetId;
+        updatePinsInfo();
+      });
+    }catch(e){
+      console.error(e);
+      alert('スプレッドシートの取得に失敗しました');
+    }
+  };
+}
+
   // Ensure status shows the new backend
+  // === Heartbeat autosave every 10s when enabled and sheet resolved ===
+  setInterval(async ()=>{
+    try{
+      if (autoSaveEl?.checked && SHEET_ID){
+        await g.autoSaveNow();
+      }
+    }catch{}
+  }, 10000);
+
   setTimeout(updatePinsInfo, 1000);
 })();
 </script>
