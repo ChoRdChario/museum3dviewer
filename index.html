@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>LociMyu v0.8 (Views + Ortho + BG + DoubleSide)</title>
+  <title>LociMyu v0.8.1 (Views + Ortho + BG + DoubleSide)</title>
   <link rel="icon" href='data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><circle cx="32" cy="32" r="28" fill="%230b0f14"/><text x="32" y="39" font-size="28" text-anchor="middle" fill="%2353b7ff" font-family="Arial">L</text></svg>'>
   <style>
     :root{ --bg:#0b0f14; --panel:#121922; --text:#e6edf3; --accent:#53b7ff; --muted:#8fa3bd; --radius:16px;}
@@ -168,8 +168,8 @@
   function onGapi(){ window.__flags.gapi = true; }
   function onGis(){  window.__flags.gis  = true; }
 </script>
-<script async defer src="https://accounts.google.com/gsi/client" onload="onGis"></script>
-<script async defer src="https://apis.google.com/js/api.js" onload="onGapi"></script>
+<script async defer src="https://accounts.google.com/gsi/client" onload="onGis()"></script>
+<script async defer src="https://apis.google.com/js/api.js" onload="onGapi()"></script>
 
 <script type="module">
 import * as THREE from 'three';
@@ -405,7 +405,7 @@ function switchProjection(useOrtho){
   camera.position.copy(pos);
   buildControls();
   controls.target.copy(tar); controls.update();
-  tcontrols.camera = camera; // keep transform controls consistent
+  tcontrols.camera = camera;
   resize(); renderNow();
 }
 function setNamedView(name){
@@ -413,12 +413,12 @@ function setNamedView(name){
   const d = radius*2.2;
   let dir = new THREE.Vector3(0,0,d);
   switch(name){
-    case 'front': dir.set(0,0,d); break;    // +Z
-    case 'back':  dir.set(0,0,-d); break;   // -Z
-    case 'left':  dir.set(-d,0,0); break;   // -X
-    case 'right': dir.set(d,0,0); break;    // +X
-    case 'top':   dir.set(0,d,0); break;    // +Y
-    case 'bottom':dir.set(0,-d,0); break;   // -Y
+    case 'front': dir.set(0,0,d); break;
+    case 'back':  dir.set(0,0,-d); break;
+    case 'left':  dir.set(-d,0,0); break;
+    case 'right': dir.set(d,0,0); break;
+    case 'top':   dir.set(0,d,0); break;
+    case 'bottom':dir.set(0,-d,0); break;
   }
   camera.position.copy(center.clone().add(dir));
   controls.target.copy(center);
@@ -432,7 +432,7 @@ function setAddPinMode(on){ addPinMode=on; el.modeLabel.textContent=on?'Add Pin:
 function getIntersectPoint(event){
   const rect=el.viewerCanvas.getBoundingClientRect();
   pointer.x=((event.clientX-rect.left)/rect.width)*2-1;
-  pointer.y=-((event.clientY-rect.top)/rect.height)*2+1;
+  pointer.y=-((event.clientY-rect.top)/rect.height)/2*2+1;
   raycaster.setFromCamera(pointer,camera);
   const hits=currentModel?raycaster.intersectObject(currentModel,true):[];
   return hits.length?hits[0].point.clone():null;
@@ -480,7 +480,7 @@ function flyTo(target){
   const t0 = performance.now(); const dur = 600;
   (function tick(now){
     const t = Math.min(1, (now - t0)/dur);
-    const k = t<.5 ? 2*t*t : -1+(4-2*t)*t; // easeInOutQuad
+    const k = t<.5 ? 2*t*t : -1+(4-2*t)*t;
     camera.position.lerpVectors(startPos, endPos, k);
     controls.target.lerpVectors(startTar, endTar, k);
     controls.update();
@@ -579,19 +579,6 @@ async function loadGLBByFileId(fileId){
     alert('GLB読み込みに失敗しました：' + (err?.message || 'unknown error'));
   }finally{
     el.loading.hidden = true;
-  }
-}
-function fitToScene(){ // override previous
-  const { center, radius } = sceneBounds();
-  if(camera.isPerspectiveCamera){
-    const dist = radius*2.2;
-    const dir = new THREE.Vector3(1,0.6,1).normalize();
-    camera.position.copy(center.clone().addScaledVector(dir, dist));
-    controls.target.copy(center); controls.update();
-  }else{
-    updateOrthoFrustum();
-    camera.position.copy(center.clone().add(new THREE.Vector3(1,0.6,1)));
-    controls.target.copy(center); controls.update();
   }
 }
 
@@ -696,7 +683,6 @@ async function applyMaterialLive(){
     if(wantUnlit && !rec.wasUnlit){
       const active = getActiveMaterialFor(origM);
       const um = new THREE.MeshBasicMaterial();
-      // carry over
       um.map = active.map || rec.map || null;
       um.transparent = active.transparent;
       um.opacity = active.opacity;
@@ -707,7 +693,6 @@ async function applyMaterialLive(){
       um.blending = active.blending;
       um.toneMapped = false;
       rec.unlitMat = um; rec.wasUnlit = true;
-      // swap in scene
       currentModel.traverse(obj=>{
         const m=obj.material;
         if(m===origM || m===active){ obj.material = um; }
@@ -733,14 +718,13 @@ async function applyMaterialLive(){
     mat.alphaTest = thresh;
     mat.depthWrite = !mat.transparent || thresh>0;
 
-    // Texture processing: always start from ORIGINAL baseColor map
+    // Texture processing
     if((invert || whiteToAlpha) && rec.map){
       try{
         const processed = await processTextureToCanvasTextureFromOriginal(rec.map, { invertRGB: invert, alphaFromWhite: whiteToAlpha, threshold: thresh });
         if(processed){ mat.map = processed; mat.map.needsUpdate = true; }
       }catch(e){ console.warn('texture process failed', e); }
     }else if(!invert && !whiteToAlpha && rec.map){
-      // restore original
       mat.map = rec.map; if(mat.map) mat.map.needsUpdate = true;
     }
 
