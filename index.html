@@ -552,6 +552,27 @@ html.sheet-open .floating-buttons{
 </head>
 
 <body>
+
+  <!-- === LociMyu: Data Source (Drive JSON / Google Sheets) === -->
+  <div id="locimyu-data-source" style="display:flex;flex-wrap:wrap;gap:.5rem;align-items:center;margin:.75rem 0;padding:.5rem;border:1px dashed var(--muted, #888);border-radius:.5rem;">
+    <strong>データソース:</strong>
+    <select id="lm_ds_select">
+      <option value="drive-json">Drive pins.json</option>
+      <option value="sheets">Google Sheets</option>
+    </select>
+
+    <label for="lm_sheet_id" title="スプレッドシートID（URLの /d/ と /edit の間）">Spreadsheet ID:</label>
+    <input id="lm_sheet_id" placeholder="1AbCdEf...（/d/〜/edit のID）" style="min-width:22rem;max-width:60vw;" />
+
+    <label for="lm_sheet_range" title="範囲（ヘッダは pinId..deleted の9列。既定: pins!A:I）">Range:</label>
+    <input id="lm_sheet_range" value="pins!A:I" style="width:10rem" />
+
+    <button id="lm_btn_connect" title="シートから読み込み">接続/再読込</button>
+    <button id="lm_btn_create" title="新しいスプレッドシートを作成して接続">新規シート作成</button>
+    <a id="lm_btn_open" href="#" target="_blank" style="margin-left:auto;display:none;">シートを開く↗</a>
+  </div>
+
+
 <div id="sheetScrim" class="scrim" hidden aria-hidden="true"></div>
 <!-- Desktop open-dock button (hidden on mobile) -->
 <!-- Global loader overlay -->
@@ -586,19 +607,6 @@ html.sheet-open .floating-buttons{
 <input autocomplete="off" id="folderId" placeholder="（任意）保存先フォルダID"/>
 <button class="iconbtn" id="helpPins" title="pins.jsonの説明">？</button>
 </div>
-<!-- 🧭 データソース切替（Drive JSON / Google Sheets） -->
-<div class="hgroup" id="grpDataSource">
-  <span class="title">データソース</span>
-  <select id="dataSourceSelect">
-    <option value="drive-json">Drive pins.json</option>
-    <option value="sheets">Google Sheets</option>
-  </select>
-  <input id="sheetsIdInput" placeholder="Spreadsheet ID（/d/〜/edit のID）" style="width:28rem;max-width:60vw;" />
-  <input id="sheetsRangeInput" value="pins!A:I" style="width:12rem" title="範囲（例: pins!A:I）"/>
-  <button class="iconbtn" id="sheetsConnectBtn">接続/再読込</button>
-  <span class="tiny" id="sheetsStatus"></span>
-</div>
-
 <!-- 🔑 共有・権限 -->
 <div class="hgroup" id="grpShare">
 <span class="title">共有・権限</span>
@@ -860,8 +868,7 @@ function closeDock(){
 const SCOPES_READ  = "https://www.googleapis.com/auth/drive.readonly";
 const SCOPES_WRITE = "https://www.googleapis.com/auth/drive.file";
 const SCOPES_FULL  = "https://www.googleapis.com/auth/drive";
-const SCOPES_SHEETS = "https://www.googleapis.com/auth/spreadsheets";
-const ALL_SCOPES   = `${SCOPES_READ} ${SCOPES_WRITE} ${SCOPES_FULL} ${SCOPES_SHEETS}`;
+const ALL_SCOPES   = `${SCOPES_READ} ${SCOPES_WRITE} ${SCOPES_FULL}`;
 const CLIENT_ID    = "595200751510-ncahnf7edci6b9925becn5to49r6cguv.apps.googleusercontent.com";
 
 /* ===== DOM ===== */
@@ -1009,7 +1016,7 @@ async function loadGapi(){
     const t = setInterval(()=>{ if (window.gapi){ clearInterval(t); resolve(); } }, 30);
   });
   await new Promise((res)=> gapi.load('client', res));
-  await gapi.client.init({ discoveryDocs: ["https://www.googleapis.com/discovery/v1/apis/drive/v3/rest", "https://sheets.googleapis.com/$discovery/rest?version=v4"] });
+  await gapi.client.init({ discoveryDocs: ["https://www.googleapis.com/discovery/v1/apis/drive/v3/rest"] });
   window.gapiLoaded = true;
 }
 /* 起動直後に裏で初期化（ユーザー操作をブロックしない） */
@@ -3909,177 +3916,295 @@ document.getElementById('toolInlineBtn')?.addEventListener('click', ()=>{
 </script>
 
 
+
 <script>
-// ===== Sheets Mode Integration (LociMyu) =====
+/* ===== LociMyu Sheets Mode + Auto-create Module (non-destructive) ===== */
 (function(){
   const $ = (id)=>document.getElementById(id);
-  const sel = $("dataSourceSelect");
-  const sheetsId = $("sheetsIdInput");
-  const sheetsRange = $("sheetsRangeInput");
-  const sheetsBtn = $("sheetsConnectBtn");
-  const sheetsStatus = $("sheetsStatus");
-
-  // Boot defaults
-  const cfg = JSON.parse(localStorage.getItem("locimyu.sheetsCfg")||"{}");
-  if (cfg.mode) sel.value = cfg.mode;
-  if (cfg.spreadsheetId) sheetsId.value = cfg.spreadsheetId;
-  if (cfg.range) sheetsRange.value = cfg.range;
+  const ui = {
+    box: $("locimyu-data-source"),
+    sel: $("lm_ds_select"),
+    id:  $("lm_sheet_id"),
+    range: $("lm_sheet_range"),
+    btnConnect: $("lm_btn_connect"),
+    btnCreate: $("lm_btn_create"),
+    btnOpen: $("lm_btn_open")
+  };
+  const HEADERS = ["pinId","x","y","z","text","tags","author","updatedAt","deleted"];
+  const CFG_KEY = "locimyu.sheetsCfg.v1";
+  const cfg = Object.assign({mode:"drive-json", range:"pins!A:I"}, JSON.parse(localStorage.getItem(CFG_KEY)||"{}"));
+  if (ui.sel) ui.sel.value = cfg.mode || "drive-json";
+  if (cfg.spreadsheetId && ui.id) ui.id.value = cfg.spreadsheetId;
+  if (cfg.range && ui.range) ui.range.value = cfg.range;
+  refreshOpenLink();
 
   function saveCfg(){
-    localStorage.setItem("locimyu.sheetsCfg", JSON.stringify({
-      mode: sel?.value || "drive-json",
-      spreadsheetId: sheetsId?.value?.trim() || "",
-      range: (sheetsRange?.value || "pins!A:I").trim()
-    }));
+    const c = {
+      mode: ui.sel ? ui.sel.value : "drive-json",
+      spreadsheetId: (ui.id && ui.id.value || "").trim(),
+      range: (ui.range && ui.range.value || "pins!A:I").trim()
+    };
+    localStorage.setItem(CFG_KEY, JSON.stringify(c));
+    refreshOpenLink();
   }
-  function getMode(){ try{ return JSON.parse(localStorage.getItem("locimyu.sheetsCfg")||"{}").mode || "drive-json"; }catch(_){ return "drive-json"; } }
-  function setStatus(txt){ if(sheetsStatus) sheetsStatus.textContent = txt; }
+  function refreshOpenLink(){
+    if (!ui.btnOpen || !ui.id) return;
+    const sid = (ui.id.value||"").trim();
+    if (sid) {
+      ui.btnOpen.href = "https://docs.google.com/spreadsheets/d/"+sid+"/edit";
+      ui.btnOpen.style.display = "inline-block";
+    } else {
+      ui.btnOpen.style.display = "none";
+    }
+  }
+  if (ui.sel) ui.sel.addEventListener("change", saveCfg);
+  if (ui.id) ui.id.addEventListener("change", saveCfg);
+  if (ui.range) ui.range.addEventListener("change", saveCfg);
 
-  sel?.addEventListener("change", saveCfg);
-  sheetsId?.addEventListener("change", saveCfg);
-  sheetsRange?.addEventListener("change", saveCfg);
+  const SCOPES_SHEETS = "https://www.googleapis.com/auth/spreadsheets";
+  const SCOPES_DRIVE_FILE = "https://www.googleapis.com/auth/drive.file";
+  let _sheetsLoaded = false;
 
-  const SHEETS_HEADERS = ["pinId","x","y","z","text","tags","author","updatedAt","deleted"];
+  async function ensureGapiClient(){
+    if (!window.gapi || !gapi.client) throw new Error("gapi client is not available yet.");
+  }
+  async function ensureSheetsDiscovery(){
+    await ensureGapiClient();
+    if (_sheetsLoaded) return;
+    try {
+      if (gapi.client.sheets) { _sheetsLoaded = true; return; }
+      await gapi.client.load("sheets", "v4");
+      _sheetsLoaded = true;
+    } catch(e){
+      await gapi.client.init({ discoveryDocs:["https://sheets.googleapis.com/$discovery/rest?version=v4"] });
+      _sheetsLoaded = true;
+    }
+  }
+  function hasScope(scope){
+    try {
+      const auth = gapi.auth2.getAuthInstance();
+      const user = auth.currentUser.get();
+      const granted = user.getGrantedScopes() || "";
+      return granted.split(" ").includes(scope);
+    } catch(e){ return false; }
+  }
+  async function ensureScope(scope){
+    await ensureGapiClient();
+    if (!hasScope(scope)) {
+      await gapi.auth2.getAuthInstance().signIn({scope});
+    }
+  }
 
   const Sheets = {
-    get spreadsheetId(){ return (sheetsId?.value||"").trim(); },
-    get range(){ return (sheetsRange?.value||"pins!A:I").trim(); },
+    get spreadsheetId(){ return (ui.id && ui.id.value || "").trim(); },
+    get range(){ return (ui.range && ui.range.value || "pins!A:I").trim(); },
 
     async readAll(){
-      if (!gapi?.client?.sheets) throw new Error("Sheets API not ready");
-      if (!this.spreadsheetId) throw new Error("Spreadsheet ID 未設定");
+      await ensureSheetsDiscovery();
+      await ensureScope(SCOPES_SHEETS);
+      if (!this.spreadsheetId) throw new Error("Spreadsheet ID 未設定です");
       const resp = await gapi.client.sheets.spreadsheets.values.get({
-        spreadsheetId: this.spreadsheetId, range: this.range,
-        valueRenderOption: "UNFORMATTED_VALUE", dateTimeRenderOption: "FORMATTED_STRING"
+        spreadsheetId: this.spreadsheetId,
+        range: this.range,
+        valueRenderOption: "UNFORMATTED_VALUE",
+        dateTimeRenderOption: "FORMATTED_STRING"
       });
       const values = resp.result.values || [];
-      const hasHeader = Array.isArray(values[0]) && values[0][0]==="pinId";
+      const hasHeader = Array.isArray(values[0]) && String(values[0][0]).trim() === "pinId";
       const rows = hasHeader ? values.slice(1) : values;
-      const pins = rows.filter(r=>r.length>0).map(r=>{
-        const m = {}; SHEETS_HEADERS.forEach((h,i)=>m[h] = r[i] ?? "");
-        return {
-          id: m.pinId || (crypto?.randomUUID?.() || String(Math.random()).slice(2)),
-          position: [Number(m.x||0), Number(m.y||0), Number(m.z||0)],
-          title: m.text || "",
-          text: m.text || "",
-          imageUrl: "",
-          imageMime: "",
-          floatPos: null, color: "#ee3333",
-          _author: m.author||"", _updatedAt: m.updatedAt||"",
-          _deleted: String(m.deleted).toLowerCase()==="true"
-        };
-      });
-      return pins.filter(p=>!p._deleted);
+      return rows.filter(r=>r.length>0).map(rowToPin);
     },
 
-    async writeAll(pins){
-      if (!gapi?.client?.sheets) throw new Error("Sheets API not ready");
-      if (!this.spreadsheetId) throw new Error("Spreadsheet ID 未設定");
-      // Read to map row numbers
-      const resp = await gapi.client.sheets.spreadsheets.values.get({
-        spreadsheetId: this.spreadsheetId, range: this.range,
-        valueRenderOption: "UNFORMATTED_VALUE"
-      });
-      const values = resp.result.values || [];
-      const hasHeader = Array.isArray(values[0]) && values[0][0]==="pinId";
-      const rows = hasHeader ? values.slice(1) : values;
-      const rowById = new Map();
-      rows.forEach((r,idx)=>{ if (r[0]) rowById.set(String(r[0]), idx+2); }); // +2: header offset
+    async batchUpsert(pins){
+      await ensureSheetsDiscovery();
+      await ensureScope(SCOPES_SHEETS);
+      const all = await this.readAll();
+      const rowById = new Map(all.map((p,idx)=>[p.pinId, idx+2]));
+      const updates = [];
+      const appends = [];
 
-      const toRow = (p)=>[ p.id, p.position?.[0]||0, p.position?.[1]||0, p.position?.[2]||0,
-                           p.text||"", "", "", new Date().toISOString(), "FALSE" ];
-
-      const updates=[], appends=[];
-      for (const p of pins){
-        if (rowById.has(p.id)){
-          const rowNum = rowById.get(p.id);
-          updates.push({ range: `pins!A${rowNum}:I${rowNum}`, values: [toRow(p)] });
-        }else{
-          appends.push(toRow(p));
+      for (const p of pins) {
+        const row = pinToRow(p);
+        if (rowById.has(p.pinId)) {
+          const r = rowById.get(p.pinId);
+          updates.push({ range: `pins!A${r}:I${r}`, values:[row] });
+        } else {
+          appends.push(row);
         }
       }
-      if (updates.length){
+      if (updates.length) {
         await gapi.client.sheets.spreadsheets.values.batchUpdate({
           spreadsheetId: this.spreadsheetId,
-          resource: { valueInputOption:"RAW", data: updates }
+          resource: { valueInputOption: "RAW", data: updates }
         });
       }
-      if (appends.length){
+      if (appends.length) {
         await gapi.client.sheets.spreadsheets.values.append({
-          spreadsheetId: this.spreadsheetId, range: this.range,
-          valueInputOption:"RAW", insertDataOption:"INSERT_ROWS",
+          spreadsheetId: this.spreadsheetId,
+          range: this.range,
+          valueInputOption: "RAW",
+          insertDataOption: "INSERT_ROWS",
           resource: { values: appends }
         });
       }
-    }
-  };
+    },
 
-  // Expose minimal API
-  window._Sheets = Sheets;
-  window.getDataSourceMode = getMode;
+    async markDeleted(pinId){
+      const pins = await this.readAll();
+      const p = pins.find(x=>x.pinId===pinId);
+      if (!p) return;
+      p.deleted = true;
+      p.updatedAt = new Date().toISOString();
+      await this.batchUpsert([p]);
+    },
 
-  // Replace All Pins helper
-  window.replaceAllPinsFromExternal = function(newPins){
-    try{
-      if (!Array.isArray(newPins)) return;
-      // Adapt to LociMyu's internal shape (already done in readAll)
-      PINS = newPins;
-      selectedPinId = '';
-      redrawPins();
-      updatePinsInfo?.();
-    }catch(e){ console.warn(e); }
-  };
-
-  sheetsBtn?.addEventListener('click', async ()=>{
-    saveCfg();
-    if (getMode()==='sheets'){
-      try{
-        setStatus('読込中…');
-        await ensureToken?.(); // ensure Drive token covers Sheets scope too
-        const pins = await Sheets.readAll();
-        window.replaceAllPinsFromExternal(pins);
-        setStatus(`読み込み完了（${pins.length}件）`);
-      }catch(e){ console.warn(e); setStatus('読み込み失敗'); alert('Sheets 読み込みに失敗しました: '+e.message); }
-    }else{
-      setStatus('Drive pins.json に切替');
-    }
-  });
-
-  // Patch autosave: if sheets mode, write pins to sheet instead of Drive
-  const _autoSaveNow = window.autoSaveNow;
-  window.autoSaveNow = async function(){
-    if (getMode()==='sheets'){
-      try{
-        setSaveStatus?.('pending','保存中…');
-        await ensureToken?.();
-        await Sheets.writeAll(PINS||[]);
-        setSaveStatus?.('ok','Sheets に保存しました');
-        // mimic lastSavedJson to suppress rapid writes
-        try{ lastSavedJson = JSON.stringify({ pins:PINS, materials:MATERIALS }); }catch(_){}
-        updatePinsInfo?.();
-      }catch(e){
-        console.warn('Sheets save failed', e);
-        setSaveStatus?.('fail','Sheets 保存失敗');
+    async reloadFromSheets(){
+      const pins = await this.readAll();
+      if (typeof window.replaceAllPinsFromExternal === "function") {
+        window.replaceAllPinsFromExternal(pins.filter(p=>!p.deleted));
+      } else {
+        console.warn("[Sheets] replaceAllPinsFromExternal 未定義。読み込み結果:", pins);
       }
+    }
+  };
+
+  function rowToPin(r){
+    const h = ["pinId","x","y","z","text","tags","author","updatedAt","deleted"];
+    const m = {};
+    for (let i=0;i<h.length;i++){ m[h[i]] = r[i] ?? ""; }
+    return {
+      pinId: m.pinId || (crypto?.randomUUID ? crypto.randomUUID() : ("pin_"+Math.random().toString(36).slice(2))),
+      x: num(m.x), y: num(m.y), z: num(m.z),
+      text: m.text || "", tags: m.tags || "",
+      author: m.author || "", updatedAt: m.updatedAt || "",
+      deleted: String(m.deleted).toLowerCase()==="true"
+    };
+  }
+  function pinToRow(pin){
+    return [
+      pin.pinId,
+      num(pin.x), num(pin.y), num(pin.z),
+      pin.text ?? "", pin.tags ?? "",
+      pin.author ?? (window.currentUserEmail||""),
+      pin.updatedAt ?? new Date().toISOString(),
+      pin.deleted ? "TRUE":"FALSE"
+    ];
+  }
+  function num(v){ const n = Number(v); return Number.isFinite(n) ? n : 0; }
+
+  async function createSpreadsheetAndConnect(){
+    await ensureSheetsDiscovery();
+    await ensureScope(SCOPES_SHEETS + " " + SCOPES_DRIVE_FILE);
+    const title = `LociMyu pins ${new Date().toISOString().slice(0,19).replace(/[:T]/g,'-')}`;
+    const createResp = await gapi.client.sheets.spreadsheets.create({
+      properties: { title },
+      sheets: [{ properties: { title: "pins" } }]
+    });
+    const spreadsheetId = createResp.result.spreadsheetId;
+    await gapi.client.sheets.spreadsheets.values.update({
+      spreadsheetId,
+      range: "pins!A1:I1",
+      valueInputOption: "RAW",
+      resource: { values: [["pinId","x","y","z","text","tags","author","updatedAt","deleted"]] }
+    });
+
+    // Optional: move the sheet into same folder as current model (if available)
+    try {
+      const modelId = (window.currentModelFileId||"").trim();
+      if (modelId) {
+        if (!gapi.client.drive || !gapi.client.drive.files) {
+          await gapi.client.load("drive","v3");
+        }
+        await ensureScope(SCOPES_DRIVE_FILE);
+        const model = await gapi.client.drive.files.get({ fileId: modelId, fields: "parents" });
+        const parents = model.result.parents || [];
+        if (parents.length) {
+          await gapi.client.drive.files.update({
+            fileId: spreadsheetId,
+            addParents: parents[0],
+            fields: "id, parents"
+          });
+        }
+      }
+    } catch(e){ console.warn("フォルダ移動はスキップ:", e); }
+
+    if (ui.id) ui.id.value = spreadsheetId;
+    if (ui.sel) ui.sel.value = "sheets";
+    saveCfg();
+    await Sheets.reloadFromSheets();
+    alert("新規スプレッドシートを作成し、接続しました。共有設定をご確認ください。");
+  }
+
+  const orig = {
+    onPinAdded:   window.onPinAdded,
+    onPinUpdated: window.onPinUpdated,
+    onPinDeleted: window.onPinDeleted,
+    exportPinsJson: window.exportPinsJson
+  };
+
+  window.onPinAdded = async function(pin){
+    if (ui.sel && ui.sel.value === "sheets") {
+      pin.updatedAt = new Date().toISOString();
+      pin.author = (window.currentUserEmail||"");
+      await Sheets.batchUpsert([pin]);
+      await Sheets.reloadFromSheets();
+    } else if (typeof orig.onPinAdded === "function") {
+      return orig.onPinAdded(pin);
+    }
+  };
+  window.onPinUpdated = async function(pin){
+    if (ui.sel && ui.sel.value === "sheets") {
+      pin.updatedAt = new Date().toISOString();
+      pin.author = (window.currentUserEmail||"");
+      await Sheets.batchUpsert([pin]);
+      await Sheets.reloadFromSheets();
+    } else if (typeof orig.onPinUpdated === "function") {
+      return orig.onPinUpdated(pin);
+    }
+  };
+  window.onPinDeleted = async function(pinId){
+    if (ui.sel && ui.sel.value === "sheets") {
+      await Sheets.markDeleted(pinId);
+      await Sheets.reloadFromSheets();
+    } else if (typeof orig.onPinDeleted === "function") {
+      return orig.onPinDeleted(pinId);
+    }
+  };
+  window.exportPinsJson = async function(){
+    if (ui.sel && ui.sel.value !== "sheets") {
+      if (typeof orig.exportPinsJson === "function") return orig.exportPinsJson();
       return;
     }
-    // Fallback to original Drive autosave
-    return _autoSaveNow?.apply(this, arguments);
+    const pins = (await Sheets.readAll()).filter(p=>!p.deleted);
+    if (typeof window.saveJsonToDrive === "function") {
+      await window.saveJsonToDrive(pins, `pins.export.${new Date().toISOString().slice(0,16).replace(/[:T]/g,'-')}.json`);
+      alert("pins.json をエクスポートしました（Drive）");
+    } else {
+      console.log("pins.json export:", pins);
+      alert("コンソールに pins.json を出力しました（saveJsonToDrive 未実装）");
+    }
   };
 
-  // Init: if mode is sheets and spreadsheetId preset, lazy-load on start
-  window.addEventListener('load', async ()=>{
-    if (getMode()==='sheets' && sheetsId?.value){
-      try{
-        await ensureToken?.();
-        const pins = await Sheets.readAll();
-        window.replaceAllPinsFromExternal(pins);
-        setStatus(`読み込み完了（${pins.length}件）`);
-      }catch(_){}
+  if (ui.btnConnect) ui.btnConnect.addEventListener("click", async ()=>{
+    saveCfg();
+    if (ui.sel && ui.sel.value === "sheets") {
+      try { await Sheets.reloadFromSheets(); } catch(e){ alert("シート読み込みに失敗: "+e.message); }
+    } else if (typeof window.reloadFromDrivePins === "function") {
+      await window.reloadFromDrivePins();
+    }
+  });
+  if (ui.btnCreate) ui.btnCreate.addEventListener("click", async ()=>{
+    try { await createSpreadsheetAndConnect(); } catch(e){ alert("シート作成に失敗: "+e.message); }
+  });
+
+  window.addEventListener("load", ()=>{
+    if (ui.sel && ui.sel.value === "sheets" && ui.id && (ui.id.value||"").trim()) {
+      Sheets.reloadFromSheets().catch(console.warn);
     }
   });
 })();
 </script>
+
 </body>
 
 
