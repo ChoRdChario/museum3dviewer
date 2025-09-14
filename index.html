@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>LociMyu v0.3 (ESM + import map)</title>
+  <title>LociMyu v0.3.1 (ESM + import map + pointer fix)</title>
   <link rel="icon" href='data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><circle cx="32" cy="32" r="28" fill="%230b0f14"/><text x="32" y="39" font-size="28" text-anchor="middle" fill="%2353b7ff" font-family="Arial">L</text></svg>'>
   <style>
     :root{ --bg:#0b0f14; --panel:#121922; --text:#e6edf3; --accent:#53b7ff; --muted:#8fa3bd; --radius:16px;}
@@ -40,7 +40,6 @@
     @media (max-width: 900px){ .main{grid-template-columns:1fr; grid-template-rows: 300px 1fr 300px} }
   </style>
 
-  <!-- Import map: resolves any bare 'three' or 'three/examples/jsm/*' imports on the page -->
   <script type="importmap">
   {
     "imports": {
@@ -208,7 +207,6 @@ function maybeReady(){
       }
     }
   });
-  // bind the static gate button
   el.btnSignIn.addEventListener('click', ()=>{
     if(!tokenClient){ alert('Google API 初期化中。少し待って再試行'); return; }
     tokenClient.requestAccessToken({ prompt:'consent' });
@@ -217,6 +215,10 @@ function maybeReady(){
 
 // ====== Three viewer ======
 let renderer, scene, camera, controls, tcontrols, pinGroup, loader, currentModel=null;
+let raycaster, pointer;
+let addPinMode=false, currentColor='#ff6b6b';
+let pins=[], selectedPinId=null, undoStack=[];
+
 function viewerInit(){
   renderer = new THREE.WebGLRenderer({ canvas: el.viewerCanvas, antialias:true });
   scene = new THREE.Scene();
@@ -229,14 +231,62 @@ function viewerInit(){
   tcontrols = new TransformControls(camera, el.viewerCanvas); tcontrols.setSize(0.9); tcontrols.setSpace('world'); tcontrols.addEventListener('dragging-changed', e=>{ controls.enabled = !e.value; }); scene.add(tcontrols); tcontrols.visible=false;
   pinGroup = new THREE.Group(); scene.add(pinGroup);
   loader = new GLTFLoader();
+  raycaster = new THREE.Raycaster();
+  pointer = new THREE.Vector2();
+
   window.addEventListener('resize', resize);
   el.viewerCanvas.addEventListener('pointerdown', onPointerDown);
+
+  // UI wires for pins/gizmo
+  el.btnAddPin?.addEventListener('click', ()=> setAddPinMode(true));
+  el.btnGizmo?.addEventListener('click', ()=>{
+    const p=pins.find(x=>x.id===selectedPinId); if(!p){ alert('ピンを選択してください'); return; }
+    tcontrols.visible=!tcontrols.visible;
+    el.btnGizmo.textContent=`ギズモ: ${tcontrols.visible?'ON':'OFF'}`;
+    el.modeLabel.textContent=tcontrols.visible?'Gizmo':'Orbit';
+  });
+
   resize(); animate();
 }
 function resize(){ const w = el.viewerCanvas.clientWidth || el.viewerCanvas.parentElement.clientWidth; const h = el.viewerCanvas.clientHeight || el.viewerCanvas.parentElement.clientHeight; renderer.setSize(w,h,false); camera.aspect=w/h; camera.updateProjectionMatrix(); }
 function animate(){ requestAnimationFrame(animate); renderer.render(scene,camera); }
 function renderNow(){ renderer.render(scene,camera); }
 viewerInit();
+
+// ====== Picking / Pins ======
+function setAddPinMode(on){ addPinMode=on; el.modeLabel.textContent=on?'Add Pin: Click model':(tcontrols.visible?'Gizmo':'Orbit'); }
+function getIntersectPoint(event){
+  const rect=el.viewerCanvas.getBoundingClientRect();
+  pointer.x=((event.clientX-rect.left)/rect.width)*2-1;
+  pointer.y=-((event.clientY-rect.top)/rect.height)*2+1;
+  raycaster.setFromCamera(pointer,camera);
+  const hits=currentModel?raycaster.intersectObject(currentModel,true):[];
+  return hits.length?hits[0].point.clone():null;
+}
+function onPointerDown(e){
+  if(!currentModel) return;
+  if(tcontrols.dragging) return;
+  if(addPinMode){
+    const pt=getIntersectPoint(e);
+    if(pt){ createPin(pt,currentColor); setAddPinMode(false); }
+    return;
+  }
+  // select pin by hit
+  const rect=el.viewerCanvas.getBoundingClientRect();
+  pointer.x=((e.clientX-rect.left)/rect.width)*2-1;
+  pointer.y=-((e.clientY-rect.top)/rect.height)*2+1;
+  raycaster.setFromCamera(pointer,camera);
+  const hits=raycaster.intersectObjects(pinGroup.children,false);
+  if(hits.length){ selectPin(hits[0].object.userData.pinId); }
+}
+
+function addUndo(u){ undoStack.push(u); }
+function undo(){ const u = undoStack.pop(); if(!u) return; if(u.type==='move'){ const p=pins.find(x=>x.id===u.id); if(p){ p.pos.copy(u.from); placePinMesh(p); selectPin(p.id); renderNow(); } } else if(u.type==='add'){ removePin(u.id,{silent:true}); } else if(u.type==='delete'){ pins.push(u.pin); placePinMesh(u.pin); refreshPinsList(); selectPin(u.pin.id); renderNow(); } }
+function createPin(pos,color){ const id=`p_${Date.now()}_${Math.random().toString(36).slice(2,7)}`; const pin={id,pos:pos.clone(),color:color||'#ff6b6b',title:'',body:'',images:[],mesh:null}; pins.push(pin); placePinMesh(pin); refreshPinsList(); selectPin(id); addUndo({type:'add',id}); }
+function placePinMesh(pin){ if(pin.mesh){ pinGroup.remove(pin.mesh); pin.mesh.geometry.dispose(); pin.mesh.material.dispose(); pin.mesh=null; } const geo=new THREE.SphereGeometry(0.01,16,16); const mat=new THREE.MeshBasicMaterial({color:new THREE.Color(pin.color)}); const mesh=new THREE.Mesh(geo,mat); mesh.position.copy(pin.pos); mesh.userData.pinId=pin.id; pin.mesh=mesh; pinGroup.add(mesh); }
+function selectPin(id){ selectedPinId=id; const p=pins.find(x=>x.id===id); if(!p){ el.rightEditor.hidden=true; el.rightNoSel.hidden=false; return; } el.rightNoSel.hidden=true; el.rightEditor.hidden=false; el.capTitle.value=p.title||''; el.capBody.value=p.body||''; tcontrols.attach(p.mesh); controls.target.copy(p.pos); controls.update(); }
+function refreshPinsList(){ el.pinsList.innerHTML=''; pins.forEach(p=>{ const row=document.createElement('div'); row.className='row'; row.dataset.id=p.id; const left=document.createElement('div'); left.style.display='flex'; left.style.alignItems='center'; left.style.gap='8px'; const dot=document.createElement('div'); dot.style.width='10px'; dot.style.height='10px'; dot.style.borderRadius='999px'; dot.style.background=p.color; left.appendChild(dot); const title=document.createElement('div'); title.className='title'; title.textContent=p.title||'(無題)'; left.appendChild(title); const meta=document.createElement('div'); meta.className='meta'; meta.textContent=`x:${p.pos.x.toFixed(2)} y:${p.pos.y.toFixed(2)} z:${p.pos.z.toFixed(2)}`; row.appendChild(left); row.appendChild(meta); row.addEventListener('click',()=>selectPin(p.id)); el.pinsList.appendChild(row); }); }
+function removePin(id,{silent}={}){ const idx=pins.findIndex(x=>x.id===id); if(idx<0) return; const pin=pins[idx]; if(pin.mesh){ pinGroup.remove(pin.mesh); pin.mesh.geometry.dispose(); pin.mesh.material.dispose(); } pins.splice(idx,1); if(!silent) addUndo({type:'delete',pin}); refreshPinsList(); el.rightEditor.hidden=true; el.rightNoSel.hidden=false; selectedPinId=null; }
 
 // ====== GLB load ======
 async function loadGLBByFileId(fileId){
@@ -261,7 +311,7 @@ async function loadGLBByFileId(fileId){
     }
     await new Promise((resolve,reject)=>{
       try{
-        loader.parse(ab, '', (gltf)=>{ currentModel = gltf.scene; scene.add(currentModel); fitToScene(); resolve(); }, (err)=> reject(err||new Error('parse failed')) );
+        loader.parse(ab, '', (gltf)=>{ currentModel = gltf.scene; scene.add(currentModel); fitToScene(); renderNow(); resolve(); }, (err)=> reject(err||new Error('parse failed')) );
       }catch(err){ reject(err); }
     });
     el.statusLabel.textContent = `Loaded: ${meta.result.name}`;
@@ -274,16 +324,6 @@ async function loadGLBByFileId(fileId){
   }
 }
 function fitToScene(){ if(!currentModel) return; const box = new THREE.Box3().setFromObject(currentModel); const size = box.getSize(new THREE.Vector3()); const center = box.getCenter(new THREE.Vector3()); const maxDim = Math.max(size.x,size.y,size.z)||1; const dist = maxDim*1.6; camera.position.copy(center.clone().add(new THREE.Vector3(dist, dist*0.7, dist))); controls.target.copy(center); controls.update(); }
-
-// ====== Pins (short) ======
-let pins=[]; let selectedPinId=null; let undoStack=[];
-function addUndo(u){ undoStack.push(u); }
-function undo(){ const u = undoStack.pop(); if(!u) return; if(u.type==='move'){ const p=pins.find(x=>x.id===u.id); if(p){ p.pos.copy(u.from); placePinMesh(p); selectPin(p.id); renderNow(); } } else if(u.type==='add'){ removePin(u.id,{silent:true}); } else if(u.type==='delete'){ pins.push(u.pin); placePinMesh(u.pin); refreshPinsList(); selectPin(u.pin.id); renderNow(); } }
-function createPin(pos,color){ const id=`p_${Date.now()}_${Math.random().toString(36).slice(2,7)}`; const pin={id,pos:pos.clone(),color:color||'#ff6b6b',title:'',body:'',images:[],mesh:null}; pins.push(pin); placePinMesh(pin); refreshPinsList(); selectPin(id); addUndo({type:'add',id}); }
-function placePinMesh(pin){ if(pin.mesh){ pinGroup.remove(pin.mesh); pin.mesh.geometry.dispose(); pin.mesh.material.dispose(); pin.mesh=null; } const geo=new THREE.SphereGeometry(0.01,16,16); const mat=new THREE.MeshBasicMaterial({color:new THREE.Color(pin.color)}); const mesh=new THREE.Mesh(geo,mat); mesh.position.copy(pin.pos); mesh.userData.pinId=pin.id; pin.mesh=mesh; pinGroup.add(mesh); }
-function selectPin(id){ selectedPinId=id; const p=pins.find(x=>x.id===id); if(!p){ el.rightEditor.hidden=true; el.rightNoSel.hidden=false; return; } el.rightNoSel.hidden=true; el.rightEditor.hidden=false; el.capTitle.value=p.title||''; el.capBody.value=p.body||''; tcontrols.attach(p.mesh); controls.target.copy(p.pos); controls.update(); }
-function refreshPinsList(){ el.pinsList.innerHTML=''; pins.forEach(p=>{ const row=document.createElement('div'); row.className='row'; row.dataset.id=p.id; const left=document.createElement('div'); left.style.display='flex'; left.style.alignItems='center'; left.style.gap='8px'; const dot=document.createElement('div'); dot.style.width='10px'; dot.style.height='10px'; dot.style.borderRadius='999px'; dot.style.background=p.color; left.appendChild(dot); const title=document.createElement('div'); title.className='title'; title.textContent=p.title||'(無題)'; left.appendChild(title); const meta=document.createElement('div'); meta.className='meta'; meta.textContent=`x:${p.pos.x.toFixed(2)} y:${p.pos.y.toFixed(2)} z:${p.pos.z.toFixed(2)}`; row.appendChild(left); row.appendChild(meta); row.addEventListener('click',()=>selectPin(p.id)); el.pinsList.appendChild(row); }); }
-function removePin(id,{silent}={}){ const idx=pins.findIndex(x=>x.id===id); if(idx<0) return; const pin=pins[idx]; if(pin.mesh){ pinGroup.remove(pin.mesh); pin.mesh.geometry.dispose(); pin.mesh.material.dispose(); } pins.splice(idx,1); if(!silent) addUndo({type:'delete',pin}); refreshPinsList(); el.rightEditor.hidden=true; el.rightNoSel.hidden=false; selectedPinId=null; }
 
 // ====== UI wires ======
 document.getElementById('btnViewOnly')?.addEventListener('click', ()=>{
@@ -298,7 +338,7 @@ el.btnLoad.addEventListener('click', ()=>{
   loadGLBByFileId(fid);
 });
 
-// ====== Keyboard ======
+// ====== Keyboard & Undo ======
 window.addEventListener('keydown', (e)=>{ if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='z'){ e.preventDefault(); document.getElementById('btnUndo')?.click(); } });
 
 </script>
