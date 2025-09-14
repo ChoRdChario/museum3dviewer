@@ -3918,11 +3918,10 @@ document.getElementById('toolInlineBtn')?.addEventListener('click', ()=>{
 
 
 <script>
-/* ===== LociMyu Sheets Mode + Auto-create Module (GIS-native auth) ===== */
+/* ===== LociMyu Sheets Mode + Auto-create Module (reuse app token; no window.CLIENT_ID needed) ===== */
 (function(){
   const $ = (id)=>document.getElementById(id);
   const ui = {
-    box: $("locimyu-data-source"),
     sel: $("lm_ds_select"),
     id:  $("lm_sheet_id"),
     range: $("lm_sheet_range"),
@@ -3931,51 +3930,35 @@ document.getElementById('toolInlineBtn')?.addEventListener('click', ()=>{
     btnOpen: $("lm_btn_open")
   };
   const HEADERS = ["pinId","x","y","z","text","tags","author","updatedAt","deleted"];
-  const CFG_KEY = "locimyu.sheetsCfg.v2";
+  const CFG_KEY = "locimyu.sheetsCfg.v3";
   const cfg = Object.assign({mode:"drive-json", range:"pins!A:I"}, JSON.parse(localStorage.getItem(CFG_KEY)||"{}"));
   if (ui.sel) ui.sel.value = cfg.mode || "drive-json";
   if (cfg.spreadsheetId && ui.id) ui.id.value = cfg.spreadsheetId;
   if (cfg.range && ui.range) ui.range.value = cfg.range;
-  refreshOpenLink();
-
   function saveCfg(){
-    const c = {
+    localStorage.setItem(CFG_KEY, JSON.stringify({
       mode: ui.sel ? ui.sel.value : "drive-json",
       spreadsheetId: (ui.id && ui.id.value || "").trim(),
       range: (ui.range && ui.range.value || "pins!A:I").trim()
-    };
-    localStorage.setItem(CFG_KEY, JSON.stringify(c));
+    }));
     refreshOpenLink();
   }
   function refreshOpenLink(){
     if (!ui.btnOpen || !ui.id) return;
     const sid = (ui.id.value||"").trim();
-    if (sid) {
-      ui.btnOpen.href = "https://docs.google.com/spreadsheets/d/"+sid+"/edit";
-      ui.btnOpen.style.display = "inline-block";
-    } else {
-      ui.btnOpen.style.display = "none";
-    }
+    ui.btnOpen.style.display = sid ? "inline-block":"none";
+    if (sid) ui.btnOpen.href = "https://docs.google.com/spreadsheets/d/"+sid+"/edit";
   }
   if (ui.sel) ui.sel.addEventListener("change", saveCfg);
   if (ui.id) ui.id.addEventListener("change", saveCfg);
   if (ui.range) ui.range.addEventListener("change", saveCfg);
+  refreshOpenLink();
 
-  // --- Reuse app's GIS token & gapi client ---
   const SHEETS_SCOPE = "https://www.googleapis.com/auth/spreadsheets";
+
   async function ensureGapiClient(){
-    // The app already loads gapi (Drive discovery). Wait until available.
-    if (!window.gapi) {
-      // fall back to the app's own loader if present
-      if (typeof window.loadGapi === "function") { await window.loadGapi(); }
-      // else spin until gapi arrives
-      await new Promise((resolve)=>{
-        const t = setInterval(()=>{ if (window.gapi){ clearInterval(t); resolve(); } }, 30);
-      });
-    }
-    if (!gapi.client) {
-      await new Promise(res=> gapi.load("client", res));
-    }
+    if (!window.gapi) await new Promise(res=>{ const t=setInterval(()=>{ if (window.gapi){clearInterval(t);res();}},30);});
+    if (!gapi.client) await new Promise(res=> gapi.load("client", res));
   }
   async function ensureSheetsDiscovery(){
     await ensureGapiClient();
@@ -3990,57 +3973,32 @@ document.getElementById('toolInlineBtn')?.addEventListener('click', ()=>{
       await gapi.client.init({ discoveryDocs: ["https://www.googleapis.com/discovery/v1/apis/drive/v3/rest"] });
     }
   }
-  function getClientId(){
-    return (window.CLIENT_ID || window.GOOGLE_CLIENT_ID || window.GIS_CLIENT_ID || window.CLIENT_ID_WEB || "");
-  }
 
-  // Borrow the app's ensureToken() to get a Drive token, then upgrade to include Sheets if needed.
-  async function ensureSheetsToken(){
-    if (typeof window.ensureToken === "function") {
-      await window.ensureToken(); // fetch Drive token into window.accessToken
-    }
-    // Always request an updated token that includes Sheets scope (incremental consent). Using GIS.
-    if (!window.google?.accounts?.oauth2) {
-      throw new Error("Google Identity Services (GSI) が未ロードです");
-    }
-    const clientId = getClientId();
-    if (!clientId) throw new Error("CLIENT_ID が定義されていません");
-    const scopes = (window.ALL_SCOPES ? (window.ALL_SCOPES + " ") : "") + SHEETS_SCOPE;
-    const accessToken = await new Promise((resolve, reject)=>{
-      try{
-        const tokenClient = google.accounts.oauth2.initTokenClient({
-          client_id: clientId,
-          scope: scopes,
-          prompt: "", // try silent first
-          callback: (resp)=>{
-            if (resp && resp.access_token) return resolve(resp.access_token);
-            reject(new Error("アクセストークンが取得できませんでした"));
-          }
+  // === KEY: reuse app's own token acquisition so we don't need CLIENT_ID in global scope ===
+  async function ensureSheetsTokenInteractive(){
+    const baseScopes = (window.ALL_SCOPES || "").trim();
+    const wantScopes = (baseScopes ? baseScopes+" " : "") + SHEETS_SCOPE;
+    if (typeof window.requestTokenInteractive === "function") {
+      // Use the app's own interactive flow (click-handler safe, uses internal CLIENT_ID)
+      await window.requestTokenInteractive(wantScopes);
+    } else if (window.google?.accounts?.oauth2) {
+      // Fallback: do our own interactive consent (needs global CLIENT_ID, which may not be on window)
+      const cid = (window.CLIENT_ID || window.GOOGLE_CLIENT_ID || window.GIS_CLIENT_ID || window.CLIENT_ID_WEB || "");
+      if (!cid) throw new Error("CLIENT_ID が定義されていません（アプリの requestTokenInteractive が見つからないため）。");
+      await new Promise((resolve,reject)=>{
+        const tc = google.accounts.oauth2.initTokenClient({
+          client_id: cid, scope: wantScopes, prompt: "consent",
+          callback: (resp)=> resp?.access_token ? resolve() : reject(new Error("アクセストークン取得に失敗"))
         });
-        tokenClient.requestAccessToken({ prompt: "" });
-      }catch(e){ reject(e); }
-    }).catch(async (e)=>{
-      // Retry with consent prompt (user interaction needed)
-      return await new Promise((resolve, reject)=>{
-        const tokenClient = google.accounts.oauth2.initTokenClient({
-          client_id: clientId,
-          scope: scopes,
-          prompt: "consent",
-          callback: (resp)=>{
-            if (resp && resp.access_token) return resolve(resp.access_token);
-            reject(new Error("アクセストークン取得に失敗（consent）"));
-          }
-        });
-        tokenClient.requestAccessToken({ prompt: "consent" });
+        tc.requestAccessToken({ prompt:"consent" });
       });
-    });
-    // Set token for gapi client calls
-    try { gapi.client.setToken({ access_token: accessToken }); } catch(_){}
-    // Also update app globals if present
-    try {
-      window.accessToken = accessToken;
-      window.accessTokenExpiresAt = Date.now() + 55*60*1000;
-    } catch(_){}
+    } else {
+      throw new Error("Google Identity Services が読み込まれていません");
+    }
+    // After any of above, set gapi client token if accessToken exists
+    if (window.accessToken) {
+      try { gapi.client.setToken({ access_token: window.accessToken }); } catch(_){}
+    }
   }
 
   const Sheets = {
@@ -4049,7 +4007,9 @@ document.getElementById('toolInlineBtn')?.addEventListener('click', ()=>{
 
     async readAll(){
       await ensureSheetsDiscovery();
-      await ensureSheetsToken();
+      // ensure Drive token first (silent refresh) then expand to Sheets via the app's interactive helper
+      if (typeof window.ensureToken === "function") { await window.ensureToken(); }
+      await ensureSheetsTokenInteractive();
       if (!this.spreadsheetId) throw new Error("Spreadsheet ID 未設定です");
       const resp = await gapi.client.sheets.spreadsheets.values.get({
         spreadsheetId: this.spreadsheetId,
@@ -4065,7 +4025,8 @@ document.getElementById('toolInlineBtn')?.addEventListener('click', ()=>{
 
     async batchUpsert(pins){
       await ensureSheetsDiscovery();
-      await ensureSheetsToken();
+      if (typeof window.ensureToken === "function") { await window.ensureToken(); }
+      await ensureSheetsTokenInteractive();
       const all = await this.readAll();
       const rowById = new Map(all.map((p,idx)=>[p.pinId, idx+2]));
       const updates = [];
@@ -4140,7 +4101,8 @@ document.getElementById('toolInlineBtn')?.addEventListener('click', ()=>{
 
   async function createSpreadsheetAndConnect(){
     await ensureSheetsDiscovery();
-    await ensureSheetsToken();
+    if (typeof window.ensureToken === "function") { await window.ensureToken(); }
+    await ensureSheetsTokenInteractive(); // interactive – must be in click handler
     const title = `LociMyu pins ${new Date().toISOString().slice(0,19).replace(/[:T]/g,'-')}`;
     const createResp = await gapi.client.sheets.spreadsheets.create({
       properties: { title },
@@ -4154,12 +4116,13 @@ document.getElementById('toolInlineBtn')?.addEventListener('click', ()=>{
       resource: { values: [HEADERS] }
     });
 
-    // Optional: move into same Drive folder as model file
+    // Try moving into same folder as current model
     try {
       const modelId = (window.currentModelFileId||"").trim();
       if (modelId) {
         await ensureDriveDiscovery();
-        await ensureSheetsToken(); // drive.file scope already included
+        if (typeof window.ensureToken === "function") { await window.ensureToken(); }
+        // gapi uses the same access token set by requestTokenInteractive
         const model = await gapi.client.drive.files.get({ fileId: modelId, fields: "parents" });
         const parents = model.result.parents || [];
         if (parents.length) {
