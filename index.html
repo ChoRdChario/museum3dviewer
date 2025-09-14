@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>LociMyu v0.8.2 (Views + Ortho + BG + DoubleSide)</title>
+  <title>LociMyu v0.9.0 (Views remap + Folder Picker + Color fix)</title>
   <link rel="icon" href='data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><circle cx="32" cy="32" r="28" fill="%230b0f14"/><text x="32" y="39" font-size="28" text-anchor="middle" fill="%2353b7ff" font-family="Arial">L</text></svg>'>
   <style>
     :root{ --bg:#0b0f14; --panel:#121922; --text:#e6edf3; --accent:#53b7ff; --muted:#8fa3bd; --radius:16px;}
@@ -48,8 +48,20 @@
     .field label{min-width:120px;color:#a9b8cf}
     input[type="range"]{width:160px}
     .subtle{opacity:.8}
-    .viewgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
-    @media (max-width: 1100px){ .main{grid-template-columns:1fr; grid-template-rows: 360px 1fr 460px} }
+    .viewgrid{display:grid;grid-template-columns:repeat(6,1fr);gap:6px}
+    .modal{position:fixed;inset:0;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;z-index:40}
+    .modal[hidden]{display:none}
+    .modal .box{width:min(90vw,980px);max-height:80vh;background:#0f1722;border:1px solid #203049;border-radius:16px;overflow:hidden;display:flex;flex-direction:column}
+    .modal header{display:flex;justify-content:space-between;align-items:center;padding:10px 12px;background:#0c131d;border-bottom:1px solid #203049}
+    .modal .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:10px;padding:10px;overflow:auto}
+    .modal .cell{background:#0c1118;border:1px solid #223146;border-radius:12px;padding:8px;cursor:pointer;display:flex;flex-direction:column;gap:6px}
+    .modal .cell img{width:100%;height:110px;object-fit:cover;border-radius:8px}
+    .modal .cell:hover{background:#132035}
+    #viewerPreview{position:absolute;top:10px;right:10px;max-width:28%;max-height:40%;border:1px solid #203049;border-radius:8px;background:#0a0f16cc;backdrop-filter: blur(2px);padding:6px;display:flex;flex-direction:column;gap:4px}
+    #viewerPreview.hidden{display:none}
+    #viewerPreview img{max-width:100%;max-height:36vh;border-radius:6px;display:block}
+    #viewerPreview .cap{font-size:.8rem;color:#a9b8cf}
+    @media (max-width: 1100px){ .main{grid-template-columns:1fr; grid-template-rows: 360px 1fr 480px} }
   </style>
 
   <script type="importmap">
@@ -86,8 +98,7 @@
           <button id="btnUndo" disabled>Ctrl+Z</button>
         </div>
 
-        <!-- Pin color presets (restored) -->
-        <div class="flex">
+        <div class="flex" style="align-items:center">
           <div class="small">ピン色:</div>
           <div id="colorPresets" class="flex"></div>
           <input id="colorPicker" type="color" value="#ff6b6b" />
@@ -110,11 +121,11 @@
         <div class="small" style="margin:4px 0 6px">ビュー</div>
         <div class="viewgrid" style="margin-bottom:8px">
           <button id="viewFront">前面</button>
-          <button id="viewTop">上面</button>
-          <button id="viewRight">右面</button>
-          <button id="viewLeft">左面</button>
-          <button id="viewBottom">下面</button>
           <button id="viewBack">背面</button>
+          <button id="viewLeft">左面</button>
+          <button id="viewRight">右面</button>
+          <button id="viewTop">上面</button>
+          <button id="viewBottom">下面</button>
         </div>
         <div class="field"><label>平行投影</label><input id="projOrtho" type="checkbox"><span class="small">ON: Orthographic</span></div>
         <div class="field"><label>背景色</label><input id="bgColor" type="color" value="#0a0f16"></div>
@@ -125,6 +136,10 @@
     <section class="panel" id="viewer">
       <div class="spinner" id="loading" hidden><div class="lds"></div></div>
       <canvas id="viewerCanvas"></canvas>
+      <div id="viewerPreview" class="hidden">
+        <img id="previewImg" alt="preview"/>
+        <div class="cap" id="previewCap"></div>
+      </div>
       <div class="hud"><div class="chip" id="modeLabel">Orbit</div></div>
     </section>
 
@@ -145,6 +160,9 @@
             <input id="imgLocal" type="file" accept="image/*,.heic,.HEIC" />
             <button id="btnAttach" class="accent" disabled>画像を添付してDriveに保存</button>
           </div>
+          <div class="flex">
+            <button id="btnPickFromFolder" class="accent" disabled>📁 フォルダから選択</button>
+          </div>
           <div class="thumbs" id="thumbs"></div>
           <div class="flex" style="justify-content:space-between;margin-top:8px;margin-bottom:8px">
             <button id="btnDeletePin" style="border-color:#5a1f26;color:#ffb4b4" disabled>ピン削除</button>
@@ -154,6 +172,20 @@
         </div>
       </div>
     </section>
+  </div>
+</div>
+
+<!-- Modal: Folder Picker -->
+<div id="pickerModal" class="modal" hidden>
+  <div class="box">
+    <header>
+      <strong>フォルダ内の画像を選択</strong>
+      <div style="display:flex;gap:8px;align-items:center">
+        <button id="btnPickerReload">再読み込み</button>
+        <button id="btnPickerClose">閉じる</button>
+      </div>
+    </header>
+    <div id="pickerGrid" class="grid"></div>
   </div>
 </div>
 
@@ -207,6 +239,9 @@ const el = {
   btnLoad: document.getElementById('btnLoad'),
   loading: document.getElementById('loading'),
   viewerCanvas: document.getElementById('viewerCanvas'),
+  viewerPreview: document.getElementById('viewerPreview'),
+  previewImg: document.getElementById('previewImg'),
+  previewCap: document.getElementById('previewCap'),
   pinsList: document.getElementById('pinsList'),
   rightNoSel: document.getElementById('noSelection'),
   rightEditor: document.getElementById('editor'),
@@ -223,6 +258,7 @@ const el = {
   colorPicker: document.getElementById('colorPicker'),
   imgLocal: document.getElementById('imgLocal'),
   btnAttach: document.getElementById('btnAttach'),
+  btnPickFromFolder: document.getElementById('btnPickFromFolder'),
   thumbs: document.getElementById('thumbs'),
   autosaveTip: document.getElementById('autosaveTip'),
   // material
@@ -245,6 +281,11 @@ const el = {
   viewBottom: document.getElementById('viewBottom'),
   projOrtho: document.getElementById('projOrtho'),
   bgColor: document.getElementById('bgColor'),
+  // modal
+  pickerModal: document.getElementById('pickerModal'),
+  pickerGrid: document.getElementById('pickerGrid'),
+  btnPickerReload: document.getElementById('btnPickerReload'),
+  btnPickerClose: document.getElementById('btnPickerClose'),
 };
 const viewOnly = new URLSearchParams(location.search).get('view') === '1';
 let tokenClient; let gapiInited=false; let gisInited=false; let accessToken=null;
@@ -302,7 +343,7 @@ function maybeReady(){
       accessToken = resp.access_token;
       if(accessToken){
         el.gate.style.display = 'none';
-        setDisabled(['btnLoad','btnAddPin','btnGizmo','btnUndo','btnSavePin','btnDeletePin','btnAttach'], false);
+        setDisabled(['btnLoad','btnAddPin','btnGizmo','btnUndo','btnSavePin','btnDeletePin','btnAttach','btnPickFromFolder'], false);
         el.statusLabel.textContent = 'Ready';
         if(viewOnly){
           document.getElementById('leftToolbox').classList.add('hidden');
@@ -415,15 +456,16 @@ function switchProjection(useOrtho){
   tcontrols.camera = camera;
   resize(); renderNow();
 }
+// Remapped camera directions: rotate +90° around Y compared to previous
 function setNamedView(name){
   const { center, radius } = sceneBounds();
   const d = radius*2.2;
   let dir = new THREE.Vector3(0,0,d);
   switch(name){
-    case 'front': dir.set(0,0,d); break;
-    case 'back':  dir.set(0,0,-d); break;
-    case 'left':  dir.set(-d,0,0); break;
-    case 'right': dir.set(d,0,0); break;
+    case 'front': dir.set(d,0,0); break;     // +X (was +Z)
+    case 'back':  dir.set(-d,0,0); break;    // -X (was -Z)
+    case 'left':  dir.set(0,0,d); break;     // +Z (was -X)
+    case 'right': dir.set(0,0,-d); break;    // -Z (was +X)
     case 'top':   dir.set(0,d,0); break;
     case 'bottom':dir.set(0,-d,0); break;
   }
@@ -439,7 +481,7 @@ function setAddPinMode(on){ addPinMode=on; el.modeLabel.textContent=on?'Add Pin:
 function getIntersectPoint(event){
   const rect=el.viewerCanvas.getBoundingClientRect();
   pointer.x=((event.clientX-rect.left)/rect.width)*2-1;
-  pointer.y=-((event.clientY-rect.top)/rect.height)*2+1; // fixed formula
+  pointer.y=-((event.clientY-rect.top)/rect.height)*2+1;
   raycaster.setFromCamera(pointer,camera);
   const hits=currentModel?raycaster.intersectObject(currentModel,true):[];
   return hits.length?hits[0].point.clone():null;
@@ -470,11 +512,12 @@ function placePinMesh(pin){ if(pin.mesh){ pinGroup.remove(pin.mesh); pin.mesh.ge
 function selectPin(id,{fly}={}){
   selectedPinId=id;
   const p=pins.find(x=>x.id===id);
-  if(!p){ el.rightEditor.classList.add('hidden'); el.rightNoSel.classList.remove('hidden'); return; }
+  if(!p){ el.rightEditor.classList.add('hidden'); el.rightNoSel.classList.remove('hidden'); updateViewerPreviewForPin(null); return; }
   el.rightNoSel.classList.add('hidden'); el.rightEditor.classList.remove('hidden');
   document.getElementById('capTitle').value=p.title||'';
   document.getElementById('capBody').value=p.body||'';
   renderThumbs(p);
+  updateViewerPreviewForPin(p);
   tcontrols.attach(p.mesh);
   if(fly){ flyTo(p.pos); } else { controls.target.copy(p.pos); controls.update(); }
 }
@@ -514,19 +557,26 @@ function removePin(id,{silent}={}){
   const pin=pins[idx]; if(pin.mesh){ pinGroup.remove(pin.mesh); pin.mesh.geometry.dispose(); pin.mesh.material.dispose(); }
   pins.splice(idx,1);
   if(!silent) addUndo({type:'delete',pin});
-  refreshPinsList(); el.rightEditor.classList.add('hidden'); el.rightNoSel.classList.remove('hidden'); selectedPinId=null;
+  refreshPinsList(); el.rightEditor.classList.add('hidden'); el.rightNoSel.classList.remove('hidden'); selectedPinId=null; updateViewerPreviewForPin(null);
 }
 function renderThumbs(p){
   const thumbs=document.getElementById('thumbs'); thumbs.innerHTML='';
   ensureArray(p.images).forEach(url=>{
-    const img=document.createElement('img'); img.src=url; img.title=url; thumbs.appendChild(img);
+    const img=document.createElement('img'); img.src=url; img.title=url; img.addEventListener('click', ()=>{ setPreview(url, p.title||''); }); thumbs.appendChild(img);
   });
 }
+function setPreview(url, cap){
+  if(!url){ el.viewerPreview.classList.add('hidden'); return; }
+  el.previewImg.src = url;
+  el.previewCap.textContent = cap||'';
+  el.viewerPreview.classList.remove('hidden');
+}
+function updateViewerPreviewForPin(p){ setPreview(p && p.images && p.images[0] ? p.images[0] : null, p?.title); }
 
 // ====== Colors ======
 const PRESET_COLORS = ['#ff6b6b','#ffd166','#06d6a0','#118ab2','#ef476f','#f72585','#b5179e','#7209b7','#3a0ca3','#4361ee','#4cc9f0'];
 function buildColorPresets(){
-  if(!el.colorPresets) return; // guard
+  if(!el.colorPresets) return;
   el.colorPresets.innerHTML='';
   PRESET_COLORS.forEach(c=>{
     const b=document.createElement('button'); b.style.width='18px'; b.style.height='18px'; b.style.borderRadius='999px'; b.style.border='2px solid #223146'; b.style.background=c; b.title=c;
@@ -612,6 +662,7 @@ function collectMaterials(){
 function ensureMatRecord(m){
   if(matOriginals.has(m)) return;
   matOriginals.set(m, {
+    color: (m.color ? m.color.clone() : new THREE.Color(0xffffff)),
     map: m.map || null,
     alphaMap: m.alphaMap || null,
     transparent: !!m.transparent,
@@ -690,10 +741,11 @@ async function applyMaterialLive(){
     ensureMatRecord(origM);
     const rec = matOriginals.get(origM);
 
-    // Unlit swap
+    // Unlit swap (carry .color)
     if(wantUnlit && !rec.wasUnlit){
       const active = getActiveMaterialFor(origM);
       const um = new THREE.MeshBasicMaterial();
+      um.color = (active.color ? active.color.clone() : rec.color.clone());
       um.map = active.map || rec.map || null;
       um.transparent = active.transparent;
       um.opacity = active.opacity;
@@ -735,9 +787,15 @@ async function applyMaterialLive(){
         const processed = await processTextureToCanvasTextureFromOriginal(rec.map, { invertRGB: invert, alphaFromWhite: whiteToAlpha, threshold: thresh });
         if(processed){ mat.map = processed; mat.map.needsUpdate = true; }
       }catch(e){ console.warn('texture process failed', e); }
-    }else if(!invert && !whiteToAlpha && rec.map){
-      mat.map = rec.map; if(mat.map) mat.map.needsUpdate = true;
+    }else if(!invert && !whiteToAlpha){
+      // restore original map if existed; otherwise keep color-only
+      mat.map = rec.map || null;
+      if(mat.map) mat.map.needsUpdate = true;
     }
+
+    // Ensure color is preserved even if map is null
+    if(!mat.color && rec.color){ mat.color = rec.color.clone(); }
+    if(mat.color) mat.color.needsUpdate = true;
 
     mat.needsUpdate = true;
   }
@@ -799,15 +857,17 @@ async function upsertPinToSheet(){
 }
 document.getElementById('btnSavePin').addEventListener('click', ()=> upsertPinToSheet());
 
-// ====== Image attach & Drive upload ======
+// ====== Image attach & Drive upload / folder picker ======
 document.getElementById('btnAttach').addEventListener('click', async ()=>{
   const file = el.imgLocal.files?.[0]; const p = pins.find(x=>x.id===selectedPinId);
   if(!file || !p){ alert('画像とピンを確認してください'); return; }
   try{
     const blob = await toUploadableBlob(file);
     const uploaded = await driveMultipartUpload(blob, sanitizeName(file.name), glbParents);
-    p.images = ensureArray(p.images); p.images.push(`https://drive.google.com/uc?id=${uploaded.id}`);
+    p.images = ensureArray(p.images); const url = `https://drive.google.com/uc?id=${uploaded.id}`;
+    p.images.push(url);
     renderThumbs(p);
+    setPreview(url, p.title||'');
     debounceSave();
     toast('画像をアップロードしました');
   }catch(err){ console.error(err); alert('画像アップロードに失敗しました'); }
@@ -838,6 +898,59 @@ async function driveMultipartUpload(blob, name, parents){
   return await res.json();
 }
 
+// Folder picker
+el.btnPickFromFolder.addEventListener('click', openPickerModal);
+el.btnPickerClose.addEventListener('click', ()=> el.pickerModal.hidden = true);
+el.btnPickerReload.addEventListener('click', loadFolderImages);
+
+async function openPickerModal(){
+  if(!glbParents || !glbParents.length){ alert('GLBの親フォルダが不明です。先にGLBを読み込んでください。'); return; }
+  await loadFolderImages();
+  el.pickerModal.hidden = false;
+}
+async function loadFolderImages(){
+  if(!accessToken){ alert('先にサインインしてください'); return; }
+  el.pickerGrid.innerHTML = '<div class="small">読み込み中…</div>';
+  const cells = [];
+  try{
+    for(const parent of glbParents){
+      const q = `'${parent}' in parents and trashed=false and (mimeType contains 'image/')`;
+      const resp = await gapi.client.drive.files.list({
+        q, pageSize: 100, fields: 'files(id,name,mimeType,thumbnailLink)'
+      });
+      const files = resp.result.files || [];
+      for(const f of files){
+        const id = f.id;
+        const url = `https://drive.google.com/uc?id=${id}`;
+        const cell = document.createElement('div'); cell.className='cell';
+        const img = document.createElement('img'); img.src = f.thumbnailLink || url; img.alt = f.name;
+        const cap = document.createElement('div'); cap.textContent = f.name; cap.className='small';
+        cell.appendChild(img); cell.appendChild(cap);
+        cell.addEventListener('click', ()=> chooseFolderImage(url));
+        cells.push(cell);
+      }
+    }
+    el.pickerGrid.innerHTML='';
+    if(!cells.length){
+      el.pickerGrid.innerHTML = '<div class="small">フォルダに画像が見つかりませんでした。</div>';
+    }else{
+      cells.forEach(c=> el.pickerGrid.appendChild(c));
+    }
+  }catch(e){
+    console.error(e);
+    el.pickerGrid.innerHTML = '<div class="small">読み込みに失敗しました。</div>';
+  }
+}
+function chooseFolderImage(url){
+  el.pickerModal.hidden = true;
+  const p = pins.find(x=>x.id===selectedPinId);
+  if(!p){ alert('先にピンを選択してください'); return; }
+  p.images = ensureArray(p.images); p.images.push(url);
+  renderThumbs(p);
+  setPreview(url, p.title||'');
+  debounceSave();
+}
+
 // ====== Gizmo & Inputs ======
 document.getElementById('btnAddPin').addEventListener('click', ()=> setAddPinMode(!addPinMode));
 document.getElementById('btnGizmo').addEventListener('click', ()=>{
@@ -847,7 +960,7 @@ document.getElementById('btnGizmo').addEventListener('click', ()=>{
   el.modeLabel.textContent = tcontrols.visible ? 'Gizmo' : 'Orbit';
 });
 document.getElementById('btnUndo').addEventListener('click', ()=> undo());
-document.getElementById('capTitle').addEventListener('input', ()=>{ const p=pins.find(x=>x.id===selectedPinId); if(p){ p.title=el.capTitle.value; refreshPinsList(); debounceSave(); } });
+document.getElementById('capTitle').addEventListener('input', ()=>{ const p=pins.find(x=>x.id===selectedPinId); if(p){ p.title=el.capTitle.value; refreshPinsList(); debounceSave(); updateViewerPreviewForPin(p); } });
 document.getElementById('capBody').addEventListener('input', ()=>{ const p=pins.find(x=>x.id===selectedPinId); if(p){ p.body=el.capBody.value; debounceSave(); } });
 
 // Track gizmo move → update pin pos
