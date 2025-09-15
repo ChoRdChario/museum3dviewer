@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>LociMyu v0.9.16</title>
+  <title>LociMyu v0.9.17</title>
   <link rel="icon" href='data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><circle cx="32" cy="32" r="28" fill="%230b0f14"/><text x="32" y="39" font-size="28" text-anchor="middle" fill="%2353b7ff" font-family="Arial">L</text></svg>'>
   <style>
     :root{ --bg:#0b0f14; --panel:#121922; --text:#e6edf3; --accent:#53b7ff; --muted:#8fa3bd; --radius:16px; --shadow:0 10px 30px rgba(0,0,0,.3);}
@@ -87,7 +87,7 @@
     }
   }
   </script>
-  <!-- まずは読み込むが、失敗時は動的フォールバックで再試行する -->
+  <!-- heic2any（CDN不調対策は後段のフォールバックローダで） -->
   <script src="https://unpkg.com/heic2any@0.0.5/dist/heic2any.min.js"></script>
 </head>
 <body>
@@ -275,6 +275,7 @@ const SCOPES = [
   'https://www.googleapis.com/auth/spreadsheets'
 ].join(' ');
 
+/* ---------- refs to DOM ---------- */
 const el = {
   gate: document.getElementById('gate'),
   statusLabel: document.getElementById('statusLabel'),
@@ -345,14 +346,18 @@ const el = {
   btnFilterClose: document.getElementById('btnFilterClose'),
 };
 const viewOnly = new URLSearchParams(location.search).get('view') === '1';
+
+/* ---------- state (single declarations only!) ---------- */
 let tokenClient; let gapiInited=false; let gisInited=false; let accessToken=null;
 
 let renderer, scene, camera, controls, tcontrols, pinGroup, loader, currentModel=null;
 let perspCam, orthoCam;
 let raycaster = new THREE.Raycaster(), pointer = new THREE.Vector2();
+
 let addPinMode=false, currentColor='#ff6b6b';
 let pins=[], selectedPinId=null, undoStack=[];
 let glbParents=[];
+
 let materials=[], materialMap=new Map();
 let matOriginals=new WeakMap();
 
@@ -625,14 +630,12 @@ async function resolveImageObjectURL(ref, {preferThumb=false}={}){
   if(info.kind==='drive'){
     const meta = await driveFileMeta(info.id);
     const isHeic = isHeicMimeOrExt(meta.mimeType, meta.fileExtension);
-    // 1) HEIC かつサムネがあればまずサムネを即表示（プレビューにもOK）
     if((isHeic || preferThumb) && meta.hasThumbnail && meta.thumbnailLink){
       const sep = meta.thumbnailLink.includes('?') ? '&' : '?';
       outUrl = meta.thumbnailLink + sep + 'access_token=' + encodeURIComponent(accessToken);
       imageBlobCache.set(key, outUrl);
       return outUrl;
     }
-    // 2) HEIC をフル解像度化したい場合：heic2any を動的ロードして変換
     if(isHeic){
       const ok = await ensureHeic2any();
       if(ok){
@@ -641,7 +644,6 @@ async function resolveImageObjectURL(ref, {preferThumb=false}={}){
         const jpg = Array.isArray(jpegBlob) ? jpegBlob[0] : jpegBlob;
         outUrl = URL.createObjectURL(jpg);
       }else{
-        // ライブラリが使えない場合はサムネでフォールバック（なければ例外）
         if(meta.hasThumbnail && meta.thumbnailLink){
           const sep2 = meta.thumbnailLink.includes('?') ? '&' : '?';
           outUrl = meta.thumbnailLink + sep2 + 'access_token=' + encodeURIComponent(accessToken);
@@ -650,7 +652,6 @@ async function resolveImageObjectURL(ref, {preferThumb=false}={}){
         }
       }
     }else{
-      // 通常画像は Blob → ObjectURL
       const blob = await driveFileFetchBlob(info.id);
       outUrl = URL.createObjectURL(blob);
     }
@@ -794,10 +795,9 @@ async function loadGLBByFileId(fileId){
   }
 }
 
-/* ---------- Materials ---------- */
-let currentModel=null;
+/* ---------- Materials (single definitions only) ---------- */
 function collectMaterials(){
-  let materials=[]; materialMap.clear();
+  materials=[]; materialMap.clear();
   const set = new Set();
   if(!currentModel) return;
   currentModel.traverse(obj=>{
@@ -813,7 +813,6 @@ function collectMaterials(){
   });
   applyMaterialLive();
 }
-let materials=[]; const matOriginals=new WeakMap(); const materialMap=new Map();
 function ensureMatRecord(m){
   if(matOriginals.has(m)) return;
   matOriginals.set(m, {
@@ -1113,7 +1112,38 @@ function chooseFolderImage(ref){
 document.getElementById('matOpacity').addEventListener('input', ()=> el.matOpacityVal.textContent = parseFloat(el.matOpacity.value).toFixed(2));
 document.getElementById('matThreshold').addEventListener('input', ()=> el.matThresholdVal.textContent = parseFloat(el.matThreshold.value).toFixed(2));
 
+/* ---------- Thumbs / Preview binding ---------- */
+function renderThumbs(p){
+  const thumbs=document.getElementById('thumbs'); thumbs.innerHTML='';
+  ensureArray(p.images).forEach(async (ref, idx)=>{
+    const wrap=document.createElement('div'); wrap.className='thumb'; thumbs.appendChild(wrap);
+    const img=document.createElement('img'); img.alt = 'thumb';
+    const del=document.createElement('div'); del.className='del'; del.textContent='×'; del.title='この画像をキャプションから外す';
+    del.addEventListener('click', (ev)=>{
+      ev.stopPropagation(); const wasPreview = (el.previewImg.src && el.previewImg.src === img.src);
+      p.images.splice(idx,1); renderThumbs(p);
+      if(wasPreview){ const next = p.images[0] || null; setPreview(next, p.title||''); }
+    });
+    wrap.appendChild(img); wrap.appendChild(del);
+    try{ const src = await resolveImageObjectURL(ref, {preferThumb:false}); img.src = src; img.addEventListener('click', async ()=>{ const s2 = await resolveImageObjectURL(ref, {preferThumb:false}); setPreview(s2, p.title||''); }); }
+    catch{ wrap.classList.add('error'); wrap.title = '画像を読み込めませんでした'; }
+  });
+}
+
 /* ---------- Save (Sheets) ---------- */
+async function ensureSpreadsheet(glbName){
+  const title = `LociMyu - ${glbName}`;
+  const resp = await gapi.client.sheets.spreadsheets.create({
+    resource: { properties: { title }, sheets: [{ properties: { title: 'pins' } }] }
+  });
+  const spreadsheetId = resp.result.spreadsheetId;
+  await gapi.client.sheets.spreadsheets.values.update({
+    spreadsheetId, range: 'pins!A1',
+    valueInputOption:'RAW',
+    resource:{ values: [[ 'pin_id','title','body','x','y','z','color','images','updated_at' ]] }
+  });
+  return spreadsheetId;
+}
 async function upsertPinToSheet(){
   const sheetId = extractSpreadsheetId(el.inputSheet.value.trim()); if(!sheetId) return;
   const p = pins.find(x=>x.id===selectedPinId); if(!p) return;
