@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>LociMyu v0.9.9 (Drive images fix)</title>
+  <title>LociMyu v0.9.12</title>
   <link rel="icon" href='data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><circle cx="32" cy="32" r="28" fill="%230b0f14"/><text x="32" y="39" font-size="28" text-anchor="middle" fill="%2353b7ff" font-family="Arial">L</text></svg>'>
   <style>
     :root{ --bg:#0b0f14; --panel:#121922; --text:#e6edf3; --accent:#53b7ff; --muted:#8fa3bd; --radius:16px; --shadow:0 10px 30px rgba(0,0,0,.3);}
@@ -562,12 +562,13 @@ function onPointerDown(e){
   raycaster.setFromCamera(pointer,camera);
   if(e.shiftKey || addPinMode){
     const hitModel = currentModel? raycaster.intersectObject(currentModel,true): [];
-    if(hitModel.length){ const pt = hitModel[0].point.clone(); createPin(pt,currentColor); if(addPinMode) addPinMode=false; return; }
+    if(hitModel.length){ const pt = hitModel[0].point.clone(); createPin(pt,currentColor); if(addPinMode) addPinMode=false; el.modeLabel.textContent='Orbit'; return; }
   }
   const hitsPins = raycaster.intersectObjects(pinGroup.children,false);
   if(hitsPins.length){ selectPin(hitsPins[0].object.userData.pinId, {fly:true}); return; }
 }
 
+// Connector
 function updateConnector(){
   const p = pins.find(x=>x.id===selectedPinId);
   if(!p || !p.mesh || el.viewerPreview.classList.contains('hidden') || !pinGroup.visible || !p.mesh.visible){
@@ -673,7 +674,8 @@ el.btnFilterAll.addEventListener('click', ()=>{ filterColors.clear(); uniquePinC
 el.btnFilterNone.addEventListener('click', ()=>{ filterColors.clear(); applyPinVisibilityFilter(); buildColorFilter(); });
 el.btnFilterClose.addEventListener('click', ()=> el.colorFilterPanel.hidden = true);
 
-// List & view-only link
+// Pins UI & misc
+function refreshPinsListUI(){ refreshPinsList(); }
 document.getElementById('btnLoad').addEventListener('click', ()=>{
   const fid = extractDriveFileId(el.inputGLB.value.trim());
   el.inputGLB.value = fid; loadGLBByFileId(fid);
@@ -683,6 +685,30 @@ document.getElementById('btnViewOnly')?.addEventListener('click', ()=>{
   const sid = extractSpreadsheetId(el.inputSheet.value.trim());
   const url = new URL(location.href); url.searchParams.set('view','1'); if(fid) url.searchParams.set('fileId', fid); if(sid) url.searchParams.set('sheetId', sid);
   navigator.clipboard.writeText(url.toString()); toast('閲覧リンクをコピーしました');
+});
+function addUndo(u){ undoStack.push(u); }
+document.getElementById('btnTogglePins').addEventListener('click', ()=>{
+  pinGroup.visible = !pinGroup.visible;
+  document.getElementById('btnTogglePins').textContent = 'ピン表示: ' + (pinGroup.visible? 'ON' : 'OFF');
+  applyPinVisibilityFilter(); renderNow();
+});
+el.btnAddPin.addEventListener('click', ()=>{
+  addPinMode = !addPinMode;
+  el.modeLabel.textContent = addPinMode ? 'AddPin' : 'Orbit';
+  el.btnAddPin.textContent = addPinMode ? '＋ ピン追加: ON' : '＋ ピン追加モード';
+});
+el.btnGizmo.addEventListener('click', ()=>{
+  const enable = !tcontrols.visible;
+  tcontrols.visible = enable; tcontrols.enabled = enable;
+  el.btnGizmo.textContent = 'ギズモ: ' + (enable ? 'ON' : 'OFF');
+  // attach to selected pin
+  const p = pins.find(x=>x.id===selectedPinId);
+  if(enable && p && p.mesh){ tcontrols.attach(p.mesh); }
+  else{ tcontrols.detach(); }
+});
+el.btnUndo.addEventListener('click', ()=>{
+  const last = undoStack.pop(); if(!last) return;
+  if(last.type==='add'){ const idx = pins.findIndex(p=>p.id===last.id); if(idx>=0){ const pin = pins[idx]; if(pin.mesh) pinGroup.remove(pin.mesh); pins.splice(idx,1); refreshPinsList(); renderNow(); } }
 });
 
 // GLB load
@@ -1018,7 +1044,7 @@ function chooseFolderImage(ref){
   setPreview(ref, p.title||'');
 }
 
-// Pins UI & misc
+// Pins list rendering
 function refreshPinsList(){
   el.pinsList.innerHTML='';
   pins.filter(pinPassesFilter).forEach(p=>{
@@ -1033,15 +1059,7 @@ function refreshPinsList(){
     el.pinsList.appendChild(row);
   });
 }
-function addUndo(u){ undoStack.push(u); }
-
-// (duplicate applyPinVisibilityFilter removed)
- }); refreshPinsList(); renderNow(); }
-el.btnTogglePins.addEventListener('click', ()=>{
-  pinGroup.visible = !pinGroup.visible;
-  document.getElementById('btnTogglePins').textContent = 'ピン表示: ' + (pinGroup.visible? 'ON' : 'OFF');
-  applyPinVisibilityFilter(); renderNow();
-});
+function addUndo(u){ undoStack.push(u); } // (kept for completeness)
 
 // Materials UI events
 ['change','input'].forEach(ev=>{
