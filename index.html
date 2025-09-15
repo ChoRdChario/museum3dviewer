@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>LociMyu v0.9.18</title>
+  <title>LociMyu v0.9.19</title>
   <link rel="icon" href='data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><circle cx="32" cy="32" r="28" fill="%230b0f14"/><text x="32" y="39" font-size="28" text-anchor="middle" fill="%2353b7ff" font-family="Arial">L</text></svg>'>
   <style>
     :root{ --bg:#0b0f14; --panel:#121922; --text:#e6edf3; --accent:#53b7ff; --muted:#8fa3bd; --radius:16px; --shadow:0 10px 30px rgba(0,0,0,.3);}
@@ -87,7 +87,6 @@
     }
   }
   </script>
-  <!-- heic2any（CDN不調対策は後段のフォールバックローダで） -->
   <script src="https://unpkg.com/heic2any@0.0.5/dist/heic2any.min.js"></script>
 </head>
 <body>
@@ -253,8 +252,8 @@
   function onGapi(){ window.__flags.gapi = true; }
   function onGis(){  window.__flags.gis  = true; }
 </script>
-<script async defer src="https://accounts.google.com/gsi/client" onload="onGis()"></script>
-<script async defer src="https://apis.google.com/js/api.js" onload="onGapi()"></script>
+<script async defer src="https://accounts.google.com/gsi/client" onload="onGis"></script>
+<script async defer src="https://apis.google.com/js/api.js" onload="onGapi"></script>
 
 <script type="module">
 import * as THREE from 'three';
@@ -347,7 +346,7 @@ const el = {
 };
 const viewOnly = new URLSearchParams(location.search).get('view') === '1';
 
-/* ---------- state (single declarations only!) ---------- */
+/* ---------- state ---------- */
 let tokenClient; let gapiInited=false; let gisInited=false; let accessToken=null;
 
 let renderer, scene, camera, controls, tcontrols, pinGroup, loader, currentModel=null;
@@ -364,7 +363,7 @@ let matOriginals=new WeakMap();
 const imageBlobCache = new Map();
 let filterColors = new Set();
 
-/* ---------- heic2any フォールバックローダ ---------- */
+/* ---------- heic2any フォールバック ---------- */
 function loadScriptOnce(src){
   return new Promise((resolve,reject)=>{
     const s=document.createElement('script'); s.src=src; s.async=true; s.onload=resolve; s.onerror=reject;
@@ -504,14 +503,14 @@ function extractDriveFileId(input){
   const m1 = input.match(/\/file\/d\/([a-zA-Z0-9_-]{10,})/); if(m1) return m1[1];
   const m2 = input.match(/[?&]id=([a-zA-Z0-9_-]{10,})/);     if(m2) return m2[1];
   const m3 = input.match(/^([a-zA-Z0-9_-]{20,})$/);          if(m3) return m3[1];
-  return input.trim();
+  return '';
 }
 function extractSpreadsheetId(input){
   if(!input) return '';
   const m1 = input.match(/spreadsheets\/d\/([a-zA-Z0-9_-]{10,})/); if(m1) return m1[1];
   const m2 = input.match(/[?&]id=([a-zA-Z0-9_-]{10,})/);           if(m2) return m2[1];
   const m3 = input.match(/^([a-zA-Z0-9_-]{20,})$/);                if(m3) return m3[1];
-  return input.trim();
+  return '';
 }
 
 function toast(msg){ el.statusLabel.textContent=msg; setTimeout(()=> el.statusLabel.textContent='Ready', 2000); }
@@ -584,7 +583,7 @@ function updateConnector(){
   el.connDot.style.display = 'block';
 }
 
-/* ---------- Preview ---------- */
+/* ---------- Preview (hi-res) ---------- */
 let previewZoom = 1.0;
 function applyPreviewZoom(){ el.previewInner.style.transform = `scale(${previewZoom})`; }
 el.previewZoom.addEventListener('input', ()=>{ previewZoom = parseFloat(el.previewZoom.value)||1; el.previewZoomVal.textContent = previewZoom.toFixed(2) + '×'; applyPreviewZoom(); });
@@ -594,7 +593,8 @@ async function setPreview(ref, cap){
   if(!ref){ el.viewerPreview.classList.add('hidden'); return; }
   try{
     el.previewErr.style.display='none';
-    const src = await resolveImageObjectURL(ref, {preferThumb:true});
+    // 常に高解像度（HEICだけは変換 or サムネfallback）
+    const src = await resolveImageObjectURL(ref, {preferThumb:false});
     el.previewImg.src = src;
     el.previewImg.onerror = ()=>{ el.previewErr.style.display='inline'; };
     el.previewCap.textContent = cap||'';
@@ -608,56 +608,70 @@ async function setPreview(ref, cap){
 }
 function updateViewerPreviewForPin(p){ setPreview(p && p.images && p.images[0] ? p.images[0] : null, p?.title); }
 
-/* ---------- Image resolve (HEIC対応強化) ---------- */
+/* ---------- Image resolve（URL厳格判定 + HEIC対応） ---------- */
 function parseImageRef(ref){
+  // 1) 既にURLならDrive扱いしない
+  if(typeof ref === 'string' && /^(blob:|data:|https?:)/i.test(ref)){
+    return { kind:'url', url: ref };
+  }
+  // 2) drive:ID|mime 形式
   if(typeof ref === 'string' && ref.startsWith('drive:')){
     const [, rest] = ref.split(':');
     const [id, mime] = rest.split('|');
     return { kind:'drive', id, mime: mime||null };
   }
+  // 3) 裸の fileId / 共有URL
   if(typeof ref === 'string'){
     const id = extractDriveFileId(ref);
     if(id){ return { kind:'drive', id, mime:null }; }
-    return { kind:'url', url: ref };
   }
+  // 4) それ以外はURLとして扱う
   return { kind:'url', url: String(ref) };
 }
+
 async function resolveImageObjectURL(ref, {preferThumb=false}={}){
   const key = typeof ref==='string'?ref:JSON.stringify(ref);
   if(imageBlobCache.has(key)) return imageBlobCache.get(key);
+
   const info = parseImageRef(ref);
+
+  // URL / blob / data はそのまま返す（Driveに問い合わせない）
+  if(info.kind === 'url'){
+    imageBlobCache.set(key, info.url);
+    return info.url;
+  }
+
+  // Drive fileId パス
   let outUrl;
-  if(info.kind==='drive'){
-    const meta = await driveFileMeta(info.id);
-    const isHeic = isHeicMimeOrExt(meta.mimeType, meta.fileExtension);
-    if((isHeic || preferThumb) && meta.hasThumbnail && meta.thumbnailLink){
+  const meta = await driveFileMeta(info.id);
+  const isHeic = isHeicMimeOrExt(meta.mimeType, meta.fileExtension);
+
+  if(isHeic){
+    // HEICは変換。heic2anyが無ければサムネfallback
+    const ok = await ensureHeic2any();
+    if(ok){
+      const blob = await driveFileFetchBlob(meta.id);
+      const jpegBlob = await window.heic2any({ blob, toType:'image/jpeg', quality:0.9 });
+      const jpg = Array.isArray(jpegBlob) ? jpegBlob[0] : jpegBlob;
+      outUrl = URL.createObjectURL(jpg);
+    }else if(meta.hasThumbnail && meta.thumbnailLink){
       const sep = meta.thumbnailLink.includes('?') ? '&' : '?';
       outUrl = meta.thumbnailLink + sep + 'access_token=' + encodeURIComponent(accessToken);
-      imageBlobCache.set(key, outUrl);
-      return outUrl;
-    }
-    if(isHeic){
-      const ok = await ensureHeic2any();
-      if(ok){
-        const blob = await driveFileFetchBlob(info.id);
-        const jpegBlob = await window.heic2any({ blob, toType:'image/jpeg', quality:0.9 });
-        const jpg = Array.isArray(jpegBlob) ? jpegBlob[0] : jpegBlob;
-        outUrl = URL.createObjectURL(jpg);
-      }else{
-        if(meta.hasThumbnail && meta.thumbnailLink){
-          const sep2 = meta.thumbnailLink.includes('?') ? '&' : '?';
-          outUrl = meta.thumbnailLink + sep2 + 'access_token=' + encodeURIComponent(accessToken);
-        }else{
-          throw new Error('HEIC preview unavailable (no heic2any & no thumbnailLink)');
-        }
-      }
     }else{
-      const blob = await driveFileFetchBlob(info.id);
-      outUrl = URL.createObjectURL(blob);
+      throw new Error('HEIC preview unavailable (no heic2any & no thumbnailLink)');
     }
   }else{
-    outUrl = info.url;
+    if(preferThumb && meta.hasThumbnail && meta.thumbnailLink){
+      // モーダル等軽量表示用
+      const sep = meta.thumbnailLink.includes('?') ? '&' : '?';
+      outUrl = meta.thumbnailLink + sep + 'access_token=' + encodeURIComponent(accessToken);
+    }else{
+      // 高解像度
+      const blob = await driveFileFetchBlob(meta.id);
+      outUrl = URL.createObjectURL(blob);
+    }
   }
+
   imageBlobCache.set(key, outUrl);
   return outUrl;
 }
@@ -721,7 +735,7 @@ function refreshPinsList(){
   });
 }
 document.getElementById('btnLoad').addEventListener('click', ()=>{
-  const fid = extractDriveFileId(el.inputGLB.value.trim());
+  const fid = extractDriveFileId(el.inputGLB.value.trim()) || el.inputGLB.value.trim();
   el.inputGLB.value = fid; loadGLBByFileId(fid);
 });
 document.getElementById('btnViewOnly')?.addEventListener('click', ()=>{
@@ -1067,13 +1081,13 @@ async function loadFolderImages(){
           img.onerror = async ()=>{
             usedFallback = true;
             try{
-              const url = await resolveImageObjectURL(ref);
+              const url = await resolveImageObjectURL(ref, {preferThumb:true});
               img.src = url;
             }catch{ cell.classList.add('error'); }
           };
         }else{
           try{
-            const url = await resolveImageObjectURL(ref);
+            const url = await resolveImageObjectURL(ref, {preferThumb:true});
             img.src = url;
           }catch{ cell.classList.add('error'); }
         }
@@ -1125,12 +1139,33 @@ function renderThumbs(p){
       if(wasPreview){ const next = p.images[0] || null; setPreview(next, p.title||''); }
     });
     wrap.appendChild(img); wrap.appendChild(del);
-    try{ const src = await resolveImageObjectURL(ref, {preferThumb:false}); img.src = src; img.addEventListener('click', async ()=>{ const s2 = await resolveImageObjectURL(ref, {preferThumb:false}); setPreview(s2, p.title||''); }); }
-    catch{ wrap.classList.add('error'); wrap.title = '画像を読み込めませんでした'; }
+    try{
+      // サムネは軽量に
+      const src = await resolveImageObjectURL(ref, {preferThumb:true});
+      img.src = src;
+      img.addEventListener('click', async ()=>{
+        setPreview(ref, p.title||''); // ここで高解像度を再解決
+      });
+    }catch{
+      wrap.classList.add('error'); wrap.title = '画像を読み込めませんでした';
+    }
   });
 }
 
 /* ---------- Save (Sheets) ---------- */
+async function ensureSpreadsheet(glbName){
+  const title = `LociMyu - ${glbName}`;
+  const resp = await gapi.client.sheets.spreadsheets.create({
+    resource: { properties: { title }, sheets: [{ properties: { title: 'pins' } }] }
+  });
+  const spreadsheetId = resp.result.spreadsheetId;
+  await gapi.client.sheets.spreadsheets.values.update({
+    spreadsheetId, range: 'pins!A1',
+    valueInputOption:'RAW',
+    resource:{ values: [[ 'pin_id','title','body','x','y','z','color','images','updated_at' ]] }
+  });
+  return spreadsheetId;
+}
 async function upsertPinToSheet(){
   const sheetId = extractSpreadsheetId(el.inputSheet.value.trim()); if(!sheetId) return;
   const p = pins.find(x=>x.id===selectedPinId); if(!p) return;
