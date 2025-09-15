@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>LociMyu v0.9.19</title>
+  <title>LociMyu v0.9.20</title>
   <link rel="icon" href='data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><circle cx="32" cy="32" r="28" fill="%230b0f14"/><text x="32" y="39" font-size="28" text-anchor="middle" fill="%2353b7ff" font-family="Arial">L</text></svg>'>
   <style>
     :root{ --bg:#0b0f14; --panel:#121922; --text:#e6edf3; --accent:#53b7ff; --muted:#8fa3bd; --radius:16px; --shadow:0 10px 30px rgba(0,0,0,.3);}
@@ -274,7 +274,7 @@ const SCOPES = [
   'https://www.googleapis.com/auth/spreadsheets'
 ].join(' ');
 
-/* ---------- refs to DOM ---------- */
+/* ---------- refs ---------- */
 const el = {
   gate: document.getElementById('gate'),
   statusLabel: document.getElementById('statusLabel'),
@@ -610,22 +610,18 @@ function updateViewerPreviewForPin(p){ setPreview(p && p.images && p.images[0] ?
 
 /* ---------- Image resolve（URL厳格判定 + HEIC対応） ---------- */
 function parseImageRef(ref){
-  // 1) 既にURLならDrive扱いしない
   if(typeof ref === 'string' && /^(blob:|data:|https?:)/i.test(ref)){
     return { kind:'url', url: ref };
   }
-  // 2) drive:ID|mime 形式
   if(typeof ref === 'string' && ref.startsWith('drive:')){
     const [, rest] = ref.split(':');
     const [id, mime] = rest.split('|');
     return { kind:'drive', id, mime: mime||null };
   }
-  // 3) 裸の fileId / 共有URL
   if(typeof ref === 'string'){
     const id = extractDriveFileId(ref);
     if(id){ return { kind:'drive', id, mime:null }; }
   }
-  // 4) それ以外はURLとして扱う
   return { kind:'url', url: String(ref) };
 }
 
@@ -635,19 +631,16 @@ async function resolveImageObjectURL(ref, {preferThumb=false}={}){
 
   const info = parseImageRef(ref);
 
-  // URL / blob / data はそのまま返す（Driveに問い合わせない）
   if(info.kind === 'url'){
     imageBlobCache.set(key, info.url);
     return info.url;
   }
 
-  // Drive fileId パス
   let outUrl;
   const meta = await driveFileMeta(info.id);
   const isHeic = isHeicMimeOrExt(meta.mimeType, meta.fileExtension);
 
   if(isHeic){
-    // HEICは変換。heic2anyが無ければサムネfallback
     const ok = await ensureHeic2any();
     if(ok){
       const blob = await driveFileFetchBlob(meta.id);
@@ -662,11 +655,9 @@ async function resolveImageObjectURL(ref, {preferThumb=false}={}){
     }
   }else{
     if(preferThumb && meta.hasThumbnail && meta.thumbnailLink){
-      // モーダル等軽量表示用
       const sep = meta.thumbnailLink.includes('?') ? '&' : '?';
       outUrl = meta.thumbnailLink + sep + 'access_token=' + encodeURIComponent(accessToken);
     }else{
-      // 高解像度
       const blob = await driveFileFetchBlob(meta.id);
       outUrl = URL.createObjectURL(blob);
     }
@@ -984,7 +975,7 @@ function setNamedView(name){
 el.projOrtho.addEventListener('change', ()=> alert('Orthographicは将来対応予定（現状は透視投影のみ）'));
 el.bgColor.addEventListener('input', ()=>{ scene.background = new THREE.Color(el.bgColor.value); renderNow(); });
 
-/* ---------- Sheets ---------- */
+/* ---------- Sheets（ここでのみ定義！） ---------- */
 async function ensureSpreadsheet(glbName){
   const title = `LociMyu - ${glbName}`;
   const resp = await gapi.client.sheets.spreadsheets.create({
@@ -1140,11 +1131,10 @@ function renderThumbs(p){
     });
     wrap.appendChild(img); wrap.appendChild(del);
     try{
-      // サムネは軽量に
       const src = await resolveImageObjectURL(ref, {preferThumb:true});
       img.src = src;
       img.addEventListener('click', async ()=>{
-        setPreview(ref, p.title||''); // ここで高解像度を再解決
+        setPreview(ref, p.title||'');
       });
     }catch{
       wrap.classList.add('error'); wrap.title = '画像を読み込めませんでした';
@@ -1153,19 +1143,6 @@ function renderThumbs(p){
 }
 
 /* ---------- Save (Sheets) ---------- */
-async function ensureSpreadsheet(glbName){
-  const title = `LociMyu - ${glbName}`;
-  const resp = await gapi.client.sheets.spreadsheets.create({
-    resource: { properties: { title }, sheets: [{ properties: { title: 'pins' } }] }
-  });
-  const spreadsheetId = resp.result.spreadsheetId;
-  await gapi.client.sheets.spreadsheets.values.update({
-    spreadsheetId, range: 'pins!A1',
-    valueInputOption:'RAW',
-    resource:{ values: [[ 'pin_id','title','body','x','y','z','color','images','updated_at' ]] }
-  });
-  return spreadsheetId;
-}
 async function upsertPinToSheet(){
   const sheetId = extractSpreadsheetId(el.inputSheet.value.trim()); if(!sheetId) return;
   const p = pins.find(x=>x.id===selectedPinId); if(!p) return;
