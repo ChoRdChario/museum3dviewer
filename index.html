@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>LociMyu v0.9.14</title>
+  <title>LociMyu v0.9.15</title>
   <link rel="icon" href='data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><circle cx="32" cy="32" r="28" fill="%230b0f14"/><text x="32" y="39" font-size="28" text-anchor="middle" fill="%2353b7ff" font-family="Arial">L</text></svg>'>
   <style>
     :root{ --bg:#0b0f14; --panel:#121922; --text:#e6edf3; --accent:#53b7ff; --muted:#8fa3bd; --radius:16px; --shadow:0 10px 30px rgba(0,0,0,.3);}
@@ -87,7 +87,8 @@
     }
   }
   </script>
-  <script src="https://unpkg.com/heic2any@0.0.4/dist/heic2any.min.js"></script>
+  <!-- heic2any を 0.0.5 にアップデート -->
+  <script src="https://unpkg.com/heic2any@0.0.5/dist/heic2any.min.js"></script>
 </head>
 <body>
 <div class="app">
@@ -151,7 +152,7 @@
       <canvas id="viewerCanvas"></canvas>
       <svg id="connector">
         <defs>
-          <filter id="dropshadow" x="-20%" y="-20%" width="140%" height="140%">
+          <filter id="dropshadow" x="-20%" y="-20%" width="140%">
             <feDropShadow dx="0" dy="0" stdDeviation="2" flood-color="#001a33" flood-opacity="0.9"/>
           </filter>
         </defs>
@@ -676,7 +677,7 @@ el.btnFilterNone.addEventListener('click', ()=>{ filterColors.clear(); applyPinV
 el.btnFilterClose.addEventListener('click', ()=> el.colorFilterPanel.hidden = true);
 
 // Pins UI & misc
-function refreshPinsList(){  // NOTE: single definition
+function refreshPinsList(){  // single definition
   el.pinsList.innerHTML='';
   pins.filter(pinPassesFilter).forEach(p=>{
     const row=document.createElement('div'); row.className='row'; row.dataset.id=p.id;
@@ -929,7 +930,7 @@ function setNamedView(name){
   switch(name){
     case 'front': dir.set(d,0,0); break;
     case 'back':  dir.set(-d,0,0); break;
-    case 'left':  dir.set(0,0,-d); break;   // 左右入れ替え対応済み
+    case 'left':  dir.set(0,0,-d); break;
     case 'right': dir.set(0,0,d); break;
     case 'top':   dir.set(0,d,0); break;
     case 'bottom':dir.set(0,-d,0); break;
@@ -1013,7 +1014,7 @@ async function loadFolderImages(){
       const q = `'${parent}' in parents and trashed=false and (mimeType contains 'image/')`;
       const resp = await gapi.client.drive.files.list({
         q, pageSize: 200,
-        fields: 'files(id,name,mimeType,fileExtension)',
+        fields: 'files(id,name,mimeType,fileExtension,hasThumbnail,thumbnailLink)',
         includeItemsFromAllDrives: true,
         supportsAllDrives: true
       });
@@ -1026,11 +1027,27 @@ async function loadFolderImages(){
         const cell = document.createElement('div'); cell.className='cell';
         const img = document.createElement('img'); img.alt = f.name;
         const tag = document.createElement('div'); tag.className='tag'; tag.textContent = isHeic ? 'HEIC/HEIF (変換表示)' : (mime||'image');
-        resolveImageObjectURL(ref)
-          .then(objUrl => { img.src = objUrl; })
-          .catch(err => { console.warn('preview error', err); cell.classList.add('error'); });
-        img.onerror = ()=> cell.classList.add('error');
         const cap = document.createElement('div'); cap.textContent = f.name; cap.className='small';
+
+        let usedFallback = false;
+        if(f.hasThumbnail && f.thumbnailLink){
+          const sep = f.thumbnailLink.includes('?') ? '&' : '?';
+          img.src = f.thumbnailLink + sep + 'access_token=' + encodeURIComponent(accessToken);
+          img.onerror = async ()=>{
+            usedFallback = true;
+            try{
+              const url = await resolveImageObjectURL(ref);
+              img.src = url;
+            }catch{ cell.classList.add('error'); }
+          };
+        }else{
+          try{
+            const url = await resolveImageObjectURL(ref);
+            img.src = url;
+          }catch{ cell.classList.add('error'); }
+        }
+
+        img.onerror = ()=>{ if(!usedFallback){ cell.classList.add('error'); } };
         cell.appendChild(img); cell.appendChild(cap); cell.appendChild(tag);
         cell.addEventListener('click', ()=>{ if(cell.classList.contains('error')) return; chooseFolderImage(ref); });
         cells.push(cell);
