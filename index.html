@@ -19,7 +19,6 @@
     .accent{border-color:#2c82c9}
     .main{display:grid;grid-template-columns:360px 1fr 420px;gap:10px;padding:10px;height:calc(100vh - 58px)}
     body.hide-right .main{grid-template-columns:1fr}
-    #leftToolbox{display:flex}
     .panel{background:#121922;border:1px solid #1e2837;border-radius:var(--radius);overflow:hidden;display:flex;flex-direction:column;min-height:0}
     .panel h3{margin:0;padding:10px 12px;border-bottom:1px solid #203049;background:#0f1722;font-size:.95rem;font-weight:600}
     .panel .body{padding:10px;overflow:auto}
@@ -66,28 +65,16 @@
     #capTitleLine{font-weight:700}
     #capBodyLine{font-size:.85rem;color:#c9d7ea;max-height:8em;overflow:auto}
 
-    /* 閲覧モード：パネルは表示。編集 UI を除去（見た目上） */
-    body.viewonly .field:has(#matSelect),
-    body.viewonly .field:has(#matUnlit),
-    body.viewonly .field:has(#matDoubleSided),
-    body.viewonly .field:has(#matTransparent),
-    body.viewonly .field:has(#matOpacity),
-    body.viewonly .field:has(#matInvert),
-    body.viewonly .field:has(#matWhiteTransparent),
-    body.viewonly .field:has(#matThreshold),
-    body.viewonly .field:has(#bgColor){display:none}
+    /* 閲覧モード：パネルは表示のまま / 左のピンツールを丸ごと非表示 */
+    body.viewonly #pinTools{display:none}
+    /* 右パネルの編集系ボタン群を隠す（閲覧モード） */
     body.viewonly #btnSavePin,
     body.viewonly #btnDeletePin,
     body.viewonly #btnAttach,
     body.viewonly #btnPickFromFolder,
-    body.viewonly #imgLocal,
     body.viewonly #autosaveTip,
     body.viewonly #listNew,
-    body.viewonly #listDelete,
-    body.viewonly #btnAddPin,
-    body.viewonly #btnGizmo,
-    body.viewonly #btnUndo,
-    body.viewonly #colorPicker{display:none}
+    body.viewonly #listDelete { display:none; }
 
     @media (max-width:1100px){
       .main{grid-template-columns:1fr; grid-template-rows: 360px 1fr 480px}
@@ -123,32 +110,23 @@
     <section class="panel" id="leftToolbox">
       <h3>ツールボックス（マテリアル & カメラ & ピン）</h3>
       <div class="body">
-        <div class="small">Shift + クリック でピンを配置（編集モードのみ）</div>
-        <div class="flex" style="margin-top:6px;margin-bottom:6px">
-          <button id="btnAddPin" disabled>＋ ピン追加モード</button>
-          <button id="btnGizmo" disabled>ギズモ: OFF</button>
-          <button id="btnUndo" disabled>Ctrl+Z</button>
-          <button id="btnTogglePins" disabled>ピン表示: ON</button>
-        </div>
 
-        <div class="flex" style="align-items:center">
-          <div class="small">ピン色:</div>
-          <div id="colorPresets" class="flex"></div>
-          <input id="colorPicker" type="color" value="#ff6b6b" />
-          <button id="btnColorFilter" disabled>色フィルタ ▾</button>
-        </div>
-
-        <div id="colorFilterPanel" class="panel body" style="display:none;margin-top:6px;padding:8px">
-          <div class="small" style="margin-bottom:6px">表示する色を選択（複数可）</div>
-          <div id="colorFilterList"></div>
-          <div class="flex" style="justify-content:flex-end;margin-top:8px">
-            <button id="btnFilterAll">すべて</button>
-            <button id="btnFilterNone">なし</button>
-            <button id="btnFilterClose">閉じる</button>
+        <!-- ピン関連（閲覧モードでは丸ごと非表示） -->
+        <div id="pinTools">
+          <div class="small">Shift + クリック でピンを配置（編集モードのみ）</div>
+          <div class="flex" style="margin-top:6px;margin-bottom:6px">
+            <button id="btnAddPin" disabled>＋ ピン追加モード</button>
+            <button id="btnGizmo" disabled>ギズモ: OFF</button>
+            <button id="btnUndo" disabled>Ctrl+Z</button>
+            <button id="btnTogglePins" disabled>ピン表示: ON</button>
           </div>
+          <div class="flex" style="align-items:center">
+            <div class="small">ピン色:</div>
+            <div id="colorPresets" class="flex"></div>
+            <input id="colorPicker" type="color" value="#ff6b6b" />
+          </div>
+          <hr style="border-color:#203049;border-width:1px 0;margin:12px 0">
         </div>
-
-        <hr style="border-color:#203049;border-width:1px 0;margin:12px 0">
 
         <div class="small" style="margin:4px 0 6px">マテリアル編集</div>
         <div class="field"><label>対象</label><select id="matSelect"><option value="__all__">（全マテリアル）</option></select></div>
@@ -214,11 +192,26 @@
       <h3>キャプション</h3>
       <div class="body">
         <div class="flex" style="justify-content:space-between;align-items:center;margin-bottom:6px">
-          <div class="small">ピン一覧</div>
+          <div class="flex" style="gap:8px;align-items:center">
+            <div class="small">ピン一覧</div>
+            <!-- 右側に色フィルタ（編集/閲覧 共通） -->
+            <button id="btnColorFilter">色で絞り込み ▾</button>
+          </div>
           <div class="flex" style="gap:6px;align-items:center">
             <select id="listSelect" disabled></select>
             <button id="listNew" disabled>新規</button>
             <button id="listDelete" disabled>削除</button>
+          </div>
+        </div>
+
+        <!-- 色フィルタパネル（右側） -->
+        <div id="colorFilterPanel" class="panel body" style="display:none;margin-bottom:8px;padding:8px">
+          <div class="small" style="margin-bottom:6px">表示する色を選択（複数可）</div>
+          <div id="colorFilterList"></div>
+          <div class="flex" style="justify-content:flex-end;margin-top:8px">
+            <button id="btnFilterAll">すべて</button>
+            <button id="btnFilterNone">なし</button>
+            <button id="btnFilterClose">閉じる</button>
           </div>
         </div>
 
@@ -228,12 +221,16 @@
         <div id="editor" class="hidden">
           <div class="field" style="width:100%"><label>タイトル</label><input id="capTitle" type="text" placeholder="タイトル" style="flex:1"/></div>
           <div class="field" style="width:100%"><label>本文</label><textarea id="capBody" rows="6" placeholder="キャプション本文" style="flex:1"></textarea></div>
+
           <div class="flex">
-            <input id="imgLocal" type="file" accept="image/*,.heic,.HEIC" />
+            <!-- 非表示の file input（UIからは消したが内部で利用） -->
+            <input id="imgLocal" type="file" accept="image/*,.heic,.HEIC" style="display:none"/>
             <button id="btnAttach" class="accent" disabled>画像を添付してDriveに保存</button>
-            <button id="btnPickFromFolder" class="accent" disabled>📁 フォルダから選択</button>
+            <button id="btnPickFromFolder" class="accent" disabled>Driveから保存</button>
           </div>
+
           <div class="thumbs" id="thumbs"></div>
+
           <div class="flex" style="justify-content:space-between;margin-top:8px;margin-bottom:8px">
             <button id="btnSavePin" class="accent" disabled>保存（Sheets）</button>
             <button id="btnDeletePin" style="border-color:#5a1f26;color:#ffb4b4" disabled>ピン削除</button>
@@ -248,7 +245,7 @@
 <!-- フォルダ画像ピッカー -->
 <div id="pickerModal" class="signin-gate" style="display:none;background:rgba(0,0,0,.55)">
   <div class="card" style="width:min(90vw,980px);max-height:80vh;overflow:hidden">
-    <h1 style="margin:0 0 6px">フォルダ内の画像を選択</h1>
+    <h1 style="margin:0 0 6px">Driveから保存</h1>
     <div class="flex" style="justify-content:flex-end;margin-bottom:8px">
       <button id="btnPickerReload">再読み込み</button>
       <button id="btnPickerClose">閉じる</button>
@@ -334,6 +331,7 @@ const el = {
   btnSignIn: document.getElementById('btnSignIn'),
   colorPresets: document.getElementById('colorPresets'),
   colorPicker: document.getElementById('colorPicker'),
+  // 右側フィルタ
   btnColorFilter: document.getElementById('btnColorFilter'),
   colorFilterPanel: document.getElementById('colorFilterPanel'),
   colorFilterList: document.getElementById('colorFilterList'),
@@ -399,7 +397,7 @@ const debounce = (fn,ms)=>{ let t; return (...a)=>{ clearTimeout(t); t=setTimeou
 const debouncedSave = debounce(()=> upsertPinToSheet(), 500);
 const PRESET_COLORS = ['#ff6b6b','#ffd166','#06d6a0','#118ab2','#ef476f','#f72585','#b5179e','#7209b7','#3a0ca3','#4361ee','#4cc9f0'];
 
-function toast(msg){ el.statusLabel.textContent=msg; setTimeout(()=> el.statusLabel.textContent='Ready', 2000); }
+function toast(msg){ el.statusLabel.textContent=msg; setTimeout(()=> el.statusLabel.textContent= viewOnly ? '閲覧モード' : 'Ready', 2000); }
 function ensureArray(x){ return Array.isArray(x)?x:[]; }
 function normalizeHex(c){ const t = new THREE.Color(c); return '#' + t.getHexString(); }
 
@@ -451,7 +449,7 @@ function maybeReady(){
       accessToken = resp.access_token;
       if(accessToken){
         el.gate.style.display = 'none';
-        const enableCommon = ['btnLoad','btnTogglePins','btnColorFilter','projOrtho'];
+        const enableCommon = ['btnLoad','btnTogglePins','projOrtho'];
         enableCommon.forEach(id=> document.getElementById(id).removeAttribute('disabled'));
         if(!viewOnly){
           ['btnAddPin','btnGizmo','btnUndo','btnSavePin','btnDeletePin','btnAttach','btnPickFromFolder','listSelect','listNew','listDelete']
@@ -474,7 +472,7 @@ function maybeReady(){
   });
 }
 
-/* ▼ 閲覧モードの安全化：UI/操作の無効化（パネルは表示のまま） */
+/* ▼ 閲覧モードの安全化：UI/操作の無効化（パネルは表示のまま & 左ピンツール隠す） */
 function enforceViewOnlyMode(){
   if (!viewOnly) return;
   document.body.classList.add('viewonly');
@@ -482,9 +480,7 @@ function enforceViewOnlyMode(){
   el.capBody.readOnly  = true;
   [
     'btnSavePin','btnDeletePin','btnAttach','btnPickFromFolder',
-    'imgLocal','listNew','listDelete','btnAddPin','btnGizmo','btnUndo',
-    'matSelect','matUnlit','matDoubleSided','matTransparent','matOpacity',
-    'matInvert','matWhiteTransparent','matThreshold','bgColor','colorPicker'
+    'listNew','listDelete','btnAddPin','btnGizmo','btnUndo'
   ].forEach(id => document.getElementById(id)?.setAttribute('disabled','true'));
 }
 
@@ -645,8 +641,7 @@ function selectPin(id,{fly}={}){
   selectedPinId=id;
   const p=pins.find(x=>x.id===id);
   if(!p){ el.rightEditor.classList.add('hidden'); el.rightNoSel.classList.remove('hidden'); updateViewerPreviewForPin(null); return; }
-  el.rightNoSel.classList.add('hidden');
-  if(!viewOnly){ el.rightEditor.classList.remove('hidden'); } else { el.rightEditor.classList.remove('hidden'); } // 閲覧でも内容は見せる
+  el.rightNoSel.classList.add('hidden'); el.rightEditor.classList.remove('hidden');
   el.capTitle.value = p.title || '';
   el.capBody.value  = p.body  || '';
   renderThumbs(p);
@@ -657,16 +652,29 @@ function selectPin(id,{fly}={}){
 }
 function onPointerDown(e){
   if(!currentModel) return;
+
+  // 追加モードの視覚フィードバック：キャンバスカーソル
+  el.viewerCanvas.style.cursor = (addPinMode || e.shiftKey) && !viewOnly ? 'crosshair' : 'default';
+
   const rect=el.viewerCanvas.getBoundingClientRect();
   pointer.x=((e.clientX-rect.left)/rect.width)*2-1;
   pointer.y=-((e.clientY-rect.top)/rect.height)*2+1;
   raycaster.setFromCamera(pointer,camera);
-  if((e.shiftKey || addPinMode) && !viewOnly){
-    const hitModel = currentModel? raycaster.intersectObject(currentModel,true): [];
-    if(hitModel.length){ const pt = hitModel[0].point.clone(); createPin(pt,currentColor); if(addPinMode) addPinMode=false; el.modeLabel.textContent='Orbit'; return; }
-  }
+
+  // 1) ピンヒットなら選択
   const hitsPins = raycaster.intersectObjects(pinGroup.children,false);
   if(hitsPins.length){ selectPin(hitsPins[0].object.userData.pinId, {fly:true}); return; }
+
+  // 2) 追加モード or Shift でモデル上に追加
+  if((e.shiftKey || addPinMode) && !viewOnly){
+    const hitModel = currentModel? raycaster.intersectObject(currentModel,true): [];
+    if(hitModel.length){
+      const pt = hitModel[0].point.clone();
+      createPin(pt,currentColor);
+      if(addPinMode){ addPinMode=false; el.btnAddPin.textContent='＋ ピン追加モード'; el.modeLabel.textContent='Orbit'; el.viewerCanvas.style.cursor='default'; }
+      return;
+    }
+  }
 }
 function updateConnector(){
   const p = pins.find(x=>x.id===selectedPinId);
@@ -859,6 +867,7 @@ el.btnTogglePins.addEventListener('click', ()=>{
 el.btnAddPin.addEventListener('click', ()=>{
   if(viewOnly) return;
   addPinMode = !addPinMode;
+  el.viewerCanvas.style.cursor = addPinMode ? 'crosshair' : 'default';
   el.modeLabel.textContent = addPinMode ? 'AddPin' : 'Orbit';
   el.btnAddPin.textContent = addPinMode ? '＋ ピン追加: ON' : '＋ ピン追加モード';
 });
@@ -936,8 +945,9 @@ async function loadGLBByFileId(fileId){
 }
 
 /* ================== Materials ================== */
+let materialMapNameToOrig = new Map();
 function collectMaterials(){
-  materials=[]; materialMap.clear();
+  materials=[]; materialMap.clear(); materialMapNameToOrig.clear();
   const set = new Set();
   if(!currentModel) return;
   currentModel.traverse(obj=>{
@@ -949,6 +959,7 @@ function collectMaterials(){
   materials.forEach((m,idx)=>{
     const name = m.name && m.name.trim() ? m.name : `Material_${idx}`;
     materialMap.set(name, m);
+    materialMapNameToOrig.set(name, m);
     const opt=document.createElement('option'); opt.value=name; opt.textContent=name; el.matSelect.appendChild(opt);
   });
   applyMaterialLive();
@@ -974,7 +985,7 @@ function ensureMatRecord(m){
 function getSelectedOriginalMaterials(){
   const key=el.matSelect.value;
   if(key==='__all__') return materials;
-  const m = materialMap.get(key);
+  const m = materialMapNameToOrig.get(key);
   return m? [m] : [];
 }
 function getActiveMaterialFor(originalM){
@@ -1315,18 +1326,26 @@ async function deletePinFromActiveSheet(spreadsheetId, pinId){
 /* ================== Attach / Upload ================== */
 el.btnAttach.addEventListener('click', async ()=>{
   if(viewOnly) return;
-  const file = el.imgLocal.files?.[0]; const p = pins.find(x=>x.id===selectedPinId);
-  if(!file || !p){ alert('画像とピンを確認してください'); return; }
-  try{
-    const blob = await toUploadableBlob(file);
-    const uploaded = await driveMultipartUpload(blob, sanitizeName(file.name), glbParents);
-    const ref = makeDriveRef(uploaded.id, blob.type || 'image/jpeg');
-    p.images = ensureArray(p.images); p.images.push(ref);
-    renderThumbs(p);
-    setPreview(ref, p);
-    toast('画像をアップロードしました');
-    upsertPinToSheet();
-  }catch(err){ console.error(err); alert('画像アップロードに失敗しました'); }
+
+  // 非表示 input を都度起動して選択 → アップロード
+  const fileInput = el.imgLocal;
+  fileInput.value = '';
+  fileInput.onchange = async ()=>{
+    const file = fileInput.files?.[0];
+    const p = pins.find(x=>x.id===selectedPinId);
+    if(!file || !p){ return; }
+    try{
+      const blob = await toUploadableBlob(file);
+      const uploaded = await driveMultipartUpload(blob, sanitizeName(file.name), glbParents);
+      const ref = makeDriveRef(uploaded.id, blob.type || 'image/jpeg');
+      p.images = ensureArray(p.images); p.images.push(ref);
+      renderThumbs(p);
+      setPreview(ref, p);
+      toast('画像をアップロードしました');
+      upsertPinToSheet();
+    }catch(err){ console.error(err); alert('画像アップロードに失敗しました'); }
+  };
+  fileInput.click();
 });
 function sanitizeName(n){ return n.replace(/[^\p{Letter}\p{Number}\s._-]+/gu,'_'); }
 async function toUploadableBlob(file){
@@ -1474,7 +1493,6 @@ el.capBody.addEventListener('input',  ()=>{ const p=pins.find(x=>x.id===selected
 
 /* ================== Entry ================== */
 viewerInit();
-
 </script>
 </body>
 </html>
