@@ -18,10 +18,8 @@
     button:hover{background:#1a2b45}
     .accent{border-color:#2c82c9}
     .main{display:grid;grid-template-columns:360px 1fr 420px;gap:10px;padding:10px;height:calc(100vh - 58px)}
-    /* 拡大モード：左右パネルを隠してビューアのみ */
     body.wide #leftToolbox, body.wide #rightCaption{display:none}
     body.wide .main{grid-template-columns:1fr}
-    body.hide-right .main{grid-template-columns:1fr}
     .panel{background:#121922;border:1px solid #1e2837;border-radius:var(--radius);overflow:hidden;display:flex;flex-direction:column;min-height:0}
     .panel h3{margin:0;padding:10px 12px;border-bottom:1px solid #203049;background:#0f1722;font-size:.95rem;font-weight:600}
     .panel .body{padding:10px;overflow:auto}
@@ -56,8 +54,6 @@
     .thumb img{width:72px;height:72px;object-fit:cover;border-radius:10px;border:1px solid #223146;display:block}
     .thumb .del{position:absolute;top:-6px;right:-6px;width:20px;height:20px;border-radius:50%;background:#1e2a3b;border:1px solid #334966;color:#e8f0ff;line-height:18px;text-align:center;font-weight:700;cursor:pointer}
     .thumb .del:hover{background:#2a3b55}
-
-    /* 右上プレビュー */
     #viewerPreview{position:absolute;top:10px;right:10px;max-height:60%;border:1px solid #203049;border-radius:8px;background:#0a0f16cc;backdrop-filter: blur(2px);display:grid;grid-template-rows:auto 1fr auto;gap:0;resize:both;overflow:hidden;min-width:260px;min-height:200px}
     #viewerPreview.hidden{display:none}
     #previewControls{position:sticky;top:0;background:#0a0f16f0;border-bottom:1px solid #203049;padding:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;z-index:1}
@@ -67,10 +63,7 @@
     #viewerPreview .cap{border-top:1px solid #203049;background:#0a0f16f0;display:grid;grid-template-rows:auto auto;gap:4px;padding:6px 8px}
     #capTitleLine{font-weight:700}
     #capBodyLine{font-size:.85rem;color:#c9d7ea;max-height:8em;overflow:auto}
-
-    /* 閲覧モード：パネルは表示のまま / 左のピンツールを丸ごと非表示 */
     body.viewonly #pinTools{display:none}
-    /* 右パネルの編集系ボタン群を隠す（閲覧モード） */
     body.viewonly #btnSavePin,
     body.viewonly #btnDeletePin,
     body.viewonly #btnAttach,
@@ -78,20 +71,17 @@
     body.viewonly #autosaveTip,
     body.viewonly #listNew,
     body.viewonly #listDelete { display:none; }
-
     @media (max-width:1100px){
       .main{grid-template-columns:1fr; grid-template-rows: 360px 1fr 480px}
     }
   </style>
 
-  <!-- three.js (ES Modules) -->
   <script type="importmap">
   { "imports": {
       "three": "https://unpkg.com/three@0.157.0/build/three.module.js",
       "three/examples/jsm/": "https://unpkg.com/three@0.157.0/examples/jsm/"
     } }
   </script>
-  <!-- HEIC/HEIF 変換 -->
   <script src="https://unpkg.com/heic2any@0.0.5/dist/heic2any.min.js"></script>
 </head>
 <body>
@@ -109,12 +99,9 @@
   </header>
 
   <div class="main">
-    <!-- 左：ツール -->
     <section class="panel" id="leftToolbox">
       <h3>ツールボックス（マテリアル & カメラ & ピン）</h3>
       <div class="body">
-
-        <!-- ピン関連（閲覧モードでは丸ごと非表示） -->
         <div id="pinTools">
           <div class="small">Shift + クリック でピンを配置（編集モードのみ）</div>
           <div class="flex" style="margin-top:6px;margin-bottom:6px">
@@ -123,13 +110,10 @@
             <button id="btnUndo" disabled>Ctrl+Z</button>
             <button id="btnTogglePins" disabled>ピン表示: ON</button>
           </div>
-
-          <!-- 色プリセット：1行・9色 -->
           <div class="flex" style="align-items:center;flex-wrap:nowrap">
             <div class="small">ピン色:</div>
             <div id="colorPresets" class="flex" style="flex-wrap:nowrap"></div>
           </div>
-
           <hr style="border-color:#203049;border-width:1px 0;margin:12px 0">
         </div>
 
@@ -159,7 +143,6 @@
       </div>
     </section>
 
-    <!-- 中央：ビューワ -->
     <section class="panel" id="viewer">
       <div class="spinner" id="loading" hidden><div class="lds"></div></div>
       <canvas id="viewerCanvas"></canvas>
@@ -169,7 +152,6 @@
         <circle id="connDot" r="3" cx="0" cy="0" style="display:none"/>
       </svg>
 
-      <!-- 右上プレビュー -->
       <div id="viewerPreview" class="hidden">
         <div id="previewControls">
           <span class="small">倍率</span>
@@ -188,14 +170,12 @@
       <div class="hud"><div class="chip" id="modeLabel">Orbit</div></div>
     </section>
 
-    <!-- 右：キャプション -->
     <section class="panel" id="rightCaption">
       <h3>キャプション</h3>
       <div class="body">
         <div class="flex" style="justify-content:space-between;align-items:center;margin-bottom:6px">
           <div class="flex" style="gap:8px;align-items:center">
             <div class="small">ピン一覧</div>
-            <!-- 右側に色フィルタ（編集/閲覧 共通） -->
             <button id="btnColorFilter">色で絞り込み ▾</button>
           </div>
           <div class="flex" style="gap:6px;align-items:center">
@@ -205,7 +185,6 @@
           </div>
         </div>
 
-        <!-- 色フィルタパネル（右側） -->
         <div id="colorFilterPanel" class="panel body" style="display:none;margin-bottom:8px;padding:8px">
           <div class="small" style="margin-bottom:6px">表示する色を選択（複数可）</div>
           <div id="colorFilterList"></div>
@@ -224,7 +203,6 @@
           <div class="field" style="width:100%"><label>本文</label><textarea id="capBody" rows="6" placeholder="キャプション本文" style="flex:1"></textarea></div>
 
           <div class="flex">
-            <!-- 非表示の file input（UIからは消したが内部で利用） -->
             <input id="imgLocal" type="file" accept="image/*,.heic,.HEIC" style="display:none"/>
             <button id="btnAttach" class="accent" disabled>画像を添付してDriveに保存</button>
             <button id="btnPickFromFolder" class="accent" disabled>Driveから保存</button>
@@ -243,7 +221,6 @@
   </div>
 </div>
 
-<!-- フォルダ画像ピッカー -->
 <div id="pickerModal" class="signin-gate" style="display:none;background:rgba(0,0,0,.55)">
   <div class="card" style="width:min(90vw,980px);max-height:80vh;overflow:hidden">
     <h1 style="margin:0 0 6px">Driveから保存</h1>
@@ -255,7 +232,6 @@
   </div>
 </div>
 
-<!-- サインインゲート -->
 <div class="signin-gate" id="gate">
   <div class="card">
     <h1>Googleにサインイン</h1>
@@ -268,13 +244,12 @@
 </div>
 
 <script>
-  /* Google loader flags */
   window.__flags = { gapi:false, gis:false };
   function onGapi(){ window.__flags.gapi = true; }
   function onGis(){  window.__flags.gis  = true; }
 </script>
-<script async defer src="https://accounts.google.com/gsi/client" onload="onGis()"></script>
-<script async defer src="https://apis.google.com/js/api.js" onload="onGapi()"></script>
+<script async defer src="https://accounts.google.com/gsi/client" onload="onGis"></script>
+<script async defer src="https://apis.google.com/js/api.js" onload="onGapi"></script>
 
 <script type="module">
 import * as THREE from 'three';
@@ -331,7 +306,6 @@ const el = {
   modeLabel: document.getElementById('modeLabel'),
   btnSignIn: document.getElementById('btnSignIn'),
   colorPresets: document.getElementById('colorPresets'),
-  // 右側フィルタ
   btnColorFilter: document.getElementById('btnColorFilter'),
   colorFilterPanel: document.getElementById('colorFilterPanel'),
   colorFilterList: document.getElementById('colorFilterList'),
@@ -385,7 +359,8 @@ let addPinMode=false, currentColor='#ff6b6b';
 let pins=[], selectedPinId=null, undoStack=[];
 let glbParents=[], glbMetaCache=null;
 
-let materials=[], materialMap=new Map();
+/* ★ materials の宣言はここに1回だけ */
+let materials=[], materialMap=new Map(), materialMapNameToOrig=new Map();
 let matOriginals=new WeakMap();
 
 const imageBlobCache = new Map();
@@ -395,7 +370,6 @@ let activeSheet = { sheetId:null, title:'pins' };
 
 const debounce = (fn,ms)=>{ let t; return (...a)=>{ clearTimeout(t); t=setTimeout(()=>fn(...a),ms); }; };
 const debouncedSave = debounce(()=> upsertPinToSheet(), 500);
-/* ★ 9色に縮小（1行想定） */
 const PRESET_COLORS = ['#ff6b6b','#ffd166','#06d6a0','#118ab2','#ef476f','#b5179e','#4361ee','#4cc9f0','#ff9f1c'];
 
 function toast(msg){ el.statusLabel.textContent=msg; setTimeout(()=> el.statusLabel.textContent= viewOnly ? '閲覧モード' : 'Ready', 2000); }
@@ -458,7 +432,6 @@ function maybeReady(){
         }
         el.statusLabel.textContent = viewOnly ? '閲覧モード' : 'Ready';
         enforceViewOnlyMode();
-        // URLクエリに fileId / sheetId があれば自動投入
         const qs = new URLSearchParams(location.search);
         const fid = qs.get('fileId') || '';
         const sid = qs.get('sheetId') || '';
@@ -473,7 +446,7 @@ function maybeReady(){
   });
 }
 
-/* ▼ 閲覧モードの安全化：UI/操作の無効化（パネルは表示のまま & 左ピンツール隠す） */
+/* ▼ 閲覧モード（UIは表示のまま、編集系を無効化 & 左ピンツール隠す） */
 function enforceViewOnlyMode(){
   if (!viewOnly) return;
   document.body.classList.add('viewonly');
@@ -627,11 +600,10 @@ function createPin(pos,color){
   const id=`p_${Date.now()}_${Math.random().toString(36).slice(2,7)}`;
   const pin={id,pos:pos.clone(),color:normalizeHex(color||'#ff6b6b'),title:'',body:'',images:[],mesh:null};
   pins.push(pin);
-  /* ★ 新規色はフィルタに自動追加（初期表示ON） */
-  filterColors.add(pin.color);
+  filterColors.add(pin.color); // 初期表示ON
   placePinMesh(pin);
   refreshPinsList();
-  buildColorFilter();   // UIも更新
+  buildColorFilter();
   selectPin(id);
   addUndo({type:'add',id});
   upsertPinToSheet();
@@ -667,11 +639,9 @@ function onPointerDown(e){
   pointer.y=-((e.clientY-rect.top)/rect.height)*2+1;
   raycaster.setFromCamera(pointer,camera);
 
-  // 1) ピンヒットなら選択
   const hitsPins = raycaster.intersectObjects(pinGroup.children,false);
   if(hitsPins.length){ selectPin(hitsPins[0].object.userData.pinId, {fly:true}); return; }
 
-  // 2) 追加モード or Shift でモデル上に追加
   if((e.shiftKey || addPinMode) && !viewOnly){
     const hitModel = currentModel? raycaster.intersectObject(currentModel,true): [];
     if(hitModel.length){
@@ -797,7 +767,6 @@ function buildColorPresets(){
         p.color=normalizeHex(c);
         placePinMesh(p);
         refreshPinsList();
-        /* ★ 色変更時もフィルタに自動追加して見えるように */
         filterColors.add(p.color);
         buildColorFilter();
         debouncedSave();
@@ -866,7 +835,6 @@ el.btnViewOnly.addEventListener('click', ()=>{
   const url = new URL(location.href); url.searchParams.set('view','1'); if(fid) url.searchParams.set('fileId', fid); if(sid) url.searchParams.set('sheetId', sid);
   navigator.clipboard.writeText(url.toString()); toast('閲覧リンクをコピーしました');
 });
-/* ★ ビューア拡大：左右パネルを隠す */
 el.btnWide.addEventListener('click', ()=>{
   document.body.classList.toggle('wide');
   el.btnWide.textContent = document.body.classList.contains('wide') ? '📋 パネル表示' : '📺 ビューア拡大';
@@ -922,7 +890,7 @@ async function loadGLBByFileId(fileId){
     const dlUrl = `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media&supportsAllDrives=true`;
     const res = await fetch(dlUrl, { headers:{ Authorization:`Bearer ${accessToken}` } });
     if(!res.ok){
-      let hint = ''; if(res.status === 403 || res.status === 404){ hint = '（IDや共有設定を確認してください）'; }
+      let hint = ''; if(res.status === 403 || res === 404){ hint = '（IDや共有設定を確認してください）'; }
       throw new Error(`Drive download failed: ${res.status} ${res.statusText} ${hint}`);
     }
     const ab = await res.arrayBuffer();
@@ -939,7 +907,6 @@ async function loadGLBByFileId(fileId){
     });
     el.statusLabel.textContent = `Loaded: ${meta.name}`;
 
-    // ▼ シートIDの入力が無ければ「同階層に」作成 or 検出
     let sheetId = extractSpreadsheetId(el.inputSheet.value.trim());
     if(!sheetId){
       sheetId = await findOrCreateSpreadsheetInGlbFolder(meta);
@@ -958,8 +925,6 @@ async function loadGLBByFileId(fileId){
 }
 
 /* ================== Materials ================== */
-let materials=[], materialMap=new Map(), materialMapNameToOrig=new Map();
-let matOriginals=new WeakMap();
 function collectMaterials(){
   materials=[]; materialMap.clear(); materialMapNameToOrig.clear();
   const set = new Set();
@@ -1094,16 +1059,17 @@ async function applyMaterialLive(){
     mat.alphaTest = thresh;
     mat.depthWrite = !mat.transparent || thresh>0;
 
-    if((invert || whiteToAlpha) && rec.map){
+    if((invert || whiteToAlpha) && matOriginals.get(origM).map){
       try{
-        const processed = await processTextureToCanvasTextureFromOriginal(rec.map, { invertRGB: invert, alphaFromWhite: whiteToAlpha, threshold: thresh });
+        const processed = await processTextureToCanvasTextureFromOriginal(matOriginals.get(origM).map, { invertRGB: invert, alphaFromWhite: whiteToAlpha, threshold: thresh });
         if(processed){ mat.map = processed; mat.map.needsUpdate = true; }
       }catch(e){ console.warn('texture process failed', e); }
     }else if(!invert && !whiteToAlpha){
-      mat.map = rec.map || null;
+      const rec0 = matOriginals.get(origM);
+      mat.map = rec0.map || null;
       if(mat.map) mat.map.needsUpdate = true;
     }
-    if(!mat.color && rec.color){ mat.color = rec.color.clone(); }
+    if(!mat.color && matOriginals.get(origM).color){ mat.color = matOriginals.get(origM).color.clone(); }
     if(mat.color) mat.color.needsUpdate = true;
     mat.needsUpdate = true;
   }
@@ -1141,7 +1107,6 @@ async function findOrCreateSpreadsheetInGlbFolder(glbMeta){
   if (!glbMeta || !glbMeta.id) throw new Error('GLBメタデータがありません');
   const parents = glbMeta.parents || [];
 
-  // 同階層で appProperties.lociFor = GLB id を検索
   let found = null;
   for (const parent of (parents.length ? parents : ['root'])) {
     const q = [
@@ -1158,7 +1123,6 @@ async function findOrCreateSpreadsheetInGlbFolder(glbMeta){
   }
   if (found) return found.id;
 
-  // 見つからなければ作成
   const name = `LociMyu - ${glbMeta.name}`;
   const create = await gapi.client.drive.files.create({
     resource: {
@@ -1172,7 +1136,6 @@ async function findOrCreateSpreadsheetInGlbFolder(glbMeta){
   });
   const spreadsheetId = create.result.id;
 
-  // 初期化
   await gapi.client.sheets.spreadsheets.batchUpdate({
     spreadsheetId,
     resource: {
@@ -1504,13 +1467,6 @@ el.capTitle.addEventListener('input', ()=>{ const p=pins.find(x=>x.id===selected
 el.capBody.addEventListener('input',  ()=>{ const p=pins.find(x=>x.id===selectedPinId); if(p){ p.body=el.capBody.value; upsertPinToSheet(); updateViewerPreviewForPin(p); } });
 
 /* ================== Entry ================== */
-function enforceViewOnlyMode(){
-  if (!viewOnly) return;
-  document.body.classList.add('viewonly');
-  el.capTitle.readOnly = true; el.capBody.readOnly  = true;
-  ['btnSavePin','btnDeletePin','btnAttach','btnPickFromFolder','listNew','listDelete','btnAddPin','btnGizmo','btnUndo']
-    .forEach(id => document.getElementById(id)?.setAttribute('disabled','true'));
-}
 viewerInit();
 </script>
 </body>
