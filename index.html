@@ -117,7 +117,7 @@
           <hr style="border-color:#203049;border-width:1px 0;margin:12px 0">
         </div>
 
-        <div class="small" style="margin:4px 0 6px">マテリアル編集</div>
+        <div class="small" style="margin:4px 0 6px">マテリアル編集（シートごとに保存）</div>
         <div class="field"><label>対象</label><select id="matSelect"><option value="__all__">（全マテリアル）</option></select></div>
         <div class="field"><label>Unlit</label><input id="matUnlit" type="checkbox"><span class="small">明暗なし</span></div>
         <div class="field"><label>裏面描画</label><input id="matDoubleSided" type="checkbox"></div>
@@ -129,7 +129,7 @@
 
         <hr style="border-color:#203049;border-width:1px 0;margin:12px 0">
 
-        <div class="small" style="margin:4px 0 6px">ビュー</div>
+        <div class="small" style="margin:4px 0 6px">ビュー（シートごとに保存）</div>
         <div class="viewgrid" style="margin-bottom:8px">
           <button id="viewFront">前面</button>
           <button id="viewBack">背面</button>
@@ -244,12 +244,11 @@
 </div>
 
 <script>
-  // ← onload で「呼び出し」されるように修正（onGapi(), onGis()）
+  // Google SDK onload ハンドラ（確実発火）
   window.__flags = { gapi:false, gis:false };
   function onGapi(){ window.__flags.gapi = true; }
   function onGis(){  window.__flags.gis  = true; }
 </script>
-<!-- ★ ここを onload="onGis()" / "onGapi()" に修正 -->
 <script async defer src="https://accounts.google.com/gsi/client" onload="onGis()"></script>
 <script async defer src="https://apis.google.com/js/api.js" onload="onGapi()"></script>
 
@@ -362,9 +361,13 @@ let addPinMode=false, currentColor='#ff6b6b';
 let pins=[], selectedPinId=null, undoStack=[];
 let glbParents=[], glbMetaCache=null;
 
-/* materials は1回だけ */
+/* materials */
 let materials=[], materialMap=new Map(), materialMapNameToOrig=new Map();
 let matOriginals=new WeakMap();
+
+/* ★ マテリアル ⇔ キー（シート保存用） */
+const materialKeyByMaterial = new Map();
+const materialByKey = new Map();
 
 const imageBlobCache = new Map();
 let filterColors = new Set();
@@ -407,7 +410,6 @@ function upscaleThumbnailUrl(u, size=2048){
 }
 
 /* ================== Google init ================== */
-/* サインインボタンは常時アタッチ（初期化前でも押せる） */
 el.btnSignIn.addEventListener('click', ()=>{
   if(tokenClient){
     tokenClient.requestAccessToken({ prompt:'consent' });
@@ -416,14 +418,10 @@ el.btnSignIn.addEventListener('click', ()=>{
     toast('Google API 初期化中…');
   }
 });
-
-/* onload が動かない環境でも拾えるようにポーリングを強化 */
 const waitGoogle = setInterval(()=>{
-  // gapi
   if(!gapiInited && window.gapi?.load){
     try{ gapi.load('client', initGapiClient); }catch{}
   }
-  // gis
   if(!gisInited && window.google?.accounts?.oauth2){
     gisInited = true;
   }
@@ -463,14 +461,11 @@ function maybeReady(){
       }
     }
   });
-  // もしユーザが先に押していたら、ここで要求する
   if(pendingSignIn && tokenClient){
     pendingSignIn = false;
     tokenClient.requestAccessToken({ prompt:'consent' });
   }
 }
-
-/* ▼ 閲覧モードの編集抑止（UIは表示） */
 function enforceViewOnlyMode(){
   const viewOnly = new URLSearchParams(location.search).get('view') === '1';
   if (!viewOnly) return;
@@ -483,9 +478,7 @@ function enforceViewOnlyMode(){
   ].forEach(id => document.getElementById(id)?.setAttribute('disabled','true'));
 }
 
-/* ================== （以下、前回と同じ：Viewer / Pins / Materials / Drive & Sheets / Picker など） ================== */
-/* 省略せず全文を維持 — ここから下は、あなたが使っていた最新版と同一のロジックです */
-
+/* ================== Viewer ================== */
 let rendererFrameReq = null;
 function viewerInit(){
   renderer = new THREE.WebGLRenderer({ canvas: el.viewerCanvas, antialias:true });
@@ -505,7 +498,7 @@ function viewerInit(){
   loader = new GLTFLoader();
   window.addEventListener('resize', resize);
   el.viewerCanvas.addEventListener('pointerdown', onPointerDown);
-  el.projOrtho.addEventListener('change', ()=> toggleProjection(el.projOrtho.checked));
+  el.projOrtho.addEventListener('change', ()=> { toggleProjection(el.projOrtho.checked); debouncedSaveMaterials(); });
   resize();
   const loop = ()=>{ renderer.render(scene,camera); updateConnector(); rendererFrameReq=requestAnimationFrame(loop); };
   loop();
@@ -540,7 +533,6 @@ function resize(){
   camera.updateProjectionMatrix(); updateConnector();
 }
 function renderNow(){ renderer.render(scene,camera); updateConnector(); }
-
 function sceneBounds(){
   if(!currentModel){ return { center:new THREE.Vector3(0,0,0), radius: 2 }; }
   const box = new THREE.Box3().setFromObject(currentModel);
@@ -585,7 +577,7 @@ function toggleProjection(useOrtho){
   renderNow();
 }
 
-/* Pins & Connector */
+/* ================== Pins & Connector ================== */
 function addUndo(u){ undoStack.push(u); }
 function createPin(pos,color){
   if(viewOnly) return;
@@ -665,7 +657,7 @@ function updateConnector(){
   el.connDot.style.display = 'block';
 }
 
-/* Preview */
+/* ================== Preview ================== */
 let previewZoom = 1.0;
 function applyPreviewZoom(){ el.previewInner.style.transform = `scale(${previewZoom})`; }
 el.previewZoom.addEventListener('input', ()=>{ previewZoom = parseFloat(el.previewZoom.value)||1; el.previewZoomVal.textContent = previewZoom.toFixed(2) + '×'; applyPreviewZoom(); });
@@ -690,7 +682,7 @@ async function setPreview(ref, p){
 }
 function updateViewerPreviewForPin(p){ setPreview(p && p.images && p.images[0] ? p.images[0] : null, p); }
 
-/* Image resolve */
+/* ================== Image resolve & Drive ================== */
 function parseImageRef(ref){
   if(typeof ref === 'string' && /^(blob:|data:|https?:)/i.test(ref)){ return { kind:'url', url: ref }; }
   if(typeof ref === 'string' && ref.startsWith('drive:')){
@@ -708,9 +700,10 @@ async function resolveImageObjectURL(ref, {preferThumb=false}={}){
   if(imageBlobCache.has(key)) return imageBlobCache.get(key);
 
   const info = parseImageRef(ref);
+  let outUrl;
+
   if(info.kind === 'url'){ imageBlobCache.set(key, info.url); return info.url; }
 
-  let outUrl;
   const meta = await driveFileMeta(info.id);
   const isHeic = isHeicMimeOrExt(meta.mimeType, meta.fileExtension);
 
@@ -742,8 +735,6 @@ async function resolveImageObjectURL(ref, {preferThumb=false}={}){
   imageBlobCache.set(key, outUrl);
   return outUrl;
 }
-
-/* Drive helpers */
 async function driveFileMeta(fileId){
   const meta = await gapi.client.drive.files.get({
     fileId, fields:'id,name,mimeType,fileExtension,hasThumbnail,thumbnailLink,parents',
@@ -778,7 +769,7 @@ function extractSpreadsheetId(input){
 }
 function makeDriveRef(id, mime){ return `drive:${id}|${mime||''}`; }
 
-/* Materials */
+/* ================== Materials ================== */
 function collectMaterials(){
   materials=[]; materialMap.clear(); materialMapNameToOrig.clear();
   const set = new Set();
@@ -795,6 +786,8 @@ function collectMaterials(){
     materialMapNameToOrig.set(name, m);
     const opt=document.createElement('option'); opt.value=name; opt.textContent=name; el.matSelect.appendChild(opt);
   });
+  /* ★ キーインデックスを作る（シート保存のため） */
+  indexMaterialsByKey();
   applyMaterialLive();
 }
 function ensureMatRecord(m){
@@ -813,6 +806,37 @@ function ensureMatRecord(m){
     toneMapped: m.toneMapped,
     wasUnlit: false,
     unlitMat: null
+  });
+}
+/* ★ ルートからのパスとキー化 */
+function objectPath(node) {
+  const names = [];
+  let cur = node;
+  while (cur && cur.parent) {
+    names.push(cur.name && cur.name.trim() ? cur.name : '_' + (cur.uuid?.slice(0,8) || 'node'));
+    cur = cur.parent;
+  }
+  names.reverse();
+  return names.join('/');
+}
+function indexMaterialsByKey(){
+  materialKeyByMaterial.clear();
+  materialByKey.clear();
+  if (!currentModel) return;
+  currentModel.traverse(obj=>{
+    if (!obj.material) return;
+    const basePath = objectPath(obj);
+    if (Array.isArray(obj.material)) {
+      obj.material.forEach((m, idx)=>{
+        const key = `${basePath}#${idx}`;
+        materialKeyByMaterial.set(m, key);
+        materialByKey.set(key, m);
+      });
+    } else {
+      const key = `${basePath}#0`;
+      materialKeyByMaterial.set(obj.material, key);
+      materialByKey.set(key, obj.material);
+    }
   });
 }
 function getSelectedOriginalMaterials(){
@@ -928,9 +952,10 @@ async function applyMaterialLive(){
     mat.needsUpdate = true;
   }
   renderNow();
+  debouncedSaveMaterials(); // ★ UI変更でシート保存（閲覧モードでは内部で弾く）
 }
 
-/* Camera views */
+/* ================== Camera views ================== */
 el.viewFront.addEventListener('click', ()=> setNamedView('front'));
 el.viewBack.addEventListener('click', ()=> setNamedView('back'));
 el.viewLeft.addEventListener('click', ()=> setNamedView('left'));
@@ -954,9 +979,8 @@ function setNamedView(name){
   if(camera.isOrthographicCamera) fitOrthoFrustum();
   controls.update(); renderNow();
 }
-el.bgColor.addEventListener('input', ()=>{ scene.background = new THREE.Color(el.bgColor.value); renderNow(); });
 
-/* Sheets：同階層検出/作成 */
+/* ================== Sheets：同階層検出/作成 ================== */
 async function findOrCreateSpreadsheetInGlbFolder(glbMeta){
   if (!glbMeta || !glbMeta.id) throw new Error('GLBメタデータがありません');
   const parents = glbMeta.parents || [];
@@ -1007,84 +1031,248 @@ async function findOrCreateSpreadsheetInGlbFolder(glbMeta){
   return spreadsheetId;
 }
 
-/* Caption Lists */
-async function refreshCaptionLists(spreadsheetId){
-  const resp = await gapi.client.sheets.spreadsheets.get({
+/* ================== Meta（K/L列） 保存・復元 ================== */
+const META_MARKER_RANGE = ()=> `${activeSheet.title}!K1`;
+const META_MAT_KEY_RANGE = ()=> `${activeSheet.title}!K2:L2`;
+const META_VIEW_KEY_RANGE = ()=> `${activeSheet.title}!K3:L3`;
+
+function safeParseJSON(s, fallback){ try{ return s ? JSON.parse(s) : fallback; }catch{ return fallback; } }
+
+async function loadSheetMeta(spreadsheetId){
+  try{
+    const get = await gapi.client.sheets.spreadsheets.values.batchGet({
+      spreadsheetId,
+      ranges: [ META_MARKER_RANGE(), META_MAT_KEY_RANGE(), META_VIEW_KEY_RANGE() ]
+    });
+    const vals = (get.result.valueRanges || []).map(v=>v.values||[]);
+    const marker = vals[0]?.[0]?.[0] || '';
+    const matJson = vals[1]?.[0]?.[1] || '';
+    const viewJson = vals[2]?.[0]?.[1] || '';
+    return {
+      marker,
+      materials: safeParseJSON(matJson, { version:1, items:[] }),
+      viewer:    safeParseJSON(viewJson, { version:1, bgColor:'#0a0f16', projection:'perspective' })
+    };
+  }catch(e){
+    console.warn('loadSheetMeta failed', e);
+    return { marker:'', materials:{version:1,items:[]}, viewer:{version:1,bgColor:'#0a0f16',projection:'perspective'} };
+  }
+}
+async function saveSheetMeta(spreadsheetId, { materials, viewer }){
+  if(viewOnly) return; // 閲覧モードでは保存しない
+  const data = [
+    { range: META_MARKER_RANGE(), values: [[ 'LOCI_META_V1' ]] },
+    { range: META_MAT_KEY_RANGE(), values: [[ 'materials_json', JSON.stringify(materials) ]] },
+    { range: META_VIEW_KEY_RANGE(), values: [[ 'viewer_json', JSON.stringify(viewer) ]] },
+  ];
+  await gapi.client.sheets.spreadsheets.values.batchUpdate({
     spreadsheetId,
-    fields: 'sheets(properties(sheetId,title,index))'
+    valueInputOption:'RAW',
+    data
   });
-  const sheets = (resp.result.sheets || []).map(s => s.properties);
-  el.listSelect.innerHTML = '';
-  sheets.forEach(p => {
-    const o = document.createElement('option');
-    o.value = String(p.sheetId);
-    o.textContent = p.title;
-    el.listSelect.appendChild(o);
-  });
-  let pick = sheets.find(s => s.title === 'pins') || sheets[0];
-  if (!activeSheet.sheetId) {
-    if (pick){ activeSheet = { sheetId: pick.sheetId, title: pick.title }; }
-  } else {
-    const same = sheets.find(s => s.sheetId === activeSheet.sheetId);
-    if (!same) {
-      pick = sheets.find(s => s.title === 'pins') || sheets[0];
-      if (pick){ activeSheet = { sheetId: pick.sheetId, title: pick.title }; }
-    } else {
-      activeSheet.title = same.title;
+}
+function serializeMaterialsForSheet(){
+  const items = [];
+  const targets = materials;
+  for (const orig of targets){
+    const key = materialKeyByMaterial.get(orig) || (orig.name ? `name:${orig.name}` : null);
+    if (!key) continue;
+    const rec = matOriginals.get(orig) || {};
+    const active = rec.wasUnlit && rec.unlitMat ? rec.unlitMat : orig;
+    items.push({
+      key,
+      name: orig.name || '',
+      unlit: !!rec.wasUnlit,
+      doubleSided: active.side === THREE.DoubleSide,
+      transparent: !!active.transparent,
+      opacity: Number(active.opacity ?? 1),
+      invertRGB: !!el.matInvert.checked,
+      whiteToAlpha: !!el.matWhiteTransparent.checked,
+      alphaTest: Number(active.alphaTest ?? 0)
+    });
+  }
+  return { version:1, items };
+}
+function serializeViewerPrefs(){
+  return {
+    version: 1,
+    bgColor: el.bgColor.value || '#0a0f16',
+    projection: usingOrtho ? 'orthographic' : 'perspective'
+  };
+}
+async function applyMaterialsFromSheet(materialsData){
+  if (!materialsData || !Array.isArray(materialsData.items)) return;
+  for (const it of materialsData.items){
+    let mat = materialByKey.get(it.key);
+    if(!mat && it.name){
+      mat = materials.find(m => (m.name||'') === it.name);
+    }
+    if(!mat) continue;
+    // UIへ反映（個別適用のため一時的に matSelect を合わせて apply）
+    el.matUnlit.checked = !!it.unlit;
+    el.matDoubleSided.checked = !!it.doubleSided;
+    el.matTransparent.checked = !!it.transparent;
+    el.matOpacity.value = String(it.opacity ?? 1);
+    el.matOpacityVal.textContent = (Number(it.opacity ?? 1)).toFixed(2);
+    el.matInvert.checked = !!it.invertRGB;
+    el.matWhiteTransparent.checked = !!it.whiteToAlpha;
+    el.matThreshold.value = String(it.alphaTest ?? 0);
+    el.matThresholdVal.textContent = (Number(it.alphaTest ?? 0)).toFixed(2);
+
+    const name = mat.name && mat.name.trim() ? mat.name : null;
+    if(name && materialMap.has(name)){
+      el.matSelect.value = name;
+      await applyMaterialLive();
+    }else{
+      mat.side = it.doubleSided ? THREE.DoubleSide : THREE.FrontSide;
+      mat.transparent = it.transparent || (it.opacity < 1);
+      mat.opacity = it.opacity ?? 1;
+      mat.alphaTest = it.alphaTest ?? 0;
+      mat.needsUpdate = true;
     }
   }
-  if (activeSheet.sheetId){ el.listSelect.value = String(activeSheet.sheetId); }
-  if(!viewOnly){ ['listSelect','listNew','listDelete'].forEach(id=>document.getElementById(id).disabled=false); }
+  // UI 対象を全体に戻す
+  el.matSelect.value = '__all__';
+  renderNow();
 }
-el.listSelect.addEventListener('change', async (e)=>{
-  const spreadsheetId = extractSpreadsheetId(el.inputSheet.value.trim());
-  if(!spreadsheetId) return;
-  const sheetId = Number(e.target.value);
-  const title = e.target.options[e.target.selectedIndex].textContent;
-  activeSheet = { sheetId, title };
-  await loadPinsFromActiveSheet(spreadsheetId);
-  toast(`キャプションリストを切替: ${title}`);
-});
-el.listNew.addEventListener('click', async ()=>{
+async function applyViewerPrefs(viewerData){
+  if(!viewerData) return;
+  if(viewerData.bgColor){
+    el.bgColor.value = viewerData.bgColor;
+    scene.background = new THREE.Color(viewerData.bgColor);
+  }
+  if(viewerData.projection){
+    const wantOrtho = (viewerData.projection === 'orthographic');
+    el.projOrtho.checked = wantOrtho;
+    toggleProjection(wantOrtho);
+  }
+  renderNow();
+}
+/* マテリアル/ビューのオートセーブ（UIイベントで呼ぶ） */
+const debouncedSaveMaterials = debounce(async ()=>{
   if(viewOnly) return;
   const spreadsheetId = extractSpreadsheetId(el.inputSheet.value.trim());
-  if(!spreadsheetId) return;
-  const title = prompt('新しいキャプションリスト名を入力', `pins_${Date.now().toString().slice(-5)}`);
-  if(!title) return;
-  const add = await gapi.client.sheets.spreadsheets.batchUpdate({
-    spreadsheetId,
-    resource:{ requests:[ { addSheet:{ properties:{ title } } } ] }
-  });
-  const newSheetId = add.result.replies[0].addSheet.properties.sheetId;
-  await gapi.client.sheets.spreadsheets.values.update({
-    spreadsheetId, range: `${title}!A1`,
-    valueInputOption:'RAW',
-    resource:{ values: [[ 'pin_id','title','body','x','y','z','color','images','updated_at' ]] }
-  });
-  await refreshCaptionLists(spreadsheetId);
-  activeSheet = { sheetId: newSheetId, title };
-  el.listSelect.value = String(newSheetId);
-  pins = []; selectedPinId = null; rebuildPinsScene(); refreshPinsList();
-  toast(`新しいリストを作成: ${title}`);
-});
-el.listDelete.addEventListener('click', async ()=>{
-  if(viewOnly) return;
-  const spreadsheetId = extractSpreadsheetId(el.inputSheet.value.trim());
-  if(!spreadsheetId || !activeSheet.sheetId) return;
-  const g = await gapi.client.sheets.spreadsheets.get({ spreadsheetId, fields: 'sheets(properties(sheetId))' });
-  const count = (g.result.sheets||[]).length;
-  if(count <= 1){ alert('最後のシートは削除できません'); return; }
-  if(!confirm(`キャプションリスト「${activeSheet.title}」を削除しますか？`)) return;
-  await gapi.client.sheets.spreadsheets.batchUpdate({
-    spreadsheetId,
-    resource:{ requests:[ { deleteSheet:{ sheetId: activeSheet.sheetId } } ] }
-  });
-  await refreshCaptionLists(spreadsheetId);
-  await loadPinsFromActiveSheet(spreadsheetId);
-  toast('リストを削除しました');
-});
+  if (!spreadsheetId || !activeSheet.sheetId) return;
+  const materialsData = serializeMaterialsForSheet();
+  const viewerData = serializeViewerPrefs();
+  try{ await saveSheetMeta(spreadsheetId, { materials: materialsData, viewer: viewerData }); }
+  catch(e){ console.warn('saveSheetMeta failed', e); }
+}, 600);
 
-/* Load/Save pins */
+/* ================== Material UI Bindings ================== */
+['change','input'].forEach(ev=>{
+  ['matUnlit','matDoubleSided','matTransparent','matOpacity','matInvert','matWhiteTransparent','matThreshold','matSelect']
+    .forEach(id=> document.getElementById(id).addEventListener(ev, ()=> applyMaterialLive()));
+});
+el.matOpacity.addEventListener('input', ()=> el.matOpacityVal.textContent = parseFloat(el.matOpacity.value).toFixed(2));
+el.matThreshold.addEventListener('input', ()=> el.matThresholdVal.textContent = parseFloat(el.matThreshold.value).toFixed(2));
+el.bgColor.addEventListener('input', ()=>{ scene.background = new THREE.Color(el.bgColor.value); renderNow(); debouncedSaveMaterials(); });
+
+/* ================== Thumbs / Preview ================== */
+function renderThumbs(p){
+  const thumbs=el.thumbs; thumbs.innerHTML='';
+  ensureArray(p.images).forEach(async (ref, idx)=>{
+    const wrap=document.createElement('div'); wrap.className='thumb'; thumbs.appendChild(wrap);
+    const img=document.createElement('img'); img.alt = 'thumb';
+    const del=document.createElement('div'); del.className='del'; del.textContent='×'; del.title='この画像をキャプションから外す';
+    del.addEventListener('click', (ev)=>{
+      if(viewOnly) return;
+      ev.stopPropagation(); const wasPreview = (el.previewImg.src && el.previewImg.src === img.src);
+      p.images.splice(idx,1); renderThumbs(p);
+      if(wasPreview){ const next = p.images[0] || null; setPreview(next, p); }
+      upsertPinToSheet();
+    });
+    wrap.appendChild(img); wrap.appendChild(del);
+    try{
+      const src = await resolveImageObjectURL(ref, {preferThumb:true});
+      img.src = src;
+      img.addEventListener('click', async ()=>{ setPreview(ref, p); });
+    }catch{
+      wrap.classList.add('error'); wrap.title = '画像を読み込めませんでした';
+    }
+  });
+}
+
+/* ================== Caption bindings ================== */
+document.getElementById('btnSavePin').addEventListener('click', ()=> upsertPinToSheet());
+el.capTitle.addEventListener('input', ()=>{ const p=pins.find(x=>x.id===selectedPinId); if(p){ p.title=el.capTitle.value; refreshPinsList(); upsertPinToSheet(); updateViewerPreviewForPin(p); } });
+el.capBody.addEventListener('input',  ()=>{ const p=pins.find(x=>x.id===selectedPinId); if(p){ p.body=el.capBody.value; upsertPinToSheet(); updateViewerPreviewForPin(p); } });
+
+/* ================== UI Utilities ================== */
+function buildColorPresets(){
+  const holder = el.colorPresets; holder.innerHTML='';
+  ['#ff6b6b','#ffd166','#06d6a0','#118ab2','#ef476f','#b5179e','#4361ee','#4cc9f0','#ff9f1c'].forEach(c=>{
+    const b=document.createElement('button');
+    b.style.width='18px'; b.style.height='18px';
+    b.style.borderRadius='999px'; b.style.border='2px solid #223146';
+    b.style.background=c; b.title=c;
+    b.addEventListener('click',()=>{
+      currentColor=c;
+      const pId=selectedPinId;
+      if(pId){
+        const p=pins.find(x=>x.id===pId);
+        p.color=normalizeHex(c);
+        placePinMesh(p);
+        refreshPinsList();
+        filterColors.add(p.color);
+        buildColorFilter();
+        debouncedSave();
+      }
+    });
+    holder.appendChild(b);
+  });
+}
+buildColorPresets();
+
+function uniquePinColors(){ const set = new Set(); pins.forEach(p=> set.add(normalizeHex(p.color))); return Array.from(set); }
+function buildColorFilter(){
+  const list = el.colorFilterList; list.innerHTML='';
+  const colors = uniquePinColors().sort();
+  if(colors.length===0){ list.innerHTML = '<div class="small">ピンがありません</div>'; return; }
+  colors.forEach(c=>{
+    const row = document.createElement('label'); row.style.display='flex'; row.style.alignItems='center'; row.style.gap='8px'; row.style.margin='4px 0';
+    const sw = document.createElement('span'); sw.style.width='14px'; sw.style.height='14px'; sw.style.borderRadius='50%'; sw.style.border='2px solid #223146'; sw.style.display='inline-block'; sw.style.background=c;
+    const cb = document.createElement('input'); cb.type='checkbox'; cb.value=c; cb.checked = (filterColors.size===0 || filterColors.has(c));
+    const name = document.createElement('span'); name.textContent = c; name.className='small';
+    row.appendChild(cb); row.appendChild(sw); row.appendChild(name);
+    cb.addEventListener('change', ()=>{
+      if(cb.checked) filterColors.add(c); else filterColors.delete(c);
+      if(filterColors.size===0){ colors.forEach(k=> filterColors.add(k)); }
+      applyPinVisibilityFilter();
+    });
+    list.appendChild(row);
+  });
+  if(filterColors.size===0){ colors.forEach(k=> filterColors.add(k)); }
+  applyPinVisibilityFilter();
+}
+function pinPassesFilter(p){ if(filterColors.size===0) return true; return filterColors.has(normalizeHex(p.color)); }
+function applyPinVisibilityFilter(){
+  pins.forEach(p=>{ if(p.mesh){ p.mesh.visible = pinPassesFilter(p); } });
+  refreshPinsList(); renderNow();
+}
+el.btnColorFilter.addEventListener('click', ()=>{
+  el.colorFilterPanel.style.display = (el.colorFilterPanel.style.display==='none' || !el.colorFilterPanel.style.display) ? 'block' : 'none';
+});
+document.getElementById('btnFilterAll').addEventListener('click', ()=>{ filterColors.clear(); uniquePinColors().forEach(c=> filterColors.add(c)); buildColorFilter(); });
+document.getElementById('btnFilterNone').addEventListener('click', ()=>{ filterColors.clear(); applyPinVisibilityFilter(); buildColorFilter(); });
+document.getElementById('btnFilterClose').addEventListener('click', ()=> el.colorFilterPanel.style.display='none');
+
+function refreshPinsList(){
+  el.pinsList.innerHTML='';
+  pins.filter(pinPassesFilter).forEach(p=>{
+    const row=document.createElement('div'); row.className='row'; row.dataset.id=p.id;
+    const left=document.createElement('div'); left.style.display='flex'; left.style.alignItems='center'; left.style.gap='8px';
+    const dot=document.createElement('div'); dot.style.width='10px'; dot.style.height='10px'; dot.style.borderRadius='999px'; dot.style.background=p.color;
+    const title=document.createElement('div'); title.className='title'; title.textContent=p.title||'(無題)';
+    const meta=document.createElement('div'); meta.className='meta'; meta.textContent=`x:${p.pos.x.toFixed(2)} y:${p.pos.y.toFixed(2)} z:${p.pos.z.toFixed(2)}`;
+    left.appendChild(dot); left.appendChild(title);
+    row.appendChild(left); row.appendChild(meta);
+    row.addEventListener('click',()=>selectPin(p.id,{fly:true}));
+    el.pinsList.appendChild(row);
+  });
+}
+
+/* ================== Load/Save pins ================== */
 function rebuildPinsScene(){
   pinGroup.children.slice().forEach(ch=> pinGroup.remove(ch));
   pins.forEach(p=> placePinMesh(p));
@@ -1118,6 +1306,11 @@ async function loadPinsFromActiveSheet(spreadsheetId){
     rebuildPinsScene();
     refreshPinsList();
     buildColorFilter();
+
+    /* ★ 同じタブのメタ情報を読み込んで適用 */
+    const meta = await loadSheetMeta(spreadsheetId);
+    await applyMaterialsFromSheet(meta.materials);
+    await applyViewerPrefs(meta.viewer);
   }catch(e){ console.error('loadPinsFromActiveSheet failed', e); }
 }
 async function upsertPinToSheet(){
@@ -1154,7 +1347,7 @@ async function deletePinFromActiveSheet(spreadsheetId, pinId){
   });
 }
 
-/* Attach / Upload */
+/* ================== Attach / Upload ================== */
 el.btnAttach.addEventListener('click', async ()=>{
   if(viewOnly) return;
   const fileInput = el.imgLocal;
@@ -1202,7 +1395,7 @@ async function driveMultipartUpload(blob, name, parents){
   return await res.json();
 }
 
-/* Folder Picker */
+/* ================== Folder Picker ================== */
 el.btnPickFromFolder.addEventListener('click', openPickerModal);
 el.btnPickerClose.addEventListener('click', ()=> el.pickerModal.style.display='none');
 el.btnPickerReload.addEventListener('click', loadFolderImages);
@@ -1282,119 +1475,98 @@ function chooseFolderImage(ref){
   upsertPinToSheet();
 }
 
-/* Material UI */
-['change','input'].forEach(ev=>{
-  ['matUnlit','matDoubleSided','matTransparent','matOpacity','matInvert','matWhiteTransparent','matThreshold','matSelect']
-    .forEach(id=> document.getElementById(id).addEventListener(ev, ()=> applyMaterialLive()));
-});
-el.matOpacity.addEventListener('input', ()=> el.matOpacityVal.textContent = parseFloat(el.matOpacity.value).toFixed(2));
-el.matThreshold.addEventListener('input', ()=> el.matThresholdVal.textContent = parseFloat(el.matThreshold.value).toFixed(2));
-
-/* Thumbs / Preview */
-function renderThumbs(p){
-  const thumbs=el.thumbs; thumbs.innerHTML='';
-  ensureArray(p.images).forEach(async (ref, idx)=>{
-    const wrap=document.createElement('div'); wrap.className='thumb'; thumbs.appendChild(wrap);
-    const img=document.createElement('img'); img.alt = 'thumb';
-    const del=document.createElement('div'); del.className='del'; del.textContent='×'; del.title='この画像をキャプションから外す';
-    del.addEventListener('click', (ev)=>{
-      if(viewOnly) return;
-      ev.stopPropagation(); const wasPreview = (el.previewImg.src && el.previewImg.src === img.src);
-      p.images.splice(idx,1); renderThumbs(p);
-      if(wasPreview){ const next = p.images[0] || null; setPreview(next, p); }
-      upsertPinToSheet();
-    });
-    wrap.appendChild(img); wrap.appendChild(del);
-    try{
-      const src = await resolveImageObjectURL(ref, {preferThumb:true});
-      img.src = src;
-      img.addEventListener('click', async ()=>{ setPreview(ref, p); });
-    }catch{
-      wrap.classList.add('error'); wrap.title = '画像を読み込めませんでした';
+/* ================== Caption Lists ================== */
+async function refreshCaptionLists(spreadsheetId){
+  const resp = await gapi.client.sheets.spreadsheets.get({
+    spreadsheetId,
+    fields: 'sheets(properties(sheetId,title,index))'
+  });
+  const sheets = (resp.result.sheets || []).map(s => s.properties);
+  el.listSelect.innerHTML = '';
+  sheets.forEach(p => {
+    const o = document.createElement('option');
+    o.value = String(p.sheetId);
+    o.textContent = p.title;
+    el.listSelect.appendChild(o);
+  });
+  let pick = sheets.find(s => s.title === 'pins') || sheets[0];
+  if (!activeSheet.sheetId) {
+    if (pick){ activeSheet = { sheetId: pick.sheetId, title: pick.title }; }
+  } else {
+    const same = sheets.find(s => s.sheetId === activeSheet.sheetId);
+    if (!same) {
+      pick = sheets.find(s => s.title === 'pins') || sheets[0];
+      if (pick){ activeSheet = { sheetId: pick.sheetId, title: pick.title }; }
+    } else {
+      activeSheet.title = same.title;
     }
-  });
+  }
+  if (activeSheet.sheetId){ el.listSelect.value = String(activeSheet.sheetId); }
+  if(!viewOnly){ ['listSelect','listNew','listDelete'].forEach(id=>document.getElementById(id).disabled=false); }
 }
-
-/* Caption bindings */
-document.getElementById('btnSavePin').addEventListener('click', ()=> upsertPinToSheet());
-el.capTitle.addEventListener('input', ()=>{ const p=pins.find(x=>x.id===selectedPinId); if(p){ p.title=el.capTitle.value; refreshPinsList(); upsertPinToSheet(); updateViewerPreviewForPin(p); } });
-el.capBody.addEventListener('input',  ()=>{ const p=pins.find(x=>x.id===selectedPinId); if(p){ p.body=el.capBody.value; upsertPinToSheet(); updateViewerPreviewForPin(p); } });
-
-/* Utility */
-function buildColorPresets(){
-  const holder = el.colorPresets; holder.innerHTML='';
-  ['#ff6b6b','#ffd166','#06d6a0','#118ab2','#ef476f','#b5179e','#4361ee','#4cc9f0','#ff9f1c'].forEach(c=>{
-    const b=document.createElement('button');
-    b.style.width='18px'; b.style.height='18px';
-    b.style.borderRadius='999px'; b.style.border='2px solid #223146';
-    b.style.background=c; b.title=c;
-    b.addEventListener('click',()=>{
-      currentColor=c;
-      const pId=selectedPinId;
-      if(pId){
-        const p=pins.find(x=>x.id===pId);
-        p.color=normalizeHex(c);
-        placePinMesh(p);
-        refreshPinsList();
-        filterColors.add(p.color);
-        buildColorFilter();
-        debouncedSave();
-      }
-    });
-    holder.appendChild(b);
-  });
-}
-buildColorPresets();
-
-function uniquePinColors(){ const set = new Set(); pins.forEach(p=> set.add(normalizeHex(p.color))); return Array.from(set); }
-function buildColorFilter(){
-  const list = el.colorFilterList; list.innerHTML='';
-  const colors = uniquePinColors().sort();
-  if(colors.length===0){ list.innerHTML = '<div class="small">ピンがありません</div>'; return; }
-  colors.forEach(c=>{
-    const row = document.createElement('label'); row.style.display='flex'; row.style.alignItems='center'; row.style.gap='8px'; row.style.margin='4px 0';
-    const sw = document.createElement('span'); sw.style.width='14px'; sw.style.height='14px'; sw.style.borderRadius='50%'; sw.style.border='2px solid #223146'; sw.style.display='inline-block'; sw.style.background=c;
-    const cb = document.createElement('input'); cb.type='checkbox'; cb.value=c; cb.checked = (filterColors.size===0 || filterColors.has(c));
-    const name = document.createElement('span'); name.textContent = c; name.className='small';
-    row.appendChild(cb); row.appendChild(sw); row.appendChild(name);
-    cb.addEventListener('change', ()=>{
-      if(cb.checked) filterColors.add(c); else filterColors.delete(c);
-      if(filterColors.size===0){ colors.forEach(k=> filterColors.add(k)); }
-      applyPinVisibilityFilter();
-    });
-    list.appendChild(row);
-  });
-  if(filterColors.size===0){ colors.forEach(k=> filterColors.add(k)); }
-  applyPinVisibilityFilter();
-}
-function pinPassesFilter(p){ if(filterColors.size===0) return true; return filterColors.has(normalizeHex(p.color)); }
-function applyPinVisibilityFilter(){
-  pins.forEach(p=>{ if(p.mesh){ p.mesh.visible = pinPassesFilter(p); } });
-  refreshPinsList(); renderNow();
-}
-el.btnColorFilter.addEventListener('click', ()=>{
-  el.colorFilterPanel.style.display = (el.colorFilterPanel.style.display==='none' || !el.colorFilterPanel.style.display) ? 'block' : 'none';
+el.listSelect.addEventListener('change', async (e)=>{
+  const spreadsheetId = extractSpreadsheetId(el.inputSheet.value.trim());
+  if(!spreadsheetId) return;
+  const sheetId = Number(e.target.value);
+  const title = e.target.options[e.target.selectedIndex].textContent;
+  activeSheet = { sheetId, title };
+  await loadPinsFromActiveSheet(spreadsheetId);
+  toast(`キャプションリストを切替: ${title}`);
 });
-document.getElementById('btnFilterAll').addEventListener('click', ()=>{ filterColors.clear(); uniquePinColors().forEach(c=> filterColors.add(c)); buildColorFilter(); });
-document.getElementById('btnFilterNone').addEventListener('click', ()=>{ filterColors.clear(); applyPinVisibilityFilter(); buildColorFilter(); });
-document.getElementById('btnFilterClose').addEventListener('click', ()=> el.colorFilterPanel.style.display='none');
-
-function refreshPinsList(){
-  el.pinsList.innerHTML='';
-  pins.filter(pinPassesFilter).forEach(p=>{
-    const row=document.createElement('div'); row.className='row'; row.dataset.id=p.id;
-    const left=document.createElement('div'); left.style.display='flex'; left.style.alignItems='center'; left.style.gap='8px';
-    const dot=document.createElement('div'); dot.style.width='10px'; dot.style.height='10px'; dot.style.borderRadius='999px'; dot.style.background=p.color;
-    const title=document.createElement('div'); title.className='title'; title.textContent=p.title||'(無題)';
-    const meta=document.createElement('div'); meta.className='meta'; meta.textContent=`x:${p.pos.x.toFixed(2)} y:${p.pos.y.toFixed(2)} z:${p.pos.z.toFixed(2)}`;
-    left.appendChild(dot); left.appendChild(title);
-    row.appendChild(left); row.appendChild(meta);
-    row.addEventListener('click',()=>selectPin(p.id,{fly:true}));
-    el.pinsList.appendChild(row);
+el.listNew.addEventListener('click', async ()=>{
+  if(viewOnly) return;
+  const spreadsheetId = extractSpreadsheetId(el.inputSheet.value.trim());
+  if(!spreadsheetId) return;
+  const title = prompt('新しいキャプションリスト名を入力', `pins_${Date.now().toString().slice(-5)}`);
+  if(!title) return;
+  const add = await gapi.client.sheets.spreadsheets.batchUpdate({
+    spreadsheetId,
+    resource:{ requests:[ { addSheet:{ properties:{ title } } } ] }
   });
-}
+  const newSheetId = add.result.replies[0].addSheet.properties.sheetId;
+  await gapi.client.sheets.spreadsheets.values.update({
+    spreadsheetId, range: `${title}!A1`,
+    valueInputOption:'RAW',
+    resource:{ values: [[ 'pin_id','title','body','x','y','z','color','images','updated_at' ]] }
+  });
+  await refreshCaptionLists(spreadsheetId);
+  activeSheet = { sheetId: newSheetId, title };
+  el.listSelect.value = String(newSheetId);
+  pins = []; selectedPinId = null; rebuildPinsScene(); refreshPinsList();
 
-/* Load GLB */
+  /* 新しいタブにはデフォルトのメタを書き込む */
+  await saveSheetMeta(spreadsheetId, {
+    materials: {version:1, items:[]},
+    viewer: {version:1, bgColor: el.bgColor.value || '#0a0f16', projection: usingOrtho ? 'orthographic' : 'perspective' }
+  });
+
+  toast(`新しいリストを作成: ${title}`);
+});
+el.listDelete.addEventListener('click', async ()=>{
+  if(viewOnly) return;
+  const spreadsheetId = extractSpreadsheetId(el.inputSheet.value.trim());
+  if(!spreadsheetId || !activeSheet.sheetId) return;
+  const g = await gapi.client.sheets.spreadsheets.get({ spreadsheetId, fields: 'sheets(properties(sheetId))' });
+  const count = (g.result.sheets||[]).length;
+  if(count <= 1){ alert('最後のシートは削除できません'); return; }
+  if(!confirm(`キャプションリスト「${activeSheet.title}」を削除しますか？`)) return;
+  await gapi.client.sheets.spreadsheets.batchUpdate({
+    spreadsheetId,
+    resource:{ requests:[ { deleteSheet:{ sheetId: activeSheet.sheetId } } ] }
+  });
+  await refreshCaptionLists(spreadsheetId);
+  await loadPinsFromActiveSheet(spreadsheetId);
+  toast('リストを削除しました');
+});
+
+/* ================== Buttons ================== */
+el.viewFront.addEventListener('click', ()=> { setNamedView('front'); debouncedSaveMaterials(); });
+el.viewBack.addEventListener('click',  ()=> { setNamedView('back');  debouncedSaveMaterials(); });
+el.viewLeft.addEventListener('click',  ()=> { setNamedView('left');  debouncedSaveMaterials(); });
+el.viewRight.addEventListener('click', ()=> { setNamedView('right'); debouncedSaveMaterials(); });
+el.viewTop.addEventListener('click',   ()=> { setNamedView('top');   debouncedSaveMaterials(); });
+el.viewBottom.addEventListener('click',()=> { setNamedView('bottom');debouncedSaveMaterials(); });
+
 el.btnLoad.addEventListener('click', ()=>{
   const fid = extractDriveFileId(el.inputGLB.value.trim()) || el.inputGLB.value.trim();
   el.inputGLB.value = fid; loadGLBByFileId(fid);
@@ -1448,6 +1620,7 @@ el.btnDeletePin.addEventListener('click', async ()=>{
   if(spreadsheetId){ try{ await deletePinFromActiveSheet(spreadsheetId, p.id); }catch(e){ console.error(e); } }
 });
 
+/* ================== GLB Load ================== */
 async function loadGLBByFileId(fileId){
   if(!accessToken){ alert('先にサインインしてください'); return; }
   if(!fileId){ alert('GLBの fileId または共有URLを入力してください'); return; }
@@ -1493,7 +1666,7 @@ async function loadGLBByFileId(fileId){
   }
 }
 
-/* Entry */
+/* ================== Entry ================== */
 viewerInit();
 </script>
 </body>
