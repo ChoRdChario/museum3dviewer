@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>LociMyu v0.11.0</title>
+  <title>LociMyu v0.12.0</title>
   <link rel="icon" href='data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><circle cx="32" cy="32" r="28" fill="%230b0f14"/><text x="32" y="39" font-size="28" text-anchor="middle" fill="%2353b7ff" font-family="Arial">L</text></svg>'>
   <style>
     :root{ --bg:#0b0f14; --panel:#121922; --text:#e6edf3; --accent:#53b7ff; --muted:#8fa3bd; --radius:16px; --shadow:0 10px 30px rgba(0,0,0,.3);}
@@ -22,7 +22,7 @@
     body.hide-right .main{grid-template-columns:1fr}
     body.hide-right #rightCaption{display:none}
     #leftToolbox{display:flex}
-    body.viewonly #leftToolbox{display:none} /* 閲覧モードは左を隠して広く */
+    body.viewonly #leftToolbox{display:none}
     .panel{background:#121922;border:1px solid #1e2837;border-radius:var(--radius);overflow:hidden;display:flex;flex-direction:column;min-height:0}
     .panel h3{margin:0;padding:10px 12px;border-bottom:1px solid #203049;background:#0f1722;font-size:.95rem;font-weight:600}
     .panel .body{padding:10px;overflow:auto}
@@ -69,7 +69,7 @@
     .modal .cell.error{opacity:.5;pointer-events:none}
     .modal .cell img{width:100%;height:110px;object-fit:cover;border-radius:8px}
     .modal .cell .tag{font-size:.75rem;color:#a9b8cf}
-    /* 右上プレビュー：本文も表示 */
+    /* 右上プレビュー */
     #viewerPreview{position:absolute;top:10px;right:10px;max-height:60%;border:1px solid #203049;border-radius:8px;background:#0a0f16cc;backdrop-filter: blur(2px);display:grid;grid-template-rows:auto 1fr auto;gap:0;resize:both;overflow:hidden;min-width:260px;min-height:200px}
     #viewerPreview.hidden{display:none}
     #previewControls{position:sticky;top:0;background:#0a0f16f0;border-bottom:1px solid #203049;padding:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;z-index:1}
@@ -112,7 +112,7 @@
   </header>
 
   <div class="main">
-    <!-- 左：ツール（閲覧モードでは非表示） -->
+    <!-- 左：ツール -->
     <section class="panel" id="leftToolbox">
       <h3>ツールボックス（マテリアル & カメラ & ピン）</h3>
       <div class="body">
@@ -152,7 +152,7 @@
           <button id="viewTop">上面</button>
           <button id="viewBottom">下面</button>
         </div>
-        <div class="field"><label>平行投影</label><input id="projOrtho" type="checkbox" disabled><span class="small">（今後対応）</span></div>
+        <div class="field"><label>平行投影</label><input id="projOrtho" type="checkbox"><span class="small">ON: Orthographic</span></div>
         <div class="field"><label>背景色</label><input id="bgColor" type="color" value="#0a0f16"></div>
       </div>
     </section>
@@ -171,7 +171,7 @@
         <circle id="connDot" r="3" cx="0" cy="0" style="display:none"/>
       </svg>
 
-      <!-- 右上プレビュー：タイトル＋本文を表示 -->
+      <!-- 右上プレビュー -->
       <div id="viewerPreview" class="hidden">
         <div id="previewControls">
           <span class="small">倍率</span>
@@ -190,18 +190,16 @@
       <div class="hud"><div class="chip" id="modeLabel">Orbit</div></div>
     </section>
 
-    <!-- 右：キャプション（閲覧モードでもピン一覧＆色フィルタは表示） -->
+    <!-- 右：キャプション -->
     <section class="panel" id="rightCaption">
       <h3>キャプション</h3>
       <div class="body">
         <div class="flex" style="justify-content:space-between;align-items:center;margin-bottom:6px">
           <div class="small">ピン一覧</div>
           <div class="flex" style="gap:6px;align-items:center">
-            <!-- キャプションリスト（シート） -->
             <select id="listSelect" disabled></select>
             <button id="listNew" disabled>新規</button>
             <button id="listDelete" disabled>削除</button>
-            <!-- 色フィルタ -->
             <div class="dropdown">
               <button id="btnColorFilter" disabled>色フィルタ ▾</button>
               <div id="colorFilterPanel" class="dropdown-panel" hidden>
@@ -221,7 +219,6 @@
         <div id="pinsList" class="list" style="margin:8px 0 14px"></div>
         <div id="noSelection">ピンを選択してください</div>
 
-        <!-- 編集UI（閲覧モードでは非表示＆無効化） -->
         <div id="editor" class="hidden">
           <div class="grid2">
             <label>タイトル<input id="capTitle" type="text" placeholder="タイトル" /></label>
@@ -280,17 +277,12 @@
 <script async defer src="https://apis.google.com/js/api.js" onload="onGapi()"></script>
 
 <script type="module">
-/* =========================
-      Imports
-========================= */
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js';
 
-/* =========================
-      Google OAuth / API
-========================= */
+/* ============ Google Auth ============ */
 const CLIENT_ID = '595200751510-ncahnf7edci6b9925becn5to49r6cguv.apps.googleusercontent.com';
 const API_KEY   = 'AIzaSyCUnTCr5yWUWPdEXST9bKP1LpgawU5rIbI';
 const DISCOVERY_DOCS = [
@@ -304,9 +296,7 @@ const SCOPES = [
   'https://www.googleapis.com/auth/spreadsheets'
 ].join(' ');
 
-/* =========================
-      Element refs
-========================= */
+/* ============ Element refs ============ */
 const el = {
   gate: document.getElementById('gate'),
   statusLabel: document.getElementById('statusLabel'),
@@ -384,13 +374,11 @@ const el = {
 };
 const viewOnly = new URLSearchParams(location.search).get('view') === '1';
 
-/* =========================
-      State
-========================= */
+/* ============ State & Utils ============ */
 let tokenClient; let gapiInited=false; let gisInited=false; let accessToken=null;
 
 let renderer, scene, camera, controls, tcontrols, pinGroup, loader, currentModel=null;
-let perspCam, orthoCam;
+let perspCam, orthoCam; let usingOrtho=false;
 let raycaster = new THREE.Raycaster(), pointer = new THREE.Vector2();
 
 let addPinMode=false, currentColor='#ff6b6b';
@@ -405,9 +393,6 @@ let filterColors = new Set();
 
 let activeSheet = { sheetId:null, title:'pins' };
 
-/* =========================
-      Utils
-========================= */
 const debounce = (fn,ms)=>{ let t; return (...a)=>{ clearTimeout(t); t=setTimeout(()=>fn(...a),ms); }; };
 const debouncedSave = debounce(()=> upsertPinToSheet(), 500);
 const PRESET_COLORS = ['#ff6b6b','#ffd166','#06d6a0','#118ab2','#ef476f','#f72585','#b5179e','#7209b7','#3a0ca3','#4361ee','#4cc9f0'];
@@ -416,9 +401,7 @@ function toast(msg){ el.statusLabel.textContent=msg; setTimeout(()=> el.statusLa
 function ensureArray(x){ return Array.isArray(x)?x:[]; }
 function normalizeHex(c){ const t = new THREE.Color(c); return '#' + t.getHexString(); }
 
-/* =========================
-      HEIC helpers
-========================= */
+/* ============ HEIC helpers ============ */
 function loadScriptOnce(src){
   return new Promise((resolve,reject)=>{
     const s=document.createElement('script'); s.src=src; s.async=true; s.onload=resolve; s.onerror=reject;
@@ -445,9 +428,7 @@ function upscaleThumbnailUrl(u, size=2048){
   }catch{ return u.replace(/=s(\d+)/, `=s${size}`); }
 }
 
-/* =========================
-      Google init
-========================= */
+/* ============ Google init ============ */
 const waitGoogle = setInterval(()=>{
   if(!gapiInited && window.__flags.gapi && window.gapi){ gapi.load('client', initGapiClient); }
   if(!gisInited && window.__flags.gis){ gisInited = true; maybeReady(); }
@@ -468,16 +449,13 @@ function maybeReady(){
       accessToken = resp.access_token;
       if(accessToken){
         el.gate.style.display = 'none';
-        // 編集系は通常モードのみ解放、閲覧モードは閲覧に必要な最低限だけ解放
-        const toEnableCommon = ['btnLoad','btnTogglePins','btnColorFilter'];
+        const toEnableCommon = ['btnLoad','btnTogglePins','btnColorFilter','projOrtho'];
         toEnableCommon.forEach(id=> document.getElementById(id).removeAttribute('disabled'));
         if(!viewOnly){
           ['btnAddPin','btnGizmo','btnUndo','btnSavePin','btnDeletePin','btnAttach','btnPickFromFolder','listSelect','listNew','listDelete']
             .forEach(id=> document.getElementById(id).removeAttribute('disabled'));
         }else{
-          // 閲覧モード：UIを広く
           document.body.classList.add('viewonly');
-          // 右側は「ピン一覧＋フィルタ」を表示、エディタは非表示固定
           el.rightEditor.classList.add('hidden');
         }
         el.statusLabel.textContent = 'Ready';
@@ -490,9 +468,7 @@ function maybeReady(){
   });
 }
 
-/* =========================
-      Drive helpers
-========================= */
+/* ============ Drive helpers ============ */
 async function driveFileMeta(fileId){
   const meta = await gapi.client.drive.files.get({
     fileId, fields:'id,name,mimeType,fileExtension,hasThumbnail,thumbnailLink,parents',
@@ -527,9 +503,7 @@ function extractSpreadsheetId(input){
 }
 function makeDriveRef(id, mime){ return `drive:${id}|${mime||''}`; }
 
-/* =========================
-      Viewer
-========================= */
+/* ============ Viewer ============ */
 let rendererFrameReq = null;
 function viewerInit(){
   renderer = new THREE.WebGLRenderer({ canvas: el.viewerCanvas, antialias:true });
@@ -538,7 +512,7 @@ function viewerInit(){
   perspCam = new THREE.PerspectiveCamera(60, 2, 0.1, 5000);
   perspCam.position.set(2.8,1.6,3.6);
   orthoCam = new THREE.OrthographicCamera(-2,2,2,-2, -5000, 5000);
-  camera = perspCam;
+  camera = perspCam; usingOrtho=false;
 
   const hemi = new THREE.HemisphereLight(0xffffff, 0x223355, 0.6); scene.add(hemi);
   const dir = new THREE.DirectionalLight(0xffffff, 1.0); dir.position.set(3,5,4); scene.add(dir);
@@ -549,15 +523,17 @@ function viewerInit(){
   loader = new GLTFLoader();
   window.addEventListener('resize', resize);
   el.viewerCanvas.addEventListener('pointerdown', onPointerDown);
+  el.projOrtho.addEventListener('change', ()=> toggleProjection(el.projOrtho.checked));
   resize();
   const loop = ()=>{ renderer.render(scene,camera); updateConnector(); rendererFrameReq=requestAnimationFrame(loop); };
   loop();
 }
 function buildControls(){
   if(controls){ controls.dispose(); }
-  controls = new OrbitControls(camera, el.viewerCanvas); controls.target.set(0,1,0); controls.update();
+  controls = new OrbitControls(camera, el.viewerCanvas);
+  controls.target.set(0,1,0); controls.update();
   controls.addEventListener('change', updateConnector);
-  if(tcontrols){ scene.remove(tcontrols); }
+  if(tcontrols){ scene.remove(tcontrols); tcontrols.dispose?.(); }
   tcontrols = new TransformControls(camera, el.viewerCanvas);
   tcontrols.setSize(0.9); tcontrols.setSpace('world');
   tcontrols.addEventListener('dragging-changed', e=>{ controls.enabled = !e.value; });
@@ -574,7 +550,12 @@ function resize(){
   const w = el.viewerCanvas.clientWidth || el.viewerCanvas.parentElement.clientWidth;
   const h = el.viewerCanvas.clientHeight || el.viewerCanvas.parentElement.clientHeight;
   renderer.setSize(w,h,false);
-  if(camera.isPerspectiveCamera){ camera.aspect = w/h; }
+  if(camera.isPerspectiveCamera){
+    camera.aspect = w/h;
+  }else{
+    // keep ortho frustum consistent with aspect
+    fitOrthoFrustum();
+  }
   camera.updateProjectionMatrix(); updateConnector();
 }
 function renderNow(){ renderer.render(scene,camera); updateConnector(); }
@@ -594,10 +575,38 @@ function fitToScene(){
   camera.position.copy(center.clone().addScaledVector(dirv, dist));
   controls.target.copy(center); controls.update(); updateConnector();
 }
+function fitOrthoFrustum(){
+  const { radius } = sceneBounds();
+  const w = el.viewerCanvas.clientWidth || 1;
+  const h = el.viewerCanvas.clientHeight || 1;
+  const aspect = w/h;
+  const size = radius*1.8;
+  orthoCam.left = -size*aspect;
+  orthoCam.right = size*aspect;
+  orthoCam.top = size;
+  orthoCam.bottom = -size;
+  orthoCam.updateProjectionMatrix();
+}
+function toggleProjection(useOrtho){
+  usingOrtho = !!useOrtho;
+  const { center } = sceneBounds();
+  // 現在視点の方向を維持
+  const dir = camera.position.clone().sub(controls.target).normalize();
+  const dist = camera.position.distanceTo(controls.target);
 
-/* =========================
-      Pins & Connector
-========================= */
+  if(usingOrtho){
+    fitOrthoFrustum();
+    orthoCam.position.copy(controls.target.clone().addScaledVector(dir, dist));
+    camera = orthoCam;
+  }else{
+    perspCam.position.copy(controls.target.clone().addScaledVector(dir, Math.max(dist, 0.1)));
+    camera = perspCam;
+  }
+  buildControls(); // カメラ変更に追従するため再構築
+  renderNow();
+}
+
+/* ============ Pins & Connector ============ */
 function addUndo(u){ undoStack.push(u); }
 function createPin(pos,color){
   const id=`p_${Date.now()}_${Math.random().toString(36).slice(2,7)}`;
@@ -662,9 +671,7 @@ function updateConnector(){
   el.connDot.style.display = 'block';
 }
 
-/* =========================
-      Preview（本文も表示）
-========================= */
+/* ============ Preview ============ */
 let previewZoom = 1.0;
 function applyPreviewZoom(){ el.previewInner.style.transform = `scale(${previewZoom})`; }
 el.previewZoom.addEventListener('input', ()=>{ previewZoom = parseFloat(el.previewZoom.value)||1; el.previewZoomVal.textContent = previewZoom.toFixed(2) + '×'; applyPreviewZoom(); });
@@ -689,9 +696,7 @@ async function setPreview(ref, p){
 }
 function updateViewerPreviewForPin(p){ setPreview(p && p.images && p.images[0] ? p.images[0] : null, p); }
 
-/* =========================
-      Image resolve
-========================= */
+/* ============ Image resolve ============ */
 function parseImageRef(ref){
   if(typeof ref === 'string' && /^(blob:|data:|https?:)/i.test(ref)){ return { kind:'url', url: ref }; }
   if(typeof ref === 'string' && ref.startsWith('drive:')){
@@ -744,10 +749,7 @@ async function resolveImageObjectURL(ref, {preferThumb=false}={}){
   return outUrl;
 }
 
-/* =========================
-      Color presets & filter
-========================= */
-const PRESET_COLORS = ['#ff6b6b','#ffd166','#06d6a0','#118ab2','#ef476f','#f72585','#b5179e','#7209b7','#3a0ca3','#4361ee','#4cc9f0'];
+/* ============ Color presets & filter ============ */
 function buildColorPresets(){
   const holder = document.getElementById('colorPresets'); holder.innerHTML='';
   PRESET_COLORS.forEach(c=>{
@@ -769,7 +771,6 @@ function buildColorPresets(){
 buildColorPresets();
 
 function uniquePinColors(){ const set = new Set(); pins.forEach(p=> set.add(normalizeHex(p.color))); return Array.from(set); }
-let filterColors = new Set();
 function buildColorFilter(){
   const list = el.colorFilterList; list.innerHTML='';
   const colors = uniquePinColors().sort();
@@ -800,9 +801,7 @@ el.btnFilterAll.addEventListener('click', ()=>{ filterColors.clear(); uniquePinC
 el.btnFilterNone.addEventListener('click', ()=>{ filterColors.clear(); applyPinVisibilityFilter(); buildColorFilter(); });
 el.btnFilterClose.addEventListener('click', ()=> el.colorFilterPanel.hidden = true);
 
-/* =========================
-      Pins UI
-========================= */
+/* ============ Pins UI ============ */
 function refreshPinsList(){
   el.pinsList.innerHTML='';
   pins.filter(pinPassesFilter).forEach(p=>{
@@ -830,7 +829,7 @@ el.btnViewOnly.addEventListener('click', ()=>{
 el.btnWide.addEventListener('click', ()=>{
   document.body.classList.toggle('hide-right');
   el.btnWide.textContent = document.body.classList.contains('hide-right') ? '📋 ピン一覧を表示' : '📺 ビューア拡大';
-  setTimeout(updateConnector, 50);
+  setTimeout(()=>{ resize(); updateConnector(); }, 50);
 });
 el.btnTogglePins.addEventListener('click', ()=>{
   pinGroup.visible = !pinGroup.visible;
@@ -865,9 +864,7 @@ el.btnDeletePin.addEventListener('click', async ()=>{
   if(spreadsheetId){ try{ await deletePinFromActiveSheet(spreadsheetId, p.id); }catch(e){ console.error(e); } }
 });
 
-/* =========================
-      GLB load
-========================= */
+/* ============ GLB load ============ */
 async function loadGLBByFileId(fileId){
   if(!accessToken){ alert('先にサインインしてください'); return; }
   if(!fileId){ alert('GLBの fileId または共有URLを入力してください'); return; }
@@ -914,9 +911,7 @@ async function loadGLBByFileId(fileId){
   }
 }
 
-/* =========================
-      Materials
-========================= */
+/* ============ Materials ============ */
 function collectMaterials(){
   materials=[]; materialMap.clear();
   const set = new Set();
@@ -1066,9 +1061,7 @@ async function applyMaterialLive(){
   renderNow();
 }
 
-/* =========================
-      Camera
-========================= */
+/* ============ Camera named views ============ */
 el.viewFront.addEventListener('click', ()=> setNamedView('front'));
 el.viewBack.addEventListener('click', ()=> setNamedView('back'));
 el.viewLeft.addEventListener('click', ()=> setNamedView('left'));
@@ -1088,18 +1081,18 @@ function setNamedView(name){
     case 'bottom':dir.set(0,-d,0); break;
   }
   camera.position.copy(center.clone().add(dir));
-  controls.target.copy(center); controls.update(); renderNow();
+  controls.target.copy(center);
+  if(camera.isOrthographicCamera) fitOrthoFrustum();
+  controls.update(); renderNow();
 }
 el.bgColor.addEventListener('input', ()=>{ scene.background = new THREE.Color(el.bgColor.value); renderNow(); });
 
-/* =========================
-      Sheets: 作成/検出（同階層）
-========================= */
+/* ============ Sheets: 同階層検出/作成 ============ */
 async function findOrCreateSpreadsheetInGlbFolder(glbMeta){
   if (!glbMeta || !glbMeta.id) throw new Error('GLBメタデータがありません');
   const parents = glbMeta.parents || [];
 
-  // 1) 同フォルダ内で appProperties.lociFor === GLB id のスプレッドシートを検索
+  // 同階層で appProperties.lociFor = GLB id を検索
   let found = null;
   for (const parent of (parents.length ? parents : ['root'])) {
     const q = [
@@ -1109,17 +1102,14 @@ async function findOrCreateSpreadsheetInGlbFolder(glbMeta){
       `appProperties has { key='lociFor' and value='${glbMeta.id}' }`
     ].join(' and ');
     const resp = await gapi.client.drive.files.list({
-      q,
-      fields: 'files(id,name)',
-      includeItemsFromAllDrives: true,
-      supportsAllDrives: true,
-      pageSize: 10,
+      q, fields: 'files(id,name)',
+      includeItemsFromAllDrives: true, supportsAllDrives: true, pageSize: 10,
     });
     if (resp.result.files?.length) { found = resp.result.files[0]; break; }
   }
   if (found) return found.id;
 
-  // 2) 見つからなければ Drive API で同フォルダに新規作成
+  // 見つからなければ作成
   const name = `LociMyu - ${glbMeta.name}`;
   const create = await gapi.client.drive.files.create({
     resource: {
@@ -1133,7 +1123,7 @@ async function findOrCreateSpreadsheetInGlbFolder(glbMeta){
   });
   const spreadsheetId = create.result.id;
 
-  // 初期化（Sheets API）
+  // 初期化
   await gapi.client.sheets.spreadsheets.batchUpdate({
     spreadsheetId,
     resource: {
@@ -1151,9 +1141,7 @@ async function findOrCreateSpreadsheetInGlbFolder(glbMeta){
   return spreadsheetId;
 }
 
-/* =========================
-      Caption Lists (sheets tabs)
-========================= */
+/* ============ Caption Lists (tabs) ============ */
 async function refreshCaptionLists(spreadsheetId){
   const resp = await gapi.client.sheets.spreadsheets.get({
     spreadsheetId,
@@ -1167,13 +1155,12 @@ async function refreshCaptionLists(spreadsheetId){
     o.textContent = p.title;
     el.listSelect.appendChild(o);
   });
-  // 既定は pins、無ければ先頭
   let pick = sheets.find(s => s.title === 'pins') || sheets[0];
   if (!activeSheet.sheetId) {
     if (pick){ activeSheet = { sheetId: pick.sheetId, title: pick.title }; }
   } else {
     const same = sheets.find(s => s.sheetId === activeSheet.sheetId);
-    if (!same) { // 前回のが消えた場合
+    if (!same) {
       pick = sheets.find(s => s.title === 'pins') || sheets[0];
       if (pick){ activeSheet = { sheetId: pick.sheetId, title: pick.title }; }
     } else {
@@ -1229,9 +1216,7 @@ el.listDelete.addEventListener('click', async ()=>{
   toast('リストを削除しました');
 });
 
-/* =========================
-      Load/Save pins to sheet
-========================= */
+/* ============ Load/Save pins ============ */
 function rebuildPinsScene(){
   pinGroup.children.slice().forEach(ch=> pinGroup.remove(ch));
   pins.forEach(p=> placePinMesh(p));
@@ -1268,7 +1253,7 @@ async function loadPinsFromActiveSheet(spreadsheetId){
   }catch(e){ console.error('loadPinsFromActiveSheet failed', e); }
 }
 async function upsertPinToSheet(){
-  if(viewOnly) return; // 閲覧モードでは書き込みなし
+  if(viewOnly) return;
   const spreadsheetId = extractSpreadsheetId(el.inputSheet.value.trim()); if(!spreadsheetId) return;
   const p = pins.find(x=>x.id===selectedPinId) || pins[pins.length-1]; if(!p) return;
   try{
@@ -1301,9 +1286,7 @@ async function deletePinFromActiveSheet(spreadsheetId, pinId){
   });
 }
 
-/* =========================
-      Attach / Upload
-========================= */
+/* ============ Attach / Upload ============ */
 el.btnAttach.addEventListener('click', async ()=>{
   const file = el.imgLocal.files?.[0]; const p = pins.find(x=>x.id===selectedPinId);
   if(!file || !p){ alert('画像とピンを確認してください'); return; }
@@ -1344,9 +1327,7 @@ async function driveMultipartUpload(blob, name, parents){
   return await res.json();
 }
 
-/* =========================
-      Folder Picker
-========================= */
+/* ============ Folder Picker ============ */
 el.btnPickFromFolder.addEventListener('click', openPickerModal);
 el.btnPickerClose.addEventListener('click', ()=> el.pickerModal.hidden = true);
 el.btnPickerReload.addEventListener('click', loadFolderImages);
@@ -1426,9 +1407,7 @@ function chooseFolderImage(ref){
   upsertPinToSheet();
 }
 
-/* =========================
-      Materials UI events
-========================= */
+/* ============ Materials UI events ============ */
 ['change','input'].forEach(ev=>{
   ['matUnlit','matDoubleSided','matTransparent','matOpacity','matInvert','matWhiteTransparent','matThreshold','matSelect']
     .forEach(id=> document.getElementById(id).addEventListener(ev, ()=> applyMaterialLive()));
@@ -1436,9 +1415,7 @@ function chooseFolderImage(ref){
 el.matOpacity.addEventListener('input', ()=> el.matOpacityVal.textContent = parseFloat(el.matOpacity.value).toFixed(2));
 el.matThreshold.addEventListener('input', ()=> el.matThresholdVal.textContent = parseFloat(el.matThreshold.value).toFixed(2));
 
-/* =========================
-      Thumbs / Preview binding
-========================= */
+/* ============ Thumbs / Preview binding ============ */
 function renderThumbs(p){
   const thumbs=el.thumbs; thumbs.innerHTML='';
   ensureArray(p.images).forEach(async (ref, idx)=>{
@@ -1462,16 +1439,12 @@ function renderThumbs(p){
   });
 }
 
-/* =========================
-      Bindings
-========================= */
+/* ============ Bindings ============ */
 document.getElementById('btnSavePin').addEventListener('click', ()=> upsertPinToSheet());
 el.capTitle.addEventListener('input', ()=>{ const p=pins.find(x=>x.id===selectedPinId); if(p){ p.title=el.capTitle.value; refreshPinsList(); upsertPinToSheet(); updateViewerPreviewForPin(p); } });
 el.capBody.addEventListener('input',  ()=>{ const p=pins.find(x=>x.id===selectedPinId); if(p){ p.body=el.capBody.value; upsertPinToSheet(); updateViewerPreviewForPin(p); } });
 
-/* =========================
-      Entry
-========================= */
+/* ============ Entry ============ */
 viewerInit();
 
 </script>
