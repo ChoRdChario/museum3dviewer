@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>LociMyu v0.9.20</title>
+  <title>LociMyu v0.9.21</title>
   <link rel="icon" href='data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><circle cx="32" cy="32" r="28" fill="%230b0f14"/><text x="32" y="39" font-size="28" text-anchor="middle" fill="%2353b7ff" font-family="Arial">L</text></svg>'>
   <style>
     :root{ --bg:#0b0f14; --panel:#121922; --text:#e6edf3; --accent:#53b7ff; --muted:#8fa3bd; --radius:16px; --shadow:0 10px 30px rgba(0,0,0,.3);}
@@ -252,7 +252,6 @@
   function onGapi(){ window.__flags.gapi = true; }
   function onGis(){  window.__flags.gis  = true; }
 </script>
-<!-- ★ ここを修正：() を付与して確実にコールする -->
 <script async defer src="https://accounts.google.com/gsi/client" onload="onGis()"></script>
 <script async defer src="https://apis.google.com/js/api.js" onload="onGapi()"></script>
 
@@ -539,7 +538,7 @@ function selectPin(id,{fly}={}){
   const p=pins.find(x=>x.id===id);
   if(!p){ el.rightEditor.classList.add('hidden'); el.rightNoSel.classList.remove('hidden'); updateViewerPreviewForPin(null); return; }
   el.rightNoSel.classList.add('hidden'); el.rightEditor.classList.remove('hidden');
-  document.getElementById('capTitle').value=p.title||'';
+  document.getElementById('capTitle').value=p.title||';
   document.getElementById('capBody').value=p.body||'';
   renderThumbs(p);
   updateViewerPreviewForPin(p);
@@ -975,7 +974,7 @@ function setNamedView(name){
 el.projOrtho.addEventListener('change', ()=> alert('Orthographicは将来対応予定（現状は透視投影のみ）'));
 el.bgColor.addEventListener('input', ()=>{ scene.background = new THREE.Color(el.bgColor.value); renderNow(); });
 
-/* ---------- Sheets（ここでのみ定義！） ---------- */
+/* ---------- Sheets ---------- */
 async function ensureSpreadsheet(glbName){
   const title = `LociMyu - ${glbName}`;
   const resp = await gapi.client.sheets.spreadsheets.create({
@@ -1057,7 +1056,7 @@ async function loadFolderImages(){
       const files = resp.result.files || [];
       for(const f of files){
         const id = f.id;
-        the const mime = f.mimeType || '';
+        const mime = f.mimeType || '';
         const isHeic = isHeicMimeOrExt(mime, f.fileExtension);
         const ref = makeDriveRef(id, mime);
         const cell = document.createElement('div'); cell.className='cell';
@@ -1067,7 +1066,7 @@ async function loadFolderImages(){
 
         let usedFallback = false;
         if(f.hasThumbnail && f.thumbnailLink){
-          const sep = f.thumbnailLink includes('?') ? '&' : '?';
+          const sep = f.thumbnailLink.includes('?') ? '&' : '?';
           img.src = f.thumbnailLink + sep + 'access_token=' + encodeURIComponent(accessToken);
           img.onerror = async ()=>{
             usedFallback = true;
