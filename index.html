@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>LociMyu v0.9.22</title>
+  <title>LociMyu v0.9.23</title>
   <link rel="icon" href='data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><circle cx="32" cy="32" r="28" fill="%230b0f14"/><text x="32" y="39" font-size="28" text-anchor="middle" fill="%2353b7ff" font-family="Arial">L</text></svg>'>
   <style>
     :root{ --bg:#0b0f14; --panel:#121922; --text:#e6edf3; --accent:#53b7ff; --muted:#8fa3bd; --radius:16px; --shadow:0 10px 30px rgba(0,0,0,.3);}
@@ -363,6 +363,10 @@ let matOriginals=new WeakMap();
 const imageBlobCache = new Map();
 let filterColors = new Set();
 
+/* ---------- Helpers ---------- */
+const debounce = (fn,ms)=>{ let t; return (...a)=>{ clearTimeout(t); t=setTimeout(()=>fn(...a),ms); }; };
+const debouncedSave = debounce(()=> upsertPinToSheet(), 500);
+
 /* ---------- heic2any フォールバック ---------- */
 function loadScriptOnce(src){
   return new Promise((resolve,reject)=>{
@@ -376,6 +380,19 @@ async function ensureHeic2any(){
   if(typeof window.heic2any === 'function') return true;
   try{ await loadScriptOnce('https://unpkg.com/heic2any@0.0.5/dist/heic2any.min.js'); }catch{}
   return (typeof window.heic2any === 'function');
+}
+function upscaleThumbnailUrl(u, size=2048){
+  if(!u) return u;
+  try{
+    const url = new URL(u);
+    // Google Drive thumbnailLink often ends with ...=s220 or has "s220"
+    url.search = url.search.replace(/(\bs=)(\d+)/, `$1${size}`);
+    url.pathname = url.pathname.replace(/=s(\d+)/, `=s${size}`);
+    if(!/(\bs=)/.test(url.search) && !/=s\d+/.test(url.pathname)){
+      url.searchParams.set('s', String(size));
+    }
+    return url.toString();
+  }catch{ return u.replace(/=s(\d+)/, `=s${size}`); }
 }
 
 /* ---------- Google init ---------- */
@@ -447,7 +464,9 @@ function buildControls(){
   tcontrols.addEventListener('change', ()=>{
     if(!selectedPinId || !tcontrols.object || !tcontrols.visible) return;
     const p=pins.find(x=>x.id===selectedPinId); if(!p) return;
-    p.pos.copy(tcontrols.object.position); renderNow();
+    p.pos.copy(tcontrols.object.position);
+    renderNow();
+    debouncedSave();
   });
   scene.add(tcontrols); tcontrols.visible=false; tcontrols.enabled=false;
 }
@@ -523,6 +542,7 @@ function createPin(pos,color){
   const id=`p_${Date.now()}_${Math.random().toString(36).slice(2,7)}`;
   const pin={id,pos:pos.clone(),color:normalizeHex(color||'#ff6b6b'),title:'',body:'',images:[],mesh:null};
   pins.push(pin); placePinMesh(pin); refreshPinsList(); selectPin(id); addUndo({type:'add',id}); buildColorFilter();
+  upsertPinToSheet();
 }
 function placePinMesh(pin){
   if(pin.mesh){ pinGroup.remove(pin.mesh); pin.mesh.geometry.dispose(); pin.mesh.material.dispose(); pin.mesh=null; }
@@ -607,7 +627,7 @@ async function setPreview(ref, cap){
 }
 function updateViewerPreviewForPin(p){ setPreview(p && p.images && p.images[0] ? p.images[0] : null, p?.title); }
 
-/* ---------- Image resolve（URL厳格判定 + HEIC対応） ---------- */
+/* ---------- Image resolve（URL厳格判定 + HEIC高解像度） ---------- */
 function parseImageRef(ref){
   if(typeof ref === 'string' && /^(blob:|data:|https?:)/i.test(ref)){
     return { kind:'url', url: ref };
@@ -642,20 +662,24 @@ async function resolveImageObjectURL(ref, {preferThumb=false}={}){
   if(isHeic){
     const ok = await ensureHeic2any();
     if(ok){
+      // 1) 元ファイルを取得してフル解像度でJPEG化
       const blob = await driveFileFetchBlob(meta.id);
-      const jpegBlob = await window.heic2any({ blob, toType:'image/jpeg', quality:0.9 });
+      const jpegBlob = await window.heic2any({ blob, toType:'image/jpeg', quality:1.0 });
       const jpg = Array.isArray(jpegBlob) ? jpegBlob[0] : jpegBlob;
       outUrl = URL.createObjectURL(jpg);
     }else if(meta.hasThumbnail && meta.thumbnailLink){
-      const sep = meta.thumbnailLink.includes('?') ? '&' : '?';
-      outUrl = meta.thumbnailLink + sep + 'access_token=' + encodeURIComponent(accessToken);
+      // 2) 代替：Driveのサムネ解像度を最大まで引き上げ
+      const hi = upscaleThumbnailUrl(meta.thumbnailLink, 2048);
+      const sep = hi.includes('?') ? '&' : '?';
+      outUrl = hi + sep + 'access_token=' + encodeURIComponent(accessToken);
     }else{
       throw new Error('HEIC preview unavailable (no heic2any & no thumbnailLink)');
     }
   }else{
     if(preferThumb && meta.hasThumbnail && meta.thumbnailLink){
-      const sep = meta.thumbnailLink.includes('?') ? '&' : '?';
-      outUrl = meta.thumbnailLink + sep + 'access_token=' + encodeURIComponent(accessToken);
+      const hi = upscaleThumbnailUrl(meta.thumbnailLink, 1024);
+      const sep = hi.includes('?') ? '&' : '?';
+      outUrl = hi + sep + 'access_token=' + encodeURIComponent(accessToken);
     }else{
       const blob = await driveFileFetchBlob(meta.id);
       outUrl = URL.createObjectURL(blob);
@@ -672,12 +696,23 @@ function buildColorPresets(){
   const holder = document.getElementById('colorPresets'); holder.innerHTML='';
   PRESET_COLORS.forEach(c=>{
     const b=document.createElement('button'); b.style.width='18px'; b.style.height='18px'; b.style.borderRadius='999px'; b.style.border='2px solid #223146'; b.style.background=c; b.title=c;
-    b.addEventListener('click',()=>{ currentColor=c; const pId=selectedPinId; if(pId){ const p=pins.find(x=>x.id===pId); p.color=normalizeHex(c); placePinMesh(p); refreshPinsList(); } });
+    b.addEventListener('click',()=>{
+      currentColor=c;
+      const pId=selectedPinId;
+      if(pId){
+        const p=pins.find(x=>x.id===pId);
+        p.color=normalizeHex(c);
+        placePinMesh(p);
+        refreshPinsList();
+        debouncedSave();
+      }
+    });
     holder.appendChild(b);
   });
 }
 buildColorPresets();
 
+/* ---------- Filter ---------- */
 function uniquePinColors(){ const set = new Set(); pins.forEach(p=> set.add(normalizeHex(p.color))); return Array.from(set); }
 function buildColorFilter(){
   const list = el.colorFilterList; list.innerHTML='';
@@ -754,7 +789,19 @@ el.btnGizmo.addEventListener('click', ()=>{
 });
 el.btnUndo.addEventListener('click', ()=>{
   const last = undoStack.pop(); if(!last) return;
-  if(last.type==='add'){ const idx = pins.findIndex(p=>p.id===last.id); if(idx>=0){ const pin = pins[idx]; if(pin.mesh) pinGroup.remove(pin.mesh); pins.splice(idx,1); refreshPinsList(); renderNow(); } }
+  if(last.type==='add'){ const idx = pins.findIndex(p=>p.id===last.id); if(idx>=0){ const pin = pins[idx]; if(pin.mesh) pinGroup.remove(pin.mesh); pins.splice(idx,1); refreshPinsList(); renderNow(); upsertPinToSheet(); } }
+});
+el.btnDeletePin.addEventListener('click', async ()=>{
+  const p = pins.find(x=>x.id===selectedPinId); if(!p) return;
+  const sheetId = extractSpreadsheetId(el.inputSheet.value.trim());
+  // local remove
+  if(p.mesh) pinGroup.remove(p.mesh);
+  pins = pins.filter(x=>x.id!==p.id);
+  selectedPinId = null;
+  refreshPinsList(); updateViewerPreviewForPin(null); el.rightEditor.classList.add('hidden'); el.rightNoSel.classList.remove('hidden');
+  renderNow();
+  // sheet remove
+  if(sheetId){ try{ await deletePinFromSheet(sheetId, p.id); }catch(e){ console.error(e); } }
 });
 
 /* ---------- GLB load ---------- */
@@ -988,6 +1035,19 @@ async function ensureSpreadsheet(glbName){
   });
   return spreadsheetId;
 }
+async function deletePinFromSheet(spreadsheetId, pinId){
+  const col = await gapi.client.sheets.spreadsheets.values.get({ spreadsheetId, range: 'pins!A:A' });
+  const rows = col.result.values || [];
+  let rowIndex = -1;
+  for(let i=0;i<rows.length;i++){ if(rows[i][0]===pinId){ rowIndex=i; break; } }
+  if(rowIndex<0) return;
+  await gapi.client.sheets.spreadsheets.batchUpdate({
+    spreadsheetId,
+    resource:{
+      requests:[{ deleteDimension:{ range:{ sheetId:0, dimension:'ROWS', startIndex:rowIndex, endIndex:rowIndex+1 } } }]
+    }
+  });
+}
 
 /* ---------- Attach / Upload ---------- */
 document.getElementById('btnAttach').addEventListener('click', async ()=>{
@@ -1001,6 +1061,7 @@ document.getElementById('btnAttach').addEventListener('click', async ()=>{
     renderThumbs(p);
     setPreview(ref, p.title||'');
     toast('画像をアップロードしました');
+    upsertPinToSheet();
   }catch(err){ console.error(err); alert('画像アップロードに失敗しました'); }
 });
 function sanitizeName(n){ return n.replace(/[^\p{Letter}\p{Number}\s._-]+/gu,'_'); }
@@ -1009,7 +1070,7 @@ async function toUploadableBlob(file){
   if(ext==='heic' || ext==='heif'){
     const ok = await ensureHeic2any();
     if(!ok) throw new Error('heic2any unavailable');
-    const jpegBlob = await window.heic2any({ blob:file, toType:'image/jpeg', quality:0.9 });
+    const jpegBlob = await window.heic2any({ blob:file, toType:'image/jpeg', quality:0.95 });
     return Array.isArray(jpegBlob) ? jpegBlob[0] : jpegBlob;
   }
   return file;
@@ -1066,8 +1127,9 @@ async function loadFolderImages(){
 
         let usedFallback = false;
         if(f.hasThumbnail && f.thumbnailLink){
-          const sep = f.thumbnailLink.includes('?') ? '&' : '?';
-          img.src = f.thumbnailLink + sep + 'access_token=' + encodeURIComponent(accessToken);
+          const hi = upscaleThumbnailUrl(f.thumbnailLink, isHeic? 1024 : 512);
+          const sep = hi.includes('?') ? '&' : '?';
+          img.src = hi + sep + 'access_token=' + encodeURIComponent(accessToken);
           img.onerror = async ()=>{
             usedFallback = true;
             try{
@@ -1106,6 +1168,7 @@ function chooseFolderImage(ref){
   p.images = ensureArray(p.images); p.images.push(ref);
   renderThumbs(p);
   setPreview(ref, p.title||'');
+  upsertPinToSheet();
 }
 
 /* ---------- Materials UI events ---------- */
@@ -1127,6 +1190,7 @@ function renderThumbs(p){
       ev.stopPropagation(); const wasPreview = (el.previewImg.src && el.previewImg.src === img.src);
       p.images.splice(idx,1); renderThumbs(p);
       if(wasPreview){ const next = p.images[0] || null; setPreview(next, p.title||''); }
+      upsertPinToSheet();
     });
     wrap.appendChild(img); wrap.appendChild(del);
     try{
@@ -1144,7 +1208,7 @@ function renderThumbs(p){
 /* ---------- Save (Sheets) ---------- */
 async function upsertPinToSheet(){
   const sheetId = extractSpreadsheetId(el.inputSheet.value.trim()); if(!sheetId) return;
-  const p = pins.find(x=>x.id===selectedPinId); if(!p) return;
+  const p = pins.find(x=>x.id===selectedPinId) || pins[pins.length-1]; if(!p) return;
   try{
     const col = await gapi.client.sheets.spreadsheets.values.get({ spreadsheetId: sheetId, range: 'pins!A:A' });
     const rows = col.result.values || [];
