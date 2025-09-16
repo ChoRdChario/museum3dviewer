@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>LociMyu v0.9.21</title>
+  <title>LociMyu v0.9.22</title>
   <link rel="icon" href='data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><circle cx="32" cy="32" r="28" fill="%230b0f14"/><text x="32" y="39" font-size="28" text-anchor="middle" fill="%2353b7ff" font-family="Arial">L</text></svg>'>
   <style>
     :root{ --bg:#0b0f14; --panel:#121922; --text:#e6edf3; --accent:#53b7ff; --muted:#8fa3bd; --radius:16px; --shadow:0 10px 30px rgba(0,0,0,.3);}
@@ -538,8 +538,8 @@ function selectPin(id,{fly}={}){
   const p=pins.find(x=>x.id===id);
   if(!p){ el.rightEditor.classList.add('hidden'); el.rightNoSel.classList.remove('hidden'); updateViewerPreviewForPin(null); return; }
   el.rightNoSel.classList.add('hidden'); el.rightEditor.classList.remove('hidden');
-  document.getElementById('capTitle').value=p.title||';
-  document.getElementById('capBody').value=p.body||'';
+  document.getElementById('capTitle').value = p.title || '';
+  document.getElementById('capBody').value  = p.body  || '';
   renderThumbs(p);
   updateViewerPreviewForPin(p);
   if(fly){ const {x,y,z}=p.pos; controls.target.set(x,y,z); controls.update(); }
