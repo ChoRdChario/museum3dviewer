@@ -3,26 +3,23 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>LociMyu v0.12.0</title>
+  <title>LociMyu</title>
   <link rel="icon" href='data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><circle cx="32" cy="32" r="28" fill="%230b0f14"/><text x="32" y="39" font-size="28" text-anchor="middle" fill="%2353b7ff" font-family="Arial">L</text></svg>'>
   <style>
-    :root{ --bg:#0b0f14; --panel:#121922; --text:#e6edf3; --accent:#53b7ff; --muted:#8fa3bd; --radius:16px; --shadow:0 10px 30px rgba(0,0,0,.3);}
+    :root{ --bg:#0b0f14; --panel:#121922; --text:#e6edf3; --accent:#53b7ff; --radius:16px; --shadow:0 10px 30px rgba(0,0,0,.3);}
     html,body{height:100%}
     body{margin:0;background:var(--bg);color:var(--text);font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial;}
     .app{display:grid;grid-template-rows:auto 1fr;height:100vh}
     header{display:flex;gap:.75rem;align-items:center;padding:10px 12px;background:linear-gradient(180deg,#0e1520,#0b0f14);border-bottom:1px solid #1e2837}
     .pill{background:rgba(255,255,255,.06);padding:6px 10px;border-radius:999px;border:1px solid rgba(255,255,255,.08);font-weight:700}
-    input[type=text], select, textarea{background:#0f1722;border:1px solid #203049;color:var(--text);border-radius:10px;padding:8px 10px;min-width:260px}
+    input[type=text], select, textarea{background:#0f1722;border:1px solid #203049;color:var(--text);border-radius:10px;padding:8px 10px;min-width:240px}
     button{background:#152133;color:var(--text);border:1px solid #223146;border-radius:10px;padding:8px 12px;cursor:pointer}
     button[disabled]{opacity:.5;cursor:not-allowed}
     button:hover{background:#1a2b45}
     .accent{border-color:#2c82c9}
     .main{display:grid;grid-template-columns:360px 1fr 420px;gap:10px;padding:10px;height:calc(100vh - 58px)}
-    body.viewonly .main{grid-template-columns:1fr 420px}
     body.hide-right .main{grid-template-columns:1fr}
-    body.hide-right #rightCaption{display:none}
     #leftToolbox{display:flex}
-    body.viewonly #leftToolbox{display:none}
     .panel{background:#121922;border:1px solid #1e2837;border-radius:var(--radius);overflow:hidden;display:flex;flex-direction:column;min-height:0}
     .panel h3{margin:0;padding:10px 12px;border-bottom:1px solid #203049;background:#0f1722;font-size:.95rem;font-weight:600}
     .panel .body{padding:10px;overflow:auto}
@@ -46,29 +43,18 @@
     .row .title{font-weight:600}
     .row .meta{color:#a9b8cf;font-size:.85rem}
     .row:hover{background:#132035}
-    .flex{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
     .small{font-size:.85rem;color:#a9b8cf}
-    .grid2{display:grid;grid-template-columns:1fr auto;gap:8px;align-items:center}
+    .flex{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+    .field{display:flex;gap:8px;align-items:center;margin:8px 0}
+    .field label{min-width:120px;color:#a9b8cf}
+    input[type="range"]{width:160px}
+    .viewgrid{display:grid;grid-template-columns:repeat(6,1fr);gap:6px}
     .thumbs{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
     .thumb{position:relative}
     .thumb img{width:72px;height:72px;object-fit:cover;border-radius:10px;border:1px solid #223146;display:block}
     .thumb .del{position:absolute;top:-6px;right:-6px;width:20px;height:20px;border-radius:50%;background:#1e2a3b;border:1px solid #334966;color:#e8f0ff;line-height:18px;text-align:center;font-weight:700;cursor:pointer}
     .thumb .del:hover{background:#2a3b55}
-    .hidden{display:none !important}
-    .field{display:flex;gap:8px;align-items:center;margin:8px 0}
-    .field label{min-width:120px;color:#a9b8cf}
-    input[type="range"]{width:160px}
-    .subtle{opacity:.8}
-    .viewgrid{display:grid;grid-template-columns:repeat(6,1fr);gap:6px}
-    .modal{position:fixed;inset:0;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;z-index:40}
-    .modal[hidden]{display:none}
-    .modal .box{width:min(90vw,980px);max-height:80vh;background:#0f1722;border:1px solid #203049;border-radius:16px;overflow:hidden;display:flex;flex-direction:column}
-    .modal header{display:flex;justify-content:space-between;align-items:center;padding:10px 12px;background:#0c131d;border-bottom:1px solid #203049}
-    .modal .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:10px;padding:10px;overflow:auto}
-    .modal .cell{background:#0c1118;border:1px solid #223146;border-radius:12px;padding:8px;cursor:pointer;display:flex;flex-direction:column;gap:6px}
-    .modal .cell.error{opacity:.5;pointer-events:none}
-    .modal .cell img{width:100%;height:110px;object-fit:cover;border-radius:8px}
-    .modal .cell .tag{font-size:.75rem;color:#a9b8cf}
+
     /* 右上プレビュー */
     #viewerPreview{position:absolute;top:10px;right:10px;max-height:60%;border:1px solid #203049;border-radius:8px;background:#0a0f16cc;backdrop-filter: blur(2px);display:grid;grid-template-rows:auto 1fr auto;gap:0;resize:both;overflow:hidden;min-width:260px;min-height:200px}
     #viewerPreview.hidden{display:none}
@@ -79,15 +65,36 @@
     #viewerPreview .cap{border-top:1px solid #203049;background:#0a0f16f0;display:grid;grid-template-rows:auto auto;gap:4px;padding:6px 8px}
     #capTitleLine{font-weight:700}
     #capBodyLine{font-size:.85rem;color:#c9d7ea;max-height:8em;overflow:auto}
-    @media (max-width:1100px){ .main{grid-template-columns:1fr; grid-template-rows: 360px 1fr 480px} }
-    .dropdown{position:relative;display:inline-block}
-    .dropdown-panel{position:absolute;top:100%;right:0;background:#0f1722;border:1px solid #203049;border-radius:10px;box-shadow:var(--shadow);padding:10px;min-width:220px;z-index:15}
-    .dropdown-panel[hidden]{display:none}
-    .color-row{display:flex;align-items:center;gap:8px;margin:4px 0}
-    .swatch{width:14px;height:14px;border-radius:50%;border:2px solid #223146;display:inline-block}
+
+    /* 閲覧モード：パネルは表示。編集 UI を除去（見た目上） */
+    body.viewonly .field:has(#matSelect),
+    body.viewonly .field:has(#matUnlit),
+    body.viewonly .field:has(#matDoubleSided),
+    body.viewonly .field:has(#matTransparent),
+    body.viewonly .field:has(#matOpacity),
+    body.viewonly .field:has(#matInvert),
+    body.viewonly .field:has(#matWhiteTransparent),
+    body.viewonly .field:has(#matThreshold),
+    body.viewonly .field:has(#bgColor){display:none}
+    body.viewonly #btnSavePin,
+    body.viewonly #btnDeletePin,
+    body.viewonly #btnAttach,
+    body.viewonly #btnPickFromFolder,
+    body.viewonly #imgLocal,
+    body.viewonly #autosaveTip,
+    body.viewonly #listNew,
+    body.viewonly #listDelete,
+    body.viewonly #btnAddPin,
+    body.viewonly #btnGizmo,
+    body.viewonly #btnUndo,
+    body.viewonly #colorPicker{display:none}
+
+    @media (max-width:1100px){
+      .main{grid-template-columns:1fr; grid-template-rows: 360px 1fr 480px}
+    }
   </style>
 
-  <!-- three.js (ESM) -->
+  <!-- three.js (ES Modules) -->
   <script type="importmap">
   { "imports": {
       "three": "https://unpkg.com/three@0.157.0/build/three.module.js",
@@ -116,17 +123,29 @@
     <section class="panel" id="leftToolbox">
       <h3>ツールボックス（マテリアル & カメラ & ピン）</h3>
       <div class="body">
-        <div class="small subtle">Shift + クリック でピンを配置</div>
+        <div class="small">Shift + クリック でピンを配置（編集モードのみ）</div>
         <div class="flex" style="margin-top:6px;margin-bottom:6px">
           <button id="btnAddPin" disabled>＋ ピン追加モード</button>
           <button id="btnGizmo" disabled>ギズモ: OFF</button>
           <button id="btnUndo" disabled>Ctrl+Z</button>
+          <button id="btnTogglePins" disabled>ピン表示: ON</button>
         </div>
 
         <div class="flex" style="align-items:center">
           <div class="small">ピン色:</div>
           <div id="colorPresets" class="flex"></div>
           <input id="colorPicker" type="color" value="#ff6b6b" />
+          <button id="btnColorFilter" disabled>色フィルタ ▾</button>
+        </div>
+
+        <div id="colorFilterPanel" class="panel body" style="display:none;margin-top:6px;padding:8px">
+          <div class="small" style="margin-bottom:6px">表示する色を選択（複数可）</div>
+          <div id="colorFilterList"></div>
+          <div class="flex" style="justify-content:flex-end;margin-top:8px">
+            <button id="btnFilterAll">すべて</button>
+            <button id="btnFilterNone">なし</button>
+            <button id="btnFilterClose">閉じる</button>
+          </div>
         </div>
 
         <hr style="border-color:#203049;border-width:1px 0;margin:12px 0">
@@ -134,11 +153,11 @@
         <div class="small" style="margin:4px 0 6px">マテリアル編集</div>
         <div class="field"><label>対象</label><select id="matSelect"><option value="__all__">（全マテリアル）</option></select></div>
         <div class="field"><label>Unlit</label><input id="matUnlit" type="checkbox"><span class="small">明暗なし</span></div>
-        <div class="field"><label>裏面描画</label><input id="matDoubleSided" type="checkbox"><span class="small">DoubleSide</span></div>
-        <div class="field"><label>透明</label><input id="matTransparent" type="checkbox"><span class="small">ONで不透明度適用</span></div>
+        <div class="field"><label>裏面描画</label><input id="matDoubleSided" type="checkbox"></div>
+        <div class="field"><label>透明</label><input id="matTransparent" type="checkbox"></div>
         <div class="field"><label>不透明度</label><input id="matOpacity" type="range" min="0" max="1" step="0.01" value="1"><span id="matOpacityVal" class="small">1.00</span></div>
-        <div class="field"><label>テクスチャ反転</label><input id="matInvert" type="checkbox"><span class="small">色を反転</span></div>
-        <div class="field"><label>白→透明</label><input id="matWhiteTransparent" type="checkbox"><span class="small">白ほど透明</span></div>
+        <div class="field"><label>テクスチャ反転</label><input id="matInvert" type="checkbox"></div>
+        <div class="field"><label>白→透明</label><input id="matWhiteTransparent" type="checkbox"></div>
         <div class="field"><label>閾値（αTest）</label><input id="matThreshold" type="range" min="0" max="1" step="0.01" value="0"><span id="matThresholdVal" class="small">0.00</span></div>
 
         <hr style="border-color:#203049;border-width:1px 0;margin:12px 0">
@@ -200,19 +219,6 @@
             <select id="listSelect" disabled></select>
             <button id="listNew" disabled>新規</button>
             <button id="listDelete" disabled>削除</button>
-            <div class="dropdown">
-              <button id="btnColorFilter" disabled>色フィルタ ▾</button>
-              <div id="colorFilterPanel" class="dropdown-panel" hidden>
-                <div class="small" style="margin-bottom:6px">表示する色を選択（複数可）</div>
-                <div id="colorFilterList"></div>
-                <div class="flex" style="justify-content:flex-end;margin-top:8px">
-                  <button id="btnFilterAll">すべて</button>
-                  <button id="btnFilterNone">なし</button>
-                  <button id="btnFilterClose">閉じる</button>
-                </div>
-              </div>
-            </div>
-            <button id="btnTogglePins" disabled>ピン表示: ON</button>
           </div>
         </div>
 
@@ -220,22 +226,19 @@
         <div id="noSelection">ピンを選択してください</div>
 
         <div id="editor" class="hidden">
-          <div class="grid2">
-            <label>タイトル<input id="capTitle" type="text" placeholder="タイトル" /></label>
-            <button id="btnSavePin" class="accent" disabled>保存（Sheets）</button>
-          </div>
-          <label>本文<textarea id="capBody" rows="6" placeholder="キャプション本文"></textarea></label>
+          <div class="field" style="width:100%"><label>タイトル</label><input id="capTitle" type="text" placeholder="タイトル" style="flex:1"/></div>
+          <div class="field" style="width:100%"><label>本文</label><textarea id="capBody" rows="6" placeholder="キャプション本文" style="flex:1"></textarea></div>
           <div class="flex">
             <input id="imgLocal" type="file" accept="image/*,.heic,.HEIC" />
             <button id="btnAttach" class="accent" disabled>画像を添付してDriveに保存</button>
+            <button id="btnPickFromFolder" class="accent" disabled>📁 フォルダから選択</button>
           </div>
-          <div class="flex"><button id="btnPickFromFolder" class="accent" disabled>📁 フォルダから選択</button></div>
           <div class="thumbs" id="thumbs"></div>
           <div class="flex" style="justify-content:space-between;margin-top:8px;margin-bottom:8px">
+            <button id="btnSavePin" class="accent" disabled>保存（Sheets）</button>
             <button id="btnDeletePin" style="border-color:#5a1f26;color:#ffb4b4" disabled>ピン削除</button>
             <span class="small" id="autosaveTip">入力は数秒後に自動保存</span>
           </div>
-          <div class="small subtle">※ ピン選択でビューが自動で寄ります</div>
         </div>
       </div>
     </section>
@@ -243,16 +246,14 @@
 </div>
 
 <!-- フォルダ画像ピッカー -->
-<div id="pickerModal" class="modal" hidden>
-  <div class="box">
-    <header>
-      <strong>フォルダ内の画像を選択</strong>
-      <div style="display:flex;gap:8px;align-items:center">
-        <button id="btnPickerReload">再読み込み</button>
-        <button id="btnPickerClose">閉じる</button>
-      </div>
-    </header>
-    <div id="pickerGrid" class="grid"></div>
+<div id="pickerModal" class="signin-gate" style="display:none;background:rgba(0,0,0,.55)">
+  <div class="card" style="width:min(90vw,980px);max-height:80vh;overflow:hidden">
+    <h1 style="margin:0 0 6px">フォルダ内の画像を選択</h1>
+    <div class="flex" style="justify-content:flex-end;margin-bottom:8px">
+      <button id="btnPickerReload">再読み込み</button>
+      <button id="btnPickerClose">閉じる</button>
+    </div>
+    <div id="pickerGrid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:10px;overflow:auto;max-height:60vh"></div>
   </div>
 </div>
 
@@ -263,12 +264,13 @@
     <p>本ツールは Google Drive / Google Sheets を使用します。先にサインインしてください。</p>
     <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
       <button id="btnSignIn" class="accent" style="font-weight:700">🔐 Sign in with Google</button>
-      <span class="meta" style="opacity:.8">OAuth2 (Drive.file / Sheets)</span>
+      <span class="small" style="opacity:.8">OAuth2 (Drive.file / Sheets)</span>
     </div>
   </div>
 </div>
 
 <script>
+  /* Google loader flags */
   window.__flags = { gapi:false, gis:false };
   function onGapi(){ window.__flags.gapi = true; }
   function onGis(){  window.__flags.gis  = true; }
@@ -282,7 +284,7 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js';
 
-/* ============ Google Auth ============ */
+/* ================== Google Auth ================== */
 const CLIENT_ID = '595200751510-ncahnf7edci6b9925becn5to49r6cguv.apps.googleusercontent.com';
 const API_KEY   = 'AIzaSyCUnTCr5yWUWPdEXST9bKP1LpgawU5rIbI';
 const DISCOVERY_DOCS = [
@@ -296,7 +298,7 @@ const SCOPES = [
   'https://www.googleapis.com/auth/spreadsheets'
 ].join(' ');
 
-/* ============ Element refs ============ */
+/* ================== Elements ================== */
 const el = {
   gate: document.getElementById('gate'),
   statusLabel: document.getElementById('statusLabel'),
@@ -332,11 +334,16 @@ const el = {
   btnSignIn: document.getElementById('btnSignIn'),
   colorPresets: document.getElementById('colorPresets'),
   colorPicker: document.getElementById('colorPicker'),
+  btnColorFilter: document.getElementById('btnColorFilter'),
+  colorFilterPanel: document.getElementById('colorFilterPanel'),
+  colorFilterList: document.getElementById('colorFilterList'),
+  btnFilterAll: document.getElementById('btnFilterAll'),
+  btnFilterNone: document.getElementById('btnFilterNone'),
+  btnFilterClose: document.getElementById('btnFilterClose'),
   imgLocal: document.getElementById('imgLocal'),
   btnAttach: document.getElementById('btnAttach'),
   btnPickFromFolder: document.getElementById('btnPickFromFolder'),
   thumbs: document.getElementById('thumbs'),
-  autosaveTip: document.getElementById('autosaveTip'),
   matSelect: document.getElementById('matSelect'),
   matUnlit: document.getElementById('matUnlit'),
   matDoubleSided: document.getElementById('matDoubleSided'),
@@ -362,19 +369,14 @@ const el = {
   pickerGrid: document.getElementById('pickerGrid'),
   btnPickerReload: document.getElementById('btnPickerReload'),
   btnPickerClose: document.getElementById('btnPickerClose'),
-  btnColorFilter: document.getElementById('btnColorFilter'),
-  colorFilterPanel: document.getElementById('colorFilterPanel'),
-  colorFilterList: document.getElementById('colorFilterList'),
-  btnFilterAll: document.getElementById('btnFilterAll'),
-  btnFilterNone: document.getElementById('btnFilterNone'),
-  btnFilterClose: document.getElementById('btnFilterClose'),
   listSelect: document.getElementById('listSelect'),
   listNew: document.getElementById('listNew'),
   listDelete: document.getElementById('listDelete'),
 };
+
 const viewOnly = new URLSearchParams(location.search).get('view') === '1';
 
-/* ============ State & Utils ============ */
+/* ================== State & Utils ================== */
 let tokenClient; let gapiInited=false; let gisInited=false; let accessToken=null;
 
 let renderer, scene, camera, controls, tcontrols, pinGroup, loader, currentModel=null;
@@ -401,7 +403,7 @@ function toast(msg){ el.statusLabel.textContent=msg; setTimeout(()=> el.statusLa
 function ensureArray(x){ return Array.isArray(x)?x:[]; }
 function normalizeHex(c){ const t = new THREE.Color(c); return '#' + t.getHexString(); }
 
-/* ============ HEIC helpers ============ */
+/* ================== HEIC helpers ================== */
 function loadScriptOnce(src){
   return new Promise((resolve,reject)=>{
     const s=document.createElement('script'); s.src=src; s.async=true; s.onload=resolve; s.onerror=reject;
@@ -428,7 +430,7 @@ function upscaleThumbnailUrl(u, size=2048){
   }catch{ return u.replace(/=s(\d+)/, `=s${size}`); }
 }
 
-/* ============ Google init ============ */
+/* ================== Google init ================== */
 const waitGoogle = setInterval(()=>{
   if(!gapiInited && window.__flags.gapi && window.gapi){ gapi.load('client', initGapiClient); }
   if(!gisInited && window.__flags.gis){ gisInited = true; maybeReady(); }
@@ -449,16 +451,20 @@ function maybeReady(){
       accessToken = resp.access_token;
       if(accessToken){
         el.gate.style.display = 'none';
-        const toEnableCommon = ['btnLoad','btnTogglePins','btnColorFilter','projOrtho'];
-        toEnableCommon.forEach(id=> document.getElementById(id).removeAttribute('disabled'));
+        const enableCommon = ['btnLoad','btnTogglePins','btnColorFilter','projOrtho'];
+        enableCommon.forEach(id=> document.getElementById(id).removeAttribute('disabled'));
         if(!viewOnly){
           ['btnAddPin','btnGizmo','btnUndo','btnSavePin','btnDeletePin','btnAttach','btnPickFromFolder','listSelect','listNew','listDelete']
             .forEach(id=> document.getElementById(id).removeAttribute('disabled'));
-        }else{
-          document.body.classList.add('viewonly');
-          el.rightEditor.classList.add('hidden');
         }
-        el.statusLabel.textContent = 'Ready';
+        el.statusLabel.textContent = viewOnly ? '閲覧モード' : 'Ready';
+        enforceViewOnlyMode();
+        // URLクエリに fileId / sheetId があれば自動投入
+        const qs = new URLSearchParams(location.search);
+        const fid = qs.get('fileId') || '';
+        const sid = qs.get('sheetId') || '';
+        if(fid) el.inputGLB.value = fid;
+        if(sid) el.inputSheet.value = sid;
       }
     }
   });
@@ -468,7 +474,21 @@ function maybeReady(){
   });
 }
 
-/* ============ Drive helpers ============ */
+/* ▼ 閲覧モードの安全化：UI/操作の無効化（パネルは表示のまま） */
+function enforceViewOnlyMode(){
+  if (!viewOnly) return;
+  document.body.classList.add('viewonly');
+  el.capTitle.readOnly = true;
+  el.capBody.readOnly  = true;
+  [
+    'btnSavePin','btnDeletePin','btnAttach','btnPickFromFolder',
+    'imgLocal','listNew','listDelete','btnAddPin','btnGizmo','btnUndo',
+    'matSelect','matUnlit','matDoubleSided','matTransparent','matOpacity',
+    'matInvert','matWhiteTransparent','matThreshold','bgColor','colorPicker'
+  ].forEach(id => document.getElementById(id)?.setAttribute('disabled','true'));
+}
+
+/* ================== Drive helpers ================== */
 async function driveFileMeta(fileId){
   const meta = await gapi.client.drive.files.get({
     fileId, fields:'id,name,mimeType,fileExtension,hasThumbnail,thumbnailLink,parents',
@@ -503,7 +523,7 @@ function extractSpreadsheetId(input){
 }
 function makeDriveRef(id, mime){ return `drive:${id}|${mime||''}`; }
 
-/* ============ Viewer ============ */
+/* ================== Viewer ================== */
 let rendererFrameReq = null;
 function viewerInit(){
   renderer = new THREE.WebGLRenderer({ canvas: el.viewerCanvas, antialias:true });
@@ -553,7 +573,6 @@ function resize(){
   if(camera.isPerspectiveCamera){
     camera.aspect = w/h;
   }else{
-    // keep ortho frustum consistent with aspect
     fitOrthoFrustum();
   }
   camera.updateProjectionMatrix(); updateConnector();
@@ -590,10 +609,8 @@ function fitOrthoFrustum(){
 function toggleProjection(useOrtho){
   usingOrtho = !!useOrtho;
   const { center } = sceneBounds();
-  // 現在視点の方向を維持
   const dir = camera.position.clone().sub(controls.target).normalize();
   const dist = camera.position.distanceTo(controls.target);
-
   if(usingOrtho){
     fitOrthoFrustum();
     orthoCam.position.copy(controls.target.clone().addScaledVector(dir, dist));
@@ -602,13 +619,14 @@ function toggleProjection(useOrtho){
     perspCam.position.copy(controls.target.clone().addScaledVector(dir, Math.max(dist, 0.1)));
     camera = perspCam;
   }
-  buildControls(); // カメラ変更に追従するため再構築
+  buildControls();
   renderNow();
 }
 
-/* ============ Pins & Connector ============ */
+/* ================== Pins & Connector ================== */
 function addUndo(u){ undoStack.push(u); }
 function createPin(pos,color){
+  if(viewOnly) return;
   const id=`p_${Date.now()}_${Math.random().toString(36).slice(2,7)}`;
   const pin={id,pos:pos.clone(),color:normalizeHex(color||'#ff6b6b'),title:'',body:'',images:[],mesh:null};
   pins.push(pin); placePinMesh(pin); refreshPinsList(); selectPin(id); addUndo({type:'add',id}); buildColorFilter();
@@ -628,7 +646,7 @@ function selectPin(id,{fly}={}){
   const p=pins.find(x=>x.id===id);
   if(!p){ el.rightEditor.classList.add('hidden'); el.rightNoSel.classList.remove('hidden'); updateViewerPreviewForPin(null); return; }
   el.rightNoSel.classList.add('hidden');
-  if(!viewOnly){ el.rightEditor.classList.remove('hidden'); }
+  if(!viewOnly){ el.rightEditor.classList.remove('hidden'); } else { el.rightEditor.classList.remove('hidden'); } // 閲覧でも内容は見せる
   el.capTitle.value = p.title || '';
   el.capBody.value  = p.body  || '';
   renderThumbs(p);
@@ -671,7 +689,7 @@ function updateConnector(){
   el.connDot.style.display = 'block';
 }
 
-/* ============ Preview ============ */
+/* ================== Preview ================== */
 let previewZoom = 1.0;
 function applyPreviewZoom(){ el.previewInner.style.transform = `scale(${previewZoom})`; }
 el.previewZoom.addEventListener('input', ()=>{ previewZoom = parseFloat(el.previewZoom.value)||1; el.previewZoomVal.textContent = previewZoom.toFixed(2) + '×'; applyPreviewZoom(); });
@@ -696,7 +714,7 @@ async function setPreview(ref, p){
 }
 function updateViewerPreviewForPin(p){ setPreview(p && p.images && p.images[0] ? p.images[0] : null, p); }
 
-/* ============ Image resolve ============ */
+/* ================== Image resolve ================== */
 function parseImageRef(ref){
   if(typeof ref === 'string' && /^(blob:|data:|https?:)/i.test(ref)){ return { kind:'url', url: ref }; }
   if(typeof ref === 'string' && ref.startsWith('drive:')){
@@ -749,9 +767,9 @@ async function resolveImageObjectURL(ref, {preferThumb=false}={}){
   return outUrl;
 }
 
-/* ============ Color presets & filter ============ */
+/* ================== Color presets & filter ================== */
 function buildColorPresets(){
-  const holder = document.getElementById('colorPresets'); holder.innerHTML='';
+  const holder = el.colorPresets; holder.innerHTML='';
   PRESET_COLORS.forEach(c=>{
     const b=document.createElement('button'); b.style.width='18px'; b.style.height='18px'; b.style.borderRadius='999px'; b.style.border='2px solid #223146'; b.style.background=c; b.title=c;
     b.addEventListener('click',()=>{
@@ -776,10 +794,10 @@ function buildColorFilter(){
   const colors = uniquePinColors().sort();
   if(colors.length===0){ list.innerHTML = '<div class="small">ピンがありません</div>'; return; }
   colors.forEach(c=>{
-    const row = document.createElement('label'); row.className='color-row';
-    const sw = document.createElement('span'); sw.className='swatch'; sw.style.background=c;
+    const row = document.createElement('label'); row.style.display='flex'; row.style.alignItems='center'; row.style.gap='8px'; row.style.margin='4px 0';
+    const sw = document.createElement('span'); sw.style.width='14px'; sw.style.height='14px'; sw.style.borderRadius='50%'; sw.style.border='2px solid #223146'; sw.style.display='inline-block'; sw.style.background=c;
     const cb = document.createElement('input'); cb.type='checkbox'; cb.value=c; cb.checked = (filterColors.size===0 || filterColors.has(c));
-    const name = document.createElement('span'); name.textContent = c;
+    const name = document.createElement('span'); name.textContent = c; name.className='small';
     row.appendChild(cb); row.appendChild(sw); row.appendChild(name);
     cb.addEventListener('change', ()=>{
       if(cb.checked) filterColors.add(c); else filterColors.delete(c);
@@ -796,12 +814,14 @@ function applyPinVisibilityFilter(){
   pins.forEach(p=>{ if(p.mesh){ p.mesh.visible = pinPassesFilter(p); } });
   refreshPinsList(); renderNow();
 }
-el.btnColorFilter.addEventListener('click', ()=>{ el.colorFilterPanel.hidden = !el.colorFilterPanel.hidden; });
-el.btnFilterAll.addEventListener('click', ()=>{ filterColors.clear(); uniquePinColors().forEach(c=> filterColors.add(c)); buildColorFilter(); });
-el.btnFilterNone.addEventListener('click', ()=>{ filterColors.clear(); applyPinVisibilityFilter(); buildColorFilter(); });
-el.btnFilterClose.addEventListener('click', ()=> el.colorFilterPanel.hidden = true);
+el.btnColorFilter.addEventListener('click', ()=>{
+  el.colorFilterPanel.style.display = (el.colorFilterPanel.style.display==='none' || !el.colorFilterPanel.style.display) ? 'block' : 'none';
+});
+document.getElementById('btnFilterAll').addEventListener('click', ()=>{ filterColors.clear(); uniquePinColors().forEach(c=> filterColors.add(c)); buildColorFilter(); });
+document.getElementById('btnFilterNone').addEventListener('click', ()=>{ filterColors.clear(); applyPinVisibilityFilter(); buildColorFilter(); });
+document.getElementById('btnFilterClose').addEventListener('click', ()=> el.colorFilterPanel.style.display='none');
 
-/* ============ Pins UI ============ */
+/* ================== Pins UI ================== */
 function refreshPinsList(){
   el.pinsList.innerHTML='';
   pins.filter(pinPassesFilter).forEach(p=>{
@@ -837,11 +857,13 @@ el.btnTogglePins.addEventListener('click', ()=>{
   applyPinVisibilityFilter(); renderNow();
 });
 el.btnAddPin.addEventListener('click', ()=>{
+  if(viewOnly) return;
   addPinMode = !addPinMode;
   el.modeLabel.textContent = addPinMode ? 'AddPin' : 'Orbit';
   el.btnAddPin.textContent = addPinMode ? '＋ ピン追加: ON' : '＋ ピン追加モード';
 });
 el.btnGizmo.addEventListener('click', ()=>{
+  if(viewOnly) return;
   const enable = !tcontrols.visible;
   tcontrols.visible = enable; tcontrols.enabled = enable;
   el.btnGizmo.textContent = 'ギズモ: ' + (enable ? 'ON' : 'OFF');
@@ -850,10 +872,12 @@ el.btnGizmo.addEventListener('click', ()=>{
   else{ tcontrols.detach(); }
 });
 el.btnUndo.addEventListener('click', ()=>{
+  if(viewOnly) return;
   const last = undoStack.pop(); if(!last) return;
   if(last.type==='add'){ const idx = pins.findIndex(p=>p.id===last.id); if(idx>=0){ const pin = pins[idx]; if(pin.mesh) pinGroup.remove(pin.mesh); pins.splice(idx,1); refreshPinsList(); renderNow(); upsertPinToSheet(); } }
 });
 el.btnDeletePin.addEventListener('click', async ()=>{
+  if(viewOnly) return;
   const p = pins.find(x=>x.id===selectedPinId); if(!p) return;
   const spreadsheetId = extractSpreadsheetId(el.inputSheet.value.trim());
   if(p.mesh) pinGroup.remove(p.mesh);
@@ -864,7 +888,7 @@ el.btnDeletePin.addEventListener('click', async ()=>{
   if(spreadsheetId){ try{ await deletePinFromActiveSheet(spreadsheetId, p.id); }catch(e){ console.error(e); } }
 });
 
-/* ============ GLB load ============ */
+/* ================== GLB load ================== */
 async function loadGLBByFileId(fileId){
   if(!accessToken){ alert('先にサインインしてください'); return; }
   if(!fileId){ alert('GLBの fileId または共有URLを入力してください'); return; }
@@ -911,7 +935,7 @@ async function loadGLBByFileId(fileId){
   }
 }
 
-/* ============ Materials ============ */
+/* ================== Materials ================== */
 function collectMaterials(){
   materials=[]; materialMap.clear();
   const set = new Set();
@@ -1061,7 +1085,7 @@ async function applyMaterialLive(){
   renderNow();
 }
 
-/* ============ Camera named views ============ */
+/* ================== Camera named views ================== */
 el.viewFront.addEventListener('click', ()=> setNamedView('front'));
 el.viewBack.addEventListener('click', ()=> setNamedView('back'));
 el.viewLeft.addEventListener('click', ()=> setNamedView('left'));
@@ -1087,7 +1111,7 @@ function setNamedView(name){
 }
 el.bgColor.addEventListener('input', ()=>{ scene.background = new THREE.Color(el.bgColor.value); renderNow(); });
 
-/* ============ Sheets: 同階層検出/作成 ============ */
+/* ================== Sheets: 同階層検出/作成 ================== */
 async function findOrCreateSpreadsheetInGlbFolder(glbMeta){
   if (!glbMeta || !glbMeta.id) throw new Error('GLBメタデータがありません');
   const parents = glbMeta.parents || [];
@@ -1141,7 +1165,7 @@ async function findOrCreateSpreadsheetInGlbFolder(glbMeta){
   return spreadsheetId;
 }
 
-/* ============ Caption Lists (tabs) ============ */
+/* ================== Caption Lists (tabs) ================== */
 async function refreshCaptionLists(spreadsheetId){
   const resp = await gapi.client.sheets.spreadsheets.get({
     spreadsheetId,
@@ -1180,6 +1204,7 @@ el.listSelect.addEventListener('change', async (e)=>{
   toast(`キャプションリストを切替: ${title}`);
 });
 el.listNew.addEventListener('click', async ()=>{
+  if(viewOnly) return;
   const spreadsheetId = extractSpreadsheetId(el.inputSheet.value.trim());
   if(!spreadsheetId) return;
   const title = prompt('新しいキャプションリスト名を入力', `pins_${Date.now().toString().slice(-5)}`);
@@ -1201,6 +1226,7 @@ el.listNew.addEventListener('click', async ()=>{
   toast(`新しいリストを作成: ${title}`);
 });
 el.listDelete.addEventListener('click', async ()=>{
+  if(viewOnly) return;
   const spreadsheetId = extractSpreadsheetId(el.inputSheet.value.trim());
   if(!spreadsheetId || !activeSheet.sheetId) return;
   const g = await gapi.client.sheets.spreadsheets.get({ spreadsheetId, fields: 'sheets(properties(sheetId))' });
@@ -1216,7 +1242,7 @@ el.listDelete.addEventListener('click', async ()=>{
   toast('リストを削除しました');
 });
 
-/* ============ Load/Save pins ============ */
+/* ================== Load/Save pins ================== */
 function rebuildPinsScene(){
   pinGroup.children.slice().forEach(ch=> pinGroup.remove(ch));
   pins.forEach(p=> placePinMesh(p));
@@ -1286,8 +1312,9 @@ async function deletePinFromActiveSheet(spreadsheetId, pinId){
   });
 }
 
-/* ============ Attach / Upload ============ */
+/* ================== Attach / Upload ================== */
 el.btnAttach.addEventListener('click', async ()=>{
+  if(viewOnly) return;
   const file = el.imgLocal.files?.[0]; const p = pins.find(x=>x.id===selectedPinId);
   if(!file || !p){ alert('画像とピンを確認してください'); return; }
   try{
@@ -1327,15 +1354,15 @@ async function driveMultipartUpload(blob, name, parents){
   return await res.json();
 }
 
-/* ============ Folder Picker ============ */
+/* ================== Folder Picker ================== */
 el.btnPickFromFolder.addEventListener('click', openPickerModal);
-el.btnPickerClose.addEventListener('click', ()=> el.pickerModal.hidden = true);
+el.btnPickerClose.addEventListener('click', ()=> el.pickerModal.style.display='none');
 el.btnPickerReload.addEventListener('click', loadFolderImages);
 
 async function openPickerModal(){
   if(!glbParents || !glbParents.length){ alert('GLBの親フォルダが不明です。先にGLBを読み込んでください。'); return; }
   await loadFolderImages();
-  el.pickerModal.hidden = false;
+  el.pickerModal.style.display='grid';
 }
 async function loadFolderImages(){
   if(!accessToken){ alert('先にサインインしてください'); return; }
@@ -1356,9 +1383,9 @@ async function loadFolderImages(){
         const mime = f.mimeType || '';
         const isHeic = isHeicMimeOrExt(mime, f.fileExtension);
         const ref = makeDriveRef(id, mime);
-        const cell = document.createElement('div'); cell.className='cell';
-        const img = document.createElement('img'); img.alt = f.name;
-        const tag = document.createElement('div'); tag.className='tag'; tag.textContent = isHeic ? 'HEIC/HEIF (変換/サムネ表示)' : (mime||'image');
+        const cell = document.createElement('div'); cell.style.background='#0c1118'; cell.style.border='1px solid #223146'; cell.style.borderRadius='12px'; cell.style.padding='8px'; cell.style.cursor='pointer'; cell.style.display='flex'; cell.style.flexDirection='column'; cell.style.gap='6px';
+        const img = document.createElement('img'); img.alt = f.name; img.style.width='100%'; img.style.height='110px'; img.style.objectFit='cover'; img.style.borderRadius='8px';
+        const tag = document.createElement('div'); tag.className='small'; tag.textContent = isHeic ? 'HEIC/HEIF (変換/サムネ表示)' : (mime||'image');
         const cap = document.createElement('div'); cap.textContent = f.name; cap.className='small';
 
         let usedFallback = false;
@@ -1371,18 +1398,18 @@ async function loadFolderImages(){
             try{
               const url = await resolveImageObjectURL(ref, {preferThumb:true});
               img.src = url;
-            }catch{ cell.classList.add('error'); }
+            }catch{ cell.style.opacity='.5'; cell.style.pointerEvents='none'; }
           };
         }else{
           try{
             const url = await resolveImageObjectURL(ref, {preferThumb:true});
             img.src = url;
-          }catch{ cell.classList.add('error'); }
+          }catch{ cell.style.opacity='.5'; cell.style.pointerEvents='none'; }
         }
 
-        img.onerror = ()=>{ if(!usedFallback){ cell.classList.add('error'); } };
+        img.onerror = ()=>{ if(!usedFallback){ cell.style.opacity='.5'; cell.style.pointerEvents='none'; } };
         cell.appendChild(img); cell.appendChild(cap); cell.appendChild(tag);
-        cell.addEventListener('click', ()=>{ if(cell.classList.contains('error')) return; chooseFolderImage(ref); });
+        cell.addEventListener('click', ()=>{ if(cell.style.pointerEvents==='none') return; chooseFolderImage(ref); });
         cells.push(cell);
       }
     }
@@ -1398,7 +1425,7 @@ async function loadFolderImages(){
   }
 }
 function chooseFolderImage(ref){
-  el.pickerModal.hidden = true;
+  el.pickerModal.style.display='none';
   const p = pins.find(x=>x.id===selectedPinId);
   if(!p){ alert('先にピンを選択してください'); return; }
   p.images = ensureArray(p.images); p.images.push(ref);
@@ -1407,7 +1434,7 @@ function chooseFolderImage(ref){
   upsertPinToSheet();
 }
 
-/* ============ Materials UI events ============ */
+/* ================== Materials UI events ================== */
 ['change','input'].forEach(ev=>{
   ['matUnlit','matDoubleSided','matTransparent','matOpacity','matInvert','matWhiteTransparent','matThreshold','matSelect']
     .forEach(id=> document.getElementById(id).addEventListener(ev, ()=> applyMaterialLive()));
@@ -1415,7 +1442,7 @@ function chooseFolderImage(ref){
 el.matOpacity.addEventListener('input', ()=> el.matOpacityVal.textContent = parseFloat(el.matOpacity.value).toFixed(2));
 el.matThreshold.addEventListener('input', ()=> el.matThresholdVal.textContent = parseFloat(el.matThreshold.value).toFixed(2));
 
-/* ============ Thumbs / Preview binding ============ */
+/* ================== Thumbs / Preview binding ================== */
 function renderThumbs(p){
   const thumbs=el.thumbs; thumbs.innerHTML='';
   ensureArray(p.images).forEach(async (ref, idx)=>{
@@ -1423,6 +1450,7 @@ function renderThumbs(p){
     const img=document.createElement('img'); img.alt = 'thumb';
     const del=document.createElement('div'); del.className='del'; del.textContent='×'; del.title='この画像をキャプションから外す';
     del.addEventListener('click', (ev)=>{
+      if(viewOnly) return;
       ev.stopPropagation(); const wasPreview = (el.previewImg.src && el.previewImg.src === img.src);
       p.images.splice(idx,1); renderThumbs(p);
       if(wasPreview){ const next = p.images[0] || null; setPreview(next, p); }
@@ -1439,12 +1467,12 @@ function renderThumbs(p){
   });
 }
 
-/* ============ Bindings ============ */
+/* ================== Caption bindings ================== */
 document.getElementById('btnSavePin').addEventListener('click', ()=> upsertPinToSheet());
 el.capTitle.addEventListener('input', ()=>{ const p=pins.find(x=>x.id===selectedPinId); if(p){ p.title=el.capTitle.value; refreshPinsList(); upsertPinToSheet(); updateViewerPreviewForPin(p); } });
 el.capBody.addEventListener('input',  ()=>{ const p=pins.find(x=>x.id===selectedPinId); if(p){ p.body=el.capBody.value; upsertPinToSheet(); updateViewerPreviewForPin(p); } });
 
-/* ============ Entry ============ */
+/* ================== Entry ================== */
 viewerInit();
 
 </script>
