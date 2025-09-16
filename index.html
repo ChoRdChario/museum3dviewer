@@ -18,6 +18,9 @@
     button:hover{background:#1a2b45}
     .accent{border-color:#2c82c9}
     .main{display:grid;grid-template-columns:360px 1fr 420px;gap:10px;padding:10px;height:calc(100vh - 58px)}
+    /* 拡大モード：左右パネルを隠してビューアのみ */
+    body.wide #leftToolbox, body.wide #rightCaption{display:none}
+    body.wide .main{grid-template-columns:1fr}
     body.hide-right .main{grid-template-columns:1fr}
     .panel{background:#121922;border:1px solid #1e2837;border-radius:var(--radius);overflow:hidden;display:flex;flex-direction:column;min-height:0}
     .panel h3{margin:0;padding:10px 12px;border-bottom:1px solid #203049;background:#0f1722;font-size:.95rem;font-weight:600}
@@ -120,11 +123,13 @@
             <button id="btnUndo" disabled>Ctrl+Z</button>
             <button id="btnTogglePins" disabled>ピン表示: ON</button>
           </div>
-          <div class="flex" style="align-items:center">
+
+          <!-- 色プリセット：1行・9色 -->
+          <div class="flex" style="align-items:center;flex-wrap:nowrap">
             <div class="small">ピン色:</div>
-            <div id="colorPresets" class="flex"></div>
-            <input id="colorPicker" type="color" value="#ff6b6b" />
+            <div id="colorPresets" class="flex" style="flex-wrap:nowrap"></div>
           </div>
+
           <hr style="border-color:#203049;border-width:1px 0;margin:12px 0">
         </div>
 
@@ -159,11 +164,7 @@
       <div class="spinner" id="loading" hidden><div class="lds"></div></div>
       <canvas id="viewerCanvas"></canvas>
       <svg id="connector">
-        <defs>
-          <filter id="dropshadow" x="-20%" y="-20%" width="140%">
-            <feDropShadow dx="0" dy="0" stdDeviation="2" flood-color="#001a33" flood-opacity="0.9"/>
-          </filter>
-        </defs>
+        <defs><filter id="dropshadow" x="-20%" y="-20%" width="140%"><feDropShadow dx="0" dy="0" stdDeviation="2" flood-color="#001a33" flood-opacity="0.9"/></filter></defs>
         <line id="connLine" x1="0" y1="0" x2="0" y2="0" style="display:none"/>
         <circle id="connDot" r="3" cx="0" cy="0" style="display:none"/>
       </svg>
@@ -330,7 +331,6 @@ const el = {
   modeLabel: document.getElementById('modeLabel'),
   btnSignIn: document.getElementById('btnSignIn'),
   colorPresets: document.getElementById('colorPresets'),
-  colorPicker: document.getElementById('colorPicker'),
   // 右側フィルタ
   btnColorFilter: document.getElementById('btnColorFilter'),
   colorFilterPanel: document.getElementById('colorFilterPanel'),
@@ -395,7 +395,8 @@ let activeSheet = { sheetId:null, title:'pins' };
 
 const debounce = (fn,ms)=>{ let t; return (...a)=>{ clearTimeout(t); t=setTimeout(()=>fn(...a),ms); }; };
 const debouncedSave = debounce(()=> upsertPinToSheet(), 500);
-const PRESET_COLORS = ['#ff6b6b','#ffd166','#06d6a0','#118ab2','#ef476f','#f72585','#b5179e','#7209b7','#3a0ca3','#4361ee','#4cc9f0'];
+/* ★ 9色に縮小（1行想定） */
+const PRESET_COLORS = ['#ff6b6b','#ffd166','#06d6a0','#118ab2','#ef476f','#b5179e','#4361ee','#4cc9f0','#ff9f1c'];
 
 function toast(msg){ el.statusLabel.textContent=msg; setTimeout(()=> el.statusLabel.textContent= viewOnly ? '閲覧モード' : 'Ready', 2000); }
 function ensureArray(x){ return Array.isArray(x)?x:[]; }
@@ -625,7 +626,14 @@ function createPin(pos,color){
   if(viewOnly) return;
   const id=`p_${Date.now()}_${Math.random().toString(36).slice(2,7)}`;
   const pin={id,pos:pos.clone(),color:normalizeHex(color||'#ff6b6b'),title:'',body:'',images:[],mesh:null};
-  pins.push(pin); placePinMesh(pin); refreshPinsList(); selectPin(id); addUndo({type:'add',id}); buildColorFilter();
+  pins.push(pin);
+  /* ★ 新規色はフィルタに自動追加（初期表示ON） */
+  filterColors.add(pin.color);
+  placePinMesh(pin);
+  refreshPinsList();
+  buildColorFilter();   // UIも更新
+  selectPin(id);
+  addUndo({type:'add',id});
   upsertPinToSheet();
 }
 function placePinMesh(pin){
@@ -652,8 +660,6 @@ function selectPin(id,{fly}={}){
 }
 function onPointerDown(e){
   if(!currentModel) return;
-
-  // 追加モードの視覚フィードバック：キャンバスカーソル
   el.viewerCanvas.style.cursor = (addPinMode || e.shiftKey) && !viewOnly ? 'crosshair' : 'default';
 
   const rect=el.viewerCanvas.getBoundingClientRect();
@@ -779,7 +785,10 @@ async function resolveImageObjectURL(ref, {preferThumb=false}={}){
 function buildColorPresets(){
   const holder = el.colorPresets; holder.innerHTML='';
   PRESET_COLORS.forEach(c=>{
-    const b=document.createElement('button'); b.style.width='18px'; b.style.height='18px'; b.style.borderRadius='999px'; b.style.border='2px solid #223146'; b.style.background=c; b.title=c;
+    const b=document.createElement('button');
+    b.style.width='18px'; b.style.height='18px';
+    b.style.borderRadius='999px'; b.style.border='2px solid #223146';
+    b.style.background=c; b.title=c;
     b.addEventListener('click',()=>{
       currentColor=c;
       const pId=selectedPinId;
@@ -788,6 +797,9 @@ function buildColorPresets(){
         p.color=normalizeHex(c);
         placePinMesh(p);
         refreshPinsList();
+        /* ★ 色変更時もフィルタに自動追加して見えるように */
+        filterColors.add(p.color);
+        buildColorFilter();
         debouncedSave();
       }
     });
@@ -854,9 +866,10 @@ el.btnViewOnly.addEventListener('click', ()=>{
   const url = new URL(location.href); url.searchParams.set('view','1'); if(fid) url.searchParams.set('fileId', fid); if(sid) url.searchParams.set('sheetId', sid);
   navigator.clipboard.writeText(url.toString()); toast('閲覧リンクをコピーしました');
 });
+/* ★ ビューア拡大：左右パネルを隠す */
 el.btnWide.addEventListener('click', ()=>{
-  document.body.classList.toggle('hide-right');
-  el.btnWide.textContent = document.body.classList.contains('hide-right') ? '📋 ピン一覧を表示' : '📺 ビューア拡大';
+  document.body.classList.toggle('wide');
+  el.btnWide.textContent = document.body.classList.contains('wide') ? '📋 パネル表示' : '📺 ビューア拡大';
   setTimeout(()=>{ resize(); updateConnector(); }, 50);
 });
 el.btnTogglePins.addEventListener('click', ()=>{
@@ -945,7 +958,8 @@ async function loadGLBByFileId(fileId){
 }
 
 /* ================== Materials ================== */
-let materialMapNameToOrig = new Map();
+let materials=[], materialMap=new Map(), materialMapNameToOrig=new Map();
+let matOriginals=new WeakMap();
 function collectMaterials(){
   materials=[]; materialMap.clear(); materialMapNameToOrig.clear();
   const set = new Set();
@@ -1326,8 +1340,6 @@ async function deletePinFromActiveSheet(spreadsheetId, pinId){
 /* ================== Attach / Upload ================== */
 el.btnAttach.addEventListener('click', async ()=>{
   if(viewOnly) return;
-
-  // 非表示 input を都度起動して選択 → アップロード
   const fileInput = el.imgLocal;
   fileInput.value = '';
   fileInput.onchange = async ()=>{
@@ -1492,6 +1504,13 @@ el.capTitle.addEventListener('input', ()=>{ const p=pins.find(x=>x.id===selected
 el.capBody.addEventListener('input',  ()=>{ const p=pins.find(x=>x.id===selectedPinId); if(p){ p.body=el.capBody.value; upsertPinToSheet(); updateViewerPreviewForPin(p); } });
 
 /* ================== Entry ================== */
+function enforceViewOnlyMode(){
+  if (!viewOnly) return;
+  document.body.classList.add('viewonly');
+  el.capTitle.readOnly = true; el.capBody.readOnly  = true;
+  ['btnSavePin','btnDeletePin','btnAttach','btnPickFromFolder','listNew','listDelete','btnAddPin','btnGizmo','btnUndo']
+    .forEach(id => document.getElementById(id)?.setAttribute('disabled','true'));
+}
 viewerInit();
 </script>
 </body>
