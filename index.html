@@ -252,8 +252,9 @@
   function onGapi(){ window.__flags.gapi = true; }
   function onGis(){  window.__flags.gis  = true; }
 </script>
-<script async defer src="https://accounts.google.com/gsi/client" onload="onGis"></script>
-<script async defer src="https://apis.google.com/js/api.js" onload="onGapi"></script>
+<!-- ★ ここを修正：() を付与して確実にコールする -->
+<script async defer src="https://accounts.google.com/gsi/client" onload="onGis()"></script>
+<script async defer src="https://apis.google.com/js/api.js" onload="onGapi()"></script>
 
 <script type="module">
 import * as THREE from 'three';
@@ -593,7 +594,6 @@ async function setPreview(ref, cap){
   if(!ref){ el.viewerPreview.classList.add('hidden'); return; }
   try{
     el.previewErr.style.display='none';
-    // 常に高解像度（HEICだけは変換 or サムネfallback）
     const src = await resolveImageObjectURL(ref, {preferThumb:false});
     el.previewImg.src = src;
     el.previewImg.onerror = ()=>{ el.previewErr.style.display='inline'; };
@@ -1057,7 +1057,7 @@ async function loadFolderImages(){
       const files = resp.result.files || [];
       for(const f of files){
         const id = f.id;
-        const mime = f.mimeType || '';
+        the const mime = f.mimeType || '';
         const isHeic = isHeicMimeOrExt(mime, f.fileExtension);
         const ref = makeDriveRef(id, mime);
         const cell = document.createElement('div'); cell.className='cell';
@@ -1067,7 +1067,7 @@ async function loadFolderImages(){
 
         let usedFallback = false;
         if(f.hasThumbnail && f.thumbnailLink){
-          const sep = f.thumbnailLink.includes('?') ? '&' : '?';
+          const sep = f.thumbnailLink includes('?') ? '&' : '?';
           img.src = f.thumbnailLink + sep + 'access_token=' + encodeURIComponent(accessToken);
           img.onerror = async ()=>{
             usedFallback = true;
