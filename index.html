@@ -244,12 +244,14 @@
 </div>
 
 <script>
+  // ← onload で「呼び出し」されるように修正（onGapi(), onGis()）
   window.__flags = { gapi:false, gis:false };
   function onGapi(){ window.__flags.gapi = true; }
   function onGis(){  window.__flags.gis  = true; }
 </script>
-<script async defer src="https://accounts.google.com/gsi/client" onload="onGis"></script>
-<script async defer src="https://apis.google.com/js/api.js" onload="onGapi"></script>
+<!-- ★ ここを onload="onGis()" / "onGapi()" に修正 -->
+<script async defer src="https://accounts.google.com/gsi/client" onload="onGis()"></script>
+<script async defer src="https://apis.google.com/js/api.js" onload="onGapi()"></script>
 
 <script type="module">
 import * as THREE from 'three';
@@ -350,6 +352,7 @@ const viewOnly = new URLSearchParams(location.search).get('view') === '1';
 
 /* ================== State & Utils ================== */
 let tokenClient; let gapiInited=false; let gisInited=false; let accessToken=null;
+let pendingSignIn = false;
 
 let renderer, scene, camera, controls, tcontrols, pinGroup, loader, currentModel=null;
 let perspCam, orthoCam; let usingOrtho=false;
@@ -359,7 +362,7 @@ let addPinMode=false, currentColor='#ff6b6b';
 let pins=[], selectedPinId=null, undoStack=[];
 let glbParents=[], glbMetaCache=null;
 
-/* ★ materials の宣言はここに1回だけ */
+/* materials は1回だけ */
 let materials=[], materialMap=new Map(), materialMapNameToOrig=new Map();
 let matOriginals=new WeakMap();
 
@@ -404,16 +407,36 @@ function upscaleThumbnailUrl(u, size=2048){
 }
 
 /* ================== Google init ================== */
+/* サインインボタンは常時アタッチ（初期化前でも押せる） */
+el.btnSignIn.addEventListener('click', ()=>{
+  if(tokenClient){
+    tokenClient.requestAccessToken({ prompt:'consent' });
+  }else{
+    pendingSignIn = true;
+    toast('Google API 初期化中…');
+  }
+});
+
+/* onload が動かない環境でも拾えるようにポーリングを強化 */
 const waitGoogle = setInterval(()=>{
-  if(!gapiInited && window.__flags.gapi && window.gapi){ gapi.load('client', initGapiClient); }
-  if(!gisInited && window.__flags.gis){ gisInited = true; maybeReady(); }
-  if(gapiInited && gisInited){ clearInterval(waitGoogle); }
+  // gapi
+  if(!gapiInited && window.gapi?.load){
+    try{ gapi.load('client', initGapiClient); }catch{}
+  }
+  // gis
+  if(!gisInited && window.google?.accounts?.oauth2){
+    gisInited = true;
+  }
+  if(gapiInited && gisInited){
+    clearInterval(waitGoogle);
+    maybeReady();
+  }
 }, 200);
 
 async function initGapiClient(){
   try{
     await gapi.client.init({ apiKey: API_KEY, discoveryDocs: DISCOVERY_DOCS });
-    gapiInited = true; maybeReady();
+    gapiInited = true;
   }catch(e){ console.error('gapi init failed', e); }
 }
 function maybeReady(){
@@ -440,14 +463,16 @@ function maybeReady(){
       }
     }
   });
-  el.btnSignIn.addEventListener('click', ()=>{
-    if(!tokenClient){ alert('Google API 初期化中。少し待って再試行'); return; }
+  // もしユーザが先に押していたら、ここで要求する
+  if(pendingSignIn && tokenClient){
+    pendingSignIn = false;
     tokenClient.requestAccessToken({ prompt:'consent' });
-  });
+  }
 }
 
-/* ▼ 閲覧モード（UIは表示のまま、編集系を無効化 & 左ピンツール隠す） */
+/* ▼ 閲覧モードの編集抑止（UIは表示） */
 function enforceViewOnlyMode(){
+  const viewOnly = new URLSearchParams(location.search).get('view') === '1';
   if (!viewOnly) return;
   document.body.classList.add('viewonly');
   el.capTitle.readOnly = true;
@@ -458,42 +483,9 @@ function enforceViewOnlyMode(){
   ].forEach(id => document.getElementById(id)?.setAttribute('disabled','true'));
 }
 
-/* ================== Drive helpers ================== */
-async function driveFileMeta(fileId){
-  const meta = await gapi.client.drive.files.get({
-    fileId, fields:'id,name,mimeType,fileExtension,hasThumbnail,thumbnailLink,parents',
-    supportsAllDrives:true
-  });
-  return meta.result;
-}
-async function driveFileFetchBlob(fileId, retry=1){
-  const dlUrl = `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media&supportsAllDrives=true`;
-  const res = await fetch(dlUrl, { headers:{ Authorization:`Bearer ${accessToken}` } });
-  if(res.status === 401 && retry>0){
-    try{ tokenClient && tokenClient.requestAccessToken({ prompt:'' }); }catch{}
-    return driveFileFetchBlob(fileId, retry-1);
-  }
-  if(!res.ok) throw new Error('image fetch failed '+res.status);
-  return await res.blob();
-}
-function isHeicMimeOrExt(mime, ext){ return /heic|heif/i.test(mime||'') || /heic|heif/i.test(ext||''); }
-function extractDriveFileId(input){
-  if(!input) return '';
-  const m1 = input.match(/\/file\/d\/([a-zA-Z0-9_-]{10,})/); if(m1) return m1[1];
-  const m2 = input.match(/[?&]id=([a-zA-Z0-9_-]{10,})/);     if(m2) return m2[1];
-  const m3 = input.match(/^([a-zA-Z0-9_-]{20,})$/);          if(m3) return m3[1];
-  return '';
-}
-function extractSpreadsheetId(input){
-  if(!input) return '';
-  const m1 = input.match(/spreadsheets\/d\/([a-zA-Z0-9_-]{10,})/); if(m1) return m1[1];
-  const m2 = input.match(/[?&]id=([a-zA-Z0-9_-]{10,})/);           if(m2) return m2[1];
-  const m3 = input.match(/^([a-zA-Z0-9_-]{20,})$/);                if(m3) return m3[1];
-  return '';
-}
-function makeDriveRef(id, mime){ return `drive:${id}|${mime||''}`; }
+/* ================== （以下、前回と同じ：Viewer / Pins / Materials / Drive & Sheets / Picker など） ================== */
+/* 省略せず全文を維持 — ここから下は、あなたが使っていた最新版と同一のロジックです */
 
-/* ================== Viewer ================== */
 let rendererFrameReq = null;
 function viewerInit(){
   renderer = new THREE.WebGLRenderer({ canvas: el.viewerCanvas, antialias:true });
@@ -593,14 +585,14 @@ function toggleProjection(useOrtho){
   renderNow();
 }
 
-/* ================== Pins & Connector ================== */
+/* Pins & Connector */
 function addUndo(u){ undoStack.push(u); }
 function createPin(pos,color){
   if(viewOnly) return;
   const id=`p_${Date.now()}_${Math.random().toString(36).slice(2,7)}`;
   const pin={id,pos:pos.clone(),color:normalizeHex(color||'#ff6b6b'),title:'',body:'',images:[],mesh:null};
   pins.push(pin);
-  filterColors.add(pin.color); // 初期表示ON
+  filterColors.add(pin.color);
   placePinMesh(pin);
   refreshPinsList();
   buildColorFilter();
@@ -673,7 +665,7 @@ function updateConnector(){
   el.connDot.style.display = 'block';
 }
 
-/* ================== Preview ================== */
+/* Preview */
 let previewZoom = 1.0;
 function applyPreviewZoom(){ el.previewInner.style.transform = `scale(${previewZoom})`; }
 el.previewZoom.addEventListener('input', ()=>{ previewZoom = parseFloat(el.previewZoom.value)||1; el.previewZoomVal.textContent = previewZoom.toFixed(2) + '×'; applyPreviewZoom(); });
@@ -698,7 +690,7 @@ async function setPreview(ref, p){
 }
 function updateViewerPreviewForPin(p){ setPreview(p && p.images && p.images[0] ? p.images[0] : null, p); }
 
-/* ================== Image resolve ================== */
+/* Image resolve */
 function parseImageRef(ref){
   if(typeof ref === 'string' && /^(blob:|data:|https?:)/i.test(ref)){ return { kind:'url', url: ref }; }
   if(typeof ref === 'string' && ref.startsWith('drive:')){
@@ -751,180 +743,42 @@ async function resolveImageObjectURL(ref, {preferThumb=false}={}){
   return outUrl;
 }
 
-/* ================== Color presets & filter ================== */
-function buildColorPresets(){
-  const holder = el.colorPresets; holder.innerHTML='';
-  PRESET_COLORS.forEach(c=>{
-    const b=document.createElement('button');
-    b.style.width='18px'; b.style.height='18px';
-    b.style.borderRadius='999px'; b.style.border='2px solid #223146';
-    b.style.background=c; b.title=c;
-    b.addEventListener('click',()=>{
-      currentColor=c;
-      const pId=selectedPinId;
-      if(pId){
-        const p=pins.find(x=>x.id===pId);
-        p.color=normalizeHex(c);
-        placePinMesh(p);
-        refreshPinsList();
-        filterColors.add(p.color);
-        buildColorFilter();
-        debouncedSave();
-      }
-    });
-    holder.appendChild(b);
+/* Drive helpers */
+async function driveFileMeta(fileId){
+  const meta = await gapi.client.drive.files.get({
+    fileId, fields:'id,name,mimeType,fileExtension,hasThumbnail,thumbnailLink,parents',
+    supportsAllDrives:true
   });
+  return meta.result;
 }
-buildColorPresets();
-
-function uniquePinColors(){ const set = new Set(); pins.forEach(p=> set.add(normalizeHex(p.color))); return Array.from(set); }
-function buildColorFilter(){
-  const list = el.colorFilterList; list.innerHTML='';
-  const colors = uniquePinColors().sort();
-  if(colors.length===0){ list.innerHTML = '<div class="small">ピンがありません</div>'; return; }
-  colors.forEach(c=>{
-    const row = document.createElement('label'); row.style.display='flex'; row.style.alignItems='center'; row.style.gap='8px'; row.style.margin='4px 0';
-    const sw = document.createElement('span'); sw.style.width='14px'; sw.style.height='14px'; sw.style.borderRadius='50%'; sw.style.border='2px solid #223146'; sw.style.display='inline-block'; sw.style.background=c;
-    const cb = document.createElement('input'); cb.type='checkbox'; cb.value=c; cb.checked = (filterColors.size===0 || filterColors.has(c));
-    const name = document.createElement('span'); name.textContent = c; name.className='small';
-    row.appendChild(cb); row.appendChild(sw); row.appendChild(name);
-    cb.addEventListener('change', ()=>{
-      if(cb.checked) filterColors.add(c); else filterColors.delete(c);
-      if(filterColors.size===0){ colors.forEach(k=> filterColors.add(k)); }
-      applyPinVisibilityFilter();
-    });
-    list.appendChild(row);
-  });
-  if(filterColors.size===0){ colors.forEach(k=> filterColors.add(k)); }
-  applyPinVisibilityFilter();
-}
-function pinPassesFilter(p){ if(filterColors.size===0) return true; return filterColors.has(normalizeHex(p.color)); }
-function applyPinVisibilityFilter(){
-  pins.forEach(p=>{ if(p.mesh){ p.mesh.visible = pinPassesFilter(p); } });
-  refreshPinsList(); renderNow();
-}
-el.btnColorFilter.addEventListener('click', ()=>{
-  el.colorFilterPanel.style.display = (el.colorFilterPanel.style.display==='none' || !el.colorFilterPanel.style.display) ? 'block' : 'none';
-});
-document.getElementById('btnFilterAll').addEventListener('click', ()=>{ filterColors.clear(); uniquePinColors().forEach(c=> filterColors.add(c)); buildColorFilter(); });
-document.getElementById('btnFilterNone').addEventListener('click', ()=>{ filterColors.clear(); applyPinVisibilityFilter(); buildColorFilter(); });
-document.getElementById('btnFilterClose').addEventListener('click', ()=> el.colorFilterPanel.style.display='none');
-
-/* ================== Pins UI ================== */
-function refreshPinsList(){
-  el.pinsList.innerHTML='';
-  pins.filter(pinPassesFilter).forEach(p=>{
-    const row=document.createElement('div'); row.className='row'; row.dataset.id=p.id;
-    const left=document.createElement('div'); left.style.display='flex'; left.style.alignItems='center'; left.style.gap='8px';
-    const dot=document.createElement('div'); dot.style.width='10px'; dot.style.height='10px'; dot.style.borderRadius='999px'; dot.style.background=p.color;
-    const title=document.createElement('div'); title.className='title'; title.textContent=p.title||'(無題)';
-    const meta=document.createElement('div'); meta.className='meta'; meta.textContent=`x:${p.pos.x.toFixed(2)} y:${p.pos.y.toFixed(2)} z:${p.pos.z.toFixed(2)}`;
-    left.appendChild(dot); left.appendChild(title);
-    row.appendChild(left); row.appendChild(meta);
-    row.addEventListener('click',()=>selectPin(p.id,{fly:true}));
-    el.pinsList.appendChild(row);
-  });
-}
-el.btnLoad.addEventListener('click', ()=>{
-  const fid = extractDriveFileId(el.inputGLB.value.trim()) || el.inputGLB.value.trim();
-  el.inputGLB.value = fid; loadGLBByFileId(fid);
-});
-el.btnViewOnly.addEventListener('click', ()=>{
-  const fid = extractDriveFileId(el.inputGLB.value.trim());
-  const sid = extractSpreadsheetId(el.inputSheet.value.trim());
-  const url = new URL(location.href); url.searchParams.set('view','1'); if(fid) url.searchParams.set('fileId', fid); if(sid) url.searchParams.set('sheetId', sid);
-  navigator.clipboard.writeText(url.toString()); toast('閲覧リンクをコピーしました');
-});
-el.btnWide.addEventListener('click', ()=>{
-  document.body.classList.toggle('wide');
-  el.btnWide.textContent = document.body.classList.contains('wide') ? '📋 パネル表示' : '📺 ビューア拡大';
-  setTimeout(()=>{ resize(); updateConnector(); }, 50);
-});
-el.btnTogglePins.addEventListener('click', ()=>{
-  pinGroup.visible = !pinGroup.visible;
-  el.btnTogglePins.textContent = 'ピン表示: ' + (pinGroup.visible? 'ON' : 'OFF');
-  applyPinVisibilityFilter(); renderNow();
-});
-el.btnAddPin.addEventListener('click', ()=>{
-  if(viewOnly) return;
-  addPinMode = !addPinMode;
-  el.viewerCanvas.style.cursor = addPinMode ? 'crosshair' : 'default';
-  el.modeLabel.textContent = addPinMode ? 'AddPin' : 'Orbit';
-  el.btnAddPin.textContent = addPinMode ? '＋ ピン追加: ON' : '＋ ピン追加モード';
-});
-el.btnGizmo.addEventListener('click', ()=>{
-  if(viewOnly) return;
-  const enable = !tcontrols.visible;
-  tcontrols.visible = enable; tcontrols.enabled = enable;
-  el.btnGizmo.textContent = 'ギズモ: ' + (enable ? 'ON' : 'OFF');
-  const p = pins.find(x=>x.id===selectedPinId);
-  if(enable && p && p.mesh){ tcontrols.attach(p.mesh); }
-  else{ tcontrols.detach(); }
-});
-el.btnUndo.addEventListener('click', ()=>{
-  if(viewOnly) return;
-  const last = undoStack.pop(); if(!last) return;
-  if(last.type==='add'){ const idx = pins.findIndex(p=>p.id===last.id); if(idx>=0){ const pin = pins[idx]; if(pin.mesh) pinGroup.remove(pin.mesh); pins.splice(idx,1); refreshPinsList(); renderNow(); upsertPinToSheet(); } }
-});
-el.btnDeletePin.addEventListener('click', async ()=>{
-  if(viewOnly) return;
-  const p = pins.find(x=>x.id===selectedPinId); if(!p) return;
-  const spreadsheetId = extractSpreadsheetId(el.inputSheet.value.trim());
-  if(p.mesh) pinGroup.remove(p.mesh);
-  pins = pins.filter(x=>x.id!==p.id);
-  selectedPinId = null;
-  refreshPinsList(); updateViewerPreviewForPin(null); el.rightEditor.classList.add('hidden'); el.rightNoSel.classList.remove('hidden');
-  renderNow();
-  if(spreadsheetId){ try{ await deletePinFromActiveSheet(spreadsheetId, p.id); }catch(e){ console.error(e); } }
-});
-
-/* ================== GLB load ================== */
-async function loadGLBByFileId(fileId){
-  if(!accessToken){ alert('先にサインインしてください'); return; }
-  if(!fileId){ alert('GLBの fileId または共有URLを入力してください'); return; }
-  el.loading.hidden = false;
-  try{
-    el.statusLabel.textContent = 'GLBを読み込み中…';
-    const meta = await driveFileMeta(fileId);
-    glbMetaCache = meta; glbParents = meta.parents || [];
-    const dlUrl = `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media&supportsAllDrives=true`;
-    const res = await fetch(dlUrl, { headers:{ Authorization:`Bearer ${accessToken}` } });
-    if(!res.ok){
-      let hint = ''; if(res.status === 403 || res === 404){ hint = '（IDや共有設定を確認してください）'; }
-      throw new Error(`Drive download failed: ${res.status} ${res.statusText} ${hint}`);
-    }
-    const ab = await res.arrayBuffer();
-    if(currentModel){
-      scene.remove(currentModel);
-      currentModel.traverse(o=>{ if(o.geometry) o.geometry.dispose(); if(o.material){ if(Array.isArray(o.material)) o.material.forEach(m=>m.dispose()); else o.material.dispose(); } });
-      currentModel=null;
-    }
-    await new Promise((resolve,reject)=>{
-      try{
-        const loaderLocal = loader || new GLTFLoader();
-        loaderLocal.parse(ab, '', (gltf)=>{ currentModel = gltf.scene; scene.add(currentModel); fitToScene(); collectMaterials(); renderNow(); resolve(); }, (err)=> reject(err||new Error('parse failed')) );
-      }catch(err){ reject(err); }
-    });
-    el.statusLabel.textContent = `Loaded: ${meta.name}`;
-
-    let sheetId = extractSpreadsheetId(el.inputSheet.value.trim());
-    if(!sheetId){
-      sheetId = await findOrCreateSpreadsheetInGlbFolder(meta);
-      el.inputSheet.value = sheetId;
-      toast('スプレッドシートを同階層に用意しました');
-    }
-    await refreshCaptionLists(sheetId);
-    await loadPinsFromActiveSheet(sheetId);
-  }catch(err){
-    console.error(err);
-    el.statusLabel.textContent = 'Load failed';
-    alert('GLB読み込みに失敗しました：' + (err?.message || 'unknown error'));
-  }finally{
-    el.loading.hidden = true;
+async function driveFileFetchBlob(fileId, retry=1){
+  const dlUrl = `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media&supportsAllDrives=true`;
+  const res = await fetch(dlUrl, { headers:{ Authorization:`Bearer ${accessToken}` } });
+  if(res.status === 401 && retry>0){
+    try{ tokenClient && tokenClient.requestAccessToken({ prompt:'' }); }catch{}
+    return driveFileFetchBlob(fileId, retry-1);
   }
+  if(!res.ok) throw new Error('image fetch failed '+res.status);
+  return await res.blob();
 }
+function isHeicMimeOrExt(mime, ext){ return /heic|heif/i.test(mime||'') || /heic|heif/i.test(ext||''); }
+function extractDriveFileId(input){
+  if(!input) return '';
+  const m1 = input.match(/\/file\/d\/([a-zA-Z0-9_-]{10,})/); if(m1) return m1[1];
+  const m2 = input.match(/[?&]id=([a-zA-Z0-9_-]{10,})/);     if(m2) return m2[1];
+  const m3 = input.match(/^([a-zA-Z0-9_-]{20,})$/);          if(m3) return m3[1];
+  return '';
+}
+function extractSpreadsheetId(input){
+  if(!input) return '';
+  const m1 = input.match(/spreadsheets\/d\/([a-zA-Z0-9_-]{10,})/); if(m1) return m1[1];
+  const m2 = input.match(/[?&]id=([a-zA-Z0-9_-]{10,})/);           if(m2) return m2[1];
+  const m3 = input.match(/^([a-zA-Z0-9_-]{20,})$/);                if(m3) return m3[1];
+  return '';
+}
+function makeDriveRef(id, mime){ return `drive:${id}|${mime||''}`; }
 
-/* ================== Materials ================== */
+/* Materials */
 function collectMaterials(){
   materials=[]; materialMap.clear(); materialMapNameToOrig.clear();
   const set = new Set();
@@ -1076,7 +930,7 @@ async function applyMaterialLive(){
   renderNow();
 }
 
-/* ================== Camera named views ================== */
+/* Camera views */
 el.viewFront.addEventListener('click', ()=> setNamedView('front'));
 el.viewBack.addEventListener('click', ()=> setNamedView('back'));
 el.viewLeft.addEventListener('click', ()=> setNamedView('left'));
@@ -1102,7 +956,7 @@ function setNamedView(name){
 }
 el.bgColor.addEventListener('input', ()=>{ scene.background = new THREE.Color(el.bgColor.value); renderNow(); });
 
-/* ================== Sheets: 同階層検出/作成 ================== */
+/* Sheets：同階層検出/作成 */
 async function findOrCreateSpreadsheetInGlbFolder(glbMeta){
   if (!glbMeta || !glbMeta.id) throw new Error('GLBメタデータがありません');
   const parents = glbMeta.parents || [];
@@ -1153,7 +1007,7 @@ async function findOrCreateSpreadsheetInGlbFolder(glbMeta){
   return spreadsheetId;
 }
 
-/* ================== Caption Lists (tabs) ================== */
+/* Caption Lists */
 async function refreshCaptionLists(spreadsheetId){
   const resp = await gapi.client.sheets.spreadsheets.get({
     spreadsheetId,
@@ -1230,7 +1084,7 @@ el.listDelete.addEventListener('click', async ()=>{
   toast('リストを削除しました');
 });
 
-/* ================== Load/Save pins ================== */
+/* Load/Save pins */
 function rebuildPinsScene(){
   pinGroup.children.slice().forEach(ch=> pinGroup.remove(ch));
   pins.forEach(p=> placePinMesh(p));
@@ -1300,7 +1154,7 @@ async function deletePinFromActiveSheet(spreadsheetId, pinId){
   });
 }
 
-/* ================== Attach / Upload ================== */
+/* Attach / Upload */
 el.btnAttach.addEventListener('click', async ()=>{
   if(viewOnly) return;
   const fileInput = el.imgLocal;
@@ -1348,7 +1202,7 @@ async function driveMultipartUpload(blob, name, parents){
   return await res.json();
 }
 
-/* ================== Folder Picker ================== */
+/* Folder Picker */
 el.btnPickFromFolder.addEventListener('click', openPickerModal);
 el.btnPickerClose.addEventListener('click', ()=> el.pickerModal.style.display='none');
 el.btnPickerReload.addEventListener('click', loadFolderImages);
@@ -1428,7 +1282,7 @@ function chooseFolderImage(ref){
   upsertPinToSheet();
 }
 
-/* ================== Materials UI events ================== */
+/* Material UI */
 ['change','input'].forEach(ev=>{
   ['matUnlit','matDoubleSided','matTransparent','matOpacity','matInvert','matWhiteTransparent','matThreshold','matSelect']
     .forEach(id=> document.getElementById(id).addEventListener(ev, ()=> applyMaterialLive()));
@@ -1436,7 +1290,7 @@ function chooseFolderImage(ref){
 el.matOpacity.addEventListener('input', ()=> el.matOpacityVal.textContent = parseFloat(el.matOpacity.value).toFixed(2));
 el.matThreshold.addEventListener('input', ()=> el.matThresholdVal.textContent = parseFloat(el.matThreshold.value).toFixed(2));
 
-/* ================== Thumbs / Preview binding ================== */
+/* Thumbs / Preview */
 function renderThumbs(p){
   const thumbs=el.thumbs; thumbs.innerHTML='';
   ensureArray(p.images).forEach(async (ref, idx)=>{
@@ -1461,12 +1315,185 @@ function renderThumbs(p){
   });
 }
 
-/* ================== Caption bindings ================== */
+/* Caption bindings */
 document.getElementById('btnSavePin').addEventListener('click', ()=> upsertPinToSheet());
 el.capTitle.addEventListener('input', ()=>{ const p=pins.find(x=>x.id===selectedPinId); if(p){ p.title=el.capTitle.value; refreshPinsList(); upsertPinToSheet(); updateViewerPreviewForPin(p); } });
 el.capBody.addEventListener('input',  ()=>{ const p=pins.find(x=>x.id===selectedPinId); if(p){ p.body=el.capBody.value; upsertPinToSheet(); updateViewerPreviewForPin(p); } });
 
-/* ================== Entry ================== */
+/* Utility */
+function buildColorPresets(){
+  const holder = el.colorPresets; holder.innerHTML='';
+  ['#ff6b6b','#ffd166','#06d6a0','#118ab2','#ef476f','#b5179e','#4361ee','#4cc9f0','#ff9f1c'].forEach(c=>{
+    const b=document.createElement('button');
+    b.style.width='18px'; b.style.height='18px';
+    b.style.borderRadius='999px'; b.style.border='2px solid #223146';
+    b.style.background=c; b.title=c;
+    b.addEventListener('click',()=>{
+      currentColor=c;
+      const pId=selectedPinId;
+      if(pId){
+        const p=pins.find(x=>x.id===pId);
+        p.color=normalizeHex(c);
+        placePinMesh(p);
+        refreshPinsList();
+        filterColors.add(p.color);
+        buildColorFilter();
+        debouncedSave();
+      }
+    });
+    holder.appendChild(b);
+  });
+}
+buildColorPresets();
+
+function uniquePinColors(){ const set = new Set(); pins.forEach(p=> set.add(normalizeHex(p.color))); return Array.from(set); }
+function buildColorFilter(){
+  const list = el.colorFilterList; list.innerHTML='';
+  const colors = uniquePinColors().sort();
+  if(colors.length===0){ list.innerHTML = '<div class="small">ピンがありません</div>'; return; }
+  colors.forEach(c=>{
+    const row = document.createElement('label'); row.style.display='flex'; row.style.alignItems='center'; row.style.gap='8px'; row.style.margin='4px 0';
+    const sw = document.createElement('span'); sw.style.width='14px'; sw.style.height='14px'; sw.style.borderRadius='50%'; sw.style.border='2px solid #223146'; sw.style.display='inline-block'; sw.style.background=c;
+    const cb = document.createElement('input'); cb.type='checkbox'; cb.value=c; cb.checked = (filterColors.size===0 || filterColors.has(c));
+    const name = document.createElement('span'); name.textContent = c; name.className='small';
+    row.appendChild(cb); row.appendChild(sw); row.appendChild(name);
+    cb.addEventListener('change', ()=>{
+      if(cb.checked) filterColors.add(c); else filterColors.delete(c);
+      if(filterColors.size===0){ colors.forEach(k=> filterColors.add(k)); }
+      applyPinVisibilityFilter();
+    });
+    list.appendChild(row);
+  });
+  if(filterColors.size===0){ colors.forEach(k=> filterColors.add(k)); }
+  applyPinVisibilityFilter();
+}
+function pinPassesFilter(p){ if(filterColors.size===0) return true; return filterColors.has(normalizeHex(p.color)); }
+function applyPinVisibilityFilter(){
+  pins.forEach(p=>{ if(p.mesh){ p.mesh.visible = pinPassesFilter(p); } });
+  refreshPinsList(); renderNow();
+}
+el.btnColorFilter.addEventListener('click', ()=>{
+  el.colorFilterPanel.style.display = (el.colorFilterPanel.style.display==='none' || !el.colorFilterPanel.style.display) ? 'block' : 'none';
+});
+document.getElementById('btnFilterAll').addEventListener('click', ()=>{ filterColors.clear(); uniquePinColors().forEach(c=> filterColors.add(c)); buildColorFilter(); });
+document.getElementById('btnFilterNone').addEventListener('click', ()=>{ filterColors.clear(); applyPinVisibilityFilter(); buildColorFilter(); });
+document.getElementById('btnFilterClose').addEventListener('click', ()=> el.colorFilterPanel.style.display='none');
+
+function refreshPinsList(){
+  el.pinsList.innerHTML='';
+  pins.filter(pinPassesFilter).forEach(p=>{
+    const row=document.createElement('div'); row.className='row'; row.dataset.id=p.id;
+    const left=document.createElement('div'); left.style.display='flex'; left.style.alignItems='center'; left.style.gap='8px';
+    const dot=document.createElement('div'); dot.style.width='10px'; dot.style.height='10px'; dot.style.borderRadius='999px'; dot.style.background=p.color;
+    const title=document.createElement('div'); title.className='title'; title.textContent=p.title||'(無題)';
+    const meta=document.createElement('div'); meta.className='meta'; meta.textContent=`x:${p.pos.x.toFixed(2)} y:${p.pos.y.toFixed(2)} z:${p.pos.z.toFixed(2)}`;
+    left.appendChild(dot); left.appendChild(title);
+    row.appendChild(left); row.appendChild(meta);
+    row.addEventListener('click',()=>selectPin(p.id,{fly:true}));
+    el.pinsList.appendChild(row);
+  });
+}
+
+/* Load GLB */
+el.btnLoad.addEventListener('click', ()=>{
+  const fid = extractDriveFileId(el.inputGLB.value.trim()) || el.inputGLB.value.trim();
+  el.inputGLB.value = fid; loadGLBByFileId(fid);
+});
+el.btnViewOnly.addEventListener('click', ()=>{
+  const fid = extractDriveFileId(el.inputGLB.value.trim());
+  const sid = extractSpreadsheetId(el.inputSheet.value.trim());
+  const url = new URL(location.href); url.searchParams.set('view','1'); if(fid) url.searchParams.set('fileId', fid); if(sid) url.searchParams.set('sheetId', sid);
+  navigator.clipboard.writeText(url.toString()); toast('閲覧リンクをコピーしました');
+});
+el.btnWide.addEventListener('click', ()=>{
+  document.body.classList.toggle('wide');
+  el.btnWide.textContent = document.body.classList.contains('wide') ? '📋 パネル表示' : '📺 ビューア拡大';
+  setTimeout(()=>{ resize(); updateConnector(); }, 50);
+});
+el.btnTogglePins.addEventListener('click', ()=>{
+  pinGroup.visible = !pinGroup.visible;
+  el.btnTogglePins.textContent = 'ピン表示: ' + (pinGroup.visible? 'ON' : 'OFF');
+  applyPinVisibilityFilter(); renderNow();
+});
+el.btnAddPin.addEventListener('click', ()=>{
+  if(viewOnly) return;
+  addPinMode = !addPinMode;
+  el.viewerCanvas.style.cursor = addPinMode ? 'crosshair' : 'default';
+  el.modeLabel.textContent = addPinMode ? 'AddPin' : 'Orbit';
+  el.btnAddPin.textContent = addPinMode ? '＋ ピン追加: ON' : '＋ ピン追加モード';
+});
+el.btnGizmo.addEventListener('click', ()=>{
+  if(viewOnly) return;
+  const enable = !tcontrols.visible;
+  tcontrols.visible = enable; tcontrols.enabled = enable;
+  el.btnGizmo.textContent = 'ギズモ: ' + (enable ? 'ON' : 'OFF');
+  const p = pins.find(x=>x.id===selectedPinId);
+  if(enable && p && p.mesh){ tcontrols.attach(p.mesh); }
+  else{ tcontrols.detach(); }
+});
+el.btnUndo.addEventListener('click', ()=>{
+  if(viewOnly) return;
+  const last = undoStack.pop(); if(!last) return;
+  if(last.type==='add'){ const idx = pins.findIndex(p=>p.id===last.id); if(idx>=0){ const pin = pins[idx]; if(pin.mesh) pinGroup.remove(pin.mesh); pins.splice(idx,1); refreshPinsList(); renderNow(); upsertPinToSheet(); } }
+});
+el.btnDeletePin.addEventListener('click', async ()=>{
+  if(viewOnly) return;
+  const p = pins.find(x=>x.id===selectedPinId); if(!p) return;
+  const spreadsheetId = extractSpreadsheetId(el.inputSheet.value.trim());
+  if(p.mesh) pinGroup.remove(p.mesh);
+  pins = pins.filter(x=>x.id!==p.id);
+  selectedPinId = null;
+  refreshPinsList(); updateViewerPreviewForPin(null); el.rightEditor.classList.add('hidden'); el.rightNoSel.classList.remove('hidden');
+  renderNow();
+  if(spreadsheetId){ try{ await deletePinFromActiveSheet(spreadsheetId, p.id); }catch(e){ console.error(e); } }
+});
+
+async function loadGLBByFileId(fileId){
+  if(!accessToken){ alert('先にサインインしてください'); return; }
+  if(!fileId){ alert('GLBの fileId または共有URLを入力してください'); return; }
+  el.loading.hidden = false;
+  try{
+    el.statusLabel.textContent = 'GLBを読み込み中…';
+    const meta = await driveFileMeta(fileId);
+    glbMetaCache = meta; glbParents = meta.parents || [];
+    const dlUrl = `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media&supportsAllDrives=true`;
+    const res = await fetch(dlUrl, { headers:{ Authorization:`Bearer ${accessToken}` } });
+    if(!res.ok){
+      let hint = ''; if(res.status === 403 || res === 404){ hint = '（IDや共有設定を確認してください）'; }
+      throw new Error(`Drive download failed: ${res.status} ${res.statusText} ${hint}`);
+    }
+    const ab = await res.arrayBuffer();
+    if(currentModel){
+      scene.remove(currentModel);
+      currentModel.traverse(o=>{ if(o.geometry) o.geometry.dispose(); if(o.material){ if(Array.isArray(o.material)) o.material.forEach(m=>m.dispose()); else o.material.dispose(); } });
+      currentModel=null;
+    }
+    await new Promise((resolve,reject)=>{
+      try{
+        const loaderLocal = loader || new GLTFLoader();
+        loaderLocal.parse(ab, '', (gltf)=>{ currentModel = gltf.scene; scene.add(currentModel); fitToScene(); collectMaterials(); renderNow(); resolve(); }, (err)=> reject(err||new Error('parse failed')) );
+      }catch(err){ reject(err); }
+    });
+    el.statusLabel.textContent = `Loaded: ${meta.name}`;
+
+    let sheetId = extractSpreadsheetId(el.inputSheet.value.trim());
+    if(!sheetId){
+      sheetId = await findOrCreateSpreadsheetInGlbFolder(meta);
+      el.inputSheet.value = sheetId;
+      toast('スプレッドシートを同階層に用意しました');
+    }
+    await refreshCaptionLists(sheetId);
+    await loadPinsFromActiveSheet(sheetId);
+  }catch(err){
+    console.error(err);
+    el.statusLabel.textContent = 'Load failed';
+    alert('GLB読み込みに失敗しました：' + (err?.message || 'unknown error'));
+  }finally{
+    el.loading.hidden = true;
+  }
+}
+
+/* Entry */
 viewerInit();
 </script>
 </body>
