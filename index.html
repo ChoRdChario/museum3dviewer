@@ -222,7 +222,7 @@
   </div>
 </div>
 
-<!-- Drive画像ピッカー(簡易) -->
+<!-- Drive画像ピッカー -->
 <div id="pickerModal" class="signin-gate" style="display:none;background:rgba(0,0,0,.55)">
   <div class="card" style="width:min(90vw,980px);max-height:80vh;overflow:hidden">
     <h1 style="margin:0 0 6px">Driveから保存</h1>
@@ -324,7 +324,7 @@ async function ensureTokenClient() {
             .forEach(id=> document.getElementById(id).removeAttribute('disabled'));
         }
         enforceViewOnlyMode();
-        // URLの初期値
+        // URL初期値
         const qs = new URLSearchParams(location.search);
         const fid = qs.get('fileId') || '';
         const sid = qs.get('sheetId') || '';
@@ -483,7 +483,7 @@ function upscaleThumbnailUrl(u, size=2048){
 /* ========= UI wire ========= */
 document.getElementById('btnSignIn').addEventListener('click', startSignIn);
 
-/* also kick lazy init (race-safe) */
+/* also kick lazy init */
 (async () => { ensureGIS().catch(()=>{}); ensureGapiClient().catch(()=>{}); })();
 
 /* ========= Viewer ========= */
@@ -831,62 +831,64 @@ function indexMaterialsByKey(){
     }
   });
 }
+
+/* ▼▼▼ ここから “キー基準” に修正した 3点 ▼▼▼ */
 function collectMaterials(){
   materials=[]; 
   const set = new Set();
   if(!currentModel) return;
+
+  // 安定キーのインデックスを作成
+  indexMaterialsByKey();
+
+  // 重複除去しつつ material 群
   currentModel.traverse(obj=>{
     const m=obj.material;
     if(Array.isArray(m)){ m.forEach(mm=>{ if(mm && !set.has(mm)){ set.add(mm); materials.push(mm); ensureMatRecord(mm); } }); }
     else if(m){ if(!set.has(m)){ set.add(m); materials.push(m); ensureMatRecord(m); } }
   });
 
-  // UI 更新：__all__ は編集不可。最初のマテリアルを選択状態に
+  // プルダウン：value=key（表示は名前）
   el.matSelect.innerHTML = '<option value="__all__">（全マテリアル：編集不可）</option>';
   materials.forEach((m,idx)=>{
-    const name = m.name && m.name.trim() ? m.name : `Material_${idx}`;
-    const opt=document.createElement('option'); opt.value=name; opt.textContent=name; el.matSelect.appendChild(opt);
-  });
-  indexMaterialsByKey();
-  if(materials.length){ el.matSelect.value = el.matSelect.options[1]?.value || '__all__'; }
-  applyMaterialUIFromSelection(); // UIだけ
-}
-function getSelectedOriginalMaterial(){
-  const name=el.matSelect.value;
-  if(name==='__all__') return null;
-  // 見た目の名前から実マテリアルを検索
-  const idx = Array.from(el.matSelect.options).findIndex(o=>o.value===name);
-  let target=null;
-  let counter=0;
-  currentModel && currentModel.traverse(o=>{
-    if(target) return;
-    if(o.material){
-      if(Array.isArray(o.material)){
-        o.material.forEach(m=>{
-          const label = m.name && m.name.trim() ? m.name : `Material_${counter}`;
-          if(label===name && !target){ target=m; }
-          counter++;
-        });
-      }else{
-        const label = o.material.name && o.material.name.trim() ? o.material.name : `Material_${counter}`;
-        if(label===name && !target){ target=o.material; }
-        counter++;
-      }
+    const key = materialKeyByMaterial.get(m);
+    if(!key) return;
+    const name = (m.name && m.name.trim()) ? m.name : `Material_${idx}`;
+    const opt=document.createElement('option'); 
+    opt.value=key;            // ← 重要：キーを value に
+    opt.textContent=name;     // ラベルは人間可読
+    el.matSelect.appendChild(opt);
+    if(!matState.has(key)){
+      matState.set(key, {
+        unlit:false,
+        doubleSided:(m.side===THREE.DoubleSide),
+        opacity:(m.opacity??1),
+        invertRGB:false,
+        whiteToAlpha:false,
+        alphaTest:(m.alphaTest??0)
+      });
     }
   });
-  return target;
+
+  // 初期選択（存在すれば先頭キー）
+  if(el.matSelect.options.length>1){
+    el.matSelect.value = el.matSelect.options[1].value;
+  }else{
+    el.matSelect.value = '__all__';
+  }
+  applyMaterialUIFromSelection();
 }
-function getKeyForMaterial(m){ return materialKeyByMaterial.get(m) || null; }
-
+function getSelectedOriginalMaterial(){
+  const val=el.matSelect.value;
+  if(val==='__all__') return null;
+  return materialByKey.get(val) || null; // ← キーから元マテリアルを取得
+}
 function applyMaterialUIFromSelection(){
-  const orig = getSelectedOriginalMaterial();
-  const disable = !orig;
-  ['matUnlit','matDoubleSided','matOpacity','matInvert','matWhiteTransparent','matThreshold'].forEach(id=>{
-    document.getElementById(id).disabled = disable || viewOnly;
-  });
-  if(!orig) return;
-
-  const key = getKeyForMaterial(orig);
+  const key = el.matSelect.value;
+  const disable = (key === '__all__');
+  ['matUnlit','matDoubleSided','matOpacity','matInvert','matWhiteTransparent','matThreshold']
+    .forEach(id=>{ document.getElementById(id).disabled = disable || viewOnly; });
+  if(disable) return;
   const st = matState.get(key) || { unlit:false,doubleSided:false,opacity:1,invertRGB:false,whiteToAlpha:false,alphaTest:0 };
   el.matUnlit.checked = !!st.unlit;
   el.matDoubleSided.checked = !!st.doubleSided;
@@ -898,11 +900,12 @@ function applyMaterialUIFromSelection(){
   el.matThresholdVal.textContent = (Number(st.alphaTest ?? 0)).toFixed(2);
 }
 el.matSelect.addEventListener('change', ()=> applyMaterialUIFromSelection());
+/* ▲▲▲ 修正ここまで ▲▲▲ */
 
 async function applyMaterialFromUIToSelected(){
   const orig = getSelectedOriginalMaterial();
   if(!orig) return; // __all__ のときは適用しない
-  const key = getKeyForMaterial(orig);
+  const key = materialKeyByMaterial.get(orig);
   const st = matState.get(key) || {};
   st.unlit = !!el.matUnlit.checked;
   st.doubleSided = !!el.matDoubleSided.checked;
