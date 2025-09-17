@@ -117,11 +117,13 @@
           <hr style="border-color:#203049;border-width:1px 0;margin:12px 0">
         </div>
 
-        <div class="small" style="margin:4px 0 6px">マテリアル編集（シートごとに保存）</div>
-        <div class="field"><label>対象</label><select id="matSelect"><option value="__all__">（全マテリアル）</option></select></div>
+        <div class="small" style="margin:4px 0 6px">マテリアル編集（タブごとに保存）</div>
+        <div class="field"><label>対象</label>
+          <select id="matSelect"><option value="__all__">（全マテリアル：編集不可）</option></select>
+        </div>
         <div class="field"><label>Unlit</label><input id="matUnlit" type="checkbox"><span class="small">明暗なし</span></div>
         <div class="field"><label>裏面描画</label><input id="matDoubleSided" type="checkbox"></div>
-        <div class="field"><label>透明</label><input id="matTransparent" type="checkbox"></div>
+        <!-- 透明チェックは削除 -->
         <div class="field"><label>不透明度</label><input id="matOpacity" type="range" min="0" max="1" step="0.01" value="1"><span id="matOpacityVal" class="small">1.00</span></div>
         <div class="field"><label>テクスチャ反転</label><input id="matInvert" type="checkbox"></div>
         <div class="field"><label>白→透明</label><input id="matWhiteTransparent" type="checkbox"></div>
@@ -129,7 +131,7 @@
 
         <hr style="border-color:#203049;border-width:1px 0;margin:12px 0">
 
-        <div class="small" style="margin:4px 0 6px">ビュー（シートごとに保存）</div>
+        <div class="small" style="margin:4px 0 6px">ビュー（タブごとに保存）</div>
         <div class="viewgrid" style="margin-bottom:8px">
           <button id="viewFront">前面</button>
           <button id="viewBack">背面</button>
@@ -244,7 +246,7 @@
 </div>
 
 <script>
-  // Google SDK onload ハンドラ（確実発火）
+  // Google SDK onload フラグ
   window.__flags = { gapi:false, gis:false };
   function onGapi(){ window.__flags.gapi = true; }
   function onGis(){  window.__flags.gis  = true; }
@@ -320,7 +322,6 @@ const el = {
   matSelect: document.getElementById('matSelect'),
   matUnlit: document.getElementById('matUnlit'),
   matDoubleSided: document.getElementById('matDoubleSided'),
-  matTransparent: document.getElementById('matTransparent'),
   matOpacity: document.getElementById('matOpacity'),
   matOpacityVal: document.getElementById('matOpacityVal'),
   matInvert: document.getElementById('matInvert'),
@@ -365,9 +366,10 @@ let glbParents=[], glbMetaCache=null;
 let materials=[], materialMap=new Map(), materialMapNameToOrig=new Map();
 let matOriginals=new WeakMap();
 
-/* ★ マテリアル ⇔ キー（シート保存用） */
-const materialKeyByMaterial = new Map();
-const materialByKey = new Map();
+/* ★ per-material 保存用のキー&状態 */
+const materialKeyByMaterial = new Map();   // Material -> key
+const materialByKey = new Map();           // key -> Material
+const matState = new Map();                // key -> {unlit,doubleSided,opacity,invertRGB,whiteToAlpha,alphaTest}
 
 const imageBlobCache = new Map();
 let filterColors = new Set();
@@ -445,10 +447,10 @@ function maybeReady(){
       accessToken = resp.access_token;
       if(accessToken){
         el.gate.style.display = 'none';
-        const enableCommon = ['btnLoad','btnTogglePins','projOrtho'];
-        enableCommon.forEach(id=> document.getElementById(id).removeAttribute('disabled'));
+        // 閲覧モードでも listSelect は有効
+        ['btnLoad','btnTogglePins','projOrtho','listSelect'].forEach(id=> document.getElementById(id).removeAttribute('disabled'));
         if(!viewOnly){
-          ['btnAddPin','btnGizmo','btnUndo','btnSavePin','btnDeletePin','btnAttach','btnPickFromFolder','listSelect','listNew','listDelete']
+          ['btnAddPin','btnGizmo','btnUndo','btnSavePin','btnDeletePin','btnAttach','btnPickFromFolder','listNew','listDelete']
             .forEach(id=> document.getElementById(id).removeAttribute('disabled'));
         }
         el.statusLabel.textContent = viewOnly ? '閲覧モード' : 'Ready';
@@ -472,10 +474,7 @@ function enforceViewOnlyMode(){
   document.body.classList.add('viewonly');
   el.capTitle.readOnly = true;
   el.capBody.readOnly  = true;
-  [
-    'btnSavePin','btnDeletePin','btnAttach','btnPickFromFolder',
-    'listNew','listDelete','btnAddPin','btnGizmo','btnUndo'
-  ].forEach(id => document.getElementById(id)?.setAttribute('disabled','true'));
+  // listSelect は有効のまま（閲覧モードで切替可）
 }
 
 /* ================== Viewer ================== */
@@ -770,26 +769,6 @@ function extractSpreadsheetId(input){
 function makeDriveRef(id, mime){ return `drive:${id}|${mime||''}`; }
 
 /* ================== Materials ================== */
-function collectMaterials(){
-  materials=[]; materialMap.clear(); materialMapNameToOrig.clear();
-  const set = new Set();
-  if(!currentModel) return;
-  currentModel.traverse(obj=>{
-    const m=obj.material;
-    if(Array.isArray(m)){ m.forEach(mm=>{ if(mm && !set.has(mm)){ set.add(mm); materials.push(mm); ensureMatRecord(mm); } }); }
-    else if(m){ if(!set.has(m)){ set.add(m); materials.push(m); ensureMatRecord(m); } }
-  });
-  el.matSelect.innerHTML = '<option value="__all__">（全マテリアル）</option>';
-  materials.forEach((m,idx)=>{
-    const name = m.name && m.name.trim() ? m.name : `Material_${idx}`;
-    materialMap.set(name, m);
-    materialMapNameToOrig.set(name, m);
-    const opt=document.createElement('option'); opt.value=name; opt.textContent=name; el.matSelect.appendChild(opt);
-  });
-  /* ★ キーインデックスを作る（シート保存のため） */
-  indexMaterialsByKey();
-  applyMaterialLive();
-}
 function ensureMatRecord(m){
   if(matOriginals.has(m)) return;
   matOriginals.set(m, {
@@ -808,7 +787,6 @@ function ensureMatRecord(m){
     unlitMat: null
   });
 }
-/* ★ ルートからのパスとキー化 */
 function objectPath(node) {
   const names = [];
   let cur = node;
@@ -831,20 +809,101 @@ function indexMaterialsByKey(){
         const key = `${basePath}#${idx}`;
         materialKeyByMaterial.set(m, key);
         materialByKey.set(key, m);
+        ensureMatRecord(m);
+        if(!matState.has(key)){
+          matState.set(key, { unlit:false, doubleSided:(m.side===THREE.DoubleSide), opacity:(m.opacity??1), invertRGB:false, whiteToAlpha:false, alphaTest:(m.alphaTest??0) });
+        }
       });
     } else {
       const key = `${basePath}#0`;
       materialKeyByMaterial.set(obj.material, key);
       materialByKey.set(key, obj.material);
+      const m = obj.material; ensureMatRecord(m);
+      if(!matState.has(key)){
+        matState.set(key, { unlit:false, doubleSided:(m.side===THREE.DoubleSide), opacity:(m.opacity??1), invertRGB:false, whiteToAlpha:false, alphaTest:(m.alphaTest??0) });
+      }
     }
   });
 }
-function getSelectedOriginalMaterials(){
-  const key=el.matSelect.value;
-  if(key==='__all__') return materials;
-  const m = materialMapNameToOrig.get(key);
-  return m? [m] : [];
+function collectMaterials(){
+  materials=[]; materialMap.clear(); materialMapNameToOrig.clear();
+  const set = new Set();
+  if(!currentModel) return;
+  currentModel.traverse(obj=>{
+    const m=obj.material;
+    if(Array.isArray(m)){ m.forEach(mm=>{ if(mm && !set.has(mm)){ set.add(mm); materials.push(mm); ensureMatRecord(mm); } }); }
+    else if(m){ if(!set.has(m)){ set.add(m); materials.push(m); ensureMatRecord(m); } }
+  });
+
+  // UI 更新：__all__ は編集不可。最初のマテリアルを選択状態に
+  el.matSelect.innerHTML = '<option value="__all__">（全マテリアル：編集不可）</option>';
+  materials.forEach((m,idx)=>{
+    const name = m.name && m.name.trim() ? m.name : `Material_${idx}`;
+    materialMap.set(name, m);
+    materialMapNameToOrig.set(name, m);
+    const opt=document.createElement('option'); opt.value=name; opt.textContent=name; el.matSelect.appendChild(opt);
+  });
+  indexMaterialsByKey();
+
+  // デフォルト選択：1つ目（存在すれば）
+  if(materials.length){
+    el.matSelect.value = el.matSelect.options[1]?.value || '__all__';
+  }
+  applyMaterialUIFromSelection(); // UIに反映だけ
 }
+function getSelectedOriginalMaterial(){
+  const key=el.matSelect.value;
+  if(key==='__all__') return null;
+  const m = materialMapNameToOrig.get(key);
+  return m||null;
+}
+function getKeyForMaterial(m){
+  return materialKeyByMaterial.get(m) || null;
+}
+function applyMaterialUIFromSelection(){
+  const orig = getSelectedOriginalMaterial();
+  const disable = !orig;
+  ['matUnlit','matDoubleSided','matOpacity','matInvert','matWhiteTransparent','matThreshold'].forEach(id=>{
+    document.getElementById(id).disabled = disable || viewOnly;
+  });
+  if(!orig) return;
+
+  const key = getKeyForMaterial(orig);
+  const st = matState.get(key) || { unlit:false,doubleSided:false,opacity:1,invertRGB:false,whiteToAlpha:false,alphaTest:0 };
+  el.matUnlit.checked = !!st.unlit;
+  el.matDoubleSided.checked = !!st.doubleSided;
+  el.matOpacity.value = String(st.opacity ?? 1);
+  el.matOpacityVal.textContent = (Number(st.opacity ?? 1)).toFixed(2);
+  el.matInvert.checked = !!st.invertRGB;
+  el.matWhiteTransparent.checked = !!st.whiteToAlpha;
+  el.matThreshold.value = String(st.alphaTest ?? 0);
+  el.matThresholdVal.textContent = (Number(st.alphaTest ?? 0)).toFixed(2);
+}
+el.matSelect.addEventListener('change', ()=> applyMaterialUIFromSelection());
+
+async function applyMaterialFromUIToSelected(){
+  const orig = getSelectedOriginalMaterial();
+  if(!orig) return; // __all__ のときは適用しない
+  const key = getKeyForMaterial(orig);
+  const st = matState.get(key) || {};
+  st.unlit = !!el.matUnlit.checked;
+  st.doubleSided = !!el.matDoubleSided.checked;
+  st.opacity = Number(el.matOpacity.value ?? 1);
+  st.invertRGB = !!el.matInvert.checked;
+  st.whiteToAlpha = !!el.matWhiteTransparent.checked;
+  st.alphaTest = Number(el.matThreshold.value ?? 0);
+  matState.set(key, st);
+  await applyStateToMaterial(orig, st);
+  renderNow();
+  debouncedSaveMaterials(); // 保存トリガ
+}
+['change','input'].forEach(ev=>{
+  ['matUnlit','matDoubleSided','matOpacity','matInvert','matWhiteTransparent','matThreshold']
+    .forEach(id=> document.getElementById(id).addEventListener(ev, ()=> applyMaterialFromUIToSelected()));
+});
+el.matOpacity.addEventListener('input', ()=> el.matOpacityVal.textContent = parseFloat(el.matOpacity.value).toFixed(2));
+el.matThreshold.addEventListener('input', ()=> el.matThresholdVal.textContent = parseFloat(el.matThreshold.value).toFixed(2));
+
 function getActiveMaterialFor(originalM){
   const rec = matOriginals.get(originalM);
   return (rec && rec.wasUnlit && rec.unlitMat) ? rec.unlitMat : originalM;
@@ -888,71 +947,62 @@ async function processTextureToCanvasTextureFromOriginal(originalTex, { invertRG
   ctex.needsUpdate = true;
   return ctex;
 }
-async function applyMaterialLive(){
-  const wantUnlit = el.matUnlit.checked;
-  const wantDouble = el.matDoubleSided.checked;
-  const wantTransparent = el.matTransparent.checked;
-  const opacity = parseFloat(el.matOpacity.value);
-  const invert = el.matInvert.checked;
-  const whiteToAlpha = el.matWhiteTransparent.checked;
-  const thresh = parseFloat(el.matThreshold.value);
+async function applyStateToMaterial(origM, st){
+  ensureMatRecord(origM);
+  const rec = matOriginals.get(origM);
 
-  const targets = getSelectedOriginalMaterials();
-  for(const origM of targets){
-    ensureMatRecord(origM);
-    const rec = matOriginals.get(origM);
-
-    if(wantUnlit && !rec.wasUnlit){
-      const active = getActiveMaterialFor(origM);
-      const um = new THREE.MeshBasicMaterial();
-      um.color = (active.color ? active.color.clone() : rec.color.clone());
-      um.map = active.map || rec.map || null;
-      um.transparent = active.transparent;
-      um.opacity = active.opacity;
-      um.alphaTest = active.alphaTest;
-      um.side = active.side;
-      um.depthWrite = active.depthWrite;
-      um.depthTest = active.depthTest;
-      um.blending = active.blending;
-      um.toneMapped = false;
-      rec.unlitMat = um; rec.wasUnlit = true;
-      currentModel.traverse(obj=>{
-        const m=obj.material;
-        if(m===origM || m===active){ obj.material = um; }
-        else if(Array.isArray(m)){ obj.material = m.map(x=> (x===origM||x===active)? um : x ); }
-      });
-    }else if(!wantUnlit && rec.wasUnlit){
-      currentModel.traverse(obj=>{
-        const m=obj.material;
-        if(m===rec.unlitMat){ obj.material = origM; }
-        else if(Array.isArray(m)){ obj.material = m.map(x=> (x===rec.unlitMat)? origM : x ); }
-      });
-      rec.wasUnlit = false;
-    }
-
-    const mat = getActiveMaterialFor(origM);
-    mat.side = wantDouble ? THREE.DoubleSide : THREE.FrontSide;
-    mat.transparent = wantTransparent || whiteToAlpha || (opacity < 1.0);
-    mat.opacity = opacity;
-    mat.alphaTest = thresh;
-    mat.depthWrite = !mat.transparent || thresh>0;
-
-    if((invert || whiteToAlpha) && matOriginals.get(origM).map){
-      try{
-        const processed = await processTextureToCanvasTextureFromOriginal(matOriginals.get(origM).map, { invertRGB: invert, alphaFromWhite: whiteToAlpha, threshold: thresh });
-        if(processed){ mat.map = processed; mat.map.needsUpdate = true; }
-      }catch(e){ console.warn('texture process failed', e); }
-    }else if(!invert && !whiteToAlpha){
-      const rec0 = matOriginals.get(origM);
-      mat.map = rec0.map || null;
-      if(mat.map) mat.map.needsUpdate = true;
-    }
-    if(!mat.color && matOriginals.get(origM).color){ mat.color = matOriginals.get(origM).color.clone(); }
-    if(mat.color) mat.color.needsUpdate = true;
-    mat.needsUpdate = true;
+  // Unlit 切替
+  if(st.unlit && !rec.wasUnlit){
+    const active = getActiveMaterialFor(origM);
+    const um = new THREE.MeshBasicMaterial();
+    um.color = (active.color ? active.color.clone() : rec.color.clone());
+    um.map = active.map || rec.map || null;
+    um.transparent = active.transparent;
+    um.opacity = active.opacity;
+    um.alphaTest = active.alphaTest;
+    um.side = active.side;
+    um.depthWrite = active.depthWrite;
+    um.depthTest = active.depthTest;
+    um.blending = active.blending;
+    um.toneMapped = false;
+    rec.unlitMat = um; rec.wasUnlit = true;
+    currentModel.traverse(obj=>{
+      const m=obj.material;
+      if(m===origM || m===active){ obj.material = um; }
+      else if(Array.isArray(m)){ obj.material = m.map(x=> (x===origM||x===active)? um : x ); }
+    });
+  }else if(!st.unlit && rec.wasUnlit){
+    currentModel.traverse(obj=>{
+      const m=obj.material;
+      if(m===rec.unlitMat){ obj.material = origM; }
+      else if(Array.isArray(m)){ obj.material = m.map(x=> (x===rec.unlitMat)? origM : x ); }
+    });
+    rec.wasUnlit = false;
   }
-  renderNow();
-  debouncedSaveMaterials(); // ★ UI変更でシート保存（閲覧モードでは内部で弾く）
+
+  const mat = getActiveMaterialFor(origM);
+  mat.side = st.doubleSided ? THREE.DoubleSide : THREE.FrontSide;
+  // 透明チェックなし：不透明度 or 白→透明で判定
+  const willTransparent = (st.whiteToAlpha || (st.opacity < 1.0));
+  mat.transparent = willTransparent;
+  mat.opacity = st.opacity ?? 1;
+  mat.alphaTest = st.alphaTest ?? 0;
+  mat.depthWrite = !mat.transparent || (mat.alphaTest>0);
+
+  // テクスチャ処理
+  if((st.invertRGB || st.whiteToAlpha) && matOriginals.get(origM).map){
+    try{
+      const processed = await processTextureToCanvasTextureFromOriginal(matOriginals.get(origM).map, { invertRGB: st.invertRGB, alphaFromWhite: st.whiteToAlpha, threshold: st.alphaTest||0 });
+      if(processed){ mat.map = processed; mat.map.needsUpdate = true; }
+    }catch(e){ console.warn('texture process failed', e); }
+  }else{
+    const rec0 = matOriginals.get(origM);
+    mat.map = rec0.map || null;
+    if(mat.map) mat.map.needsUpdate = true;
+  }
+  if(!mat.color && matOriginals.get(origM).color){ mat.color = matOriginals.get(origM).color.clone(); }
+  if(mat.color) mat.color.needsUpdate = true;
+  mat.needsUpdate = true;
 }
 
 /* ================== Camera views ================== */
@@ -1045,18 +1095,36 @@ async function loadSheetMeta(spreadsheetId){
       ranges: [ META_MARKER_RANGE(), META_MAT_KEY_RANGE(), META_VIEW_KEY_RANGE() ]
     });
     const vals = (get.result.valueRanges || []).map(v=>v.values||[]);
-    const marker = vals[0]?.[0]?.[0] || '';
     const matJson = vals[1]?.[0]?.[1] || '';
     const viewJson = vals[2]?.[0]?.[1] || '';
-    return {
-      marker,
-      materials: safeParseJSON(matJson, { version:1, items:[] }),
-      viewer:    safeParseJSON(viewJson, { version:1, bgColor:'#0a0f16', projection:'perspective' })
-    };
+    const m = safeParseJSON(matJson, null);
+    const materials = normalizeMaterialsJSON(m);
+    const viewer = safeParseJSON(viewJson, { version:1, bgColor:'#0a0f16', projection:'perspective' });
+    return { materials, viewer };
   }catch(e){
     console.warn('loadSheetMeta failed', e);
-    return { marker:'', materials:{version:1,items:[]}, viewer:{version:1,bgColor:'#0a0f16',projection:'perspective'} };
+    return { materials:{version:2,byKey:{}}, viewer:{version:1,bgColor:'#0a0f16',projection:'perspective'} };
   }
+}
+function normalizeMaterialsJSON(m){
+  if(!m) return { version:2, byKey:{} };
+  if(m.version===2 && m.byKey) return m;
+  if(Array.isArray(m.items)){ // v1 -> v2 変換
+    const byKey = {};
+    m.items.forEach(it=>{
+      if(!it || !it.key) return;
+      byKey[it.key] = {
+        unlit: !!it.unlit,
+        doubleSided: !!it.doubleSided,
+        opacity: Number(it.opacity ?? 1),
+        invertRGB: !!it.invertRGB,
+        whiteToAlpha: !!it.whiteToAlpha,
+        alphaTest: Number(it.alphaTest ?? 0)
+      };
+    });
+    return { version:2, byKey };
+  }
+  return { version:2, byKey:{} };
 }
 async function saveSheetMeta(spreadsheetId, { materials, viewer }){
   if(viewOnly) return; // 閲覧モードでは保存しない
@@ -1072,26 +1140,21 @@ async function saveSheetMeta(spreadsheetId, { materials, viewer }){
   });
 }
 function serializeMaterialsForSheet(){
-  const items = [];
-  const targets = materials;
-  for (const orig of targets){
-    const key = materialKeyByMaterial.get(orig) || (orig.name ? `name:${orig.name}` : null);
-    if (!key) continue;
-    const rec = matOriginals.get(orig) || {};
-    const active = rec.wasUnlit && rec.unlitMat ? rec.unlitMat : orig;
-    items.push({
-      key,
-      name: orig.name || '',
-      unlit: !!rec.wasUnlit,
-      doubleSided: active.side === THREE.DoubleSide,
-      transparent: !!active.transparent,
-      opacity: Number(active.opacity ?? 1),
-      invertRGB: !!el.matInvert.checked,
-      whiteToAlpha: !!el.matWhiteTransparent.checked,
-      alphaTest: Number(active.alphaTest ?? 0)
-    });
+  // 現在の matState をそのまま書き出す（存在するマテリアルキーのみ）
+  const byKey = {};
+  for(const [key, st] of matState){
+    if(materialByKey.has(key)){
+      byKey[key] = {
+        unlit: !!st.unlit,
+        doubleSided: !!st.doubleSided,
+        opacity: Number(st.opacity ?? 1),
+        invertRGB: !!st.invertRGB,
+        whiteToAlpha: !!st.whiteToAlpha,
+        alphaTest: Number(st.alphaTest ?? 0)
+      };
+    }
   }
-  return { version:1, items };
+  return { version:2, byKey };
 }
 function serializeViewerPrefs(){
   return {
@@ -1101,38 +1164,18 @@ function serializeViewerPrefs(){
   };
 }
 async function applyMaterialsFromSheet(materialsData){
-  if (!materialsData || !Array.isArray(materialsData.items)) return;
-  for (const it of materialsData.items){
-    let mat = materialByKey.get(it.key);
-    if(!mat && it.name){
-      mat = materials.find(m => (m.name||'') === it.name);
-    }
-    if(!mat) continue;
-    // UIへ反映（個別適用のため一時的に matSelect を合わせて apply）
-    el.matUnlit.checked = !!it.unlit;
-    el.matDoubleSided.checked = !!it.doubleSided;
-    el.matTransparent.checked = !!it.transparent;
-    el.matOpacity.value = String(it.opacity ?? 1);
-    el.matOpacityVal.textContent = (Number(it.opacity ?? 1)).toFixed(2);
-    el.matInvert.checked = !!it.invertRGB;
-    el.matWhiteTransparent.checked = !!it.whiteToAlpha;
-    el.matThreshold.value = String(it.alphaTest ?? 0);
-    el.matThresholdVal.textContent = (Number(it.alphaTest ?? 0)).toFixed(2);
-
-    const name = mat.name && mat.name.trim() ? mat.name : null;
-    if(name && materialMap.has(name)){
-      el.matSelect.value = name;
-      await applyMaterialLive();
-    }else{
-      mat.side = it.doubleSided ? THREE.DoubleSide : THREE.FrontSide;
-      mat.transparent = it.transparent || (it.opacity < 1);
-      mat.opacity = it.opacity ?? 1;
-      mat.alphaTest = it.alphaTest ?? 0;
-      mat.needsUpdate = true;
-    }
+  if(!materialsData || !materialsData.byKey) return;
+  // matState に取り込んでから、一括適用
+  for(const [key, st] of Object.entries(materialsData.byKey)){
+    matState.set(key, { ...st });
   }
-  // UI 対象を全体に戻す
-  el.matSelect.value = '__all__';
+  for(const [key, st] of matState){
+    const mat = materialByKey.get(key);
+    if(!mat) continue;
+    await applyStateToMaterial(mat, st);
+  }
+  // UI は現在選択材の状態を表示
+  applyMaterialUIFromSelection();
   renderNow();
 }
 async function applyViewerPrefs(viewerData){
@@ -1148,7 +1191,7 @@ async function applyViewerPrefs(viewerData){
   }
   renderNow();
 }
-/* マテリアル/ビューのオートセーブ（UIイベントで呼ぶ） */
+/* マテリアル/ビューのオートセーブ */
 const debouncedSaveMaterials = debounce(async ()=>{
   if(viewOnly) return;
   const spreadsheetId = extractSpreadsheetId(el.inputSheet.value.trim());
@@ -1159,13 +1202,6 @@ const debouncedSaveMaterials = debounce(async ()=>{
   catch(e){ console.warn('saveSheetMeta failed', e); }
 }, 600);
 
-/* ================== Material UI Bindings ================== */
-['change','input'].forEach(ev=>{
-  ['matUnlit','matDoubleSided','matTransparent','matOpacity','matInvert','matWhiteTransparent','matThreshold','matSelect']
-    .forEach(id=> document.getElementById(id).addEventListener(ev, ()=> applyMaterialLive()));
-});
-el.matOpacity.addEventListener('input', ()=> el.matOpacityVal.textContent = parseFloat(el.matOpacity.value).toFixed(2));
-el.matThreshold.addEventListener('input', ()=> el.matThresholdVal.textContent = parseFloat(el.matThreshold.value).toFixed(2));
 el.bgColor.addEventListener('input', ()=>{ scene.background = new THREE.Color(el.bgColor.value); renderNow(); debouncedSaveMaterials(); });
 
 /* ================== Thumbs / Preview ================== */
@@ -1307,10 +1343,13 @@ async function loadPinsFromActiveSheet(spreadsheetId){
     refreshPinsList();
     buildColorFilter();
 
-    /* ★ 同じタブのメタ情報を読み込んで適用 */
+    // メタ適用（マテリアル/ビュー）
     const meta = await loadSheetMeta(spreadsheetId);
     await applyMaterialsFromSheet(meta.materials);
     await applyViewerPrefs(meta.viewer);
+
+    // 現在の選択材UI同期
+    applyMaterialUIFromSelection();
   }catch(e){ console.error('loadPinsFromActiveSheet failed', e); }
 }
 async function upsertPinToSheet(){
@@ -1502,7 +1541,8 @@ async function refreshCaptionLists(spreadsheetId){
     }
   }
   if (activeSheet.sheetId){ el.listSelect.value = String(activeSheet.sheetId); }
-  if(!viewOnly){ ['listSelect','listNew','listDelete'].forEach(id=>document.getElementById(id).disabled=false); }
+  // 閲覧モードでも listSelect は有効（ここで disable しない）
+  if(!viewOnly){ ['listNew','listDelete'].forEach(id=>document.getElementById(id).disabled=false); }
 }
 el.listSelect.addEventListener('change', async (e)=>{
   const spreadsheetId = extractSpreadsheetId(el.inputSheet.value.trim());
@@ -1534,9 +1574,8 @@ el.listNew.addEventListener('click', async ()=>{
   el.listSelect.value = String(newSheetId);
   pins = []; selectedPinId = null; rebuildPinsScene(); refreshPinsList();
 
-  /* 新しいタブにはデフォルトのメタを書き込む */
   await saveSheetMeta(spreadsheetId, {
-    materials: {version:1, items:[]},
+    materials: {version:2, byKey:{}},
     viewer: {version:1, bgColor: el.bgColor.value || '#0a0f16', projection: usingOrtho ? 'orthographic' : 'perspective' }
   });
 
@@ -1666,8 +1705,43 @@ async function loadGLBByFileId(fileId){
   }
 }
 
+/* ================== Save viewer prefs ================== */
+el.viewFront.addEventListener('click', ()=> debouncedSaveMaterials());
+el.viewBack.addEventListener('click',  ()=> debouncedSaveMaterials());
+el.viewLeft.addEventListener('click',  ()=> debouncedSaveMaterials());
+el.viewRight.addEventListener('click', ()=> debouncedSaveMaterials());
+el.viewTop.addEventListener('click',   ()=> debouncedSaveMaterials());
+el.viewBottom.addEventListener('click',()=> debouncedSaveMaterials());
+
 /* ================== Entry ================== */
-viewerInit();
+function buildColorPresets(){
+  const holder = el.colorPresets; holder.innerHTML='';
+  ['#ff6b6b','#ffd166','#06d6a0','#118ab2','#ef476f','#b5179e','#4361ee','#4cc9f0','#ff9f1c'].forEach(c=>{
+    const b=document.createElement('button');
+    b.style.width='18px'; b.style.height='18px';
+    b.style.borderRadius='999px'; b.style.border='2px solid #223146';
+    b.style.background=c; b.title=c;
+    b.addEventListener('click',()=>{
+      currentColor=c;
+      const pId=selectedPinId;
+      if(pId){
+        const p=pins.find(x=>x.id===pId);
+        p.color=normalizeHex(c);
+        placePinMesh(p);
+        refreshPinsList();
+        filterColors.add(p.color);
+        buildColorFilter();
+        debouncedSave();
+      }
+    });
+    holder.appendChild(b);
+  });
+}
+// すでに上で呼出済み
+
+function viewerInitWrap(){ viewerInit(); }
+viewerInitWrap();
+
 </script>
 </body>
 </html>
