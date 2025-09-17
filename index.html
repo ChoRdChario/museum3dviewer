@@ -399,7 +399,6 @@ function onSignedIn(){
     ['btnAddPin','btnGizmo','btnUndo','btnSavePin','btnDeletePin','btnAttach','btnPickFromFolder','listNew','listDelete'].forEach(id=>{ const b=document.getElementById(id); if(b) b.disabled=false; });
   }
   setStatus(viewOnly?'閲覧モード':'Ready');
-  // URL 初期値
   const fid=qs.get('fileId')||''; const sid=qs.get('sheetId')||'';
   if(fid) el.inputGLB.value=fid;
   if(sid) el.inputSheet.value=sid;
@@ -412,13 +411,11 @@ const debounce=(fn,ms)=>{let t;return(...a)=>{clearTimeout(t);t=setTimeout(()=>f
 
 function extractDriveFileId(str){
   if(!str) return '';
-  // 共有URLや open?id= に対応
   const m1 = str.match(/\/d\/([a-zA-Z0-9_-]+)/);
   if(m1) return m1[1];
   const u = (()=>{ try{return new URL(str);}catch{return null} })();
   if(u){
     if(u.searchParams.get('id')) return u.searchParams.get('id');
-    // ファイルURL末尾？
     const parts=u.pathname.split('/').filter(Boolean);
     if(parts.length>0) return parts[parts.length-1];
   }
@@ -487,6 +484,11 @@ function viewerInit(){
 
   loader=new GLTFLoader();
 
+  /* ★★ 追加：pinGroup を必ず初期化しておく（これが無いと clear() 相当で死ぬ） */
+  pinGroup = new THREE.Group();
+  pinGroup.name = 'LociMyuPins';
+  scene.add(pinGroup);
+
   window.addEventListener('resize', resize);
   el.canvas.addEventListener('pointerdown', onPointerDown);
   resize();
@@ -524,7 +526,7 @@ function setView(dir){
   switch(dir){
     case 'front':  pos=new THREE.Vector3( 0, 0, d); break;
     case 'back':   pos=new THREE.Vector3( 0, 0,-d); break;
-    case 'left':   pos=new THREE.Vector3( d, 0, 0); break;   // ※左右入れ替え（要望）
+    case 'left':   pos=new THREE.Vector3( d, 0, 0); break;   // 左右入替え（ご要望）
     case 'right':  pos=new THREE.Vector3(-d, 0, 0); break;
     case 'top':    pos=new THREE.Vector3( 0, d, 0); break;
     case 'bottom': pos=new THREE.Vector3( 0,-d, 0); break;
@@ -572,6 +574,7 @@ function buildFilterPanel(){
   });
 }
 function applyPinVisibilityFilter(){
+  if(!pinGroup) return;
   pinGroup.children.forEach(mesh=>{
     const pin=pins.find(p=>p.id===mesh.userData.pinId);
     const ok = pinVisible && (!filterColors.size || filterColors.has(pin?.color));
@@ -591,7 +594,6 @@ async function listFolderImages(folderId){
   return res.result.files||[];
 }
 async function createSpreadsheetInFolder(name, folderId){
-  // Drive で Spreadsheet を作成 → そのIDを返す
   const meta = await gapi.client.drive.files.create({
     resource:{ name, mimeType:'application/vnd.google-apps.spreadsheet', parents: folderId?[folderId]:undefined },
     fields:'id'
@@ -599,10 +601,8 @@ async function createSpreadsheetInFolder(name, folderId){
   return meta.result.id;
 }
 async function ensureSheetHeaders(spreadsheetId, sheetTitle){
-  // A:id B:title C:body D:color E:x F:y G:z H:images I:updatedAt
   const res = await gapi.client.sheets.spreadsheets.get({ spreadsheetId });
   const sheet = res.result.sheets.find(s=>s.properties.title===sheetTitle);
-  const sheetId = sheet ? sheet.properties.sheetId : null;
   if(!sheet){
     await gapi.client.sheets.spreadsheets.batchUpdate({
       spreadsheetId,
@@ -613,7 +613,6 @@ async function ensureSheetHeaders(spreadsheetId, sheetTitle){
       resource:{ values:[['id','title','body','color','x','y','z','images','updatedAt']] }
     });
   }else{
-    // ヘッダがない場合にだけ書く（安全）
     const v = await gapi.client.sheets.spreadsheets.values.get({ spreadsheetId, range:`${sheetTitle}!A1:I1` });
     if(!(v.result.values && v.result.values[0] && v.result.values[0][0]==='id')){
       await gapi.client.sheets.spreadsheets.values.update({
@@ -624,8 +623,6 @@ async function ensureSheetHeaders(spreadsheetId, sheetTitle){
   }
 }
 async function saveMetaKV(spreadsheetId, obj){
-  // K2: MATERIALS_JSON / L2: json
-  // K3: VIEWER_JSON    / L3: json
   const kv=[
     ['MATERIALS_JSON', JSON.stringify(obj.materials||{})],
     ['VIEWER_JSON', JSON.stringify(obj.viewer||{})],
@@ -664,7 +661,6 @@ async function loadGLBByFileId(fileId){
     if(!res.ok) throw new Error(`Drive download failed: ${res.status}`);
     const ab=await res.arrayBuffer();
 
-    // dispose old
     if(currentModel){
       scene.remove(currentModel);
       currentModel.traverse(o=>{
@@ -685,7 +681,6 @@ async function loadGLBByFileId(fileId){
     renderer.setClearColor(new THREE.Color(el.bgColor.value)); scene.background = new THREE.Color(el.bgColor.value);
     renderNow();
 
-    // Spreadsheet の確保
     spreadsheetId = extractSpreadsheetId(el.inputSheet.value.trim());
     if(!spreadsheetId){
       spreadsheetId = await createSpreadsheetInFolder('LociMyu Captions', glbParents[0]);
@@ -693,7 +688,6 @@ async function loadGLBByFileId(fileId){
       toast('同階層にスプレッドシートを作成しました');
     }
 
-    // リスト準備＆読込
     await refreshCaptionLists(spreadsheetId);
     await ensureSheetHeaders(spreadsheetId, activeSheet.title);
     await loadPinsFromSheet();
@@ -789,18 +783,11 @@ el.matOpacity.addEventListener('input', ()=> el.matOpacityVal.textContent=parseF
 el.matThreshold.addEventListener('input', ()=> el.matThresholdVal.textContent=parseFloat(el.matThreshold.value).toFixed(2));
 
 async function applyStateToMaterial(m, st){
-  // clone once
-  if(!m.userData.__lmCloned){
-    const clone=m.clone(); // textures are shared OK
-    m.userData.__lmCloned=clone;
-  }
-  // base properties
   m.transparent = (st.opacity<1) || st.whiteToAlpha || (m.transparent===true);
   m.opacity = st.opacity;
   m.side = st.doubleSided ? THREE.DoubleSide : THREE.FrontSide;
   m.alphaTest = st.alphaTest||0;
 
-  // Unlit: use MeshBasicMaterial-like behavior
   if(st.unlit){
     m.onBeforeCompile=(shader)=>{ shader.fragmentShader = shader.fragmentShader.replace('#include <lights_fragment_begin>',''); };
     m.needsUpdate=true;
@@ -809,7 +796,6 @@ async function applyStateToMaterial(m, st){
     m.needsUpdate=true;
   }
 
-  // texture inversion / white-to-alpha
   if(m.map){
     m.map.needsUpdate=true;
     m.needsUpdate=true;
@@ -825,9 +811,7 @@ async function applyStateToMaterial(m, st){
           #ifdef DECODE_VIDEO_TEXTURE
             sampledDiffuseColor = sRGBToLinear( sampledDiffuseColor );
           #endif
-          // invert
           ${st.invertRGB ? 'sampledDiffuseColor.rgb = 1.0 - sampledDiffuseColor.rgb;' : ''}
-          // white -> transparent
           ${st.whiteToAlpha ? 'float mx = max(sampledDiffuseColor.r, max(sampledDiffuseColor.g, sampledDiffuseColor.b)); sampledDiffuseColor.a = 1.0 - mx;' : ''}
           diffuseColor *= sampledDiffuseColor;
         #endif
@@ -845,17 +829,13 @@ const debouncedSaveMaterials = debounce(async ()=>{
   if(!spreadsheetId || !activeSheet.title) return;
   const materialsObj = {};
   for(const [key, st] of matState.entries()){ materialsObj[key]=st; }
-  const viewerObj = {
-    ortho: !!usingOrtho,
-    bg: el.bgColor.value||'#0a0f16'
-  };
+  const viewerObj = { ortho: !!usingOrtho, bg: el.bgColor.value||'#0a0f16' };
   try{ await saveMetaKV(spreadsheetId,{materials:materialsObj,viewer:viewerObj}); }catch(e){ console.warn('saveMetaKV',e); }
 }, 600);
 
 async function applyMetaFromSheet(){
   if(!spreadsheetId || !activeSheet.title) return;
   const meta = await loadMetaKV(spreadsheetId);
-  // apply materials
   if(meta.materials){
     for(const [key,st] of Object.entries(meta.materials)){
       matState.set(key,st);
@@ -863,7 +843,6 @@ async function applyMetaFromSheet(){
       if(m) await applyStateToMaterial(m,st);
     }
   }
-  // apply viewer
   if(meta.viewer){
     if(typeof meta.viewer.bg==='string'){ el.bgColor.value = meta.viewer.bg; scene.background = new THREE.Color(meta.viewer.bg); renderer.setClearColor(new THREE.Color(meta.viewer.bg)); }
     if(typeof meta.viewer.ortho==='boolean'){ el.projOrtho.checked = !!meta.viewer.ortho; toggleProjection(!!meta.viewer.ortho); }
@@ -902,15 +881,12 @@ function selectPin(id, focusCamera=false){
   el.capTitle.value=p.title||'';
   el.capBody.value=p.body||'';
 
-  // ギズモ attach
   const mesh = pinGroup.children.find(m=>m.userData.pinId===p.id);
   if(mesh){ tcontrols.attach(mesh); tcontrols.visible=!viewOnly && gizmoOn; tcontrols.enabled=!viewOnly && gizmoOn; }
 
-  // プレビュー
   setPreview(p).catch(err=>console.warn('preview failed',err));
   if(focusCamera){
     controls.target.copy(p.pos); controls.update();
-    // 原点注視ではなくピン注視、ただし距離維持
     const dist=camera.position.distanceTo(controls.target);
     const dir=camera.position.clone().sub(controls.target).normalize();
     camera.position.copy(controls.target.clone().addScaledVector(dir, Math.max(dist,0.1)));
@@ -929,7 +905,6 @@ function updateConnector(){
   const sx=((v.x+1)/2)*rect.width;
   const sy=((1-v.y)/2)*rect.height;
 
-  // 目標はプレビューパネル左上
   const pr=el.viewerPreview.getBoundingClientRect();
   const tx=pr.left-rect.left+8; const ty=pr.top-rect.top+8;
 
@@ -980,8 +955,18 @@ async function savePinsToSheet(){
 }
 const debouncedSavePins=debounce(savePinsToSheet,600);
 
+/* ★★ 追加：pinGroup の安全クリア（未初期化でも安全 & dispose） */
+function safeClearPinGroup(){
+  if(!pinGroup) return;
+  while(pinGroup.children.length){
+    const c = pinGroup.children.pop();
+    c.geometry?.dispose?.();
+    c.material?.dispose?.();
+  }
+}
+
 async function loadPinsFromSheet(){
-  pins=[]; pinGroup.clear();
+  pins=[]; safeClearPinGroup(); // ← ここを clear() から置換済み
   const res=await gapi.client.sheets.spreadsheets.values.get({ spreadsheetId, range:`${activeSheet.title}!A2:I` });
   const rows=res.result.values||[];
   for(const r of rows){
@@ -1010,7 +995,6 @@ function onPointerDown(e){
   const intersects = raycaster.intersectObjects(currentModel.children,true);
   if(intersects.length>0){
     const p = intersects[0].point;
-    // 既存ピンに近ければ選択
     const nearest = pins.map(pp=>({pp, d:pp.pos.distanceTo(p)})).sort((a,b)=>a.d-b.d)[0];
     if(nearest && nearest.d<0.05){
       selectPin(nearest.pp.id,true);
@@ -1022,7 +1006,7 @@ function onPointerDown(e){
 }
 document.addEventListener('keydown', (e)=>{
   if(e.key==='z' && (e.ctrlKey||e.metaKey)){
-    // 簡易Undo: 直前の保存状態を復元（ここでは省略: 実運用は履歴栄養）
+    // TODO: Undo
   }
 });
 
@@ -1038,7 +1022,6 @@ el.btnGizmo.addEventListener('click', ()=>{
   tcontrols.visible=gizmoOn && !!selectedPinId;
   tcontrols.enabled=tcontrols.visible;
 });
-el.btnUndo.addEventListener('click', ()=>{/* 省略 */});
 el.btnTogglePins.addEventListener('click', ()=>{
   pinVisible = !pinVisible;
   el.btnTogglePins.textContent = pinVisible?'ピン表示: ON':'ピン表示: OFF';
@@ -1047,6 +1030,7 @@ el.btnTogglePins.addEventListener('click', ()=>{
 
 el.capTitle.addEventListener('input', ()=>{ const p=pins.find(x=>x.id===selectedPinId); if(!p) return; p.title=el.capTitle.value; refreshPinsList(false); debouncedSavePins(); });
 el.capBody.addEventListener('input',  ()=>{ const p=pins.find(x=>x.id===selectedPinId); if(!p) return; p.body=el.capBody.value; debouncedSavePins(); });
+
 el.btnSavePin.addEventListener('click', savePinsToSheet);
 el.btnDeletePin.addEventListener('click', ()=>{ if(!selectedPinId) return; if(confirm('このピンを削除しますか？')) removePin(selectedPinId); });
 
@@ -1063,7 +1047,6 @@ el.previewReset.addEventListener('click', ()=>{
 });
 
 async function resolveImageObjectURL(file){
-  // HEIC/HEIF は生Blob→heic2anyでJPEG化
   const isHeic = /heic|heif/i.test(file.fileExtension || file.mimeType || '');
   const url = `https://www.googleapis.com/drive/v3/files/${file.id}?alt=media&supportsAllDrives=true`;
   const blob = await fetch(url, { headers:{ Authorization:`Bearer ${accessToken}` }}).then(r=>r.blob());
@@ -1072,7 +1055,7 @@ async function resolveImageObjectURL(file){
     const jpg = await window.heic2any({ blob, toType:'image/jpeg', quality: 0.92 });
     return URL.createObjectURL(jpg);
   }else{
-    return URL.createObjectURL(blob); // これで高解像度
+    return URL.createObjectURL(blob);
   }
 }
 async function setPreview(p){
@@ -1088,8 +1071,8 @@ async function setPreview(p){
       imageBlobCache.set(fileId,objUrl);
       el.previewImg.src=objUrl;
     }
-    el.capTitleLine.textContent=p.title||'(無題)';
-    el.capBodyLine.textContent=p.body||'';
+    document.getElementById('capTitleLine').textContent=p.title||'(無題)';
+    document.getElementById('capBodyLine').textContent=p.body||'';
     el.viewerPreview.classList.remove('hidden');
     updateConnector();
   }catch(err){
@@ -1135,7 +1118,7 @@ el.imgLocal.addEventListener('change', async ()=>{
   }catch(e){ alert('アップロード失敗: '+e.message); }
 });
 
-/* Drive picker (同階層フォルダ) */
+/* Drive picker */
 el.btnPickFromFolder.addEventListener('click', async ()=>{
   if(!glbParents.length){ alert('GLB の親フォルダが不明です'); return; }
   await reloadPicker();
@@ -1151,7 +1134,6 @@ async function reloadPicker(){
   files.forEach(f=>{
     const cell=document.createElement('div'); cell.style.border='1px solid #223146'; cell.style.borderRadius='10px'; cell.style.padding='6px'; cell.style.cursor='pointer'; cell.style.background='#0f1722';
     const img=document.createElement('img'); img.style.width='100%'; img.style.height='120px'; img.style.objectFit='cover'; img.style.borderRadius='8px';
-    // サムネは Drive の thumbnailLink（HEICでもOK）だがプレビューはフル解像度を別途取得
     img.src = (f.thumbnailLink||'').replace(/=s220/,'=s400');
     const cap=document.createElement('div'); cap.className='small'; cap.textContent=f.name;
     cell.appendChild(img); cell.appendChild(cap);
@@ -1190,7 +1172,6 @@ async function refreshCaptionLists(spreadsheetIdIn){
     const opt=document.createElement('option'); opt.value=t; opt.textContent=t;
     el.listSelect.appendChild(opt);
   });
-  // 無ければ作る
   if(!sheets.length){
     await gapi.client.sheets.spreadsheets.batchUpdate({
       spreadsheetId: spreadsheetIdIn,
@@ -1205,7 +1186,7 @@ el.listSelect.addEventListener('change', async ()=>{
   activeSheet.title = el.listSelect.value;
   await ensureSheetHeaders(spreadsheetId, activeSheet.title);
   await loadPinsFromSheet();
-  await applyMetaFromSheet(); // マテリアル & ビューを適用（閲覧モードでもOK）
+  await applyMetaFromSheet();
 });
 el.listNew.addEventListener('click', async ()=>{
   const name = prompt('新しいキャプションリスト名（シート名）','Pins 2');
@@ -1232,8 +1213,9 @@ el.listDelete.addEventListener('click', async ()=>{
 });
 
 /* ====== Material/Viewer save triggers ====== */
-el.projOrtho.addEventListener('change', ()=>{ toggleProjection(el.projOrtho.checked); debouncedSaveMaterials(); });
-el.bgColor.addEventListener('input', ()=>{ scene.background = new THREE.Color(el.bgColor.value); renderer.setClearColor(new THREE.Color(el.bgColor.value)); renderNow(); debouncedSaveMaterials(); });
+const debouncedSaveMaterialsLocal = debouncedSaveMaterials;
+el.projOrtho.addEventListener('change', ()=>{ toggleProjection(el.projOrtho.checked); debouncedSaveMaterialsLocal(); });
+el.bgColor.addEventListener('input', ()=>{ scene.background = new THREE.Color(el.bgColor.value); renderer.setClearColor(new THREE.Color(el.bgColor.value)); renderNow(); debouncedSaveMaterialsLocal(); });
 
 /* ====== Filter UI ====== */
 el.btnColorFilter.addEventListener('click', ()=> el.colorFilterPanel.style.display = el.colorFilterPanel.style.display==='none'?'block':'none');
@@ -1269,7 +1251,7 @@ el.viewTop  .addEventListener('click', ()=>setView('top'));
 el.viewBottom.addEventListener('click', ()=>setView('bottom'));
 
 /* ====== Sign-in gate ====== */
-document.getElementById('btnSignIn').addEventListener('click', startSignIn);
+el.btnSignIn.addEventListener('click', startSignIn);
 
 /* ====== Start ====== */
 viewerInit();
