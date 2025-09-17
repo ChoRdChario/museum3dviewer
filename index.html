@@ -117,13 +117,12 @@
           <hr style="border-color:#203049;border-width:1px 0;margin:12px 0">
         </div>
 
-        <div class="small" style="margin:4px 0 6px">マテリアル編集（タブごとに保存）</div>
+        <div class="small" style="margin:4px 0 6px">マテリアル編集（キャプションシートごとに保存）</div>
         <div class="field"><label>対象</label>
           <select id="matSelect"><option value="__all__">（全マテリアル：編集不可）</option></select>
         </div>
         <div class="field"><label>Unlit</label><input id="matUnlit" type="checkbox"><span class="small">明暗なし</span></div>
         <div class="field"><label>裏面描画</label><input id="matDoubleSided" type="checkbox"></div>
-        <!-- 透明チェックは削除 -->
         <div class="field"><label>不透明度</label><input id="matOpacity" type="range" min="0" max="1" step="0.01" value="1"><span id="matOpacityVal" class="small">1.00</span></div>
         <div class="field"><label>テクスチャ反転</label><input id="matInvert" type="checkbox"></div>
         <div class="field"><label>白→透明</label><input id="matWhiteTransparent" type="checkbox"></div>
@@ -131,7 +130,7 @@
 
         <hr style="border-color:#203049;border-width:1px 0;margin:12px 0">
 
-        <div class="small" style="margin:4px 0 6px">ビュー（タブごとに保存）</div>
+        <div class="small" style="margin:4px 0 6px">ビュー（キャプションシートごとに保存）</div>
         <div class="viewgrid" style="margin-bottom:8px">
           <button id="viewFront">前面</button>
           <button id="viewBack">背面</button>
@@ -223,6 +222,7 @@
   </div>
 </div>
 
+<!-- Drive画像ピッカー(簡易) -->
 <div id="pickerModal" class="signin-gate" style="display:none;background:rgba(0,0,0,.55)">
   <div class="card" style="width:min(90vw,980px);max-height:80vh;overflow:hidden">
     <h1 style="margin:0 0 6px">Driveから保存</h1>
@@ -234,6 +234,7 @@
   </div>
 </div>
 
+<!-- サインインゲート -->
 <div class="signin-gate" id="gate">
   <div class="card">
     <h1>Googleにサインイン</h1>
@@ -245,8 +246,8 @@
   </div>
 </div>
 
+<!-- SDK -->
 <script>
-  // Google SDK onload フラグ
   window.__flags = { gapi:false, gis:false };
   function onGapi(){ window.__flags.gapi = true; }
   function onGis(){  window.__flags.gis  = true; }
@@ -255,12 +256,13 @@
 <script async defer src="https://apis.google.com/js/api.js" onload="onGapi()"></script>
 
 <script type="module">
+/* ===== Three.js imports ===== */
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js';
 
-/* ================== Google Auth ================== */
+/* ================== Google Auth（クリック即初期化版） ================== */
 const CLIENT_ID = '595200751510-ncahnf7edci6b9925becn5to49r6cguv.apps.googleusercontent.com';
 const API_KEY   = 'AIzaSyCUnTCr5yWUWPdEXST9bKP1LpgawU5rIbI';
 const DISCOVERY_DOCS = [
@@ -274,7 +276,77 @@ const SCOPES = [
   'https://www.googleapis.com/auth/spreadsheets'
 ].join(' ');
 
-/* ================== Elements ================== */
+let tokenClient = null;
+let accessToken = null;
+let gapiReady = false;
+let gisReady  = false;
+
+async function ensureGapiClient() {
+  if (gapiReady) return;
+  if (!(window.gapi && gapi && gapi.load)) {
+    await new Promise(r => {
+      const t = setInterval(() => {
+        if (window.gapi && gapi && gapi.load) { clearInterval(t); r(); }
+      }, 50);
+    });
+  }
+  await new Promise((resolve) => gapi.load('client', resolve));
+  await gapi.client.init({ apiKey: API_KEY, discoveryDocs: DISCOVERY_DOCS });
+  gapiReady = true;
+}
+async function ensureGIS() {
+  if (gisReady) return;
+  if (!(window.google && google.accounts && google.accounts.oauth2)) {
+    await new Promise(r => {
+      const t = setInterval(() => {
+        if (window.google && google.accounts && google.accounts.oauth2) { clearInterval(t); r(); }
+      }, 50);
+    });
+  }
+  gisReady = true;
+}
+async function ensureTokenClient() {
+  await ensureGIS();
+  if (tokenClient) return tokenClient;
+  tokenClient = google.accounts.oauth2.initTokenClient({
+    client_id: CLIENT_ID,
+    scope: SCOPES,
+    callback: (resp) => {
+      if (resp && resp.access_token) {
+        accessToken = resp.access_token;
+        document.getElementById('gate').style.display = 'none';
+        document.getElementById('statusLabel').textContent = (new URLSearchParams(location.search).get('view') === '1') ? '閲覧モード' : 'Ready';
+        ensureGapiClient().catch(console.warn);
+        // 有効化
+        ['btnLoad','btnTogglePins','projOrtho','listSelect'].forEach(id=> document.getElementById(id).removeAttribute('disabled'));
+        if(!viewOnly){
+          ['btnAddPin','btnGizmo','btnUndo','btnSavePin','btnDeletePin','btnAttach','btnPickFromFolder','listNew','listDelete']
+            .forEach(id=> document.getElementById(id).removeAttribute('disabled'));
+        }
+        enforceViewOnlyMode();
+        // URLの初期値
+        const qs = new URLSearchParams(location.search);
+        const fid = qs.get('fileId') || '';
+        const sid = qs.get('sheetId') || '';
+        if(fid) el.inputGLB.value = fid;
+        if(sid) el.inputSheet.value = sid;
+      }
+    }
+  });
+  return tokenClient;
+}
+async function startSignIn() {
+  try {
+    el.statusLabel.textContent = 'サインイン処理中…';
+    await ensureTokenClient();
+    tokenClient.requestAccessToken({ prompt: 'consent' });
+  } catch (e) {
+    console.error(e);
+    alert('サインインの初期化に失敗しました。ネットワーク状態をご確認ください。');
+  }
+}
+
+/* ================== Elements / State ================== */
 const el = {
   gate: document.getElementById('gate'),
   statusLabel: document.getElementById('statusLabel'),
@@ -350,41 +422,38 @@ const el = {
 
 const viewOnly = new URLSearchParams(location.search).get('view') === '1';
 
-/* ================== State & Utils ================== */
-let tokenClient; let gapiInited=false; let gisInited=false; let accessToken=null;
-let pendingSignIn = false;
-
+/* ================== Viewer State ================== */
 let renderer, scene, camera, controls, tcontrols, pinGroup, loader, currentModel=null;
 let perspCam, orthoCam; let usingOrtho=false;
 let raycaster = new THREE.Raycaster(), pointer = new THREE.Vector2();
-
 let addPinMode=false, currentColor='#ff6b6b';
 let pins=[], selectedPinId=null, undoStack=[];
 let glbParents=[], glbMetaCache=null;
 
-/* materials */
-let materials=[], materialMap=new Map(), materialMapNameToOrig=new Map();
-let matOriginals=new WeakMap();
-
-/* ★ per-material 保存用のキー&状態 */
+/* materials (per-material state persisted) */
+let materials=[];
 const materialKeyByMaterial = new Map();   // Material -> key
 const materialByKey = new Map();           // key -> Material
-const matState = new Map();                // key -> {unlit,doubleSided,opacity,invertRGB,whiteToAlpha,alphaTest}
-
+const matOriginals=new WeakMap();
+const matState = new Map();                // key -> state
 const imageBlobCache = new Map();
 let filterColors = new Set();
-
 let activeSheet = { sheetId:null, title:'pins' };
 
 const debounce = (fn,ms)=>{ let t; return (...a)=>{ clearTimeout(t); t=setTimeout(()=>fn(...a),ms); }; };
 const debouncedSave = debounce(()=> upsertPinToSheet(), 500);
 const PRESET_COLORS = ['#ff6b6b','#ffd166','#06d6a0','#118ab2','#ef476f','#b5179e','#4361ee','#4cc9f0','#ff9f1c'];
 
-function toast(msg){ el.statusLabel.textContent=msg; setTimeout(()=> el.statusLabel.textContent= viewOnly ? '閲覧モード' : 'Ready', 2000); }
+function toast(msg){ el.statusLabel.textContent=msg; setTimeout(()=> el.statusLabel.textContent= viewOnly ? '閲覧モード' : 'Ready', 1800); }
 function ensureArray(x){ return Array.isArray(x)?x:[]; }
 function normalizeHex(c){ const t = new THREE.Color(c); return '#' + t.getHexString(); }
+function enforceViewOnlyMode(){
+  if (!viewOnly) return;
+  document.body.classList.add('viewonly');
+  el.capTitle.readOnly = true; el.capBody.readOnly  = true;
+}
 
-/* ================== HEIC helpers ================== */
+/* ========= HEIC helpers ========= */
 function loadScriptOnce(src){
   return new Promise((resolve,reject)=>{
     const s=document.createElement('script'); s.src=src; s.async=true; s.onload=resolve; s.onerror=reject;
@@ -411,74 +480,14 @@ function upscaleThumbnailUrl(u, size=2048){
   }catch{ return u.replace(/=s(\d+)/, `=s${size}`); }
 }
 
-/* ================== Google init ================== */
-el.btnSignIn.addEventListener('click', ()=>{
-  if(tokenClient){
-    tokenClient.requestAccessToken({ prompt:'consent' });
-  }else{
-    pendingSignIn = true;
-    toast('Google API 初期化中…');
-  }
-});
-const waitGoogle = setInterval(()=>{
-  if(!gapiInited && window.gapi?.load){
-    try{ gapi.load('client', initGapiClient); }catch{}
-  }
-  if(!gisInited && window.google?.accounts?.oauth2){
-    gisInited = true;
-  }
-  if(gapiInited && gisInited){
-    clearInterval(waitGoogle);
-    maybeReady();
-  }
-}, 200);
+/* ========= UI wire ========= */
+document.getElementById('btnSignIn').addEventListener('click', startSignIn);
 
-async function initGapiClient(){
-  try{
-    await gapi.client.init({ apiKey: API_KEY, discoveryDocs: DISCOVERY_DOCS });
-    gapiInited = true;
-  }catch(e){ console.error('gapi init failed', e); }
-}
-function maybeReady(){
-  if(!gapiInited || !gisInited) return;
-  tokenClient = google.accounts.oauth2.initTokenClient({
-    client_id: CLIENT_ID, scope: SCOPES,
-    callback: (resp)=>{
-      accessToken = resp.access_token;
-      if(accessToken){
-        el.gate.style.display = 'none';
-        // 閲覧モードでも listSelect は有効
-        ['btnLoad','btnTogglePins','projOrtho','listSelect'].forEach(id=> document.getElementById(id).removeAttribute('disabled'));
-        if(!viewOnly){
-          ['btnAddPin','btnGizmo','btnUndo','btnSavePin','btnDeletePin','btnAttach','btnPickFromFolder','listNew','listDelete']
-            .forEach(id=> document.getElementById(id).removeAttribute('disabled'));
-        }
-        el.statusLabel.textContent = viewOnly ? '閲覧モード' : 'Ready';
-        enforceViewOnlyMode();
-        const qs = new URLSearchParams(location.search);
-        const fid = qs.get('fileId') || '';
-        const sid = qs.get('sheetId') || '';
-        if(fid) el.inputGLB.value = fid;
-        if(sid) el.inputSheet.value = sid;
-      }
-    }
-  });
-  if(pendingSignIn && tokenClient){
-    pendingSignIn = false;
-    tokenClient.requestAccessToken({ prompt:'consent' });
-  }
-}
-function enforceViewOnlyMode(){
-  const viewOnly = new URLSearchParams(location.search).get('view') === '1';
-  if (!viewOnly) return;
-  document.body.classList.add('viewonly');
-  el.capTitle.readOnly = true;
-  el.capBody.readOnly  = true;
-  // listSelect は有効のまま（閲覧モードで切替可）
-}
+/* also kick lazy init (race-safe) */
+(async () => { ensureGIS().catch(()=>{}); ensureGapiClient().catch(()=>{}); })();
 
-/* ================== Viewer ================== */
-let rendererFrameReq = null;
+/* ========= Viewer ========= */
+let rendererLoopId=null;
 function viewerInit(){
   renderer = new THREE.WebGLRenderer({ canvas: el.viewerCanvas, antialias:true });
   scene = new THREE.Scene();
@@ -495,11 +504,12 @@ function viewerInit(){
 
   pinGroup = new THREE.Group(); scene.add(pinGroup);
   loader = new GLTFLoader();
+
   window.addEventListener('resize', resize);
   el.viewerCanvas.addEventListener('pointerdown', onPointerDown);
   el.projOrtho.addEventListener('change', ()=> { toggleProjection(el.projOrtho.checked); debouncedSaveMaterials(); });
   resize();
-  const loop = ()=>{ renderer.render(scene,camera); updateConnector(); rendererFrameReq=requestAnimationFrame(loop); };
+  const loop = ()=>{ renderer.render(scene,camera); updateConnector(); rendererLoopId=requestAnimationFrame(loop); };
   loop();
 }
 function buildControls(){
@@ -515,8 +525,7 @@ function buildControls(){
     if(!selectedPinId || !tcontrols.object || !tcontrols.visible) return;
     const p=pins.find(x=>x.id===selectedPinId); if(!p) return;
     p.pos.copy(tcontrols.object.position);
-    renderNow();
-    debouncedSave();
+    renderNow(); debouncedSave();
   });
   scene.add(tcontrols); tcontrols.visible=false; tcontrols.enabled=false;
 }
@@ -526,9 +535,7 @@ function resize(){
   renderer.setSize(w,h,false);
   if(camera.isPerspectiveCamera){
     camera.aspect = w/h;
-  }else{
-    fitOrthoFrustum();
-  }
+  }else{ fitOrthoFrustum(); }
   camera.updateProjectionMatrix(); updateConnector();
 }
 function renderNow(){ renderer.render(scene,camera); updateConnector(); }
@@ -561,7 +568,6 @@ function fitOrthoFrustum(){
 }
 function toggleProjection(useOrtho){
   usingOrtho = !!useOrtho;
-  const { center } = sceneBounds();
   const dir = camera.position.clone().sub(controls.target).normalize();
   const dist = camera.position.distanceTo(controls.target);
   if(usingOrtho){
@@ -576,14 +582,14 @@ function toggleProjection(useOrtho){
   renderNow();
 }
 
-/* ================== Pins & Connector ================== */
+/* ========= Pins & Connector ========= */
 function addUndo(u){ undoStack.push(u); }
 function createPin(pos,color){
   if(viewOnly) return;
   const id=`p_${Date.now()}_${Math.random().toString(36).slice(2,7)}`;
   const pin={id,pos:pos.clone(),color:normalizeHex(color||'#ff6b6b'),title:'',body:'',images:[],mesh:null};
   pins.push(pin);
-  filterColors.add(pin.color);
+  filterColors.add(pin.color); // 新色も表示対象
   placePinMesh(pin);
   refreshPinsList();
   buildColorFilter();
@@ -656,7 +662,7 @@ function updateConnector(){
   el.connDot.style.display = 'block';
 }
 
-/* ================== Preview ================== */
+/* ========= Preview ========= */
 let previewZoom = 1.0;
 function applyPreviewZoom(){ el.previewInner.style.transform = `scale(${previewZoom})`; }
 el.previewZoom.addEventListener('input', ()=>{ previewZoom = parseFloat(el.previewZoom.value)||1; el.previewZoomVal.textContent = previewZoom.toFixed(2) + '×'; applyPreviewZoom(); });
@@ -681,7 +687,7 @@ async function setPreview(ref, p){
 }
 function updateViewerPreviewForPin(p){ setPreview(p && p.images && p.images[0] ? p.images[0] : null, p); }
 
-/* ================== Image resolve & Drive ================== */
+/* ========= Image resolve & Drive ========= */
 function parseImageRef(ref){
   if(typeof ref === 'string' && /^(blob:|data:|https?:)/i.test(ref)){ return { kind:'url', url: ref }; }
   if(typeof ref === 'string' && ref.startsWith('drive:')){
@@ -768,7 +774,7 @@ function extractSpreadsheetId(input){
 }
 function makeDriveRef(id, mime){ return `drive:${id}|${mime||''}`; }
 
-/* ================== Materials ================== */
+/* ========= Materials ========= */
 function ensureMatRecord(m){
   if(matOriginals.has(m)) return;
   matOriginals.set(m, {
@@ -826,7 +832,7 @@ function indexMaterialsByKey(){
   });
 }
 function collectMaterials(){
-  materials=[]; materialMap.clear(); materialMapNameToOrig.clear();
+  materials=[]; 
   const set = new Set();
   if(!currentModel) return;
   currentModel.traverse(obj=>{
@@ -839,27 +845,39 @@ function collectMaterials(){
   el.matSelect.innerHTML = '<option value="__all__">（全マテリアル：編集不可）</option>';
   materials.forEach((m,idx)=>{
     const name = m.name && m.name.trim() ? m.name : `Material_${idx}`;
-    materialMap.set(name, m);
-    materialMapNameToOrig.set(name, m);
     const opt=document.createElement('option'); opt.value=name; opt.textContent=name; el.matSelect.appendChild(opt);
   });
   indexMaterialsByKey();
-
-  // デフォルト選択：1つ目（存在すれば）
-  if(materials.length){
-    el.matSelect.value = el.matSelect.options[1]?.value || '__all__';
-  }
-  applyMaterialUIFromSelection(); // UIに反映だけ
+  if(materials.length){ el.matSelect.value = el.matSelect.options[1]?.value || '__all__'; }
+  applyMaterialUIFromSelection(); // UIだけ
 }
 function getSelectedOriginalMaterial(){
-  const key=el.matSelect.value;
-  if(key==='__all__') return null;
-  const m = materialMapNameToOrig.get(key);
-  return m||null;
+  const name=el.matSelect.value;
+  if(name==='__all__') return null;
+  // 見た目の名前から実マテリアルを検索
+  const idx = Array.from(el.matSelect.options).findIndex(o=>o.value===name);
+  let target=null;
+  let counter=0;
+  currentModel && currentModel.traverse(o=>{
+    if(target) return;
+    if(o.material){
+      if(Array.isArray(o.material)){
+        o.material.forEach(m=>{
+          const label = m.name && m.name.trim() ? m.name : `Material_${counter}`;
+          if(label===name && !target){ target=m; }
+          counter++;
+        });
+      }else{
+        const label = o.material.name && o.material.name.trim() ? o.material.name : `Material_${counter}`;
+        if(label===name && !target){ target=o.material; }
+        counter++;
+      }
+    }
+  });
+  return target;
 }
-function getKeyForMaterial(m){
-  return materialKeyByMaterial.get(m) || null;
-}
+function getKeyForMaterial(m){ return materialKeyByMaterial.get(m) || null; }
+
 function applyMaterialUIFromSelection(){
   const orig = getSelectedOriginalMaterial();
   const disable = !orig;
@@ -982,14 +1000,12 @@ async function applyStateToMaterial(origM, st){
 
   const mat = getActiveMaterialFor(origM);
   mat.side = st.doubleSided ? THREE.DoubleSide : THREE.FrontSide;
-  // 透明チェックなし：不透明度 or 白→透明で判定
   const willTransparent = (st.whiteToAlpha || (st.opacity < 1.0));
   mat.transparent = willTransparent;
   mat.opacity = st.opacity ?? 1;
   mat.alphaTest = st.alphaTest ?? 0;
   mat.depthWrite = !mat.transparent || (mat.alphaTest>0);
 
-  // テクスチャ処理
   if((st.invertRGB || st.whiteToAlpha) && matOriginals.get(origM).map){
     try{
       const processed = await processTextureToCanvasTextureFromOriginal(matOriginals.get(origM).map, { invertRGB: st.invertRGB, alphaFromWhite: st.whiteToAlpha, threshold: st.alphaTest||0 });
@@ -1005,13 +1021,14 @@ async function applyStateToMaterial(origM, st){
   mat.needsUpdate = true;
 }
 
-/* ================== Camera views ================== */
-el.viewFront.addEventListener('click', ()=> setNamedView('front'));
-el.viewBack.addEventListener('click', ()=> setNamedView('back'));
-el.viewLeft.addEventListener('click', ()=> setNamedView('left'));
-el.viewRight.addEventListener('click', ()=> setNamedView('right'));
-el.viewTop.addEventListener('click', ()=> setNamedView('top'));
-el.viewBottom.addEventListener('click', ()=> setNamedView('bottom'));
+/* ========= Camera views ========= */
+el.viewFront.addEventListener('click', ()=> { setNamedView('front'); debouncedSaveMaterials(); });
+el.viewBack.addEventListener('click',  ()=> { setNamedView('back');  debouncedSaveMaterials(); });
+el.viewLeft.addEventListener('click',  ()=> { setNamedView('left');  debouncedSaveMaterials(); });
+el.viewRight.addEventListener('click', ()=> { setNamedView('right'); debouncedSaveMaterials(); });
+el.viewTop.addEventListener('click',   ()=> { setNamedView('top');   debouncedSaveMaterials(); });
+el.viewBottom.addEventListener('click',()=> { setNamedView('bottom');debouncedSaveMaterials(); });
+
 function setNamedView(name){
   const { center, radius } = sceneBounds();
   const d = radius*2.2;
@@ -1030,11 +1047,10 @@ function setNamedView(name){
   controls.update(); renderNow();
 }
 
-/* ================== Sheets：同階層検出/作成 ================== */
+/* ========= Sheets：同階層で作成/検索 ========= */
 async function findOrCreateSpreadsheetInGlbFolder(glbMeta){
   if (!glbMeta || !glbMeta.id) throw new Error('GLBメタデータがありません');
   const parents = glbMeta.parents || [];
-
   let found = null;
   for (const parent of (parents.length ? parents : ['root'])) {
     const q = [
@@ -1081,7 +1097,7 @@ async function findOrCreateSpreadsheetInGlbFolder(glbMeta){
   return spreadsheetId;
 }
 
-/* ================== Meta（K/L列） 保存・復元 ================== */
+/* ========= Meta（K/L列） 保存・復元 ========= */
 const META_MARKER_RANGE = ()=> `${activeSheet.title}!K1`;
 const META_MAT_KEY_RANGE = ()=> `${activeSheet.title}!K2:L2`;
 const META_VIEW_KEY_RANGE = ()=> `${activeSheet.title}!K3:L3`;
@@ -1109,7 +1125,7 @@ async function loadSheetMeta(spreadsheetId){
 function normalizeMaterialsJSON(m){
   if(!m) return { version:2, byKey:{} };
   if(m.version===2 && m.byKey) return m;
-  if(Array.isArray(m.items)){ // v1 -> v2 変換
+  if(Array.isArray(m.items)){
     const byKey = {};
     m.items.forEach(it=>{
       if(!it || !it.key) return;
@@ -1127,7 +1143,7 @@ function normalizeMaterialsJSON(m){
   return { version:2, byKey:{} };
 }
 async function saveSheetMeta(spreadsheetId, { materials, viewer }){
-  if(viewOnly) return; // 閲覧モードでは保存しない
+  if(viewOnly) return;
   const data = [
     { range: META_MARKER_RANGE(), values: [[ 'LOCI_META_V1' ]] },
     { range: META_MAT_KEY_RANGE(), values: [[ 'materials_json', JSON.stringify(materials) ]] },
@@ -1140,7 +1156,6 @@ async function saveSheetMeta(spreadsheetId, { materials, viewer }){
   });
 }
 function serializeMaterialsForSheet(){
-  // 現在の matState をそのまま書き出す（存在するマテリアルキーのみ）
   const byKey = {};
   for(const [key, st] of matState){
     if(materialByKey.has(key)){
@@ -1165,7 +1180,6 @@ function serializeViewerPrefs(){
 }
 async function applyMaterialsFromSheet(materialsData){
   if(!materialsData || !materialsData.byKey) return;
-  // matState に取り込んでから、一括適用
   for(const [key, st] of Object.entries(materialsData.byKey)){
     matState.set(key, { ...st });
   }
@@ -1174,7 +1188,6 @@ async function applyMaterialsFromSheet(materialsData){
     if(!mat) continue;
     await applyStateToMaterial(mat, st);
   }
-  // UI は現在選択材の状態を表示
   applyMaterialUIFromSelection();
   renderNow();
 }
@@ -1191,7 +1204,6 @@ async function applyViewerPrefs(viewerData){
   }
   renderNow();
 }
-/* マテリアル/ビューのオートセーブ */
 const debouncedSaveMaterials = debounce(async ()=>{
   if(viewOnly) return;
   const spreadsheetId = extractSpreadsheetId(el.inputSheet.value.trim());
@@ -1201,10 +1213,9 @@ const debouncedSaveMaterials = debounce(async ()=>{
   try{ await saveSheetMeta(spreadsheetId, { materials: materialsData, viewer: viewerData }); }
   catch(e){ console.warn('saveSheetMeta failed', e); }
 }, 600);
-
 el.bgColor.addEventListener('input', ()=>{ scene.background = new THREE.Color(el.bgColor.value); renderNow(); debouncedSaveMaterials(); });
 
-/* ================== Thumbs / Preview ================== */
+/* ========= Thumbs / Preview ========= */
 function renderThumbs(p){
   const thumbs=el.thumbs; thumbs.innerHTML='';
   ensureArray(p.images).forEach(async (ref, idx)=>{
@@ -1229,15 +1240,15 @@ function renderThumbs(p){
   });
 }
 
-/* ================== Caption bindings ================== */
+/* ========= Caption bindings ========= */
 document.getElementById('btnSavePin').addEventListener('click', ()=> upsertPinToSheet());
 el.capTitle.addEventListener('input', ()=>{ const p=pins.find(x=>x.id===selectedPinId); if(p){ p.title=el.capTitle.value; refreshPinsList(); upsertPinToSheet(); updateViewerPreviewForPin(p); } });
 el.capBody.addEventListener('input',  ()=>{ const p=pins.find(x=>x.id===selectedPinId); if(p){ p.body=el.capBody.value; upsertPinToSheet(); updateViewerPreviewForPin(p); } });
 
-/* ================== UI Utilities ================== */
+/* ========= Pin color presets ========= */
 function buildColorPresets(){
   const holder = el.colorPresets; holder.innerHTML='';
-  ['#ff6b6b','#ffd166','#06d6a0','#118ab2','#ef476f','#b5179e','#4361ee','#4cc9f0','#ff9f1c'].forEach(c=>{
+  PRESET_COLORS.forEach(c=>{
     const b=document.createElement('button');
     b.style.width='18px'; b.style.height='18px';
     b.style.borderRadius='999px'; b.style.border='2px solid #223146';
@@ -1250,7 +1261,7 @@ function buildColorPresets(){
         p.color=normalizeHex(c);
         placePinMesh(p);
         refreshPinsList();
-        filterColors.add(p.color);
+        filterColors.add(p.color); // 初期状態は表示
         buildColorFilter();
         debouncedSave();
       }
@@ -1308,7 +1319,7 @@ function refreshPinsList(){
   });
 }
 
-/* ================== Load/Save pins ================== */
+/* ========= Load/Save pins ========= */
 function rebuildPinsScene(){
   pinGroup.children.slice().forEach(ch=> pinGroup.remove(ch));
   pins.forEach(p=> placePinMesh(p));
@@ -1343,12 +1354,9 @@ async function loadPinsFromActiveSheet(spreadsheetId){
     refreshPinsList();
     buildColorFilter();
 
-    // メタ適用（マテリアル/ビュー）
     const meta = await loadSheetMeta(spreadsheetId);
     await applyMaterialsFromSheet(meta.materials);
     await applyViewerPrefs(meta.viewer);
-
-    // 現在の選択材UI同期
     applyMaterialUIFromSelection();
   }catch(e){ console.error('loadPinsFromActiveSheet failed', e); }
 }
@@ -1386,7 +1394,7 @@ async function deletePinFromActiveSheet(spreadsheetId, pinId){
   });
 }
 
-/* ================== Attach / Upload ================== */
+/* ========= Attach / Upload ========= */
 el.btnAttach.addEventListener('click', async ()=>{
   if(viewOnly) return;
   const fileInput = el.imgLocal;
@@ -1434,7 +1442,7 @@ async function driveMultipartUpload(blob, name, parents){
   return await res.json();
 }
 
-/* ================== Folder Picker ================== */
+/* ========= Folder Picker ========= */
 el.btnPickFromFolder.addEventListener('click', openPickerModal);
 el.btnPickerClose.addEventListener('click', ()=> el.pickerModal.style.display='none');
 el.btnPickerReload.addEventListener('click', loadFolderImages);
@@ -1514,7 +1522,7 @@ function chooseFolderImage(ref){
   upsertPinToSheet();
 }
 
-/* ================== Caption Lists ================== */
+/* ========= Caption Lists ========= */
 async function refreshCaptionLists(spreadsheetId){
   const resp = await gapi.client.sheets.spreadsheets.get({
     spreadsheetId,
@@ -1541,7 +1549,6 @@ async function refreshCaptionLists(spreadsheetId){
     }
   }
   if (activeSheet.sheetId){ el.listSelect.value = String(activeSheet.sheetId); }
-  // 閲覧モードでも listSelect は有効（ここで disable しない）
   if(!viewOnly){ ['listNew','listDelete'].forEach(id=>document.getElementById(id).disabled=false); }
 }
 el.listSelect.addEventListener('change', async (e)=>{
@@ -1598,14 +1605,7 @@ el.listDelete.addEventListener('click', async ()=>{
   toast('リストを削除しました');
 });
 
-/* ================== Buttons ================== */
-el.viewFront.addEventListener('click', ()=> { setNamedView('front'); debouncedSaveMaterials(); });
-el.viewBack.addEventListener('click',  ()=> { setNamedView('back');  debouncedSaveMaterials(); });
-el.viewLeft.addEventListener('click',  ()=> { setNamedView('left');  debouncedSaveMaterials(); });
-el.viewRight.addEventListener('click', ()=> { setNamedView('right'); debouncedSaveMaterials(); });
-el.viewTop.addEventListener('click',   ()=> { setNamedView('top');   debouncedSaveMaterials(); });
-el.viewBottom.addEventListener('click',()=> { setNamedView('bottom');debouncedSaveMaterials(); });
-
+/* ========= Buttons ========= */
 el.btnLoad.addEventListener('click', ()=>{
   const fid = extractDriveFileId(el.inputGLB.value.trim()) || el.inputGLB.value.trim();
   el.inputGLB.value = fid; loadGLBByFileId(fid);
@@ -1659,7 +1659,7 @@ el.btnDeletePin.addEventListener('click', async ()=>{
   if(spreadsheetId){ try{ await deletePinFromActiveSheet(spreadsheetId, p.id); }catch(e){ console.error(e); } }
 });
 
-/* ================== GLB Load ================== */
+/* ========= GLB Load ========= */
 async function loadGLBByFileId(fileId){
   if(!accessToken){ alert('先にサインインしてください'); return; }
   if(!fileId){ alert('GLBの fileId または共有URLを入力してください'); return; }
@@ -1705,39 +1705,35 @@ async function loadGLBByFileId(fileId){
   }
 }
 
-/* ================== Save viewer prefs ================== */
-el.viewFront.addEventListener('click', ()=> debouncedSaveMaterials());
-el.viewBack.addEventListener('click',  ()=> debouncedSaveMaterials());
-el.viewLeft.addEventListener('click',  ()=> debouncedSaveMaterials());
-el.viewRight.addEventListener('click', ()=> debouncedSaveMaterials());
-el.viewTop.addEventListener('click',   ()=> debouncedSaveMaterials());
-el.viewBottom.addEventListener('click',()=> debouncedSaveMaterials());
+/* ========= Save viewer prefs ========= */
+['viewFront','viewBack','viewLeft','viewRight','viewTop','viewBottom'].forEach(id=>{
+  document.getElementById(id).addEventListener('click', ()=> debouncedSaveMaterials());
+});
 
-/* ================== Entry ================== */
-function buildColorPresets(){
-  const holder = el.colorPresets; holder.innerHTML='';
-  ['#ff6b6b','#ffd166','#06d6a0','#118ab2','#ef476f','#b5179e','#4361ee','#4cc9f0','#ff9f1c'].forEach(c=>{
+/* ========= Entry ========= */
+function buildColorPresetsOnce(){
+  // 9色プリセット（1行）
+  el.colorPresets.innerHTML='';
+  PRESET_COLORS.forEach(c=>{
     const b=document.createElement('button');
     b.style.width='18px'; b.style.height='18px';
     b.style.borderRadius='999px'; b.style.border='2px solid #223146';
     b.style.background=c; b.title=c;
     b.addEventListener('click',()=>{
       currentColor=c;
-      const pId=selectedPinId;
-      if(pId){
-        const p=pins.find(x=>x.id===pId);
+      if(selectedPinId){
+        const p=pins.find(x=>x.id===selectedPinId);
         p.color=normalizeHex(c);
         placePinMesh(p);
         refreshPinsList();
-        filterColors.add(p.color);
-        buildColorFilter();
+        filterColors.add(p.color); buildColorFilter();
         debouncedSave();
       }
     });
-    holder.appendChild(b);
+    el.colorPresets.appendChild(b);
   });
 }
-// すでに上で呼出済み
+buildColorPresetsOnce();
 
 function viewerInitWrap(){ viewerInit(); }
 viewerInitWrap();
