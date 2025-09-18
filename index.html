@@ -30,6 +30,7 @@ body.wide .main{grid-template-columns:1fr}
 .panel h3{margin:0;padding:10px 12px;border-bottom:1px solid #203049;background:#0f1722;font-size:.95rem;font-weight:600}
 .panel .body{padding:10px;overflow:auto}
 
+/* viewer */
 #viewer{position:relative}
 #viewerCanvas{display:block;width:100%;height:100%;background:#0a0f16;border-radius:var(--radius);touch-action:none;-webkit-user-select:none;user-select:none}
 #connector{position:absolute;left:0;top:0;width:100%;height:100%;pointer-events:none}
@@ -42,10 +43,11 @@ body.wide .main{grid-template-columns:1fr}
 .lds{width:64px;height:64px;border-radius:50%;border:6px solid rgba(255,255,255,.12);border-top-color:var(--accent);animation:spin 1s linear infinite}
 @keyframes spin{to{transform:rotate(360deg)}}
 
-/* プレビュー */
+/* caption preview window */
 #viewerPreview{position:absolute;top:10px;right:10px;max-height:60%;border:1px solid #203049;border-radius:8px;background:#0a0f16cc;backdrop-filter: blur(2px);display:grid;grid-template-rows:auto 1fr auto;gap:0;resize:both;overflow:hidden;min-width:260px;min-height:200px}
 #viewerPreview.hidden{display:none}
 #previewControls{position:sticky;top:0;background:#0a0f16f0;border-bottom:1px solid #203049;padding:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;z-index:1}
+#previewControls .spacer{flex:1}
 #previewWrap{position:relative;overflow:auto}
 #previewInner{transform-origin: top left;}
 #previewInner img{display:block;max-width:none;max-height:none;border-radius:0}
@@ -53,6 +55,7 @@ body.wide .main{grid-template-columns:1fr}
 #capTitleLine{font-weight:700}
 #capBodyLine{font-size:.85rem;color:#c9d7ea;max-height:8em;overflow:auto}
 
+/* signin */
 .signin-gate{position:fixed;inset:0;display:grid;place-items:center;background:radial-gradient(1200px 600px at 50% 15%, rgba(83,183,255,.08), transparent 60%), linear-gradient(180deg,#0a0f16,#05070b);z-index:20;padding:env(safe-area-inset-top) env(safe-area-inset-right) calc(env(safe-area-inset-bottom)) env(safe-area-inset-left)}
 .card{width:min(560px,92vw);background:#0c1118;border:1px solid #1d2a3d;border-radius:24px;box-shadow:var(--shadow);padding:20px}
 .card h1{margin:4px 0 8px;font-size:1.35rem}
@@ -91,12 +94,13 @@ body.viewonly #btnSavePin, body.viewonly #btnDeletePin, body.viewonly #btnAttach
     max-height:min(70dvh, 70svh);
     background:#0c1118;border-top:1px solid #203049;border-right:0;border-left:0;
     border-radius:16px 16px 0 0;z-index:1002;box-shadow:0 -12px 30px rgba(0,0,0,.4);
-    transform:translateY(calc(100% + 8px));
+    /* ← 閉じている時でもヘッダーが 36px 見えるようにする */
+    transform:translateY(calc(100% - 36px));
     transition:transform .25s ease;
     padding-bottom:env(safe-area-inset-bottom);
   }
   #mobileSheet.open{transform:translateY(0)}
-  #mobileSheetHeader{display:flex;align-items:center;gap:8px;padding:8px 10px;border-bottom:1px solid #1b2636}
+  #mobileSheetHeader{display:flex;align-items:center;gap:8px;padding:8px 10px;border-bottom:1px solid #1b2636;cursor:pointer}
   #mobileSheetGrip{width:36px;height:4px;background:#30425e;border-radius:999px;margin:2px auto}
   #mobileSheetTitle{font-weight:700}
   #mobilePages{overflow:auto;max-height:calc(min(70dvh,70svh) - 44px);padding:8px}
@@ -106,12 +110,15 @@ body.viewonly #btnSavePin, body.viewonly #btnDeletePin, body.viewonly #btnAttach
 @keyframes spin{to{transform:rotate(360deg)}}
 </style>
 
+<!-- three.js ES Modules -->
 <script type="importmap">
 { "imports": {
   "three": "https://unpkg.com/three@0.157.0/build/three.module.js",
   "three/examples/jsm/": "https://unpkg.com/three@0.157.0/examples/jsm/"
 } }
 </script>
+
+<!-- HEIC/HEIF converter -->
 <script src="https://unpkg.com/heic2any@0.0.5/dist/heic2any.min.js"></script>
 </head>
 <body>
@@ -186,10 +193,12 @@ body.viewonly #btnSavePin, body.viewonly #btnDeletePin, body.viewonly #btnAttach
       <div id="viewerPreview" class="hidden">
         <div id="previewControls">
           <span class="small">倍率</span>
-          <input id="previewZoom" type="range" min="0.25" max="3" step="0.05" value="1">
+          <input id="previewZoom" type="range" min="0.1" max="3" step="0.05" value="1">
           <span id="previewZoomVal" class="small">1.00×</span>
           <button id="previewReset">リセット</button>
-          <span id="previewErr" class="small" style="margin-left:auto;color:#ffb4b4;display:none">画像を読み込めませんでした</span>
+          <span class="spacer"></span>
+          <span id="previewErr" class="small" style="color:#ffb4b4;display:none">画像を読み込めませんでした</span>
+          <button id="previewClose" title="閉じる">✕</button>
         </div>
         <div id="previewWrap"><div id="previewInner"><img id="previewImg" alt="preview"/></div></div>
         <div class="cap">
@@ -252,6 +261,7 @@ body.viewonly #btnSavePin, body.viewonly #btnDeletePin, body.viewonly #btnAttach
   </div>
 </div>
 
+<!-- mobile controls -->
 <nav id="mobileTabs">
   <button id="tabViewer" class="active">ビュー</button>
   <button id="tabPins">キャプション</button>
@@ -271,6 +281,7 @@ body.viewonly #btnSavePin, body.viewonly #btnDeletePin, body.viewonly #btnAttach
   </div>
 </section>
 
+<!-- picker -->
 <div id="pickerModal" class="signin-gate" style="display:none;background:rgba(0,0,0,.55)">
   <div class="card" style="width:min(90vw,980px);max-height:80svh;overflow:hidden">
     <h1 style="margin:0 0 6px">Driveから保存</h1>
@@ -282,6 +293,7 @@ body.viewonly #btnSavePin, body.viewonly #btnDeletePin, body.viewonly #btnAttach
   </div>
 </div>
 
+<!-- sign-in gate -->
 <div class="signin-gate" id="gate">
   <div class="card">
     <h1>Googleにサインイン</h1>
@@ -307,7 +319,7 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js';
 
-/* ======= device & quality ======= */
+/* ===== device & quality ===== */
 const IS_IOS = /iP(hone|ad|od)/.test(navigator.platform) ||
                (navigator.userAgent.includes('Mac') && 'ontouchend' in document);
 function getQualityProfile(){
@@ -329,7 +341,7 @@ function getQualityProfile(){
   };
 }
 
-/* ======= Google Auth ======= */
+/* ===== Google Auth ===== */
 const CLIENT_ID = '595200751510-ncahnf7edci6b9925becn5to49r6cguv.apps.googleusercontent.com';
 const API_KEY   = 'AIzaSyCUnTCr5yWUWPdEXST9bKP1LpgawU5rIbI';
 const DISCOVERY_DOCS = [
@@ -384,7 +396,7 @@ function startSignInClick(){
   tokenClient.requestAccessToken({ prompt: 'consent' });
 }
 
-/* ======= elements & state ======= */
+/* ===== elements & state ===== */
 const el = {
   gate: document.getElementById('gate'),
   statusLabel: document.getElementById('statusLabel'),
@@ -403,6 +415,7 @@ const el = {
   previewZoomVal: document.getElementById('previewZoomVal'),
   previewReset: document.getElementById('previewReset'),
   previewErr: document.getElementById('previewErr'),
+  previewClose: document.getElementById('previewClose'),
   capTitleLine: document.getElementById('capTitleLine'),
   capBodyLine: document.getElementById('capBodyLine'),
   pinsList: document.getElementById('pinsList'),
@@ -461,6 +474,8 @@ const el = {
   tabPins: document.getElementById('tabPins'),
   tabTools: document.getElementById('tabTools'),
   mobileSheet: document.getElementById('mobileSheet'),
+  mobileSheetHeader: document.getElementById('mobileSheetHeader'),
+  mobileSheetGrip: document.getElementById('mobileSheetGrip'),
   mobileSheetTitle: document.getElementById('mobileSheetTitle'),
   mobileSheetClose: document.getElementById('mobileSheetClose'),
   mobilePagePins: document.getElementById('mobilePagePins'),
@@ -468,7 +483,7 @@ const el = {
 };
 const viewOnly = new URLSearchParams(location.search).get('view') === '1';
 
-/* ======= viewer ======= */
+/* ===== viewer ===== */
 let renderer, scene, camera, controls, tcontrols, pinGroup, loader, currentModel=null;
 let perspCam, orthoCam; let usingOrtho=false;
 let raycaster = new THREE.Raycaster(), pointer = new THREE.Vector2();
@@ -531,10 +546,9 @@ function viewerInit(){
     const draco=new DRACOLoader(); draco.setDecoderPath('https://unpkg.com/three@0.157.0/examples/jsm/libs/draco/'); loader.setDRACOLoader(draco);
   });
 
-  // サイズ監視（0px化で消える対策）
   const ro=new ResizeObserver(()=> resize()); ro.observe(el.viewerCanvas.parentElement);
-
   window.addEventListener('resize', resize, {passive:true});
+
   el.viewerCanvas.addEventListener('pointerdown', onPointerDown, {passive:false});
   ['touchstart','touchmove','touchend','gesturestart'].forEach(ev=>{
     el.viewerCanvas.addEventListener(ev, e=>{ e.preventDefault(); }, { passive:false });
@@ -647,7 +661,6 @@ async function loadGLBByFileId(fileId){
     glbParents=meta.result.parents||[];
     const ab=await fetchDriveFileArrayBuffer(fid);
 
-    // レンダリングを「数秒強制」して消失対策
     transientRender(2500);
 
     await new Promise((resolve,reject)=>{
@@ -710,7 +723,6 @@ function applyMatUITo(material){
   material.side = dbl ? THREE.DoubleSide : THREE.FrontSide;
   material.depthWrite = !whtr;
 
-  // shader hook（安全に1度だけ差し替え）
   material.onBeforeCompile = (shader)=>{
     let repl = 'gl_FragColor = vec4( outgoingLight, diffuseColor.a );';
     let code = `vec4 c = vec4( outgoingLight, diffuseColor.a );`;
@@ -718,10 +730,7 @@ function applyMatUITo(material){
     if(whtr) code += `\n float lum = dot(c.rgb, vec3(0.299,0.587,0.114)); float a = smoothstep(${thr.toFixed(3)}, 1.0, 1.0 - lum); c.a *= a;`;
     code += `\n gl_FragColor = c;`;
     shader.fragmentShader = shader.fragmentShader.replace(repl, code);
-    if(unlit){
-      // Unlit 風（照明計算を素通しに近づける）
-      shader.fragmentShader = shader.fragmentShader.replace('#include <dithering_fragment>', '#include <dithering_fragment>');
-    }
+    if(unlit){ /* 擬似 unlit（ライト寄与を最小化） */ }
   };
   material.needsUpdate=true;
   requestRender();
@@ -762,7 +771,7 @@ function applyMatStateToAll(){
   });
 }
 
-/* preview image */
+/* image helpers */
 async function fileToObjectURL(fileId){
   const url=`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?alt=media`;
   const res=await fetch(url,{ headers:{ 'Authorization':'Bearer '+accessToken }});
@@ -772,7 +781,9 @@ async function fileToObjectURL(fileId){
 
 /* pins UI */
 function buildColorPresets(){
-  el.colorPresets.innerHTML=''; PRESET_COLORS.forEach(col=>{
+  el.colorPresets.innerHTML='';
+  const COLORS=['#ff6b6b','#ffd166','#06d6a0','#118ab2','#ef476f','#b5179e','#4361ee','#4cc9f0','#ff9f1c'];
+  COLORS.forEach(col=>{
     const b=document.createElement('button'); b.textContent='●'; b.style.color=col; b.style.fontSize='18px'; b.title=col;
     b.addEventListener('click', ()=>{ currentColor=col; toast('ピン色: '+col); });
     el.colorPresets.appendChild(b);
@@ -784,7 +795,7 @@ function buildPinsUI(){
 }
 function addPinRow(p){
   const row=document.createElement('div'); row.className='row'; row.dataset.id=p.id;
-  row.innerHTML=`<div class="title" style="display:flex;gap:6px;align-items:center">
+  row.innerHTML=`<div class="title" style="display:flex;gap:6px;align-items:center;cursor:pointer">
     <span style="width:12px;height:12px;border-radius:50%;background:${p.color};display:inline-block"></span>
     <span>${p.title||'(無題)'}</span></div>
     <div class="meta">${p.pos.x.toFixed(2)}, ${p.pos.y.toFixed(2)}, ${p.pos.z.toFixed(2)}</div>`;
@@ -806,16 +817,37 @@ function selectPin(id){
   tcontrols.attach(p.mesh); tcontrols.visible=tcontrols.enabled;
   controls.target.copy(p.pos); requestRender();
 }
+function closePreview(){
+  el.viewerPreview.classList.add('hidden');
+  el.connLine.style.display='none'; el.connDot.style.display='none';
+}
 async function setPreview(p){
   try{
-    el.previewErr.style.display='none'; el.viewerPreview.classList.remove('hidden');
+    el.previewErr.style.display='none';
+    el.viewerPreview.classList.remove('hidden');
     el.capTitleLine.textContent=p.title||''; el.capBodyLine.textContent=p.body||'';
-    if(ensureArray(p.images).length===0){ el.previewImg.src=''; el.previewErr.style.display='block'; return; }
+    if(ensureArray(p.images).length===0){
+      el.previewImg.src=''; el.previewErr.style.display='block'; updateConnector(); return;
+    }
     const fid=p.images[0]; const url=await fileToObjectURL(fid);
-    el.previewImg.onload=()=>{ URL.revokeObjectURL(url); updateConnector(); };
+    el.previewImg.onload=()=>{
+      URL.revokeObjectURL(url);
+      el.previewErr.style.display='none'; // 確実に隠す
+      // 初期倍率フィット
+      const imgW=el.previewImg.naturalWidth||1, imgH=el.previewImg.naturalHeight||1;
+      const cw = el.previewWrap.clientWidth || 1, ch = el.previewWrap.clientHeight || 1;
+      const s = Math.max(0.1, Math.min(3, Math.min(cw/imgW, ch/imgH)));
+      el.previewZoom.value = String(s.toFixed(2));
+      el.previewZoomVal.textContent = s.toFixed(2)+'×';
+      el.previewInner.style.transform = `scale(${s})`;
+      updateConnector();
+    };
+    el.previewImg.onerror=()=>{ el.previewErr.style.display='block'; };
     el.previewImg.src=url;
   }catch(err){ console.warn('preview failed', err); el.previewErr.style.display='block'; }
 }
+
+/* pointer (Shift+クリック対応) */
 function onPointerDown(ev){
   if(!currentModel) return;
   const rect=el.viewerCanvas.getBoundingClientRect();
@@ -823,12 +855,14 @@ function onPointerDown(ev){
   pointer.y= -((ev.clientY-rect.top)/rect.height)*2+1;
   raycaster.setFromCamera(pointer,camera);
   const hits=raycaster.intersectObject(currentModel,true);
-  if(addPinMode && hits.length){
+
+  const wantAdd = addPinMode || (!!ev.shiftKey);
+  if(wantAdd && hits.length){
     const pt=hits[0].point.clone(); const p=createPin(pt,currentColor); selectPin(p.id); debouncedSavePins();
-  }else{
-    const phits=raycaster.intersectObjects(pinGroup.children,true);
-    if(phits.length){ const sel=pins.find(x=> x.mesh===phits[0].object); if(sel) selectPin(sel.id); }
+    ev.preventDefault(); return;
   }
+  const phits=raycaster.intersectObjects(pinGroup.children,true);
+  if(phits.length){ const sel=pins.find(x=> x.mesh===phits[0].object); if(sel) selectPin(sel.id); }
 }
 function createPin(pos,color){
   const id='p'+Math.random().toString(36).slice(2,9);
@@ -872,11 +906,9 @@ async function ensureSheetPicked(){
   el.listSelect.value=activeSheet.title;
 }
 async function loadPinsFromActiveSheet(){
-  // 既存ピンのクリア
   pins.forEach(p=>{ pinGroup.remove(p.mesh); p.mesh.geometry.dispose(); p.mesh.material.dispose?.(); });
   pins=[]; selectedPinId=null; el.pinsList.innerHTML=''; el.rightNoSel.style.display='block'; el.rightEditor.classList.add('hidden');
 
-  // ピン読み込み（NaN除外）
   const range=`'${activeSheet.title}'!A2:H`;
   try{
     const r=await gapi.client.sheets.spreadsheets.values.get({ spreadsheetId:activeSheet.sheetId, range });
@@ -893,8 +925,6 @@ async function loadPinsFromActiveSheet(){
   }catch(e){ /* 空でもOK */ }
 
   await loadMetaFromSheet();
-
-  // 初期は全色表示
   filterColors = new Set(); applyPinVisibilityFilter();
   requestRender();
 }
@@ -1040,12 +1070,35 @@ function wireUI(){
 
   el.previewZoom.addEventListener('input', ()=>{ const z=parseFloat(el.previewZoom.value); el.previewZoomVal.textContent=z.toFixed(2)+'×'; el.previewInner.style.transform=`scale(${z})`; updateConnector(); });
   el.previewReset.addEventListener('click', ()=>{ el.previewZoom.value='1'; el.previewZoomVal.textContent='1.00×'; el.previewInner.style.transform='scale(1)'; updateConnector(); });
+  el.previewClose.addEventListener('click', closePreview);
 
-  // Mobile tabs / sheet
+  /* Mobile tabs / sheet */
   el.tabViewer.addEventListener('click', ()=> setActiveMobileTab('viewer'));
   el.tabPins.addEventListener('click',   ()=> setActiveMobileTab('pins'));
   el.tabTools.addEventListener('click',  ()=> setActiveMobileTab('tools'));
   el.mobileSheetClose.addEventListener('click', ()=> setActiveMobileTab('viewer'));
+
+  // ヘッダー（グリップ）タップで開閉
+  el.mobileSheetHeader.addEventListener('click', ()=>{
+    if(!el.mobileSheet.classList.contains('open')) setActiveMobileTab('pins');
+    else setActiveMobileTab('viewer');
+  });
+
+  // グリップでスワイプ開閉
+  let startY=0, dragging=false;
+  const onStart = (y)=>{ startY=y; dragging=true; };
+  const onMove  = (y)=>{ if(!dragging) return; };
+  const onEnd   = (y)=>{
+    if(!dragging) return; dragging=false;
+    const dy=y-startY;
+    if(Math.abs(dy)<20) return; // 小さい移動は無視
+    if(dy<0) setActiveMobileTab('pins'); else setActiveMobileTab('viewer');
+  };
+  el.mobileSheetHeader.addEventListener('touchstart', e=> onStart(e.touches[0].clientY), {passive:true});
+  el.mobileSheetHeader.addEventListener('touchmove',  e=> onMove(e.touches[0].clientY),  {passive:true});
+  el.mobileSheetHeader.addEventListener('touchend',   e=> onEnd(startY-1+1),             {passive:true}); // end では座標取れない端末があるので開始との差分だけで判定
+  el.mobileSheetHeader.addEventListener('mousedown',  e=> onStart(e.clientY));
+  document.addEventListener('mouseup',   e=> onEnd(e.clientY));
 }
 function buildColorFilterPanel(){
   el.colorFilterList.innerHTML='';
