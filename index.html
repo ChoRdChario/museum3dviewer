@@ -267,10 +267,37 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js';
 
-/* ================== iOS Detection & constants ================== */
+/* ================== iOS & Quality Profile ================== */
 const IS_IOS = /iP(hone|ad|od)/.test(navigator.platform) ||
                (navigator.userAgent.includes('Mac') && 'ontouchend' in document);
 const ORTHO_MARGIN = IS_IOS ? 1.6 : 1.8;
+
+function getQualityProfile(){
+  const coarse   = matchMedia('(pointer: coarse)').matches;
+  const narrow   = matchMedia('(max-width: 820px)').matches;
+  const dpr      = Math.min(window.devicePixelRatio || 1, 4);
+  const mem      = (navigator.deviceMemory || 4);
+  const cores    = (navigator.hardwareConcurrency || 4);
+  const isiOS    = IS_IOS;
+
+  let level = 'high';
+  if (isiOS || coarse || narrow || dpr >= 3 || mem <= 4 || cores <= 4) level = 'low';
+  if (mem <= 2 || cores <= 2) level = 'ultra';
+
+  return {
+    level,
+    antialias: (level === 'high') && !isiOS,
+    pixelRatioCap: (level === 'high') ? 1.75 : (level === 'low' ? 1.0 : 0.85),
+    enableShadows: false,
+    useMipmaps: (level !== 'ultra'),
+    anisotropy: (level === 'high') ? 4 : 1,
+    toneMapping: THREE.NoToneMapping,
+    physicallyCorrectLights: false,
+    onDemandRender: (level !== 'high'),
+    throttleHz: (level === 'low') ? 30 : (level === 'ultra' ? 20 : 0),
+    maxTextureSize: (level === 'high') ? 4096 : 2048  // ★ モバイル系は 2048 上限
+  };
+}
 
 /* ================== Google Auth ================== */
 const CLIENT_ID = '595200751510-ncahnf7edci6b9925becn5to49r6cguv.apps.googleusercontent.com';
@@ -492,39 +519,87 @@ function upscaleThumbnailUrl(u, size=2048){
 document.getElementById('btnSignIn').addEventListener('click', startSignIn);
 (async () => { ensureGIS().catch(()=>{}); ensureGapiClient().catch(()=>{}); })();
 
-/* ========= Viewer ========= */
-let rendererLoopId=null;
+/* ========= Adaptive Viewer ========= */
+let rendererLoopId=null, renderScheduled=false;
+function requestRender(){
+  if (renderScheduled) return;
+  renderScheduled = true;
+  requestAnimationFrame(()=>{
+    renderScheduled = false;
+    renderer.render(scene, camera);
+    updateConnector();
+  });
+}
 function viewerInit(){
+  const Q = getQualityProfile();
+
   renderer = new THREE.WebGLRenderer({
     canvas: el.viewerCanvas,
-    antialias: !IS_IOS,                 // iOSはAAオフで安定性
+    antialias: Q.antialias,
     powerPreference: 'low-power',
     preserveDrawingBuffer: false
   });
-  const cap = IS_IOS ? 1 : 1.5;         // iOSはDPR=1固定、他は1.5上限
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, cap));
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, Q.pixelRatioCap));
+  renderer.shadowMap.enabled = Q.enableShadows;
+  renderer.toneMapping = Q.toneMapping;
+  renderer.physicallyCorrectLights = Q.physicallyCorrectLights;
+  renderer.outputColorSpace = THREE.SRGBColorSpace;
 
   scene = new THREE.Scene();
   scene.background = new THREE.Color(0x0a0f16);
+
   perspCam = new THREE.PerspectiveCamera(60, 2, 0.1, 5000);
   perspCam.position.set(2.8,1.6,3.6);
   orthoCam = new THREE.OrthographicCamera(-2,2,2,-2, -5000, 5000);
   camera = perspCam; usingOrtho=false;
 
   const hemi = new THREE.HemisphereLight(0xffffff, 0x223355, 0.6); scene.add(hemi);
-  const dir = new THREE.DirectionalLight(0xffffff, 1.0); dir.position.set(3,5,4); scene.add(dir);
+  const dir  = new THREE.DirectionalLight(0xffffff, 1.0); dir.position.set(3,5,4); scene.add(dir);
 
   buildControls();
 
   pinGroup = new THREE.Group(); scene.add(pinGroup);
   loader = new GLTFLoader();
 
+  // KTX2 / Draco（あれば自動省メモリ）
+  import('three/examples/jsm/loaders/KTX2Loader.js').then(({ KTX2Loader })=>{
+    const ktx = new KTX2Loader().setTranscoderPath('https://unpkg.com/three@0.157.0/examples/jsm/libs/basis/');
+    ktx.detectSupport(renderer);
+    loader.setKTX2Loader(ktx);
+  }).catch(()=>{});
+  import('three/examples/jsm/loaders/DRACOLoader.js').then(({ DRACOLoader })=>{
+    const draco = new DRACOLoader();
+    draco.setDecoderPath('https://unpkg.com/three@0.157.0/examples/jsm/libs/draco/');
+    loader.setDRACOLoader(draco);
+  }).catch(()=>{});
+
   window.addEventListener('resize', resize, { passive:true });
   el.viewerCanvas.addEventListener('pointerdown', onPointerDown, { passive:false });
   el.projOrtho.addEventListener('change', ()=> { toggleProjection(el.projOrtho.checked); debouncedSaveMaterials(); });
+
   resize();
-  const loop = ()=>{ renderer.render(scene,camera); updateConnector(); rendererLoopId=requestAnimationFrame(loop); };
-  loop();
+
+  if (Q.onDemandRender) {
+    controls.addEventListener('change', requestRender);
+    if (tcontrols) tcontrols.addEventListener('change', requestRender);
+    requestRender();
+  } else {
+    let lastTime = 0;
+    const loop = (t)=>{
+      const hz = Q.throttleHz;
+      if (hz>0){
+        const dt = t - lastTime, minDt = 1000/hz;
+        if (dt < minDt) { requestAnimationFrame(loop); return; }
+        lastTime = t;
+      }
+      renderer.render(scene,camera);
+      updateConnector();
+      requestAnimationFrame(loop);
+    };
+    requestAnimationFrame(loop);
+  }
+
+  el.viewerCanvas.addEventListener('webglcontextlost', (e)=>{ e.preventDefault(); toast('WebGL コンテキストが失われました。再読み込みします…'); location.reload(); });
 }
 function buildControls(){
   if(controls){ controls.dispose(); }
@@ -539,7 +614,7 @@ function buildControls(){
     if(!selectedPinId || !tcontrols.object || !tcontrols.visible) return;
     const p=pins.find(x=>x.id===selectedPinId); if(!p) return;
     p.pos.copy(tcontrols.object.position);
-    renderNow(); debouncedSave();
+    requestRender(); debouncedSave();
   });
   scene.add(tcontrols); tcontrols.visible=false; tcontrols.enabled=false;
 }
@@ -547,10 +622,9 @@ function resize(){
   const w = el.viewerCanvas.clientWidth || el.viewerCanvas.parentElement.clientWidth;
   const h = el.viewerCanvas.clientHeight || el.viewerCanvas.parentElement.clientHeight;
   renderer.setSize(w,h,false);
-  if(camera.isPerspectiveCamera){
-    camera.aspect = w/h;
-  }else{ fitOrthoFrustum(); }
-  camera.updateProjectionMatrix(); updateConnector();
+  if(camera.isPerspectiveCamera){ camera.aspect = w/h; }
+  else{ fitOrthoFrustum(); }
+  camera.updateProjectionMatrix(); updateConnector(); requestRender();
 }
 function renderNow(){ renderer.render(scene,camera); updateConnector(); }
 function sceneBounds(){
@@ -569,7 +643,7 @@ function focusOrigin(){
   camera.position.copy(origin.clone().addScaledVector(dirv, dist));
   controls.target.copy(origin);
   if(camera.isOrthographicCamera) fitOrthoFrustum();
-  controls.update(); updateConnector();
+  controls.update(); updateConnector(); requestRender();
 }
 function fitOrthoFrustum(){
   const { radius } = sceneBounds();
@@ -597,7 +671,7 @@ function toggleProjection(useOrtho){
     camera = perspCam;
   }
   buildControls();
-  renderNow();
+  requestRender();
 }
 
 /* ========= Pins & Connector ========= */
@@ -683,8 +757,8 @@ function updateConnector(){
 /* ========= Preview ========= */
 let previewZoom = 1.0;
 function applyPreviewZoom(){ el.previewInner.style.transform = `scale(${previewZoom})`; }
-el.previewZoom.addEventListener('input', ()=>{ previewZoom = parseFloat(el.previewZoom.value)||1; el.previewZoomVal.textContent = previewZoom.toFixed(2) + '×'; applyPreviewZoom(); });
-el.previewReset.addEventListener('click', ()=>{ previewZoom = 1; el.previewZoom.value = 1; el.previewZoomVal.textContent = '1.00×'; applyPreviewZoom(); });
+el.previewZoom.addEventListener('input', ()=>{ previewZoom = parseFloat(el.previewZoom.value)||1; el.previewZoomVal.textContent = previewZoom.toFixed(2) + '×'; applyPreviewZoom(); requestRender(); });
+el.previewReset.addEventListener('click', ()=>{ previewZoom = 1; el.previewZoom.value = 1; el.previewZoomVal.textContent = '1.00×'; applyPreviewZoom(); requestRender(); });
 
 async function setPreview(ref, p){
   if(!ref){ el.viewerPreview.classList.add('hidden'); return; }
@@ -696,7 +770,7 @@ async function setPreview(ref, p){
     el.capTitleLine.textContent = p?.title || '';
     el.capBodyLine.textContent  = p?.body  || '';
     el.viewerPreview.classList.remove('hidden');
-    applyPreviewZoom(); updateConnector();
+    applyPreviewZoom(); updateConnector(); requestRender();
   }catch(e){
     console.warn('preview failed', e);
     el.previewErr.style.display='inline';
@@ -734,7 +808,7 @@ async function resolveImageObjectURL(ref, {preferThumb=false}={}){
     const ok = await ensureHeic2any();
     if(ok){
       const blob = await driveFileFetchBlob(meta.id);
-      const jpegBlob = await window.heic2any({ blob, toType:'image/jpeg', quality:1.0 });
+      const jpegBlob = await window.heic2any({ blob, toType:'image/jpeg', quality:0.95 });
       const jpg = Array.isArray(jpegBlob) ? jpegBlob[0] : jpegBlob;
       outUrl = URL.createObjectURL(jpg);
     }else if(meta.hasThumbnail && meta.thumbnailLink){
@@ -925,7 +999,7 @@ async function applyMaterialFromUIToSelected(){
   st.alphaTest = Number(el.matThreshold.value ?? 0);
   matState.set(key, st);
   await applyStateToMaterial(orig, st);
-  renderNow();
+  requestRender();
   debouncedSaveMaterials();
 }
 ['change','input'].forEach(ev=>{
@@ -949,16 +1023,74 @@ function copyTextureParams(from, to){
   to.anisotropy = from.anisotropy;
   to.colorSpace = from.colorSpace ?? THREE.SRGBColorSpace;
 }
+
+/* === 2Kダウンサイジング（モバイル優先） === */
+async function downscaleTextureIfNeeded(tex, maxDim){
+  try{
+    if(!tex || !tex.image || tex.isCompressedTexture) return tex;
+    const img = tex.image;
+    const w = img.width || img.videoWidth || 0;
+    const h = img.height || img.videoHeight || 0;
+    if(!w || !h || (w<=maxDim && h<=maxDim)) return tex;
+
+    const scale = Math.min(maxDim / w, maxDim / h);
+    const nw = Math.max(1, Math.round(w * scale));
+    const nh = Math.max(1, Math.round(h * scale));
+    const canvas = document.createElement('canvas'); canvas.width = nw; canvas.height = nh;
+    const ctx = canvas.getContext('2d');
+    try{ ctx.drawImage(img, 0, 0, nw, nh); }
+    catch{
+      const bmp = await createImageBitmap(img, { resizeWidth:nw, resizeHeight:nh });
+      ctx.drawImage(bmp, 0, 0, nw, nh);
+    }
+    const ctex = new THREE.CanvasTexture(canvas);
+    copyTextureParams(tex, ctex);
+    const Q = getQualityProfile();
+    ctex.generateMipmaps = Q.useMipmaps;
+    ctex.anisotropy = Q.anisotropy;
+    ctex.minFilter = Q.useMipmaps ? THREE.LinearMipmapLinearFilter : THREE.LinearFilter;
+    ctex.magFilter = THREE.LinearFilter;
+    ctex.needsUpdate = true;
+    return ctex;
+  }catch{
+    return tex;
+  }
+}
+async function downscaleAllTextures(root, maxDim){
+  const tasks=[];
+  root.traverse(obj=>{
+    if(!obj.material) return;
+    const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+    mats.forEach(m=>{
+      ['map','normalMap','roughnessMap','metalnessMap','aoMap','emissiveMap','specularMap','alphaMap'].forEach(slot=>{
+        const tex = m[slot]; if(!tex) return;
+        tasks.push(downscaleTextureIfNeeded(tex, maxDim).then(nt=>{ if(nt!==tex){ m[slot]=nt; m.needsUpdate=true; } }));
+      });
+    });
+  });
+  await Promise.all(tasks);
+}
+
 async function processTextureToCanvasTextureFromOriginal(originalTex, { invertRGB=false, alphaFromWhite=false, threshold=0 }){
   if(!originalTex || !originalTex.image) return null;
   const image = originalTex.image;
-  const w = image.width || image.videoWidth || 0;
-  const h = image.height || image.videoHeight || 0;
+  let w = image.width || image.videoWidth || 0;
+  let h = image.height || image.videoHeight || 0;
   if(!w || !h) return null;
+
+  // ★ 2K上限
+  const Q = getQualityProfile();
+  const maxDim = Q.maxTextureSize;
+  if (w>maxDim || h>maxDim){
+    const scale = Math.min(maxDim/w, maxDim/h);
+    w = Math.max(1, Math.round(w*scale));
+    h = Math.max(1, Math.round(h*scale));
+  }
+
   const canvas = document.createElement('canvas'); canvas.width = w; canvas.height = h;
   const ctx = canvas.getContext('2d');
   try{ ctx.drawImage(image, 0, 0, w, h); }
-  catch(e){ try{ const bmp = await createImageBitmap(image); ctx.drawImage(bmp,0,0,w,h); } catch(e2){ return null; } }
+  catch(e){ try{ const bmp = await createImageBitmap(image, { resizeWidth:w, resizeHeight:h }); ctx.drawImage(bmp,0,0,w,h); } catch(e2){ return null; } }
   const img = ctx.getImageData(0,0,w,h); const data = img.data;
   for(let i=0;i<data.length;i+=4){
     let r=data[i], g=data[i+1], b=data[i+2], a=data[i+3];
@@ -975,6 +1107,10 @@ async function processTextureToCanvasTextureFromOriginal(originalTex, { invertRG
   ctx.putImageData(img,0,0);
   const ctex = new THREE.CanvasTexture(canvas);
   copyTextureParams(originalTex, ctex);
+  ctex.generateMipmaps = Q.useMipmaps;
+  ctex.anisotropy = Q.anisotropy;
+  ctex.minFilter = Q.useMipmaps ? THREE.LinearMipmapLinearFilter : THREE.LinearFilter;
+  ctex.magFilter = THREE.LinearFilter;
   ctex.needsUpdate = true;
   return ctex;
 }
@@ -1026,7 +1162,16 @@ async function applyStateToMaterial(origM, st){
   }else{
     const rec0 = matOriginals.get(origM);
     mat.map = rec0.map || null;
-    if(mat.map) mat.map.needsUpdate = true;
+    if(mat.map){
+      const Q = getQualityProfile();
+      const nt = await downscaleTextureIfNeeded(mat.map, Q.maxTextureSize);
+      mat.map = nt;
+      mat.map.generateMipmaps = Q.useMipmaps;
+      mat.map.anisotropy = Q.anisotropy;
+      mat.map.minFilter = Q.useMipmaps ? THREE.LinearMipmapLinearFilter : THREE.LinearFilter;
+      mat.map.magFilter = THREE.LinearFilter;
+      mat.map.needsUpdate = true;
+    }
   }
   if(!mat.color && matOriginals.get(origM).color){ mat.color = matOriginals.get(origM).color.clone(); }
   if(mat.color) mat.color.needsUpdate = true;
@@ -1057,7 +1202,7 @@ function setNamedView(name){
   camera.position.copy(origin.clone().add(dir));
   controls.target.copy(origin);
   if(camera.isOrthographicCamera) fitOrthoFrustum();
-  controls.update(); renderNow();
+  controls.update(); requestRender();
 }
 
 /* ========= Sheets：同階層で作成/検索 ========= */
@@ -1202,7 +1347,7 @@ async function applyMaterialsFromSheet(materialsData){
     await applyStateToMaterial(mat, st);
   }
   applyMaterialUIFromSelection();
-  renderNow();
+  requestRender();
 }
 async function applyViewerPrefs(viewerData){
   if(!viewerData) return;
@@ -1215,7 +1360,7 @@ async function applyViewerPrefs(viewerData){
     el.projOrtho.checked = wantOrtho;
     toggleProjection(wantOrtho);
   }
-  renderNow();
+  requestRender();
 }
 const debouncedSaveMaterials = debounce(async ()=>{
   if(viewOnly) return;
@@ -1226,7 +1371,7 @@ const debouncedSaveMaterials = debounce(async ()=>{
   try{ await saveSheetMeta(spreadsheetId, { materials: materialsData, viewer: viewerData }); }
   catch(e){ console.warn('saveSheetMeta failed', e); }
 }, 600);
-el.bgColor.addEventListener('input', ()=>{ scene.background = new THREE.Color(el.bgColor.value); renderNow(); debouncedSaveMaterials(); });
+el.bgColor.addEventListener('input', ()=>{ scene.background = new THREE.Color(el.bgColor.value); requestRender(); debouncedSaveMaterials(); });
 
 /* ========= Thumbs / Preview ========= */
 function renderThumbs(p){
@@ -1275,7 +1420,7 @@ function buildColorPresets(){
         p.color=normalizeHex(c);
         placePinMesh(p);
         refreshPinsList();
-        filterColors.add(p.color); // 新色を初期表示
+        filterColors.add(p.color);
         buildColorFilter();
         debouncedSave();
       }
@@ -1309,7 +1454,7 @@ function buildColorFilter(){
 function pinPassesFilter(p){ if(filterColors.size===0) return true; return filterColors.has(normalizeHex(p.color)); }
 function applyPinVisibilityFilter(){
   pins.forEach(p=>{ if(p.mesh){ p.mesh.visible = pinPassesFilter(p); } });
-  refreshPinsList(); renderNow();
+  refreshPinsList(); requestRender();
 }
 el.btnColorFilter.addEventListener('click', ()=>{
   el.colorFilterPanel.style.display = (el.colorFilterPanel.style.display==='none' || !el.colorFilterPanel.style.display) ? 'block' : 'none';
@@ -1341,7 +1486,7 @@ function rebuildPinsScene(){
     const p=pins.find(x=>x.id===selectedPinId);
     if(p?.mesh) tcontrols.attach(p.mesh); else tcontrols.detach();
   }
-  renderNow();
+  requestRender();
 }
 async function loadPinsFromActiveSheet(spreadsheetId){
   pins=[]; selectedPinId=null; el.rightEditor.classList.add('hidden'); el.rightNoSel.classList.remove('hidden');
@@ -1638,7 +1783,7 @@ el.btnWide.addEventListener('click', ()=>{
 el.btnTogglePins.addEventListener('click', ()=>{
   pinGroup.visible = !pinGroup.visible;
   el.btnTogglePins.textContent = 'ピン表示: ' + (pinGroup.visible? 'ON' : 'OFF');
-  applyPinVisibilityFilter(); renderNow();
+  applyPinVisibilityFilter(); requestRender();
 });
 el.btnAddPin.addEventListener('click', ()=>{
   if(viewOnly) return;
@@ -1659,7 +1804,7 @@ el.btnGizmo.addEventListener('click', ()=>{
 el.btnUndo.addEventListener('click', ()=>{
   if(viewOnly) return;
   const last = undoStack.pop(); if(!last) return;
-  if(last.type==='add'){ const idx = pins.findIndex(p=>p.id===last.id); if(idx>=0){ const pin = pins[idx]; if(pin.mesh) pinGroup.remove(pin.mesh); pins.splice(idx,1); refreshPinsList(); renderNow(); upsertPinToSheet(); } }
+  if(last.type==='add'){ const idx = pins.findIndex(p=>p.id===last.id); if(idx>=0){ const pin = pins[idx]; if(pin.mesh) pinGroup.remove(pin.mesh); pins.splice(idx,1); refreshPinsList(); requestRender(); upsertPinToSheet(); } }
 });
 el.btnDeletePin.addEventListener('click', async ()=>{
   if(viewOnly) return;
@@ -1669,11 +1814,11 @@ el.btnDeletePin.addEventListener('click', async ()=>{
   pins = pins.filter(x=>x.id!==p.id);
   selectedPinId = null;
   refreshPinsList(); updateViewerPreviewForPin(null); el.rightEditor.classList.add('hidden'); el.rightNoSel.classList.remove('hidden');
-  renderNow();
+  requestRender();
   if(spreadsheetId){ try{ await deletePinFromActiveSheet(spreadsheetId, p.id); }catch(e){ console.error(e); } }
 });
 
-/* ========= GLB Load (LOW-MEM for iOS) ========= */
+/* ========= GLB Load (Blob URL + 2K downscale) ========= */
 async function loadGLBByFileId(fileId){
   if(!accessToken){ alert('先にサインインしてください'); return; }
   if(!fileId){ alert('GLBの fileId または共有URLを入力してください'); return; }
@@ -1690,7 +1835,6 @@ async function loadGLBByFileId(fileId){
       throw new Error(`Drive download failed: ${res.status} ${res.statusText} ${hint}`);
     }
 
-    // ★★ 低負荷：Blob URL + loadAsync（ArrayBufferを避ける）
     const blob = await res.blob();
     const url = URL.createObjectURL(blob);
     try {
@@ -1701,9 +1845,14 @@ async function loadGLBByFileId(fileId){
       }
       const gltf = await loader.loadAsync(url);
       currentModel = gltf.scene; scene.add(currentModel);
+
+      // ★ 2K制限で全テクスチャを縮小（モバイル優先）
+      const Q = getQualityProfile();
+      await downscaleAllTextures(currentModel, Q.maxTextureSize);
+
       collectMaterials();
       focusOrigin();
-      renderNow();
+      requestRender();
     } finally {
       URL.revokeObjectURL(url);
     }
