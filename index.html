@@ -53,7 +53,6 @@ body.wide .main{grid-template-columns:1fr}
 #capTitleLine{font-weight:700}
 #capBodyLine{font-size:.85rem;color:#c9d7ea;max-height:8em;overflow:auto}
 
-/* サインイン */
 .signin-gate{position:fixed;inset:0;display:grid;place-items:center;background:radial-gradient(1200px 600px at 50% 15%, rgba(83,183,255,.08), transparent 60%), linear-gradient(180deg,#0a0f16,#05070b);z-index:20;padding:env(safe-area-inset-top) env(safe-area-inset-right) calc(env(safe-area-inset-bottom)) env(safe-area-inset-left)}
 .card{width:min(560px,92vw);background:#0c1118;border:1px solid #1d2a3d;border-radius:24px;box-shadow:var(--shadow);padding:20px}
 .card h1{margin:4px 0 8px;font-size:1.35rem}
@@ -74,7 +73,7 @@ input[type="range"]{width:160px}
 body.viewonly #pinTools{display:none}
 body.viewonly #btnSavePin, body.viewonly #btnDeletePin, body.viewonly #btnAttach, body.viewonly #btnPickFromFolder, body.viewonly #autosaveTip, body.viewonly #listNew, body.viewonly #listDelete{display:none}
 
-/* ===== Mobile Bottom Tabs + Bottom Sheet ===== */
+/* Mobile bottom tabs + sheet */
 #mobileTabs, #mobileSheet{display:none}
 @media (max-width: 820px){
   .main{grid-template-columns:1fr}
@@ -86,14 +85,13 @@ body.viewonly #btnSavePin, body.viewonly #btnDeletePin, body.viewonly #btnAttach
   }
   #mobileTabs button{flex:1;border-radius:0;border:none;background:transparent}
   #mobileTabs button.active{background:#132035}
-
   #mobileSheet{
     display:block;position:fixed;left:0;right:0;
     bottom:calc(var(--tabh) + env(safe-area-inset-bottom));
     max-height:min(70dvh, 70svh);
     background:#0c1118;border-top:1px solid #203049;border-right:0;border-left:0;
     border-radius:16px 16px 0 0;z-index:1002;box-shadow:0 -12px 30px rgba(0,0,0,.4);
-    transform:translateY(calc(100% + 8px)); /* 初期は閉じる */
+    transform:translateY(calc(100% + 8px));
     transition:transform .25s ease;
     padding-bottom:env(safe-area-inset-bottom);
   }
@@ -108,14 +106,12 @@ body.viewonly #btnSavePin, body.viewonly #btnDeletePin, body.viewonly #btnAttach
 @keyframes spin{to{transform:rotate(360deg)}}
 </style>
 
-<!-- Import maps (Three.js ES modules) -->
 <script type="importmap">
 { "imports": {
   "three": "https://unpkg.com/three@0.157.0/build/three.module.js",
   "three/examples/jsm/": "https://unpkg.com/three@0.157.0/examples/jsm/"
 } }
 </script>
-<!-- heic2any -->
 <script src="https://unpkg.com/heic2any@0.0.5/dist/heic2any.min.js"></script>
 </head>
 <body>
@@ -133,7 +129,6 @@ body.viewonly #btnSavePin, body.viewonly #btnDeletePin, body.viewonly #btnAttach
   </header>
 
   <div class="main">
-    <!-- 左：ツール -->
     <section class="panel" id="leftToolbox">
       <h3>ツールボックス（マテリアル & カメラ & ピン）</h3>
       <div class="body" id="leftBody">
@@ -154,7 +149,7 @@ body.viewonly #btnSavePin, body.viewonly #btnDeletePin, body.viewonly #btnAttach
 
         <div class="small" style="margin:4px 0 6px">マテリアル編集（キャプションシートごとに保存）</div>
         <div class="field"><label>対象</label>
-          <select id="matSelect"><option value="__all__">（全マテリアル：編集不可）</option></select>
+          <select id="matSelect"><option value="__sel__">（マテリアルを選択）</option></select>
         </div>
         <div class="field"><label>Unlit</label><input id="matUnlit" type="checkbox"><span class="small">明暗なし</span></div>
         <div class="field"><label>裏面描画</label><input id="matDoubleSided" type="checkbox"></div>
@@ -179,7 +174,6 @@ body.viewonly #btnSavePin, body.viewonly #btnDeletePin, body.viewonly #btnAttach
       </div>
     </section>
 
-    <!-- 中央：ビューア -->
     <section class="panel" id="viewer">
       <div class="spinner" id="loading" hidden><div class="lds"></div></div>
       <canvas id="viewerCanvas"></canvas>
@@ -207,7 +201,6 @@ body.viewonly #btnSavePin, body.viewonly #btnDeletePin, body.viewonly #btnAttach
       <div class="hud"><div class="chip" id="modeLabel">Orbit</div></div>
     </section>
 
-    <!-- 右：キャプション -->
     <section class="panel" id="rightCaption">
       <h3>キャプション</h3>
       <div class="body" id="rightBody">
@@ -259,7 +252,6 @@ body.viewonly #btnSavePin, body.viewonly #btnDeletePin, body.viewonly #btnAttach
   </div>
 </div>
 
-<!-- モバイル：ボトムタブ＆ボトムシート -->
 <nav id="mobileTabs">
   <button id="tabViewer" class="active">ビュー</button>
   <button id="tabPins">キャプション</button>
@@ -279,7 +271,6 @@ body.viewonly #btnSavePin, body.viewonly #btnDeletePin, body.viewonly #btnAttach
   </div>
 </section>
 
-<!-- Drive画像ピッカー -->
 <div id="pickerModal" class="signin-gate" style="display:none;background:rgba(0,0,0,.55)">
   <div class="card" style="width:min(90vw,980px);max-height:80svh;overflow:hidden">
     <h1 style="margin:0 0 6px">Driveから保存</h1>
@@ -291,7 +282,6 @@ body.viewonly #btnSavePin, body.viewonly #btnDeletePin, body.viewonly #btnAttach
   </div>
 </div>
 
-<!-- サインインゲート -->
 <div class="signin-gate" id="gate">
   <div class="card">
     <h1>Googleにサインイン</h1>
@@ -303,7 +293,6 @@ body.viewonly #btnSavePin, body.viewonly #btnDeletePin, body.viewonly #btnAttach
   </div>
 </div>
 
-<!-- Google SDK -->
 <script>
   let gisReady=false, gapiReady=false;
   function onGis(){ gisReady=true; }
@@ -318,31 +307,22 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js';
 
-/* ======= デバイスプロファイル ======= */
+/* ======= device & quality ======= */
 const IS_IOS = /iP(hone|ad|od)/.test(navigator.platform) ||
                (navigator.userAgent.includes('Mac') && 'ontouchend' in document);
-const ORTHO_MARGIN = IS_IOS ? 1.6 : 1.8;
 function getQualityProfile(){
   const coarse   = matchMedia('(pointer: coarse)').matches;
   const narrow   = matchMedia('(max-width: 820px)').matches;
   const dpr      = Math.min(window.devicePixelRatio || 1, 4);
   const mem      = (navigator.deviceMemory || 4);
   const cores    = (navigator.hardwareConcurrency || 4);
-  const isiOS    = IS_IOS;
-
   let level = 'high';
-  if (isiOS || coarse || narrow || dpr >= 3 || mem <= 4 || cores <= 4) level = 'low';
+  if (IS_IOS || coarse || narrow || dpr >= 3 || mem <= 4 || cores <= 4) level = 'low';
   if (mem <= 2 || cores <= 2) level = 'ultra';
-
   return {
     level,
-    antialias: (level === 'high') && !isiOS,
+    antialias: (level === 'high') && !IS_IOS,
     pixelRatioCap: (level === 'high') ? 1.75 : (level === 'low' ? 1.0 : 0.85),
-    enableShadows: false,
-    useMipmaps: (level !== 'ultra'),
-    anisotropy: (level === 'high') ? 4 : 1,
-    toneMapping: THREE.NoToneMapping,
-    physicallyCorrectLights: false,
     onDemandRender: (level !== 'high'),
     throttleHz: (level === 'low') ? 30 : (level === 'ultra' ? 20 : 0),
     maxTextureSize: (level === 'high') ? 4096 : 2048
@@ -377,54 +357,34 @@ function afterAuthReady(){
   document.getElementById('gate').style.display='none';
   const viewOnly = new URLSearchParams(location.search).get('view') === '1';
   document.getElementById('statusLabel').textContent = viewOnly ? '閲覧モード' : 'Ready';
-  // 有効化
   ['btnLoad','projOrtho','listSelect','btnViewOnly','btnWide'].forEach(id=> document.getElementById(id).removeAttribute('disabled'));
   if(!viewOnly){
     ['btnAddPin','btnGizmo','btnUndo','btnSavePin','btnDeletePin','btnAttach','btnPickFromFolder','listNew','listDelete','btnTogglePins'].forEach(id=> document.getElementById(id).removeAttribute('disabled'));
   }else{
-    // 閲覧モードでもシート選択は可能（要求）
     document.getElementById('listSelect').removeAttribute('disabled');
   }
   enforceViewOnlyMode();
 
-  // クエリの自動セット
+  // クエリ反映＆自動ロード
   const qs = new URLSearchParams(location.search);
-  const fid = qs.get('fileId') || '';
-  const sid = qs.get('sheetId') || '';
-  if(fid) el.inputGLB.value = fid;
-  if(sid) el.inputSheet.value = sid;
-
-  // 閲覧モードなら自動ロード
-  if(viewOnly && fid){
-    // onClickLoadGLB の方でID抽出＆ロード
-    onClickLoadGLB().catch(()=>{});
-  }
+  const fid = qs.get('fileId') || ''; const sid = qs.get('sheetId') || '';
+  if(fid) el.inputGLB.value = fid; if(sid) el.inputSheet.value = sid;
+  if(viewOnly && fid){ onClickLoadGLB().catch(()=>{}); }
 }
 function startSignInClick(){
-  if(!window.google || !google.accounts || !google.accounts.oauth2){
-    alert('初期化中です。数秒後にもう一度お試しください。');
-    return;
+  if(!window.google || !google.accounts?.oauth2){
+    alert('初期化中です。数秒後にお試しください。'); return;
   }
-  try{
-    if(!tokenClient){
-      tokenClient = google.accounts.oauth2.initTokenClient({
-        client_id: CLIENT_ID,
-        scope: SCOPES,
-        callback: (resp)=>{
-          if(resp && resp.access_token){
-            accessToken = resp.access_token;
-            afterAuthReady();
-          }
-        }
-      });
-    }
-    tokenClient.requestAccessToken({ prompt: 'consent' });
-  }catch(e){
-    console.error(e); alert('サインインでエラーが発生しました。');
+  if(!tokenClient){
+    tokenClient = google.accounts.oauth2.initTokenClient({
+      client_id: CLIENT_ID, scope: SCOPES,
+      callback: (resp)=>{ if(resp?.access_token){ accessToken = resp.access_token; afterAuthReady(); } }
+    });
   }
+  tokenClient.requestAccessToken({ prompt: 'consent' });
 }
 
-/* ======= Elements & State ======= */
+/* ======= elements & state ======= */
 const el = {
   gate: document.getElementById('gate'),
   statusLabel: document.getElementById('statusLabel'),
@@ -496,7 +456,7 @@ const el = {
   listSelect: document.getElementById('listSelect'),
   listNew: document.getElementById('listNew'),
   listDelete: document.getElementById('listDelete'),
-  // Mobile UI
+  // Mobile
   tabViewer: document.getElementById('tabViewer'),
   tabPins: document.getElementById('tabPins'),
   tabTools: document.getElementById('tabTools'),
@@ -508,176 +468,97 @@ const el = {
 };
 const viewOnly = new URLSearchParams(location.search).get('view') === '1';
 
-/* ======= Viewer ======= */
+/* ======= viewer ======= */
 let renderer, scene, camera, controls, tcontrols, pinGroup, loader, currentModel=null;
 let perspCam, orthoCam; let usingOrtho=false;
 let raycaster = new THREE.Raycaster(), pointer = new THREE.Vector2();
 let addPinMode=false, currentColor='#ff6b6b';
-let pins=[], selectedPinId=null, undoStack=[];
-let glbParents=[], glbMetaCache=null;
-
-/* materials */
-let materials=[];
-const materialKeyByMaterial = new Map();
-const materialByKey = new Map();
-const matOriginals=new WeakMap();
-const matState = new Map();
-const imageBlobCache = new Map();
+let pins=[], selectedPinId=null;
+let glbParents=[], materials=[];
+const matOriginals=new WeakMap(), matState=new Map();
+const materialKeyByMaterial = new Map(); const materialByKey = new Map();
 let filterColors = new Set();
 let activeSheet = { sheetId:null, title:'pins' };
 
-const debounce = (fn,ms)=>{ let t; return (...a)=>{ clearTimeout(t); t=setTimeout(()=>fn(...a),ms); }; };
 const PRESET_COLORS = ['#ff6b6b','#ffd166','#06d6a0','#118ab2','#ef476f','#b5179e','#4361ee','#4cc9f0','#ff9f1c'];
-
-/* ======= ユーティリティ ======= */
-function toast(msg){ el.statusLabel.textContent=msg; setTimeout(()=> el.statusLabel.textContent= viewOnly ? '閲覧モード' : 'Ready', 1800); }
+const debounce = (fn,ms)=>{ let t; return (...a)=>{ clearTimeout(t); t=setTimeout(()=>fn(...a),ms); }; };
+function toast(msg){ el.statusLabel.textContent=msg; setTimeout(()=> el.statusLabel.textContent= viewOnly ? '閲覧モード' : 'Ready', 1600); }
 function ensureArray(x){ return Array.isArray(x)?x:[]; }
 function normalizeHex(c){ const t = new THREE.Color(c); return '#' + t.getHexString(); }
 function enforceViewOnlyMode(){ if (!viewOnly) return; document.body.classList.add('viewonly'); el.capTitle.readOnly = true; el.capBody.readOnly  = true; }
-function extractDriveId(input) {
-  if (!input) return "";
-  const s = input.trim();
-  if (/^[a-zA-Z0-9_-]{20,}$/.test(s) && !s.includes("http")) return s;
-  try {
-    const u = new URL(s);
-    const m1 = u.pathname.match(/\/file\/d\/([^/]+)/);
-    if (m1) return m1[1];
-    if (u.searchParams.get("id")) return u.searchParams.get("id");
-    const m2 = u.pathname.match(/\/d\/([^/]+)/);
-    if (m2) return m2[1];
-  } catch {}
-  return s;
-}
-function extractSpreadsheetId(input) {
-  if (!input) return "";
-  const s = input.trim();
-  if (/^[a-zA-Z0-9_-]{20,}$/.test(s) && !s.includes("http")) return s;
-  try {
-    const u = new URL(s);
-    const m = u.pathname.match(/\/spreadsheets\/d\/([^/]+)/);
-    if (m) return m[1];
-    if (u.searchParams.get("id")) return u.searchParams.get("id");
-  } catch {}
-  return s;
-}
+function extractDriveId(input){ if(!input) return ""; const s=input.trim(); if(/^[a-zA-Z0-9_-]{20,}$/.test(s)&&!s.includes("http")) return s; try{ const u=new URL(s); const m1=u.pathname.match(/\/file\/d\/([^/]+)/); if(m1) return m1[1]; if(u.searchParams.get("id")) return u.searchParams.get("id"); const m2=u.pathname.match(/\/d\/([^/]+)/); if(m2) return m2[1]; }catch{} return s; }
+function extractSpreadsheetId(input){ if(!input) return ""; const s=input.trim(); if(/^[a-zA-Z0-9_-]{20,}$/.test(s)&&!s.includes("http")) return s; try{ const u=new URL(s); const m=u.pathname.match(/\/spreadsheets\/d\/([^/]+)/); if(m) return m[1]; if(u.searchParams.get("id")) return u.searchParams.get("id"); }catch{} return s; }
+const safeFloat=(v,def=0)=>{ const n=parseFloat(v); return Number.isFinite(n)?n:def; };
 
-/* ======= HEIC ======= */
-function loadScriptOnce(src){ return new Promise((resolve,reject)=>{ const s=document.createElement('script'); s.src=src; s.async=true; s.onload=resolve; s.onerror=reject; document.head.appendChild(s); }); }
-async function ensureHeic2any(){ if(typeof window.heic2any === 'function') return true; try{ await loadScriptOnce('https://cdn.jsdelivr.net/npm/heic2any@0.0.5/dist/heic2any.min.js'); }catch{} if(typeof window.heic2any === 'function') return true; try{ await loadScriptOnce('https://unpkg.com/heic2any@0.0.5/dist/heic2any.min.js'); }catch{} return (typeof window.heic2any === 'function'); }
-function upscaleThumbnailUrl(u, size=1024){ if(!u) return u; try{ const url = new URL(u); url.search = url.search.replace(/(\bs=)(\d+)/, `$1${size}`); url.pathname = url.pathname.replace(/=s(\d+)/, `=s${size}`); if(!/(\bs=)/.test(url.search) && !/=s\d+/.test(url.pathname)){ url.searchParams.set('s', String(size)); } return url.toString(); }catch{ return u.replace(/=s(\d+)/, `=s${size}`); } }
-
-/* ======= パフォーマンス：動的解像度/ループ ======= */
-let basePixelRatio = 1, lowPixelRatio = 1, interactionLoop=false, onDemand=true, suppressOverlay=false;
+/* perf */
+let basePixelRatio=1, lowPixelRatio=1, interactionLoop=false, onDemand=true;
 function beginInteraction(){
-  if(!renderer) return;
-  if(interactionLoop) return;
-  suppressOverlay = true;
+  if(!renderer||interactionLoop) return;
   renderer.setPixelRatio(lowPixelRatio);
-  interactionLoop = true;
-  const loop = (t)=>{
-    if(!interactionLoop) return;
-    renderer.render(scene, camera);
-    requestAnimationFrame(loop);
-  };
+  interactionLoop=true;
+  const loop=()=>{ if(!interactionLoop) return; renderer.render(scene,camera); updateConnector(); requestAnimationFrame(loop); };
   requestAnimationFrame(loop);
 }
 const endInteraction = debounce(()=>{
-  if(!renderer) return;
-  interactionLoop = false;
-  renderer.setPixelRatio(basePixelRatio);
-  suppressOverlay = false;
-  requestRender();
-}, 120);
+  if(!renderer) return; interactionLoop=false; renderer.setPixelRatio(basePixelRatio); requestRender();
+}, 100);
 
-/* ======= Viewer初期化 ======= */
+/* init */
 function viewerInit(){
-  const Q = getQualityProfile();
-  renderer = new THREE.WebGLRenderer({
-    canvas: el.viewerCanvas,
-    antialias: Q.antialias,
-    powerPreference: 'low-power',
-    preserveDrawingBuffer: false,
-    alpha:false
-  });
-  basePixelRatio = Math.min(window.devicePixelRatio || 1, Q.pixelRatioCap);
-  lowPixelRatio  = Math.max(0.6, Math.min(basePixelRatio*0.75, 1.0));
+  const Q=getQualityProfile();
+  renderer=new THREE.WebGLRenderer({ canvas:el.viewerCanvas, antialias:Q.antialias, powerPreference:'low-power', alpha:false });
+  basePixelRatio=Math.min(window.devicePixelRatio||1, Q.pixelRatioCap);
+  lowPixelRatio=Math.max(0.6, Math.min(basePixelRatio*0.75, 1.0));
   renderer.setPixelRatio(basePixelRatio);
-  renderer.shadowMap.enabled = Q.enableShadows;
-  renderer.toneMapping = Q.toneMapping;
-  renderer.physicallyCorrectLights = Q.physicallyCorrectLights;
   renderer.outputColorSpace = THREE.SRGBColorSpace;
 
-  scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x0a0f16);
+  scene=new THREE.Scene(); scene.background=new THREE.Color(0x0a0f16);
+  perspCam=new THREE.PerspectiveCamera(60,2,0.1,5000); perspCam.position.set(2.8,1.6,3.6);
+  orthoCam=new THREE.OrthographicCamera(-2,2,2,-2,-5000,5000);
+  camera=perspCam; usingOrtho=false;
 
-  perspCam = new THREE.PerspectiveCamera(60, 2, 0.1, 5000);
-  perspCam.position.set(2.8,1.6,3.6);
-  orthoCam = new THREE.OrthographicCamera(-2,2,2,-2, -5000, 5000);
-  camera = perspCam; usingOrtho=false;
-
-  const hemi = new THREE.HemisphereLight(0xffffff, 0x223355, 0.6); scene.add(hemi);
-  const dir  = new THREE.DirectionalLight(0xffffff, 1.0); dir.position.set(3,5,4); scene.add(dir);
+  const hemi=new THREE.HemisphereLight(0xffffff,0x223355,0.6); scene.add(hemi);
+  const dir =new THREE.DirectionalLight(0xffffff,1.0); dir.position.set(3,5,4); scene.add(dir);
 
   buildControls();
+  pinGroup=new THREE.Group(); scene.add(pinGroup);
+  loader=new GLTFLoader();
 
-  pinGroup = new THREE.Group(); scene.add(pinGroup);
-  loader = new GLTFLoader();
+  import('three/examples/jsm/loaders/KTX2Loader.js').then(({KTX2Loader})=>{
+    const ktx=new KTX2Loader().setTranscoderPath('https://unpkg.com/three@0.157.0/examples/jsm/libs/basis/'); ktx.detectSupport(renderer); loader.setKTX2Loader(ktx);
+  });
+  import('three/examples/jsm/loaders/DRACOLoader.js').then(({DRACOLoader})=>{
+    const draco=new DRACOLoader(); draco.setDecoderPath('https://unpkg.com/three@0.157.0/examples/jsm/libs/draco/'); loader.setDRACOLoader(draco);
+  });
 
-  import('three/examples/jsm/loaders/KTX2Loader.js').then(({ KTX2Loader })=>{
-    const ktx = new KTX2Loader().setTranscoderPath('https://unpkg.com/three@0.157.0/examples/jsm/libs/basis/');
-    ktx.detectSupport(renderer); loader.setKTX2Loader(ktx);
-  }).catch(()=>{});
-  import('three/examples/jsm/loaders/DRACOLoader.js').then(({ DRACOLoader })=>{
-    const draco = new DRACOLoader();
-    draco.setDecoderPath('https://unpkg.com/three@0.157.0/examples/jsm/libs/draco/');
-    loader.setDRACOLoader(draco);
-  }).catch(()=>{});
+  // サイズ監視（0px化で消える対策）
+  const ro=new ResizeObserver(()=> resize()); ro.observe(el.viewerCanvas.parentElement);
 
-  window.addEventListener('resize', resize, { passive:true });
-  el.viewerCanvas.addEventListener('pointerdown', onPointerDown, { passive:false });
+  window.addEventListener('resize', resize, {passive:true});
+  el.viewerCanvas.addEventListener('pointerdown', onPointerDown, {passive:false});
   ['touchstart','touchmove','touchend','gesturestart'].forEach(ev=>{
     el.viewerCanvas.addEventListener(ev, e=>{ e.preventDefault(); }, { passive:false });
   });
 
-  el.projOrtho.addEventListener('change', ()=> { toggleProjection(el.projOrtho.checked); debouncedSaveMeta(); });
-
   onDemand = Q.onDemandRender;
   resize();
-
-  if (onDemand) {
-    requestRender();
-  } else {
-    const hz = Q.throttleHz;
-    let lastTime = 0;
-    const loop = (t)=>{
-      if(hz>0){
-        const dt = t - lastTime, minDt = 1000/hz;
-        if (dt < minDt) { requestAnimationFrame(loop); return; }
-        lastTime = t;
-      }
-      renderer.render(scene,camera);
-      updateConnector();
-      requestAnimationFrame(loop);
-    };
-    requestAnimationFrame(loop);
-  }
-
-  el.viewerCanvas.addEventListener('webglcontextlost', (e)=>{ e.preventDefault(); toast('WebGL コンテキストが失われました。再読み込みします…'); location.reload(); });
+  if(onDemand) requestRender(); else startLoop(Q.throttleHz);
+  el.viewerCanvas.addEventListener('webglcontextlost',(e)=>{ e.preventDefault(); location.reload(); });
+}
+function startLoop(hz){
+  let last=0; const loop=(t)=>{ if(hz>0){ const dt=t-last, md=1000/hz; if(dt<md){ requestAnimationFrame(loop); return;} last=t; } renderer.render(scene,camera); updateConnector(); requestAnimationFrame(loop); };
+  requestAnimationFrame(loop);
 }
 function buildControls(){
-  if(controls){ controls.dispose(); }
-  controls = new OrbitControls(camera, el.viewerCanvas);
-  controls.target.set(0,0,0);
-  controls.enableDamping = true;
-  controls.dampingFactor = 0.12;
-  controls.rotateSpeed = matchMedia('(pointer:coarse)').matches ? 0.9 : 0.6;
-  controls.zoomSpeed   = matchMedia('(pointer:coarse)').matches ? 1.2 : 0.9;
-  controls.panSpeed    = 0.8;
-  controls.update();
-
-  controls.addEventListener('start', ()=>{ beginInteraction(); });
-  controls.addEventListener('end',   ()=>{ endInteraction(); });
-  controls.addEventListener('change', ()=>{ if(onDemand && !interactionLoop) requestRender(); });
+  if(controls) controls.dispose();
+  controls=new OrbitControls(camera, el.viewerCanvas);
+  controls.enableDamping=true; controls.dampingFactor=0.12;
+  controls.rotateSpeed= matchMedia('(pointer:coarse)').matches ? 0.9 : 0.6;
+  controls.zoomSpeed  = matchMedia('(pointer:coarse)').matches ? 1.2 : 0.9;
+  controls.panSpeed=0.8; controls.update();
+  controls.addEventListener('start', ()=> beginInteraction());
+  controls.addEventListener('end',   ()=> endInteraction());
+  controls.addEventListener('change',()=>{ if(onDemand && !interactionLoop) requestRender(); });
 
   if(tcontrols){ scene.remove(tcontrols); tcontrols.dispose?.(); }
   tcontrols = new TransformControls(camera, el.viewerCanvas);
@@ -686,37 +567,29 @@ function buildControls(){
   tcontrols.addEventListener('change', ()=>{
     if(!selectedPinId || !tcontrols.object || !tcontrols.visible) return;
     const p=pins.find(x=>x.id===selectedPinId); if(!p) return;
-    p.pos.copy(tcontrols.object.position);
-    if(!interactionLoop) requestRender();
-    updateConnector();
-    debouncedSavePins();
+    p.pos.copy(tcontrols.object.position); updateConnector(); debouncedSavePins();
   });
   scene.add(tcontrols); tcontrols.visible=false; tcontrols.enabled=false;
 }
 function resize(){
-  const w = el.viewerCanvas.clientWidth || el.viewerCanvas.parentElement.clientWidth;
-  const h = el.viewerCanvas.clientHeight || el.viewerCanvas.parentElement.clientHeight;
+  const w = el.viewerCanvas.parentElement.clientWidth || 1;
+  const h = el.viewerCanvas.parentElement.clientHeight || 1;
   renderer.setSize(w,h,false);
-  if(camera.isPerspectiveCamera){ camera.aspect = w/h; }
+  if(camera.isPerspectiveCamera){ camera.aspect=w/h; camera.updateProjectionMatrix(); }
   else{ fitOrthoFrustum(); }
-  camera.updateProjectionMatrix(); updateConnector(); requestRender();
+  updateConnector(); requestRender();
 }
 let renderScheduled=false;
 function requestRender(){
-  if (renderScheduled) return;
-  renderScheduled = true;
-  requestAnimationFrame(()=>{
-    renderScheduled = false;
-    renderer.render(scene, camera);
-    updateConnector();
-  });
+  if(renderScheduled) return;
+  renderScheduled=true;
+  requestAnimationFrame(()=>{ renderScheduled=false; renderer.render(scene,camera); updateConnector(); });
 }
 function sceneBounds(){
-  if(!currentModel){ return { center:new THREE.Vector3(0,0,0), radius: 2 }; }
-  const box = new THREE.Box3().setFromObject(currentModel);
-  const size = box.getSize(new THREE.Vector3());
-  const center = box.getCenter(new THREE.Vector3());
-  const radius = Math.max(size.x,size.y,size.z)/2 || 1;
+  if(!currentModel) return { center:new THREE.Vector3(0,0,0), radius:2 };
+  const box=new THREE.Box3().setFromObject(currentModel);
+  const size=box.getSize(new THREE.Vector3()); const center=box.getCenter(new THREE.Vector3());
+  const radius=Math.max(size.x,size.y,size.z)/2 || 1;
   return { center, radius: radius*1.2 };
 }
 function focusOrigin(){
@@ -730,77 +603,57 @@ function focusOrigin(){
   controls.update(); updateConnector(); requestRender();
 }
 function fitOrthoFrustum(){
-  const { radius } = sceneBounds();
-  const w = el.viewerCanvas.clientWidth || 1;
-  const h = el.viewerCanvas.clientHeight || 1;
-  const aspect = w/h;
-  const size = radius*ORTHO_MARGIN;
-  orthoCam.left = -size*aspect;
-  orthoCam.right = size*aspect;
-  orthoCam.top = size;
-  orthoCam.bottom = -size;
-  orthoCam.updateProjectionMatrix();
+  const { radius }=sceneBounds(); const w=el.viewerCanvas.clientWidth||1, h=el.viewerCanvas.clientHeight||1;
+  const aspect=w/h; const size=radius*1.8;
+  orthoCam.left=-size*aspect; orthoCam.right=size*aspect; orthoCam.top=size; orthoCam.bottom=-size; orthoCam.updateProjectionMatrix();
 }
 function toggleProjection(useOrtho){
-  usingOrtho = !!useOrtho;
-  const dir = camera.position.clone().sub(controls.target).normalize();
-  const dist = camera.position.distanceTo(controls.target);
-  if(usingOrtho){
-    fitOrthoFrustum();
-    orthoCam.position.copy(controls.target.clone().addScaledVector(dir, dist));
-    camera = orthoCam;
-  }else{
-    perspCam.position.copy(controls.target.clone().addScaledVector(dir, Math.max(dist, 0.1)));
-    camera = perspCam;
-  }
-  buildControls();
-  requestRender();
+  const dir=camera.position.clone().sub(controls.target).normalize();
+  const dist=camera.position.distanceTo(controls.target);
+  if(useOrtho){ fitOrthoFrustum(); orthoCam.position.copy(controls.target.clone().addScaledVector(dir, dist)); camera=orthoCam; }
+  else{ perspCam.position.copy(controls.target.clone().addScaledVector(dir, Math.max(dist,0.1))); camera=perspCam; }
+  buildControls(); requestRender();
 }
 
-/* ======= Pins / Connector ======= */
+/* connector */
 function updateConnector(){
-  if(suppressOverlay) return;
   const p = pins.find(x=>x.id===selectedPinId);
   if(!p || !p.mesh || el.viewerPreview.classList.contains('hidden') || !pinGroup.visible || !p.mesh.visible){
-    el.connLine.style.display = 'none'; el.connDot.style.display = 'none'; return;
+    el.connLine.style.display='none'; el.connDot.style.display='none'; return;
   }
-  const v = p.pos.clone().project(camera);
-  const rect = el.viewerCanvas.getBoundingClientRect();
-  const x = (v.x + 1) / 2 * rect.width;
-  const y = (1 - (v.y + 1) / 2) * rect.height;
-  const rectPrev = el.viewerPreview.getBoundingClientRect();
-  const bx = (rectPrev.left - rect.left);
-  const by = (rectPrev.top - rect.top) + rectPrev.height/2;
-  const svg = el.connector;
-  svg.setAttribute('viewBox', `0 0 ${rect.width} ${rect.height}`);
-  el.connLine.setAttribute('x1', x); el.connLine.setAttribute('y1', y);
-  el.connLine.setAttribute('x2', bx); el.connLine.setAttribute('y2', by);
-  el.connLine.style.display = 'block';
-  el.connDot.setAttribute('cx', x); el.connDot.setAttribute('cy', y);
-  el.connDot.style.display = 'block';
+  const v=p.pos.clone().project(camera);
+  const rect=el.viewerCanvas.getBoundingClientRect();
+  const x=(v.x+1)/2*rect.width; const y=(1-(v.y+1)/2)*rect.height;
+  const rectPrev=el.viewerPreview.getBoundingClientRect();
+  const bx=(rectPrev.left-rect.left); const by=(rectPrev.top-rect.top)+rectPrev.height/2;
+  el.connector.setAttribute('viewBox',`0 0 ${rect.width} ${rect.height}`);
+  el.connLine.setAttribute('x1',x); el.connLine.setAttribute('y1',y);
+  el.connLine.setAttribute('x2',bx); el.connLine.setAttribute('y2',by); el.connLine.style.display='block';
+  el.connDot.setAttribute('cx',x); el.connDot.setAttribute('cy',y); el.connDot.style.display='block';
 }
 
-/* ======= GLB 読み込み ======= */
+/* GLB */
 async function fetchDriveFileArrayBuffer(fileId){
   const url = `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?alt=media`;
-  const res = await fetch(url, { headers: { 'Authorization': 'Bearer ' + accessToken }});
+  const res = await fetch(url, { headers:{ 'Authorization':'Bearer '+accessToken }});
   if(!res.ok) throw new Error('Drive fetch failed: '+res.status);
   return await res.arrayBuffer();
 }
 async function loadGLBByFileId(fileId){
-  const fid = extractDriveId(fileId);
-  el.loading.hidden = false;
+  const fid=extractDriveId(fileId);
+  el.loading.hidden=false;
   try{
-    // 親フォルダ取得（画像ピッカーで使用）
-    const meta = await gapi.client.drive.files.get({ fileId: fid, fields: 'id,name,parents,mimeType' });
-    glbParents = meta.result.parents || [];
-    // GLB本体
-    const ab = await fetchDriveFileArrayBuffer(fid);
+    const meta=await gapi.client.drive.files.get({ fileId:fid, fields:'id,name,parents,mimeType' });
+    glbParents=meta.result.parents||[];
+    const ab=await fetchDriveFileArrayBuffer(fid);
+
+    // レンダリングを「数秒強制」して消失対策
+    transientRender(2500);
+
     await new Promise((resolve,reject)=>{
-      loader.parse(ab, '', gltf=>{
-        if(currentModel){ scene.remove(currentModel); currentModel.traverse(o=>{ if(o.geometry) o.geometry.dispose?.(); if(o.material) ; }); }
-        currentModel = gltf.scene;
-        scene.add(currentModel);
+      loader.parse(ab,'',gltf=>{
+        if(currentModel){ scene.remove(currentModel); }
+        currentModel=gltf.scene; scene.add(currentModel);
         collectMaterials(currentModel);
         focusOrigin();
         buildPinsUI();
@@ -810,490 +663,337 @@ async function loadGLBByFileId(fileId){
       }, err=> reject(err));
     });
   }finally{
-    el.loading.hidden = true;
+    el.loading.hidden=true;
   }
 }
+function transientRender(ms=2000){
+  const saved = onDemand; onDemand=false;
+  const t0=performance.now();
+  const loop=(t)=>{ renderer.render(scene,camera); updateConnector();
+    if(t - t0 < ms) requestAnimationFrame(loop);
+    else { onDemand=saved; requestRender(); }
+  };
+  requestAnimationFrame(loop);
+}
 
-/* ======= Materials ======= */
+/* materials */
 function collectMaterials(root){
-  const set = new Set();
+  const set=new Set();
   root.traverse(o=>{
     if(o.isMesh && o.material){
-      const mats = Array.isArray(o.material) ? o.material : [o.material];
-      mats.forEach(m=> set.add(m));
+      (Array.isArray(o.material)?o.material:[o.material]).forEach(m=> set.add(m));
     }
   });
-  materials = Array.from(set);
+  materials=Array.from(set);
   materialKeyByMaterial.clear(); materialByKey.clear();
-
-  el.matSelect.innerHTML = '<option value="__all__">（マテリアルを選択）</option>';
+  el.matSelect.innerHTML='<option value="__sel__">（マテリアルを選択）</option>';
   materials.forEach((m,i)=>{
-    const key = m.uuid.slice(0,8) + ':' + (m.name || ('mat'+i));
-    materialKeyByMaterial.set(m, key);
-    materialByKey.set(key, m);
-    el.matSelect.insertAdjacentHTML('beforeend', `<option value="${key}">${key}</option>`);
-    matOriginals.set(m, {
-      transparent: m.transparent, opacity: m.opacity, side: m.side,
-      map: m.map || null, color: m.color?.clone?.() || new THREE.Color(0xffffff)
-    });
+    const key=m.uuid.slice(0,8)+':'+(m.name||('mat'+i));
+    materialKeyByMaterial.set(m,key); materialByKey.set(key,m);
+    el.matSelect.insertAdjacentHTML('beforeend',`<option value="${key}">${key}</option>`);
+    matOriginals.set(m,{ transparent:m.transparent, opacity:m.opacity, side:m.side, map:m.map||null, color:m.color?.clone?.()||new THREE.Color(0xffffff) });
   });
 }
+function clamp01(v,def=0){ const n=parseFloat(v); return Number.isFinite(n)? Math.min(1,Math.max(0,n)) : def; }
 function applyMatUITo(material){
   if(!material) return;
   const unlit = el.matUnlit.checked;
-  const dbl = el.matDoubleSided.checked;
-  let opacity = parseFloat(el.matOpacity.value);
-  const inv = el.matInvert.checked;
-  const whtr = el.matWhiteTransparent.checked;
-  const thr = parseFloat(el.matThreshold.value);
+  const dbl   = el.matDoubleSided.checked;
+  const op    = clamp01(el.matOpacity.value, 1);
+  const inv   = !!el.matInvert.checked;
+  const whtr  = !!el.matWhiteTransparent.checked;
+  const thr   = clamp01(el.matThreshold.value, 0);
 
-  material.transparent = (opacity < 1.0) || whtr || material.transparent;
-  material.opacity = opacity;
+  material.transparent = (op < 1.0) || whtr || false;
+  material.opacity = op;
   material.alphaTest = thr;
   material.side = dbl ? THREE.DoubleSide : THREE.FrontSide;
   material.depthWrite = !whtr;
-  // Unlitっぽく：ライト無視
-  if(unlit){
-    material.lights = false;
-    material.onBeforeCompile = (shader)=>{
-      shader.fragmentShader = shader.fragmentShader.replace(
-        /#include <dithering_fragment>/,
-        `
-        #include <dithering_fragment>
-        `
-      );
-    };
-  }else{
-    material.lights = true;
-    material.onBeforeCompile = null;
-  }
-  // テクスチャ反転/白→透明（mapが無ければスキップ）
-  if(material.map){
-    material.map.flipY = false;
-    material.map.needsUpdate = true;
-    material.needsUpdate = true;
-  }
-  if(inv || whtr){
-    material.onBeforeCompile = (shader)=>{
-      shader.fragmentShader = shader.fragmentShader.replace(
-        'gl_FragColor = vec4( outgoingLight, diffuseColor.a );',
-        `
-        vec4 c = vec4( outgoingLight, diffuseColor.a );
-        ${inv ? 'c.rgb = vec3(1.0) - c.rgb;' : ''}
-        ${whtr ? `
-          float lum = dot(c.rgb, vec3(0.299, 0.587, 0.114));
-          float a = smoothstep(${Math.max(0.0001, parseFloat(el.matThreshold.value)).toFixed(3)}, 1.0, 1.0 - lum);
-          c.a *= a;
-        ` : ''}
-        gl_FragColor = c;
-        `
-      );
-    };
-  }
-  material.needsUpdate = true;
+
+  // shader hook（安全に1度だけ差し替え）
+  material.onBeforeCompile = (shader)=>{
+    let repl = 'gl_FragColor = vec4( outgoingLight, diffuseColor.a );';
+    let code = `vec4 c = vec4( outgoingLight, diffuseColor.a );`;
+    if(inv)  code += `\n c.rgb = vec3(1.0) - c.rgb;`;
+    if(whtr) code += `\n float lum = dot(c.rgb, vec3(0.299,0.587,0.114)); float a = smoothstep(${thr.toFixed(3)}, 1.0, 1.0 - lum); c.a *= a;`;
+    code += `\n gl_FragColor = c;`;
+    shader.fragmentShader = shader.fragmentShader.replace(repl, code);
+    if(unlit){
+      // Unlit 風（照明計算を素通しに近づける）
+      shader.fragmentShader = shader.fragmentShader.replace('#include <dithering_fragment>', '#include <dithering_fragment>');
+    }
+  };
+  material.needsUpdate=true;
   requestRender();
 }
 function updateMatUIFromState(material){
-  const key = materialKeyByMaterial.get(material);
-  const s = matState.get(key);
-  if(!s) return;
-  el.matUnlit.checked = !!s.unlit;
-  el.matDoubleSided.checked = !!s.doubleSided;
-  el.matOpacity.value = (s.opacity ?? 1).toString();
-  el.matOpacityVal.textContent = (s.opacity ?? 1).toFixed(2);
-  el.matInvert.checked = !!s.invert;
-  el.matWhiteTransparent.checked = !!s.whiteTransparent;
-  el.matThreshold.value = (s.threshold ?? 0).toString();
-  el.matThresholdVal.textContent = (s.threshold ?? 0).toFixed(2);
+  const key=materialKeyByMaterial.get(material); const s=matState.get(key); if(!s) return;
+  el.matUnlit.checked=!!s.unlit;
+  el.matDoubleSided.checked=!!s.doubleSided;
+  el.matOpacity.value=String(clamp01(s.opacity,1)); el.matOpacityVal.textContent=parseFloat(el.matOpacity.value).toFixed(2);
+  el.matInvert.checked=!!s.invert;
+  el.matWhiteTransparent.checked=!!s.whiteTransparent;
+  el.matThreshold.value=String(clamp01(s.threshold,0)); el.matThresholdVal.textContent=parseFloat(el.matThreshold.value).toFixed(2);
 }
 function saveMatState(material){
-  const key = materialKeyByMaterial.get(material);
-  if(!key) return;
-  matState.set(key, {
-    unlit: el.matUnlit.checked,
-    doubleSided: el.matDoubleSided.checked,
-    opacity: parseFloat(el.matOpacity.value),
-    invert: el.matInvert.checked,
-    whiteTransparent: el.matWhiteTransparent.checked,
-    threshold: parseFloat(el.matThreshold.value)
+  const key=materialKeyByMaterial.get(material); if(!key) return;
+  matState.set(key,{
+    unlit: !!el.matUnlit.checked,
+    doubleSided: !!el.matDoubleSided.checked,
+    opacity: clamp01(el.matOpacity.value,1),
+    invert: !!el.matInvert.checked,
+    whiteTransparent: !!el.matWhiteTransparent.checked,
+    threshold: clamp01(el.matThreshold.value,0),
   });
-  applyMatUITo(material);
-  debouncedSaveMeta();
+  applyMatUITo(material); debouncedSaveMeta();
 }
 function applyMatStateToAll(){
   materials.forEach(m=>{
-    const key = materialKeyByMaterial.get(m);
-    const s = matState.get(key);
+    const key=materialKeyByMaterial.get(m); const s=matState.get(key);
     if(s){
-      // UI値に引きずられないよう、保存値で適用
-      const {unlit,doubleSided,opacity,invert,whiteTransparent,threshold} = s;
-      el.matUnlit.checked = !!unlit;
-      el.matDoubleSided.checked = !!doubleSided;
-      el.matOpacity.value = String(opacity ?? 1);
-      el.matInvert.checked = !!invert;
-      el.matWhiteTransparent.checked = !!whiteTransparent;
-      el.matThreshold.value = String(threshold ?? 0);
+      el.matUnlit.checked=!!s.unlit;
+      el.matDoubleSided.checked=!!s.doubleSided;
+      el.matOpacity.value=String(clamp01(s.opacity,1));
+      el.matInvert.checked=!!s.invert;
+      el.matWhiteTransparent.checked=!!s.whiteTransparent;
+      el.matThreshold.value=String(clamp01(s.threshold,0));
       applyMatUITo(m);
     }
   });
 }
 
-/* ======= 画像プレビュー ======= */
+/* preview image */
 async function fileToObjectURL(fileId){
-  // フル解像度で取得（モバイル負荷はCSS側で制御）
-  const url = `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?alt=media`;
-  const res = await fetch(url, { headers: { 'Authorization': 'Bearer ' + accessToken }});
+  const url=`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?alt=media`;
+  const res=await fetch(url,{ headers:{ 'Authorization':'Bearer '+accessToken }});
   if(!res.ok) throw new Error('image fetch failed '+res.status);
-  const blob = await res.blob();
-  return URL.createObjectURL(blob);
+  const blob=await res.blob(); return URL.createObjectURL(blob);
 }
 
-/* ======= Pins / UI ======= */
+/* pins UI */
 function buildColorPresets(){
-  el.colorPresets.innerHTML = '';
-  PRESET_COLORS.forEach(col=>{
-    const b = document.createElement('button');
-    b.textContent = '●';
-    b.style.color = col; b.style.fontSize='18px';
-    b.title = col;
-    b.addEventListener('click', ()=>{ currentColor = col; toast('ピン色: '+col); });
+  el.colorPresets.innerHTML=''; PRESET_COLORS.forEach(col=>{
+    const b=document.createElement('button'); b.textContent='●'; b.style.color=col; b.style.fontSize='18px'; b.title=col;
+    b.addEventListener('click', ()=>{ currentColor=col; toast('ピン色: '+col); });
     el.colorPresets.appendChild(b);
   });
 }
 function buildPinsUI(){
   buildColorPresets();
-  el.pinsList.innerHTML = '';
-  pins.forEach(p=> addPinRow(p));
-  applyPinVisibilityFilter();
+  el.pinsList.innerHTML=''; pins.forEach(p=> addPinRow(p)); applyPinVisibilityFilter();
 }
 function addPinRow(p){
-  const row = document.createElement('div');
-  row.className='row';
-  row.dataset.id = p.id;
-  row.innerHTML = `<div class="title" style="display:flex;gap:6px;align-items:center">
+  const row=document.createElement('div'); row.className='row'; row.dataset.id=p.id;
+  row.innerHTML=`<div class="title" style="display:flex;gap:6px;align-items:center">
     <span style="width:12px;height:12px;border-radius:50%;background:${p.color};display:inline-block"></span>
-    <span>${p.title || '(無題)'}</span></div>
+    <span>${p.title||'(無題)'}</span></div>
     <div class="meta">${p.pos.x.toFixed(2)}, ${p.pos.y.toFixed(2)}, ${p.pos.z.toFixed(2)}</div>`;
   row.addEventListener('click', ()=> selectPin(p.id));
   el.pinsList.appendChild(row);
 }
 function selectPin(id){
-  selectedPinId = id;
-  const p = pins.find(x=>x.id===id); if(!p) return;
-  // UI
-  el.rightNoSel.style.display='none';
-  el.rightEditor.classList.remove('hidden');
-  el.capTitle.value = p.title || '';
-  el.capBody.value = p.body || '';
-  // thumbs
-  el.thumbs.innerHTML='';
-  ensureArray(p.images).forEach(fid=>{
-    const d = document.createElement('div'); d.className='thumb';
-    const img = document.createElement('img'); img.src = 'https://drive.google.com/thumbnail?sz=w256&id='+fid;
-    d.appendChild(img);
-    const x = document.createElement('div'); x.textContent='×'; x.className='del';
-    x.addEventListener('click', ()=>{ p.images = ensureArray(p.images).filter(v=>v!==fid); selectPin(p.id); debouncedSavePins(); });
-    d.appendChild(x);
-    el.thumbs.appendChild(d);
+  selectedPinId=id; const p=pins.find(x=>x.id===id); if(!p) return;
+  el.rightNoSel.style.display='none'; el.rightEditor.classList.remove('hidden');
+  el.capTitle.value=p.title||''; el.capBody.value=p.body||'';
+  el.thumbs.innerHTML=''; ensureArray(p.images).forEach(fid=>{
+    const d=document.createElement('div'); d.className='thumb';
+    const img=document.createElement('img'); img.src='https://drive.google.com/thumbnail?sz=w256&id='+fid;
+    const x=document.createElement('div'); x.textContent='×'; x.className='del';
+    x.addEventListener('click', ()=>{ p.images=ensureArray(p.images).filter(v=>v!==fid); selectPin(p.id); debouncedSavePins(); });
+    d.appendChild(img); d.appendChild(x); el.thumbs.appendChild(d);
   });
-  // プレビュー
   setPreview(p).catch(()=>{});
-  // gizmo
-  tcontrols.attach(p.mesh);
-  tcontrols.visible = tcontrols.enabled;
-  // 中央へ
-  controls.target.copy(p.pos);
-  requestRender();
+  tcontrols.attach(p.mesh); tcontrols.visible=tcontrols.enabled;
+  controls.target.copy(p.pos); requestRender();
 }
 async function setPreview(p){
   try{
-    el.previewErr.style.display='none';
-    el.viewerPreview.classList.remove('hidden');
-    el.capTitleLine.textContent = p.title || '';
-    el.capBodyLine.textContent  = p.body || '';
-    if(ensureArray(p.images).length===0){
-      el.previewImg.src=''; el.previewErr.style.display='block'; return;
-    }
-    const fid = p.images[0];
-    const url = await fileToObjectURL(fid);
-    el.previewImg.onload = ()=>{ URL.revokeObjectURL(url); updateConnector(); };
-    el.previewImg.src = url;
-  }catch(err){
-    console.warn('preview failed', err);
-    el.previewErr.style.display='block';
-  }
+    el.previewErr.style.display='none'; el.viewerPreview.classList.remove('hidden');
+    el.capTitleLine.textContent=p.title||''; el.capBodyLine.textContent=p.body||'';
+    if(ensureArray(p.images).length===0){ el.previewImg.src=''; el.previewErr.style.display='block'; return; }
+    const fid=p.images[0]; const url=await fileToObjectURL(fid);
+    el.previewImg.onload=()=>{ URL.revokeObjectURL(url); updateConnector(); };
+    el.previewImg.src=url;
+  }catch(err){ console.warn('preview failed', err); el.previewErr.style.display='block'; }
 }
 function onPointerDown(ev){
   if(!currentModel) return;
-  const rect = el.viewerCanvas.getBoundingClientRect();
-  pointer.x = ((ev.clientX - rect.left) / rect.width) * 2 - 1;
-  pointer.y = -((ev.clientY - rect.top) / rect.height) * 2 + 1;
-  raycaster.setFromCamera(pointer, camera);
-  const hits = raycaster.intersectObject(currentModel, true);
+  const rect=el.viewerCanvas.getBoundingClientRect();
+  pointer.x=((ev.clientX-rect.left)/rect.width)*2-1;
+  pointer.y= -((ev.clientY-rect.top)/rect.height)*2+1;
+  raycaster.setFromCamera(pointer,camera);
+  const hits=raycaster.intersectObject(currentModel,true);
   if(addPinMode && hits.length){
-    const pt = hits[0].point.clone();
-    const p = createPin(pt, currentColor);
-    selectPin(p.id);
-    debouncedSavePins();
+    const pt=hits[0].point.clone(); const p=createPin(pt,currentColor); selectPin(p.id); debouncedSavePins();
   }else{
-    // ピン選択（ピン→キャプションへアクセス）
-    const phits = raycaster.intersectObjects(pinGroup.children, true);
-    if(phits.length){
-      const sel = pins.find(x=> x.mesh === phits[0].object);
-      if(sel) selectPin(sel.id);
-    }
+    const phits=raycaster.intersectObjects(pinGroup.children,true);
+    if(phits.length){ const sel=pins.find(x=> x.mesh===phits[0].object); if(sel) selectPin(sel.id); }
   }
 }
-function createPin(pos, color){
-  const id = 'p'+Math.random().toString(36).slice(2,9);
-  const geom = new THREE.SphereGeometry(0.01, 16, 12);
-  const mat = new THREE.MeshBasicMaterial({ color: new THREE.Color(color) });
-  const mesh = new THREE.Mesh(geom, mat);
-  mesh.position.copy(pos);
-  pinGroup.add(mesh);
-  const p = { id, pos:pos.clone(), color: normalizeHex(color), title:'', body:'', images:[], mesh };
-  pins.push(p);
-  addPinRow(p);
-  requestRender();
-  return p;
+function createPin(pos,color){
+  const id='p'+Math.random().toString(36).slice(2,9);
+  const geom=new THREE.SphereGeometry(0.01,16,12);
+  const mat=new THREE.MeshBasicMaterial({ color:new THREE.Color(color) });
+  const mesh=new THREE.Mesh(geom,mat);
+  mesh.position.copy(pos); pinGroup.add(mesh);
+  const p={ id, pos:pos.clone(), color:normalizeHex(color), title:'', body:'', images:[], mesh };
+  pins.push(p); addPinRow(p); requestRender(); return p;
 }
-function setPinsVisible(v){ pinGroup.visible = !!v; requestRender(); }
+function setPinsVisible(v){ pinGroup.visible=!!v; requestRender(); }
 function applyPinVisibilityFilter(){
-  if(filterColors.size===0){ // 0 = 全て表示
-    pins.forEach(p=> p.mesh.visible = true);
-  }else{
-    pins.forEach(p=> p.mesh.visible = filterColors.has(p.color.toLowerCase()));
-  }
+  if(filterColors.size===0){ pins.forEach(p=> p.mesh.visible=true); }
+  else{ pins.forEach(p=> p.mesh.visible = filterColors.has(p.color.toLowerCase())); }
   requestRender();
 }
 
-/* ======= Google Sheets ======= */
+/* Sheets */
 async function loadOrEnsureSpreadsheet(glbFileId){
-  const input = extractSpreadsheetId(el.inputSheet.value || '');
-  if (input){
-    activeSheet.sheetId = input; // 指定があればそれを使用
-    await ensureSheetPicked();
-    return;
-  }
-  // GLB の親フォルダに既存スプレッドシートがあれば流用、なければ作成
-  const folder = glbParents?.[0];
-  let sheet = null;
+  const input=extractSpreadsheetId(el.inputSheet.value||'');
+  if(input){ activeSheet.sheetId=input; await ensureSheetPicked(); return; }
+  const folder=glbParents?.[0]; let sheet=null;
   if(folder){
-    const q = `'${folder}' in parents and mimeType='application/vnd.google-apps.spreadsheet' and trashed=false`;
-    const r = await gapi.client.drive.files.list({ q, fields:'files(id,name)' });
-    if(r.result.files?.length){ sheet = r.result.files[0]; }
+    const q=`'${folder}' in parents and mimeType='application/vnd.google-apps.spreadsheet' and trashed=false`;
+    const r=await gapi.client.drive.files.list({ q, fields:'files(id,name)' });
+    if(r.result.files?.length){ sheet=r.result.files[0]; }
   }
   if(!sheet){
-    // 作成
-    const created = await gapi.client.sheets.spreadsheets.create({
-      properties: { title: 'LociMyu Pins' },
-      sheets: [{ properties: { title: 'pins' }}]
-    });
-    const sid = created.result.spreadsheetId;
-    // 親へ移動
-    if(glbParents?.length){
-      await gapi.client.drive.files.update({ fileId: sid, addParents: glbParents[0], removeParents: '', fields:'id,parents' });
-    }
-    sheet = { id: sid, name:'LociMyu Pins' };
+    const created=await gapi.client.sheets.spreadsheets.create({ properties:{ title:'LociMyu Pins'}, sheets:[{ properties:{ title:'pins' }}] });
+    const sid=created.result.spreadsheetId;
+    if(glbParents?.length){ await gapi.client.drive.files.update({ fileId:sid, addParents:glbParents[0], removeParents:'', fields:'id,parents' }); }
+    sheet={ id:sid, name:'LociMyu Pins' };
   }
-  activeSheet.sheetId = sheet.id || sheet.spreadsheetId || sheet;
-  await ensureSheetPicked();
+  activeSheet.sheetId=sheet.id||sheet.spreadsheetId||sheet; await ensureSheetPicked();
 }
 async function ensureSheetPicked(){
-  // シートリスト取得
-  const r = await gapi.client.sheets.spreadsheets.get({ spreadsheetId: activeSheet.sheetId });
-  const tabs = r.result.sheets.map(s=> s.properties.title);
-  el.listSelect.innerHTML='';
-  tabs.forEach(t=>{
-    const op = document.createElement('option'); op.value=t; op.textContent=t; el.listSelect.appendChild(op);
-  });
-  if(!tabs.includes(activeSheet.title)) activeSheet.title = tabs[0] || 'pins';
-  el.listSelect.value = activeSheet.title;
+  const r=await gapi.client.sheets.spreadsheets.get({ spreadsheetId:activeSheet.sheetId });
+  const tabs=r.result.sheets.map(s=> s.properties.title);
+  el.listSelect.innerHTML=''; tabs.forEach(t=>{ const op=document.createElement('option'); op.value=t; op.textContent=t; el.listSelect.appendChild(op); });
+  if(!tabs.includes(activeSheet.title)) activeSheet.title=tabs[0]||'pins';
+  el.listSelect.value=activeSheet.title;
 }
 async function loadPinsFromActiveSheet(){
-  pins.forEach(p=>{ pinGroup.remove(p.mesh); p.mesh.geometry.dispose(); });
-  pins = []; selectedPinId=null; el.pinsList.innerHTML=''; el.rightNoSel.style.display='block'; el.rightEditor.classList.add('hidden');
-  // ピン読み込み
-  const range = `'${activeSheet.title}'!A2:H`;
+  // 既存ピンのクリア
+  pins.forEach(p=>{ pinGroup.remove(p.mesh); p.mesh.geometry.dispose(); p.mesh.material.dispose?.(); });
+  pins=[]; selectedPinId=null; el.pinsList.innerHTML=''; el.rightNoSel.style.display='block'; el.rightEditor.classList.add('hidden');
+
+  // ピン読み込み（NaN除外）
+  const range=`'${activeSheet.title}'!A2:H`;
   try{
-    const r = await gapi.client.sheets.spreadsheets.values.get({ spreadsheetId: activeSheet.sheetId, range });
-    const rows = r.result.values || [];
-    rows.forEach(row=>{
-      const [id,x,y,z,color,title,body,images] = row;
-      const p = createPin(new THREE.Vector3(parseFloat(x),parseFloat(y),parseFloat(z)), color || '#ff6b6b');
-      p.id = id || p.id; p.title = title||''; p.body = body||''; p.images = (images||'').split(',').filter(Boolean);
-      // 既存meshは作り直さないのでOK
+    const r=await gapi.client.sheets.spreadsheets.values.get({ spreadsheetId:activeSheet.sheetId, range });
+    const rows=r.result.values||[];
+    rows.forEach((row,idx)=>{
+      const [id,x,y,z,color,title,body,images]=row;
+      const fx=safeFloat(x, NaN), fy=safeFloat(y, NaN), fz=safeFloat(z, NaN);
+      if(!Number.isFinite(fx) || !Number.isFinite(fy) || !Number.isFinite(fz)){
+        console.warn(`row ${idx+2} skipped (NaN coords)`, row); return;
+      }
+      const p=createPin(new THREE.Vector3(fx,fy,fz), color||'#ff6b6b');
+      p.id=id||p.id; p.title=title||''; p.body=body||''; p.images=(images||'').split(',').filter(Boolean);
     });
-  }catch(e){ /* シートが空など */ }
-  // メタ（マテリアル/ビュー）
+  }catch(e){ /* 空でもOK */ }
+
   await loadMetaFromSheet();
+
   // 初期は全色表示
-  filterColors = new Set();
-  applyPinVisibilityFilter();
+  filterColors = new Set(); applyPinVisibilityFilter();
   requestRender();
 }
-const debouncedSavePins = debounce(savePinsToSheet, 600);
+const debouncedSavePins = debounce(savePinsToSheet, 500);
 async function savePinsToSheet(){
-  const rows = pins.map(p=> [p.id, p.pos.x, p.pos.y, p.pos.z, p.color, p.title||'', p.body||'', ensureArray(p.images).join(',') ]);
-  const body = { values: rows };
+  const rows=pins.map(p=> [p.id, p.pos.x.toFixed(6), p.pos.y.toFixed(6), p.pos.z.toFixed(6), p.color, p.title||'', p.body||'', ensureArray(p.images).join(',') ]);
+  const body={ values:rows };
   await gapi.client.sheets.spreadsheets.values.update({
-    spreadsheetId: activeSheet.sheetId,
-    range: `'${activeSheet.title}'!A2:H`,
-    valueInputOption: 'RAW',
-    resource: body
+    spreadsheetId:activeSheet.sheetId, range:`'${activeSheet.title}'!A2:H`, valueInputOption:'RAW', resource:body
   });
 }
-const debouncedSaveMeta = debounce(saveMetaToSheet, 800);
+const debouncedSaveMeta = debounce(saveMetaToSheet, 700);
 async function saveMetaToSheet(){
-  // 1行目にメタを書き込む：背景/投影/各マテリアル状態
-  const meta = {
-    bg: el.bgColor.value,
-    ortho: el.projOrtho.checked ? 1 : 0
-  };
-  // materials
+  const meta={ bg: el.bgColor.value, ortho: el.projOrtho.checked?1:0 };
   materials.forEach(m=>{
-    const key = materialKeyByMaterial.get(m);
-    const s = matState.get(key);
-    if(s){
-      meta[`m:${key}:unlit`] = s.unlit?1:0;
-      meta[`m:${key}:double`] = s.doubleSided?1:0;
-      meta[`m:${key}:opacity`] = s.opacity ?? 1;
-      meta[`m:${key}:invert`] = s.invert?1:0;
-      meta[`m:${key}:whiteT`] = s.whiteTransparent?1:0;
-      meta[`m:${key}:thresh`] = s.threshold ?? 0;
-    }
+    const key=materialKeyByMaterial.get(m); const s=matState.get(key); if(!s) return;
+    meta[`m:${key}:unlit`]=s.unlit?1:0;
+    meta[`m:${key}:double`]=s.doubleSided?1:0;
+    meta[`m:${key}:opacity`]=clamp01(s.opacity,1);
+    meta[`m:${key}:invert`]=s.invert?1:0;
+    meta[`m:${key}:whiteT`]=s.whiteTransparent?1:0;
+    meta[`m:${key}:thresh`]=clamp01(s.threshold,0);
   });
-  // シリアライズ（K:V を横展開）
-  const keys = Object.keys(meta);
-  const values = keys.map(k=> meta[k]);
+  const keys=Object.keys(meta); const values=keys.map(k=> meta[k]);
   await gapi.client.sheets.spreadsheets.values.update({
-    spreadsheetId: activeSheet.sheetId,
-    range: `'${activeSheet.title}'!J1:${String.fromCharCode(74+keys.length-1)}1`,
-    valueInputOption: 'RAW',
-    resource: { values: [values] }
+    spreadsheetId:activeSheet.sheetId, range:`'${activeSheet.title}'!J1:${String.fromCharCode(74+keys.length-1)}1`, valueInputOption:'RAW', resource:{ values:[values] }
   });
-  // キー行
   await gapi.client.sheets.spreadsheets.values.update({
-    spreadsheetId: activeSheet.sheetId,
-    range: `'${activeSheet.title}'!J2:${String.fromCharCode(74+keys.length-1)}2`,
-    valueInputOption: 'RAW',
-    resource: { values: [keys] }
+    spreadsheetId:activeSheet.sheetId, range:`'${activeSheet.title}'!J2:${String.fromCharCode(74+keys.length-1)}2`, valueInputOption:'RAW', resource:{ values:[keys] }
   });
 }
 async function loadMetaFromSheet(){
   try{
-    const r = await gapi.client.sheets.spreadsheets.values.get({
-      spreadsheetId: activeSheet.sheetId, range: `'${activeSheet.title}'!J1:ZZ2`
-    });
-    const rows = r.result.values || [];
-    const values = rows[0] || [];
-    const keys = rows[1] || [];
-    const meta = {};
-    keys.forEach((k,i)=> meta[k]=values[i]);
-
-    if(meta.bg){ scene.background = new THREE.Color(meta.bg); el.bgColor.value = meta.bg; }
-    if(meta.ortho!==undefined){ const b = Number(meta.ortho)===1; el.projOrtho.checked = b; toggleProjection(b); }
-
-    // materials
+    const r=await gapi.client.sheets.spreadsheets.values.get({ spreadsheetId:activeSheet.sheetId, range:`'${activeSheet.title}'!J1:ZZ2` });
+    const rows=r.result.values||[]; const values=rows[0]||[]; const keys=rows[1]||[]; const meta={}; keys.forEach((k,i)=> meta[k]=values[i]);
+    if(meta.bg){ scene.background=new THREE.Color(meta.bg); el.bgColor.value=meta.bg; }
+    if(meta.ortho!==undefined){ const b=Number(meta.ortho)===1; el.projOrtho.checked=b; toggleProjection(b); }
     materials.forEach(m=>{
-      const key = materialKeyByMaterial.get(m);
-      const s = {
+      const key=materialKeyByMaterial.get(m);
+      const s={
         unlit: Number(meta[`m:${key}:unlit`]||0)===1,
         doubleSided: Number(meta[`m:${key}:double`]||0)===1,
-        opacity: parseFloat(meta[`m:${key}:opacity`]??1),
+        opacity: clamp01(meta[`m:${key}:opacity`],1),
         invert: Number(meta[`m:${key}:invert`]||0)===1,
         whiteTransparent: Number(meta[`m:${key}:whiteT`]||0)===1,
-        threshold: parseFloat(meta[`m:${key}:thresh`]??0),
+        threshold: clamp01(meta[`m:${key}:thresh`],0),
       };
-      matState.set(key, s);
+      matState.set(key,s);
     });
-    applyMatStateToAll();
-    requestRender();
-  }catch(e){
-    // 未設定なら無視
-  }
+    applyMatStateToAll(); requestRender();
+  }catch(e){ /* 未設定なら何もしない */ }
 }
 
-/* ======= 画像ピッカー（GLB同階層） ======= */
-function openPicker(){
-  el.pickerModal.style.display='grid';
-  loadPickerGrid().catch(err=>{ console.error(err); alert('画像一覧の読み込みに失敗しました'); });
-}
+/* picker */
+function openPicker(){ el.pickerModal.style.display='grid'; loadPickerGrid().catch(err=>{ console.error(err); alert('画像一覧の読み込みに失敗しました'); }); }
 function closePicker(){ el.pickerModal.style.display='none'; }
 async function loadPickerGrid(){
-  el.pickerGrid.innerHTML = '';
-  const folder = glbParents?.[0];
-  if(!folder){ el.pickerGrid.textContent='GLBの親フォルダが取得できませんでした'; return; }
-  const q = `'${folder}' in parents and (mimeType contains 'image/' or mimeType='image/heic' or mimeType='image/heif') and trashed=false`;
-  const r = await gapi.client.drive.files.list({ q, fields:'files(id,name,thumbnailLink,mimeType)' });
+  el.pickerGrid.innerHTML='';
+  const folder=glbParents?.[0]; if(!folder){ el.pickerGrid.textContent='GLBの親フォルダが取得できませんでした'; return; }
+  const q=`'${folder}' in parents and (mimeType contains 'image/' or mimeType='image/heic' or mimeType='image/heif') and trashed=false`;
+  const r=await gapi.client.drive.files.list({ q, fields:'files(id,name,thumbnailLink,mimeType)' });
   (r.result.files||[]).forEach(f=>{
-    const d = document.createElement('div'); d.className='row'; d.style.cursor='pointer';
-    const thumb = (f.thumbnailLink ? upscaleThumbnailUrl(f.thumbnailLink, 512) : ('https://drive.google.com/thumbnail?sz=w256&id='+f.id));
-    d.innerHTML = `<div style="display:flex;gap:8px;align-items:center;flex:1">
+    const d=document.createElement('div'); d.className='row'; d.style.cursor='pointer';
+    const thumb=(f.thumbnailLink ? f.thumbnailLink.replace(/=s\d+/, '=s512') : ('https://drive.google.com/thumbnail?sz=w256&id='+f.id));
+    d.innerHTML=`<div style="display:flex;gap:8px;align-items:center;flex:1">
       <img src="${thumb}" alt="" style="width:48px;height:48px;object-fit:cover;border-radius:8px;border:1px solid #223146">
       <div class="title" style="flex:1">${f.name}</div>
-      <div class="meta">${f.mimeType}</div>
-    </div>`;
+      <div class="meta">${f.mimeType}</div></div>`;
     d.addEventListener('click', ()=>{
-      const p = pins.find(x=>x.id===selectedPinId);
-      if(!p){ alert('ピンを選択してください'); return; }
-      p.images = ensureArray(p.images);
-      if(!p.images.includes(f.id)) p.images.push(f.id);
-      selectPin(p.id);
-      debouncedSavePins();
-      closePicker();
+      const p=pins.find(x=>x.id===selectedPinId); if(!p){ alert('ピンを選択してください'); return; }
+      p.images=ensureArray(p.images); if(!p.images.includes(f.id)) p.images.push(f.id);
+      selectPin(p.id); debouncedSavePins(); closePicker();
     });
     el.pickerGrid.appendChild(d);
   });
 }
 
-/* ======= UIイベント配線 ======= */
+/* UI wire */
 function wireUI(){
-  // 認証
   document.getElementById('btnSignIn').addEventListener('click', startSignInClick);
-  // GLB読み込み
   el.btnLoad.addEventListener('click', onClickLoadGLB);
   el.inputGLB.addEventListener('keydown', (ev)=>{ if(ev.key==='Enter') onClickLoadGLB(); });
-  // 閲覧リンク
+
   el.btnViewOnly.addEventListener('click', ()=>{
-    const fid = extractDriveId(el.inputGLB.value||'');
-    const sid = extractSpreadsheetId(el.inputSheet.value||'');
+    const fid=extractDriveId(el.inputGLB.value||''); const sid=extractSpreadsheetId(el.inputSheet.value||'');
     if(!fid){ alert('GLBのfileId/URLを入力'); return; }
-    const u = new URL(location.href);
-    u.searchParams.set('view','1'); u.searchParams.set('fileId', fid);
-    if(sid) u.searchParams.set('sheetId', sid);
-    navigator.clipboard?.writeText(u.toString());
-    alert('閲覧URLをクリップボードにコピーしました：\n'+u.toString());
+    const u=new URL(location.href); u.searchParams.set('view','1'); u.searchParams.set('fileId',fid); if(sid) u.searchParams.set('sheetId',sid);
+    navigator.clipboard?.writeText(u.toString()); alert('閲覧URLをクリップボードにコピーしました：\n'+u.toString());
   });
-  // ビューア拡大
   el.btnWide.addEventListener('click', ()=>{ document.body.classList.toggle('wide'); resize(); });
 
-  // マテリアルUI
-  el.matSelect.addEventListener('change', ()=>{
-    const key = el.matSelect.value;
-    const m = materialByKey.get(key);
-    if(!m) return;
-    updateMatUIFromState(m);
-  });
+  el.matSelect.addEventListener('change', ()=>{ const m=materialByKey.get(el.matSelect.value); if(!m) return; updateMatUIFromState(m); });
   [el.matUnlit, el.matDoubleSided, el.matInvert, el.matWhiteTransparent].forEach(n=>{
-    n.addEventListener('change', ()=>{
-      const key = el.matSelect.value; const m = materialByKey.get(key); if(!m) return;
-      saveMatState(m);
-    });
+    n.addEventListener('change', ()=>{ const m=materialByKey.get(el.matSelect.value); if(!m) return; saveMatState(m); });
   });
-  el.matOpacity.addEventListener('input', ()=>{
-    el.matOpacityVal.textContent = parseFloat(el.matOpacity.value).toFixed(2);
-    const key = el.matSelect.value; const m = materialByKey.get(key); if(!m) return;
-    saveMatState(m);
-  });
-  el.matThreshold.addEventListener('input', ()=>{
-    el.matThresholdVal.textContent = parseFloat(el.matThreshold.value).toFixed(2);
-    const key = el.matSelect.value; const m = materialByKey.get(key); if(!m) return;
-    saveMatState(m);
-  });
+  el.matOpacity.addEventListener('input', ()=>{ el.matOpacityVal.textContent=parseFloat(el.matOpacity.value).toFixed(2); const m=materialByKey.get(el.matSelect.value); if(!m) return; saveMatState(m); });
+  el.matThreshold.addEventListener('input',()=>{ el.matThresholdVal.textContent=parseFloat(el.matThreshold.value).toFixed(2); const m=materialByKey.get(el.matSelect.value); if(!m) return; saveMatState(m); });
 
-  // 背景/投影
-  el.bgColor.addEventListener('input', ()=>{ scene.background = new THREE.Color(el.bgColor.value); requestRender(); debouncedSaveMeta(); });
+  el.bgColor.addEventListener('input', ()=>{ scene.background=new THREE.Color(el.bgColor.value); requestRender(); debouncedSaveMeta(); });
   el.viewFront.addEventListener('click', ()=>{ controls.reset(); controls.rotateLeft(Math.PI); controls.update(); requestRender(); debouncedSaveMeta(); });
   el.viewBack.addEventListener('click',  ()=>{ controls.reset(); controls.update(); requestRender(); debouncedSaveMeta(); });
   el.viewLeft.addEventListener('click',  ()=>{ controls.reset(); controls.rotateLeft(Math.PI/2); controls.update(); requestRender(); debouncedSaveMeta(); });
@@ -1301,70 +1001,47 @@ function wireUI(){
   el.viewTop.addEventListener('click',   ()=>{ controls.reset(); camera.position.set(0,5,0); controls.target.set(0,0,0); controls.update(); requestRender(); debouncedSaveMeta(); });
   el.viewBottom.addEventListener('click',()=>{ controls.reset(); camera.position.set(0,-5,0); controls.target.set(0,0,0); controls.update(); requestRender(); debouncedSaveMeta(); });
 
-  // ピンUI
-  el.btnAddPin.addEventListener('click', ()=>{ addPinMode = !addPinMode; el.modeLabel.textContent = addPinMode?'Add Pin':'Orbit'; toast(addPinMode?'ピン追加中':'ピン追加終了'); });
-  el.btnGizmo.addEventListener('click', ()=>{ tcontrols.enabled = !tcontrols.enabled; tcontrols.visible = tcontrols.enabled && selectedPinId; el.btnGizmo.textContent = 'ギズモ: ' + (tcontrols.enabled?'ON':'OFF'); });
-  el.btnTogglePins.addEventListener('click', ()=>{ const v = !pinGroup.visible; setPinsVisible(v); el.btnTogglePins.textContent = 'ピン表示: ' + (v?'ON':'OFF'); });
-  el.btnUndo.addEventListener('click', ()=>{ /* 省略：必要に応じて実装 */ });
+  el.btnAddPin.addEventListener('click', ()=>{ addPinMode=!addPinMode; el.modeLabel.textContent=addPinMode?'Add Pin':'Orbit'; toast(addPinMode?'ピン追加中':'ピン追加終了'); });
+  el.btnGizmo.addEventListener('click', ()=>{ tcontrols.enabled=!tcontrols.enabled; tcontrols.visible=tcontrols.enabled && selectedPinId; el.btnGizmo.textContent='ギズモ: '+(tcontrols.enabled?'ON':'OFF'); });
+  el.btnTogglePins.addEventListener('click', ()=>{ const v=!pinGroup.visible; setPinsVisible(v); el.btnTogglePins.textContent='ピン表示: '+(v?'ON':'OFF'); });
 
   el.capTitle.addEventListener('input', ()=>{ const p=pins.find(x=>x.id===selectedPinId); if(!p) return; p.title=el.capTitle.value; updatePinsListItem(p.id); debouncedSavePins(); el.capTitleLine.textContent=p.title; });
-  el.capBody.addEventListener('input',  ()=>{ const p=pins.find(x=>x.id===selectedPinId); if(!p) return; p.body=el.capBody.value; debouncedSavePins(); el.capBodyLine.textContent=p.body; });
+  el.capBody.addEventListener('input',  ()=>{ const p=pins.find(x=>x.id===selectedPinId); if(!p) return; p.body=el.capBody.value;  debouncedSavePins(); el.capBodyLine.textContent=p.body; });
 
   el.btnAttach.addEventListener('click', ()=> el.imgLocal.click());
   el.imgLocal.addEventListener('change', async (ev)=>{
-    const file = ev.target.files?.[0]; if(!file) return;
-    const p=pins.find(x=>x.id===selectedPinId); if(!p) return;
-    // Driveへアップロード
-    const upId = await uploadToDrive(file, glbParents?.[0]);
-    p.images = ensureArray(p.images); if(!p.images.includes(upId)) p.images.push(upId);
-    selectPin(p.id);
-    debouncedSavePins();
+    const file=ev.target.files?.[0]; if(!file) return; const p=pins.find(x=>x.id===selectedPinId); if(!p) return;
+    const upId=await uploadToDrive(file, glbParents?.[0]); p.images=ensureArray(p.images); if(!p.images.includes(upId)) p.images.push(upId);
+    selectPin(p.id); debouncedSavePins();
   });
   el.btnPickFromFolder.addEventListener('click', ()=> openPicker());
   el.btnPickerClose.addEventListener('click', closePicker);
   el.btnPickerReload.addEventListener('click', ()=> loadPickerGrid());
 
-  // シート選択
-  el.listSelect.addEventListener('change', ()=>{ activeSheet.title = el.listSelect.value; loadPinsFromActiveSheet(); });
+  el.listSelect.addEventListener('change', ()=>{ activeSheet.title=el.listSelect.value; loadPinsFromActiveSheet(); });
   el.listNew.addEventListener('click', async ()=>{
-    const name = prompt('新しいキャプションリスト名', 'pins_'+(Date.now()%10000));
-    if(!name) return;
-    await gapi.client.sheets.spreadsheets.batchUpdate({
-      spreadsheetId: activeSheet.sheetId,
-      resource: { requests: [{ addSheet: { properties: { title:name } } }] }
-    });
-    activeSheet.title = name; await ensureSheetPicked(); await loadPinsFromActiveSheet();
+    const name=prompt('新しいキャプションリスト名','pins_'+(Date.now()%10000)); if(!name) return;
+    await gapi.client.sheets.spreadsheets.batchUpdate({ spreadsheetId:activeSheet.sheetId, resource:{ requests:[{ addSheet:{ properties:{ title:name }}}]}});
+    activeSheet.title=name; await ensureSheetPicked(); await loadPinsFromActiveSheet();
   });
   el.listDelete.addEventListener('click', async ()=>{
     if(!confirm('現在のシートを削除しますか？')) return;
-    const r = await gapi.client.sheets.spreadsheets.get({ spreadsheetId: activeSheet.sheetId });
-    const sheet = (r.result.sheets||[]).find(s=> s.properties.title===activeSheet.title);
+    const r=await gapi.client.sheets.spreadsheets.get({ spreadsheetId:activeSheet.sheetId });
+    const sheet=(r.result.sheets||[]).find(s=> s.properties.title===activeSheet.title);
     if(!sheet){ alert('シートが見つかりません'); return; }
-    await gapi.client.sheets.spreadsheets.batchUpdate({
-      spreadsheetId: activeSheet.sheetId,
-      resource: { requests: [{ deleteSheet: { sheetId: sheet.properties.sheetId } }] }
-    });
+    await gapi.client.sheets.spreadsheets.batchUpdate({ spreadsheetId:activeSheet.sheetId, resource:{ requests:[{ deleteSheet:{ sheetId:sheet.properties.sheetId }}]}});
     await ensureSheetPicked(); await loadPinsFromActiveSheet();
   });
 
-  // 色フィルタ（右パネル）
-  el.btnColorFilter.addEventListener('click', ()=>{
-    el.colorFilterPanel.style.display = (el.colorFilterPanel.style.display==='none'?'block':'none');
-    buildColorFilterPanel();
-  });
-  el.btnFilterAll.addEventListener('click', ()=>{ filterColors = new Set(); applyPinVisibilityFilter(); });
-  el.btnFilterNone.addEventListener('click', ()=>{ filterColors = new Set(['__none__']); applyPinVisibilityFilter(); });
+  el.btnColorFilter.addEventListener('click', ()=>{ el.colorFilterPanel.style.display=(el.colorFilterPanel.style.display==='none'?'block':'none'); buildColorFilterPanel(); });
+  el.btnFilterAll.addEventListener('click', ()=>{ filterColors=new Set(); applyPinVisibilityFilter(); });
+  el.btnFilterNone.addEventListener('click', ()=>{ filterColors=new Set(['__none__']); applyPinVisibilityFilter(); });
   el.btnFilterClose.addEventListener('click', ()=>{ el.colorFilterPanel.style.display='none'; });
 
-  // プレビュー UI
-  el.previewZoom.addEventListener('input', ()=>{
-    const z = parseFloat(el.previewZoom.value); el.previewZoomVal.textContent = z.toFixed(2)+'×';
-    el.previewInner.style.transform = `scale(${z})`;
-    updateConnector();
-  });
+  el.previewZoom.addEventListener('input', ()=>{ const z=parseFloat(el.previewZoom.value); el.previewZoomVal.textContent=z.toFixed(2)+'×'; el.previewInner.style.transform=`scale(${z})`; updateConnector(); });
   el.previewReset.addEventListener('click', ()=>{ el.previewZoom.value='1'; el.previewZoomVal.textContent='1.00×'; el.previewInner.style.transform='scale(1)'; updateConnector(); });
 
-  // モバイル：タブ／ボトムシート
+  // Mobile tabs / sheet
   el.tabViewer.addEventListener('click', ()=> setActiveMobileTab('viewer'));
   el.tabPins.addEventListener('click',   ()=> setActiveMobileTab('pins'));
   el.tabTools.addEventListener('click',  ()=> setActiveMobileTab('tools'));
@@ -1374,104 +1051,62 @@ function buildColorFilterPanel(){
   el.colorFilterList.innerHTML='';
   PRESET_COLORS.forEach(c=>{
     const id='cf_'+c.slice(1);
-    const wrap = document.createElement('label'); wrap.style.display='inline-flex'; wrap.style.alignItems='center'; wrap.style.gap='6px'; wrap.style.marginRight='10px';
-    wrap.innerHTML = `<input type="checkbox" id="${id}"><span style="width:14px;height:14px;border-radius:50%;background:${c};display:inline-block;border:1px solid #223146"></span><span class="small">${c}</span>`;
-    const chk = wrap.querySelector('input');
-    chk.checked = (filterColors.size===0) || filterColors.has(c.toLowerCase());
-    chk.addEventListener('change', ()=>{
-      if(chk.checked) filterColors.add(c.toLowerCase()); else filterColors.delete(c.toLowerCase());
-      applyPinVisibilityFilter();
-    });
+    const wrap=document.createElement('label'); wrap.style.display='inline-flex'; wrap.style.alignItems='center'; wrap.style.gap='6px'; wrap.style.marginRight='10px';
+    wrap.innerHTML=`<input type="checkbox" id="${id}"><span style="width:14px;height:14px;border-radius:50%;background:${c};display:inline-block;border:1px solid #223146"></span><span class="small">${c}</span>`;
+    const chk=wrap.querySelector('input');
+    chk.checked=(filterColors.size===0)||filterColors.has(c.toLowerCase());
+    chk.addEventListener('change',()=>{ if(chk.checked) filterColors.add(c.toLowerCase()); else filterColors.delete(c.toLowerCase()); applyPinVisibilityFilter(); });
     el.colorFilterList.appendChild(wrap);
   });
 }
 function updatePinsListItem(id){
-  const row = el.pinsList.querySelector(`[data-id="${id}"] .title span:last-child`);
-  const p = pins.find(x=>x.id===id);
-  if(row && p) row.textContent = p.title || '(無題)';
+  const row=el.pinsList.querySelector(`[data-id="${id}"] .title span:last-child`);
+  const p=pins.find(x=>x.id===id);
+  if(row && p) row.textContent=p.title||'(無題)';
 }
 
-/* ======= Upload to Drive ======= */
-async function uploadToDrive(file, parentId){
-  // Multipart
-  const metadata = { name: file.name, mimeType: file.type || 'application/octet-stream', parents: parentId?[parentId]:undefined };
-  const boundary = '-------314159265358979323846';
-  const delimeter = "\r\n--" + boundary + "\r\n";
-  const close_delim = "\r\n--" + boundary + "--";
-  const reader = await file.arrayBuffer();
-  const base64Data = btoa(String.fromCharCode(...new Uint8Array(reader)));
-  const contentType = file.type || 'application/octet-stream';
-  const body =
-    delimeter + 'Content-Type: application/json; charset=UTF-8\r\n\r\n' +
-    JSON.stringify(metadata) +
-    delimeter + 'Content-Type: ' + contentType + '\r\n' +
-    'Content-Transfer-Encoding: base64\r\n' + '\r\n' +
-    base64Data + close_delim;
-
-  const res = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
-    method:'POST',
-    headers:{ 'Authorization': 'Bearer '+accessToken, 'Content-Type': 'multipart/related; boundary='+boundary },
-    body
-  });
-  if(!res.ok) throw new Error('upload failed '+res.status);
-  const json = await res.json();
-  return json.id;
+/* upload */
+async function uploadToDrive(file,parentId){
+  const metadata={ name:file.name, mimeType:file.type||'application/octet-stream', parents: parentId?[parentId]:undefined };
+  const boundary='-------314159265358979323846'; const del="\r\n--"+boundary+"\r\n"; const close="\r\n--"+boundary+"--";
+  const buf=await file.arrayBuffer(); const base64=btoa(String.fromCharCode(...new Uint8Array(buf)));
+  const body = del+'Content-Type: application/json; charset=UTF-8\r\n\r\n'+JSON.stringify(metadata)+
+               del+'Content-Type: '+(file.type||'application/octet-stream')+'\r\nContent-Transfer-Encoding: base64\r\n\r\n'+
+               base64+close;
+  const res=await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart',{ method:'POST', headers:{ 'Authorization':'Bearer '+accessToken, 'Content-Type':'multipart/related; boundary='+boundary }, body });
+  if(!res.ok) throw new Error('upload failed '+res.status); const json=await res.json(); return json.id;
 }
 
-/* ======= GLB 読み込みハンドラ（配線漏れ修正） ======= */
+/* load button */
 async function onClickLoadGLB(e){
   e?.preventDefault?.();
-  const fid = extractDriveId(el.inputGLB.value);
-  if (!fid) { alert("GLBの fileId または共有URLを入力してください"); return; }
-  const sid = extractSpreadsheetId(el.inputSheet.value);
-  if (sid) { activeSheet.sheetId = sid; } // 任意
-  try{
-    el.loading.hidden = false;
-    el.btnLoad.disabled = true;
-    await loadGLBByFileId(fid);
-    focusOrigin?.();
-  }catch(err){
-    console.error(err);
-    alert("GLB読み込みに失敗しました。fileId/権限/ファイル形式をご確認ください。");
-  }finally{
-    el.loading.hidden = true;
-    el.btnLoad.disabled = false;
-  }
+  const fid=extractDriveId(el.inputGLB.value); if(!fid){ alert("GLBの fileId または共有URLを入力してください"); return; }
+  const sid=extractSpreadsheetId(el.inputSheet.value); if(sid){ activeSheet.sheetId=sid; }
+  try{ el.loading.hidden=false; el.btnLoad.disabled=true; await loadGLBByFileId(fid); focusOrigin(); }
+  catch(err){ console.error(err); alert("GLB読み込みに失敗しました。fileId/権限/ファイル形式をご確認ください。"); }
+  finally{ el.loading.hidden=true; el.btnLoad.disabled=false; }
 }
 
-/* ======= モバイルUI：タブ & シート（開かない問題の修正） ======= */
-let mobileActive = false;
+/* mobile UI */
+let mobileActive=false;
 function setActiveMobileTab(name){
-  // ボタン見た目
-  [el.tabViewer, el.tabPins, el.tabTools].forEach(b=>b.classList.remove('active'));
+  [el.tabViewer,el.tabPins,el.tabTools].forEach(b=>b.classList.remove('active'));
   if(name==='viewer') el.tabViewer.classList.add('active');
   if(name==='pins')   el.tabPins.classList.add('active');
   if(name==='tools')  el.tabTools.classList.add('active');
-
-  // コンテンツ切替
   el.mobilePagePins.classList.toggle('active', name==='pins');
   el.mobilePageTools.classList.toggle('active', name==='tools');
-
-  // シート開閉
-  if(name==='viewer'){
-    el.mobileSheet.classList.remove('open'); // 閉じる
-  }else{
-    el.mobileSheet.classList.add('open'); // 開く
-    el.mobileSheetTitle.textContent = (name==='pins') ? 'キャプション' : 'ツール';
-  }
+  if(name==='viewer'){ el.mobileSheet.classList.remove('open'); }
+  else{ el.mobileSheet.classList.add('open'); el.mobileSheetTitle.textContent=(name==='pins')?'キャプション':'ツール'; }
 }
 function enterMobile(){
-  if(mobileActive) return;
-  mobileActive = true;
-  // 左右パネルの body をシート内へ「移動」（cloneせず移す → イベント維持）
+  if(mobileActive) return; mobileActive=true;
   el.mobilePagePins.appendChild(document.getElementById('rightBody'));
   el.mobilePageTools.appendChild(document.getElementById('leftBody'));
-  setActiveMobileTab('viewer'); // 初期は閉じる
+  setActiveMobileTab('viewer');
 }
 function exitMobile(){
-  if(!mobileActive) return;
-  mobileActive = false;
-  // 元の位置へ戻す
+  if(!mobileActive) return; mobileActive=false;
   document.getElementById('rightCaption').appendChild(document.getElementById('rightBody'));
   document.getElementById('leftToolbox').appendChild(document.getElementById('leftBody'));
   el.mobileSheet.classList.remove('open');
@@ -1481,15 +1116,13 @@ function updateResponsiveLayout(){
   if(mobile) enterMobile(); else exitMobile();
 }
 
-/* ======= 初期化 ======= */
-function viewerInitWrap(){ viewerInit(); updateResponsiveLayout(); }
-viewerInitWrap();
-wireUI();
-
-window.addEventListener('resize', updateResponsiveLayout, { passive:true });
-
-// サインインボタン（ゲート）
-document.getElementById('btnSignIn').addEventListener('click', startSignInClick);
+/* init */
+function wireBasic(){
+  document.getElementById('btnSignIn').addEventListener('click', startSignInClick);
+}
+wireBasic();
+viewerInit(); wireUI(); updateResponsiveLayout();
+window.addEventListener('resize', updateResponsiveLayout, {passive:true});
 </script>
 </body>
 </html>
