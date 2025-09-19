@@ -741,7 +741,7 @@ function programKeyFromUI(){
   });
 }
 
-/* ★ 修正版：安全な onBeforeCompile 差し替え */
+/* ★ 修正版：安全な onBeforeCompile 差し替え（uniform 注入込み） */
 function applyMatUITo(material){
   if(!material) return;
   // three の生シェーダ系は対象外
@@ -775,12 +775,21 @@ function applyMatUITo(material){
   material.customProgramCacheKey = ()=> cacheKey;
 
   material.onBeforeCompile = (shader)=>{
+    // JS 側 uniform 値
     shader.uniforms.uLMThreshold = { value: thr };
 
-    const needle = '#include <output_fragment>';
     let frag = shader.fragmentShader;
 
-    // 出力直前に diffuseColor / outgoingLight を調整し、既存の出力を残す
+    // ★ uniform 宣言を GLSL に注入（#include <common> の直後）
+    const headerNeedle = '#include <common>';
+    if (frag.includes(headerNeedle)) {
+      frag = frag.replace(headerNeedle, headerNeedle + '\n' + 'uniform float uLMThreshold;');
+    } else {
+      frag = 'uniform float uLMThreshold;\n' + frag;
+    }
+
+    // 出力直前でアルファと発光色（unlit）を調整し、既存の出力ブロックは残す
+    const footerNeedle = '#include <output_fragment>';
     const injected = `
       // === LociMyu Patch (safe pre-output) ===
       float luma = dot( diffuseColor.rgb, vec3(0.299, 0.587, 0.114) );
@@ -796,11 +805,13 @@ function applyMatUITo(material){
       // === /LociMyu Patch ===
     `;
 
-    if (frag.includes(needle)){
-      shader.fragmentShader = frag.replace(needle, injected + '\n' + needle);
+    if (frag.includes(footerNeedle)){
+      frag = frag.replace(footerNeedle, injected + '\n' + footerNeedle);
     } else {
-      shader.fragmentShader = frag + '\n' + injected + '\n';
+      frag = frag + '\n' + injected + '\n';
     }
+
+    shader.fragmentShader = frag;
   };
 
   material.needsUpdate = true;
