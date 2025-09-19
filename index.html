@@ -63,12 +63,11 @@ body.wide .main{grid-template-columns:1fr}
 .card h1{margin:4px 0 8px;font-size:1.35rem}
 .card p{color:#c2d0e2;opacity:.9}
 
-/* mobile tabs + sheet (前面化) */
+/* mobile tabs + sheet */
 #mobileTabs{
   display:none;position:fixed;left:0;right:0;bottom:0;height:calc(var(--tabh) + env(safe-area-inset-bottom));
   padding-bottom:env(safe-area-inset-bottom);
-  background:#0f1722;border-top:1px solid #203049;z-index:1800; /* ← 前面 */
-  pointer-events:auto;
+  background:#0f1722;border-top:1px solid #203049;z-index:1800; pointer-events:auto;
 }
 #mobileTabs button{flex:1;border-radius:0;border:none;background:transparent;font-weight:700}
 #mobileTabs button.active{background:#132035}
@@ -154,7 +153,7 @@ body.wide .main{grid-template-columns:1fr}
         <div class="field"><label>Unlit</label><input id="matUnlit" type="checkbox"><span class="small">明暗なし</span></div>
         <div class="field"><label>裏面描画</label><input id="matDoubleSided" type="checkbox"></div>
         <div class="field"><label>不透明度</label><input id="matOpacity" type="range" min="0" max="1" step="0.01" value="1"><span id="matOpacityVal" class="small">1.00</span></div>
-        <div class="field"><label>テクスチャ反転</label><input id="matInvert" type="checkbox"></div>
+        <div class="field"><label>黒→透明</label><input id="matInvert" type="checkbox"></div>
         <div class="field"><label>白→透明</label><input id="matWhiteTransparent" type="checkbox"></div>
         <div class="field"><label>閾値（αTest）</label><input id="matThreshold" type="range" min="0" max="1" step="0.01" value="0"><span id="matThresholdVal" class="small">0.00</span></div>
 
@@ -371,7 +370,7 @@ function afterAuthReady(){
   }
   enforceViewOnlyMode();
 
-  // クエリ反映＆自動ロード
+  // クエリ反映＆自動ロード（閲覧モード）
   const qs = new URLSearchParams(location.search);
   const fid = qs.get('fileId') || ''; const sid = qs.get('sheetId') || '';
   if(fid) el.inputGLB.value = fid; if(sid) el.inputSheet.value = sid;
@@ -441,8 +440,8 @@ const el = {
   matDoubleSided: document.getElementById('matDoubleSided'),
   matOpacity: document.getElementById('matOpacity'),
   matOpacityVal: document.getElementById('matOpacityVal'),
-  matInvert: document.getElementById('matInvert'),
-  matWhiteTransparent: document.getElementById('matWhiteTransparent'),
+  matInvert: document.getElementById('matInvert'),              // 黒→透明
+  matWhiteTransparent: document.getElementById('matWhiteTransparent'), // 白→透明
   matThreshold: document.getElementById('matThreshold'),
   matThresholdVal: document.getElementById('matThresholdVal'),
   viewFront: document.getElementById('viewFront'),
@@ -494,11 +493,11 @@ const PRESET_COLORS = ['#ff6b6b','#ffd166','#06d6a0','#118ab2','#ef476f','#b5179
 const undoStack=[]; const pushUndo=(act)=>{ undoStack.push(act); el.btnUndo.disabled = undoStack.length===0; };
 function doUndo(){
   const a=undoStack.pop(); if(!a) return;
-  if(a.type==='add'){ // undo add -> remove
+  if(a.type==='add'){
     const idx=pins.findIndex(p=>p.id===a.pin.id); if(idx>=0){ pinGroup.remove(pins[idx].mesh); pins.splice(idx,1); rebuildPinsList(); }
-  }else if(a.type==='delete'){ // undo delete -> add
+  }else if(a.type==='delete'){
     const p=a.pin; const mesh=new THREE.Mesh(new THREE.SphereGeometry(0.01,16,12), new THREE.MeshBasicMaterial({color:new THREE.Color(p.color)})); mesh.position.copy(p.pos); pinGroup.add(mesh); p.mesh=mesh; pins.push(p); rebuildPinsList();
-  }else if(a.type==='move'){ // revert position
+  }else if(a.type==='move'){
     const p=pins.find(x=>x.id===a.id); if(p){ p.pos.copy(a.prev.clone()); p.mesh.position.copy(p.pos); updateConnector(); debouncedSavePins(); }
   }
   el.btnUndo.disabled = undoStack.length===0; requestRender();
@@ -733,73 +732,92 @@ function collectMaterials(root){
 function clamp01(v,def=0){ const n=parseFloat(v); return Number.isFinite(n)? Math.min(1,Math.max(0,n)) : def; }
 function programKeyFromUI(){
   return JSON.stringify({
-    U: el.matUnlit.checked?1:0,
-    D: el.matDoubleSided.checked?1:0,
+    U: el.matUnlit.checked ? 1 : 0,
+    D: el.matDoubleSided.checked ? 1 : 0,
     O: Number(el.matOpacity.value||1).toFixed(2),
-    I: el.matInvert.checked?1:0,
-    W: el.matWhiteTransparent.checked?1:0,
-    T: Number(el.matThreshold.value||0).toFixed(2),
+    WT: el.matWhiteTransparent.checked ? 1 : 0, // 白→透明
+    BT: el.matInvert.checked ? 1 : 0,           // 黒→透明
+    T: Number(el.matThreshold.value||0).toFixed(3)
   });
 }
 function applyMatUITo(material){
   if(!material) return;
-  const unlit = el.matUnlit.checked;
-  const dbl   = el.matDoubleSided.checked;
-  const op    = clamp01(el.matOpacity.value, 1);
-  const inv   = !!el.matInvert.checked;
-  const whtr  = !!el.matWhiteTransparent.checked;
-  const thr   = clamp01(el.matThreshold.value, 0);
 
-  material.transparent = (op < 1.0) || whtr;
-  material.opacity = op;
-  material.alphaTest = thr;
+  const unlit   = !!el.matUnlit.checked;
+  const dbl     = !!el.matDoubleSided.checked;
+  const opacity = clamp01(el.matOpacity.value, 1);
+  const whiteT  = !!el.matWhiteTransparent.checked; // 白→透明
+  const blackT  = !!el.matInvert.checked;           // 黒→透明
+  const thr     = clamp01(el.matThreshold.value, 0);
+
+  // 透過に関与する要素がある場合 transparent を有効化
+  material.transparent = (opacity < 1.0) || whiteT || blackT || (material.alphaTest > 0);
+  material.opacity = opacity;
+  material.alphaTest = (whiteT || blackT) ? Math.max(0.001, thr*0.2) : 0.0;
   material.side = dbl ? THREE.DoubleSide : THREE.FrontSide;
-  material.depthWrite = !(whtr && op<1);
+  material.depthWrite = !(whiteT || blackT) || (opacity >= 1.0);
 
-  // キャッシュキーでシェーダを作り直し
-  material.customProgramCacheKey = ()=> programKeyFromUI();
+  const cacheKey = programKeyFromUI();
+  material.customProgramCacheKey = ()=> cacheKey;
 
-  // シェーダ差し替え：unlit / invert / white→alpha
   material.onBeforeCompile = (shader)=>{
-    const repl = 'gl_FragColor = vec4( outgoingLight, diffuseColor.a );';
-    let code = '';
-    if(unlit){
-      code += `
-        vec4 c = vec4( diffuseColor.rgb, diffuseColor.a );
-      `;
-    }else{
-      code += `
-        vec4 c = vec4( outgoingLight, diffuseColor.a );
-      `;
+    shader.uniforms.uLMThreshold = { value: thr };
+
+    const needle = '#include <output_fragment>';
+    let frag = shader.fragmentShader;
+
+    const patch = `
+      // === LociMyu Material Patch ===
+      float luma = dot( diffuseColor.rgb, vec3(0.299, 0.587, 0.114) );
+      float a = diffuseColor.a;
+
+      vec3 outRGB = ${unlit ? 'diffuseColor.rgb' : 'outgoingLight'};
+
+      ${whiteT ? `a *= (1.0 - smoothstep(1.0 - uLMThreshold, 1.0, luma));` : ''}
+      ${blackT ? `a *= smoothstep(uLMThreshold, 1.0, luma);` : ''}
+
+      a = a * ${opacity.toFixed(3)};
+
+      if(a <= 0.0){ discard; }
+
+      gl_FragColor = vec4(outRGB, a);
+      // === /LociMyu Material Patch ===
+    `;
+
+    if (frag.includes(needle)){
+      shader.fragmentShader = frag.replace(needle, patch);
+    } else {
+      shader.fragmentShader = frag + '\n' + patch + '\n';
     }
-    if(inv)  code += ` c.rgb = vec3(1.0) - c.rgb; `;
-    if(whtr) code += ` float lum = dot(c.rgb, vec3(0.299,0.587,0.114)); float a = smoothstep(${thr.toFixed(3)}, 1.0, 1.0 - lum); c.a *= a; `;
-    code += ` gl_FragColor = c; `;
-    shader.fragmentShader = shader.fragmentShader.replace(repl, code);
   };
 
-  material.needsUpdate=true;
+  material.needsUpdate = true;
   requestRender();
 }
 function updateMatUIFromState(material){
-  const key=materialKeyByMaterial.get(material); const s=matState.get(key); if(!s) return;
-  el.matUnlit.checked=!!s.unlit;
-  el.matDoubleSided.checked=!!s.doubleSided;
-  el.matOpacity.value=String(clamp01(s.opacity,1)); el.matOpacityVal.textContent=parseFloat(el.matOpacity.value).toFixed(2);
-  el.matInvert.checked=!!s.invert;
-  el.matWhiteTransparent.checked=!!s.whiteTransparent;
-  el.matThreshold.value=String(clamp01(s.threshold,0)); el.matThresholdVal.textContent=parseFloat(el.matThreshold.value).toFixed(2);
+  const key=materialKeyByMaterial.get(material); const s=matState.get(key);
+  const def = { unlit:false, doubleSided:false, opacity:1, whiteTransparent:false, blackTransparent:false, threshold:0 };
+  const v = Object.assign(def, s||{});
+  el.matUnlit.checked = !!v.unlit;
+  el.matDoubleSided.checked = !!v.doubleSided;
+  el.matOpacity.value = String(v.opacity);
+  el.matOpacityVal.textContent = Number(v.opacity).toFixed(2);
+  el.matWhiteTransparent.checked = !!v.whiteTransparent;
+  el.matInvert.checked = !!v.blackTransparent; // 黒→透明
+  el.matThreshold.value = String(v.threshold);
+  el.matThresholdVal.textContent = Number(v.threshold).toFixed(2);
 }
 function saveMatState(material){
   const key=materialKeyByMaterial.get(material); if(!key) return;
-  matState.set(key,{
+  const s = {
     unlit: !!el.matUnlit.checked,
     doubleSided: !!el.matDoubleSided.checked,
     opacity: clamp01(el.matOpacity.value,1),
-    invert: !!el.matInvert.checked,
-    whiteTransparent: !!el.matWhiteTransparent.checked,
-    threshold: clamp01(el.matThreshold.value,0),
-  });
+    whiteTransparent: !!el.matWhiteTransparent.checked, // 白→透明
+    blackTransparent: !!el.matInvert.checked,           // 黒→透明
+    threshold: clamp01(el.matThreshold.value,0)
+  };
+  matState.set(key, s);
   applyMatUITo(material); debouncedSaveMeta();
 }
 function applyMatStateToAll(){
@@ -809,8 +827,8 @@ function applyMatStateToAll(){
       el.matUnlit.checked=!!s.unlit;
       el.matDoubleSided.checked=!!s.doubleSided;
       el.matOpacity.value=String(clamp01(s.opacity,1));
-      el.matInvert.checked=!!s.invert;
       el.matWhiteTransparent.checked=!!s.whiteTransparent;
+      el.matInvert.checked=!!s.blackTransparent;
       el.matThreshold.value=String(clamp01(s.threshold,0));
       el.matOpacityVal.textContent=parseFloat(el.matOpacity.value).toFixed(2);
       el.matThresholdVal.textContent=parseFloat(el.matThreshold.value).toFixed(2);
@@ -1000,7 +1018,7 @@ async function saveMetaToSheet(){
     meta[`m:${key}:unlit`]=s.unlit?1:0;
     meta[`m:${key}:double`]=s.doubleSided?1:0;
     meta[`m:${key}:opacity`]=clamp01(s.opacity,1);
-    meta[`m:${key}:invert`]=s.invert?1:0;
+    meta[`m:${key}:blackT`]=s.blackTransparent?1:0;
     meta[`m:${key}:whiteT`]=s.whiteTransparent?1:0;
     meta[`m:${key}:thresh`]=clamp01(s.threshold,0);
   });
@@ -1024,7 +1042,7 @@ async function loadMetaFromSheet(){
         unlit: Number(meta[`m:${key}:unlit`]||0)===1,
         doubleSided: Number(meta[`m:${key}:double`]||0)===1,
         opacity: clamp01(meta[`m:${key}:opacity`],1),
-        invert: Number(meta[`m:${key}:invert`]||0)===1,
+        blackTransparent: Number(meta[`m:${key}:blackT`]||0)===1,
         whiteTransparent: Number(meta[`m:${key}:whiteT`]||0)===1,
         threshold: clamp01(meta[`m:${key}:thresh`],0),
       };
