@@ -741,10 +741,9 @@ function programKeyFromUI(){
   });
 }
 
-/* ★ 修正版：安全な onBeforeCompile 差し替え（uniform 注入込み） */
+/* ★ 修正版：Shader 安定化版 applyMatUITo（uniform 注入／alpha のみ操作。unlit は lights=false） */
 function applyMatUITo(material){
   if(!material) return;
-  // three の生シェーダ系は対象外
   if (material.isShaderMaterial || material.isRawShaderMaterial) return;
 
   const unlit   = !!el.matUnlit.checked;
@@ -754,16 +753,17 @@ function applyMatUITo(material){
   const blackT  = !!el.matInvert.checked;           // 黒→透明
   const thr     = clamp01(el.matThreshold.value, 0);
 
-  // 透過条件
+  // Unlit は three のフラグで切替（照明計算を完全オフ）
+  material.lights = !unlit;
+
+  // 一般パラメータ
   material.transparent = (opacity < 1.0) || whiteT || blackT || (material.alphaTest > 0);
-  material.opacity = opacity;
+  material.opacity     = opacity;
+  material.alphaTest   = (whiteT || blackT) ? Math.max(0.0001, thr * 0.05) : 0.0;
+  material.side        = dbl ? THREE.DoubleSide : THREE.FrontSide;
+  material.depthWrite  = !(whiteT || blackT) || (opacity >= 1.0);
 
-  // αテストは控えめ（にじみ防止）。白/黒→透明OFF時は0
-  material.alphaTest = (whiteT || blackT) ? Math.max(0.0001, thr * 0.05) : 0.0;
-
-  material.side = dbl ? THREE.DoubleSide : THREE.FrontSide;
-  material.depthWrite = !(whiteT || blackT) || (opacity >= 1.0);
-
+  // キャッシュキー（不要な再コンパイルを抑制）
   const cacheKey = JSON.stringify({
     U: unlit ? 1 : 0,
     D: dbl ? 1 : 0,
@@ -774,42 +774,34 @@ function applyMatUITo(material){
   });
   material.customProgramCacheKey = ()=> cacheKey;
 
+  // フック：アルファだけ安全に調整（outgoingLight には触れない）
   material.onBeforeCompile = (shader)=>{
-    // JS 側 uniform 値
     shader.uniforms.uLMThreshold = { value: thr };
 
     let frag = shader.fragmentShader;
 
-    // ★ uniform 宣言を GLSL に注入（#include <common> の直後）
+    // uniform 宣言を必ず注入
     const headerNeedle = '#include <common>';
-    if (frag.includes(headerNeedle)) {
-      frag = frag.replace(headerNeedle, headerNeedle + '\n' + 'uniform float uLMThreshold;');
-    } else {
-      frag = 'uniform float uLMThreshold;\n' + frag;
-    }
+    frag = frag.includes(headerNeedle)
+      ? frag.replace(headerNeedle, headerNeedle + '\n' + 'uniform float uLMThreshold;')
+      : ('uniform float uLMThreshold;\n' + frag);
 
-    // 出力直前でアルファと発光色（unlit）を調整し、既存の出力ブロックは残す
+    // 出力直前に alpha のみ調整（色は既存のパイプラインに任せる）
     const footerNeedle = '#include <output_fragment>';
     const injected = `
-      // === LociMyu Patch (safe pre-output) ===
-      float luma = dot( diffuseColor.rgb, vec3(0.299, 0.587, 0.114) );
-      float aAdj = diffuseColor.a;
-
-      ${whiteT ? `aAdj *= (1.0 - smoothstep(1.0 - uLMThreshold, 1.0, luma));` : ``}
-      ${blackT ? `aAdj *= smoothstep(uLMThreshold, 1.0, luma);` : ``}
-
-      aAdj *= ${opacity.toFixed(3)};
-      diffuseColor.a = aAdj;
-
-      ${unlit ? `outgoingLight = diffuseColor.rgb;` : ``}
+      // === LociMyu Patch: alpha only ===
+      float lm_luma = dot( diffuseColor.rgb, vec3(0.299, 0.587, 0.114) );
+      float lm_aAdj = diffuseColor.a;
+      ${whiteT ? `lm_aAdj *= (1.0 - smoothstep(1.0 - uLMThreshold, 1.0, lm_luma));` : ``}
+      ${blackT ? `lm_aAdj *= smoothstep(uLMThreshold, 1.0, lm_luma);` : ``}
+      lm_aAdj *= ${opacity.toFixed(3)};
+      diffuseColor.a = lm_aAdj;
       // === /LociMyu Patch ===
     `;
 
-    if (frag.includes(footerNeedle)){
-      frag = frag.replace(footerNeedle, injected + '\n' + footerNeedle);
-    } else {
-      frag = frag + '\n' + injected + '\n';
-    }
+    frag = frag.includes(footerNeedle)
+      ? frag.replace(footerNeedle, injected + '\n' + footerNeedle)
+      : (frag + '\n' + injected + '\n');
 
     shader.fragmentShader = frag;
   };
