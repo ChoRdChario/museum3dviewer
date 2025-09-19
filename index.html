@@ -5,29 +5,19 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
 <title>LociMyu</title>
 <link rel="icon" href='data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><circle cx="32" cy="32" r="28" fill="%230b0f14"/><text x="32" y="39" font-size="28" text-anchor="middle" fill="%2353b7ff" font-family="Arial">L</text></svg>'>
-
 <style>
-:root{
-  --bg:#0b0f14;--panel:#121922;--text:#e6edf3;--accent:#53b7ff;
-  --radius:16px;--shadow:0 10px 30px rgba(0,0,0,.3);
-  --tabh:60px;
-}
-html,body{height:100%}
-body{margin:0;background:var(--bg);color:var(--text);font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial}
+/* ===== 省略せず収録（UI/レイアウトは前回同等） ===== */
+:root{--bg:#0b0f14;--panel:#121922;--text:#e6edf3;--accent:#53b7ff;--radius:16px;--shadow:0 10px 30px rgba(0,0,0,.3);--tabh:60px}
+html,body{height:100%} body{margin:0;background:var(--bg);color:var(--text);font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial}
 .app{display:grid;grid-template-rows:auto 1fr;height:100dvh}
 header{display:flex;gap:.75rem;align-items:center;padding:10px 12px;background:linear-gradient(180deg,#0e1520,#0b0f14);border-bottom:1px solid #1e2837;position:relative;z-index:1200}
 .pill{background:rgba(255,255,255,.06);padding:6px 10px;border-radius:999px;border:1px solid rgba(255,255,255,.08);font-weight:700}
 input[type=text],select,textarea{background:#0f1722;border:1px solid #203049;color:var(--text);border-radius:10px;padding:8px 10px;min-width:240px}
 button{background:#152133;color:var(--text);border:1px solid #223146;border-radius:10px;padding:8px 12px;cursor:pointer}
-button[disabled]{opacity:.5;cursor:not-allowed}
-button:hover{background:#1a2b45}
-.accent{border-color:#2c82c9}
-.small{font-size:.85rem;color:#a9b8cf}
-
+button[disabled]{opacity:.5;cursor:not-allowed} button:hover{background:#1a2b45}
+.accent{border-color:#2c82c9} .small{font-size:.85rem;color:#a9b8cf}
 .main{display:grid;grid-template-columns:360px 1fr 420px;gap:10px;padding:10px;height:calc(100dvh - 58px)}
-body.wide #leftToolbox,body.wide #rightCaption{display:none}
-body.wide .main{grid-template-columns:1fr}
-
+body.wide #leftToolbox,body.wide #rightCaption{display:none} body.wide .main{grid-template-columns:1fr}
 .panel{background:#121922;border:1px solid #1e2837;border-radius:var(--radius);overflow:hidden;display:flex;flex-direction:column;min-height:0}
 .panel h3{margin:0;padding:10px 12px;border-bottom:1px solid #203049;background:#0f1722;font-size:.95rem;font-weight:600}
 .panel .body{padding:10px;overflow:auto}
@@ -60,24 +50,13 @@ body.wide .main{grid-template-columns:1fr}
 /* signin */
 .signin-gate{position:fixed;inset:0;display:grid;place-items:center;background:radial-gradient(1200px 600px at 50% 15%, rgba(83,183,255,.08), transparent 60%), linear-gradient(180deg,#0a0f16,#05070b);z-index:2000;padding:env(safe-area-inset-top) env(safe-area-inset-right) calc(env(safe-area-inset-bottom)) env(safe-area-inset-left)}
 .card{width:min(560px,92vw);background:#0c1118;border:1px solid #1d2a3d;border-radius:24px;box-shadow:var(--shadow);padding:20px}
-.card h1{margin:4px 0 8px;font-size:1.35rem}
-.card p{color:#c2d0e2;opacity:.9}
+.card h1{margin:4px 0 8px;font-size:1.35rem} .card p{color:#c2d0e2;opacity:.9}
 
 /* mobile tabs + sheet */
-#mobileTabs{
-  display:none;position:fixed;left:0;right:0;bottom:0;height:calc(var(--tabh) + env(safe-area-inset-bottom));
-  padding-bottom:env(safe-area-inset-bottom);
-  background:#0f1722;border-top:1px solid #203049;z-index:1800; pointer-events:auto;
-}
+#mobileTabs{display:none;position:fixed;left:0;right:0;bottom:0;height:calc(var(--tabh) + env(safe-area-inset-bottom));padding-bottom:env(safe-area-inset-bottom);background:#0f1722;border-top:1px solid #203049;z-index:1800;pointer-events:auto}
 #mobileTabs button{flex:1;border-radius:0;border:none;background:transparent;font-weight:700}
 #mobileTabs button.active{background:#132035}
-#mobileSheet{
-  display:none;position:fixed;left:0;right:0;
-  bottom:calc(var(--tabh) + env(safe-area-inset-bottom));
-  max-height:min(70dvh,70svh);
-  background:#0c1118;border-top:1px solid #203049;border-right:0;border-left:0;border-radius:16px 16px 0 0;z-index:1700;
-  transform:translateY(calc(100% - 36px)); transition:transform .25s ease; padding-bottom:env(safe-area-inset-bottom)
-}
+#mobileSheet{display:none;position:fixed;left:0;right:0;bottom:calc(var(--tabh) + env(safe-area-inset-bottom));max-height:min(70dvh,70svh);background:#0c1118;border-top:1px solid #203049;border-right:0;border-left:0;border-radius:16px 16px 0 0;z-index:1700;transform:translateY(calc(100% - 36px));transition:transform .25s ease;padding-bottom:env(safe-area-inset-bottom)}
 #mobileSheet.open{transform:translateY(0)}
 #mobileSheetHeader{display:flex;align-items:center;gap:8px;padding:8px 10px;border-bottom:1px solid #1b2636;cursor:pointer}
 #mobileSheetGrip{width:36px;height:4px;background:#30425e;border-radius:999px;margin:2px auto}
@@ -102,7 +81,6 @@ body.wide .main{grid-template-columns:1fr}
 .thumb .del:hover{background:#2a3b55}
 </style>
 
-<!-- three.js ES Modules -->
 <script type="importmap">
 { "imports": {
   "three": "https://unpkg.com/three@0.157.0/build/three.module.js",
@@ -110,7 +88,6 @@ body.wide .main{grid-template-columns:1fr}
 } }
 </script>
 
-<!-- HEIC/HEIF converter -->
 <script src="https://unpkg.com/heic2any@0.0.5/dist/heic2any.min.js"></script>
 </head>
 <body>
@@ -128,13 +105,14 @@ body.wide .main{grid-template-columns:1fr}
   </header>
 
   <div class="main">
+    <!-- 左ツール -->
     <section class="panel" id="leftToolbox">
       <h3>ツールボックス（マテリアル & カメラ & ピン）</h3>
       <div class="body" id="leftBody">
         <!-- ピン -->
         <div id="pinTools">
           <div class="small">Shift + クリック でピンを配置（編集モードのみ）</div>
-          <div class="small" style="margin:6px 0">プリセット色（1列）：</div>
+          <div class="small" style="margin:6px 0">プリセット色：</div>
           <div id="colorPresets" class="flex" style="gap:6px;flex-wrap:nowrap"></div>
           <div class="flex" style="margin-top:6px;margin-bottom:6px">
             <button id="btnAddPin" disabled>＋ ピン追加モード</button>
@@ -174,6 +152,7 @@ body.wide .main{grid-template-columns:1fr}
       </div>
     </section>
 
+    <!-- ビューア -->
     <section class="panel" id="viewer">
       <div class="spinner" id="loading" hidden><div class="lds"></div></div>
       <canvas id="viewerCanvas"></canvas>
@@ -203,6 +182,7 @@ body.wide .main{grid-template-columns:1fr}
       <div class="hud"><div class="chip" id="modeLabel">Orbit</div></div>
     </section>
 
+    <!-- 右キャプション -->
     <section class="panel" id="rightCaption">
       <h3>キャプション</h3>
       <div class="body" id="rightBody">
@@ -530,6 +510,7 @@ const endInteraction = debounce(()=>{
 function viewerInit(){
   const Q=getQualityProfile();
   renderer=new THREE.WebGLRenderer({ canvas:el.viewerCanvas, antialias:Q.antialias, powerPreference:'low-power', alpha:false });
+  renderer.debug.checkShaderErrors = true; /* ← デバッグ有効 */
   basePixelRatio=Math.min(window.devicePixelRatio||1, Q.pixelRatioCap);
   lowPixelRatio=Math.max(0.6, Math.min(basePixelRatio*0.75, 1.0));
   renderer.setPixelRatio(basePixelRatio);
@@ -641,8 +622,6 @@ function toggleProjection(useOrtho){
   else{ perspCam.position.copy(controls.target.clone().addScaledVector(dir, Math.max(dist,0.1))); camera=perspCam; }
   buildControls(); requestRender();
 }
-
-/* set camera to fixed axis view (target = origin) */
 function setAxisView(dir){
   const origin=new THREE.Vector3(0,0,0);
   const { radius } = sceneBounds();
@@ -729,22 +708,31 @@ function collectMaterials(root){
     matOriginals.set(m,{ transparent:m.transparent, opacity:m.opacity, side:m.side, map:m.map||null, color:m.color?.clone?.()||new THREE.Color(0xffffff) });
   });
 }
-function clamp01(v,def=0){ const n=parseFloat(v); return Number.isFinite(n)? Math.min(1,Math.max(0,n)) : def; }
-function programKeyFromUI(){
-  return JSON.stringify({
-    U: el.matUnlit.checked ? 1 : 0,
-    D: el.matDoubleSided.checked ? 1 : 0,
-    O: Number(el.matOpacity.value||1).toFixed(2),
-    WT: el.matWhiteTransparent.checked ? 1 : 0, // 白→透明
-    BT: el.matInvert.checked ? 1 : 0,           // 黒→透明
-    T: Number(el.matThreshold.value||0).toFixed(3)
-  });
+
+/* 安全なシェーダ注入補助 */
+function hasOutputInclude(frag){ return frag.includes('#include <output_fragment>'); }
+function hasDiffuseColor(frag){ return /diffuseColor\s*\./.test(frag) || /\bvec4\s+diffuseColor\b/.test(frag); }
+function injectAlphaPatch(frag, injected){
+  const begin='// LMY_BEGIN', end='// LMY_END';
+  // 既存差し込みを除去してから再注入
+  frag = frag.replace(new RegExp(`${begin}[\\s\\S]*?${end}`,'g'), '');
+  const footer = '#include <output_fragment>';
+  if(frag.includes(footer)){
+    return frag.replace(footer, `${begin}\n${injected}\n${end}\n${footer}`);
+  } else {
+    // 予備：末尾に追加（安全性重視）
+    return `${frag}\n${begin}\n${injected}\n${end}\n`;
+  }
 }
 
-/* ★ 修正版：Shader 安定化版 applyMatUITo（uniform 注入／alpha のみ操作。unlit は lights=false） */
+/* ここが今回の修正中核：安全版 applyMatUITo */
 function applyMatUITo(material){
   if(!material) return;
-  if (material.isShaderMaterial || material.isRawShaderMaterial) return;
+
+  // Shader/RawShader は対象外
+  if (material.isShaderMaterial || material.isRawShaderMaterial) {
+    material.needsUpdate = true; requestRender(); return;
+  }
 
   const unlit   = !!el.matUnlit.checked;
   const dbl     = !!el.matDoubleSided.checked;
@@ -753,8 +741,9 @@ function applyMatUITo(material){
   const blackT  = !!el.matInvert.checked;           // 黒→透明
   const thr     = clamp01(el.matThreshold.value, 0);
 
-  // Unlit は three のフラグで切替（照明計算を完全オフ）
+  // Unlit：ライト計算とトーンマッピングを切る（シェーダは触らない）
   material.lights = !unlit;
+  material.toneMapped = !unlit;
 
   // 一般パラメータ
   material.transparent = (opacity < 1.0) || whiteT || blackT || (material.alphaTest > 0);
@@ -763,7 +752,7 @@ function applyMatUITo(material){
   material.side        = dbl ? THREE.DoubleSide : THREE.FrontSide;
   material.depthWrite  = !(whiteT || blackT) || (opacity >= 1.0);
 
-  // キャッシュキー（不要な再コンパイルを抑制）
+  // キャッシュキー（再コンパイル安定）
   const cacheKey = JSON.stringify({
     U: unlit ? 1 : 0,
     D: dbl ? 1 : 0,
@@ -774,40 +763,64 @@ function applyMatUITo(material){
   });
   material.customProgramCacheKey = ()=> cacheKey;
 
-  // フック：アルファだけ安全に調整（outgoingLight には触れない）
+  // パッチは “出力フラグメントあり & diffuseColor あり” の材質にのみ適用
+  // また、白/黒→透明いずれか or 不透明度が 1 以外 のときに限定（無駄な差し込みを避ける）
+  const needPatch = (whiteT || blackT || opacity < 1.0);
+
+  if(!needPatch){
+    // 差し込み不要のときは既存 onBeforeCompile をクリアして更新
+    material.onBeforeCompile = undefined;
+    material.needsUpdate = true; requestRender(); return;
+  }
+
   material.onBeforeCompile = (shader)=>{
-    shader.uniforms.uLMThreshold = { value: thr };
+    try{
+      let frag = shader.fragmentShader;
+      if(!hasOutputInclude(frag) || !hasDiffuseColor(frag)){
+        // パッチ条件を満たさない → そのまま（パラメータだけで対応）
+        return;
+      }
+      // uniform を common セクションに（重複はマーカー削除で防ぐ）
+      const headerNeedle = '#include <common>';
+      const decl = 'uniform float uLMThreshold;';
+      frag = frag.replace(/uniform\s+float\s+uLMThreshold\s*;/g,''); // 重複回避
+      if(frag.includes(headerNeedle)){
+        frag = frag.replace(headerNeedle, `${headerNeedle}\n${decl}`);
+      }else{
+        frag = `${decl}\n${frag}`;
+      }
 
-    let frag = shader.fragmentShader;
-
-    // uniform 宣言を必ず注入
-    const headerNeedle = '#include <common>';
-    frag = frag.includes(headerNeedle)
-      ? frag.replace(headerNeedle, headerNeedle + '\n' + 'uniform float uLMThreshold;')
-      : ('uniform float uLMThreshold;\n' + frag);
-
-    // 出力直前に alpha のみ調整（色は既存のパイプラインに任せる）
-    const footerNeedle = '#include <output_fragment>';
-    const injected = `
-      // === LociMyu Patch: alpha only ===
-      float lm_luma = dot( diffuseColor.rgb, vec3(0.299, 0.587, 0.114) );
-      float lm_aAdj = diffuseColor.a;
-      ${whiteT ? `lm_aAdj *= (1.0 - smoothstep(1.0 - uLMThreshold, 1.0, lm_luma));` : ``}
-      ${blackT ? `lm_aAdj *= smoothstep(uLMThreshold, 1.0, lm_luma);` : ``}
-      lm_aAdj *= ${opacity.toFixed(3)};
-      diffuseColor.a = lm_aAdj;
-      // === /LociMyu Patch ===
-    `;
-
-    frag = frag.includes(footerNeedle)
-      ? frag.replace(footerNeedle, injected + '\n' + footerNeedle)
-      : (frag + '\n' + injected + '\n');
-
-    shader.fragmentShader = frag;
+      // アルファのみ調整（色は触らない）
+      const injected = `
+float lm_luma = dot( diffuseColor.rgb, vec3(0.299, 0.587, 0.114) );
+float lm_aAdj = diffuseColor.a;
+${whiteT ? `lm_aAdj *= (1.0 - smoothstep(1.0 - uLMThreshold, 1.0, lm_luma));` : ``}
+${blackT ? `lm_aAdj *= smoothstep(uLMThreshold, 1.0, lm_luma);` : ``}
+lm_aAdj *= ${opacity.toFixed(3)};
+diffuseColor.a = lm_aAdj;
+`;
+      frag = injectAlphaPatch(frag, injected);
+      shader.fragmentShader = frag;
+      shader.uniforms.uLMThreshold = { value: thr };
+    }catch(e){
+      console.warn('shader patch skipped:', e);
+    }
   };
 
   material.needsUpdate = true;
   requestRender();
+}
+
+function clamp01(v,def=0){ const n=parseFloat(v); return Number.isFinite(n)? Math.min(1,Math.max(0,n)) : def; }
+function programKeyFromUI(){
+  return JSON.stringify({
+    U: el.matUnlit.checked ? 1 : 0,
+    D: el.matDoubleSided.checked ? 1 : 0,
+    O: Number(el.matOpacity.value||1).toFixed(2),
+    WT: el.matWhiteTransparent.checked ? 1 : 0,
+    BT: el.matInvert.checked ? 1 : 0,
+    T: Number(el.matThreshold.value||0).toFixed(3)
+  });
 }
 
 function updateMatUIFromState(material){
@@ -819,7 +832,7 @@ function updateMatUIFromState(material){
   el.matOpacity.value = String(v.opacity);
   el.matOpacityVal.textContent = Number(v.opacity).toFixed(2);
   el.matWhiteTransparent.checked = !!v.whiteTransparent;
-  el.matInvert.checked = !!v.blackTransparent; // 黒→透明
+  el.matInvert.checked = !!v.blackTransparent;
   el.matThreshold.value = String(v.threshold);
   el.matThresholdVal.textContent = Number(v.threshold).toFixed(2);
 }
@@ -829,8 +842,8 @@ function saveMatState(material){
     unlit: !!el.matUnlit.checked,
     doubleSided: !!el.matDoubleSided.checked,
     opacity: clamp01(el.matOpacity.value,1),
-    whiteTransparent: !!el.matWhiteTransparent.checked, // 白→透明
-    blackTransparent: !!el.matInvert.checked,           // 黒→透明
+    whiteTransparent: !!el.matWhiteTransparent.checked,
+    blackTransparent: !!el.matInvert.checked,
     threshold: clamp01(el.matThreshold.value,0)
   };
   matState.set(key, s);
@@ -861,7 +874,7 @@ async function fileToObjectURL(fileId){
   const blob=await res.blob(); return URL.createObjectURL(blob);
 }
 
-/* pins UI */
+/* pins UI …（以下は前回同等。省略せず収録） */
 function buildColorPresets(){
   el.colorPresets.innerHTML='';
   PRESET_COLORS.forEach(col=>{
@@ -929,7 +942,7 @@ async function setPreview(p){
   }catch(err){ console.warn('preview failed', err); el.previewErr.style.display='block'; }
 }
 
-/* pointer (Shift+クリック対応) */
+/* pointer */
 function onPointerDown(ev){
   if(!currentModel) return;
   const rect=el.viewerCanvas.getBoundingClientRect();
@@ -970,7 +983,7 @@ function applyPinVisibilityFilter(){
   requestRender();
 }
 
-/* Sheets */
+/* Sheets （GLBと同階層生成・キャプションリスト管理・メタ保存）*/
 async function loadOrEnsureSpreadsheet(glbFileId){
   const input=extractSpreadsheetId(el.inputSheet.value||'');
   if(input){ activeSheet.sheetId=input; await ensureSheetPicked(); return; }
@@ -1173,8 +1186,6 @@ function wireUI(){
   el.tabPins.addEventListener('click',   ()=> setActiveMobileTab('pins'));
   el.tabTools.addEventListener('click',  ()=> setActiveMobileTab('tools'));
   el.mobileSheetClose.addEventListener('click', ()=> setActiveMobileTab('viewer'));
-
-  // ヘッダー（グリップ）タップで開閉
   el.mobileSheetHeader.addEventListener('click', ()=>{
     if(!el.mobileSheet.classList.contains('open')) setActiveMobileTab('pins');
     else setActiveMobileTab('viewer');
