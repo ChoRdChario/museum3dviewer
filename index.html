@@ -440,8 +440,8 @@ const el = {
   matDoubleSided: document.getElementById('matDoubleSided'),
   matOpacity: document.getElementById('matOpacity'),
   matOpacityVal: document.getElementById('matOpacityVal'),
-  matInvert: document.getElementById('matInvert'),              // 黒→透明
-  matWhiteTransparent: document.getElementById('matWhiteTransparent'), // 白→透明
+  matInvert: document.getElementById('matInvert'),
+  matWhiteTransparent: document.getElementById('matWhiteTransparent'),
   matThreshold: document.getElementById('matThreshold'),
   matThresholdVal: document.getElementById('matThresholdVal'),
   viewFront: document.getElementById('viewFront'),
@@ -740,8 +740,12 @@ function programKeyFromUI(){
     T: Number(el.matThreshold.value||0).toFixed(3)
   });
 }
+
+/* ★ 修正版：安全な onBeforeCompile 差し替え */
 function applyMatUITo(material){
   if(!material) return;
+  // three の生シェーダ系は対象外
+  if (material.isShaderMaterial || material.isRawShaderMaterial) return;
 
   const unlit   = !!el.matUnlit.checked;
   const dbl     = !!el.matDoubleSided.checked;
@@ -750,14 +754,24 @@ function applyMatUITo(material){
   const blackT  = !!el.matInvert.checked;           // 黒→透明
   const thr     = clamp01(el.matThreshold.value, 0);
 
-  // 透過に関与する要素がある場合 transparent を有効化
+  // 透過条件
   material.transparent = (opacity < 1.0) || whiteT || blackT || (material.alphaTest > 0);
   material.opacity = opacity;
-  material.alphaTest = (whiteT || blackT) ? Math.max(0.001, thr*0.2) : 0.0;
+
+  // αテストは控えめ（にじみ防止）。白/黒→透明OFF時は0
+  material.alphaTest = (whiteT || blackT) ? Math.max(0.0001, thr * 0.05) : 0.0;
+
   material.side = dbl ? THREE.DoubleSide : THREE.FrontSide;
   material.depthWrite = !(whiteT || blackT) || (opacity >= 1.0);
 
-  const cacheKey = programKeyFromUI();
+  const cacheKey = JSON.stringify({
+    U: unlit ? 1 : 0,
+    D: dbl ? 1 : 0,
+    O: Number(opacity).toFixed(2),
+    WT: whiteT ? 1 : 0,
+    BT: blackT ? 1 : 0,
+    T: Number(thr).toFixed(3)
+  });
   material.customProgramCacheKey = ()=> cacheKey;
 
   material.onBeforeCompile = (shader)=>{
@@ -766,34 +780,33 @@ function applyMatUITo(material){
     const needle = '#include <output_fragment>';
     let frag = shader.fragmentShader;
 
-    const patch = `
-      // === LociMyu Material Patch ===
+    // 出力直前に diffuseColor / outgoingLight を調整し、既存の出力を残す
+    const injected = `
+      // === LociMyu Patch (safe pre-output) ===
       float luma = dot( diffuseColor.rgb, vec3(0.299, 0.587, 0.114) );
-      float a = diffuseColor.a;
+      float aAdj = diffuseColor.a;
 
-      vec3 outRGB = ${unlit ? 'diffuseColor.rgb' : 'outgoingLight'};
+      ${whiteT ? `aAdj *= (1.0 - smoothstep(1.0 - uLMThreshold, 1.0, luma));` : ``}
+      ${blackT ? `aAdj *= smoothstep(uLMThreshold, 1.0, luma);` : ``}
 
-      ${whiteT ? `a *= (1.0 - smoothstep(1.0 - uLMThreshold, 1.0, luma));` : ''}
-      ${blackT ? `a *= smoothstep(uLMThreshold, 1.0, luma);` : ''}
+      aAdj *= ${opacity.toFixed(3)};
+      diffuseColor.a = aAdj;
 
-      a = a * ${opacity.toFixed(3)};
-
-      if(a <= 0.0){ discard; }
-
-      gl_FragColor = vec4(outRGB, a);
-      // === /LociMyu Material Patch ===
+      ${unlit ? `outgoingLight = diffuseColor.rgb;` : ``}
+      // === /LociMyu Patch ===
     `;
 
     if (frag.includes(needle)){
-      shader.fragmentShader = frag.replace(needle, patch);
+      shader.fragmentShader = frag.replace(needle, injected + '\n' + needle);
     } else {
-      shader.fragmentShader = frag + '\n' + patch + '\n';
+      shader.fragmentShader = frag + '\n' + injected + '\n';
     }
   };
 
   material.needsUpdate = true;
   requestRender();
 }
+
 function updateMatUIFromState(material){
   const key=materialKeyByMaterial.get(material); const s=matState.get(key);
   const def = { unlit:false, doubleSided:false, opacity:1, whiteTransparent:false, blackTransparent:false, threshold:0 };
