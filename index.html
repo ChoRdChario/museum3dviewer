@@ -3,22 +3,23 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>LociMyu — Sign-in Safe Full Build</title>
+  <title>LociMyu</title>
   <link rel="icon" href='data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><circle cx="32" cy="32" r="28" fill="%230b0f14"/><text x="32" y="39" font-size="28" text-anchor="middle" fill="%2353b7ff" font-family="Arial">L</text></svg>'>
-
   <style>
-    :root{ --bg:#0b0f14; --panel:#121922; --text:#e6edf3; --accent:#53b7ff; --muted:#8fa3bd; --radius:16px; --shadow:0 10px 30px rgba(0,0,0,.3);}
+    :root{ --bg:#0b0f14; --panel:#121922; --text:#e6edf3; --accent:#53b7ff; --radius:16px; --shadow:0 10px 30px rgba(0,0,0,.3);}
     html,body{height:100%}
-    body{margin:0;background:var(--bg);color:var(--text);font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial}
+    body{margin:0;background:var(--bg);color:var(--text);font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial;}
     .app{display:grid;grid-template-rows:auto 1fr;height:100vh}
     header{display:flex;gap:.75rem;align-items:center;padding:10px 12px;background:linear-gradient(180deg,#0e1520,#0b0f14);border-bottom:1px solid #1e2837}
     .pill{background:rgba(255,255,255,.06);padding:6px 10px;border-radius:999px;border:1px solid rgba(255,255,255,.08);font-weight:700}
-    input[type=text], select, textarea{background:#0f1722;border:1px solid #203049;color:var(--text);border-radius:10px;padding:8px 10px;min-width:260px}
+    input[type=text], select, textarea{background:#0f1722;border:1px solid #203049;color:var(--text);border-radius:10px;padding:8px 10px;min-width:240px}
     button{background:#152133;color:var(--text);border:1px solid #223146;border-radius:10px;padding:8px 12px;cursor:pointer}
     button[disabled]{opacity:.5;cursor:not-allowed}
     button:hover{background:#1a2b45}
     .accent{border-color:#2c82c9}
     .main{display:grid;grid-template-columns:360px 1fr 420px;gap:10px;padding:10px;height:calc(100vh - 58px)}
+    body.wide #leftToolbox, body.wide #rightCaption{display:none}
+    body.wide .main{grid-template-columns:1fr}
     .panel{background:#121922;border:1px solid #1e2837;border-radius:var(--radius);overflow:hidden;display:flex;flex-direction:column;min-height:0}
     .panel h3{margin:0;padding:10px 12px;border-bottom:1px solid #203049;background:#0f1722;font-size:.95rem;font-weight:600}
     .panel .body{padding:10px;overflow:auto}
@@ -42,52 +43,49 @@
     .row .title{font-weight:600}
     .row .meta{color:#a9b8cf;font-size:.85rem}
     .row:hover{background:#132035}
-    .flex{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
     .small{font-size:.85rem;color:#a9b8cf}
-    .grid2{display:grid;grid-template-columns:1fr auto;gap:8px;align-items:center}
+    .flex{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+    .field{display:flex;gap:8px;align-items:center;margin:8px 0}
+    .field label{min-width:120px;color:#a9b8cf}
+    input[type="range"]{width:160px}
+    .viewgrid{display:grid;grid-template-columns:repeat(6,1fr);gap:6px}
     .thumbs{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
     .thumb{position:relative}
     .thumb img{width:72px;height:72px;object-fit:cover;border-radius:10px;border:1px solid #223146;display:block}
     .thumb .del{position:absolute;top:-6px;right:-6px;width:20px;height:20px;border-radius:50%;background:#1e2a3b;border:1px solid #334966;color:#e8f0ff;line-height:18px;text-align:center;font-weight:700;cursor:pointer}
     .thumb .del:hover{background:#2a3b55}
-    .hidden{display:none !important}
-    .field{display:flex;gap:8px;align-items:center;margin:8px 0}
-    .field label{min-width:120px;color:#a9b8cf}
-    input[type="range"]{width:160px}
-    .subtle{opacity:.8}
-    .viewgrid{display:grid;grid-template-columns:repeat(6,1fr);gap:6px}
-    .modal{position:fixed;inset:0;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;z-index:40}
-    .modal[hidden]{display:none}
-    .modal .box{width:min(90vw,980px);max-height:80vh;background:#0f1722;border:1px solid #203049;border-radius:16px;overflow:hidden;display:flex;flex-direction:column}
-    .modal header{display:flex;justify-content:space-between;align-items:center;padding:10px 12px;background:#0c131d;border-bottom:1px solid #203049}
-    .modal .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:10px;padding:10px;overflow:auto}
-    .modal .cell{background:#0c1118;border:1px solid #223146;border-radius:12px;padding:8px;cursor:pointer;display:flex;flex-direction:column;gap:6px}
-    .modal .cell img{width:100%;height:110px;object-fit:cover;border-radius:8px}
-    .modal .cell .tag{font-size:.75rem;color:#a9b8cf}
-    #viewerPreview{position:absolute;top:10px;right:10px;max-height:60%;border:1px solid #203049;border-radius:8px;background:#0a0f16cc;backdrop-filter: blur(2px);display:grid;grid-template-rows:auto 1fr auto;gap:6px;resize:both;overflow:hidden;min-width:220px;min-height:180px;padding:0}
+    #viewerPreview{position:absolute;top:10px;right:10px;max-height:60%;border:1px solid #203049;border-radius:8px;background:#0a0f16cc;backdrop-filter: blur(2px);display:grid;grid-template-rows:auto 1fr auto;gap:0;resize:both;overflow:hidden;min-width:260px;min-height:200px}
     #viewerPreview.hidden{display:none}
     #previewControls{position:sticky;top:0;background:#0a0f16f0;border-bottom:1px solid #203049;padding:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;z-index:1}
-    #previewWrap{position:relative;overflow:auto;padding:8px}
+    #previewWrap{position:relative;overflow:auto}
     #previewInner{transform-origin: top left;}
-    #previewInner img{display:block;max-width:none;max-height:none;border-radius:6px}
-    #viewerPreview .cap{font-size:.8rem;color:#a9b8cf;border-top:1px solid #203049;padding:6px 8px;background:#0a0f16f0}
-    @media (max-width: 1100px){ .main{grid-template-columns:1fr; grid-template-rows: 360px 1fr 480px} }
-    .dropdown{position:relative;display:inline-block}
-    .dropdown-panel{position:absolute;top:100%;right:0;background:#0f1722;border:1px solid #203049;border-radius:10px;box-shadow:var(--shadow);padding:10px;min-width:220px;z-index:15}
-    .dropdown-panel[hidden]{display:none}
+    #previewInner img{display:block;max-width:none;max-height:none;border-radius:0}
+    #viewerPreview .cap{border-top:1px solid #203049;background:#0a0f16f0;display:grid;grid-template-rows:auto auto;gap:4px;padding:6px 8px}
+    #capTitleLine{font-weight:700}
+    #capBodyLine{font-size:.85rem;color:#c9d7ea;max-height:8em;overflow:auto}
+    body.viewonly #pinTools{display:none}
+    body.viewonly #btnSavePin,
+    body.viewonly #btnDeletePin,
+    body.viewonly #btnAttach,
+    body.viewonly #btnPickFromFolder,
+    body.viewonly #autosaveTip,
+    body.viewonly #listNew,
+    body.viewonly #listDelete { display:none; }
+    @media (max-width:1100px){
+      .main{grid-template-columns:1fr; grid-template-rows: 360px 1fr 480px}
+    }
   </style>
 
+  <!-- ES Modules -->
   <script type="importmap">
-  {
-    "imports": {
+  { "imports": {
       "three": "https://unpkg.com/three@0.157.0/build/three.module.js",
       "three/examples/jsm/": "https://unpkg.com/three@0.157.0/examples/jsm/"
-    }
-  }
+    } }
   </script>
-  <script src="https://unpkg.com/heic2any@0.0.4/dist/heic2any.min.js"></script>
+  <!-- HEIC fallback -->
+  <script src="https://unpkg.com/heic2any@0.0.5/dist/heic2any.min.js"></script>
 </head>
-
 <body>
 <div class="app">
   <header>
@@ -97,35 +95,45 @@
       <input id="inputSheet" type="text" placeholder="SpreadsheetId or share URL（空なら自動作成）" />
       <button id="btnLoad" class="accent" disabled>GLBを読み込む</button>
       <button id="btnViewOnly">閲覧リンクを生成</button>
+      <button id="btnWide">📺 ビューア拡大</button>
       <span id="statusLabel" class="chip">サインイン待ち…</span>
     </div>
   </header>
 
   <div class="main">
+    <!-- 左：ツール -->
     <section class="panel" id="leftToolbox">
       <h3>ツールボックス（マテリアル & カメラ & ピン）</h3>
       <div class="body">
-        <div class="small subtle">Shift + クリック でピンを配置</div>
-        <div class="flex" style="margin-top:6px;margin-bottom:6px">
-          <button id="btnAddPin" disabled>＋ ピン追加モード</button>
-          <button id="btnGizmo" disabled>ギズモ: OFF</button>
-          <button id="btnUndo" disabled>Ctrl+Z</button>
+        <div id="pinTools">
+          <div class="small">Shift + クリック でピンを配置（編集モードのみ）</div>
+          <div class="flex" style="margin-top:6px;margin-bottom:6px">
+            <button id="btnAddPin" disabled>＋ ピン追加モード</button>
+            <button id="btnGizmo" disabled>ギズモ: OFF</button>
+            <button id="btnUndo" disabled>Ctrl+Z</button>
+            <button id="btnTogglePins" disabled>ピン表示: ON</button>
+          </div>
+          <div class="flex" style="align-items:center;flex-wrap:nowrap">
+            <div class="small">ピン色:</div>
+            <div id="colorPresets" class="flex" style="flex-wrap:nowrap"></div>
+          </div>
+          <hr style="border-color:#203049;border-width:1px 0;margin:12px 0">
         </div>
 
-        <hr style="border-color:#203049;border-width:1px 0;margin:12px 0">
-
-        <div class="small" style="margin:4px 0 6px">マテリアル編集</div>
-        <div class="field"><label>対象</label><select id="matSelect"><option value="__all__">（全マテリアル）</option></select></div>
+        <div class="small" style="margin:4px 0 6px">マテリアル編集（キャプションシートごとに保存）</div>
+        <div class="field"><label>対象</label>
+          <select id="matSelect"><option value="__all__">（全マテリアル：編集不可）</option></select>
+        </div>
         <div class="field"><label>Unlit</label><input id="matUnlit" type="checkbox"><span class="small">明暗なし</span></div>
-        <div class="field"><label>裏面描画</label><input id="matDoubleSided" type="checkbox"><span class="small">DoubleSide</span></div>
+        <div class="field"><label>裏面描画</label><input id="matDoubleSided" type="checkbox"></div>
         <div class="field"><label>不透明度</label><input id="matOpacity" type="range" min="0" max="1" step="0.01" value="1"><span id="matOpacityVal" class="small">1.00</span></div>
-        <div class="field"><label>白→透明</label><input id="matWhiteTransparent" type="checkbox"><span class="small">白ほど透明</span></div>
-        <div class="field"><label>黒→透明（反転）</label><input id="matBlackTransparent" type="checkbox"><span class="small">黒ほど透明</span></div>
+        <div class="field"><label>テクスチャ反転</label><input id="matInvert" type="checkbox"></div>
+        <div class="field"><label>白→透明</label><input id="matWhiteTransparent" type="checkbox"></div>
         <div class="field"><label>閾値（αTest）</label><input id="matThreshold" type="range" min="0" max="1" step="0.01" value="0"><span id="matThresholdVal" class="small">0.00</span></div>
 
         <hr style="border-color:#203049;border-width:1px 0;margin:12px 0">
 
-        <div class="small" style="margin:4px 0 6px">ビュー</div>
+        <div class="small" style="margin:4px 0 6px">ビュー（キャプションシートごとに保存）</div>
         <div class="viewgrid" style="margin-bottom:8px">
           <button id="viewFront">前面</button>
           <button id="viewBack">背面</button>
@@ -139,103 +147,112 @@
       </div>
     </section>
 
+    <!-- 中央：ビューア -->
     <section class="panel" id="viewer">
       <div class="spinner" id="loading" hidden><div class="lds"></div></div>
       <canvas id="viewerCanvas"></canvas>
-
       <svg id="connector">
-        <defs>
-          <filter id="dropshadow" x="-20%" y="-20%" width="140%" height="140%">
-            <feDropShadow dx="0" dy="0" stdDeviation="2" flood-color="#001a33" flood-opacity="0.9"/>
-          </filter>
-        </defs>
+        <defs><filter id="dropshadow" x="-20%" y="-20%" width="140%"><feDropShadow dx="0" dy="0" stdDeviation="2" flood-color="#001a33" flood-opacity="0.9"/></filter></defs>
         <line id="connLine" x1="0" y1="0" x2="0" y2="0" style="display:none"/>
         <circle id="connDot" r="3" cx="0" cy="0" style="display:none"/>
       </svg>
 
+      <div id="viewerPreview" class="hidden">
+        <div id="previewControls">
+          <span class="small">倍率</span>
+          <input id="previewZoom" type="range" min="0.25" max="3" step="0.05" value="1">
+          <span id="previewZoomVal" class="small">1.00×</span>
+          <button id="previewReset">リセット</button>
+          <span id="previewErr" class="small" style="margin-left:auto;color:#ffb4b4;display:none">画像を読み込めませんでした</span>
+        </div>
+        <div id="previewWrap"><div id="previewInner"><img id="previewImg" alt="preview"/></div></div>
+        <div class="cap">
+          <div id="capTitleLine"></div>
+          <div id="capBodyLine"></div>
+        </div>
+      </div>
+
       <div class="hud"><div class="chip" id="modeLabel">Orbit</div></div>
     </section>
 
+    <!-- 右：キャプション -->
     <section class="panel" id="rightCaption">
       <h3>キャプション</h3>
       <div class="body">
         <div class="flex" style="justify-content:space-between;align-items:center;margin-bottom:6px">
-          <div class="small">ピン一覧</div>
+          <div class="flex" style="gap:8px;align-items:center">
+            <div class="small">ピン一覧</div>
+            <button id="btnColorFilter">色で絞り込み ▾</button>
+          </div>
           <div class="flex" style="gap:6px;align-items:center">
-            <div class="dropdown">
-              <button id="btnColorFilter" disabled>色フィルタ ▾</button>
-              <div id="colorFilterPanel" class="dropdown-panel" hidden>
-                <div class="small" style="margin-bottom:6px">表示する色を選択（複数可）</div>
-                <div id="colorFilterList"></div>
-                <div class="flex" style="justify-content:flex-end;margin-top:8px">
-                  <button id="btnFilterAll">すべて</button>
-                  <button id="btnFilterNone">なし</button>
-                  <button id="btnFilterClose">閉じる</button>
-                </div>
-              </div>
-            </div>
-            <button id="btnTogglePins" disabled>ピン表示: ON</button>
+            <select id="listSelect" disabled></select>
+            <button id="listNew" disabled>新規</button>
+            <button id="listDelete" disabled>削除</button>
+          </div>
+        </div>
+
+        <div id="colorFilterPanel" class="panel body" style="display:none;margin-bottom:8px;padding:8px">
+          <div class="small" style="margin-bottom:6px">表示する色を選択（複数可）</div>
+          <div id="colorFilterList"></div>
+          <div class="flex" style="justify-content:flex-end;margin-top:8px">
+            <button id="btnFilterAll">すべて</button>
+            <button id="btnFilterNone">なし</button>
+            <button id="btnFilterClose">閉じる</button>
           </div>
         </div>
 
         <div id="pinsList" class="list" style="margin:8px 0 14px"></div>
-
         <div id="noSelection">ピンを選択してください</div>
 
         <div id="editor" class="hidden">
-          <div class="grid2">
-            <label>タイトル<input id="capTitle" type="text" placeholder="タイトル" /></label>
-            <button id="btnSavePin" class="accent" disabled>保存（Sheets）</button>
-          </div>
-          <label>本文<textarea id="capBody" rows="6" placeholder="キャプション本文"></textarea></label>
+          <div class="field" style="width:100%"><label>タイトル</label><input id="capTitle" type="text" placeholder="タイトル" style="flex:1"/></div>
+          <div class="field" style="width:100%"><label>本文</label><textarea id="capBody" rows="6" placeholder="キャプション本文" style="flex:1"></textarea></div>
 
           <div class="flex">
-            <input id="imgLocal" type="file" accept="image/*,.heic,.HEIC" />
+            <input id="imgLocal" type="file" accept="image/*,.heic,.HEIC" style="display:none"/>
             <button id="btnAttach" class="accent" disabled>画像を添付してDriveに保存</button>
-          </div>
-          <div class="flex">
-            <button id="btnPickFromFolder" class="accent" disabled>📁 Driveから保存</button>
+            <button id="btnPickFromFolder" class="accent" disabled>Driveから保存</button>
           </div>
 
           <div class="thumbs" id="thumbs"></div>
 
           <div class="flex" style="justify-content:space-between;margin-top:8px;margin-bottom:8px">
+            <button id="btnSavePin" class="accent" disabled>保存（Sheets）</button>
             <button id="btnDeletePin" style="border-color:#5a1f26;color:#ffb4b4" disabled>ピン削除</button>
             <span class="small" id="autosaveTip">入力は数秒後に自動保存</span>
           </div>
-          <div class="small subtle">※ ピン選択でビューが自動で寄ります</div>
         </div>
       </div>
     </section>
   </div>
 </div>
 
-<div id="pickerModal" class="modal" hidden>
-  <div class="box">
-    <header>
-      <strong>フォルダ内の画像を選択</strong>
-      <div style="display:flex;gap:8px;align-items:center">
-        <button id="btnPickerReload">再読み込み</button>
-        <button id="btnPickerClose">閉じる</button>
-      </div>
-    </header>
-    <div id="pickerGrid" class="grid"></div>
+<!-- Drive画像ピッカー -->
+<div id="pickerModal" class="signin-gate" style="display:none;background:rgba(0,0,0,.55)">
+  <div class="card" style="width:min(90vw,980px);max-height:80vh;overflow:hidden">
+    <h1 style="margin:0 0 6px">Driveから保存</h1>
+    <div class="flex" style="justify-content:flex-end;margin-bottom:8px">
+      <button id="btnPickerReload">再読み込み</button>
+      <button id="btnPickerClose">閉じる</button>
+    </div>
+    <div id="pickerGrid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:10px;overflow:auto;max-height:60vh"></div>
   </div>
 </div>
 
+<!-- サインインゲート -->
 <div class="signin-gate" id="gate">
   <div class="card">
     <h1>Googleにサインイン</h1>
     <p>本ツールは Google Drive / Google Sheets を使用します。先にサインインしてください。</p>
     <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
-      <button id="btnSignIn" class="accent" style="font-weight:700" disabled>🔐 Sign in with Google</button>
-      <span class="meta" style="opacity:.8">OAuth2 (Drive.file / Sheets)</span>
+      <button id="btnSignIn" class="accent" style="font-weight:700">🔐 Sign in with Google</button>
+      <span class="small" style="opacity:.8">OAuth2 (Drive.file / Sheets)</span>
     </div>
   </div>
 </div>
 
+<!-- Google SDK -->
 <script>
-  // フラグ：Googleライブラリロード
   window.__flags = { gapi:false, gis:false };
   function onGapi(){ window.__flags.gapi = true; }
   function onGis(){  window.__flags.gis  = true; }
@@ -244,12 +261,18 @@
 <script async defer src="https://apis.google.com/js/api.js" onload="onGapi()"></script>
 
 <script type="module">
+/* ===== Three.js imports ===== */
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js';
 
-/* ===================== Google API 設定 ===================== */
+/* ================== iOS Detection & constants ================== */
+const IS_IOS = /iP(hone|ad|od)/.test(navigator.platform) ||
+               (navigator.userAgent.includes('Mac') && 'ontouchend' in document);
+const ORTHO_MARGIN = IS_IOS ? 1.6 : 1.8;
+
+/* ================== Google Auth ================== */
 const CLIENT_ID = '595200751510-ncahnf7edci6b9925becn5to49r6cguv.apps.googleusercontent.com';
 const API_KEY   = 'AIzaSyCUnTCr5yWUWPdEXST9bKP1LpgawU5rIbI';
 const DISCOVERY_DOCS = [
@@ -263,28 +286,129 @@ const SCOPES = [
   'https://www.googleapis.com/auth/spreadsheets'
 ].join(' ');
 
-/* ===================== 要素参照 ===================== */
+let tokenClient = null;
+let accessToken = null;
+let gapiReady = false;
+let gisReady  = false;
+
+async function ensureGapiClient() {
+  if (gapiReady) return;
+  if (!(window.gapi && gapi && gapi.load)) {
+    await new Promise(r => {
+      const t = setInterval(() => {
+        if (window.gapi && gapi && gapi.load) { clearInterval(t); r(); }
+      }, 50);
+    });
+  }
+  await new Promise((resolve) => gapi.load('client', resolve));
+  await gapi.client.init({ apiKey: API_KEY, discoveryDocs: DISCOVERY_DOCS });
+  gapiReady = true;
+}
+async function ensureGIS() {
+  if (gisReady) return;
+  if (!(window.google && google.accounts && google.accounts.oauth2)) {
+    await new Promise(r => {
+      const t = setInterval(() => {
+        if (window.google && google.accounts && google.accounts.oauth2) { clearInterval(t); r(); }
+      }, 50);
+    });
+  }
+  gisReady = true;
+}
+async function ensureTokenClient() {
+  await ensureGIS();
+  if (tokenClient) return tokenClient;
+  tokenClient = google.accounts.oauth2.initTokenClient({
+    client_id: CLIENT_ID,
+    scope: SCOPES,
+    callback: (resp) => {
+      if (resp && resp.access_token) {
+        accessToken = resp.access_token;
+        document.getElementById('gate').style.display = 'none';
+        const viewOnly = new URLSearchParams(location.search).get('view') === '1';
+        document.getElementById('statusLabel').textContent = viewOnly ? '閲覧モード' : 'Ready';
+        ['btnLoad','btnTogglePins','projOrtho','listSelect'].forEach(id=> document.getElementById(id).removeAttribute('disabled'));
+        if(!viewOnly){
+          ['btnAddPin','btnGizmo','btnUndo','btnSavePin','btnDeletePin','btnAttach','btnPickFromFolder','listNew','listDelete']
+            .forEach(id=> document.getElementById(id).removeAttribute('disabled'));
+        }
+        enforceViewOnlyMode();
+
+        const qs = new URLSearchParams(location.search);
+        const fid = qs.get('fileId') || '';
+        const sid = qs.get('sheetId') || '';
+        if(fid) el.inputGLB.value = fid;
+        if(sid) el.inputSheet.value = sid;
+      }
+    }
+  });
+  return tokenClient;
+}
+async function startSignIn() {
+  try {
+    el.statusLabel.textContent = 'サインイン処理中…';
+    await ensureTokenClient();
+    tokenClient.requestAccessToken({ prompt: 'consent' });
+  } catch (e) {
+    console.error(e);
+    alert('サインインの初期化に失敗しました。ネットワーク状態をご確認ください。');
+  }
+}
+
+/* ================== Elements / State ================== */
 const el = {
   gate: document.getElementById('gate'),
-  btnSignIn: document.getElementById('btnSignIn'),
   statusLabel: document.getElementById('statusLabel'),
   inputGLB: document.getElementById('inputGLB'),
   inputSheet: document.getElementById('inputSheet'),
   btnLoad: document.getElementById('btnLoad'),
   btnViewOnly: document.getElementById('btnViewOnly'),
+  btnWide: document.getElementById('btnWide'),
   loading: document.getElementById('loading'),
   viewerCanvas: document.getElementById('viewerCanvas'),
-  // 左パネル抜粋（本件の修正に直接関係のないUIは省略せずそのままあります）
+  viewerPreview: document.getElementById('viewerPreview'),
+  previewWrap: document.getElementById('previewWrap'),
+  previewInner: document.getElementById('previewInner'),
+  previewImg: document.getElementById('previewImg'),
+  previewZoom: document.getElementById('previewZoom'),
+  previewZoomVal: document.getElementById('previewZoomVal'),
+  previewReset: document.getElementById('previewReset'),
+  previewErr: document.getElementById('previewErr'),
+  capTitleLine: document.getElementById('capTitleLine'),
+  capBodyLine: document.getElementById('capBodyLine'),
+  pinsList: document.getElementById('pinsList'),
+  rightNoSel: document.getElementById('noSelection'),
+  rightEditor: document.getElementById('editor'),
+  capTitle: document.getElementById('capTitle'),
+  capBody: document.getElementById('capBody'),
+  btnSavePin: document.getElementById('btnSavePin'),
+  btnDeletePin: document.getElementById('btnDeletePin'),
+  btnAddPin: document.getElementById('btnAddPin'),
+  btnGizmo: document.getElementById('btnGizmo'),
+  btnTogglePins: document.getElementById('btnTogglePins'),
+  btnUndo: document.getElementById('btnUndo'),
+  modeLabel: document.getElementById('modeLabel'),
+  btnSignIn: document.getElementById('btnSignIn'),
+  colorPresets: document.getElementById('colorPresets'),
+  btnColorFilter: document.getElementById('btnColorFilter'),
+  colorFilterPanel: document.getElementById('colorFilterPanel'),
+  colorFilterList: document.getElementById('colorFilterList'),
+  btnFilterAll: document.getElementById('btnFilterAll'),
+  btnFilterNone: document.getElementById('btnFilterNone'),
+  btnFilterClose: document.getElementById('btnFilterClose'),
+  imgLocal: document.getElementById('imgLocal'),
+  btnAttach: document.getElementById('btnAttach'),
+  btnPickFromFolder: document.getElementById('btnPickFromFolder'),
+  thumbs: document.getElementById('thumbs'),
   matSelect: document.getElementById('matSelect'),
   matUnlit: document.getElementById('matUnlit'),
   matDoubleSided: document.getElementById('matDoubleSided'),
   matOpacity: document.getElementById('matOpacity'),
   matOpacityVal: document.getElementById('matOpacityVal'),
+  matInvert: document.getElementById('matInvert'),
   matWhiteTransparent: document.getElementById('matWhiteTransparent'),
-  matBlackTransparent: document.getElementById('matBlackTransparent'),
   matThreshold: document.getElementById('matThreshold'),
   matThresholdVal: document.getElementById('matThresholdVal'),
-  // カメラ
   viewFront: document.getElementById('viewFront'),
   viewBack: document.getElementById('viewBack'),
   viewLeft: document.getElementById('viewLeft'),
@@ -293,237 +417,1349 @@ const el = {
   viewBottom: document.getElementById('viewBottom'),
   projOrtho: document.getElementById('projOrtho'),
   bgColor: document.getElementById('bgColor'),
+  connector: document.getElementById('connector'),
+  connLine: document.getElementById('connLine'),
+  connDot: document.getElementById('connDot'),
+  pickerModal: document.getElementById('pickerModal'),
+  pickerGrid: document.getElementById('pickerGrid'),
+  btnPickerReload: document.getElementById('btnPickerReload'),
+  btnPickerClose: document.getElementById('btnPickerClose'),
+  listSelect: document.getElementById('listSelect'),
+  listNew: document.getElementById('listNew'),
+  listDelete: document.getElementById('listDelete'),
 };
+const viewOnly = new URLSearchParams(location.search).get('view') === '1';
 
-const PRESET_COLORS = ['#ff6b6b','#ffd166','#06d6a0','#118ab2','#a78bfa','#f472b6','#f59e0b','#22c55e','#60a5fa'];
+/* ================== Viewer State ================== */
+let renderer, scene, camera, controls, tcontrols, pinGroup, loader, currentModel=null;
+let perspCam, orthoCam; let usingOrtho=false;
+let raycaster = new THREE.Raycaster(), pointer = new THREE.Vector2();
+let addPinMode=false, currentColor='#ff6b6b';
+let pins=[], selectedPinId=null, undoStack=[];
+let glbParents=[], glbMetaCache=null;
 
-/* ===================== 状態 ===================== */
-const state = {
-  isViewOnly: new URL(location.href).searchParams.get('view') === '1',
-  authReady: false,
-  tokenClient: null,
-  glbFileId: '',
-  sheetId: '',
-  scene:null, camera:null, renderer:null, controls:null, tcontrols:null,
-};
+/* materials (per-material state persisted) */
+let materials=[];
+const materialKeyByMaterial = new Map();   // Material -> key
+const materialByKey = new Map();           // key -> Material
+const matOriginals=new WeakMap();
+const matState = new Map();                // key -> state
+const imageBlobCache = new Map();
+let filterColors = new Set();
+let activeSheet = { sheetId:null, title:'pins' };
 
-/* ===================== Google 初期化（多重ガード） ===================== */
-let __initPromise = null;
-async function initGoogle(){
-  if (__initPromise) return __initPromise;
-  __initPromise = (async ()=>{
-    // ライブラリ読み込みまで待機
-    await new Promise(r => {
-      const tm = setInterval(()=>{
-        if (window.__flags?.gapi && window.__flags?.gis){ clearInterval(tm); r(); }
-      }, 60);
-    });
+const debounce = (fn,ms)=>{ let t; return (...a)=>{ clearTimeout(t); t=setTimeout(()=>fn(...a),ms); }; };
+const debouncedSave = debounce(()=> upsertPinToSheet(), 500);
+const PRESET_COLORS = ['#ff6b6b','#ffd166','#06d6a0','#118ab2','#ef476f','#b5179e','#4361ee','#4cc9f0','#ff9f1c'];
 
-    // gapi client 初期化
-    await new Promise((resolve, reject)=>{
-      gapi.load('client', async ()=>{
-        try{
-          await gapi.client.init({ apiKey: API_KEY, discoveryDocs: DISCOVERY_DOCS });
-          resolve();
-        }catch(e){ reject(e); }
-      });
-    });
-
-    // Token Client 準備
-    state.tokenClient = google.accounts.oauth2.initTokenClient({
-      client_id: CLIENT_ID,
-      scope: SCOPES,
-      callback: (resp) => {
-        if(resp?.error) return;
-        state.authReady = true;
-        el.gate.style.display = 'none';
-        ensureAuthUIs();
-        maybeEnableLoadFromViewLink();
-      }
-    });
-
-    // ゲートのボタン活性化
-    el.btnSignIn.disabled = false;
-    ensureAuthUIs();
-  })();
-  return __initPromise;
+function toast(msg){ el.statusLabel.textContent=msg; setTimeout(()=> el.statusLabel.textContent= viewOnly ? '閲覧モード' : 'Ready', 1800); }
+function ensureArray(x){ return Array.isArray(x)?x:[]; }
+function normalizeHex(c){ const t = new THREE.Color(c); return '#' + t.getHexString(); }
+function enforceViewOnlyMode(){
+  if (!viewOnly) return;
+  document.body.classList.add('viewonly');
+  el.capTitle.readOnly = true; el.capBody.readOnly  = true;
 }
 
-function ensureAuthUIs(){
-  const signedIn = state.authReady;
-  el.statusLabel.textContent = signedIn ? 'サインイン完了' : 'サインイン待ち…';
-  el.btnLoad.disabled = !signedIn;
+/* ========= HEIC helpers ========= */
+function loadScriptOnce(src){
+  return new Promise((resolve,reject)=>{
+    const s=document.createElement('script'); s.src=src; s.async=true; s.onload=resolve; s.onerror=reject;
+    document.head.appendChild(s);
+  });
 }
-
-/* ===================== サインイン UI（初期化待ち→発行） ===================== */
-el.btnSignIn.addEventListener('click', async ()=>{
+async function ensureHeic2any(){
+  if(typeof window.heic2any === 'function') return true;
+  try{ await loadScriptOnce('https://cdn.jsdelivr.net/npm/heic2any@0.0.5/dist/heic2any.min.js'); }catch{}
+  if(typeof window.heic2any === 'function') return true;
+  try{ await loadScriptOnce('https://unpkg.com/heic2any@0.0.5/dist/heic2any.min.js'); }catch{}
+  return (typeof window.heic2any === 'function');
+}
+function upscaleThumbnailUrl(u, size=2048){
+  if(!u) return u;
   try{
-    if(!state.tokenClient){
-      await initGoogle();                 // ← 初期化完了を待つ
+    const url = new URL(u);
+    url.search = url.search.replace(/(\bs=)(\d+)/, `$1${size}`);
+    url.pathname = url.pathname.replace(/=s(\d+)/, `=s${size}`);
+    if(!/(\bs=)/.test(url.search) && !/=s\d+/.test(url.pathname)){
+      url.searchParams.set('s', String(size));
     }
-    state.tokenClient.requestAccessToken({ prompt: '' });
-  }catch(e){
-    console.error('Sign-in failed', e);
-    alert('Google API の初期化中です。数秒後に再試行してください。');
-  }
-});
+    return url.toString();
+  }catch{ return u.replace(/=s(\d+)/, `=s${size}`); }
+}
 
-/* ===================== Three.js ビューア ===================== */
+/* ========= UI wire ========= */
+document.getElementById('btnSignIn').addEventListener('click', startSignIn);
+(async () => { ensureGIS().catch(()=>{}); ensureGapiClient().catch(()=>{}); })();
+
+/* ========= Viewer ========= */
+let rendererLoopId=null;
 function viewerInit(){
-  const canvas = el.viewerCanvas;
-  const renderer = new THREE.WebGLRenderer({canvas, antialias:true, alpha:false});
-  renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
-  renderer.setSize(canvas.clientWidth, canvas.clientHeight, false);
-  renderer.outputColorSpace = THREE.SRGBColorSpace;
+  renderer = new THREE.WebGLRenderer({
+    canvas: el.viewerCanvas,
+    antialias: !IS_IOS,                 // iOSはAAオフで安定性
+    powerPreference: 'low-power',
+    preserveDrawingBuffer: false
+  });
+  const cap = IS_IOS ? 1 : 1.5;         // iOSはDPR=1固定、他は1.5上限
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, cap));
 
-  const scene = new THREE.Scene();
-  const camera = new THREE.PerspectiveCamera(50, 1, 0.01, 2000);
-  camera.position.set(2.5, 1.5, 2.5);
+  scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x0a0f16);
+  perspCam = new THREE.PerspectiveCamera(60, 2, 0.1, 5000);
+  perspCam.position.set(2.8,1.6,3.6);
+  orthoCam = new THREE.OrthographicCamera(-2,2,2,-2, -5000, 5000);
+  camera = perspCam; usingOrtho=false;
 
-  const controls = new OrbitControls(camera, canvas);
-  controls.enableDamping = true;
-  controls.dampingFactor = 0.08;
+  const hemi = new THREE.HemisphereLight(0xffffff, 0x223355, 0.6); scene.add(hemi);
+  const dir = new THREE.DirectionalLight(0xffffff, 1.0); dir.position.set(3,5,4); scene.add(dir);
 
-  const tcontrols = new TransformControls(camera, canvas);
-  tcontrols.visible = false;
-  scene.add(tcontrols);
+  buildControls();
 
-  scene.add(new THREE.AmbientLight(0xffffff, 0.7));
-  const dir = new THREE.DirectionalLight(0xffffff, 0.8);
-  dir.position.set(1,2,1);
-  scene.add(dir);
+  pinGroup = new THREE.Group(); scene.add(pinGroup);
+  loader = new GLTFLoader();
 
-  state.scene=scene; state.camera=camera; state.renderer=renderer; state.controls=controls; state.tcontrols=tcontrols;
-
-  function loop(){ requestAnimationFrame(loop);
-    controls.update();
-    renderer.setSize(canvas.clientWidth, canvas.clientHeight, false);
-    camera.aspect = canvas.clientWidth / canvas.clientHeight;
-    camera.updateProjectionMatrix();
-    renderer.render(scene, camera);
-  }
+  window.addEventListener('resize', resize, { passive:true });
+  el.viewerCanvas.addEventListener('pointerdown', onPointerDown, { passive:false });
+  el.projOrtho.addEventListener('change', ()=> { toggleProjection(el.projOrtho.checked); debouncedSaveMaterials(); });
+  resize();
+  const loop = ()=>{ renderer.render(scene,camera); updateConnector(); rendererLoopId=requestAnimationFrame(loop); };
   loop();
 }
-viewerInit();
-
-/* ===================== カメラ/背景 UI ===================== */
-function focusOrigin(){
-  state.controls.target.set(0,0,0);
-  state.controls.update();
+function buildControls(){
+  if(controls){ controls.dispose(); }
+  controls = new OrbitControls(camera, el.viewerCanvas);
+  controls.target.set(0,0,0); controls.update();
+  controls.addEventListener('change', updateConnector);
+  if(tcontrols){ scene.remove(tcontrols); tcontrols.dispose?.(); }
+  tcontrols = new TransformControls(camera, el.viewerCanvas);
+  tcontrols.setSize(0.9); tcontrols.setSpace('world');
+  tcontrols.addEventListener('dragging-changed', e=>{ controls.enabled = !e.value; });
+  tcontrols.addEventListener('change', ()=>{
+    if(!selectedPinId || !tcontrols.object || !tcontrols.visible) return;
+    const p=pins.find(x=>x.id===selectedPinId); if(!p) return;
+    p.pos.copy(tcontrols.object.position);
+    renderNow(); debouncedSave();
+  });
+  scene.add(tcontrols); tcontrols.visible=false; tcontrols.enabled=false;
 }
-el.bgColor.addEventListener('input', ()=> state.renderer.setClearColor(new THREE.Color(el.bgColor.value)));
-const setView = (x,y,z)=>{ state.camera.position.set(x,y,z); focusOrigin(); }
-el.viewFront.addEventListener('click', ()=> setView(0, 0, 2.2));
-el.viewBack .addEventListener('click', ()=> setView(0, 0,-2.2));
-el.viewLeft .addEventListener('click', ()=> setView( 2.2, 0, 0));
-el.viewRight.addEventListener('click', ()=> setView(-2.2, 0, 0));
-el.viewTop  .addEventListener('click', ()=> setView(0, 2.2, 0));
-el.viewBottom.addEventListener('click', ()=> setView(0,-2.2, 0));
-el.projOrtho.addEventListener('change', ()=>{
-  const canvas = el.viewerCanvas;
-  const aspect = canvas.clientWidth / canvas.clientHeight;
-  if(el.projOrtho.checked){
-    const h=1.8; const o=new THREE.OrthographicCamera(-h*aspect,h*aspect,h,-h,0.01,2000);
-    o.position.copy(state.camera.position); o.lookAt(state.controls.target);
-    state.camera=o; state.controls.object=o;
+function resize(){
+  const w = el.viewerCanvas.clientWidth || el.viewerCanvas.parentElement.clientWidth;
+  const h = el.viewerCanvas.clientHeight || el.viewerCanvas.parentElement.clientHeight;
+  renderer.setSize(w,h,false);
+  if(camera.isPerspectiveCamera){
+    camera.aspect = w/h;
+  }else{ fitOrthoFrustum(); }
+  camera.updateProjectionMatrix(); updateConnector();
+}
+function renderNow(){ renderer.render(scene,camera); updateConnector(); }
+function sceneBounds(){
+  if(!currentModel){ return { center:new THREE.Vector3(0,0,0), radius: 2 }; }
+  const box = new THREE.Box3().setFromObject(currentModel);
+  const size = box.getSize(new THREE.Vector3());
+  const center = box.getCenter(new THREE.Vector3());
+  const radius = Math.max(size.x,size.y,size.z)/2 || 1;
+  return { center, radius: radius*1.2 };
+}
+function focusOrigin(){
+  const { radius } = sceneBounds();
+  const dist = Math.max(radius*2.2, 1.5);
+  const dirv = new THREE.Vector3(1,0.6,1).normalize();
+  const origin = new THREE.Vector3(0,0,0);
+  camera.position.copy(origin.clone().addScaledVector(dirv, dist));
+  controls.target.copy(origin);
+  if(camera.isOrthographicCamera) fitOrthoFrustum();
+  controls.update(); updateConnector();
+}
+function fitOrthoFrustum(){
+  const { radius } = sceneBounds();
+  const w = el.viewerCanvas.clientWidth || 1;
+  const h = el.viewerCanvas.clientHeight || 1;
+  const aspect = w/h;
+  const size = radius*ORTHO_MARGIN;
+  orthoCam.left = -size*aspect;
+  orthoCam.right = size*aspect;
+  orthoCam.top = size;
+  orthoCam.bottom = -size;
+  orthoCam.updateProjectionMatrix();
+}
+function toggleProjection(useOrtho){
+  usingOrtho = !!useOrtho;
+  const origin = new THREE.Vector3(0,0,0);
+  const dir = camera.position.clone().sub(controls.target).normalize();
+  const dist = camera.position.distanceTo(controls.target);
+  if(usingOrtho){
+    fitOrthoFrustum();
+    orthoCam.position.copy(origin.clone().addScaledVector(dir, dist));
+    camera = orthoCam;
   }else{
-    const p=new THREE.PerspectiveCamera(50, aspect, 0.01, 2000);
-    p.position.copy(state.camera.position); p.lookAt(state.controls.target);
-    state.camera=p; state.controls.object=p;
+    perspCam.position.copy(origin.clone().addScaledVector(dir, Math.max(dist, 0.1)));
+    camera = perspCam;
   }
-});
+  buildControls();
+  renderNow();
+}
 
-/* ===================== Drive / Sheets（必要最小限） ===================== */
+/* ========= Pins & Connector ========= */
+function addUndo(u){ undoStack.push(u); }
+function createPin(pos,color){
+  if(viewOnly) return;
+  const id=`p_${Date.now()}_${Math.random().toString(36).slice(2,7)}`;
+  const pin={id,pos:pos.clone(),color:normalizeHex(color||'#ff6b6b'),title:'',body:'',images:[],mesh:null};
+  pins.push(pin);
+  filterColors.add(pin.color);
+  placePinMesh(pin);
+  refreshPinsList();
+  buildColorFilter();
+  selectPin(id);
+  addUndo({type:'add',id});
+  upsertPinToSheet();
+}
+function placePinMesh(pin){
+  if(pin.mesh){ pinGroup.remove(pin.mesh); pin.mesh.geometry.dispose(); pin.mesh.material.dispose(); pin.mesh=null; }
+  const geo=new THREE.SphereGeometry(0.006,16,16);
+  const mat=new THREE.MeshBasicMaterial({color:new THREE.Color(pin.color)});
+  const mesh=new THREE.Mesh(geo,mat);
+  mesh.position.copy(pin.pos); mesh.userData.pinId=pin.id;
+  pin.mesh=mesh; pinGroup.add(mesh);
+  applyPinVisibilityFilter();
+}
+function selectPin(id,{fly}={}){
+  selectedPinId=id;
+  const p=pins.find(x=>x.id===id);
+  if(!p){ el.rightEditor.classList.add('hidden'); el.rightNoSel.classList.remove('hidden'); updateViewerPreviewForPin(null); return; }
+  el.rightNoSel.classList.add('hidden'); el.rightEditor.classList.remove('hidden');
+  el.capTitle.value = p.title || '';
+  el.capBody.value  = p.body  || '';
+  renderThumbs(p);
+  updateViewerPreviewForPin(p);
+  if(fly){ const {x,y,z}=p.pos; controls.target.set(0,0,0); camera.position.lerp(new THREE.Vector3(x,y,z).addScaledVector(new THREE.Vector3(1,0.6,1).normalize(), 0.6), 0.0); controls.update(); }
+  if(tcontrols.visible && p.mesh){ tcontrols.attach(p.mesh); }
+  updateConnector();
+}
+function onPointerDown(e){
+  if(!currentModel) return;
+  el.viewerCanvas.style.cursor = (addPinMode || e.shiftKey) && !viewOnly ? 'crosshair' : 'default';
+
+  const rect=el.viewerCanvas.getBoundingClientRect();
+  pointer.x=((e.clientX-rect.left)/rect.width)*2-1;
+  pointer.y=-((e.clientY-rect.top)/rect.height)*2+1;
+  raycaster.setFromCamera(pointer,camera);
+
+  const hitsPins = raycaster.intersectObjects(pinGroup.children,false);
+  if(hitsPins.length){ selectPin(hitsPins[0].object.userData.pinId, {fly:true}); return; }
+
+  if((e.shiftKey || addPinMode) && !viewOnly){
+    const hitModel = currentModel? raycaster.intersectObject(currentModel,true): [];
+    if(hitModel.length){
+      const pt = hitModel[0].point.clone();
+      createPin(pt,currentColor);
+      if(addPinMode){ addPinMode=false; el.btnAddPin.textContent='＋ ピン追加モード'; el.modeLabel.textContent='Orbit'; el.viewerCanvas.style.cursor='default'; }
+      return;
+    }
+  }
+}
+function updateConnector(){
+  const p = pins.find(x=>x.id===selectedPinId);
+  if(!p || !p.mesh || el.viewerPreview.classList.contains('hidden') || !pinGroup.visible || !p.mesh.visible){
+    el.connLine.style.display = 'none'; el.connDot.style.display = 'none'; return;
+  }
+  const v = p.pos.clone().project(camera);
+  const rect = el.viewerCanvas.getBoundingClientRect();
+  const x = (v.x + 1) / 2 * rect.width;
+  const y = (1 - (v.y + 1) / 2) * rect.height;
+  const rectPrev = el.viewerPreview.getBoundingClientRect();
+  const bx = (rectPrev.left - rect.left);
+  const by = (rectPrev.top - rect.top) + rectPrev.height/2;
+  const svg = el.connector;
+  svg.setAttribute('viewBox', `0 0 ${rect.width} ${rect.height}`);
+  el.connLine.setAttribute('x1', x); el.connLine.setAttribute('y1', y);
+  el.connLine.setAttribute('x2', bx); el.connLine.setAttribute('y2', by);
+  el.connLine.style.display = 'block';
+  el.connDot.setAttribute('cx', x); el.connDot.setAttribute('cy', y);
+  el.connDot.style.display = 'block';
+}
+
+/* ========= Preview ========= */
+let previewZoom = 1.0;
+function applyPreviewZoom(){ el.previewInner.style.transform = `scale(${previewZoom})`; }
+el.previewZoom.addEventListener('input', ()=>{ previewZoom = parseFloat(el.previewZoom.value)||1; el.previewZoomVal.textContent = previewZoom.toFixed(2) + '×'; applyPreviewZoom(); });
+el.previewReset.addEventListener('click', ()=>{ previewZoom = 1; el.previewZoom.value = 1; el.previewZoomVal.textContent = '1.00×'; applyPreviewZoom(); });
+
+async function setPreview(ref, p){
+  if(!ref){ el.viewerPreview.classList.add('hidden'); return; }
+  try{
+    el.previewErr.style.display='none';
+    const src = await resolveImageObjectURL(ref, {preferThumb:false});
+    el.previewImg.src = src;
+    el.previewImg.onerror = ()=>{ el.previewErr.style.display='inline'; };
+    el.capTitleLine.textContent = p?.title || '';
+    el.capBodyLine.textContent  = p?.body  || '';
+    el.viewerPreview.classList.remove('hidden');
+    applyPreviewZoom(); updateConnector();
+  }catch(e){
+    console.warn('preview failed', e);
+    el.previewErr.style.display='inline';
+    el.viewerPreview.classList.remove('hidden');
+  }
+}
+function updateViewerPreviewForPin(p){ setPreview(p && p.images && p.images[0] ? p.images[0] : null, p); }
+
+/* ========= Image resolve & Drive ========= */
+function parseImageRef(ref){
+  if(typeof ref === 'string' && /^(blob:|data:|https?:)/i.test(ref)){ return { kind:'url', url: ref }; }
+  if(typeof ref === 'string' && ref.startsWith('drive:')){
+    const [, rest] = ref.split(':'); const [id, mime] = rest.split('|');
+    return { kind:'drive', id, mime: mime||null };
+  }
+  if(typeof ref === 'string'){
+    const id = extractDriveFileId(ref);
+    if(id){ return { kind:'drive', id, mime:null }; }
+  }
+  return { kind:'url', url: String(ref) };
+}
+async function resolveImageObjectURL(ref, {preferThumb=false}={}){
+  const key = typeof ref==='string'?ref:JSON.stringify(ref);
+  if(imageBlobCache.has(key)) return imageBlobCache.get(key);
+
+  const info = parseImageRef(ref);
+  let outUrl;
+
+  if(info.kind === 'url'){ imageBlobCache.set(key, info.url); return info.url; }
+
+  const meta = await driveFileMeta(info.id);
+  const isHeic = isHeicMimeOrExt(meta.mimeType, meta.fileExtension);
+
+  if(isHeic){
+    const ok = await ensureHeic2any();
+    if(ok){
+      const blob = await driveFileFetchBlob(meta.id);
+      const jpegBlob = await window.heic2any({ blob, toType:'image/jpeg', quality:1.0 });
+      const jpg = Array.isArray(jpegBlob) ? jpegBlob[0] : jpegBlob;
+      outUrl = URL.createObjectURL(jpg);
+    }else if(meta.hasThumbnail && meta.thumbnailLink){
+      const hi = upscaleThumbnailUrl(meta.thumbnailLink, 2048);
+      const sep = hi.includes('?') ? '&' : '?';
+      outUrl = hi + sep + 'access_token=' + encodeURIComponent(accessToken);
+    }else{
+      throw new Error('HEIC preview unavailable (no heic2any & no thumbnailLink)');
+    }
+  }else{
+    if(preferThumb && meta.hasThumbnail && meta.thumbnailLink){
+      const hi = upscaleThumbnailUrl(meta.thumbnailLink, 1024);
+      const sep = hi.includes('?') ? '&' : '?';
+      outUrl = hi + sep + 'access_token=' + encodeURIComponent(accessToken);
+    }else{
+      const blob = await driveFileFetchBlob(meta.id);
+      outUrl = URL.createObjectURL(blob);
+    }
+  }
+
+  imageBlobCache.set(key, outUrl);
+  return outUrl;
+}
+async function driveFileMeta(fileId){
+  const meta = await gapi.client.drive.files.get({
+    fileId, fields:'id,name,mimeType,fileExtension,hasThumbnail,thumbnailLink,parents',
+    supportsAllDrives:true
+  });
+  return meta.result;
+}
+async function driveFileFetchBlob(fileId, retry=1){
+  const dlUrl = `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media&supportsAllDrives=true`;
+  const res = await fetch(dlUrl, { headers:{ Authorization:`Bearer ${accessToken}` } });
+  if(res.status === 401 && retry>0){
+    try{ tokenClient && tokenClient.requestAccessToken({ prompt:'' }); }catch{}
+    return driveFileFetchBlob(fileId, retry-1);
+  }
+  if(!res.ok) throw new Error('image fetch failed '+res.status);
+  return await res.blob();
+}
+function isHeicMimeOrExt(mime, ext){ return /heic|heif/i.test(mime||'') || /heic|heif/i.test(ext||''); }
 function extractDriveFileId(input){
   if(!input) return '';
   const m1 = input.match(/\/file\/d\/([a-zA-Z0-9_-]{10,})/); if(m1) return m1[1];
   const m2 = input.match(/[?&]id=([a-zA-Z0-9_-]{10,})/);     if(m2) return m2[1];
   const m3 = input.match(/^([a-zA-Z0-9_-]{20,})$/);          if(m3) return m3[1];
-  return input.trim();
+  return '';
 }
 function extractSpreadsheetId(input){
   if(!input) return '';
   const m1 = input.match(/spreadsheets\/d\/([a-zA-Z0-9_-]{10,})/); if(m1) return m1[1];
   const m2 = input.match(/[?&]id=([a-zA-Z0-9_-]{10,})/);           if(m2) return m2[1];
   const m3 = input.match(/^([a-zA-Z0-9_-]{20,})$/);                if(m3) return m3[1];
-  return input.trim();
+  return '';
 }
-function maybeEnableLoadFromViewLink(){
-  const url = new URL(location.href);
-  const fid = extractDriveFileId(url.searchParams.get('glb')||'');
-  const sid = extractSpreadsheetId(url.searchParams.get('sheet')||'');
-  if (state.isViewOnly && fid){
-    el.inputGLB.value = fid;
-    if (sid) el.inputSheet.value = sid;
-    setTimeout(()=> el.btnLoad.click(), 0);
-  }
-}
-async function ensureSignedIn(){
-  if (state.authReady) return true;
-  if (!state.tokenClient) await initGoogle();
-  return new Promise(resolve=>{
-    state.tokenClient.requestAccessToken({ prompt:'' });
-    const tm=setInterval(()=>{ if(state.authReady){ clearInterval(tm); resolve(true);} },80);
+function makeDriveRef(id, mime){ return `drive:${id}|${mime||''}`; }
+
+/* ========= Materials ========= */
+function ensureMatRecord(m){
+  if(matOriginals.has(m)) return;
+  matOriginals.set(m, {
+    color: (m.color ? m.color.clone() : new THREE.Color(0xffffff)),
+    map: m.map || null,
+    alphaMap: m.alphaMap || null,
+    transparent: !!m.transparent,
+    opacity: (m.opacity ?? 1),
+    alphaTest: (m.alphaTest ?? 0),
+    side: m.side ?? THREE.FrontSide,
+    depthWrite: m.depthWrite,
+    depthTest: m.depthTest,
+    blending: m.blending,
+    toneMapped: m.toneMapped,
+    wasUnlit: false,
+    unlitMat: null
   });
 }
-async function driveGetContentURL(fileId){
-  return `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?alt=media&supportsAllDrives=true`;
+function objectPath(node) {
+  const names = [];
+  let cur = node;
+  while (cur && cur.parent) {
+    names.push(cur.name && cur.name.trim() ? cur.name : '_' + (cur.uuid?.slice(0,8) || 'node'));
+    cur = cur.parent;
+  }
+  names.reverse();
+  return names.join('/');
+}
+function indexMaterialsByKey(){
+  materialKeyByMaterial.clear();
+  materialByKey.clear();
+  if (!currentModel) return;
+  currentModel.traverse(obj=>{
+    if (!obj.material) return;
+    const basePath = objectPath(obj);
+    if (Array.isArray(obj.material)) {
+      obj.material.forEach((m, idx)=>{
+        const key = `${basePath}#${idx}`;
+        materialKeyByMaterial.set(m, key);
+        materialByKey.set(key, m);
+        ensureMatRecord(m);
+        if(!matState.has(key)){
+          matState.set(key, { unlit:false, doubleSided:(m.side===THREE.DoubleSide), opacity:(m.opacity??1), invertRGB:false, whiteToAlpha:false, alphaTest:(m.alphaTest??0) });
+        }
+      });
+    } else {
+      const key = `${basePath}#0`;
+      materialKeyByMaterial.set(obj.material, key);
+      materialByKey.set(key, obj.material);
+      const m = obj.material; ensureMatRecord(m);
+      if(!matState.has(key)){
+        matState.set(key, { unlit:false, doubleSided:(m.side===THREE.DoubleSide), opacity:(m.opacity??1), invertRGB:false, whiteToAlpha:false, alphaTest:(m.alphaTest??0) });
+      }
+    }
+  });
+}
+function collectMaterials(){
+  materials=[]; 
+  const set = new Set();
+  if(!currentModel) return;
+
+  indexMaterialsByKey();
+  currentModel.traverse(obj=>{
+    const m=obj.material;
+    if(Array.isArray(m)){ m.forEach(mm=>{ if(mm && !set.has(mm)){ set.add(mm); materials.push(mm); ensureMatRecord(mm); } }); }
+    else if(m){ if(!set.has(m)){ set.add(m); materials.push(m); ensureMatRecord(m); } }
+  });
+
+  el.matSelect.innerHTML = '<option value="__all__">（全マテリアル：編集不可）</option>';
+  materials.forEach((m,idx)=>{
+    const key = materialKeyByMaterial.get(m);
+    if(!key) return;
+    const name = (m.name && m.name.trim()) ? m.name : `Material_${idx}`;
+    const opt=document.createElement('option'); 
+    opt.value=key;
+    opt.textContent=name;
+    el.matSelect.appendChild(opt);
+    if(!matState.has(key)){
+      matState.set(key, {
+        unlit:false,
+        doubleSided:(m.side===THREE.DoubleSide),
+        opacity:(m.opacity??1),
+        invertRGB:false,
+        whiteToAlpha:false,
+        alphaTest:(m.alphaTest??0)
+      });
+    }
+  });
+
+  if(el.matSelect.options.length>1){
+    el.matSelect.value = el.matSelect.options[1].value;
+  }else{
+    el.matSelect.value = '__all__';
+  }
+  applyMaterialUIFromSelection();
+}
+function getSelectedOriginalMaterial(){
+  const val=el.matSelect.value;
+  if(val==='__all__') return null;
+  return materialByKey.get(val) || null;
+}
+function applyMaterialUIFromSelection(){
+  const key = el.matSelect.value;
+  const disable = (key === '__all__');
+  ['matUnlit','matDoubleSided','matOpacity','matInvert','matWhiteTransparent','matThreshold']
+    .forEach(id=>{ document.getElementById(id).disabled = disable || viewOnly; });
+  if(disable) return;
+  const st = matState.get(key) || { unlit:false,doubleSided:false,opacity:1,invertRGB:false,whiteToAlpha:false,alphaTest:0 };
+  el.matUnlit.checked = !!st.unlit;
+  el.matDoubleSided.checked = !!st.doubleSided;
+  el.matOpacity.value = String(st.opacity ?? 1);
+  el.matOpacityVal.textContent = (Number(st.opacity ?? 1)).toFixed(2);
+  el.matInvert.checked = !!st.invertRGB;
+  el.matWhiteTransparent.checked = !!st.whiteToAlpha;
+  el.matThreshold.value = String(st.alphaTest ?? 0);
+  el.matThresholdVal.textContent = (Number(st.alphaTest ?? 0)).toFixed(2);
+}
+el.matSelect.addEventListener('change', ()=> applyMaterialUIFromSelection());
+
+async function applyMaterialFromUIToSelected(){
+  const orig = getSelectedOriginalMaterial();
+  if(!orig) return;
+  const key = materialKeyByMaterial.get(orig);
+  const st = matState.get(key) || {};
+  st.unlit = !!el.matUnlit.checked;
+  st.doubleSided = !!el.matDoubleSided.checked;
+  st.opacity = Number(el.matOpacity.value ?? 1);
+  st.invertRGB = !!el.matInvert.checked;
+  st.whiteToAlpha = !!el.matWhiteTransparent.checked;
+  st.alphaTest = Number(el.matThreshold.value ?? 0);
+  matState.set(key, st);
+  await applyStateToMaterial(orig, st);
+  renderNow();
+  debouncedSaveMaterials();
+}
+['change','input'].forEach(ev=>{
+  ['matUnlit','matDoubleSided','matOpacity','matInvert','matWhiteTransparent','matThreshold']
+    .forEach(id=> document.getElementById(id).addEventListener(ev, ()=> applyMaterialFromUIToSelected()));
+});
+el.matOpacity.addEventListener('input', ()=> el.matOpacityVal.textContent = parseFloat(el.matOpacity.value).toFixed(2));
+el.matThreshold.addEventListener('input', ()=> el.matThresholdVal.textContent = parseFloat(el.matThreshold.value).toFixed(2));
+
+function getActiveMaterialFor(originalM){
+  const rec = matOriginals.get(originalM);
+  return (rec && rec.wasUnlit && rec.unlitMat) ? rec.unlitMat : originalM;
+}
+function copyTextureParams(from, to){
+  to.wrapS = from.wrapS; to.wrapT = from.wrapT;
+  to.repeat.copy(from.repeat); to.offset.copy(from.offset);
+  to.center.copy(from.center); to.rotation = from.rotation;
+  to.flipY = from.flipY;
+  to.magFilter = from.magFilter; to.minFilter = from.minFilter;
+  to.generateMipmaps = from.generateMipmaps;
+  to.anisotropy = from.anisotropy;
+  to.colorSpace = from.colorSpace ?? THREE.SRGBColorSpace;
+}
+async function processTextureToCanvasTextureFromOriginal(originalTex, { invertRGB=false, alphaFromWhite=false, threshold=0 }){
+  if(!originalTex || !originalTex.image) return null;
+  const image = originalTex.image;
+  const w = image.width || image.videoWidth || 0;
+  const h = image.height || image.videoHeight || 0;
+  if(!w || !h) return null;
+  const canvas = document.createElement('canvas'); canvas.width = w; canvas.height = h;
+  const ctx = canvas.getContext('2d');
+  try{ ctx.drawImage(image, 0, 0, w, h); }
+  catch(e){ try{ const bmp = await createImageBitmap(image); ctx.drawImage(bmp,0,0,w,h); } catch(e2){ return null; } }
+  const img = ctx.getImageData(0,0,w,h); const data = img.data;
+  for(let i=0;i<data.length;i+=4){
+    let r=data[i], g=data[i+1], b=data[i+2], a=data[i+3];
+    if(invertRGB){ r=255-r; g=255-g; b=255-b; }
+    let alpha=a;
+    if(alphaFromWhite){
+      const L = (0.2126*r + 0.7152*g + 0.0722*b)/255;
+      let alf = 1 - L;
+      if(threshold>0){ alf = (alf >= threshold) ? alf : 0; }
+      alpha = Math.round(Math.min(1,Math.max(0,alf))*255);
+    }
+    data[i]=r; data[i+1]=g; data[i+2]=b; data[i+3]=alpha;
+  }
+  ctx.putImageData(img,0,0);
+  const ctex = new THREE.CanvasTexture(canvas);
+  copyTextureParams(originalTex, ctex);
+  ctex.needsUpdate = true;
+  return ctex;
+}
+async function applyStateToMaterial(origM, st){
+  ensureMatRecord(origM);
+  const rec = matOriginals.get(origM);
+
+  if(st.unlit && !rec.wasUnlit){
+    const active = getActiveMaterialFor(origM);
+    const um = new THREE.MeshBasicMaterial();
+    um.color = (active.color ? active.color.clone() : rec.color.clone());
+    um.map = active.map || rec.map || null;
+    um.transparent = active.transparent;
+    um.opacity = active.opacity;
+    um.alphaTest = active.alphaTest;
+    um.side = active.side;
+    um.depthWrite = active.depthWrite;
+    um.depthTest = active.depthTest;
+    um.blending = active.blending;
+    um.toneMapped = false;
+    rec.unlitMat = um; rec.wasUnlit = true;
+    currentModel.traverse(obj=>{
+      const m=obj.material;
+      if(m===origM || m===active){ obj.material = um; }
+      else if(Array.isArray(m)){ obj.material = m.map(x=> (x===origM||x===active)? um : x ); }
+    });
+  }else if(!st.unlit && rec.wasUnlit){
+    currentModel.traverse(obj=>{
+      const m=obj.material;
+      if(m===rec.unlitMat){ obj.material = origM; }
+      else if(Array.isArray(m)){ obj.material = m.map(x=> (x===rec.unlitMat)? origM : x ); }
+    });
+    rec.wasUnlit = false;
+  }
+
+  const mat = getActiveMaterialFor(origM);
+  mat.side = st.doubleSided ? THREE.DoubleSide : THREE.FrontSide;
+  const willTransparent = (st.whiteToAlpha || (st.opacity < 1.0));
+  mat.transparent = willTransparent;
+  mat.opacity = st.opacity ?? 1;
+  mat.alphaTest = st.alphaTest ?? 0;
+  mat.depthWrite = !mat.transparent || (mat.alphaTest>0);
+
+  if((st.invertRGB || st.whiteToAlpha) && matOriginals.get(origM).map){
+    try{
+      const processed = await processTextureToCanvasTextureFromOriginal(matOriginals.get(origM).map, { invertRGB: st.invertRGB, alphaFromWhite: st.whiteToAlpha, threshold: st.alphaTest||0 });
+      if(processed){ mat.map = processed; mat.map.needsUpdate = true; }
+    }catch(e){ console.warn('texture process failed', e); }
+  }else{
+    const rec0 = matOriginals.get(origM);
+    mat.map = rec0.map || null;
+    if(mat.map) mat.map.needsUpdate = true;
+  }
+  if(!mat.color && matOriginals.get(origM).color){ mat.color = matOriginals.get(origM).color.clone(); }
+  if(mat.color) mat.color.needsUpdate = true;
+  mat.needsUpdate = true;
 }
 
-/* ===================== GLB 読み込み ===================== */
-const loader = new GLTFLoader();
+/* ========= Camera views ========= */
+el.viewFront.addEventListener('click', ()=> { setNamedView('front'); debouncedSaveMaterials(); });
+el.viewBack.addEventListener('click',  ()=> { setNamedView('back');  debouncedSaveMaterials(); });
+el.viewLeft.addEventListener('click',  ()=> { setNamedView('left');  debouncedSaveMaterials(); });
+el.viewRight.addEventListener('click', ()=> { setNamedView('right'); debouncedSaveMaterials(); });
+el.viewTop.addEventListener('click',   ()=> { setNamedView('top');   debouncedSaveMaterials(); });
+el.viewBottom.addEventListener('click',()=> { setNamedView('bottom');debouncedSaveMaterials(); });
+
+function setNamedView(name){
+  const { radius } = sceneBounds();
+  const d = Math.max(radius*2.2, 1.5);
+  let dir = new THREE.Vector3(d,0,0);
+  switch(name){
+    case 'front': dir.set(d,0,0); break;
+    case 'back':  dir.set(-d,0,0); break;
+    case 'left':  dir.set(0,0,-d); break;
+    case 'right': dir.set(0,0,d); break;
+    case 'top':   dir.set(0,d,0); break;
+    case 'bottom':dir.set(0,-d,0); break;
+  }
+  const origin = new THREE.Vector3(0,0,0);
+  camera.position.copy(origin.clone().add(dir));
+  controls.target.copy(origin);
+  if(camera.isOrthographicCamera) fitOrthoFrustum();
+  controls.update(); renderNow();
+}
+
+/* ========= Sheets：同階層で作成/検索 ========= */
+async function findOrCreateSpreadsheetInGlbFolder(glbMeta){
+  if (!glbMeta || !glbMeta.id) throw new Error('GLBメタデータがありません');
+  const parents = glbMeta.parents || [];
+  let found = null;
+  for (const parent of (parents.length ? parents : ['root'])) {
+    const q = [
+      `'${parent}' in parents`,
+      `mimeType='application/vnd.google-apps.spreadsheet'`,
+      `trashed=false`,
+      `appProperties has { key='lociFor' and value='${glbMeta.id}' }`
+    ].join(' and ');
+    const resp = await gapi.client.drive.files.list({
+      q, fields: 'files(id,name)',
+      includeItemsFromAllDrives: true, supportsAllDrives: true, pageSize: 10,
+    });
+    if (resp.result.files?.length) { found = resp.result.files[0]; break; }
+  }
+  if (found) return found.id;
+
+  const name = `LociMyu - ${glbMeta.name}`;
+  const create = await gapi.client.drive.files.create({
+    resource: {
+      name,
+      mimeType: 'application/vnd.google-apps.spreadsheet',
+      parents: (parents && parents.length) ? parents : undefined,
+      appProperties: { lociFor: glbMeta.id },
+    },
+    fields: 'id',
+    supportsAllDrives: true
+  });
+  const spreadsheetId = create.result.id;
+
+  await gapi.client.sheets.spreadsheets.batchUpdate({
+    spreadsheetId,
+    resource: {
+      requests: [
+        { updateSpreadsheetProperties: { properties: { title: name }, fields: 'title' } },
+        { addSheet: { properties: { title: 'pins' } } }
+      ]
+    }
+  });
+  await gapi.client.sheets.spreadsheets.values.update({
+    spreadsheetId, range: 'pins!A1',
+    valueInputOption:'RAW',
+    resource:{ values: [[ 'pin_id','title','body','x','y','z','color','images','updated_at' ]] }
+  });
+  return spreadsheetId;
+}
+
+/* ========= Meta（K/L列） 保存・復元 ========= */
+const META_MARKER_RANGE = ()=> `${activeSheet.title}!K1`;
+const META_MAT_KEY_RANGE = ()=> `${activeSheet.title}!K2:L2`;
+const META_VIEW_KEY_RANGE = ()=> `${activeSheet.title}!K3:L3`;
+
+function safeParseJSON(s, fallback){ try{ return s ? JSON.parse(s) : fallback; }catch{ return fallback; } }
+
+async function loadSheetMeta(spreadsheetId){
+  try{
+    const get = await gapi.client.sheets.spreadsheets.values.batchGet({
+      spreadsheetId,
+      ranges: [ META_MARKER_RANGE(), META_MAT_KEY_RANGE(), META_VIEW_KEY_RANGE() ]
+    });
+    const vals = (get.result.valueRanges || []).map(v=>v.values||[]);
+    const matJson = vals[1]?.[0]?.[1] || '';
+    const viewJson = vals[2]?.[0]?.[1] || '';
+    const m = safeParseJSON(matJson, null);
+    const materials = normalizeMaterialsJSON(m);
+    const viewer = safeParseJSON(viewJson, { version:1, bgColor:'#0a0f16', projection:'perspective' });
+    return { materials, viewer };
+  }catch(e){
+    console.warn('loadSheetMeta failed', e);
+    return { materials:{version:2,byKey:{}}, viewer:{version:1,bgColor:'#0a0f16',projection:'perspective'} };
+  }
+}
+function normalizeMaterialsJSON(m){
+  if(!m) return { version:2, byKey:{} };
+  if(m.version===2 && m.byKey) return m;
+  if(Array.isArray(m.items)){
+    const byKey = {};
+    m.items.forEach(it=>{
+      if(!it || !it.key) return;
+      byKey[it.key] = {
+        unlit: !!it.unlit,
+        doubleSided: !!it.doubleSided,
+        opacity: Number(it.opacity ?? 1),
+        invertRGB: !!it.invertRGB,
+        whiteToAlpha: !!it.whiteToAlpha,
+        alphaTest: Number(it.alphaTest ?? 0)
+      };
+    });
+    return { version:2, byKey };
+  }
+  return { version:2, byKey:{} };
+}
+async function saveSheetMeta(spreadsheetId, { materials, viewer }){
+  if(viewOnly) return;
+  const data = [
+    { range: META_MARKER_RANGE(), values: [[ 'LOCI_META_V1' ]] },
+    { range: META_MAT_KEY_RANGE(), values: [[ 'materials_json', JSON.stringify(materials) ]] },
+    { range: META_VIEW_KEY_RANGE(), values: [[ 'viewer_json', JSON.stringify(viewer) ]] },
+  ];
+  await gapi.client.sheets.spreadsheets.values.batchUpdate({
+    spreadsheetId,
+    valueInputOption:'RAW',
+    data
+  });
+}
+function serializeMaterialsForSheet(){
+  const byKey = {};
+  for(const [key, st] of matState){
+    if(materialByKey.has(key)){
+      byKey[key] = {
+        unlit: !!st.unlit,
+        doubleSided: !!st.doubleSided,
+        opacity: Number(st.opacity ?? 1),
+        invertRGB: !!st.invertRGB,
+        whiteToAlpha: !!st.whiteToAlpha,
+        alphaTest: Number(st.alphaTest ?? 0)
+      };
+    }
+  }
+  return { version:2, byKey };
+}
+function serializeViewerPrefs(){
+  return {
+    version: 1,
+    bgColor: el.bgColor.value || '#0a0f16',
+    projection: usingOrtho ? 'orthographic' : 'perspective'
+  };
+}
+async function applyMaterialsFromSheet(materialsData){
+  if(!materialsData || !materialsData.byKey) return;
+  for(const [key, st] of Object.entries(materialsData.byKey)){
+    matState.set(key, { ...st });
+  }
+  for(const [key, st] of matState){
+    const mat = materialByKey.get(key);
+    if(!mat) continue;
+    await applyStateToMaterial(mat, st);
+  }
+  applyMaterialUIFromSelection();
+  renderNow();
+}
+async function applyViewerPrefs(viewerData){
+  if(!viewerData) return;
+  if(viewerData.bgColor){
+    el.bgColor.value = viewerData.bgColor;
+    scene.background = new THREE.Color(viewerData.bgColor);
+  }
+  if(viewerData.projection){
+    const wantOrtho = (viewerData.projection === 'orthographic');
+    el.projOrtho.checked = wantOrtho;
+    toggleProjection(wantOrtho);
+  }
+  renderNow();
+}
+const debouncedSaveMaterials = debounce(async ()=>{
+  if(viewOnly) return;
+  const spreadsheetId = extractSpreadsheetId(el.inputSheet.value.trim());
+  if (!spreadsheetId || !activeSheet.sheetId) return;
+  const materialsData = serializeMaterialsForSheet();
+  const viewerData = serializeViewerPrefs();
+  try{ await saveSheetMeta(spreadsheetId, { materials: materialsData, viewer: viewerData }); }
+  catch(e){ console.warn('saveSheetMeta failed', e); }
+}, 600);
+el.bgColor.addEventListener('input', ()=>{ scene.background = new THREE.Color(el.bgColor.value); renderNow(); debouncedSaveMaterials(); });
+
+/* ========= Thumbs / Preview ========= */
+function renderThumbs(p){
+  const thumbs=el.thumbs; thumbs.innerHTML='';
+  ensureArray(p.images).forEach(async (ref, idx)=>{
+    const wrap=document.createElement('div'); wrap.className='thumb'; thumbs.appendChild(wrap);
+    const img=document.createElement('img'); img.alt = 'thumb';
+    const del=document.createElement('div'); del.className='del'; del.textContent='×'; del.title='この画像をキャプションから外す';
+    del.addEventListener('click', (ev)=>{
+      if(viewOnly) return;
+      ev.stopPropagation(); const wasPreview = (el.previewImg.src && el.previewImg.src === img.src);
+      p.images.splice(idx,1); renderThumbs(p);
+      if(wasPreview){ const next = p.images[0] || null; setPreview(next, p); }
+      upsertPinToSheet();
+    });
+    wrap.appendChild(img); wrap.appendChild(del);
+    try{
+      const src = await resolveImageObjectURL(ref, {preferThumb:true});
+      img.src = src;
+      img.addEventListener('click', async ()=>{ setPreview(ref, p); });
+    }catch{
+      wrap.classList.add('error'); wrap.title = '画像を読み込めませんでした';
+    }
+  });
+}
+
+/* ========= Caption bindings ========= */
+document.getElementById('btnSavePin').addEventListener('click', ()=> upsertPinToSheet());
+el.capTitle.addEventListener('input', ()=>{ const p=pins.find(x=>x.id===selectedPinId); if(p){ p.title=el.capTitle.value; refreshPinsList(); upsertPinToSheet(); updateViewerPreviewForPin(p); } });
+el.capBody.addEventListener('input',  ()=>{ const p=pins.find(x=>x.id===selectedPinId); if(p){ p.body=el.capBody.value; upsertPinToSheet(); updateViewerPreviewForPin(p); } });
+
+/* ========= Pin color presets ========= */
+const PRESET_LIST = ['#ff6b6b','#ffd166','#06d6a0','#118ab2','#ef476f','#b5179e','#4361ee','#4cc9f0','#ff9f1c'];
+function buildColorPresets(){
+  const holder = el.colorPresets; holder.innerHTML='';
+  PRESET_LIST.forEach(c=>{
+    const b=document.createElement('button');
+    b.style.width='18px'; b.style.height='18px';
+    b.style.borderRadius='999px'; b.style.border='2px solid #223146';
+    b.style.background=c; b.title=c;
+    b.addEventListener('click',()=>{
+      currentColor=c;
+      const pId=selectedPinId;
+      if(pId){
+        const p=pins.find(x=>x.id===pId);
+        p.color=normalizeHex(c);
+        placePinMesh(p);
+        refreshPinsList();
+        filterColors.add(p.color); // 新色を初期表示
+        buildColorFilter();
+        debouncedSave();
+      }
+    });
+    holder.appendChild(b);
+  });
+}
+buildColorPresets();
+
+function uniquePinColors(){ const set = new Set(); pins.forEach(p=> set.add(normalizeHex(p.color))); return Array.from(set); }
+function buildColorFilter(){
+  const list = el.colorFilterList; list.innerHTML='';
+  const colors = uniquePinColors().sort();
+  if(colors.length===0){ list.innerHTML = '<div class="small">ピンがありません</div>'; return; }
+  colors.forEach(c=>{
+    const row = document.createElement('label'); row.style.display='flex'; row.style.alignItems='center'; row.style.gap='8px'; row.style.margin='4px 0';
+    const sw = document.createElement('span'); sw.style.width='14px'; sw.style.height='14px'; sw.style.borderRadius='50%'; sw.style.border='2px solid #223146'; sw.style.display='inline-block'; sw.style.background=c;
+    const cb = document.createElement('input'); cb.type='checkbox'; cb.value=c; cb.checked = (filterColors.size===0 || filterColors.has(c));
+    const name = document.createElement('span'); name.textContent = c; name.className='small';
+    row.appendChild(cb); row.appendChild(sw); row.appendChild(name);
+    cb.addEventListener('change', ()=>{
+      if(cb.checked) filterColors.add(c); else filterColors.delete(c);
+      if(filterColors.size===0){ colors.forEach(k=> filterColors.add(k)); }
+      applyPinVisibilityFilter();
+    });
+    list.appendChild(row);
+  });
+  if(filterColors.size===0){ colors.forEach(k=> filterColors.add(k)); }
+  applyPinVisibilityFilter();
+}
+function pinPassesFilter(p){ if(filterColors.size===0) return true; return filterColors.has(normalizeHex(p.color)); }
+function applyPinVisibilityFilter(){
+  pins.forEach(p=>{ if(p.mesh){ p.mesh.visible = pinPassesFilter(p); } });
+  refreshPinsList(); renderNow();
+}
+el.btnColorFilter.addEventListener('click', ()=>{
+  el.colorFilterPanel.style.display = (el.colorFilterPanel.style.display==='none' || !el.colorFilterPanel.style.display) ? 'block' : 'none';
+});
+document.getElementById('btnFilterAll').addEventListener('click', ()=>{ filterColors.clear(); uniquePinColors().forEach(c=> filterColors.add(c)); buildColorFilter(); });
+document.getElementById('btnFilterNone').addEventListener('click', ()=>{ filterColors.clear(); applyPinVisibilityFilter(); buildColorFilter(); });
+document.getElementById('btnFilterClose').addEventListener('click', ()=> el.colorFilterPanel.style.display='none');
+
+function refreshPinsList(){
+  el.pinsList.innerHTML='';
+  pins.filter(pinPassesFilter).forEach(p=>{
+    const row=document.createElement('div'); row.className='row'; row.dataset.id=p.id;
+    const left=document.createElement('div'); left.style.display='flex'; left.style.alignItems='center'; left.style.gap='8px';
+    const dot=document.createElement('div'); dot.style.width='10px'; dot.style.height='10px'; dot.style.borderRadius='999px'; dot.style.background=p.color;
+    const title=document.createElement('div'); title.className='title'; title.textContent=p.title||'(無題)';
+    const meta=document.createElement('div'); meta.className='meta'; meta.textContent=`x:${p.pos.x.toFixed(2)} y:${p.pos.y.toFixed(2)} z:${p.pos.z.toFixed(2)}`;
+    left.appendChild(dot); left.appendChild(title);
+    row.appendChild(left); row.appendChild(meta);
+    row.addEventListener('click',()=>selectPin(p.id,{fly:true}));
+    el.pinsList.appendChild(row);
+  });
+}
+
+/* ========= Load/Save pins ========= */
+function rebuildPinsScene(){
+  pinGroup.children.slice().forEach(ch=> pinGroup.remove(ch));
+  pins.forEach(p=> placePinMesh(p));
+  if(tcontrols.visible && selectedPinId){
+    const p=pins.find(x=>x.id===selectedPinId);
+    if(p?.mesh) tcontrols.attach(p.mesh); else tcontrols.detach();
+  }
+  renderNow();
+}
+async function loadPinsFromActiveSheet(spreadsheetId){
+  pins=[]; selectedPinId=null; el.rightEditor.classList.add('hidden'); el.rightNoSel.classList.remove('hidden');
+  try{
+    const resp = await gapi.client.sheets.spreadsheets.values.get({
+      spreadsheetId, range: `${activeSheet.title}!A2:I`
+    });
+    const rows = resp.result.values || [];
+    rows.forEach(r=>{
+      const [pid, title, body, x, y, z, color, imagesJson] = r;
+      const p = {
+        id: pid || `p_${Math.random().toString(36).slice(2)}`,
+        title: title || '',
+        body: body || '',
+        pos: new THREE.Vector3(parseFloat(x)||0, parseFloat(y)||0, parseFloat(z)||0),
+        color: normalizeHex(color || '#ff6b6b'),
+        images: [],
+        mesh: null
+      };
+      try{ p.images = JSON.parse(imagesJson||'[]'); }catch{ p.images = []; }
+      pins.push(p);
+    });
+    rebuildPinsScene();
+    refreshPinsList();
+    buildColorFilter();
+
+    const meta = await loadSheetMeta(spreadsheetId);
+    await applyMaterialsFromSheet(meta.materials);
+    await applyViewerPrefs(meta.viewer);
+    applyMaterialUIFromSelection();
+  }catch(e){ console.error('loadPinsFromActiveSheet failed', e); }
+}
+async function upsertPinToSheet(){
+  if(viewOnly) return;
+  const spreadsheetId = extractSpreadsheetId(el.inputSheet.value.trim()); if(!spreadsheetId) return;
+  const p = pins.find(x=>x.id===selectedPinId) || pins[pins.length-1]; if(!p) return;
+  try{
+    const col = await gapi.client.sheets.spreadsheets.values.get({ spreadsheetId, range: `${activeSheet.title}!A:A` });
+    const rows = col.result.values || [];
+    let rowIndex = -1;
+    for(let i=0;i<rows.length;i++){ if(rows[i][0]===p.id){ rowIndex=i; break; } }
+    const values = [[ p.id, p.title||'', p.body||'', p.pos.x, p.pos.y, p.pos.z, p.color, JSON.stringify(ensureArray(p.images)), new Date().toISOString() ]];
+    if(rowIndex>=0){
+      const range = `${activeSheet.title}!A${rowIndex+1}:I${rowIndex+1}`;
+      await gapi.client.sheets.spreadsheets.values.update({ spreadsheetId, range, valueInputOption:'RAW', resource:{ values } });
+    }else{
+      await gapi.client.sheets.spreadsheets.values.append({ spreadsheetId, range: `${activeSheet.title}!A1`, valueInputOption:'RAW', resource:{ values } });
+    }
+  }catch(e){ console.error(e); }
+}
+async function deletePinFromActiveSheet(spreadsheetId, pinId){
+  const col = await gapi.client.sheets.spreadsheets.values.get({ spreadsheetId, range: `${activeSheet.title}!A:A` });
+  const rows = col.result.values || [];
+  let rowIndex = -1;
+  for(let i=0;i<rows.length;i++){ if(rows[i][0]===pinId){ rowIndex=i; break; } }
+  if(rowIndex<0) return;
+  await gapi.client.sheets.spreadsheets.batchUpdate({
+    spreadsheetId,
+    resource:{
+      requests:[{ deleteDimension:{
+        range:{ sheetId: activeSheet.sheetId, dimension:'ROWS', startIndex:rowIndex, endIndex:rowIndex+1 }
+      }}]
+    }
+  });
+}
+
+/* ========= Attach / Upload ========= */
+el.btnAttach.addEventListener('click', async ()=>{
+  if(viewOnly) return;
+  const fileInput = el.imgLocal;
+  fileInput.value = '';
+  fileInput.onchange = async ()=>{
+    const file = fileInput.files?.[0];
+    const p = pins.find(x=>x.id===selectedPinId);
+    if(!file || !p){ return; }
+    try{
+      const blob = await toUploadableBlob(file);
+      const uploaded = await driveMultipartUpload(blob, sanitizeName(file.name), glbParents);
+      const ref = makeDriveRef(uploaded.id, blob.type || 'image/jpeg');
+      p.images = ensureArray(p.images); p.images.push(ref);
+      renderThumbs(p);
+      setPreview(ref, p);
+      toast('画像をアップロードしました');
+      upsertPinToSheet();
+    }catch(err){ console.error(err); alert('画像アップロードに失敗しました'); }
+  };
+  fileInput.click();
+});
+function sanitizeName(n){ return n.replace(/[^\p{Letter}\p{Number}\s._-]+/gu,'_'); }
+async function toUploadableBlob(file){
+  const ext = (file.name.split('.').pop()||'').toLowerCase();
+  if(ext==='heic' || ext==='heif'){
+    const ok = await ensureHeic2any();
+    if(!ok) throw new Error('heic2any unavailable');
+    const jpegBlob = await window.heic2any({ blob:file, toType:'image/jpeg', quality:0.95 });
+    return Array.isArray(jpegBlob) ? jpegBlob[0] : jpegBlob;
+  }
+  return file;
+}
+async function driveMultipartUpload(blob, name, parents){
+  const meta = { name, parents: parents && parents.length ? parents : undefined };
+  const boundary = '-------loci' + Math.random().toString(36).slice(2);
+  const bufMeta = new TextEncoder().encode(`\r\n--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(meta)}\r\n\r\n--${boundary}\r\nContent-Type: ${blob.type || 'application/octet-stream'}\r\n\r\n`);
+  const bufTail = new TextEncoder().encode(`\r\n--${boundary}--`);
+  const stream = new Blob([ bufMeta, blob, bufTail ], { type: 'multipart/related; boundary='+boundary });
+  const res = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&supportsAllDrives=true', {
+    method: 'POST',
+    headers: { 'Authorization': 'Bearer ' + accessToken },
+    body: stream
+  });
+  if(!res.ok) throw new Error('Drive upload failed ' + res.status);
+  return await res.json();
+}
+
+/* ========= Folder Picker ========= */
+el.btnPickFromFolder.addEventListener('click', openPickerModal);
+el.btnPickerClose.addEventListener('click', ()=> el.pickerModal.style.display='none');
+el.btnPickerReload.addEventListener('click', loadFolderImages);
+
+async function openPickerModal(){
+  if(!glbParents || !glbParents.length){ alert('GLBの親フォルダが不明です。先にGLBを読み込んでください。'); return; }
+  await loadFolderImages();
+  el.pickerModal.style.display='grid';
+}
+async function loadFolderImages(){
+  if(!accessToken){ alert('先にサインインしてください'); return; }
+  el.pickerGrid.innerHTML = '<div class="small">読み込み中…</div>';
+  const cells = [];
+  try{
+    for(const parent of glbParents){
+      const q = `'${parent}' in parents and trashed=false and (mimeType contains 'image/')`;
+      const resp = await gapi.client.drive.files.list({
+        q, pageSize: 200,
+        fields: 'files(id,name,mimeType,fileExtension,hasThumbnail,thumbnailLink)',
+        includeItemsFromAllDrives: true,
+        supportsAllDrives: true
+      });
+      const files = resp.result.files || [];
+      for(const f of files){
+        const id = f.id;
+        const mime = f.mimeType || '';
+        const isHeic = isHeicMimeOrExt(mime, f.fileExtension);
+        const ref = makeDriveRef(id, mime);
+        const cell = document.createElement('div'); cell.style.background='#0c1118'; cell.style.border='1px solid #223146'; cell.style.borderRadius='12px'; cell.style.padding='8px'; cell.style.cursor='pointer'; cell.style.display='flex'; cell.style.flexDirection='column'; cell.style.gap='6px';
+        const img = document.createElement('img'); img.alt = f.name; img.style.width='100%'; img.style.height='110px'; img.style.objectFit='cover'; img.style.borderRadius='8px';
+        const tag = document.createElement('div'); tag.className='small'; tag.textContent = isHeic ? 'HEIC/HEIF (変換/サムネ表示)' : (mime||'image');
+        const cap = document.createElement('div'); cap.textContent = f.name; cap.className='small';
+
+        let usedFallback = false;
+        if(f.hasThumbnail && f.thumbnailLink){
+          const hi = upscaleThumbnailUrl(f.thumbnailLink, isHeic? 1024 : 512);
+          const sep = hi.includes('?') ? '&' : '?';
+          img.src = hi + sep + 'access_token=' + encodeURIComponent(accessToken);
+          img.onerror = async ()=>{
+            usedFallback = true;
+            try{
+              const url = await resolveImageObjectURL(ref, {preferThumb:true});
+              img.src = url;
+            }catch{ cell.style.opacity='.5'; cell.style.pointerEvents='none'; }
+          };
+        }else{
+          try{
+            const url = await resolveImageObjectURL(ref, {preferThumb:true});
+            img.src = url;
+          }catch{ cell.style.opacity='.5'; cell.style.pointerEvents='none'; }
+        }
+
+        img.onerror = ()=>{ if(!usedFallback){ cell.style.opacity='.5'; cell.style.pointerEvents='none'; } };
+        cell.appendChild(img); cell.appendChild(cap); cell.appendChild(tag);
+        cell.addEventListener('click', ()=>{ if(cell.style.pointerEvents==='none') return; chooseFolderImage(ref); });
+        cells.push(cell);
+      }
+    }
+    el.pickerGrid.innerHTML='';
+    if(!cells.length){
+      el.pickerGrid.innerHTML = '<div class="small">フォルダに画像が見つかりませんでした。</div>';
+    }else{
+      cells.forEach(c=> el.pickerGrid.appendChild(c));
+    }
+  }catch(e){
+    console.error(e);
+    el.pickerGrid.innerHTML = '<div class="small">読み込みに失敗しました。</div>';
+  }
+}
+function chooseFolderImage(ref){
+  el.pickerModal.style.display='none';
+  const p = pins.find(x=>x.id===selectedPinId);
+  if(!p){ alert('先にピンを選択してください'); return; }
+  p.images = ensureArray(p.images); p.images.push(ref);
+  renderThumbs(p);
+  setPreview(ref, p);
+  upsertPinToSheet();
+}
+
+/* ========= Caption Lists ========= */
+async function refreshCaptionLists(spreadsheetId){
+  const resp = await gapi.client.sheets.spreadsheets.get({
+    spreadsheetId,
+    fields: 'sheets(properties(sheetId,title,index))'
+  });
+  const sheets = (resp.result.sheets || []).map(s => s.properties);
+  el.listSelect.innerHTML = '';
+  sheets.forEach(p => {
+    const o = document.createElement('option');
+    o.value = String(p.sheetId);
+    o.textContent = p.title;
+    el.listSelect.appendChild(o);
+  });
+  let pick = sheets.find(s => s.title === 'pins') || sheets[0];
+  if (!activeSheet.sheetId) {
+    if (pick){ activeSheet = { sheetId: pick.sheetId, title: pick.title }; }
+  } else {
+    const same = sheets.find(s => s.sheetId === activeSheet.sheetId);
+    if (!same) {
+      pick = sheets.find(s => s.title === 'pins') || sheets[0];
+      if (pick){ activeSheet = { sheetId: pick.sheetId, title: pick.title }; }
+    } else {
+      activeSheet.title = same.title;
+    }
+  }
+  if (activeSheet.sheetId){ el.listSelect.value = String(activeSheet.sheetId); }
+  if(!viewOnly){ ['listNew','listDelete'].forEach(id=>document.getElementById(id).disabled=false); }
+}
+el.listSelect.addEventListener('change', async (e)=>{
+  const spreadsheetId = extractSpreadsheetId(el.inputSheet.value.trim());
+  if(!spreadsheetId) return;
+  const sheetId = Number(e.target.value);
+  const title = e.target.options[e.target.selectedIndex].textContent;
+  activeSheet = { sheetId, title };
+  await loadPinsFromActiveSheet(spreadsheetId);
+  toast(`キャプションリストを切替: ${title}`);
+});
+el.listNew.addEventListener('click', async ()=>{
+  if(viewOnly) return;
+  const spreadsheetId = extractSpreadsheetId(el.inputSheet.value.trim());
+  if(!spreadsheetId) return;
+  const title = prompt('新しいキャプションリスト名を入力', `pins_${Date.now().toString().slice(-5)}`);
+  if(!title) return;
+  const add = await gapi.client.sheets.spreadsheets.batchUpdate({
+    spreadsheetId,
+    resource:{ requests:[ { addSheet:{ properties:{ title } } } ] }
+  });
+  const newSheetId = add.result.replies[0].addSheet.properties.sheetId;
+  await gapi.client.sheets.spreadsheets.values.update({
+    spreadsheetId, range: `${title}!A1`,
+    valueInputOption:'RAW',
+    resource:{ values: [[ 'pin_id','title','body','x','y','z','color','images','updated_at' ]] }
+  });
+  await refreshCaptionLists(spreadsheetId);
+  activeSheet = { sheetId: newSheetId, title };
+  el.listSelect.value = String(newSheetId);
+  pins = []; selectedPinId = null; rebuildPinsScene(); refreshPinsList();
+
+  await saveSheetMeta(spreadsheetId, {
+    materials: {version:2, byKey:{}},
+    viewer: {version:1, bgColor: el.bgColor.value || '#0a0f16', projection: usingOrtho ? 'orthographic' : 'perspective' }
+  });
+
+  toast(`新しいリストを作成: ${title}`);
+});
+el.listDelete.addEventListener('click', async ()=>{
+  if(viewOnly) return;
+  const spreadsheetId = extractSpreadsheetId(el.inputSheet.value.trim());
+  if(!spreadsheetId || !activeSheet.sheetId) return;
+  const g = await gapi.client.sheets.spreadsheets.get({ spreadsheetId, fields: 'sheets(properties(sheetId))' });
+  const count = (g.result.sheets||[]).length;
+  if(count <= 1){ alert('最後のシートは削除できません'); return; }
+  if(!confirm(`キャプションリスト「${activeSheet.title}」を削除しますか？`)) return;
+  await gapi.client.sheets.spreadsheets.batchUpdate({
+    spreadsheetId,
+    resource:{ requests:[ { deleteSheet:{ sheetId: activeSheet.sheetId } } ] }
+  });
+  await refreshCaptionLists(spreadsheetId);
+  await loadPinsFromActiveSheet(spreadsheetId);
+  toast('リストを削除しました');
+});
+
+/* ========= Buttons ========= */
+el.btnLoad.addEventListener('click', ()=>{
+  const fid = extractDriveFileId(el.inputGLB.value.trim()) || el.inputGLB.value.trim();
+  el.inputGLB.value = fid; loadGLBByFileId(fid);
+});
+el.btnViewOnly.addEventListener('click', ()=>{
+  const fid = extractDriveFileId(el.inputGLB.value.trim());
+  const sid = extractSpreadsheetId(el.inputSheet.value.trim());
+  const url = new URL(location.href); url.searchParams.set('view','1'); if(fid) url.searchParams.set('fileId', fid); if(sid) url.searchParams.set('sheetId', sid);
+  navigator.clipboard.writeText(url.toString()); toast('閲覧リンクをコピーしました');
+});
+el.btnWide.addEventListener('click', ()=>{
+  document.body.classList.toggle('wide');
+  el.btnWide.textContent = document.body.classList.contains('wide') ? '📋 パネル表示' : '📺 ビューア拡大';
+  setTimeout(()=>{ resize(); updateConnector(); }, 50);
+});
+el.btnTogglePins.addEventListener('click', ()=>{
+  pinGroup.visible = !pinGroup.visible;
+  el.btnTogglePins.textContent = 'ピン表示: ' + (pinGroup.visible? 'ON' : 'OFF');
+  applyPinVisibilityFilter(); renderNow();
+});
+el.btnAddPin.addEventListener('click', ()=>{
+  if(viewOnly) return;
+  addPinMode = !addPinMode;
+  el.viewerCanvas.style.cursor = addPinMode ? 'crosshair' : 'default';
+  el.modeLabel.textContent = addPinMode ? 'AddPin' : 'Orbit';
+  el.btnAddPin.textContent = addPinMode ? '＋ ピン追加: ON' : '＋ ピン追加モード';
+});
+el.btnGizmo.addEventListener('click', ()=>{
+  if(viewOnly) return;
+  const enable = !tcontrols.visible;
+  tcontrols.visible = enable; tcontrols.enabled = enable;
+  el.btnGizmo.textContent = 'ギズモ: ' + (enable ? 'ON' : 'OFF');
+  const p = pins.find(x=>x.id===selectedPinId);
+  if(enable && p && p.mesh){ tcontrols.attach(p.mesh); }
+  else{ tcontrols.detach(); }
+});
+el.btnUndo.addEventListener('click', ()=>{
+  if(viewOnly) return;
+  const last = undoStack.pop(); if(!last) return;
+  if(last.type==='add'){ const idx = pins.findIndex(p=>p.id===last.id); if(idx>=0){ const pin = pins[idx]; if(pin.mesh) pinGroup.remove(pin.mesh); pins.splice(idx,1); refreshPinsList(); renderNow(); upsertPinToSheet(); } }
+});
+el.btnDeletePin.addEventListener('click', async ()=>{
+  if(viewOnly) return;
+  const p = pins.find(x=>x.id===selectedPinId); if(!p) return;
+  const spreadsheetId = extractSpreadsheetId(el.inputSheet.value.trim());
+  if(p.mesh) pinGroup.remove(p.mesh);
+  pins = pins.filter(x=>x.id!==p.id);
+  selectedPinId = null;
+  refreshPinsList(); updateViewerPreviewForPin(null); el.rightEditor.classList.add('hidden'); el.rightNoSel.classList.remove('hidden');
+  renderNow();
+  if(spreadsheetId){ try{ await deletePinFromActiveSheet(spreadsheetId, p.id); }catch(e){ console.error(e); } }
+});
+
+/* ========= GLB Load (LOW-MEM for iOS) ========= */
 async function loadGLBByFileId(fileId){
-  await ensureSignedIn();
-  state.glbFileId = fileId;
+  if(!accessToken){ alert('先にサインインしてください'); return; }
+  if(!fileId){ alert('GLBの fileId または共有URLを入力してください'); return; }
   el.loading.hidden = false;
   try{
-    const url = await driveGetContentURL(fileId);
-    const resp = await fetch(url, { headers:{ 'Authorization':'Bearer '+gapi.client.getToken().access_token }});
-    const arrbuf = await resp.arrayBuffer();
+    el.statusLabel.textContent = 'GLBを読み込み中…';
+    const meta = await driveFileMeta(fileId);
+    glbMetaCache = meta; glbParents = meta.parents || [];
+    const dlUrl = `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media&supportsAllDrives=true`;
 
-    if(state.model){
-      state.scene.remove(state.model);
+    const res = await fetch(dlUrl, { headers:{ Authorization:`Bearer ${accessToken}` } });
+    if(!res.ok){
+      let hint = ''; if(res.status === 403 || res === 404){ hint = '（IDや共有設定を確認してください）'; }
+      throw new Error(`Drive download failed: ${res.status} ${res.statusText} ${hint}`);
     }
-    const gltf = await new Promise((res,rej)=> loader.parse(arrbuf,'',res,rej));
-    state.model = gltf.scene;
-    state.scene.add(state.model);
-    state.renderer.setClearColor(new THREE.Color(el.bgColor.value));
-    focusOrigin();
-  }catch(e){
-    console.error('GLB load failed', e);
-    alert('GLB読み込みに失敗しました');
+
+    // ★★ 低負荷：Blob URL + loadAsync（ArrayBufferを避ける）
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    try {
+      if(currentModel){
+        scene.remove(currentModel);
+        currentModel.traverse(o=>{ if(o.geometry) o.geometry.dispose(); if(o.material){ if(Array.isArray(o.material)) o.material.forEach(m=>m.dispose()); else o.material.dispose(); } });
+        currentModel=null;
+      }
+      const gltf = await loader.loadAsync(url);
+      currentModel = gltf.scene; scene.add(currentModel);
+      collectMaterials();
+      focusOrigin();
+      renderNow();
+    } finally {
+      URL.revokeObjectURL(url);
+    }
+
+    el.statusLabel.textContent = `Loaded: ${meta.name}`;
+
+    let sheetId = extractSpreadsheetId(el.inputSheet.value.trim());
+    if(!sheetId){
+      sheetId = await findOrCreateSpreadsheetInGlbFolder(meta);
+      el.inputSheet.value = sheetId;
+      toast('スプレッドシートを同階層に用意しました');
+    }
+    await refreshCaptionLists(sheetId);
+    await loadPinsFromActiveSheet(sheetId);
+  }catch(err){
+    console.error(err);
+    el.statusLabel.textContent = 'Load failed';
+    alert('GLB読み込みに失敗しました：' + (err?.message || 'unknown error'));
   }finally{
     el.loading.hidden = true;
   }
 }
 
-/* ===================== ヘッダー操作 ===================== */
-el.btnLoad.addEventListener('click', async ()=>{
-  const fid = extractDriveFileId(el.inputGLB.value);
-  if(!fid) return alert('GLBの fileId または共有URLを入力してください');
-  const sid = extractSpreadsheetId(el.inputSheet.value);
-  if (sid) state.sheetId = sid;
-  await loadGLBByFileId(fid);
-});
-el.btnViewOnly.addEventListener('click', ()=>{
-  const fid = extractDriveFileId(el.inputGLB.value||state.glbFileId);
-  const sid = extractSpreadsheetId(el.inputSheet.value||state.sheetId);
-  if(!fid) return alert('GLBのIDを先に入力してください');
-  const u = new URL(location.href);
-  u.searchParams.set('view','1');
-  u.searchParams.set('glb',fid);
-  if(sid) u.searchParams.set('sheet',sid);
-  navigator.clipboard.writeText(u.toString());
-  alert('閲覧リンクをクリップボードにコピーしました');
+/* ========= Save viewer prefs ========= */
+['viewFront','viewBack','viewLeft','viewRight','viewTop','viewBottom'].forEach(id=>{
+  document.getElementById(id).addEventListener('click', ()=> debouncedSaveMaterials());
 });
 
-/* ===================== 起動時処理 ===================== */
-(async ()=>{
-  try{
-    // 早めに初期化を開始（完了前でもクリック安全）
-    initGoogle();
-  }catch(e){ console.warn('initGoogle kickoff failed', e); }
-})();
+/* ========= Entry ========= */
+function buildColorPresetsOnce(){
+  el.colorPresets.innerHTML='';
+  PRESET_COLORS.forEach(c=>{
+    const b=document.createElement('button');
+    b.style.width='18px'; b.style.height='18px';
+    b.style.borderRadius='999px'; b.style.border='2px solid #223146';
+    b.style.background=c; b.title=c;
+    b.addEventListener('click',()=>{
+      currentColor=c;
+      if(selectedPinId){
+        const p=pins.find(x=>x.id===selectedPinId);
+        p.color=normalizeHex(c);
+        placePinMesh(p);
+        refreshPinsList();
+        filterColors.add(p.color);
+        buildColorFilter();
+        debouncedSave();
+      }
+    });
+    el.colorPresets.appendChild(b);
+  });
+}
+buildColorPresetsOnce();
+
+function viewerInitWrap(){ viewerInit(); }
+viewerInitWrap();
+
 </script>
 </body>
 </html>
