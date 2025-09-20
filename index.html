@@ -6,7 +6,6 @@
 <title>LociMyu</title>
 <link rel="icon" href='data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><circle cx="32" cy="32" r="28" fill="%230b0f14"/><text x="32" y="39" font-size="28" text-anchor="middle" fill="%2353b7ff" font-family="Arial">L</text></svg>'>
 <style>
-/* ===== 省略せず収録（UI/レイアウトは前回同等） ===== */
 :root{--bg:#0b0f14;--panel:#121922;--text:#e6edf3;--accent:#53b7ff;--radius:16px;--shadow:0 10px 30px rgba(0,0,0,.3);--tabh:60px}
 html,body{height:100%} body{margin:0;background:var(--bg);color:var(--text);font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial}
 .app{display:grid;grid-template-rows:auto 1fr;height:100dvh}
@@ -21,8 +20,6 @@ body.wide #leftToolbox,body.wide #rightCaption{display:none} body.wide .main{gri
 .panel{background:#121922;border:1px solid #1e2837;border-radius:var(--radius);overflow:hidden;display:flex;flex-direction:column;min-height:0}
 .panel h3{margin:0;padding:10px 12px;border-bottom:1px solid #203049;background:#0f1722;font-size:.95rem;font-weight:600}
 .panel .body{padding:10px;overflow:auto}
-
-/* viewer */
 #viewer{position:relative}
 #viewerCanvas{display:block;width:100%;height:100%;background:#0a0f16;border-radius:var(--radius);touch-action:none;-webkit-user-select:none;user-select:none}
 #connector{position:absolute;left:0;top:0;width:100%;height:100%;pointer-events:none}
@@ -34,8 +31,6 @@ body.wide #leftToolbox,body.wide #rightCaption{display:none} body.wide .main{gri
 .spinner[hidden]{display:none}
 .lds{width:64px;height:64px;border-radius:50%;border:6px solid rgba(255,255,255,.12);border-top-color:var(--accent);animation:spin 1s linear infinite}
 @keyframes spin{to{transform:rotate(360deg)}}
-
-/* caption preview window */
 #viewerPreview{position:absolute;top:10px;right:10px;max-height:60%;border:1px solid #203049;border-radius:8px;background:#0a0f16cc;backdrop-filter: blur(2px);display:grid;grid-template-rows:auto 1fr auto;gap:0;resize:both;overflow:hidden;min-width:260px;min-height:200px;z-index:910}
 #viewerPreview.hidden{display:none}
 #previewControls{position:sticky;top:0;background:#0a0f16f0;border-bottom:1px solid #203049;padding:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;z-index:1}
@@ -46,13 +41,9 @@ body.wide #leftToolbox,body.wide #rightCaption{display:none} body.wide .main{gri
 #viewerPreview .cap{border-top:1px solid #203049;background:#0a0f16f0;display:grid;grid-template-rows:auto auto;gap:4px;padding:6px 8px}
 #capTitleLine{font-weight:700}
 #capBodyLine{font-size:.85rem;color:#c9d7ea;max-height:8em;overflow:auto}
-
-/* signin */
 .signin-gate{position:fixed;inset:0;display:grid;place-items:center;background:radial-gradient(1200px 600px at 50% 15%, rgba(83,183,255,.08), transparent 60%), linear-gradient(180deg,#0a0f16,#05070b);z-index:2000;padding:env(safe-area-inset-top) env(safe-area-inset-right) calc(env(safe-area-inset-bottom)) env(safe-area-inset-left)}
 .card{width:min(560px,92vw);background:#0c1118;border:1px solid #1d2a3d;border-radius:24px;box-shadow:var(--shadow);padding:20px}
 .card h1{margin:4px 0 8px;font-size:1.35rem} .card p{color:#c2d0e2;opacity:.9}
-
-/* mobile tabs + sheet */
 #mobileTabs{display:none;position:fixed;left:0;right:0;bottom:0;height:calc(var(--tabh) + env(safe-area-inset-bottom));padding-bottom:env(safe-area-inset-bottom);background:#0f1722;border-top:1px solid #203049;z-index:1800;pointer-events:auto}
 #mobileTabs button{flex:1;border-radius:0;border:none;background:transparent;font-weight:700}
 #mobileTabs button.active{background:#132035}
@@ -63,14 +54,11 @@ body.wide #leftToolbox,body.wide #rightCaption{display:none} body.wide .main{gri
 #mobilePages{overflow:auto;max-height:calc(min(70dvh,70svh) - 44px);padding:8px}
 #mobilePagePins,#mobilePageTools{display:none}
 #mobilePagePins.active,#mobilePageTools.active{display:block}
-
 @media (max-width: 820px){
   .main{grid-template-columns:1fr}
   #leftToolbox,#rightCaption{display:none}
   #mobileTabs, #mobileSheet{display:block}
 }
-
-/* picker grid */
 #pickerGrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:10px}
 .pickCard{border:1px solid #223146;border-radius:10px;overflow:hidden;background:#0f1722;cursor:pointer}
 .pickCard img{width:100%;height:120px;object-fit:cover;display:block}
@@ -105,11 +93,9 @@ body.wide #leftToolbox,body.wide #rightCaption{display:none} body.wide .main{gri
   </header>
 
   <div class="main">
-    <!-- 左ツール -->
     <section class="panel" id="leftToolbox">
       <h3>ツールボックス（マテリアル & カメラ & ピン）</h3>
       <div class="body" id="leftBody">
-        <!-- ピン -->
         <div id="pinTools">
           <div class="small">Shift + クリック でピンを配置（編集モードのみ）</div>
           <div class="small" style="margin:6px 0">プリセット色：</div>
@@ -123,7 +109,6 @@ body.wide #leftToolbox,body.wide #rightCaption{display:none} body.wide .main{gri
           <hr style="border-color:#203049;border-width:1px 0;margin:12px 0">
         </div>
 
-        <!-- マテリアル -->
         <div class="small" style="margin:4px 0 6px">マテリアル編集（シート別に保存）</div>
         <div class="field"><label>対象</label>
           <select id="matSelect"><option value="__sel__">（マテリアルを選択）</option></select>
@@ -137,7 +122,6 @@ body.wide #leftToolbox,body.wide #rightCaption{display:none} body.wide .main{gri
 
         <hr style="border-color:#203049;border-width:1px 0;margin:12px 0">
 
-        <!-- ビュー -->
         <div class="small" style="margin:4px 0 6px">ビュー（シート別に保存）</div>
         <div class="viewgrid" style="margin-bottom:8px;display:grid;grid-template-columns:repeat(6,1fr);gap:6px">
           <button id="viewFront">前面</button>
@@ -152,7 +136,6 @@ body.wide #leftToolbox,body.wide #rightCaption{display:none} body.wide .main{gri
       </div>
     </section>
 
-    <!-- ビューア -->
     <section class="panel" id="viewer">
       <div class="spinner" id="loading" hidden><div class="lds"></div></div>
       <canvas id="viewerCanvas"></canvas>
@@ -182,7 +165,6 @@ body.wide #leftToolbox,body.wide #rightCaption{display:none} body.wide .main{gri
       <div class="hud"><div class="chip" id="modeLabel">Orbit</div></div>
     </section>
 
-    <!-- 右キャプション -->
     <section class="panel" id="rightCaption">
       <h3>キャプション</h3>
       <div class="body" id="rightBody">
@@ -234,7 +216,6 @@ body.wide #leftToolbox,body.wide #rightCaption{display:none} body.wide .main{gri
   </div>
 </div>
 
-<!-- mobile controls -->
 <nav id="mobileTabs">
   <button id="tabViewer" class="active">ビュー</button>
   <button id="tabPins">キャプション</button>
@@ -254,7 +235,6 @@ body.wide #leftToolbox,body.wide #rightCaption{display:none} body.wide .main{gri
   </div>
 </section>
 
-<!-- picker -->
 <div id="pickerModal" class="signin-gate" style="display:none;background:rgba(0,0,0,.55)">
   <div class="card" style="width:min(90vw,980px);max-height:80svh;overflow:hidden">
     <h1 style="margin:0 0 6px">Driveから保存</h1>
@@ -266,7 +246,6 @@ body.wide #leftToolbox,body.wide #rightCaption{display:none} body.wide .main{gri
   </div>
 </div>
 
-<!-- sign-in gate -->
 <div class="signin-gate" id="gate">
   <div class="card">
     <h1>Googleにサインイン</h1>
@@ -350,7 +329,6 @@ function afterAuthReady(){
   }
   enforceViewOnlyMode();
 
-  // クエリ反映＆自動ロード（閲覧モード）
   const qs = new URLSearchParams(location.search);
   const fid = qs.get('fileId') || ''; const sid = qs.get('sheetId') || '';
   if(fid) el.inputGLB.value = fid; if(sid) el.inputSheet.value = sid;
@@ -425,11 +403,11 @@ const el = {
   matThreshold: document.getElementById('matThreshold'),
   matThresholdVal: document.getElementById('matThresholdVal'),
   viewFront: document.getElementById('viewFront'),
-  viewBack: document.getElementById('viewBack'),
-  viewLeft: document.getElementById('viewLeft'),
+  viewBack : document.getElementById('viewBack'),
+  viewLeft : document.getElementById('viewLeft'),
   viewRight: document.getElementById('viewRight'),
-  viewTop: document.getElementById('viewTop'),
-  viewBottom: document.getElementById('viewBottom'),
+  viewTop  : document.getElementById('viewTop'),
+  viewBottom:document.getElementById('viewBottom'),
   projOrtho: document.getElementById('projOrtho'),
   bgColor: document.getElementById('bgColor'),
   connector: document.getElementById('connector'),
@@ -442,7 +420,6 @@ const el = {
   listSelect: document.getElementById('listSelect'),
   listNew: document.getElementById('listNew'),
   listDelete: document.getElementById('listDelete'),
-  // Mobile
   tabViewer: document.getElementById('tabViewer'),
   tabPins: document.getElementById('tabPins'),
   tabTools: document.getElementById('tabTools'),
@@ -469,7 +446,7 @@ let filterColors = new Set();
 let activeSheet = { sheetId:null, title:'pins' };
 const PRESET_COLORS = ['#ff6b6b','#ffd166','#06d6a0','#118ab2','#ef476f','#b5179e','#4361ee','#4cc9f0','#ff9f1c'];
 
-/* Undo stack (pins) */
+/* Undo stack */
 const undoStack=[]; const pushUndo=(act)=>{ undoStack.push(act); el.btnUndo.disabled = undoStack.length===0; };
 function doUndo(){
   const a=undoStack.pop(); if(!a) return;
@@ -491,7 +468,7 @@ function normalizeHex(c){ const t = new THREE.Color(c); return '#' + t.getHexStr
 function enforceViewOnlyMode(){ if (!viewOnly) return; document.body.classList.add('viewonly'); el.capTitle.readOnly = true; el.capBody.readOnly  = true; }
 function extractDriveId(input){ if(!input) return ""; const s=input.trim(); if(/^[a-zA-Z0-9_-]{20,}$/.test(s)&&!s.includes("http")) return s; try{ const u=new URL(s); const m1=u.pathname.match(/\/file\/d\/([^/]+)/); if(m1) return m1[1]; if(u.searchParams.get("id")) return u.searchParams.get("id"); const m2=u.pathname.match(/\/d\/([^/]+)/); if(m2) return m2[1]; }catch{} return s; }
 function extractSpreadsheetId(input){ if(!input) return ""; const s=input.trim(); if(/^[a-zA-Z0-9_-]{20,}$/.test(s)&&!s.includes("http")) return s; try{ const u=new URL(s); const m=u.pathname.match(/\/spreadsheets\/d\/([^/]+)/); if(m) return m[1]; if(u.searchParams.get("id")) return u.searchParams.get("id"); }catch{} return s; }
-const safeFloat=(v,def=0)=>{ const n=parseFloat(v); return Number.isFinite(n)?n:def; };
+const safeFloat=(v,def=0)=>{ const n=parseFloat(v); return Number.isFinite(n)?n:def; }
 
 /* perf */
 let basePixelRatio=1, lowPixelRatio=1, interactionLoop=false, onDemand=true;
@@ -510,7 +487,7 @@ const endInteraction = debounce(()=>{
 function viewerInit(){
   const Q=getQualityProfile();
   renderer=new THREE.WebGLRenderer({ canvas:el.viewerCanvas, antialias:Q.antialias, powerPreference:'low-power', alpha:false });
-  renderer.debug.checkShaderErrors = true; /* ← デバッグ有効 */
+  renderer.debug.checkShaderErrors = true;
   basePixelRatio=Math.min(window.devicePixelRatio||1, Q.pixelRatioCap);
   lowPixelRatio=Math.max(0.6, Math.min(basePixelRatio*0.75, 1.0));
   renderer.setPixelRatio(basePixelRatio);
@@ -689,6 +666,11 @@ function transientRender(ms=1800){
   requestAnimationFrame(loop);
 }
 
+/* ====== onBeforeCompile 安全化ユーティリティ ====== */
+function setOBC(material, fnOrNull){
+  material.onBeforeCompile = (typeof fnOrNull === 'function') ? fnOrNull : null;
+}
+
 /* materials */
 function collectMaterials(root){
   const set=new Set();
@@ -706,6 +688,7 @@ function collectMaterials(root){
     materialKeyByMaterial.set(m,key); materialByKey.set(key,m); materialDisplayName.set(key,label);
     const opt=document.createElement('option'); opt.value=key; opt.textContent=label; el.matSelect.appendChild(opt);
     matOriginals.set(m,{ transparent:m.transparent, opacity:m.opacity, side:m.side, map:m.map||null, color:m.color?.clone?.()||new THREE.Color(0xffffff) });
+    if(typeof m.onBeforeCompile!=='function') setOBC(m, null); // ← 追加：初期化
   });
 }
 
@@ -714,22 +697,19 @@ function hasOutputInclude(frag){ return frag.includes('#include <output_fragment
 function hasDiffuseColor(frag){ return /diffuseColor\s*\./.test(frag) || /\bvec4\s+diffuseColor\b/.test(frag); }
 function injectAlphaPatch(frag, injected){
   const begin='// LMY_BEGIN', end='// LMY_END';
-  // 既存差し込みを除去してから再注入
   frag = frag.replace(new RegExp(`${begin}[\\s\\S]*?${end}`,'g'), '');
   const footer = '#include <output_fragment>';
   if(frag.includes(footer)){
     return frag.replace(footer, `${begin}\n${injected}\n${end}\n${footer}`);
   } else {
-    // 予備：末尾に追加（安全性重視）
     return `${frag}\n${begin}\n${injected}\n${end}\n`;
   }
 }
 
-/* ここが今回の修正中核：安全版 applyMatUITo */
+/* ここが修正後の applyMatUITo */
 function applyMatUITo(material){
   if(!material) return;
 
-  // Shader/RawShader は対象外
   if (material.isShaderMaterial || material.isRawShaderMaterial) {
     material.needsUpdate = true; requestRender(); return;
   }
@@ -737,22 +717,19 @@ function applyMatUITo(material){
   const unlit   = !!el.matUnlit.checked;
   const dbl     = !!el.matDoubleSided.checked;
   const opacity = clamp01(el.matOpacity.value, 1);
-  const whiteT  = !!el.matWhiteTransparent.checked; // 白→透明
-  const blackT  = !!el.matInvert.checked;           // 黒→透明
+  const whiteT  = !!el.matWhiteTransparent.checked;
+  const blackT  = !!el.matInvert.checked;
   const thr     = clamp01(el.matThreshold.value, 0);
 
-  // Unlit：ライト計算とトーンマッピングを切る（シェーダは触らない）
   material.lights = !unlit;
   material.toneMapped = !unlit;
 
-  // 一般パラメータ
   material.transparent = (opacity < 1.0) || whiteT || blackT || (material.alphaTest > 0);
   material.opacity     = opacity;
   material.alphaTest   = (whiteT || blackT) ? Math.max(0.0001, thr * 0.05) : 0.0;
   material.side        = dbl ? THREE.DoubleSide : THREE.FrontSide;
   material.depthWrite  = !(whiteT || blackT) || (opacity >= 1.0);
 
-  // キャッシュキー（再コンパイル安定）
   const cacheKey = JSON.stringify({
     U: unlit ? 1 : 0,
     D: dbl ? 1 : 0,
@@ -763,34 +740,28 @@ function applyMatUITo(material){
   });
   material.customProgramCacheKey = ()=> cacheKey;
 
-  // パッチは “出力フラグメントあり & diffuseColor あり” の材質にのみ適用
-  // また、白/黒→透明いずれか or 不透明度が 1 以外 のときに限定（無駄な差し込みを避ける）
   const needPatch = (whiteT || blackT || opacity < 1.0);
 
   if(!needPatch){
-    // 差し込み不要のときは既存 onBeforeCompile をクリアして更新
-    material.onBeforeCompile = undefined;
+    setOBC(material, null);               // ← 修正点：undefinedではなくnull
     material.needsUpdate = true; requestRender(); return;
   }
 
-  material.onBeforeCompile = (shader)=>{
+  setOBC(material, (shader)=>{
     try{
       let frag = shader.fragmentShader;
       if(!hasOutputInclude(frag) || !hasDiffuseColor(frag)){
-        // パッチ条件を満たさない → そのまま（パラメータだけで対応）
         return;
       }
-      // uniform を common セクションに（重複はマーカー削除で防ぐ）
       const headerNeedle = '#include <common>';
       const decl = 'uniform float uLMThreshold;';
-      frag = frag.replace(/uniform\s+float\s+uLMThreshold\s*;/g,''); // 重複回避
+      frag = frag.replace(/uniform\s+float\s+uLMThreshold\s*;/g,'');
       if(frag.includes(headerNeedle)){
         frag = frag.replace(headerNeedle, `${headerNeedle}\n${decl}`);
       }else{
         frag = `${decl}\n${frag}`;
       }
 
-      // アルファのみ調整（色は触らない）
       const injected = `
 float lm_luma = dot( diffuseColor.rgb, vec3(0.299, 0.587, 0.114) );
 float lm_aAdj = diffuseColor.a;
@@ -805,7 +776,7 @@ diffuseColor.a = lm_aAdj;
     }catch(e){
       console.warn('shader patch skipped:', e);
     }
-  };
+  });
 
   material.needsUpdate = true;
   requestRender();
@@ -874,7 +845,7 @@ async function fileToObjectURL(fileId){
   const blob=await res.blob(); return URL.createObjectURL(blob);
 }
 
-/* pins UI …（以下は前回同等。省略せず収録） */
+/* pins UI */
 function buildColorPresets(){
   el.colorPresets.innerHTML='';
   PRESET_COLORS.forEach(col=>{
@@ -983,7 +954,7 @@ function applyPinVisibilityFilter(){
   requestRender();
 }
 
-/* Sheets （GLBと同階層生成・キャプションリスト管理・メタ保存）*/
+/* Sheets */
 async function loadOrEnsureSpreadsheet(glbFileId){
   const input=extractSpreadsheetId(el.inputSheet.value||'');
   if(input){ activeSheet.sheetId=input; await ensureSheetPicked(); return; }
@@ -1025,7 +996,7 @@ async function loadPinsFromActiveSheet(){
       const p=createPin(new THREE.Vector3(fx,fy,fz), color||'#ff6b6b');
       p.id=id||p.id; p.title=title||''; p.body=body||''; p.images=(images||'').split(',').filter(Boolean);
     });
-  }catch(e){ /* 空でもOK */ }
+  }catch(e){}
 
   await loadMetaFromSheet();
   filterColors = new Set(); applyPinVisibilityFilter();
@@ -1078,7 +1049,7 @@ async function loadMetaFromSheet(){
       matState.set(key,s);
     });
     applyMatStateToAll(); requestRender();
-  }catch(e){ /* 未設定なら何もしない */ }
+  }catch(e){}
 }
 
 /* picker */
@@ -1170,18 +1141,15 @@ function wireUI(){
     await ensureSheetPicked(); await loadPinsFromActiveSheet();
   });
 
-  // color filter panel (右パネル)
   el.btnColorFilter.addEventListener('click', ()=>{ el.colorFilterPanel.style.display=(el.colorFilterPanel.style.display==='none'?'block':'none'); buildColorFilterPanel(); });
   el.btnFilterAll.addEventListener('click', ()=>{ filterColors=new Set(); applyPinVisibilityFilter(); });
   el.btnFilterNone.addEventListener('click', ()=>{ filterColors=new Set(['__none__']); applyPinVisibilityFilter(); });
   el.btnFilterClose.addEventListener('click', ()=>{ el.colorFilterPanel.style.display='none'; });
 
-  // preview
   el.previewZoom.addEventListener('input', ()=>{ const z=parseFloat(el.previewZoom.value); el.previewZoomVal.textContent=z.toFixed(2)+'×'; el.previewInner.style.transform=`scale(${z})`; updateConnector(); });
   el.previewReset.addEventListener('click', ()=>{ el.previewZoom.value='1'; el.previewZoomVal.textContent='1.00×'; el.previewInner.style.transform='scale(1)'; updateConnector(); });
   el.previewClose.addEventListener('click', closePreview);
 
-  /* Mobile tabs / sheet */
   el.tabViewer.addEventListener('click', ()=> setActiveMobileTab('viewer'));
   el.tabPins.addEventListener('click',   ()=> setActiveMobileTab('pins'));
   el.tabTools.addEventListener('click',  ()=> setActiveMobileTab('tools'));
@@ -1191,7 +1159,6 @@ function wireUI(){
     else setActiveMobileTab('viewer');
   });
 
-  // キー（Shift での追加補助）
   window.addEventListener('keydown', (e)=>{ if(e.ctrlKey && e.key.toLowerCase()==='z'){ e.preventDefault(); doUndo(); }});
 }
 function buildColorFilterPanel(){
