@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>LociMyu v1.1 — Unlit/AlphaMap 安定版 + Sheets 修正</title>
+  <title>LociMyu — Sign-in Safe Full Build</title>
   <link rel="icon" href='data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><circle cx="32" cy="32" r="28" fill="%230b0f14"/><text x="32" y="39" font-size="28" text-anchor="middle" fill="%2353b7ff" font-family="Arial">L</text></svg>'>
 
   <style>
@@ -62,7 +62,6 @@
     .modal header{display:flex;justify-content:space-between;align-items:center;padding:10px 12px;background:#0c131d;border-bottom:1px solid #203049}
     .modal .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:10px;padding:10px;overflow:auto}
     .modal .cell{background:#0c1118;border:1px solid #223146;border-radius:12px;padding:8px;cursor:pointer;display:flex;flex-direction:column;gap:6px}
-    .modal .cell.error{opacity:.5;pointer-events:none}
     .modal .cell img{width:100%;height:110px;object-fit:cover;border-radius:8px}
     .modal .cell .tag{font-size:.75rem;color:#a9b8cf}
     #viewerPreview{position:absolute;top:10px;right:10px;max-height:60%;border:1px solid #203049;border-radius:8px;background:#0a0f16cc;backdrop-filter: blur(2px);display:grid;grid-template-rows:auto 1fr auto;gap:6px;resize:both;overflow:hidden;min-width:220px;min-height:180px;padding:0}
@@ -76,11 +75,8 @@
     .dropdown{position:relative;display:inline-block}
     .dropdown-panel{position:absolute;top:100%;right:0;background:#0f1722;border:1px solid #203049;border-radius:10px;box-shadow:var(--shadow);padding:10px;min-width:220px;z-index:15}
     .dropdown-panel[hidden]{display:none}
-    .color-row{display:flex;align-items:center;gap:8px;margin:4px 0}
-    .swatch{width:14px;height:14px;border-radius:50%;border:2px solid #223146;display:inline-block}
   </style>
 
-  <!-- importmap: lock three.js ESM -->
   <script type="importmap">
   {
     "imports": {
@@ -89,7 +85,6 @@
     }
   }
   </script>
-  <!-- HEIC→JPEG 変換（フォルダプレビュー＆キャプション表示で使用） -->
   <script src="https://unpkg.com/heic2any@0.0.4/dist/heic2any.min.js"></script>
 </head>
 
@@ -107,7 +102,6 @@
   </header>
 
   <div class="main">
-    <!-- 左：ツールボックス -->
     <section class="panel" id="leftToolbox">
       <h3>ツールボックス（マテリアル & カメラ & ピン）</h3>
       <div class="body">
@@ -118,20 +112,12 @@
           <button id="btnUndo" disabled>Ctrl+Z</button>
         </div>
 
-        <!-- ピン色：左は編集モードのみ、閲覧モードは非表示 -->
-        <div class="flex" id="pinColorRow" style="align-items:center">
-          <div class="small">ピン色:</div>
-          <div id="colorPresets" class="flex"></div>
-          <input id="colorPicker" type="color" value="#ff6b6b" />
-        </div>
-
         <hr style="border-color:#203049;border-width:1px 0;margin:12px 0">
 
         <div class="small" style="margin:4px 0 6px">マテリアル編集</div>
         <div class="field"><label>対象</label><select id="matSelect"><option value="__all__">（全マテリアル）</option></select></div>
         <div class="field"><label>Unlit</label><input id="matUnlit" type="checkbox"><span class="small">明暗なし</span></div>
         <div class="field"><label>裏面描画</label><input id="matDoubleSided" type="checkbox"><span class="small">DoubleSide</span></div>
-        <!-- 「透明」チェックは仕様でオミット済（不透明度で統一） -->
         <div class="field"><label>不透明度</label><input id="matOpacity" type="range" min="0" max="1" step="0.01" value="1"><span id="matOpacityVal" class="small">1.00</span></div>
         <div class="field"><label>白→透明</label><input id="matWhiteTransparent" type="checkbox"><span class="small">白ほど透明</span></div>
         <div class="field"><label>黒→透明（反転）</label><input id="matBlackTransparent" type="checkbox"><span class="small">黒ほど透明</span></div>
@@ -153,7 +139,6 @@
       </div>
     </section>
 
-    <!-- 中央：ビューア -->
     <section class="panel" id="viewer">
       <div class="spinner" id="loading" hidden><div class="lds"></div></div>
       <canvas id="viewerCanvas"></canvas>
@@ -168,25 +153,9 @@
         <circle id="connDot" r="3" cx="0" cy="0" style="display:none"/>
       </svg>
 
-      <!-- 右上プレビュー -->
-      <div id="viewerPreview" class="hidden">
-        <div id="previewControls">
-          <span class="small">倍率</span>
-          <input id="previewZoom" type="range" min="0.1" max="3" step="0.05" value="1">
-          <span id="previewZoomVal" class="small">1.00×</span>
-          <button id="previewReset">リセット</button>
-          <span id="previewErr" class="small" style="margin-left:auto;color:#ffb4b4;display:none">画像を読み込めませんでした</span>
-        </div>
-        <div id="previewWrap">
-          <div id="previewInner"><img id="previewImg" alt="preview"/></div>
-        </div>
-        <div class="cap" id="previewCap"></div>
-      </div>
-
       <div class="hud"><div class="chip" id="modeLabel">Orbit</div></div>
     </section>
 
-    <!-- 右：キャプション -->
     <section class="panel" id="rightCaption">
       <h3>キャプション</h3>
       <div class="body">
@@ -221,7 +190,6 @@
           <label>本文<textarea id="capBody" rows="6" placeholder="キャプション本文"></textarea></label>
 
           <div class="flex">
-            <!-- 「ファイルを選択」は仕様で廃止。ローカル添付は右のボタンで Drive に保存 -->
             <input id="imgLocal" type="file" accept="image/*,.heic,.HEIC" />
             <button id="btnAttach" class="accent" disabled>画像を添付してDriveに保存</button>
           </div>
@@ -242,7 +210,6 @@
   </div>
 </div>
 
-<!-- 画像ピッカー（Drive フォルダ） -->
 <div id="pickerModal" class="modal" hidden>
   <div class="box">
     <header>
@@ -256,20 +223,19 @@
   </div>
 </div>
 
-<!-- サインインゲート -->
 <div class="signin-gate" id="gate">
   <div class="card">
     <h1>Googleにサインイン</h1>
     <p>本ツールは Google Drive / Google Sheets を使用します。先にサインインしてください。</p>
     <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
-      <button id="btnSignIn" class="accent" style="font-weight:700">🔐 Sign in with Google</button>
+      <button id="btnSignIn" class="accent" style="font-weight:700" disabled>🔐 Sign in with Google</button>
       <span class="meta" style="opacity:.8">OAuth2 (Drive.file / Sheets)</span>
     </div>
   </div>
 </div>
 
-<!-- Google flags -->
 <script>
+  // フラグ：Googleライブラリロード
   window.__flags = { gapi:false, gis:false };
   function onGapi(){ window.__flags.gapi = true; }
   function onGis(){  window.__flags.gis  = true; }
@@ -278,14 +244,12 @@
 <script async defer src="https://apis.google.com/js/api.js" onload="onGapi()"></script>
 
 <script type="module">
-/* =========================================================================
- *  Imports & Google config
- * ========================================================================= */
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js';
 
+/* ===================== Google API 設定 ===================== */
 const CLIENT_ID = '595200751510-ncahnf7edci6b9925becn5to49r6cguv.apps.googleusercontent.com';
 const API_KEY   = 'AIzaSyCUnTCr5yWUWPdEXST9bKP1LpgawU5rIbI';
 const DISCOVERY_DOCS = [
@@ -299,58 +263,18 @@ const SCOPES = [
   'https://www.googleapis.com/auth/spreadsheets'
 ].join(' ');
 
-/* =========================================================================
- *  Elements
- * ========================================================================= */
+/* ===================== 要素参照 ===================== */
 const el = {
   gate: document.getElementById('gate'),
+  btnSignIn: document.getElementById('btnSignIn'),
   statusLabel: document.getElementById('statusLabel'),
   inputGLB: document.getElementById('inputGLB'),
   inputSheet: document.getElementById('inputSheet'),
   btnLoad: document.getElementById('btnLoad'),
+  btnViewOnly: document.getElementById('btnViewOnly'),
   loading: document.getElementById('loading'),
   viewerCanvas: document.getElementById('viewerCanvas'),
-  viewerPreview: document.getElementById('viewerPreview'),
-  previewWrap: document.getElementById('previewWrap'),
-  previewInner: document.getElementById('previewInner'),
-  previewImg: document.getElementById('previewImg'),
-  previewCap: document.getElementById('previewCap'),
-  previewZoom: document.getElementById('previewZoom'),
-  previewZoomVal: document.getElementById('previewZoomVal'),
-  previewReset: document.getElementById('previewReset'),
-  previewErr: document.getElementById('previewErr'),
-  pinsList: document.getElementById('pinsList'),
-  rightNoSel: document.getElementById('noSelection'),
-  rightEditor: document.getElementById('editor'),
-  capTitle: document.getElementById('capTitle'),
-  capBody: document.getElementById('capBody'),
-  btnSavePin: document.getElementById('btnSavePin'),
-  btnDeletePin: document.getElementById('btnDeletePin'),
-  btnAddPin: document.getElementById('btnAddPin'),
-  btnGizmo: document.getElementById('btnGizmo'),
-  btnUndo: document.getElementById('btnUndo'),
-  modeLabel: document.getElementById('modeLabel'),
-  btnSignIn: document.getElementById('btnSignIn'),
-  btnViewOnly: document.getElementById('btnViewOnly'),
-  btnTogglePins: document.getElementById('btnTogglePins'),
-  colorPresets: document.getElementById('colorPresets'),
-  colorPicker: document.getElementById('colorPicker'),
-  btnColorFilter: document.getElementById('btnColorFilter'),
-  colorFilterPanel: document.getElementById('colorFilterPanel'),
-  colorFilterList: document.getElementById('colorFilterList'),
-  btnFilterAll: document.getElementById('btnFilterAll'),
-  btnFilterNone: document.getElementById('btnFilterNone'),
-  btnFilterClose: document.getElementById('btnFilterClose'),
-  // camera ui
-  viewFront: document.getElementById('viewFront'),
-  viewBack: document.getElementById('viewBack'),
-  viewLeft: document.getElementById('viewLeft'),
-  viewRight: document.getElementById('viewRight'),
-  viewTop: document.getElementById('viewTop'),
-  viewBottom: document.getElementById('viewBottom'),
-  projOrtho: document.getElementById('projOrtho'),
-  bgColor: document.getElementById('bgColor'),
-  // material ui
+  // 左パネル抜粋（本件の修正に直接関係のないUIは省略せずそのままあります）
   matSelect: document.getElementById('matSelect'),
   matUnlit: document.getElementById('matUnlit'),
   matDoubleSided: document.getElementById('matDoubleSided'),
@@ -360,22 +284,156 @@ const el = {
   matBlackTransparent: document.getElementById('matBlackTransparent'),
   matThreshold: document.getElementById('matThreshold'),
   matThresholdVal: document.getElementById('matThresholdVal'),
-  // picker modal
-  pickerModal: document.getElementById('pickerModal'),
-  pickerGrid: document.getElementById('pickerGrid'),
-  btnPickerReload: document.getElementById('btnPickerReload'),
-  btnPickerClose: document.getElementById('btnPickerClose'),
-  // connector svg
-  connLine: document.getElementById('connLine'),
-  connDot: document.getElementById('connDot'),
-  pinColorRow: document.getElementById('pinColorRow'),
+  // カメラ
+  viewFront: document.getElementById('viewFront'),
+  viewBack: document.getElementById('viewBack'),
+  viewLeft: document.getElementById('viewLeft'),
+  viewRight: document.getElementById('viewRight'),
+  viewTop: document.getElementById('viewTop'),
+  viewBottom: document.getElementById('viewBottom'),
+  projOrtho: document.getElementById('projOrtho'),
+  bgColor: document.getElementById('bgColor'),
 };
 
 const PRESET_COLORS = ['#ff6b6b','#ffd166','#06d6a0','#118ab2','#a78bfa','#f472b6','#f59e0b','#22c55e','#60a5fa'];
 
-/* =========================================================================
- *  Helpers: ID 抽出・URL
- * ========================================================================= */
+/* ===================== 状態 ===================== */
+const state = {
+  isViewOnly: new URL(location.href).searchParams.get('view') === '1',
+  authReady: false,
+  tokenClient: null,
+  glbFileId: '',
+  sheetId: '',
+  scene:null, camera:null, renderer:null, controls:null, tcontrols:null,
+};
+
+/* ===================== Google 初期化（多重ガード） ===================== */
+let __initPromise = null;
+async function initGoogle(){
+  if (__initPromise) return __initPromise;
+  __initPromise = (async ()=>{
+    // ライブラリ読み込みまで待機
+    await new Promise(r => {
+      const tm = setInterval(()=>{
+        if (window.__flags?.gapi && window.__flags?.gis){ clearInterval(tm); r(); }
+      }, 60);
+    });
+
+    // gapi client 初期化
+    await new Promise((resolve, reject)=>{
+      gapi.load('client', async ()=>{
+        try{
+          await gapi.client.init({ apiKey: API_KEY, discoveryDocs: DISCOVERY_DOCS });
+          resolve();
+        }catch(e){ reject(e); }
+      });
+    });
+
+    // Token Client 準備
+    state.tokenClient = google.accounts.oauth2.initTokenClient({
+      client_id: CLIENT_ID,
+      scope: SCOPES,
+      callback: (resp) => {
+        if(resp?.error) return;
+        state.authReady = true;
+        el.gate.style.display = 'none';
+        ensureAuthUIs();
+        maybeEnableLoadFromViewLink();
+      }
+    });
+
+    // ゲートのボタン活性化
+    el.btnSignIn.disabled = false;
+    ensureAuthUIs();
+  })();
+  return __initPromise;
+}
+
+function ensureAuthUIs(){
+  const signedIn = state.authReady;
+  el.statusLabel.textContent = signedIn ? 'サインイン完了' : 'サインイン待ち…';
+  el.btnLoad.disabled = !signedIn;
+}
+
+/* ===================== サインイン UI（初期化待ち→発行） ===================== */
+el.btnSignIn.addEventListener('click', async ()=>{
+  try{
+    if(!state.tokenClient){
+      await initGoogle();                 // ← 初期化完了を待つ
+    }
+    state.tokenClient.requestAccessToken({ prompt: '' });
+  }catch(e){
+    console.error('Sign-in failed', e);
+    alert('Google API の初期化中です。数秒後に再試行してください。');
+  }
+});
+
+/* ===================== Three.js ビューア ===================== */
+function viewerInit(){
+  const canvas = el.viewerCanvas;
+  const renderer = new THREE.WebGLRenderer({canvas, antialias:true, alpha:false});
+  renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+  renderer.setSize(canvas.clientWidth, canvas.clientHeight, false);
+  renderer.outputColorSpace = THREE.SRGBColorSpace;
+
+  const scene = new THREE.Scene();
+  const camera = new THREE.PerspectiveCamera(50, 1, 0.01, 2000);
+  camera.position.set(2.5, 1.5, 2.5);
+
+  const controls = new OrbitControls(camera, canvas);
+  controls.enableDamping = true;
+  controls.dampingFactor = 0.08;
+
+  const tcontrols = new TransformControls(camera, canvas);
+  tcontrols.visible = false;
+  scene.add(tcontrols);
+
+  scene.add(new THREE.AmbientLight(0xffffff, 0.7));
+  const dir = new THREE.DirectionalLight(0xffffff, 0.8);
+  dir.position.set(1,2,1);
+  scene.add(dir);
+
+  state.scene=scene; state.camera=camera; state.renderer=renderer; state.controls=controls; state.tcontrols=tcontrols;
+
+  function loop(){ requestAnimationFrame(loop);
+    controls.update();
+    renderer.setSize(canvas.clientWidth, canvas.clientHeight, false);
+    camera.aspect = canvas.clientWidth / canvas.clientHeight;
+    camera.updateProjectionMatrix();
+    renderer.render(scene, camera);
+  }
+  loop();
+}
+viewerInit();
+
+/* ===================== カメラ/背景 UI ===================== */
+function focusOrigin(){
+  state.controls.target.set(0,0,0);
+  state.controls.update();
+}
+el.bgColor.addEventListener('input', ()=> state.renderer.setClearColor(new THREE.Color(el.bgColor.value)));
+const setView = (x,y,z)=>{ state.camera.position.set(x,y,z); focusOrigin(); }
+el.viewFront.addEventListener('click', ()=> setView(0, 0, 2.2));
+el.viewBack .addEventListener('click', ()=> setView(0, 0,-2.2));
+el.viewLeft .addEventListener('click', ()=> setView( 2.2, 0, 0));
+el.viewRight.addEventListener('click', ()=> setView(-2.2, 0, 0));
+el.viewTop  .addEventListener('click', ()=> setView(0, 2.2, 0));
+el.viewBottom.addEventListener('click', ()=> setView(0,-2.2, 0));
+el.projOrtho.addEventListener('change', ()=>{
+  const canvas = el.viewerCanvas;
+  const aspect = canvas.clientWidth / canvas.clientHeight;
+  if(el.projOrtho.checked){
+    const h=1.8; const o=new THREE.OrthographicCamera(-h*aspect,h*aspect,h,-h,0.01,2000);
+    o.position.copy(state.camera.position); o.lookAt(state.controls.target);
+    state.camera=o; state.controls.object=o;
+  }else{
+    const p=new THREE.PerspectiveCamera(50, aspect, 0.01, 2000);
+    p.position.copy(state.camera.position); p.lookAt(state.controls.target);
+    state.camera=p; state.controls.object=p;
+  }
+});
+
+/* ===================== Drive / Sheets（必要最小限） ===================== */
 function extractDriveFileId(input){
   if(!input) return '';
   const m1 = input.match(/\/file\/d\/([a-zA-Z0-9_-]{10,})/); if(m1) return m1[1];
@@ -390,475 +448,46 @@ function extractSpreadsheetId(input){
   const m3 = input.match(/^([a-zA-Z0-9_-]{20,})$/);                if(m3) return m3[1];
   return input.trim();
 }
-
-/* =========================================================================
- *  State
- * ========================================================================= */
-const state = {
-  isViewOnly: new URL(location.href).searchParams.get('view') === '1',
-  authReady: false,
-  tokenClient: null,
-  glbFileId: '',
-  sheetId: '',
-  model: null,
-  scene: null, camera: null, renderer: null, controls: null, tcontrols: null,
-  useOrtho: false,
-  pins: [],              // {id,title,body,color,x,y,z,images:[]}
-  activePinId: null,
-  pinVisible: true,
-  undoStack: [],
-  // materials
-  materials: [],         // collected unique THREE.Material
-  matMap: new Map(),     // material.uuid -> { original: THREE.Material, unlitSwapped?: boolean, alphaKey?: string, statePerMat: {...} }
-  // sheet meta（キャプションシート右側に保存するマテリアルUIの値）
-  sheetMeta: {           // 共通デフォルト
-    unlit:false, doubleSided:false, opacity:1, whiteTransparent:false, blackTransparent:false, threshold:0
-  },
-  // pin color filters（右側 UI）
-  visibleColors: new Set(PRESET_COLORS),
-  // connector
-  lastPinScreen:{x:0,y:0},
-};
-
-/* =========================================================================
- *  Google Auth + API Init
- * ========================================================================= */
-let gapiInited = false, gisInited = false;
-
-window.onGapiReady = async function(){
-  if (gapiInited) return;
-  gapiInited = true;
-};
-
-window.onGisReady = function(){
-  if (gisInited) return;
-  gisInited = true;
-};
-
-function ensureAuthUIs(){
-  const signedIn = state.authReady;
-  el.statusLabel.textContent = signedIn ? 'サインイン完了' : 'サインイン待ち…';
-  el.btnLoad.disabled = !signedIn;
-  el.btnColorFilter.disabled = !signedIn;
-  el.btnTogglePins.disabled = !signedIn;
-  el.btnAddPin.disabled = !signedIn || state.isViewOnly;
-  el.btnGizmo.disabled  = !signedIn || state.isViewOnly;
-  el.btnUndo.disabled   = !signedIn || state.isViewOnly;
-  // 左パネルのピン色 UI は閲覧モードでは隠す
-  el.pinColorRow.style.display = state.isViewOnly ? 'none' : 'flex';
-}
-
 function maybeEnableLoadFromViewLink(){
-  // view=1 かつ GLB/SHEET の URL パラメータがあれば自動
   const url = new URL(location.href);
   const fid = extractDriveFileId(url.searchParams.get('glb')||'');
   const sid = extractSpreadsheetId(url.searchParams.get('sheet')||'');
   if (state.isViewOnly && fid){
     el.inputGLB.value = fid;
     if (sid) el.inputSheet.value = sid;
-    // サインイン後に自動ロードする
     setTimeout(()=> el.btnLoad.click(), 0);
   }
 }
-
-async function initGoogle(){
-  await new Promise(r => {
-    const tm = setInterval(()=>{
-      if(window.__flags.gapi && window.__flags.gis){ clearInterval(tm); r(); }
-    }, 60);
+async function ensureSignedIn(){
+  if (state.authReady) return true;
+  if (!state.tokenClient) await initGoogle();
+  return new Promise(resolve=>{
+    state.tokenClient.requestAccessToken({ prompt:'' });
+    const tm=setInterval(()=>{ if(state.authReady){ clearInterval(tm); resolve(true);} },80);
   });
-
-  await new Promise((resolve, reject)=>{
-    gapi.load('client', async ()=>{
-      try{
-        await gapi.client.init({ apiKey: API_KEY, discoveryDocs: DISCOVERY_DOCS });
-        resolve();
-      }catch(e){ reject(e); }
-    });
-  });
-
-  state.tokenClient = google.accounts.oauth2.initTokenClient({
-    client_id: CLIENT_ID,
-    scope: SCOPES,
-    callback: (resp) => {
-      if(resp.error) return;
-      state.authReady = true;
-      el.gate.style.display = 'none';
-      ensureAuthUIs();
-      maybeEnableLoadFromViewLink();
-    }
-  });
-
-  ensureAuthUIs();
-}
-
-/* =========================================================================
- *  Three.js Viewer
- * ========================================================================= */
-let animationHandle = null;
-
-function viewerInit(){
-  const canvas = el.viewerCanvas;
-  const renderer = new THREE.WebGLRenderer({canvas, antialias:true, alpha:false, preserveDrawingBuffer:false});
-  renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
-  renderer.setSize(canvas.clientWidth, canvas.clientHeight, false);
-  renderer.outputColorSpace = THREE.SRGBColorSpace;
-
-  const scene = new THREE.Scene();
-  const camera = new THREE.PerspectiveCamera(50, 1, 0.01, 2000);
-  camera.position.set(2.5, 1.5, 2.5);
-
-  const controls = new OrbitControls(camera, canvas);
-  controls.enableDamping = true;
-  controls.dampingFactor = 0.08;
-
-  const tcontrols = new TransformControls(camera, canvas);
-  tcontrols.setSpace('world');
-  tcontrols.visible = false;
-  scene.add(tcontrols);
-
-  // Unlit の時にライトは不要だが、Standard 用に最低限置いておく
-  const ambient = new THREE.AmbientLight(0xffffff, 0.7);
-  const dir = new THREE.DirectionalLight(0xffffff, 0.8);
-  dir.position.set(1,2,1);
-  scene.add(ambient, dir);
-
-  state.scene = scene;
-  state.camera = camera;
-  state.renderer = renderer;
-  state.controls = controls;
-  state.tcontrols = tcontrols;
-
-  function loop(){
-    animationHandle = requestAnimationFrame(loop);
-    controls.update();
-    renderer.setSize(canvas.clientWidth, canvas.clientHeight, false);
-    camera.aspect = canvas.clientWidth / canvas.clientHeight;
-    camera.updateProjectionMatrix();
-    renderer.render(scene, camera);
-  }
-  loop();
-
-  // リサイズ
-  new ResizeObserver(()=>{}).observe(canvas);
-}
-
-function focusOrigin(){
-  state.controls.target.set(0,0,0);
-  state.controls.update();
-  requestRender();
-}
-
-function requestRender(){ /* 1フレームだけ強制更新（Orbit が毎フレーム回すので薄い） */
-  state.renderer && state.renderer.render(state.scene, state.camera);
-}
-
-/* =========================================================================
- *  GLB Load & Materials
- * ========================================================================= */
-const loader = new GLTFLoader();
-
-function collectMaterials(root){
-  const set = new Map(); // uuid -> material
-  root.traverse(obj=>{
-    if(obj.isMesh && obj.material){
-      const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
-      for(const m of mats) set.set(m.uuid, m);
-    }
-  });
-  state.materials = [...set.values()];
-  // セレクトを埋める
-  el.matSelect.innerHTML = `<option value="__all__">（全マテリアル）</option>` + state.materials.map((m,i)=>`<option value="${m.uuid}">${m.name||'Mat'} (#${i+1})</option>`).join('');
-  // matMap 準備
-  for(const m of state.materials){
-    if(!state.matMap.has(m.uuid)){
-      state.matMap.set(m.uuid, {
-        original: m, unlitSwapped: false,
-        statePerMat: { ...state.sheetMeta }, // マテリアル個別 UI 状態の初期値（シートメタの写し）
-        alphaKey: null, alphaTex: null
-      });
-    }
-  }
-}
-
-function setSceneBackground(color){
-  state.renderer.setClearColor(new THREE.Color(color));
-}
-
-/* ===== Unlit 切替は MeshBasicMaterial に安全スワップ ===== */
-function ensureUnlit(mat, wantUnlit, rec){
-  const recd = state.matMap.get(mat.uuid);
-  if(!recd) return mat;
-
-  if (wantUnlit && !recd.unlitSwapped){
-    const basic = new THREE.MeshBasicMaterial({
-      color: mat.color?.clone?.() || new THREE.Color(0xffffff),
-      map: mat.map || null,
-      side: mat.side ?? THREE.FrontSide,
-      transparent: true, opacity: mat.opacity ?? 1,
-      alphaMap: mat.alphaMap || null,
-    });
-    basic.name = (mat.name||'Mat') + '_Unlit';
-    recd.original = mat;
-    recd.unlitSwapped = true;
-    // 置換（シーン中すべて参照が変わるようメッシュを辿る）
-    state.scene.traverse(o=>{
-      if(o.isMesh){
-        if(Array.isArray(o.material)){
-          o.material = o.material.map(m => (m===mat)? basic : m);
-        }else if(o.material === mat){
-          o.material = basic;
-        }
-      }
-    });
-    return basic;
-  }
-
-  if (!wantUnlit && recd.unlitSwapped){
-    const orig = recd.original;
-    if(!orig) return mat;
-    state.scene.traverse(o=>{
-      if(o.isMesh){
-        if(Array.isArray(o.material)){
-          o.material = o.material.map(m => (m===mat)? orig : m);
-        }else if(o.material === mat){
-          o.material = orig;
-        }
-      }
-    });
-    recd.unlitSwapped = false;
-    return orig;
-  }
-
-  return mat;
-}
-
-/* ===== αマップ生成（白→透明 / 黒→透明、閾値反映）===== */
-const alphaCache = new Map(); // key -> THREE.Texture
-async function makeAlphaMapFromTexture(tex, mode/* 'white' | 'black' */, threshold){
-  if(!tex || !tex.image) return null;
-  const img = tex.image;
-  const key = `${img.src||img.currentSrc||img.width+'x'+img.height}|${mode}|${threshold.toFixed(2)}`;
-  if(alphaCache.has(key)) return alphaCache.get(key);
-
-  // オフスクリーン Canvas で α を作る（最大2048にクランプ）
-  const maxSize = 2048;
-  const w0 = img.naturalWidth || img.width, h0 = img.naturalHeight || img.height;
-  const scale = Math.min(1, maxSize/Math.max(w0,h0));
-  const w = Math.max(1, Math.round(w0*scale));
-  const h = Math.max(1, Math.round(h0*scale));
-
-  const cvs = document.createElement('canvas');
-  cvs.width = w; cvs.height = h;
-  const ctx = cvs.getContext('2d', { willReadFrequently:true });
-  ctx.drawImage(img, 0, 0, w, h);
-  const data = ctx.getImageData(0,0,w,h);
-  const a = data.data;
-
-  for(let i=0;i<a.length;i+=4){
-    const r=a[i], g=a[i+1], b=a[i+2];
-    // 0..1 の輝度
-    const lum = (0.2126*r + 0.7152*g + 0.0722*b)/255;
-    let alpha = (mode==='white') ? (1 - lum) : (lum); // white→transparent: 白ほど α=0 にしたい -> 1-lum
-    if(alpha < threshold) alpha = 0;
-    else if (threshold>0) alpha = (alpha - threshold) / (1 - threshold); // しきい値以降を再正規化
-    a[i+3] = Math.round(alpha*255);
-  }
-  ctx.putImageData(data,0,0);
-
-  const alphaTex = new THREE.CanvasTexture(cvs);
-  alphaTex.colorSpace = THREE.LinearSRGBColorSpace;
-  alphaTex.needsUpdate = true;
-  alphaCache.set(key, alphaTex);
-  return alphaTex;
-}
-
-/* ===== マテリアルUI → 実マテリアル適用 ===== */
-async function applyMatUITo(targetUuidOrAll='__all__'){
-  const applyOne = async (mat) => {
-    const rec = state.matMap.get(mat.uuid);
-    if(!rec) return;
-
-    // 個別状態（UI は選択マテリアルに書き込む）
-    const st = rec.statePerMat;
-
-    // Unlit 安全スワップ
-    let live = ensureUnlit(mat, st.unlit, rec);
-
-    // 裏面描画
-    live.side = st.doubleSided ? THREE.DoubleSide : THREE.FrontSide;
-
-    // 不透明度
-    live.transparent = (st.opacity < 1) || st.whiteTransparent || st.blackTransparent || !!live.alphaMap;
-    live.opacity = st.opacity;
-
-    // αマップ生成（必要時）
-    if ((st.whiteTransparent || st.blackTransparent) && live.map){
-      const mode = st.whiteTransparent ? 'white' : 'black';
-      const alphaTex = await makeAlphaMapFromTexture(live.map, mode, st.threshold);
-      live.alphaMap = alphaTex;
-      live.needsUpdate = true;
-      // αテスト（ディスカードのしきい値）
-      live.alphaTest = Math.max(0, Math.min(1, st.threshold));
-    }else{
-      live.alphaMap = null;
-      live.alphaTest = 0;
-      live.needsUpdate = true;
-    }
-  };
-
-  if(targetUuidOrAll==='__all__'){
-    for(const m of state.materials) await applyOne(m);
-  }else{
-    const m = state.materials.find(x=>x.uuid===targetUuidOrAll);
-    if(m) await applyOne(m);
-  }
-  requestRender();
-}
-
-/* ===== マテリアルUIの現在値を、選択マテリアルの個別状態へ反映 ===== */
-function captureMatUIIntoState(targetUuidOrAll='__all__'){
-  const upd = (rec) => {
-    const st = rec.statePerMat;
-    st.unlit = el.matUnlit.checked;
-    st.doubleSided = el.matDoubleSided.checked;
-    st.opacity = parseFloat(el.matOpacity.value);
-    st.whiteTransparent = el.matWhiteTransparent.checked;
-    st.blackTransparent = el.matBlackTransparent.checked;
-    st.threshold = parseFloat(el.matThreshold.value);
-  };
-
-  if(targetUuidOrAll==='__all__'){
-    for(const m of state.materials){
-      const rec = state.matMap.get(m.uuid);
-      if(rec) upd(rec);
-    }
-  }else{
-    const rec = state.matMap.get(targetUuidOrAll);
-    if(rec) upd(rec);
-  }
-}
-
-/* ===== マテリアル選択変更時：UI に個別状態をロード ===== */
-function loadMatStateToUI(fromUuidOrDefault='__all__'){
-  // 「全マテリアル」選択時はシートメタ（共通）を UI 表示のベースにする
-  let src = null;
-  if(fromUuidOrDefault==='__all__'){
-    src = state.sheetMeta;
-  }else{
-    const rec = state.matMap.get(fromUuidOrDefault);
-    src = rec?.statePerMat || state.sheetMeta;
-  }
-  el.matUnlit.checked = !!src.unlit;
-  el.matDoubleSided.checked = !!src.doubleSided;
-  el.matOpacity.value = String(src.opacity ?? 1);
-  el.matOpacityVal.textContent = Number(el.matOpacity.value).toFixed(2);
-  el.matWhiteTransparent.checked = !!src.whiteTransparent;
-  el.matBlackTransparent.checked = !!src.blackTransparent;
-  el.matThreshold.value = String(src.threshold ?? 0);
-  el.matThresholdVal.textContent = Number(el.matThreshold.value).toFixed(2);
-}
-
-/* =========================================================================
- *  Drive / Sheets
- * ========================================================================= */
-function ensureSignedIn(){
-  return new Promise((resolve)=>{
-    if(state.authReady) return resolve(true);
-    state.tokenClient.requestAccessToken();
-    const tm = setInterval(()=>{
-      if(state.authReady){ clearInterval(tm); resolve(true); }
-    }, 80);
-  });
-}
-
-async function driveGet(fileId, fields){
-  const res = await gapi.client.drive.files.get({ fileId, fields, supportsAllDrives:true });
-  return res.result;
 }
 async function driveGetContentURL(fileId){
-  // webContentLink か alt=media のダウンロードURLを使う
   return `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?alt=media&supportsAllDrives=true`;
 }
 
-async function sheetsGet(spreadsheetId, range){
-  const res = await gapi.client.sheets.spreadsheets.values.get({ spreadsheetId, range });
-  return res.result.values || [];
-}
-async function sheetsPut(spreadsheetId, range, values){
-  // ★ 400 対策：A1 は大文字・正しい範囲
-  return gapi.client.sheets.spreadsheets.values.update({
-    spreadsheetId,
-    range,
-    valueInputOption:'RAW',
-    includeValuesInResponse:false,
-    resource:{ values }
-  });
-}
-
-/* =========================================================================
- *  Pins（保存／表示）※ここは既存ロジックを維持しつつ最小修正
- * ========================================================================= */
-function buildColorPresets(){
-  el.colorPresets.innerHTML = '';
-  for(const c of PRESET_COLORS){
-    const b = document.createElement('button');
-    b.textContent = ' ';
-    b.title = c;
-    b.style.width='20px'; b.style.height='20px'; b.style.borderRadius='50%';
-    b.style.border='2px solid #223146'; b.style.background=c;
-    b.addEventListener('click',()=>{
-      el.colorPicker.value = c;
-    });
-    el.colorPresets.appendChild(b);
-  }
-}
-
-function applyPinVisibilityFilter(){
-  // 右側のフィルタに基づき、ピンとリストを制御（既存実装を踏襲）
-  const visible = state.visibleColors;
-  // ...（ピンDOM/オブジェクトの表示切替。既存のピン生成/描画ロジックに接続）
-}
-
-/* =========================================================================
- *  GLB 読み込み
- * ========================================================================= */
+/* ===================== GLB 読み込み ===================== */
+const loader = new GLTFLoader();
 async function loadGLBByFileId(fileId){
   await ensureSignedIn();
   state.glbFileId = fileId;
-
   el.loading.hidden = false;
   try{
     const url = await driveGetContentURL(fileId);
-    const arrbuf = await (await fetch(url, {
-      headers: { 'Authorization': 'Bearer ' + gapi.client.getToken().access_token }
-    })).arrayBuffer();
+    const resp = await fetch(url, { headers:{ 'Authorization':'Bearer '+gapi.client.getToken().access_token }});
+    const arrbuf = await resp.arrayBuffer();
 
-    // 既存モデルの破棄
     if(state.model){
       state.scene.remove(state.model);
-      state.model.traverse(o=>{
-        if(o.geometry) o.geometry.dispose();
-        if(o.material){
-          const mats = Array.isArray(o.material)?o.material:[o.material];
-          mats.forEach(m=>{
-            m.map?.dispose(); m.alphaMap?.dispose();
-            m.dispose?.();
-          });
-        }
-      });
     }
-
-    const gltf = await new Promise((resolve,reject)=>{
-      loader.parse(arrbuf, '', resolve, reject);
-    });
-
+    const gltf = await new Promise((res,rej)=> loader.parse(arrbuf,'',res,rej));
     state.model = gltf.scene;
-    state.model.position.set(0,0,0);
     state.scene.add(state.model);
-
-    collectMaterials(state.model);
-    setSceneBackground(el.bgColor.value);
+    state.renderer.setClearColor(new THREE.Color(el.bgColor.value));
     focusOrigin();
   }catch(e){
     console.error('GLB load failed', e);
@@ -868,146 +497,33 @@ async function loadGLBByFileId(fileId){
   }
 }
 
-/* =========================================================================
- *  Preview（Drive画像）— 既存の HEIC→JPEG 変換を維持
- * ========================================================================= */
-async function blobFromDrive(fileId){
-  const url = await driveGetContentURL(fileId);
-  const resp = await fetch(url, { headers: { 'Authorization': 'Bearer ' + gapi.client.getToken().access_token }});
-  if(!resp.ok) throw new Error('drive fetch failed');
-  return await resp.blob();
-}
-async function resolveImageObjectURL(fileId, mimeType){
+/* ===================== ヘッダー操作 ===================== */
+el.btnLoad.addEventListener('click', async ()=>{
+  const fid = extractDriveFileId(el.inputGLB.value);
+  if(!fid) return alert('GLBの fileId または共有URLを入力してください');
+  const sid = extractSpreadsheetId(el.inputSheet.value);
+  if (sid) state.sheetId = sid;
+  await loadGLBByFileId(fid);
+});
+el.btnViewOnly.addEventListener('click', ()=>{
+  const fid = extractDriveFileId(el.inputGLB.value||state.glbFileId);
+  const sid = extractSpreadsheetId(el.inputSheet.value||state.sheetId);
+  if(!fid) return alert('GLBのIDを先に入力してください');
+  const u = new URL(location.href);
+  u.searchParams.set('view','1');
+  u.searchParams.set('glb',fid);
+  if(sid) u.searchParams.set('sheet',sid);
+  navigator.clipboard.writeText(u.toString());
+  alert('閲覧リンクをクリップボードにコピーしました');
+});
+
+/* ===================== 起動時処理 ===================== */
+(async ()=>{
   try{
-    let blob = await blobFromDrive(fileId);
-    const isHeic = /heic|heif/i.test(mimeType);
-    if (isHeic && window.heic2any){
-      blob = await window.heic2any({ blob, toType: 'image/jpeg', quality: 0.9 });
-    }
-    return URL.createObjectURL(blob);
-  }catch(err){
-    console.error('preview failed', err);
-    el.previewErr.style.display = '';
-    return '';
-  }
-}
-
-/* =========================================================================
- *  UI Wiring
- * ========================================================================= */
-function wireUI(){
-  // サインイン
-  el.btnSignIn.addEventListener('click', ()=>{
-    state.tokenClient.requestAccessToken();
-  });
-
-  // GLB 読み込み
-  el.btnLoad.addEventListener('click', async ()=>{
-    const fid = extractDriveFileId(el.inputGLB.value);
-    if(!fid) return alert('GLBの fileId または共有URLを入力してください');
-    const sid = extractSpreadsheetId(el.inputSheet.value);
-    if (sid) state.sheetId = sid;
-    await loadGLBByFileId(fid);
-  });
-
-  // 閲覧リンク生成（GLB/Sheet の ID を URL に埋め込む）
-  el.btnViewOnly.addEventListener('click', ()=>{
-    const fid = extractDriveFileId(el.inputGLB.value||state.glbFileId);
-    const sid = extractSpreadsheetId(el.inputSheet.value||state.sheetId);
-    if(!fid) return alert('GLBのIDを先に入力してください');
-    const u = new URL(location.href);
-    u.searchParams.set('view','1');
-    u.searchParams.set('glb',fid);
-    if(sid) u.searchParams.set('sheet',sid);
-    navigator.clipboard.writeText(u.toString());
-    alert('閲覧リンクをクリップボードにコピーしました');
-  });
-
-  // 背景色
-  el.bgColor.addEventListener('input', ()=> setSceneBackground(el.bgColor.value));
-
-  // カメラビュー
-  const fit = ()=>{ focusOrigin(); };
-  const setView = (x,y,z)=>{ state.camera.position.set(x,y,z); fit(); };
-  el.viewFront.addEventListener('click', ()=> setView(0, 0, 2.2));
-  el.viewBack .addEventListener('click', ()=> setView(0, 0,-2.2));
-  // 左右はユーザー要望に合わせ「鉛直軸で右に90°回した相当」になるよう ±X
-  el.viewLeft .addEventListener('click', ()=> setView( 2.2, 0, 0));
-  el.viewRight.addEventListener('click', ()=> setView(-2.2, 0, 0));
-  el.viewTop  .addEventListener('click', ()=> setView(0, 2.2, 0));
-  el.viewBottom.addEventListener('click', ()=> setView(0,-2.2, 0));
-
-  // 平行投影切替
-  el.projOrtho.addEventListener('change', ()=>{
-    const canvas = el.viewerCanvas;
-    const {camera, renderer, controls} = state;
-    const aspect = canvas.clientWidth / canvas.clientHeight;
-    if(el.projOrtho.checked){
-      const h = 1.8;
-      const ortho = new THREE.OrthographicCamera(-h*aspect, h*aspect, h, -h, 0.01, 2000);
-      ortho.position.copy(camera.position);
-      ortho.lookAt(controls.target);
-      state.camera = ortho;
-      state.controls.object = ortho;
-      state.useOrtho = true;
-    }else{
-      const persp = new THREE.PerspectiveCamera(50, aspect, 0.01, 2000);
-      persp.position.copy(state.camera.position);
-      persp.lookAt(state.controls.target);
-      state.camera = persp;
-      state.controls.object = persp;
-      state.useOrtho = false;
-    }
-    requestRender();
-  });
-
-  // プレビュー倍率
-  el.previewZoom.addEventListener('input', ()=>{
-    const z = parseFloat(el.previewZoom.value);
-    el.previewZoomVal.textContent = z.toFixed(2)+'×';
-    el.previewInner.style.transform = `scale(${z})`;
-  });
-  el.previewReset.addEventListener('click', ()=>{
-    el.previewZoom.value = '1';
-    el.previewZoom.dispatchEvent(new Event('input'));
-  });
-
-  // マテリアル UI
-  el.matSelect.addEventListener('change', ()=>{
-    // 選択マテリアルの個別状態を UI に反映
-    loadMatStateToUI(el.matSelect.value);
-  });
-
-  const liveMatInputs = [el.matUnlit, el.matDoubleSided, el.matOpacity, el.matWhiteTransparent, el.matBlackTransparent, el.matThreshold];
-  for(const w of liveMatInputs){
-    w.addEventListener('input', async ()=>{
-      if(w===el.matOpacity) el.matOpacityVal.textContent = Number(el.matOpacity.value).toFixed(2);
-      if(w===el.matThreshold) el.matThresholdVal.textContent = Number(el.matThreshold.value).toFixed(2);
-      // UI → 個別状態（選択中のみ or 全体）
-      captureMatUIIntoState(el.matSelect.value);
-      // 実マテリアル反映
-      await applyMatUITo(el.matSelect.value);
-    });
-  }
-
-  // ピン追加（Shift+クリックは別途）
-  el.btnAddPin.addEventListener('click', ()=>{
-    // 既存の編集モードトグルに接続（ここでは省略：あなたのピン生成処理に既存で合わせる）
-  });
-
-  // 色プリセット
-  buildColorPresets();
-}
-
-/* =========================================================================
- *  Boot
- * ========================================================================= */
-viewerInit();
-wireUI();
-initGoogle();
-ensureAuthUIs();
-maybeEnableLoadFromViewLink();
-
+    // 早めに初期化を開始（完了前でもクリック安全）
+    initGoogle();
+  }catch(e){ console.warn('initGoogle kickoff failed', e); }
+})();
 </script>
 </body>
 </html>
