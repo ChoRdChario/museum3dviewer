@@ -446,20 +446,22 @@ const matOriginals=new WeakMap();
 const matState = new Map();                // key -> state
 const imageBlobCache = new Map();
 
-// === Image URL LRU & revoke helpers ===
-const IMAGE_CACHE_MAX = 24;
-function revokeIfBlob(u){ try{ if(u && /^blob:/.test(u)) URL.revokeObjectURL(u); }catch{} }
+// [perf] LRU for blob URLs to prevent memory bloat (iOS is strict)
+const IMAGE_CACHE_LIMIT = 24;
 function cacheSetImageURL(key, url){
-  if(!imageBlobCache.has(key) && imageBlobCache.size >= IMAGE_CACHE_MAX){
+  // Evict first-in if over limit
+  if(!imageBlobCache.has(key) && imageBlobCache.size >= IMAGE_CACHE_LIMIT){
     const it = imageBlobCache.entries().next();
     if(!it.done){
       const [oldKey, oldUrl] = it.value;
-      revokeIfBlob(oldUrl);
+      if (oldUrl && /^blob:/.test(oldUrl)) try{ URL.revokeObjectURL(oldUrl); }catch{}
       imageBlobCache.delete(oldKey);
     }
   }
   const prev = imageBlobCache.get(key);
-  if(prev && prev !== url) revokeIfBlob(prev);
+  if(prev && /^blob:/.test(prev) && prev!==url){
+    try{ URL.revokeObjectURL(prev); }catch{}
+  }
   imageBlobCache.set(key, url);
 }
 
@@ -492,37 +494,6 @@ async function ensureHeic2any(){
   if(typeof window.heic2any === 'function') return true;
   try{ await loadScriptOnce('https://unpkg.com/heic2any@0.0.5/dist/heic2any.min.js'); }catch{}
   return (typeof window.heic2any === 'function');
-
-// Downscale & JPEG encode helper (to trim memory/IO on mobile)
-async function downscaleBlobToJPEG(blob, maxSize=2048, quality=0.8){
-  let ib;
-  try{
-    ib = await createImageBitmap(blob);
-  }catch(e){
-    // fallback via img element
-    const img = document.createElement('img');
-    img.src = URL.createObjectURL(blob);
-    await new Promise((res,rej)=>{ img.onload=res; img.onerror=rej; });
-    const c = document.createElement('canvas');
-    let w=img.naturalWidth, h=img.naturalHeight;
-    const scale = Math.min(1, maxSize/Math.max(w,h));
-    w = Math.max(1, (w*scale)|0); h = Math.max(1, (h*scale)|0);
-    c.width=w; c.height=h;
-    const cx=c.getContext('2d');
-    cx.drawImage(img,0,0,w,h);
-    URL.revokeObjectURL(img.src);
-    return await new Promise(r=> c.toBlob(r,'image/jpeg', quality));
-  }
-  const c = document.createElement('canvas');
-  let w=ib.width, h=ib.height;
-  const scale = Math.min(1, maxSize/Math.max(w,h));
-  w = Math.max(1, (w*scale)|0); h = Math.max(1, (h*scale)|0);
-  c.width=w; c.height=h;
-  const cx=c.getContext('2d');
-  cx.drawImage(ib,0,0,w,h);
-  return await new Promise(r=> c.toBlob(r,'image/jpeg', quality));
-}
-
 }
 function upscaleThumbnailUrl(u, size=2048){
   if(!u) return u;
@@ -564,75 +535,21 @@ function viewerInit(){
   const dir = new THREE.DirectionalLight(0xffffff, 1.0); dir.position.set(3,5,4); scene.add(dir);
 
   buildControls();
-  // --- Render system (idle/interactive/cooldown) ---
-  let rafId=null, mode='idle', lastFrame=0;
-  const targetIntervalInteractive = 1000/30;
-  const targetIntervalCooldown    = 1000/12;
-  let cooldownTimer=null;
-
-  function renderFrame(){
-    renderer.render(scene, camera);
-    throttledUpdateConnector();
-  }
-  function initRenderSystem(){
-    // controls/tcontrols events
-    controls.addEventListener('start', enterInteractive);
-    controls.addEventListener('end', enterCooldownThenIdle);
-    if(tcontrols){
-      tcontrols.addEventListener?.('mouseDown', enterInteractive);
-      tcontrols.addEventListener?.('mouseUp', enterCooldownThenIdle);
-      tcontrols.addEventListener?.('change', ()=>{ /* during transform */ enterInteractive(); });
-    }
-  }
-  function kickLoop(nextMode){
-    cancelAnimationFrame(rafId);
-    mode = nextMode;
-    lastFrame = performance.now();
-    const loop = (now)=>{
-      const interval = (mode==='interactive')? targetIntervalInteractive : targetIntervalCooldown;
-      if(now - lastFrame >= interval){
-        lastFrame = now;
-        renderFrame();
-      }
-      if(mode!=='idle') rafId = requestAnimationFrame(loop);
-    };
-    rafId = requestAnimationFrame(loop);
-  }
-  function enterInteractive(){
-    clearTimeout(cooldownTimer);
-    if(mode!=='interactive'){
-      renderFrame(); // immediate
-      kickLoop('interactive');
-    }
-  }
-  function enterCooldownThenIdle(){
-    if(mode==='idle') return;
-    mode='cooldown';
-    clearTimeout(cooldownTimer);
-    kickLoop('cooldown');
-    cooldownTimer = setTimeout(()=>{
-      mode='idle';
-      cancelAnimationFrame(rafId); rafId=null;
-    }, 450);
-  }
-
 
   pinGroup = new THREE.Group(); scene.add(pinGroup);
   loader = new GLTFLoader();
 
-  window.addEventListener('resize', ()=>{ resize(); renderFrame(); }, { passive:true });
+  window.addEventListener('resize', resize, { passive:true });
   el.viewerCanvas.addEventListener('pointerdown', onPointerDown, { passive:false });
   el.projOrtho.addEventListener('change', ()=> { toggleProjection(el.projOrtho.checked); debouncedSaveMaterials(); });
-  resize();
-  // On-demand rendering system
-  initRenderSystem();
-  renderFrame();
+  resize(); renderNow();
+  // [perf] Removed constant RAF loop; switched to on-demand rendering via renderNow()
 }
 function buildControls(){
   if(controls){ controls.dispose(); }
   controls = new OrbitControls(camera, el.viewerCanvas);
   controls.target.set(0,0,0); controls.update();
-  controls.addEventListener('change', ()=>{ enterInteractive(); throttledUpdateConnector(); });
+  controls.addEventListener('change', renderNow);
   if(tcontrols){ scene.remove(tcontrols); tcontrols.dispose?.(); }
   tcontrols = new TransformControls(camera, el.viewerCanvas);
   tcontrols.setSize(0.9); tcontrols.setSpace('world');
@@ -652,9 +569,9 @@ function resize(){
   if(camera.isPerspectiveCamera){
     camera.aspect = w/h;
   }else{ fitOrthoFrustum(); }
-  camera.updateProjectionMatrix(); updateConnector();
+  camera.updateProjectionMatrix(); updateConnectorThrottled();
 }
-function renderNow(){ renderer.render(scene,camera); updateConnector(); }
+function renderNow(){ renderer.render(scene,camera); updateConnectorThrottled(); }
 function sceneBounds(){
   if(!currentModel){ return { center:new THREE.Vector3(0,0,0), radius: 2 }; }
   const box = new THREE.Box3().setFromObject(currentModel);
@@ -671,7 +588,7 @@ function focusOrigin(){
   camera.position.copy(origin.clone().addScaledVector(dirv, dist));
   controls.target.copy(origin);
   if(camera.isOrthographicCamera) fitOrthoFrustum();
-  controls.update(); updateConnector();
+  controls.update(); updateConnectorThrottled();
 }
 function fitOrthoFrustum(){
   const { radius } = sceneBounds();
@@ -699,58 +616,6 @@ function toggleProjection(useOrtho){
     camera = perspCam;
   }
   buildControls();
-  // --- Render system (idle/interactive/cooldown) ---
-  let rafId=null, mode='idle', lastFrame=0;
-  const targetIntervalInteractive = 1000/30;
-  const targetIntervalCooldown    = 1000/12;
-  let cooldownTimer=null;
-
-  function renderFrame(){
-    renderer.render(scene, camera);
-    throttledUpdateConnector();
-  }
-  function initRenderSystem(){
-    // controls/tcontrols events
-    controls.addEventListener('start', enterInteractive);
-    controls.addEventListener('end', enterCooldownThenIdle);
-    if(tcontrols){
-      tcontrols.addEventListener?.('mouseDown', enterInteractive);
-      tcontrols.addEventListener?.('mouseUp', enterCooldownThenIdle);
-      tcontrols.addEventListener?.('change', ()=>{ /* during transform */ enterInteractive(); });
-    }
-  }
-  function kickLoop(nextMode){
-    cancelAnimationFrame(rafId);
-    mode = nextMode;
-    lastFrame = performance.now();
-    const loop = (now)=>{
-      const interval = (mode==='interactive')? targetIntervalInteractive : targetIntervalCooldown;
-      if(now - lastFrame >= interval){
-        lastFrame = now;
-        renderFrame();
-      }
-      if(mode!=='idle') rafId = requestAnimationFrame(loop);
-    };
-    rafId = requestAnimationFrame(loop);
-  }
-  function enterInteractive(){
-    clearTimeout(cooldownTimer);
-    if(mode!=='interactive'){
-      renderFrame(); // immediate
-      kickLoop('interactive');
-    }
-  }
-  function enterCooldownThenIdle(){
-    if(mode==='idle') return;
-    mode='cooldown';
-    clearTimeout(cooldownTimer);
-    kickLoop('cooldown');
-    cooldownTimer = setTimeout(()=>{
-      mode='idle';
-      cancelAnimationFrame(rafId); rafId=null;
-    }, 450);
-  }
-
   renderNow();
 }
 
@@ -814,24 +679,25 @@ function onPointerDown(e){
   }
 }
 
-// === Throttled connector updater ===
-const throttledUpdateConnector = (()=>{
-  let last=0, memo='';
-  const minInterval = 1000/15; // 15fps cap for layout work
-  return ()=>{
-    const now=performance.now();
-    if(now-last < minInterval) return;
+// [perf] Throttled wrapper to limit layout reads/DOM writes to <=15fps and avoid redundant updates
+const updateConnectorThrottled = (()=>{
+  let last = 0; let memoKey = '';
+  const MIN_INTERVAL = 1000/15;
+  return function(){
+    const now = performance.now();
+    if (now - last < MIN_INTERVAL) return;
     last = now;
-    // compute a simple key to skip redundant updates
-    try{
-      const rect = el.viewerCanvas.getBoundingClientRect();
-      const pv   = el.viewerPreview.getBoundingClientRect();
-      const key = rect.width+'x'+rect.height+'/'+pv.left+','+pv.top+','+pv.width+','+pv.height;
-      if(key===memo) return; memo=key;
-    }catch(e){}
+    // Call the original updateConnector only when geometry/layout changed
+    // We compute a cheap key from DOM rects; if unchanged, skip heavy updates.
+    const rect = el.viewerCanvas.getBoundingClientRect();
+    const rectPrev = el.viewerPreview.getBoundingClientRect();
+    const key = rect.width + 'x' + rect.height + '/' + [rectPrev.left,rectPrev.top,rectPrev.width,rectPrev.height].join(',');
+    if (key === memoKey) return;
+    memoKey = key;
     updateConnector();
   };
 })();
+
 function updateConnector(){
   const p = pins.find(x=>x.id===selectedPinId);
   if(!p || !p.mesh || el.viewerPreview.classList.contains('hidden') || !pinGroup.visible || !p.mesh.visible){
@@ -864,14 +730,12 @@ async function setPreview(ref, p){
   try{
     el.previewErr.style.display='none';
     const src = await resolveImageObjectURL(ref, {preferThumb:false});
-    const prev = el.previewImg.src;
-    el.previewImg.src = src;
-    if(prev && /^blob:/.test(prev)) try{ URL.revokeObjectURL(prev); }catch{};
+    const prevSrc = el.previewImg.src; el.previewImg.src = src; if(prevSrc && /^blob:/.test(prevSrc) && prevSrc!==src){ try{ URL.revokeObjectURL(prevSrc); }catch{} }
     el.previewImg.onerror = ()=>{ el.previewErr.style.display='inline'; };
     el.capTitleLine.textContent = p?.title || '';
     el.capBodyLine.textContent  = p?.body  || '';
     el.viewerPreview.classList.remove('hidden');
-    applyPreviewZoom(); throttledUpdateConnector();
+    applyPreviewZoom(); updateConnectorThrottled();
   }catch(e){
     console.warn('preview failed', e);
     el.previewErr.style.display='inline';
@@ -881,6 +745,24 @@ async function setPreview(ref, p){
 function updateViewerPreviewForPin(p){ setPreview(p && p.images && p.images[0] ? p.images[0] : null, p); }
 
 /* ========= Image resolve & Drive ========= */
+
+// [perf] Downscale & JPEG-encode a blob to cap decode cost
+async function downscaleBlobToJPEG(blob, maxSize=2048, quality=0.8){
+  try{
+    const ib = await createImageBitmap(blob);
+    const scale = Math.min(1, maxSize/Math.max(ib.width, ib.height));
+    const w = Math.max(1, Math.round(ib.width*scale));
+    const h = Math.max(1, Math.round(ib.height*scale));
+    const c = document.createElement('canvas'); c.width=w; c.height=h;
+    const cx = c.getContext('2d', {alpha:false});
+    cx.drawImage(ib, 0, 0, w, h);
+    const out = await new Promise(r=> c.toBlob(r, 'image/jpeg', quality));
+    if(out) return out;
+  }catch(e){ /* fallback below */ }
+  // Fallback: return original blob if downscale failed
+  return blob;
+}
+
 function parseImageRef(ref){
   if(typeof ref === 'string' && /^(blob:|data:|https?:)/i.test(ref)){ return { kind:'url', url: ref }; }
   if(typeof ref === 'string' && ref.startsWith('drive:')){
@@ -909,11 +791,8 @@ async function resolveImageObjectURL(ref, {preferThumb=false}={}){
     const ok = await ensureHeic2any();
     if(ok){
       const blob = await driveFileFetchBlob(meta.id);
-      const jpegBlob = await window.heic2any({ blob, toType:'image/jpeg', quality:0.8 });
-      const jpg = Array.isArray(jpegBlob) ? jpegBlob[0] : jpegBlob;
-      // Downscale again to protect memory on iOS
-      const ds = await downscaleBlobToJPEG(jpg, 2048, 0.8);
-      outUrl = URL.createObjectURL(ds||jpg);
+      const toJpeg = await downscaleBlobToJPEG(blob, 2048, 0.8);
+      outUrl = URL.createObjectURL(toJpeg);
     }else if(meta.hasThumbnail && meta.thumbnailLink){
       const hi = upscaleThumbnailUrl(meta.thumbnailLink, 2048);
       const sep = hi.includes('?') ? '&' : '?';
@@ -928,8 +807,8 @@ async function resolveImageObjectURL(ref, {preferThumb=false}={}){
       outUrl = hi + sep + 'access_token=' + encodeURIComponent(accessToken);
     }else{
       const blob = await driveFileFetchBlob(meta.id);
-      const ds = await downscaleBlobToJPEG(blob, 2048, 0.85);
-      outUrl = URL.createObjectURL(ds||blob);
+      const toJpeg = await downscaleBlobToJPEG(blob, 2048, 0.85);
+      outUrl = URL.createObjectURL(toJpeg);
     }
   }
 
@@ -1811,7 +1690,7 @@ el.btnViewOnly.addEventListener('click', ()=>{
 el.btnWide.addEventListener('click', ()=>{
   document.body.classList.toggle('wide');
   el.btnWide.textContent = document.body.classList.contains('wide') ? '📋 パネル表示' : '📺 ビューア拡大';
-  setTimeout(()=>{ resize(); updateConnector(); }, 50);
+  setTimeout(()=>{ resize(); updateConnectorThrottled(); }, 50);
 });
 el.btnTogglePins.addEventListener('click', ()=>{
   pinGroup.visible = !pinGroup.visible;
