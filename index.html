@@ -74,11 +74,7 @@
     @media (max-width:1100px){
       .main{grid-template-columns:1fr; grid-template-rows: 360px 1fr 480px}
     }
-  
-    /* Preview overlay layout tweaks */
-    #viewerPreview{ position:relative; }
-    #previewControls{ position:relative; z-index:2; display:flex; gap:8px; align-items:center; padding-right:80px; }
-    #previewReset{ order:0; }
+      #previewReset{ order:-1; }
   </style>
 
   <!-- ES Modules -->
@@ -171,7 +167,7 @@
           <button id="previewReset">リセット</button>
           <span id="previewErr" class="small" style="margin-left:auto;color:#ffb4b4;display:none">画像を読み込めませんでした</span>
         </div>
-        <div id="previewWrap" style="position:relative"><div id="previewInner"><img id="previewImg" alt="preview"/></div><div id="previewMsg" class="small" style="position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);color:#9fb3c8;display:none;text-align:center;pointer-events:none">画像が設定されていません</div></div>
+        <div id="previewWrap"><div id="previewInner"><img id="previewImg" alt="preview"/></div><div id="previewEmptyMsg" style="position:absolute;inset:0;display:none;align-items:center;justify-content:center;color:#c9d7ea;opacity:.9;font-size:.95rem;text-align:center;">画像が設定されていません</div></div>
         <div class="cap">
           <div id="capTitleLine"></div>
           <div id="capBodyLine"></div>
@@ -695,26 +691,28 @@ el.previewReset.addEventListener('click', ()=>{ previewZoom = 1; el.previewZoom.
 
 async function setPreview(ref, p){
   try{
-    const msg = document.getElementById('previewMsg'); if(msg) msg.style.display='none';
+    const empty = document.getElementById('previewEmptyMsg');
+    el.previewErr.style.display='none';
+    if(empty) empty.style.display='none';
     if(ref){
-      el.previewErr.style.display='none';
-      const src = await resolveImageObjectURL(ref, {preferThumb:false});
-      el.previewImg.src = src;
-      el.previewImg.onerror = ()=>{ el.previewErr.style.display='inline'; };
-      el.capTitleLine.textContent = p?.title || '';
-      el.capBodyLine.textContent  = p?.body  || '';
-      el.viewerPreview.classList.remove('hidden');
-      applyPreviewZoom(); updateConnector();
+    el.previewErr.style.display='none';
+    const src = await resolveImageObjectURL(ref, {preferThumb:false});
+    el.previewImg.src = src;
+    el.previewImg.onerror = ()=>{ el.previewErr.style.display='inline'; const empty=document.getElementById('previewEmptyMsg'); if(empty) empty.style.display='none'; };
+    el.capTitleLine.textContent = p?.title || '';
+    el.capBodyLine.textContent  = p?.body  || '';
+    el.viewerPreview.classList.remove('hidden');
+    applyPreviewZoom(); updateConnector();
     } else {
-      const msg = document.getElementById('previewMsg');
-      if(msg){ msg.textContent = '画像が設定されていません'; msg.style.display = 'block'; }
-      const img = document.getElementById('previewImg'); if(img){ img.removeAttribute('src'); }
+      const empty = document.getElementById('previewEmptyMsg');
+      if(empty) empty.style.display='flex';
+      el.previewImg.removeAttribute('src');
       el.capTitleLine.textContent = p?.title || '';
       el.capBodyLine.textContent  = p?.body  || '';
       el.viewerPreview.classList.remove('hidden');
       applyPreviewZoom(); updateConnector();
     }
-  } catch(e){
+  }catch(e){
     console.warn('preview failed', e);
     el.previewErr.style.display='inline';
     el.viewerPreview.classList.remove('hidden');
