@@ -118,6 +118,7 @@
       .mobile-caption{ display:none; }
     }
 
+      .bs-caption-bar{ padding:8px 10px; border-bottom:1px solid #1e2837; }
   </style>
 
   <!-- ES Modules -->
@@ -564,6 +565,42 @@ function placeCaptionForMobile(){
   }
 }
 document.addEventListener('DOMContentLoaded', placeCaptionForMobile);
+
+/* Copy caption select controls into bottom sheet (mobile) */
+function wireMobileCaptionMenu(){
+  if(!(window.matchMedia('(max-width: 900px)').matches)) return;
+  const sheetCaption = document.getElementById('sheetCaption');
+  if(!sheetCaption) return;
+  if(sheetCaption.dataset.wired==='1') return;
+
+  const btnColor = document.getElementById('btnColorFilter');
+  const listSel  = document.getElementById('listSelect');
+  const btnNew   = document.getElementById('listNew');
+  const btnDel   = document.getElementById('listDelete');
+
+  if(btnColor || listSel || btnNew || btnDel){
+    const bar = document.createElement('div');
+    bar.className = 'bs-caption-bar';
+    bar.style.display='flex';
+    bar.style.justifyContent='space-between';
+    bar.style.alignItems='center';
+    bar.style.gap='8px';
+    const left = document.createElement('div'); left.style.display='flex'; left.style.gap='8px'; left.style.alignItems='center';
+    const right = document.createElement('div'); right.style.display='flex'; right.style.gap='6px'; right.style.alignItems='center';
+
+    if(btnColor && btnColor.parentElement) left.appendChild(btnColor);
+    if(listSel  && listSel.parentElement ) right.appendChild(listSel);
+    if(btnNew   && btnNew.parentElement  ) right.appendChild(btnNew);
+    if(btnDel   && btnDel.parentElement  ) right.appendChild(btnDel);
+
+    bar.appendChild(left); bar.appendChild(right);
+    sheetCaption.appendChild(bar);
+    sheetCaption.dataset.wired='1';
+  }
+}
+document.addEventListener('DOMContentLoaded', wireMobileCaptionMenu);
+window.addEventListener('resize', wireMobileCaptionMenu, {passive:true});
+
 window.addEventListener('resize', placeCaptionForMobile, {passive:true});
 
 
@@ -590,7 +627,7 @@ function initMobileSheet(){
   backdrop && backdrop.addEventListener('click', collapse);
 
   // Move panel bodies into tabs
-  const right = document.getElementById('rightCaption'); if(right){ const body = right.querySelector('.body'); if(body && !sheetCaption.contains(body)) sheetCaption.appendChild(body); }
+  const right = document.getElementById('rightCaption'); if(right){ /* body is placed below viewer on mobile */ }
   const left  = document.getElementById('leftToolbox'); if(left){ const bodyL = left.querySelector('.body'); if(bodyL && !sheetTools.contains(bodyL)) sheetTools.appendChild(bodyL); }
 
   // Tabs
