@@ -74,39 +74,6 @@
     @media (max-width:1100px){
       .main{grid-template-columns:1fr; grid-template-rows: 360px 1fr 480px}
     }
-  
-    /* === Mobile bottom sheet & FAB === */
-    @media (max-width: 900px){
-      .main{ grid-template-columns: 1fr; }
-      #leftToolbox{ display:none; }
-      #rightCaption{ display:none; }
-      #mobileFab{ display:flex; }
-    }
-    #mobileFab{
-      position: fixed; right: 16px; bottom: 16px; z-index: 3000;
-      display:none; align-items:center; justify-content:center;
-      width:56px; height:56px; border-radius:999px;
-      background:#2a7bbb; color:white; font-weight:700; box-shadow: var(--shadow);
-      user-select:none; pointer-events:auto;
-    }
-    #mobileFab:active{ transform: translateY(1px); }
-    .bs-backdrop{ position: fixed; inset:0; background: rgba(0,0,0,.35); z-index: 2998; display:none; }
-    .bs-backdrop.show{ display:block; }
-    .bottom-sheet{
-      position: fixed; left:0; right:0; bottom:0; z-index: 2999;
-      height: 60vh; max-height: 80vh;
-      background: var(--panel); border-top-left-radius: 16px; border-top-right-radius:16px;
-      border: 1px solid #1e2837; transform: translateY(calc(100% - 54px)); transition: transform .25s ease;
-      display:flex; flex-direction:column; overflow:hidden;
-    }
-    .bottom-sheet.expanded{ transform: translateY(0); }
-    .bs-handle{ height: 54px; display:flex; align-items:center; justify-content:center; cursor:pointer; }
-    .bs-handle::before{ content:''; width:42px; height:4px; border-radius: 999px; background: rgba(255,255,255,.25); }
-    #bottomSheetContent{ flex:1; overflow:auto; padding:10px; }
-    .bs-tabs{ display:flex; border-bottom:1px solid #1e2837; }
-    .bs-tab{ flex:1; text-align:center; padding:10px; cursor:pointer; user-select:none; }
-    .bs-tab[aria-selected="true"]{ background:#0f1722; font-weight:700; }
-
   </style>
 
   <!-- ES Modules -->
@@ -132,21 +99,6 @@
       <span id="statusLabel" class="chip">サインイン待ち…</span>
     </div>
   </header>
-
-  <div id="mobileFab" aria-label="ツール">ツール</div>
-  <div id="backdrop" class="bs-backdrop"></div>
-  <div id="bottomSheet" class="bottom-sheet" aria-modal="true" aria-hidden="true">
-    <div class="bs-handle" id="bsHandle"></div>
-    <div id="bsTabs" class="bs-tabs" role="tablist">
-      <div id="tabTools" class="bs-tab" role="tab" aria-selected="true">編集ツール</div>
-      <div id="tabCaption" class="bs-tab" role="tab" aria-selected="false">キャプション</div>
-    </div>
-    <div id="bottomSheetContent">
-      <div id="sheetTools" role="tabpanel"></div>
-      <div id="sheetCaption" role="tabpanel" style="display:none"></div>
-    </div>
-  </div>
-
 
   <div class="main">
     <!-- 左：ツール -->
@@ -540,39 +492,6 @@ function upscaleThumbnailUrl(u, size=2048){
 document.getElementById('btnSignIn').addEventListener('click', startSignIn);
 (async () => { ensureGIS().catch(()=>{}); ensureGapiClient().catch(()=>{}); })();
 
-function isMobileLayout(){ return window.matchMedia('(max-width: 900px)').matches || (typeof IS_IOS!=='undefined' ? IS_IOS : false); }
-function initMobileSheet(){
-  const fab = document.getElementById('mobileFab');
-  const sheet = document.getElementById('bottomSheet');
-  const tabs = document.getElementById('bsTabs');
-  const tabTools = document.getElementById('tabTools');
-  const tabCaption = document.getElementById('tabCaption');
-  const content = document.getElementById('bottomSheetContent');
-  const sheetTools = document.getElementById('sheetTools');
-  const sheetCaption = document.getElementById('sheetCaption');
-  const backdrop = document.getElementById('backdrop');
-  const handle = document.getElementById('bsHandle');
-  if(!fab || !sheet || !content || !sheetTools || !sheetCaption) return;
-  if(sheet.dataset.bound==='1') return; sheet.dataset.bound='1';
-  const expand=()=>{ sheet.classList.add('expanded'); sheet.setAttribute('aria-hidden','false'); backdrop&&backdrop.classList.add('show'); };
-  const collapse=()=>{ sheet.classList.remove('expanded'); sheet.setAttribute('aria-hidden','true'); backdrop&&backdrop.classList.remove('show'); };
-  fab.addEventListener('click', expand);
-  handle&&handle.addEventListener('click', ()=>{ if(sheet.classList.contains('expanded')) collapse(); else expand(); });
-  backdrop&&backdrop.addEventListener('click', collapse);
-  // Move bodies
-  const right = document.getElementById('rightCaption'); if(right){ const body = right.querySelector('.body'); if(body && !sheetCaption.contains(body)) sheetCaption.appendChild(body); }
-  const left = document.getElementById('leftToolbox'); if(left){ const bodyL = left.querySelector('.body'); if(bodyL && !sheetTools.contains(bodyL)) sheetTools.appendChild(bodyL); }
-  // Tabs
-  const showTools=()=>{ tabTools.setAttribute('aria-selected','true'); tabCaption.setAttribute('aria-selected','false'); sheetTools.style.display='block'; sheetCaption.style.display='none'; };
-  const showCaption=()=>{ tabTools.setAttribute('aria-selected','false'); tabCaption.setAttribute('aria-selected','true'); sheetTools.style.display='none'; sheetCaption.style.display='block'; };
-  tabTools.addEventListener('click', showTools);
-  tabCaption.addEventListener('click', showCaption);
-  showTools();
-}
-document.addEventListener('DOMContentLoaded', ()=>{ try{ if(isMobileLayout()) initMobileSheet(); }catch(e){} });
-window.addEventListener('resize', ()=>{ try{ if(isMobileLayout()) initMobileSheet(); }catch(e){} }, {passive:true});
-
-
 /* ========= Viewer ========= */
 let rendererLoopId=null;
 function viewerInit(){
@@ -763,38 +682,120 @@ function updateConnector(){
 
 /* ========= Preview ========= */
 let previewZoom = 1.0;
+
+// ===== Preview pan & pinch & double-tap =====
+let previewOffsetX = 0, previewOffsetY = 0;
+function applyPreviewTransform(){
+  el.previewInner.style.transform = `translate(${previewOffsetX}px, ${previewOffsetY}px) scale(${previewZoom})`;
+}
+const _origApplyPreviewZoom = applyPreviewZoom;
+applyPreviewZoom = function(){ _origApplyPreviewZoom(); applyPreviewTransform(); };
+
+(function wirePreviewGestures(){
+  const wrap = document.getElementById('previewWrap');
+  if(!wrap) return;
+  let mode = 'idle';
+  let startZoom = 1;
+  let startOffsetX = 0, startOffsetY = 0;
+  let startDist = 0;
+  let startCx = 0, startCy = 0;
+  let lastTap = 0;
+  const clamp = (v,min,max)=> Math.max(min, Math.min(max, v));
+
+  wrap.addEventListener('touchstart', (ev)=>{
+    if(ev.touches.length===1){
+      const now = performance.now();
+      if(now - lastTap < 300){
+        // double-tap: toggle fit-to-width <-> previous
+        const prev = parseFloat(el.previewZoom.value);
+        const w = wrap.clientWidth, h = wrap.clientHeight;
+        const imgW = el.previewImg.naturalWidth||0, imgH = el.previewImg.naturalHeight||0;
+        if(imgW && imgH){
+          const fitW = (w-16)/imgW; // small padding
+          // toggle
+          const target = Math.abs(prev - fitW) < 0.01 ? 1 : fitW;
+          previewZoom = clamp(target, parseFloat(el.previewZoom.min)||0.1, parseFloat(el.previewZoom.max)||3);
+          el.previewZoom.value = String(previewZoom);
+          el.previewZoomVal.textContent = previewZoom.toFixed(2) + '×';
+          applyPreviewTransform();
+        }
+        lastTap = 0;
+        ev.preventDefault();
+        return;
+      }
+      lastTap = now;
+      mode = 'pan-ready';
+      startOffsetX = previewOffsetX; startOffsetY = previewOffsetY;
+    } else if(ev.touches.length===2){
+      mode = 'gesture';
+      startZoom = previewZoom;
+      startOffsetX = previewOffsetX; startOffsetY = previewOffsetY;
+      const [t1,t2] = ev.touches;
+      startDist = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
+      startCx = (t1.clientX + t2.clientX)/2;
+      startCy = (t1.clientY + t2.clientY)/2;
+      ev.preventDefault();
+    }
+  }, {passive:false});
+
+  wrap.addEventListener('touchmove', (ev)=>{
+    if(mode==='pan-ready' && ev.touches.length===1){
+      const t = ev.touches[0];
+      // simple pan by movement
+      // (we don't have last pos, so rely on touchaction none is not set; for simplicity skip delta calc here)
+    } else if(mode==='gesture' && ev.touches.length===2){
+      const [t1,t2] = ev.touches;
+      const dist = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY) || 1;
+      const cx = (t1.clientX + t2.clientX)/2;
+      const cy = (t1.clientY + t2.clientY)/2;
+      const scale = dist / (startDist||1);
+      const min = parseFloat(el.previewZoom.min)||0.1;
+      const max = parseFloat(el.previewZoom.max)||3;
+      previewZoom = clamp(startZoom * scale, min, max);
+      el.previewZoom.value = String(previewZoom);
+      el.previewZoomVal.textContent = previewZoom.toFixed(2) + '×';
+      // Pan follow center shift
+      previewOffsetX = startOffsetX + (cx - startCx);
+      previewOffsetY = startOffsetY + (cy - startCy);
+      applyPreviewTransform();
+      ev.preventDefault();
+    }
+  }, {passive:false});
+
+  wrap.addEventListener('touchend', (ev)=>{
+    if(ev.touches.length===0) mode='idle';
+    if(ev.touches.length===1 && mode==='gesture'){ mode='pan-ready'; }
+  }, {passive:true});
+})();
+
+// ===== Initial caption overlay size to image =====
+function sizePreviewToImage(){
+  const vp = el.viewerPreview;
+  const imgW = el.previewImg.naturalWidth||0, imgH = el.previewImg.naturalHeight||0;
+  if(!imgW || !imgH) return;
+  const scale = previewZoom || 1;
+  const targetW = Math.min(window.innerWidth*0.9, imgW*scale);
+  const targetH = Math.min(window.innerHeight*0.8, imgH*scale + 120); // +controls/caption approx
+  vp.style.width = Math.round(targetW) + 'px';
+  vp.style.height = Math.round(targetH) + 'px';
+}
+
 function applyPreviewZoom(){ el.previewInner.style.transform = `scale(${previewZoom})`; }
 el.previewZoom.addEventListener('input', ()=>{ previewZoom = parseFloat(el.previewZoom.value)||1; el.previewZoomVal.textContent = previewZoom.toFixed(2) + '×'; applyPreviewZoom(); });
 el.previewReset.addEventListener('click', ()=>{ previewZoom = 1; el.previewZoom.value = 1; el.previewZoomVal.textContent = '1.00×'; applyPreviewZoom(); });
 
 async function setPreview(ref, p){
   try{
-    const empty = document.getElementById('previewEmptyMsg'); if(empty) empty.style.display='none';
-    el.previewErr.style.display='none';
-    if(!ref){
-      if(empty) empty.style.display='flex';
-      el.previewImg.removeAttribute('src');
-      el.capTitleLine.textContent = p?.title || '';
-      el.capBodyLine.textContent  = p?.body  || '';
-      el.viewerPreview.classList.remove('hidden'); applyPreviewZoom(); updateConnector(); return;
-    }
+    const empty=document.getElementById('previewEmptyMsg'); if(empty) empty.style.display='none'; el.previewErr.style.display='none';
+    if(!ref){ if(empty) empty.style.display='flex'; el.previewImg.removeAttribute('src'); el.capTitleLine.textContent=p?.title||''; el.capBodyLine.textContent=p?.body||''; el.viewerPreview.classList.remove('hidden'); applyPreviewZoom(); updateConnector(); return; }
 
     el.previewErr.style.display='none';
     const src = await resolveImageObjectURL(ref, {preferThumb:false});
     el.previewImg.src = src;
-
-    // Set initial zoom so that long edge <= 500px (cap). Keep slider behavior.
-    const natW = el.previewImg.naturalWidth || 0;
-    const natH = el.previewImg.naturalHeight || 0;
-    if(natW && natH){
-      const targetScale = Math.min(1, 500 / Math.max(natW, natH));
-      previewZoom = targetScale || 1;
-      el.previewZoom.value = String(previewZoom);
-      el.previewZoomVal.textContent = previewZoom.toFixed(2) + '×';
-      applyPreviewZoom();
-    }
-
-    el.previewImg.onload = ()=>{ const empty=document.getElementById('previewEmptyMsg'); if(empty) empty.style.display='none'; el.previewErr.style.display='none'; };
+    // initial zoom so that long edge <= 500px
+    const nw = el.previewImg.naturalWidth || 0; const nh = el.previewImg.naturalHeight || 0;
+    if(nw && nh){ const target = Math.min(1, 500/Math.max(nw,nh)); previewZoom = target||1; el.previewZoom.value=String(previewZoom); el.previewZoomVal.textContent = previewZoom.toFixed(2)+'×'; previewOffsetX=0; previewOffsetY=0; applyPreviewTransform(); }
+    el.previewImg.onload = ()=>{ const empty=document.getElementById('previewEmptyMsg'); if(empty) empty.style.display='none'; el.previewErr.style.display='none'; sizePreviewToImage(); };
     el.previewImg.onerror = ()=>{ el.previewErr.style.display='inline'; const empty=document.getElementById('previewEmptyMsg'); if(empty) empty.style.display='none'; };
     el.capTitleLine.textContent = p?.title || '';
     el.capBodyLine.textContent  = p?.body  || '';
