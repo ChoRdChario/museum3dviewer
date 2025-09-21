@@ -158,15 +158,14 @@
       </svg>
 
       <div id="viewerPreview" class="hidden">
-        <button id="previewClose" aria-label="閉じる" style="position:absolute;right:8px;top:8px;z-index:3;background:#162234;border:1px solid #24324b;color:#e6edf3;border-radius:10px;padding:6px 10px;cursor:pointer">閉じる</button>
         <div id="previewControls">
           <span class="small">倍率</span>
-          <input id="previewZoom" type="range" min="0.1" max="3" step="0.05" value="1">
+          <input id="previewZoom" type="range" min="0.25" max="3" step="0.05" value="1">
           <span id="previewZoomVal" class="small">1.00×</span>
           <button id="previewReset">リセット</button>
           <span id="previewErr" class="small" style="margin-left:auto;color:#ffb4b4;display:none">画像を読み込めませんでした</span>
         </div>
-        <div id="previewWrap" style="position:relative"><div id="previewInner"><img id="previewImg" alt="preview"/></div><div id="previewMsg" class="small" style="position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);color:#9fb3c8;display:none;text-align:center;pointer-events:none">画像が設定されていません</div></div>
+        <div id="previewWrap"><div id="previewInner"><img id="previewImg" alt="preview"/></div></div>
         <div class="cap">
           <div id="capTitleLine"></div>
           <div id="capBodyLine"></div>
@@ -491,7 +490,6 @@ function upscaleThumbnailUrl(u, size=2048){
 
 /* ========= UI wire ========= */
 document.getElementById('btnSignIn').addEventListener('click', startSignIn);
-const _pc = document.getElementById('previewClose'); if(_pc){ _pc.addEventListener('click', ()=>{ el.viewerPreview.classList.add('hidden'); }); }
 (async () => { ensureGIS().catch(()=>{}); ensureGapiClient().catch(()=>{}); })();
 
 /* ========= Viewer ========= */
@@ -692,16 +690,15 @@ async function setPreview(ref, p){
   try{
     const msg = document.getElementById('previewMsg'); if(msg) msg.style.display='none';
     if(ref){
-    el.previewErr.style.display='none';
-    const src = await resolveImageObjectURL(ref, {preferThumb:false});
-    el.previewImg.src = src;
-    el.previewImg.onerror = ()=>{ el.previewErr.style.display='inline'; };
-    el.capTitleLine.textContent = p?.title || '';
-    el.capBodyLine.textContent  = p?.body  || '';
-    el.viewerPreview.classList.remove('hidden');
-    applyPreviewZoom(); updateConnector();
-    }
-    else {
+      el.previewErr.style.display='none';
+      const src = await resolveImageObjectURL(ref, {preferThumb:false});
+      el.previewImg.src = src;
+      el.previewImg.onerror = ()=>{ el.previewErr.style.display='inline'; };
+      el.capTitleLine.textContent = p?.title || '';
+      el.capBodyLine.textContent  = p?.body  || '';
+      el.viewerPreview.classList.remove('hidden');
+      applyPreviewZoom(); updateConnector();
+    } else {
       const msg = document.getElementById('previewMsg');
       if(msg){ msg.textContent = '画像が設定されていません'; msg.style.display = 'block'; }
       const img = document.getElementById('previewImg'); if(img){ img.removeAttribute('src'); }
@@ -710,7 +707,7 @@ async function setPreview(ref, p){
       el.viewerPreview.classList.remove('hidden');
       applyPreviewZoom(); updateConnector();
     }
-    catch(e){
+  } catch(e){
     console.warn('preview failed', e);
     el.previewErr.style.display='inline';
     el.viewerPreview.classList.remove('hidden');
