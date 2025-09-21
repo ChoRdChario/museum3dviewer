@@ -444,7 +444,18 @@ const materialKeyByMaterial = new Map();   // Material -> key
 const materialByKey = new Map();           // key -> Material
 const matOriginals=new WeakMap();
 const matState = new Map();                // key -> state
-const imageBlobCache = new Map();
+const imageBlobCache = new Map();// ---- Image Blob URL LRU + revoke ----
+const IMAGE_BLOB_CACHE_MAX = 24;
+function cacheSetImageURL(key, url){
+  // Evict oldest if exceeding limit
+  if(!imageBlobCache.has(key) && imageBlobCache.size >= IMAGE_BLOB_CACHE_MAX){
+    const first = imageBlobCache.keys().next().value;
+    const old = imageBlobCache.get(first);
+    if(old && /^blob:/.test(old)){ try{ URL.revokeObjectURL(old); }catch{} }
+    imageBlobCache.delete(first);
+  }
+  cacheSetImageURL(key, url);
+}
 let filterColors = new Set();
 let activeSheet = { sheetId:null, title:'pins' };
 
@@ -523,14 +534,60 @@ function viewerInit(){
   el.viewerCanvas.addEventListener('pointerdown', onPointerDown, { passive:false });
   el.projOrtho.addEventListener('change', ()=> { toggleProjection(el.projOrtho.checked); debouncedSaveMaterials(); });
   resize();
-  const loop = ()=>{ renderer.render(scene,camera); updateConnector(); rendererLoopId=requestAnimationFrame(loop); };
-  loop();
+  // ---- On-demand renderer with 3 modes (idle/interactive/cooldown) ----
+let rafId = null;
+let mode = 'idle'; // 'idle' | 'interactive' | 'cooldown'
+let lastFrame = 0;
+const targetIntervalInteractive = 1000/30;  // 30fps cap
+const targetIntervalCooldown    = 1000/12;  // 12fps cap
+let cooldownTimer = null;
+
+// throttled connector updater will be defined in updateConnector()
+function renderFrame(){
+  renderer.render(scene, camera);
+  updateConnector();
+}
+function startLoop(nextMode){
+  cancelAnimationFrame(rafId);
+  mode = nextMode;
+  lastFrame = performance.now();
+  const loop = (now)=>{
+    const interval = (mode==='interactive') ? targetIntervalInteractive : targetIntervalCooldown;
+    if(now - lastFrame >= interval){
+      lastFrame = now;
+      renderFrame();
+    }
+    if(mode!=='idle') rafId = requestAnimationFrame(loop);
+  };
+  rafId = requestAnimationFrame(loop);
+}
+function kickOnceAndLoop(nextMode='interactive'){
+  renderFrame(); // immediate frame to avoid hitch
+  startLoop(nextMode);
+}
+function enterInteractive(){
+  clearTimeout(cooldownTimer);
+  if(mode!=='interactive') kickOnceAndLoop('interactive');
+}
+function enterCooldownThenIdle(){
+  if(mode==='idle') return;
+  mode='cooldown';
+  clearTimeout(cooldownTimer);
+  cooldownTimer = setTimeout(()=>{
+    mode='idle';
+    cancelAnimationFrame(rafId); rafId=null;
+  }, 450);
+}
+// initial single render after setup
+setTimeout(()=>{ renderFrame(); }, 0);
 }
 function buildControls(){
   if(controls){ controls.dispose(); }
   controls = new OrbitControls(camera, el.viewerCanvas);
   controls.target.set(0,0,0); controls.update();
-  controls.addEventListener('change', updateConnector);
+  controls.addEventListener('start', enterInteractive);
+  controls.addEventListener('change', ()=>{ /* mark dirty */ });
+  controls.addEventListener('end', enterCooldownThenIdle);
   if(tcontrols){ scene.remove(tcontrols); tcontrols.dispose?.(); }
   tcontrols = new TransformControls(camera, el.viewerCanvas);
   tcontrols.setSize(0.9); tcontrols.setSpace('world');
@@ -552,7 +609,7 @@ function resize(){
   }else{ fitOrthoFrustum(); }
   camera.updateProjectionMatrix(); updateConnector();
 }
-function renderNow(){ renderer.render(scene,camera); updateConnector(); }
+function renderNow(){ renderFrame(); }
 function sceneBounds(){
   if(!currentModel){ return { center:new THREE.Vector3(0,0,0), radius: 2 }; }
   const box = new THREE.Box3().setFromObject(currentModel);
@@ -660,15 +717,22 @@ function onPointerDown(e){
   }
 }
 function updateConnector(){
+  const now = performance.now();
+  const minInterval = 1000/15; // 15fps cap for layout
+  if(updateConnector.__last && (now - updateConnector.__last) < minInterval) return;
+  updateConnector.__last = now;
+
   const p = pins.find(x=>x.id===selectedPinId);
   if(!p || !p.mesh || el.viewerPreview.classList.contains('hidden') || !pinGroup.visible || !p.mesh.visible){
     el.connLine.style.display = 'none'; el.connDot.style.display = 'none'; return;
   }
   const v = p.pos.clone().project(camera);
   const rect = el.viewerCanvas.getBoundingClientRect();
-  const x = (v.x + 1) / 2 * rect.width;
-  const y = (1 - (v.y + 1) / 2) * rect.height;
   const rectPrev = el.viewerPreview.getBoundingClientRect();
+  // memoize to avoid redundant updates
+  const __key = `${rect.width}x${rect.height}-${rect.left},${rect.top}-${rectPrev.left},${rectPrev.top},${rectPrev.width},${rectPrev.height}-${v.x.toFixed(3)},${v.y.toFixed(3)}`;
+  if(updateConnector.__memo === __key) return;
+  updateConnector.__memo = __key;
   const bx = (rectPrev.left - rect.left);
   const by = (rectPrev.top - rect.top) + rectPrev.height/2;
   const svg = el.connector;
@@ -686,12 +750,7 @@ function applyPreviewZoom(){ el.previewInner.style.transform = `scale(${previewZ
 el.previewZoom.addEventListener('input', ()=>{ previewZoom = parseFloat(el.previewZoom.value)||1; el.previewZoomVal.textContent = previewZoom.toFixed(2) + '×'; applyPreviewZoom(); });
 el.previewReset.addEventListener('click', ()=>{ previewZoom = 1; el.previewZoom.value = 1; el.previewZoomVal.textContent = '1.00×'; applyPreviewZoom(); });
 
-async function setPreview(ref, p){
-  if(!ref){ el.viewerPreview.classList.add('hidden'); return; }
-  try{
-    el.previewErr.style.display='none';
-    const src = await resolveImageObjectURL(ref, {preferThumb:false});
-    el.previewImg.src = src;
+\1const prevSrc = el.previewImg.src; el.previewImg.src = src; try{ if(prevSrc && /^blob:/.test(prevSrc)) URL.revokeObjectURL(prevSrc); }catch{};
     el.previewImg.onerror = ()=>{ el.previewErr.style.display='inline'; };
     el.capTitleLine.textContent = p?.title || '';
     el.capBodyLine.textContent  = p?.body  || '';
@@ -718,6 +777,20 @@ function parseImageRef(ref){
   }
   return { kind:'url', url: String(ref) };
 }
+// ---- Downscale & encode JPEG helper (to limit memory on mobile) ----
+async function downscaleBlobToJPEG(srcBlob, maxDim=2048, quality=0.8){
+  try{
+    const ib = await createImageBitmap(srcBlob, { resizeWidth:maxDim, resizeHeight:maxDim, resizeQuality:'high' });
+    const c = document.createElement('canvas');
+    c.width = ib.width; c.height = ib.height;
+    const cx = c.getContext('2d');
+    cx.drawImage(ib, 0, 0);
+    return await new Promise(res=> c.toBlob(b=>res(b||srcBlob), 'image/jpeg', quality));
+  }catch(e){
+    // Fallback: return original when createImageBitmap/toBlob not supported
+    return srcBlob;
+  }
+}
 async function resolveImageObjectURL(ref, {preferThumb=false}={}){
   const key = typeof ref==='string'?ref:JSON.stringify(ref);
   if(imageBlobCache.has(key)) return imageBlobCache.get(key);
@@ -725,7 +798,7 @@ async function resolveImageObjectURL(ref, {preferThumb=false}={}){
   const info = parseImageRef(ref);
   let outUrl;
 
-  if(info.kind === 'url'){ imageBlobCache.set(key, info.url); return info.url; }
+  if(info.kind === 'url'){ cacheSetImageURL(key, info.url); return info.url; }
 
   const meta = await driveFileMeta(info.id);
   const isHeic = isHeicMimeOrExt(meta.mimeType, meta.fileExtension);
@@ -734,8 +807,9 @@ async function resolveImageObjectURL(ref, {preferThumb=false}={}){
     const ok = await ensureHeic2any();
     if(ok){
       const blob = await driveFileFetchBlob(meta.id);
-      const jpegBlob = await window.heic2any({ blob, toType:'image/jpeg', quality:1.0 });
-      const jpg = Array.isArray(jpegBlob) ? jpegBlob[0] : jpegBlob;
+      const jpegBlob = await window.heic2any({ blob, toType:'image/jpeg', quality:0.8 });
+      const jpg0 = Array.isArray(jpegBlob) ? jpegBlob[0] : jpegBlob;
+      const jpg = await downscaleBlobToJPEG(jpg0, 2048, 0.8);
       outUrl = URL.createObjectURL(jpg);
     }else if(meta.hasThumbnail && meta.thumbnailLink){
       const hi = upscaleThumbnailUrl(meta.thumbnailLink, 2048);
@@ -751,11 +825,12 @@ async function resolveImageObjectURL(ref, {preferThumb=false}={}){
       outUrl = hi + sep + 'access_token=' + encodeURIComponent(accessToken);
     }else{
       const blob = await driveFileFetchBlob(meta.id);
-      outUrl = URL.createObjectURL(blob);
+      const sized = await downscaleBlobToJPEG(blob, 2048, 0.85);
+      outUrl = URL.createObjectURL(sized);
     }
   }
 
-  imageBlobCache.set(key, outUrl);
+  cacheSetImageURL(key, outUrl);
   return outUrl;
 }
 async function driveFileMeta(fileId){
