@@ -75,6 +75,11 @@
       .main{grid-template-columns:1fr; grid-template-rows: 360px 1fr 480px}
     }
   
+    /* Bottom sheet tabs */
+    .bs-tabs{ display:flex; border-bottom:1px solid #1e2837; }
+    .bs-tab{ flex:1; text-align:center; padding:10px; cursor:pointer; user-select:none; }
+    .bs-tab[aria-selected="true"]{ background:#0f1722; font-weight:700; }
+  
     /* === Mobile bottom sheet & FAB === */
     @media (max-width: 900px){
       .main{ grid-template-columns: 1fr; }
@@ -103,7 +108,9 @@
     .bs-handle{ height: 54px; display:flex; align-items:center; justify-content:center; cursor:pointer; }
     .bs-handle::before{ content:''; width:42px; height:4px; border-radius: 999px; background: rgba(255,255,255,.25); }
     #bottomSheetContent{ flex:1; overflow:auto; padding:10px; }
-
+    .bs-tabs{ display:flex; border-bottom:1px solid #1e2837; }
+    .bs-tab{ flex:1; text-align:center; padding:10px; cursor:pointer; user-select:none; }
+    .bs-tab[aria-selected="true"]{ background:#0f1722; font-weight:700; }
   </style>
 
   <!-- ES Modules -->
@@ -134,7 +141,14 @@
   <div id="backdrop" class="bs-backdrop"></div>
   <div id="bottomSheet" class="bottom-sheet" aria-modal="true" aria-hidden="true">
     <div class="bs-handle" id="bsHandle"></div>
-    <div id="bottomSheetContent"></div>
+    <div id="bsTabs" class="bs-tabs" role="tablist">
+      <div id="tabTools" class="bs-tab" role="tab" aria-selected="true">編集ツール</div>
+      <div id="tabCaption" class="bs-tab" role="tab" aria-selected="false">キャプション</div>
+    </div>
+    <div id="bottomSheetContent">
+      <div id="sheetTools" role="tabpanel"></div>
+      <div id="sheetCaption" role="tabpanel" style="display:none"></div>
+    </div>
   </div>
 
 
@@ -196,6 +210,7 @@
       </svg>
 
       <div id="viewerPreview" class="hidden">
+  <button id="previewClose" aria-label="閉じる" style="position:absolute;right:8px;top:8px;z-index:2;background:#162234;border:1px solid #24324b;color:#e6edf3;border-radius:10px;padding:6px 10px;cursor:pointer">閉じる</button>
         <div id="previewControls">
           <span class="small">倍率</span>
           <input id="previewZoom" type="range" min="0.25" max="3" step="0.05" value="1">
@@ -303,8 +318,6 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
-import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js';
-import { KTX2Loader } from 'three/examples/jsm/loaders/KTX2Loader.js';
 import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js';
 
 /* ================== iOS Detection & constants ================== */
@@ -485,23 +498,6 @@ const materialByKey = new Map();           // key -> Material
 const matOriginals=new WeakMap();
 const matState = new Map();                // key -> state
 const imageBlobCache = new Map();
-
-// [perf] LRU for blob URLs to prevent memory growth (iOS is strict)
-const IMAGE_CACHE_LIMIT = 24;
-function cacheSetImageURL(key, url){
-  if(!imageBlobCache.has(key) && imageBlobCache.size >= IMAGE_CACHE_LIMIT){
-    const it = imageBlobCache.entries().next();
-    if(!it.done){
-      const [oldKey, oldUrl] = it.value;
-      revokeIfBlob(oldUrl);
-      imageBlobCache.delete(oldKey);
-    }
-  }
-  const prev = imageBlobCache.get(key);
-  if(prev && /^blob:/.test(prev) && prev!==url){ try{ URL.revokeObjectURL(prev); }catch{} }
-  imageBlobCache.set(key, url);
-}
-
 let filterColors = new Set();
 let activeSheet = { sheetId:null, title:'pins' };
 
@@ -531,37 +527,6 @@ async function ensureHeic2any(){
   if(typeof window.heic2any === 'function') return true;
   try{ await loadScriptOnce('https://unpkg.com/heic2any@0.0.5/dist/heic2any.min.js'); }catch{}
   return (typeof window.heic2any === 'function');
-
-// Downscale & JPEG encode helper (to trim memory/IO on mobile)
-async function downscaleBlobToJPEG(blob, maxSize=2048, quality=0.8){
-  let ib;
-  try{
-    ib = await createImageBitmap(blob);
-  }catch(e){
-    // fallback via img element
-    const img = document.createElement('img');
-    img.src = URL.createObjectURL(blob);
-    await new Promise((res,rej)=>{ img.onload=res; img.onerror=rej; });
-    const c = document.createElement('canvas');
-    let w=img.naturalWidth, h=img.naturalHeight;
-    const scale = Math.min(1, maxSize/Math.max(w,h));
-    w = Math.max(1, (w*scale)|0); h = Math.max(1, (h*scale)|0);
-    c.width=w; c.height=h;
-    const cx=c.getContext('2d');
-    cx.drawImage(img,0,0,w,h);
-    URL.revokeObjectURL(img.src);
-    return await new Promise(r=> c.toBlob(r,'image/jpeg', quality));
-  }
-  const c = document.createElement('canvas');
-  let w=ib.width, h=ib.height;
-  const scale = Math.min(1, maxSize/Math.max(w,h));
-  w = Math.max(1, (w*scale)|0); h = Math.max(1, (h*scale)|0);
-  c.width=w; c.height=h;
-  const cx=c.getContext('2d');
-  cx.drawImage(ib,0,0,w,h);
-  return await new Promise(r=> c.toBlob(r,'image/jpeg', quality));
-}
-
 }
 function upscaleThumbnailUrl(u, size=2048){
   if(!u) return u;
@@ -578,17 +543,22 @@ function upscaleThumbnailUrl(u, size=2048){
 
 /* ========= UI wire ========= */
 document.getElementById('btnSignIn').addEventListener('click', startSignIn);
+const _pc = document.getElementById('previewClose'); if(_pc){ _pc.addEventListener('click', ()=>{ el.viewerPreview.classList.add('hidden'); }); }
 (async () => { ensureGIS().catch(()=>{}); ensureGapiClient().catch(()=>{}); })();
-
-/* ========= Mobile helpers ========= */
-function isMobileLayout(){ return window.matchMedia('(max-width: 900px)').matches || (typeof IS_IOS!=='undefined' ? IS_IOS : false); }
 function initMobileSheet(){
   const fab = document.getElementById('mobileFab');
   const sheet = document.getElementById('bottomSheet');
+  const tabs = document.getElementById('bsTabs');
+  const tabTools = document.getElementById('tabTools');
+  const tabCaption = document.getElementById('tabCaption');
   const content = document.getElementById('bottomSheetContent');
+  const sheetTools = document.getElementById('sheetTools');
+  const sheetCaption = document.getElementById('sheetCaption');
   const backdrop = document.getElementById('backdrop');
   const handle = document.getElementById('bsHandle');
-  if(!fab || !sheet || !content) return;
+  if(!fab || !sheet || !content || !sheetTools || !sheetCaption) return;
+  if(sheet.dataset.bound==='1') return; // already initialized once
+  sheet.dataset.bound='1';
 
   function expand(){ sheet.classList.add('expanded'); sheet.setAttribute('aria-hidden','false'); backdrop.classList.add('show'); }
   function collapse(){ sheet.classList.remove('expanded'); sheet.setAttribute('aria-hidden','true'); backdrop.classList.remove('show'); }
@@ -597,48 +567,40 @@ function initMobileSheet(){
   handle.addEventListener('click', ()=>{ sheet.classList.toggle('expanded'); const expanded = sheet.classList.contains('expanded'); sheet.setAttribute('aria-hidden', expanded?'false':'true'); if(expanded) backdrop.classList.add('show'); else backdrop.classList.remove('show'); });
   backdrop.addEventListener('click', collapse);
 
+  // Move right caption panel body into sheetCaption
   const right = document.getElementById('rightCaption');
   if(right){
     const body = right.querySelector('.body');
-    if(body && !content.contains(body)) content.appendChild(body);
+    if(body && !sheetCaption.contains(body)) sheetCaption.appendChild(body);
   }
-}
+  // Move left toolbox panel body into sheetTools
+  const left = document.getElementById('leftToolbox');
+  if(left){
+    const bodyL = left.querySelector('.body');
+    if(bodyL && !sheetTools.contains(bodyL)) sheetTools.appendChild(bodyL);
+  }
 
+  // Tabs behavior
+  function showTools(){
+    tabTools.setAttribute('aria-selected','true');
+    tabCaption.setAttribute('aria-selected','false');
+    sheetTools.style.display='block';
+    sheetCaption.style.display='none';
+  }
+  function showCaption(){
+    tabTools.setAttribute('aria-selected','false');
+    tabCaption.setAttribute('aria-selected','true');
+    sheetTools.style.display='none';
+    sheetCaption.style.display='block';
+  }
+  tabTools.addEventListener('click', showTools);
+  tabCaption.addEventListener('click', showCaption);
+
+  // default
+  showTools();
+}
 
 /* ========= Viewer ========= */
-
-async function downscaleTextureIfNeeded(tex, maxDim){
-  if(!tex || !tex.image) return;
-  const img = tex.image;
-  const w = img.width|0, h = img.height|0;
-  if(!w || !h) return;
-  const m = Math.max(w,h);
-  if(m <= maxDim) return;
-  const scale = maxDim / m;
-  const nw = Math.max(1, Math.round(w*scale));
-  const nh = Math.max(1, Math.round(h*scale));
-  const c = document.createElement('canvas'); c.width=nw; c.height=nh;
-  const cx = c.getContext('2d', {alpha:true}); cx.drawImage(img,0,0,nw,nh);
-  tex.image = c; tex.generateMipmaps=false; tex.minFilter=THREE.LinearFilter; tex.magFilter=THREE.LinearFilter; tex.anisotropy=0; tex.needsUpdate=true;
-}
-async function optimizeGLTFForMobile(gltf, {maxTex=1024}={}){
-  if(!isMobileLayout()) return;
-  const seen = new Set();
-  const tasks = [];
-  gltf.scene && gltf.scene.traverse(o=>{
-    const mats = Array.isArray(o.material)? o.material : (o.material? [o.material] : []);
-    mats.forEach(m=>{
-      if(!m || seen.has(m)) return; seen.add(m);
-      ['map','normalMap','metalnessMap','roughnessMap','emissiveMap','aoMap','bumpMap','displacementMap','specularMap','alphaMap','envMap'].forEach(k=>{
-        const t = m[k]; if(t && t.image){ tasks.push(downscaleTextureIfNeeded(t, maxTex)); }
-      });
-      if(typeof m.roughness==='number') m.roughness = Math.min(1, m.roughness+0.1);
-      if(typeof m.metalness==='number') m.metalness = Math.max(0, m.metalness-0.1);
-    });
-  });
-  await Promise.allSettled(tasks);
-}
-
 let rendererLoopId=null;
 function viewerInit(){
   renderer = new THREE.WebGLRenderer({
@@ -661,78 +623,24 @@ function viewerInit(){
   const dir = new THREE.DirectionalLight(0xffffff, 1.0); dir.position.set(3,5,4); scene.add(dir);
 
   buildControls();
-  // --- Render system (idle/interactive/cooldown) ---
-  let rafId=null, mode='idle', lastFrame=0;
-  const targetIntervalInteractive = 1000/30;
-  const targetIntervalCooldown    = 1000/12;
-  let cooldownTimer=null;
-
-  function renderFrame(){
-    renderer.render(scene, camera);
-    throttledUpdateConnector();
-  }
-  function initRenderSystem(){
-    // controls/tcontrols events
-    controls.addEventListener('start', enterInteractive);
-    controls.addEventListener('end', enterCooldownThenIdle);
-    if(tcontrols){
-      tcontrols.addEventListener?.('mouseDown', enterInteractive);
-      tcontrols.addEventListener?.('mouseUp', enterCooldownThenIdle);
-      tcontrols.addEventListener?.('change', ()=>{ /* during transform */ enterInteractive(); });
-    }
-  }
-  function kickLoop(nextMode){
-    cancelAnimationFrame(rafId);
-    mode = nextMode;
-    lastFrame = performance.now();
-    const loop = (now)=>{
-      const interval = (mode==='interactive')? targetIntervalInteractive : targetIntervalCooldown;
-      if(now - lastFrame >= interval){
-        lastFrame = now;
-        renderFrame();
-      }
-      if(mode!=='idle') rafId = requestAnimationFrame(loop);
-    };
-    rafId = requestAnimationFrame(loop);
-  }
-  function enterInteractive(){
-    clearTimeout(cooldownTimer);
-    if(mode!=='interactive'){
-      renderFrame(); // immediate
-      kickLoop('interactive');
-    }
-  }
-  function enterCooldownThenIdle(){
-    if(mode==='idle') return;
-    mode='cooldown';
-    clearTimeout(cooldownTimer);
-    kickLoop('cooldown');
-    cooldownTimer = setTimeout(()=>{
-      mode='idle';
-      cancelAnimationFrame(rafId); rafId=null;
-    }, 450);
-  }
-
 
   pinGroup = new THREE.Group(); scene.add(pinGroup);
   loader = new GLTFLoader();
-  try{ const draco = new DRACOLoader(); draco.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.6/'); loader.setDRACOLoader(draco); }catch{}
-  try{ const ktx2 = new KTX2Loader(); ktx2.setTranscoderPath('https://unpkg.com/three@0.157.0/examples/jsm/libs/basis/'); ktx2.detectSupport(renderer); loader.setKTX2Loader(ktx2); }catch{}
 
   window.addEventListener('resize', resize, { passive:true });
   window.addEventListener('resize', ()=>{ if(isMobileLayout()) initMobileSheet(); }, {passive:true});
+window.addEventListener('keydown', (e)=>{ if(e.key==='Escape'){ const vp=document.getElementById('viewerPreview'); if(vp) vp.classList.add('hidden'); const bs=document.getElementById('bottomSheet'); const bd=document.getElementById('backdrop'); if(bs&&bs.classList.contains('expanded')){ bs.classList.remove('expanded'); bs.setAttribute('aria-hidden','true'); if(bd) bd.classList.remove('show'); } } }, {passive:true});
   el.viewerCanvas.addEventListener('pointerdown', onPointerDown, { passive:false });
   el.projOrtho.addEventListener('change', ()=> { toggleProjection(el.projOrtho.checked); debouncedSaveMaterials(); });
   resize();
-  // On-demand rendering system
-  initRenderSystem();
-  renderFrame();
+  const loop = ()=>{ renderer.render(scene,camera); updateConnector(); rendererLoopId=requestAnimationFrame(loop); };
+  loop();
 }
 function buildControls(){
   if(controls){ controls.dispose(); }
   controls = new OrbitControls(camera, el.viewerCanvas);
   controls.target.set(0,0,0); controls.update();
-  controls.addEventListener('change', ()=>{ enterInteractive(); throttledUpdateConnector(); });
+  controls.addEventListener('change', updateConnector);
   if(tcontrols){ scene.remove(tcontrols); tcontrols.dispose?.(); }
   tcontrols = new TransformControls(camera, el.viewerCanvas);
   tcontrols.setSize(0.9); tcontrols.setSpace('world');
@@ -799,58 +707,6 @@ function toggleProjection(useOrtho){
     camera = perspCam;
   }
   buildControls();
-  // --- Render system (idle/interactive/cooldown) ---
-  let rafId=null, mode='idle', lastFrame=0;
-  const targetIntervalInteractive = 1000/30;
-  const targetIntervalCooldown    = 1000/12;
-  let cooldownTimer=null;
-
-  function renderFrame(){
-    renderer.render(scene, camera);
-    throttledUpdateConnector();
-  }
-  function initRenderSystem(){
-    // controls/tcontrols events
-    controls.addEventListener('start', enterInteractive);
-    controls.addEventListener('end', enterCooldownThenIdle);
-    if(tcontrols){
-      tcontrols.addEventListener?.('mouseDown', enterInteractive);
-      tcontrols.addEventListener?.('mouseUp', enterCooldownThenIdle);
-      tcontrols.addEventListener?.('change', ()=>{ /* during transform */ enterInteractive(); });
-    }
-  }
-  function kickLoop(nextMode){
-    cancelAnimationFrame(rafId);
-    mode = nextMode;
-    lastFrame = performance.now();
-    const loop = (now)=>{
-      const interval = (mode==='interactive')? targetIntervalInteractive : targetIntervalCooldown;
-      if(now - lastFrame >= interval){
-        lastFrame = now;
-        renderFrame();
-      }
-      if(mode!=='idle') rafId = requestAnimationFrame(loop);
-    };
-    rafId = requestAnimationFrame(loop);
-  }
-  function enterInteractive(){
-    clearTimeout(cooldownTimer);
-    if(mode!=='interactive'){
-      renderFrame(); // immediate
-      kickLoop('interactive');
-    }
-  }
-  function enterCooldownThenIdle(){
-    if(mode==='idle') return;
-    mode='cooldown';
-    clearTimeout(cooldownTimer);
-    kickLoop('cooldown');
-    cooldownTimer = setTimeout(()=>{
-      mode='idle';
-      cancelAnimationFrame(rafId); rafId=null;
-    }, 450);
-  }
-
   renderNow();
 }
 
@@ -913,23 +769,6 @@ function onPointerDown(e){
     }
   }
 }
-
-// [perf] Throttled connector update (<=15fps) with layout memoization
-const updateConnectorThrottled = (()=>{
-  let last = 0; let memoKey = '';
-  const MIN_INTERVAL = 1000/15;
-  return function(){
-    const now = performance.now();
-    if (now - last < MIN_INTERVAL) return;
-    last = now;
-    const rect = el.viewerCanvas.getBoundingClientRect();
-    const rectPrev = el.viewerPreview.getBoundingClientRect();
-    const key = rect.width + 'x' + rect.height + '/' + [rectPrev.left,rectPrev.top,rectPrev.width,rectPrev.height].join(',');
-    if (key === memoKey) return;
-    memoKey = key;
-    updateConnector();
-  };
-})();
 function updateConnector(){
   const p = pins.find(x=>x.id===selectedPinId);
   if(!p || !p.mesh || el.viewerPreview.classList.contains('hidden') || !pinGroup.visible || !p.mesh.visible){
@@ -962,14 +801,12 @@ async function setPreview(ref, p){
   try{
     el.previewErr.style.display='none';
     const src = await resolveImageObjectURL(ref, {preferThumb:false});
-    const prev = el.previewImg.src;
     el.previewImg.src = src;
-    if(prev && /^blob:/.test(prev)) try{ URL.revokeObjectURL(prev); }catch{};
     el.previewImg.onerror = ()=>{ el.previewErr.style.display='inline'; };
     el.capTitleLine.textContent = p?.title || '';
     el.capBodyLine.textContent  = p?.body  || '';
     el.viewerPreview.classList.remove('hidden');
-    applyPreviewZoom(); throttledUpdateConnector();
+    applyPreviewZoom(); updateConnector();
   }catch(e){
     console.warn('preview failed', e);
     el.previewErr.style.display='inline';
@@ -979,23 +816,6 @@ async function setPreview(ref, p){
 function updateViewerPreviewForPin(p){ setPreview(p && p.images && p.images[0] ? p.images[0] : null, p); }
 
 /* ========= Image resolve & Drive ========= */
-
-// [perf] Downscale & JPEG-encode a blob to cap decode/texture cost
-async function downscaleBlobToJPEG(blob, maxSize=2048, quality=0.8){
-  try{
-    const ib = await createImageBitmap(blob);
-    const scale = Math.min(1, maxSize/Math.max(ib.width, ib.height));
-    const w = Math.max(1, Math.round(ib.width*scale));
-    const h = Math.max(1, Math.round(ib.height*scale));
-    const c = document.createElement('canvas'); c.width=w; c.height=h;
-    const cx = c.getContext('2d', {alpha:false});
-    cx.drawImage(ib, 0, 0, w, h);
-    const out = await new Promise(r=> c.toBlob(r, 'image/jpeg', quality));
-    if(out) return out;
-  }catch(e){}
-  return blob;
-}
-
 function parseImageRef(ref){
   if(typeof ref === 'string' && /^(blob:|data:|https?:)/i.test(ref)){ return { kind:'url', url: ref }; }
   if(typeof ref === 'string' && ref.startsWith('drive:')){
@@ -1015,7 +835,7 @@ async function resolveImageObjectURL(ref, {preferThumb=false}={}){
   const info = parseImageRef(ref);
   let outUrl;
 
-  if(info.kind === 'url'){ cacheSetImageURL(key, info.url); return info.url; }
+  if(info.kind === 'url'){ imageBlobCache.set(key, info.url); return info.url; }
 
   const meta = await driveFileMeta(info.id);
   const isHeic = isHeicMimeOrExt(meta.mimeType, meta.fileExtension);
@@ -1024,11 +844,9 @@ async function resolveImageObjectURL(ref, {preferThumb=false}={}){
     const ok = await ensureHeic2any();
     if(ok){
       const blob = await driveFileFetchBlob(meta.id);
-      const jpegBlob = await window.heic2any({ blob, toType:'image/jpeg', quality:0.8 });
+      const jpegBlob = await window.heic2any({ blob, toType:'image/jpeg', quality:1.0 });
       const jpg = Array.isArray(jpegBlob) ? jpegBlob[0] : jpegBlob;
-      // Downscale again to protect memory on iOS
-      const ds = await downscaleBlobToJPEG(jpg, 2048, 0.8);
-      outUrl = URL.createObjectURL(ds||jpg);
+      outUrl = URL.createObjectURL(jpg);
     }else if(meta.hasThumbnail && meta.thumbnailLink){
       const hi = upscaleThumbnailUrl(meta.thumbnailLink, 2048);
       const sep = hi.includes('?') ? '&' : '?';
@@ -1043,12 +861,11 @@ async function resolveImageObjectURL(ref, {preferThumb=false}={}){
       outUrl = hi + sep + 'access_token=' + encodeURIComponent(accessToken);
     }else{
       const blob = await driveFileFetchBlob(meta.id);
-      const ds = await downscaleBlobToJPEG(blob, 2048, 0.85);
-      outUrl = URL.createObjectURL(ds||blob);
+      outUrl = URL.createObjectURL(blob);
     }
   }
 
-  cacheSetImageURL(key, outUrl);
+  imageBlobCache.set(key, outUrl);
   return outUrl;
 }
 async function driveFileMeta(fileId){
@@ -1993,7 +1810,6 @@ async function loadGLBByFileId(fileId){
         currentModel=null;
       }
       const gltf = await loader.loadAsync(url);
-      await optimizeGLTFForMobile(gltf, {maxTex: IS_IOS? 1024 : 1536});
       currentModel = gltf.scene; scene.add(currentModel);
       collectMaterials();
       focusOrigin();
