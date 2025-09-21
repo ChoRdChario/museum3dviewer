@@ -108,6 +108,16 @@
     .bs-tab[aria-selected="true"]{ background:#0f1722; font-weight:700; }
 
       #previewReset{ order:-1; }
+  
+    /* Mobile: place caption below viewer */
+    @media (max-width: 900px){
+      #rightCaption{ display:none; }
+      .mobile-caption{ display:block; margin-top:8px; }
+    }
+    @media (min-width: 901px){
+      .mobile-caption{ display:none; }
+    }
+
   </style>
 
   <!-- ES Modules -->
@@ -200,6 +210,7 @@
     <section class="panel" id="viewer">
       <div class="spinner" id="loading" hidden><div class="lds"></div></div>
       <canvas id="viewerCanvas"></canvas>
+  <div id="mobileCaptionBelow" class="mobile-caption"></div>
       <svg id="connector">
         <defs><filter id="dropshadow" x="-20%" y="-20%" width="140%"><feDropShadow dx="0" dy="0" stdDeviation="2" flood-color="#001a33" flood-opacity="0.9"/></filter></defs>
         <line id="connLine" x1="0" y1="0" x2="0" y2="0" style="display:none"/>
@@ -543,6 +554,19 @@ document.getElementById('btnSignIn').addEventListener('click', startSignIn);
 const _pc = document.getElementById('previewClose'); if(_pc){ _pc.addEventListener('click', ()=>{ el.viewerPreview.classList.add('hidden'); }); }
 (async () => { ensureGIS().catch(()=>{}); ensureGapiClient().catch(()=>{}); })();
 
+function placeCaptionForMobile(){
+  if(!(window.matchMedia('(max-width: 900px)').matches)) return;
+  const below = document.getElementById('mobileCaptionBelow');
+  const right = document.getElementById('rightCaption');
+  if(below && right){
+    const body = right.querySelector('.body');
+    if(body && !below.contains(body)) below.appendChild(body);
+  }
+}
+document.addEventListener('DOMContentLoaded', placeCaptionForMobile);
+window.addEventListener('resize', placeCaptionForMobile, {passive:true});
+
+
 function isMobileLayout(){ return window.matchMedia('(max-width: 900px)').matches || (typeof IS_IOS!=='undefined' ? IS_IOS : false); }
 function initMobileSheet(){
   const fab = document.getElementById('mobileFab');
@@ -581,6 +605,33 @@ window.addEventListener('resize', ()=>{ try{ if(isMobileLayout()) initMobileShee
 
 
 /* ========= Viewer ========= */
+
+// ========== GLB reload robustness ==========
+let currentLoadToken = 0;
+function disposeCurrentModel(){
+  try{
+    if(currentModel){
+      currentModel.traverse((o)=>{
+        if(o.geometry){ o.geometry.dispose?.(); }
+        if(o.material){
+          const mats = Array.isArray(o.material)? o.material : [o.material];
+          mats.forEach(m=>{
+            if(m.map) m.map.dispose?.();
+            if(m.normalMap) m.normalMap.dispose?.();
+            if(m.roughnessMap) m.roughnessMap.dispose?.();
+            if(m.metalnessMap) m.metalnessMap.dispose?.();
+            if(m.emissiveMap) m.emissiveMap.dispose?.();
+            if(m.aoMap) m.aoMap.dispose?.();
+          });
+        }
+      });
+      scene.remove(currentModel);
+      currentModel = null;
+    }
+  }catch(e){ /* ignore */ }
+}
+function sanitizeDriveId(id){ return (id||'').replace(/[^A-Za-z0-9_-]/g,''); }
+
 let rendererLoopId=null;
 function viewerInit(){
   renderer = new THREE.WebGLRenderer({
@@ -880,9 +931,7 @@ async function setPreview(ref, p){
     el.previewErr.style.display='none';
     const src = await resolveImageObjectURL(ref, {preferThumb:false});
     el.previewImg.src = src;
-    // initial zoom so that long edge <= 500px
-    const nw = el.previewImg.naturalWidth || 0; const nh = el.previewImg.naturalHeight || 0;
-    if(nw && nh){ const target = Math.min(1, 500/Math.max(nw,nh)); previewZoom = target||1; el.previewZoom.value=String(previewZoom); el.previewZoomVal.textContent = previewZoom.toFixed(2)+'×'; previewOffsetX=0; previewOffsetY=0; applyPreviewZoom(); }
+    }
     el.previewImg.onload = ()=>{ const empty=document.getElementById('previewEmptyMsg'); if(empty) empty.style.display='none'; el.previewErr.style.display='none'; };
     el.previewImg.onerror = ()=>{ el.previewErr.style.display='inline'; const empty=document.getElementById('previewEmptyMsg'); if(empty) empty.style.display='none'; };
     el.capTitleLine.textContent = p?.title || '';
@@ -1867,6 +1916,8 @@ el.btnDeletePin.addEventListener('click', async ()=>{
 
 /* ========= GLB Load (LOW-MEM for iOS) ========= */
 async function loadGLBByFileId(fileId){
+  fileId = sanitizeDriveId(fileId);
+  const myToken = ++currentLoadToken;
   if(!accessToken){ alert('先にサインインしてください'); return; }
   if(!fileId){ alert('GLBの fileId または共有URLを入力してください'); return; }
   el.loading.hidden = false;
