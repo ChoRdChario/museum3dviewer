@@ -74,6 +74,36 @@
     @media (max-width:1100px){
       .main{grid-template-columns:1fr; grid-template-rows: 360px 1fr 480px}
     }
+  
+    /* === Mobile bottom sheet & FAB === */
+    @media (max-width: 900px){
+      .main{ grid-template-columns: 1fr; }
+      #leftToolbox{ display:none; }
+      #rightCaption{ display:none; }
+      #mobileFab{ display:flex; }
+    }
+    #mobileFab{
+      position: fixed; right: 16px; bottom: 16px; z-index: 3000;
+      display:none; align-items:center; justify-content:center;
+      width:56px; height:56px; border-radius:999px;
+      background:#2a7bbb; color:white; font-weight:700; box-shadow: var(--shadow);
+      user-select:none;
+    }
+    #mobileFab:active{ transform: translateY(1px); }
+    .bs-backdrop{ position: fixed; inset:0; background: rgba(0,0,0,.35); z-index: 2998; display:none; }
+    .bs-backdrop.show{ display:block; }
+    .bottom-sheet{
+      position: fixed; left:0; right:0; bottom:0; z-index: 2999;
+      height: 60vh; max-height: 80vh;
+      background: var(--panel); border-top-left-radius: 16px; border-top-right-radius:16px;
+      border: 1px solid #1e2837; transform: translateY(calc(100% - 54px)); transition: transform .25s ease;
+      display:flex; flex-direction:column; overflow:hidden;
+    }
+    .bottom-sheet.expanded{ transform: translateY(0); }
+    .bs-handle{ height: 54px; display:flex; align-items:center; justify-content:center; cursor:pointer; }
+    .bs-handle::before{ content:''; width:42px; height:4px; border-radius: 999px; background: rgba(255,255,255,.25); }
+    #bottomSheetContent{ flex:1; overflow:auto; padding:10px; }
+
   </style>
 
   <!-- ES Modules -->
@@ -99,6 +129,14 @@
       <span id="statusLabel" class="chip">サインイン待ち…</span>
     </div>
   </header>
+
+  <div id="mobileFab" aria-label="ツール">ツール</div>
+  <div id="backdrop" class="bs-backdrop"></div>
+  <div id="bottomSheet" class="bottom-sheet" aria-modal="true" aria-hidden="true">
+    <div class="bs-handle" id="bsHandle"></div>
+    <div id="bottomSheetContent"></div>
+  </div>
+
 
   <div class="main">
     <!-- 左：ツール -->
@@ -265,6 +303,8 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js';
+import { KTX2Loader } from 'three/examples/jsm/loaders/KTX2Loader.js';
 import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js';
 
 /* ================== iOS Detection & constants ================== */
@@ -446,11 +486,10 @@ const matOriginals=new WeakMap();
 const matState = new Map();                // key -> state
 const imageBlobCache = new Map();
 
-// === Image URL LRU & revoke helpers ===
-const IMAGE_CACHE_MAX = 24;
-function revokeIfBlob(u){ try{ if(u && /^blob:/.test(u)) URL.revokeObjectURL(u); }catch{} }
+// [perf] LRU for blob URLs to prevent memory growth (iOS is strict)
+const IMAGE_CACHE_LIMIT = 24;
 function cacheSetImageURL(key, url){
-  if(!imageBlobCache.has(key) && imageBlobCache.size >= IMAGE_CACHE_MAX){
+  if(!imageBlobCache.has(key) && imageBlobCache.size >= IMAGE_CACHE_LIMIT){
     const it = imageBlobCache.entries().next();
     if(!it.done){
       const [oldKey, oldUrl] = it.value;
@@ -459,7 +498,7 @@ function cacheSetImageURL(key, url){
     }
   }
   const prev = imageBlobCache.get(key);
-  if(prev && prev !== url) revokeIfBlob(prev);
+  if(prev && /^blob:/.test(prev) && prev!==url){ try{ URL.revokeObjectURL(prev); }catch{} }
   imageBlobCache.set(key, url);
 }
 
@@ -541,7 +580,65 @@ function upscaleThumbnailUrl(u, size=2048){
 document.getElementById('btnSignIn').addEventListener('click', startSignIn);
 (async () => { ensureGIS().catch(()=>{}); ensureGapiClient().catch(()=>{}); })();
 
+/* ========= Mobile helpers ========= */
+function isMobileLayout(){ return window.matchMedia('(max-width: 900px)').matches || (typeof IS_IOS!=='undefined' ? IS_IOS : false); }
+function initMobileSheet(){
+  const fab = document.getElementById('mobileFab');
+  const sheet = document.getElementById('bottomSheet');
+  const content = document.getElementById('bottomSheetContent');
+  const backdrop = document.getElementById('backdrop');
+  const handle = document.getElementById('bsHandle');
+  if(!fab || !sheet || !content) return;
+
+  function expand(){ sheet.classList.add('expanded'); sheet.setAttribute('aria-hidden','false'); backdrop.classList.add('show'); }
+  function collapse(){ sheet.classList.remove('expanded'); sheet.setAttribute('aria-hidden','true'); backdrop.classList.remove('show'); }
+
+  fab.addEventListener('click', expand);
+  handle.addEventListener('click', ()=>{ sheet.classList.toggle('expanded'); const expanded = sheet.classList.contains('expanded'); sheet.setAttribute('aria-hidden', expanded?'false':'true'); if(expanded) backdrop.classList.add('show'); else backdrop.classList.remove('show'); });
+  backdrop.addEventListener('click', collapse);
+
+  const right = document.getElementById('rightCaption');
+  if(right){
+    const body = right.querySelector('.body');
+    if(body && !content.contains(body)) content.appendChild(body);
+  }
+}
+
+
 /* ========= Viewer ========= */
+
+async function downscaleTextureIfNeeded(tex, maxDim){
+  if(!tex || !tex.image) return;
+  const img = tex.image;
+  const w = img.width|0, h = img.height|0;
+  if(!w || !h) return;
+  const m = Math.max(w,h);
+  if(m <= maxDim) return;
+  const scale = maxDim / m;
+  const nw = Math.max(1, Math.round(w*scale));
+  const nh = Math.max(1, Math.round(h*scale));
+  const c = document.createElement('canvas'); c.width=nw; c.height=nh;
+  const cx = c.getContext('2d', {alpha:true}); cx.drawImage(img,0,0,nw,nh);
+  tex.image = c; tex.generateMipmaps=false; tex.minFilter=THREE.LinearFilter; tex.magFilter=THREE.LinearFilter; tex.anisotropy=0; tex.needsUpdate=true;
+}
+async function optimizeGLTFForMobile(gltf, {maxTex=1024}={}){
+  if(!isMobileLayout()) return;
+  const seen = new Set();
+  const tasks = [];
+  gltf.scene && gltf.scene.traverse(o=>{
+    const mats = Array.isArray(o.material)? o.material : (o.material? [o.material] : []);
+    mats.forEach(m=>{
+      if(!m || seen.has(m)) return; seen.add(m);
+      ['map','normalMap','metalnessMap','roughnessMap','emissiveMap','aoMap','bumpMap','displacementMap','specularMap','alphaMap','envMap'].forEach(k=>{
+        const t = m[k]; if(t && t.image){ tasks.push(downscaleTextureIfNeeded(t, maxTex)); }
+      });
+      if(typeof m.roughness==='number') m.roughness = Math.min(1, m.roughness+0.1);
+      if(typeof m.metalness==='number') m.metalness = Math.max(0, m.metalness-0.1);
+    });
+  });
+  await Promise.allSettled(tasks);
+}
+
 let rendererLoopId=null;
 function viewerInit(){
   renderer = new THREE.WebGLRenderer({
@@ -619,8 +716,11 @@ function viewerInit(){
 
   pinGroup = new THREE.Group(); scene.add(pinGroup);
   loader = new GLTFLoader();
+  try{ const draco = new DRACOLoader(); draco.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.6/'); loader.setDRACOLoader(draco); }catch{}
+  try{ const ktx2 = new KTX2Loader(); ktx2.setTranscoderPath('https://unpkg.com/three@0.157.0/examples/jsm/libs/basis/'); ktx2.detectSupport(renderer); loader.setKTX2Loader(ktx2); }catch{}
 
-  window.addEventListener('resize', ()=>{ resize(); renderFrame(); }, { passive:true });
+  window.addEventListener('resize', resize, { passive:true });
+  window.addEventListener('resize', ()=>{ if(isMobileLayout()) initMobileSheet(); }, {passive:true});
   el.viewerCanvas.addEventListener('pointerdown', onPointerDown, { passive:false });
   el.projOrtho.addEventListener('change', ()=> { toggleProjection(el.projOrtho.checked); debouncedSaveMaterials(); });
   resize();
@@ -814,21 +914,19 @@ function onPointerDown(e){
   }
 }
 
-// === Throttled connector updater ===
-const throttledUpdateConnector = (()=>{
-  let last=0, memo='';
-  const minInterval = 1000/15; // 15fps cap for layout work
-  return ()=>{
-    const now=performance.now();
-    if(now-last < minInterval) return;
+// [perf] Throttled connector update (<=15fps) with layout memoization
+const updateConnectorThrottled = (()=>{
+  let last = 0; let memoKey = '';
+  const MIN_INTERVAL = 1000/15;
+  return function(){
+    const now = performance.now();
+    if (now - last < MIN_INTERVAL) return;
     last = now;
-    // compute a simple key to skip redundant updates
-    try{
-      const rect = el.viewerCanvas.getBoundingClientRect();
-      const pv   = el.viewerPreview.getBoundingClientRect();
-      const key = rect.width+'x'+rect.height+'/'+pv.left+','+pv.top+','+pv.width+','+pv.height;
-      if(key===memo) return; memo=key;
-    }catch(e){}
+    const rect = el.viewerCanvas.getBoundingClientRect();
+    const rectPrev = el.viewerPreview.getBoundingClientRect();
+    const key = rect.width + 'x' + rect.height + '/' + [rectPrev.left,rectPrev.top,rectPrev.width,rectPrev.height].join(',');
+    if (key === memoKey) return;
+    memoKey = key;
     updateConnector();
   };
 })();
@@ -881,6 +979,23 @@ async function setPreview(ref, p){
 function updateViewerPreviewForPin(p){ setPreview(p && p.images && p.images[0] ? p.images[0] : null, p); }
 
 /* ========= Image resolve & Drive ========= */
+
+// [perf] Downscale & JPEG-encode a blob to cap decode/texture cost
+async function downscaleBlobToJPEG(blob, maxSize=2048, quality=0.8){
+  try{
+    const ib = await createImageBitmap(blob);
+    const scale = Math.min(1, maxSize/Math.max(ib.width, ib.height));
+    const w = Math.max(1, Math.round(ib.width*scale));
+    const h = Math.max(1, Math.round(ib.height*scale));
+    const c = document.createElement('canvas'); c.width=w; c.height=h;
+    const cx = c.getContext('2d', {alpha:false});
+    cx.drawImage(ib, 0, 0, w, h);
+    const out = await new Promise(r=> c.toBlob(r, 'image/jpeg', quality));
+    if(out) return out;
+  }catch(e){}
+  return blob;
+}
+
 function parseImageRef(ref){
   if(typeof ref === 'string' && /^(blob:|data:|https?:)/i.test(ref)){ return { kind:'url', url: ref }; }
   if(typeof ref === 'string' && ref.startsWith('drive:')){
@@ -1878,6 +1993,7 @@ async function loadGLBByFileId(fileId){
         currentModel=null;
       }
       const gltf = await loader.loadAsync(url);
+      await optimizeGLTFForMobile(gltf, {maxTex: IS_IOS? 1024 : 1536});
       currentModel = gltf.scene; scene.add(currentModel);
       collectMaterials();
       focusOrigin();
@@ -1937,6 +2053,7 @@ buildColorPresetsOnce();
 
 function viewerInitWrap(){ viewerInit(); }
 viewerInitWrap();
+if(isMobileLayout()) initMobileSheet();
 
 </script>
 </body>
