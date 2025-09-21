@@ -90,9 +90,7 @@
       user-select:none;
     }
     #mobileFab:active{ transform: translateY(1px); }
-    .bs-backdrop{
-      position: fixed; inset:0; background: rgba(0,0,0,.35); z-index: 2998; display:none;
-    }
+    .bs-backdrop{ position: fixed; inset:0; background: rgba(0,0,0,.35); z-index: 2998; display:none; }
     .bs-backdrop.show{ display:block; }
     .bottom-sheet{
       position: fixed; left:0; right:0; bottom:0; z-index: 2999;
@@ -103,9 +101,7 @@
     }
     .bottom-sheet.expanded{ transform: translateY(0); }
     .bs-handle{ height: 54px; display:flex; align-items:center; justify-content:center; cursor:pointer; }
-    .bs-handle::before{
-      content:''; width:42px; height:4px; border-radius: 999px; background: rgba(255,255,255,.25);
-    }
+    .bs-handle::before{ content:''; width:42px; height:4px; border-radius: 999px; background: rgba(255,255,255,.25); }
     #bottomSheetContent{ flex:1; overflow:auto; padding:10px; }
 
   </style>
@@ -490,10 +486,9 @@ const matOriginals=new WeakMap();
 const matState = new Map();                // key -> state
 const imageBlobCache = new Map();
 
-// [perf] LRU for blob URLs to prevent memory bloat (iOS is strict)
+// [perf] LRU for blob URLs to prevent memory growth (iOS is strict)
 const IMAGE_CACHE_LIMIT = 24;
 function cacheSetImageURL(key, url){
-  // Evict first-in if over limit
   if(!imageBlobCache.has(key) && imageBlobCache.size >= IMAGE_CACHE_LIMIT){
     const it = imageBlobCache.entries().next();
     if(!it.done){
@@ -503,9 +498,7 @@ function cacheSetImageURL(key, url){
     }
   }
   const prev = imageBlobCache.get(key);
-  if(prev && /^blob:/.test(prev) && prev!==url){
-    try{ URL.revokeObjectURL(prev); }catch{}
-  }
+  if(prev && /^blob:/.test(prev) && prev!==url){ try{ URL.revokeObjectURL(prev); }catch{} }
   imageBlobCache.set(key, url);
 }
 
@@ -556,11 +549,8 @@ function upscaleThumbnailUrl(u, size=2048){
 document.getElementById('btnSignIn').addEventListener('click', startSignIn);
 (async () => { ensureGIS().catch(()=>{}); ensureGapiClient().catch(()=>{}); })();
 
-/* ========= Mobile detection ========= */
-const IS_IOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform==='MacIntel' && navigator.maxTouchPoints>1);
-function isMobileLayout(){ return window.matchMedia('(max-width: 900px)').matches || IS_IOS; }
-
-/* ========= Bottom sheet wiring ========= */
+/* ========= Mobile helpers ========= */
+function isMobileLayout(){ return window.matchMedia('(max-width: 900px)').matches || (typeof IS_IOS!=='undefined' ? IS_IOS : false); }
 function initMobileSheet(){
   const fab = document.getElementById('mobileFab');
   const sheet = document.getElementById('bottomSheet');
@@ -576,15 +566,16 @@ function initMobileSheet(){
   handle.addEventListener('click', ()=>{ sheet.classList.toggle('expanded'); const expanded = sheet.classList.contains('expanded'); sheet.setAttribute('aria-hidden', expanded?'false':'true'); if(expanded) backdrop.classList.add('show'); else backdrop.classList.remove('show'); });
   backdrop.addEventListener('click', collapse);
 
-  // Move right caption panel body into bottom sheet
   const right = document.getElementById('rightCaption');
   if(right){
-    let body = right.querySelector('.body');
-    if(body){ content.appendChild(body); }
+    const body = right.querySelector('.body');
+    if(body && !content.contains(body)) content.appendChild(body);
   }
 }
 
-/* ========= Texture downscale for mobile ========= */
+
+/* ========= Viewer ========= */
+
 async function downscaleTextureIfNeeded(tex, maxDim){
   if(!tex || !tex.image) return;
   const img = tex.image;
@@ -596,16 +587,8 @@ async function downscaleTextureIfNeeded(tex, maxDim){
   const nw = Math.max(1, Math.round(w*scale));
   const nh = Math.max(1, Math.round(h*scale));
   const c = document.createElement('canvas'); c.width=nw; c.height=nh;
-  const cx = c.getContext('2d', {alpha:true});
-  try{
-    cx.drawImage(img, 0,0, nw, nh);
-    tex.image = c;
-    tex.generateMipmaps = false;
-    tex.minFilter = THREE.LinearFilter;
-    tex.magFilter = THREE.LinearFilter;
-    tex.anisotropy = 0;
-    tex.needsUpdate = true;
-  }catch{ /* ignore */ }
+  const cx = c.getContext('2d', {alpha:true}); cx.drawImage(img,0,0,nw,nh);
+  tex.image = c; tex.generateMipmaps=false; tex.minFilter=THREE.LinearFilter; tex.magFilter=THREE.LinearFilter; tex.anisotropy=0; tex.needsUpdate=true;
 }
 async function optimizeGLTFForMobile(gltf, {maxTex=1024}={}){
   if(!isMobileLayout()) return;
@@ -616,21 +599,15 @@ async function optimizeGLTFForMobile(gltf, {maxTex=1024}={}){
     mats.forEach(m=>{
       if(!m || seen.has(m)) return; seen.add(m);
       ['map','normalMap','metalnessMap','roughnessMap','emissiveMap','aoMap','bumpMap','displacementMap','specularMap','alphaMap','envMap'].forEach(k=>{
-        const t = m[k];
-        if(t && t.image){
-          tasks.push(downscaleTextureIfNeeded(t, maxTex));
-        }
+        const t = m[k]; if(t && t.image){ tasks.push(downscaleTextureIfNeeded(t, maxTex)); }
       });
-      // Slightly cheaper lighting on mobile
-      if(typeof m.roughness === 'number') m.roughness = Math.min(1, m.roughness+0.1);
-      if(typeof m.metalness === 'number') m.metalness = Math.max(0, m.metalness-0.1);
+      if(typeof m.roughness==='number') m.roughness = Math.min(1, m.roughness+0.1);
+      if(typeof m.metalness==='number') m.metalness = Math.max(0, m.metalness-0.1);
     });
   });
   await Promise.allSettled(tasks);
 }
 
-
-/* ========= Viewer ========= */
 let rendererLoopId=null;
 function viewerInit(){
   renderer = new THREE.WebGLRenderer({
@@ -656,17 +633,8 @@ function viewerInit(){
 
   pinGroup = new THREE.Group(); scene.add(pinGroup);
   loader = new GLTFLoader();
-  try{
-    const draco = new DRACOLoader();
-    draco.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.6/');
-    loader.setDRACOLoader(draco);
-  }catch{}
-  try{
-    const ktx2 = new KTX2Loader();
-    ktx2.setTranscoderPath('https://unpkg.com/three@0.157.0/examples/jsm/libs/basis/');
-    ktx2.detectSupport(renderer);
-    loader.setKTX2Loader(ktx2);
-  }catch{}
+  try{ const draco = new DRACOLoader(); draco.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.6/'); loader.setDRACOLoader(draco); }catch{}
+  try{ const ktx2 = new KTX2Loader(); ktx2.setTranscoderPath('https://unpkg.com/three@0.157.0/examples/jsm/libs/basis/'); ktx2.detectSupport(renderer); loader.setKTX2Loader(ktx2); }catch{}
 
   window.addEventListener('resize', resize, { passive:true });
   window.addEventListener('resize', ()=>{ if(isMobileLayout()) initMobileSheet(); }, {passive:true});
@@ -809,7 +777,7 @@ function onPointerDown(e){
   }
 }
 
-// [perf] Throttled wrapper to limit layout reads/DOM writes to <=15fps and avoid redundant updates
+// [perf] Throttled connector update (<=15fps) with layout memoization
 const updateConnectorThrottled = (()=>{
   let last = 0; let memoKey = '';
   const MIN_INTERVAL = 1000/15;
@@ -817,8 +785,6 @@ const updateConnectorThrottled = (()=>{
     const now = performance.now();
     if (now - last < MIN_INTERVAL) return;
     last = now;
-    // Call the original updateConnector only when geometry/layout changed
-    // We compute a cheap key from DOM rects; if unchanged, skip heavy updates.
     const rect = el.viewerCanvas.getBoundingClientRect();
     const rectPrev = el.viewerPreview.getBoundingClientRect();
     const key = rect.width + 'x' + rect.height + '/' + [rectPrev.left,rectPrev.top,rectPrev.width,rectPrev.height].join(',');
@@ -876,7 +842,7 @@ function updateViewerPreviewForPin(p){ setPreview(p && p.images && p.images[0] ?
 
 /* ========= Image resolve & Drive ========= */
 
-// [perf] Downscale & JPEG-encode a blob to cap decode cost
+// [perf] Downscale & JPEG-encode a blob to cap decode/texture cost
 async function downscaleBlobToJPEG(blob, maxSize=2048, quality=0.8){
   try{
     const ib = await createImageBitmap(blob);
@@ -888,8 +854,7 @@ async function downscaleBlobToJPEG(blob, maxSize=2048, quality=0.8){
     cx.drawImage(ib, 0, 0, w, h);
     const out = await new Promise(r=> c.toBlob(r, 'image/jpeg', quality));
     if(out) return out;
-  }catch(e){ /* fallback below */ }
-  // Fallback: return original blob if downscale failed
+  }catch(e){}
   return blob;
 }
 
@@ -1887,7 +1852,7 @@ async function loadGLBByFileId(fileId){
         currentModel=null;
       }
       const gltf = await loader.loadAsync(url);
-      await optimizeGLTFForMobile(gltf, {maxTex: IS_IOS? 1024: 1536});
+      await optimizeGLTFForMobile(gltf, {maxTex: IS_IOS? 1024 : 1536});
       currentModel = gltf.scene; scene.add(currentModel);
       collectMaterials();
       focusOrigin();
