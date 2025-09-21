@@ -923,17 +923,48 @@ applyPreviewZoom = function(){
 el.previewZoom.addEventListener('input', ()=>{ previewZoom = parseFloat(el.previewZoom.value)||1; el.previewZoomVal.textContent = previewZoom.toFixed(2) + '×'; applyPreviewZoom(); });
 el.previewReset.addEventListener('click', ()=>{ previewZoom = 1; el.previewZoom.value = 1; el.previewZoomVal.textContent = '1.00×'; applyPreviewZoom(); });
 
+
 async function setPreview(ref, p){
   try{
-    const empty=document.getElementById('previewEmptyMsg'); if(empty) empty.style.display='none'; el.previewErr.style.display='none';
-    if(!ref){ if(empty) empty.style.display='flex'; el.previewImg.removeAttribute('src'); el.capTitleLine.textContent=p?.title||''; el.capBodyLine.textContent=p?.body||''; el.viewerPreview.classList.remove('hidden'); applyPreviewZoom(); updateConnector(); return; }
-
+    const empty = document.getElementById('previewEmptyMsg');
+    if(empty) empty.style.display='none';
     el.previewErr.style.display='none';
+
+    if(!ref){
+      if(empty) empty.style.display='flex';
+      el.previewImg.removeAttribute('src');
+      el.capTitleLine.textContent = p?.title || '';
+      el.capBodyLine.textContent  = p?.body  || '';
+      el.viewerPreview.classList.remove('hidden');
+      applyPreviewZoom(); updateConnector();
+      return;
+    }
+
+    // Handlers first, then assign src
+    el.previewImg.onload = ()=>{
+      const empty=document.getElementById('previewEmptyMsg');
+      if(empty) empty.style.display='none';
+      el.previewErr.style.display='none';
+      // initial zoom to long edge <= 500px
+      const nw = el.previewImg.naturalWidth||0, nh = el.previewImg.naturalHeight||0;
+      if(nw && nh){
+        const target = Math.min(1, 500/Math.max(nw,nh));
+        previewZoom = target || 1;
+        el.previewZoom.value = String(previewZoom);
+        el.previewZoomVal.textContent = previewZoom.toFixed(2)+'×';
+      }
+      previewOffsetX=0; previewOffsetY=0;
+      applyPreviewZoom();
+    };
+    el.previewImg.onerror = ()=>{
+      el.previewErr.style.display='inline';
+      const empty=document.getElementById('previewEmptyMsg');
+      if(empty) empty.style.display='none';
+    };
+
     const src = await resolveImageObjectURL(ref, {preferThumb:false});
     el.previewImg.src = src;
-    }
-    el.previewImg.onload = ()=>{ const empty=document.getElementById('previewEmptyMsg'); if(empty) empty.style.display='none'; el.previewErr.style.display='none'; };
-    el.previewImg.onerror = ()=>{ el.previewErr.style.display='inline'; const empty=document.getElementById('previewEmptyMsg'); if(empty) empty.style.display='none'; };
+
     el.capTitleLine.textContent = p?.title || '';
     el.capBodyLine.textContent  = p?.body  || '';
     el.viewerPreview.classList.remove('hidden');
@@ -944,6 +975,7 @@ async function setPreview(ref, p){
     el.viewerPreview.classList.remove('hidden');
   }
 }
+
 function updateViewerPreviewForPin(p){ setPreview(p && p.images && p.images[0] ? p.images[0] : null, p); }
 
 /* ========= Image resolve & Drive ========= */
