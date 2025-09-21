@@ -74,6 +74,40 @@
     @media (max-width:1100px){
       .main{grid-template-columns:1fr; grid-template-rows: 360px 1fr 480px}
     }
+  
+    /* === Mobile bottom sheet & FAB === */
+    @media (max-width: 900px){
+      .main{ grid-template-columns: 1fr; }
+      #leftToolbox{ display:none; }
+      #rightCaption{ display:none; }
+      #mobileFab{ display:flex; }
+    }
+    #mobileFab{
+      position: fixed; right: 16px; bottom: 16px; z-index: 3000;
+      display:none; align-items:center; justify-content:center;
+      width:56px; height:56px; border-radius:999px;
+      background:#2a7bbb; color:white; font-weight:700; box-shadow: var(--shadow);
+      user-select:none;
+    }
+    #mobileFab:active{ transform: translateY(1px); }
+    .bs-backdrop{
+      position: fixed; inset:0; background: rgba(0,0,0,.35); z-index: 2998; display:none;
+    }
+    .bs-backdrop.show{ display:block; }
+    .bottom-sheet{
+      position: fixed; left:0; right:0; bottom:0; z-index: 2999;
+      height: 60vh; max-height: 80vh;
+      background: var(--panel); border-top-left-radius: 16px; border-top-right-radius:16px;
+      border: 1px solid #1e2837; transform: translateY(calc(100% - 54px)); transition: transform .25s ease;
+      display:flex; flex-direction:column; overflow:hidden;
+    }
+    .bottom-sheet.expanded{ transform: translateY(0); }
+    .bs-handle{ height: 54px; display:flex; align-items:center; justify-content:center; cursor:pointer; }
+    .bs-handle::before{
+      content:''; width:42px; height:4px; border-radius: 999px; background: rgba(255,255,255,.25);
+    }
+    #bottomSheetContent{ flex:1; overflow:auto; padding:10px; }
+
   </style>
 
   <!-- ES Modules -->
@@ -99,6 +133,14 @@
       <span id="statusLabel" class="chip">サインイン待ち…</span>
     </div>
   </header>
+
+  <div id="mobileFab" aria-label="ツール">ツール</div>
+  <div id="backdrop" class="bs-backdrop"></div>
+  <div id="bottomSheet" class="bottom-sheet" aria-modal="true" aria-hidden="true">
+    <div class="bs-handle" id="bsHandle"></div>
+    <div id="bottomSheetContent"></div>
+  </div>
+
 
   <div class="main">
     <!-- 左：ツール -->
@@ -265,6 +307,8 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js';
+import { KTX2Loader } from 'three/examples/jsm/loaders/KTX2Loader.js';
 import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js';
 
 /* ================== iOS Detection & constants ================== */
@@ -512,6 +556,80 @@ function upscaleThumbnailUrl(u, size=2048){
 document.getElementById('btnSignIn').addEventListener('click', startSignIn);
 (async () => { ensureGIS().catch(()=>{}); ensureGapiClient().catch(()=>{}); })();
 
+/* ========= Mobile detection ========= */
+const IS_IOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform==='MacIntel' && navigator.maxTouchPoints>1);
+function isMobileLayout(){ return window.matchMedia('(max-width: 900px)').matches || IS_IOS; }
+
+/* ========= Bottom sheet wiring ========= */
+function initMobileSheet(){
+  const fab = document.getElementById('mobileFab');
+  const sheet = document.getElementById('bottomSheet');
+  const content = document.getElementById('bottomSheetContent');
+  const backdrop = document.getElementById('backdrop');
+  const handle = document.getElementById('bsHandle');
+  if(!fab || !sheet || !content) return;
+
+  function expand(){ sheet.classList.add('expanded'); sheet.setAttribute('aria-hidden','false'); backdrop.classList.add('show'); }
+  function collapse(){ sheet.classList.remove('expanded'); sheet.setAttribute('aria-hidden','true'); backdrop.classList.remove('show'); }
+
+  fab.addEventListener('click', expand);
+  handle.addEventListener('click', ()=>{ sheet.classList.toggle('expanded'); const expanded = sheet.classList.contains('expanded'); sheet.setAttribute('aria-hidden', expanded?'false':'true'); if(expanded) backdrop.classList.add('show'); else backdrop.classList.remove('show'); });
+  backdrop.addEventListener('click', collapse);
+
+  // Move right caption panel body into bottom sheet
+  const right = document.getElementById('rightCaption');
+  if(right){
+    let body = right.querySelector('.body');
+    if(body){ content.appendChild(body); }
+  }
+}
+
+/* ========= Texture downscale for mobile ========= */
+async function downscaleTextureIfNeeded(tex, maxDim){
+  if(!tex || !tex.image) return;
+  const img = tex.image;
+  const w = img.width|0, h = img.height|0;
+  if(!w || !h) return;
+  const m = Math.max(w,h);
+  if(m <= maxDim) return;
+  const scale = maxDim / m;
+  const nw = Math.max(1, Math.round(w*scale));
+  const nh = Math.max(1, Math.round(h*scale));
+  const c = document.createElement('canvas'); c.width=nw; c.height=nh;
+  const cx = c.getContext('2d', {alpha:true});
+  try{
+    cx.drawImage(img, 0,0, nw, nh);
+    tex.image = c;
+    tex.generateMipmaps = false;
+    tex.minFilter = THREE.LinearFilter;
+    tex.magFilter = THREE.LinearFilter;
+    tex.anisotropy = 0;
+    tex.needsUpdate = true;
+  }catch{ /* ignore */ }
+}
+async function optimizeGLTFForMobile(gltf, {maxTex=1024}={}){
+  if(!isMobileLayout()) return;
+  const seen = new Set();
+  const tasks = [];
+  gltf.scene && gltf.scene.traverse(o=>{
+    const mats = Array.isArray(o.material)? o.material : (o.material? [o.material] : []);
+    mats.forEach(m=>{
+      if(!m || seen.has(m)) return; seen.add(m);
+      ['map','normalMap','metalnessMap','roughnessMap','emissiveMap','aoMap','bumpMap','displacementMap','specularMap','alphaMap','envMap'].forEach(k=>{
+        const t = m[k];
+        if(t && t.image){
+          tasks.push(downscaleTextureIfNeeded(t, maxTex));
+        }
+      });
+      // Slightly cheaper lighting on mobile
+      if(typeof m.roughness === 'number') m.roughness = Math.min(1, m.roughness+0.1);
+      if(typeof m.metalness === 'number') m.metalness = Math.max(0, m.metalness-0.1);
+    });
+  });
+  await Promise.allSettled(tasks);
+}
+
+
 /* ========= Viewer ========= */
 let rendererLoopId=null;
 function viewerInit(){
@@ -538,8 +656,20 @@ function viewerInit(){
 
   pinGroup = new THREE.Group(); scene.add(pinGroup);
   loader = new GLTFLoader();
+  try{
+    const draco = new DRACOLoader();
+    draco.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.6/');
+    loader.setDRACOLoader(draco);
+  }catch{}
+  try{
+    const ktx2 = new KTX2Loader();
+    ktx2.setTranscoderPath('https://unpkg.com/three@0.157.0/examples/jsm/libs/basis/');
+    ktx2.detectSupport(renderer);
+    loader.setKTX2Loader(ktx2);
+  }catch{}
 
   window.addEventListener('resize', resize, { passive:true });
+  window.addEventListener('resize', ()=>{ if(isMobileLayout()) initMobileSheet(); }, {passive:true});
   el.viewerCanvas.addEventListener('pointerdown', onPointerDown, { passive:false });
   el.projOrtho.addEventListener('change', ()=> { toggleProjection(el.projOrtho.checked); debouncedSaveMaterials(); });
   resize(); renderNow();
@@ -1757,6 +1887,7 @@ async function loadGLBByFileId(fileId){
         currentModel=null;
       }
       const gltf = await loader.loadAsync(url);
+      await optimizeGLTFForMobile(gltf, {maxTex: IS_IOS? 1024: 1536});
       currentModel = gltf.scene; scene.add(currentModel);
       collectMaterials();
       focusOrigin();
@@ -1816,6 +1947,7 @@ buildColorPresetsOnce();
 
 function viewerInitWrap(){ viewerInit(); }
 viewerInitWrap();
+if(isMobileLayout()) initMobileSheet();
 
 </script>
 </body>
