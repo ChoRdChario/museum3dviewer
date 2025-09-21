@@ -75,11 +75,6 @@
       .main{grid-template-columns:1fr; grid-template-rows: 360px 1fr 480px}
     }
   
-    /* Bottom sheet tabs */
-    .bs-tabs{ display:flex; border-bottom:1px solid #1e2837; }
-    .bs-tab{ flex:1; text-align:center; padding:10px; cursor:pointer; user-select:none; }
-    .bs-tab[aria-selected="true"]{ background:#0f1722; font-weight:700; }
-  
     /* === Mobile bottom sheet & FAB === */
     @media (max-width: 900px){
       .main{ grid-template-columns: 1fr; }
@@ -92,7 +87,7 @@
       display:none; align-items:center; justify-content:center;
       width:56px; height:56px; border-radius:999px;
       background:#2a7bbb; color:white; font-weight:700; box-shadow: var(--shadow);
-      user-select:none;
+      user-select:none; pointer-events:auto;
     }
     #mobileFab:active{ transform: translateY(1px); }
     .bs-backdrop{ position: fixed; inset:0; background: rgba(0,0,0,.35); z-index: 2998; display:none; }
@@ -213,7 +208,7 @@
   <button id="previewClose" aria-label="閉じる" style="position:absolute;right:8px;top:8px;z-index:2;background:#162234;border:1px solid #24324b;color:#e6edf3;border-radius:10px;padding:6px 10px;cursor:pointer">閉じる</button>
         <div id="previewControls">
           <span class="small">倍率</span>
-          <input id="previewZoom" type="range" min="0.25" max="3" step="0.05" value="1">
+          <input id="previewZoom" type="range" min="0.1" max="3" step="0.05" value="1">
           <span id="previewZoomVal" class="small">1.00×</span>
           <button id="previewReset">リセット</button>
           <span id="previewErr" class="small" style="margin-left:auto;color:#ffb4b4;display:none">画像を読み込めませんでした</span>
@@ -545,6 +540,8 @@ function upscaleThumbnailUrl(u, size=2048){
 document.getElementById('btnSignIn').addEventListener('click', startSignIn);
 const _pc = document.getElementById('previewClose'); if(_pc){ _pc.addEventListener('click', ()=>{ el.viewerPreview.classList.add('hidden'); }); }
 (async () => { ensureGIS().catch(()=>{}); ensureGapiClient().catch(()=>{}); })();
+
+function isMobileLayout(){ return window.matchMedia('(max-width: 900px)').matches || (typeof IS_IOS!=='undefined' ? IS_IOS : false); }
 function initMobileSheet(){
   const fab = document.getElementById('mobileFab');
   const sheet = document.getElementById('bottomSheet');
@@ -557,48 +554,30 @@ function initMobileSheet(){
   const backdrop = document.getElementById('backdrop');
   const handle = document.getElementById('bsHandle');
   if(!fab || !sheet || !content || !sheetTools || !sheetCaption) return;
-  if(sheet.dataset.bound==='1') return; // already initialized once
-  sheet.dataset.bound='1';
+  if(sheet.dataset.bound==='1') return; sheet.dataset.bound='1';
 
-  function expand(){ sheet.classList.add('expanded'); sheet.setAttribute('aria-hidden','false'); backdrop.classList.add('show'); }
-  function collapse(){ sheet.classList.remove('expanded'); sheet.setAttribute('aria-hidden','true'); backdrop.classList.remove('show'); }
+  const expand=()=>{ sheet.classList.add('expanded'); sheet.setAttribute('aria-hidden','false'); backdrop&&backdrop.classList.add('show'); };
+  const collapse=()=>{ sheet.classList.remove('expanded'); sheet.setAttribute('aria-hidden','true'); backdrop&&backdrop.classList.remove('show'); };
 
   fab.addEventListener('click', expand);
-  handle.addEventListener('click', ()=>{ sheet.classList.toggle('expanded'); const expanded = sheet.classList.contains('expanded'); sheet.setAttribute('aria-hidden', expanded?'false':'true'); if(expanded) backdrop.classList.add('show'); else backdrop.classList.remove('show'); });
-  backdrop.addEventListener('click', collapse);
+  handle&&handle.addEventListener('click', ()=>{ if(sheet.classList.contains('expanded')) collapse(); else expand(); });
+  backdrop&&backdrop.addEventListener('click', collapse);
 
-  // Move right caption panel body into sheetCaption
-  const right = document.getElementById('rightCaption');
-  if(right){
-    const body = right.querySelector('.body');
-    if(body && !sheetCaption.contains(body)) sheetCaption.appendChild(body);
-  }
-  // Move left toolbox panel body into sheetTools
-  const left = document.getElementById('leftToolbox');
-  if(left){
-    const bodyL = left.querySelector('.body');
-    if(bodyL && !sheetTools.contains(bodyL)) sheetTools.appendChild(bodyL);
-  }
+  // Move bodies
+  const right = document.getElementById('rightCaption'); if(right){ const body = right.querySelector('.body'); if(body && !sheetCaption.contains(body)) sheetCaption.appendChild(body); }
+  const left = document.getElementById('leftToolbox'); if(left){ const bodyL = left.querySelector('.body'); if(bodyL && !sheetTools.contains(bodyL)) sheetTools.appendChild(bodyL); }
 
-  // Tabs behavior
-  function showTools(){
-    tabTools.setAttribute('aria-selected','true');
-    tabCaption.setAttribute('aria-selected','false');
-    sheetTools.style.display='block';
-    sheetCaption.style.display='none';
-  }
-  function showCaption(){
-    tabTools.setAttribute('aria-selected','false');
-    tabCaption.setAttribute('aria-selected','true');
-    sheetTools.style.display='none';
-    sheetCaption.style.display='block';
-  }
+  // Tabs
+  const showTools=()=>{ tabTools.setAttribute('aria-selected','true'); tabCaption.setAttribute('aria-selected','false'); sheetTools.style.display='block'; sheetCaption.style.display='none'; };
+  const showCaption=()=>{ tabTools.setAttribute('aria-selected','false'); tabCaption.setAttribute('aria-selected','true'); sheetTools.style.display='none'; sheetCaption.style.display='block'; };
   tabTools.addEventListener('click', showTools);
   tabCaption.addEventListener('click', showCaption);
-
-  // default
   showTools();
 }
+document.addEventListener('DOMContentLoaded', ()=>{ try{ if(isMobileLayout()) initMobileSheet(); }catch(e){} });
+window.addEventListener('resize', ()=>{ try{ if(isMobileLayout()) initMobileSheet(); }catch(e){} }, {passive:true});
+window.addEventListener('keydown', (e)=>{ if(e.key==='Escape'){ const vp=document.getElementById('viewerPreview'); if(vp) vp.classList.add('hidden'); const bs=document.getElementById('bottomSheet'); const bd=document.getElementById('backdrop'); if(bs&&bs.classList.contains('expanded')){ bs.classList.remove('expanded'); bs.setAttribute('aria-hidden','true'); if(bd) bd.classList.remove('show'); } } }, {passive:true});
+
 
 /* ========= Viewer ========= */
 let rendererLoopId=null;
@@ -628,8 +607,6 @@ function viewerInit(){
   loader = new GLTFLoader();
 
   window.addEventListener('resize', resize, { passive:true });
-  window.addEventListener('resize', ()=>{ if(isMobileLayout()) initMobileSheet(); }, {passive:true});
-window.addEventListener('keydown', (e)=>{ if(e.key==='Escape'){ const vp=document.getElementById('viewerPreview'); if(vp) vp.classList.add('hidden'); const bs=document.getElementById('bottomSheet'); const bd=document.getElementById('backdrop'); if(bs&&bs.classList.contains('expanded')){ bs.classList.remove('expanded'); bs.setAttribute('aria-hidden','true'); if(bd) bd.classList.remove('show'); } } }, {passive:true});
   el.viewerCanvas.addEventListener('pointerdown', onPointerDown, { passive:false });
   el.projOrtho.addEventListener('change', ()=> { toggleProjection(el.projOrtho.checked); debouncedSaveMaterials(); });
   resize();
@@ -797,8 +774,9 @@ el.previewZoom.addEventListener('input', ()=>{ previewZoom = parseFloat(el.previ
 el.previewReset.addEventListener('click', ()=>{ previewZoom = 1; el.previewZoom.value = 1; el.previewZoomVal.textContent = '1.00×'; applyPreviewZoom(); });
 
 async function setPreview(ref, p){
-  if(!ref){ el.viewerPreview.classList.add('hidden'); return; }
   try{
+    el.previewErr.style.display='none';
+    if(ref){
     el.previewErr.style.display='none';
     const src = await resolveImageObjectURL(ref, {preferThumb:false});
     el.previewImg.src = src;
@@ -807,6 +785,15 @@ async function setPreview(ref, p){
     el.capBodyLine.textContent  = p?.body  || '';
     el.viewerPreview.classList.remove('hidden');
     applyPreviewZoom(); updateConnector();
+    } else {
+      el.previewImg.removeAttribute('src');
+      el.previewErr.textContent = '画像が設定されていません';
+      el.previewErr.style.display='inline';
+      el.capTitleLine.textContent = p?.title || '';
+      el.capBodyLine.textContent  = p?.body  || '';
+      el.viewerPreview.classList.remove('hidden');
+      applyPreviewZoom(); updateConnector();
+    }
   }catch(e){
     console.warn('preview failed', e);
     el.previewErr.style.display='inline';
@@ -1869,7 +1856,6 @@ buildColorPresetsOnce();
 
 function viewerInitWrap(){ viewerInit(); }
 viewerInitWrap();
-if(isMobileLayout()) initMobileSheet();
 
 </script>
 </body>
