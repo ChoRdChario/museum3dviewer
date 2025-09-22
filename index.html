@@ -495,7 +495,7 @@ const el = {
   listSelect: document.getElementById('listSelect'),
   listNew: document.getElementById('listNew'),
   listDelete: document.getElementById('listDelete'),
-};
+}
 const viewOnly = new URLSearchParams(location.search).get('view') === '1';
 
 /* ================== Viewer State ================== */
@@ -625,7 +625,7 @@ function initMobileSheet(){
   if(!fab || !sheet || !content || !sheetTools || !sheetCaption) return;
   if(sheet.dataset.bound==='1') return; sheet.dataset.bound='1';
 
-  const expand=()=>{ sheet.classList.add('expanded'); sheet.setAttribute('aria-hidden','false'); backdrop && backdrop.classList.add('show'); };
+  const expand=()=>{ sheet.classList.add('expanded'); sheet.setAttribute('aria-hidden','false'); backdrop && backdrop.classList.add('show'); }
   const collapse=()=>{ sheet.classList.remove('expanded'); sheet.setAttribute('aria-hidden','true'); backdrop && backdrop.classList.remove('show'); };
 
   fab.addEventListener('click', expand);
@@ -671,16 +671,16 @@ function disposeCurrentModel(){
   try{
     if(currentModel){
       currentModel.traverse((o)=>{
-        if(o.geometry){ o.geometry.dispose?.(); }
+        if(o.geometry){ (o.geometry.dispose && o.geometry.dispose()); }
         if(o.material){
           const mats = Array.isArray(o.material)? o.material : [o.material];
           mats.forEach(m=>{
-            if(m.map) m.map.dispose?.();
-            if(m.normalMap) m.normalMap.dispose?.();
-            if(m.roughnessMap) m.roughnessMap.dispose?.();
-            if(m.metalnessMap) m.metalnessMap.dispose?.();
-            if(m.emissiveMap) m.emissiveMap.dispose?.();
-            if(m.aoMap) m.aoMap.dispose?.();
+            if(m.map) (m.map && m.map.dispose) && m.map.dispose();
+            if(m.normalMap) (m.normalMap && m.normalMap.dispose) && m.normalMap.dispose();
+            if(m.roughnessMap) (m.roughnessMap && m.roughnessMap.dispose) && m.roughnessMap.dispose();
+            if(m.metalnessMap) (m.metalnessMap && m.metalnessMap.dispose) && m.metalnessMap.dispose();
+            if(m.emissiveMap) (m.emissiveMap && m.emissiveMap.dispose) && m.emissiveMap.dispose();
+            if(m.aoMap) (m.aoMap && m.aoMap.dispose) && m.aoMap.dispose();
           });
         }
       });
@@ -721,7 +721,7 @@ function viewerInit(){
   el.viewerCanvas.addEventListener('pointerdown', onPointerDown, { passive:false });
   el.projOrtho.addEventListener('change', ()=> { toggleProjection(el.projOrtho.checked); debouncedSaveMaterials(); });
   resize();
-  const loop = ()=>{ renderer.render(scene,camera); updateConnector(); rendererLoopId=requestAnimationFrame(loop); };
+  const loop = ()=>{ renderer.render(scene,camera); updateConnector(); rendererLoopId=requestAnimationFrame(loop); }
   loop();
 }
 function buildControls(){
@@ -729,7 +729,7 @@ function buildControls(){
   controls = new OrbitControls(camera, el.viewerCanvas);
   controls.target.set(0,0,0); controls.update();
   controls.addEventListener('change', updateConnector);
-  if(tcontrols){ scene.remove(tcontrols); tcontrols.dispose?.(); }
+  if(tcontrols){ scene.remove(tcontrols); (tcontrols && tcontrols.dispose) && tcontrols.dispose(); }
   tcontrols = new TransformControls(camera, el.viewerCanvas);
   tcontrols.setSize(0.9); tcontrols.setSpace('world');
   tcontrols.addEventListener('dragging-changed', e=>{ controls.enabled = !e.value; });
@@ -752,7 +752,7 @@ function resize(){
 }
 function renderNow(){ renderer.render(scene,camera); updateConnector(); }
 function sceneBounds(){
-  if(!currentModel){ return { center:new THREE.Vector3(0,0,0), radius: 2 }; }
+  if(!currentModel){ return { center:new THREE.Vector3(0,0,0), radius: 2 } }
   const box = new THREE.Box3().setFromObject(currentModel);
   const size = box.getSize(new THREE.Vector3());
   const center = box.getCenter(new THREE.Vector3());
@@ -803,7 +803,7 @@ function addUndo(u){ undoStack.push(u); }
 function createPin(pos,color){
   if(viewOnly) return;
   const id=`p_${Date.now()}_${Math.random().toString(36).slice(2,7)}`;
-  const pin={id,pos:pos.clone(),color:normalizeHex(color||'#ff6b6b'),title:'',body:'',images:[],mesh:null};
+  const pin={id,pos:pos.clone(),color:normalizeHex(color||'#ff6b6b'),title:'',body:'',images:[],mesh:null}
   pins.push(pin);
   filterColors.add(pin.color);
   placePinMesh(pin);
@@ -894,19 +894,13 @@ function sizePreviewToZoomed(){ try{
   var maxH=Math.max(160, Math.floor((window.innerHeight||480)*0.8));
   vp.style.width = Math.min(maxW, Math.max(zw, 120)) + 'px';
   vp.style.height = Math.min(maxH, Math.max(zh + 120, 180)) + 'px';
-}catch(e){} }
-  const zw = imgW * previewZoom, zh = imgH * previewZoom;
-  const maxW = Math.max(320, Math.floor(window.innerWidth*0.9));
-  const maxH = Math.max(240, Math.floor(window.innerHeight*0.8));
-  vp.style.width  = Math.min(maxW, Math.max(zw, 240)) + 'px';
-  vp.style.height = Math.min(maxH, Math.max(zh + 120, 240)) + 'px'; // + controls/caption approx
-}
+}catch(e){} 
 applyPreviewZoom = function(){
   _origApplyPreviewZoom();
   // include pan translate
   el.previewInner.style.transform = `translate(${previewOffsetX}px, ${previewOffsetY}px) scale(${previewZoom})`;
   sizePreviewToZoomed();
-};
+}
 
 (function wirePreviewGestures(){
   const wrap = document.getElementById('previewWrap');
@@ -952,7 +946,7 @@ applyPreviewZoom = function(){
       startCy = (t1.clientY + t2.clientY)/2;
       ev.preventDefault();
     }
-  }, {passive:false});
+  , {passive:false});
 
   wrap.addEventListener('touchmove', (ev)=>{
     if(mode==='pan' && ev.touches.length===1){
@@ -998,8 +992,8 @@ async function setPreview(ref, p){
     if(!ref){
       if(empty) empty.style.display='flex';
       el.previewImg.removeAttribute('src');
-      el.capTitleLine.textContent = p?.title || '';
-      el.capBodyLine.textContent  = p?.body  || '';
+      el.capTitleLine.textContent = ((p)&&(p).title) || '';
+      el.capBodyLine.textContent  = ((p)&&(p).body)  || '';
       el.viewerPreview.classList.remove('hidden');
       applyPreviewZoom(); updateConnector();
       return;
@@ -1020,7 +1014,7 @@ async function setPreview(ref, p){
       }
       previewOffsetX=0; previewOffsetY=0;
       applyPreviewZoom();
-    };
+    }
     el.previewImg.onerror = ()=>{
       el.previewErr.style.display='inline';
       const empty=document.getElementById('previewEmptyMsg');
@@ -1051,8 +1045,8 @@ el.previewImg.onload = function(){ try{
 }catch(e){} };
 el.previewImg.src = src;
 
-    el.capTitleLine.textContent = p?.title || '';
-    el.capBodyLine.textContent  = p?.body  || '';
+    el.capTitleLine.textContent = ((p)&&(p).title) || '';
+    el.capBodyLine.textContent  = ((p)&&(p).body)  || '';
     el.viewerPreview.classList.remove('hidden');
     applyPreviewZoom(); updateConnector();
   }catch(e){
@@ -1066,7 +1060,7 @@ function updateViewerPreviewForPin(p){ setPreview(p && p.images && p.images[0] ?
 
 /* ========= Image resolve & Drive ========= */
 function parseImageRef(ref){
-  if(typeof ref === 'string' && /^(blob:|data:|https?:)/i.test(ref)){ return { kind:'url', url: ref }; }
+  if(typeof ref === 'string' && /^(blob:|data:|https?:)/i.test(ref)){ return { kind:'url', url: ref } }
   if(typeof ref === 'string' && ref.startsWith('drive:')){
     const [, rest] = ref.split(':'); const [id, mime] = rest.split('|');
     return { kind:'drive', id, mime: mime||null };
@@ -1159,9 +1153,9 @@ function ensureMatRecord(m){
     map: m.map || null,
     alphaMap: m.alphaMap || null,
     transparent: !!m.transparent,
-    opacity: (m.opacity ?? 1),
-    alphaTest: (m.alphaTest ?? 0),
-    side: m.side ?? THREE.FrontSide,
+    opacity: (((m.opacity)!=null?(m.opacity):(1))),
+    alphaTest: (((m.alphaTest)!=null?(m.alphaTest):(0))),
+    side: ((m.side)!=null?(m.side):(THREE.FrontSide)),
     depthWrite: m.depthWrite,
     depthTest: m.depthTest,
     blending: m.blending,
@@ -1174,7 +1168,7 @@ function objectPath(node) {
   const names = [];
   let cur = node;
   while (cur && cur.parent) {
-    names.push(cur.name && cur.name.trim() ? cur.name : '_' + (cur.uuid?.slice(0,8) || 'node'));
+    names.push(cur.name && cur.name.trim() ? cur.name : '_' + (((cur.uuid)&&(cur.uuid).slice)&&(cur.uuid).slice(0,8) || 'node'));
     cur = cur.parent;
   }
   names.reverse();
@@ -1194,7 +1188,7 @@ function indexMaterialsByKey(){
         materialByKey.set(key, m);
         ensureMatRecord(m);
         if(!matState.has(key)){
-          matState.set(key, { unlit:false, doubleSided:(m.side===THREE.DoubleSide), opacity:(m.opacity??1), invertRGB:false, whiteToAlpha:false, alphaTest:(m.alphaTest??0) });
+          matState.set(key, { unlit:false, doubleSided:(m.side===THREE.DoubleSide), opacity:(((m.opacity)!=null?(m.opacity):(1))), invertRGB:false, whiteToAlpha:false, alphaTest:(((m.alphaTest)!=null?(m.alphaTest):(0))) });
         }
       });
     } else {
@@ -1203,7 +1197,7 @@ function indexMaterialsByKey(){
       materialByKey.set(key, obj.material);
       const m = obj.material; ensureMatRecord(m);
       if(!matState.has(key)){
-        matState.set(key, { unlit:false, doubleSided:(m.side===THREE.DoubleSide), opacity:(m.opacity??1), invertRGB:false, whiteToAlpha:false, alphaTest:(m.alphaTest??0) });
+        matState.set(key, { unlit:false, doubleSided:(m.side===THREE.DoubleSide), opacity:(((m.opacity)!=null?(m.opacity):(1))), invertRGB:false, whiteToAlpha:false, alphaTest:(((m.alphaTest)!=null?(m.alphaTest):(0))) });
       }
     }
   });
@@ -1233,10 +1227,10 @@ function collectMaterials(){
       matState.set(key, {
         unlit:false,
         doubleSided:(m.side===THREE.DoubleSide),
-        opacity:(m.opacity??1),
+        opacity:(((m.opacity)!=null?(m.opacity):(1))),
         invertRGB:false,
         whiteToAlpha:false,
-        alphaTest:(m.alphaTest??0)
+        alphaTest:(((m.alphaTest)!=null?(m.alphaTest):(0)))
       });
     }
   });
@@ -1259,15 +1253,15 @@ function applyMaterialUIFromSelection(){
   ['matUnlit','matDoubleSided','matOpacity','matInvert','matWhiteTransparent','matThreshold']
     .forEach(id=>{ document.getElementById(id).disabled = disable || viewOnly; });
   if(disable) return;
-  const st = matState.get(key) || { unlit:false,doubleSided:false,opacity:1,invertRGB:false,whiteToAlpha:false,alphaTest:0 };
+  const st = matState.get(key) || { unlit:false,doubleSided:false,opacity:1,invertRGB:false,whiteToAlpha:false,alphaTest:0 }
   el.matUnlit.checked = !!st.unlit;
   el.matDoubleSided.checked = !!st.doubleSided;
-  el.matOpacity.value = String(st.opacity ?? 1);
-  el.matOpacityVal.textContent = (Number(st.opacity ?? 1)).toFixed(2);
+  el.matOpacity.value = String(((st.opacity)!=null?(st.opacity):(1)));
+  el.matOpacityVal.textContent = (Number(((st.opacity)!=null?(st.opacity):(1)))).toFixed(2);
   el.matInvert.checked = !!st.invertRGB;
   el.matWhiteTransparent.checked = !!st.whiteToAlpha;
-  el.matThreshold.value = String(st.alphaTest ?? 0);
-  el.matThresholdVal.textContent = (Number(st.alphaTest ?? 0)).toFixed(2);
+  el.matThreshold.value = String(((st.alphaTest)!=null?(st.alphaTest):(0)));
+  el.matThresholdVal.textContent = (Number(((st.alphaTest)!=null?(st.alphaTest):(0)))).toFixed(2);
 }
 el.matSelect.addEventListener('change', ()=> applyMaterialUIFromSelection());
 
@@ -1275,13 +1269,13 @@ async function applyMaterialFromUIToSelected(){
   const orig = getSelectedOriginalMaterial();
   if(!orig) return;
   const key = materialKeyByMaterial.get(orig);
-  const st = matState.get(key) || {};
+  const st = matState.get(key) || {}
   st.unlit = !!el.matUnlit.checked;
   st.doubleSided = !!el.matDoubleSided.checked;
-  st.opacity = Number(el.matOpacity.value ?? 1);
+  st.opacity = Number(((el.matOpacity.value)!=null?(el.matOpacity.value):(1)));
   st.invertRGB = !!el.matInvert.checked;
   st.whiteToAlpha = !!el.matWhiteTransparent.checked;
-  st.alphaTest = Number(el.matThreshold.value ?? 0);
+  st.alphaTest = Number(((el.matThreshold.value)!=null?(el.matThreshold.value):(0)));
   matState.set(key, st);
   await applyStateToMaterial(orig, st);
   renderNow();
@@ -1306,7 +1300,7 @@ function copyTextureParams(from, to){
   to.magFilter = from.magFilter; to.minFilter = from.minFilter;
   to.generateMipmaps = from.generateMipmaps;
   to.anisotropy = from.anisotropy;
-  to.colorSpace = from.colorSpace ?? THREE.SRGBColorSpace;
+  to.colorSpace = ((from.colorSpace)!=null?(from.colorSpace):(THREE.SRGBColorSpace));
 }
 async function processTextureToCanvasTextureFromOriginal(originalTex, { invertRGB=false, alphaFromWhite=false, threshold=0 }){
   if(!originalTex || !originalTex.image) return null;
@@ -1373,8 +1367,8 @@ async function applyStateToMaterial(origM, st){
   mat.side = st.doubleSided ? THREE.DoubleSide : THREE.FrontSide;
   const willTransparent = (st.whiteToAlpha || (st.opacity < 1.0));
   mat.transparent = willTransparent;
-  mat.opacity = st.opacity ?? 1;
-  mat.alphaTest = st.alphaTest ?? 0;
+  mat.opacity = ((st.opacity)!=null?(st.opacity):(1));
+  mat.alphaTest = ((st.alphaTest)!=null?(st.alphaTest):(0));
   mat.depthWrite = !mat.transparent || (mat.alphaTest>0);
 
   if((st.invertRGB || st.whiteToAlpha) && matOriginals.get(origM).map){
@@ -1435,7 +1429,7 @@ async function findOrCreateSpreadsheetInGlbFolder(glbMeta){
       q, fields: 'files(id,name)',
       includeItemsFromAllDrives: true, supportsAllDrives: true, pageSize: 10,
     });
-    if (resp.result.files?.length) { found = resp.result.files[0]; break; }
+    if (((resp.result.files)&&(resp.result.files).length)) { found = resp.result.files[0]; break; }
   }
   if (found) return found.id;
 
@@ -1483,19 +1477,19 @@ async function loadSheetMeta(spreadsheetId){
       ranges: [ META_MARKER_RANGE(), META_MAT_KEY_RANGE(), META_VIEW_KEY_RANGE() ]
     });
     const vals = (get.result.valueRanges || []).map(v=>v.values||[]);
-    const matJson = vals[1]?.[0]?.[1] || '';
-    const viewJson = vals[2]?.[0]?.[1] || '';
+    const matJson = ((vals[1] && vals[1][0]) ? (vals[1][0][1] || '') : '');
+    const viewJson = ((vals[2] && vals[2][0]) ? (vals[2][0][1] || '') : '');
     const m = safeParseJSON(matJson, null);
     const materials = normalizeMaterialsJSON(m);
     const viewer = safeParseJSON(viewJson, { version:1, bgColor:'#0a0f16', projection:'perspective' });
-    return { materials, viewer };
+    return { materials, viewer }
   }catch(e){
     console.warn('loadSheetMeta failed', e);
     return { materials:{version:2,byKey:{}}, viewer:{version:1,bgColor:'#0a0f16',projection:'perspective'} };
   }
 }
 function normalizeMaterialsJSON(m){
-  if(!m) return { version:2, byKey:{} };
+  if(!m) return { version:2, byKey:{} }
   if(m.version===2 && m.byKey) return m;
   if(Array.isArray(m.items)){
     const byKey = {};
@@ -1504,10 +1498,10 @@ function normalizeMaterialsJSON(m){
       byKey[it.key] = {
         unlit: !!it.unlit,
         doubleSided: !!it.doubleSided,
-        opacity: Number(it.opacity ?? 1),
+        opacity: Number(((it.opacity)!=null?(it.opacity):(1))),
         invertRGB: !!it.invertRGB,
         whiteToAlpha: !!it.whiteToAlpha,
-        alphaTest: Number(it.alphaTest ?? 0)
+        alphaTest: Number(((it.alphaTest)!=null?(it.alphaTest):(0)))
       };
     });
     return { version:2, byKey };
@@ -1528,16 +1522,16 @@ async function saveSheetMeta(spreadsheetId, { materials, viewer }){
   });
 }
 function serializeMaterialsForSheet(){
-  const byKey = {};
+  const byKey = {}
   for(const [key, st] of matState){
     if(materialByKey.has(key)){
       byKey[key] = {
         unlit: !!st.unlit,
         doubleSided: !!st.doubleSided,
-        opacity: Number(st.opacity ?? 1),
+        opacity: Number(((st.opacity)!=null?(st.opacity):(1))),
         invertRGB: !!st.invertRGB,
         whiteToAlpha: !!st.whiteToAlpha,
-        alphaTest: Number(st.alphaTest ?? 0)
+        alphaTest: Number(((st.alphaTest)!=null?(st.alphaTest):(0)))
       };
     }
   }
@@ -1548,7 +1542,7 @@ function serializeViewerPrefs(){
     version: 1,
     bgColor: el.bgColor.value || '#0a0f16',
     projection: usingOrtho ? 'orthographic' : 'perspective'
-  };
+  }
 }
 async function applyMaterialsFromSheet(materialsData){
   if(!materialsData || !materialsData.byKey) return;
@@ -1698,7 +1692,7 @@ function rebuildPinsScene(){
   pins.forEach(p=> placePinMesh(p));
   if(tcontrols.visible && selectedPinId){
     const p=pins.find(x=>x.id===selectedPinId);
-    if(p?.mesh) tcontrols.attach(p.mesh); else tcontrols.detach();
+    if(((p)&&(p).mesh)) tcontrols.attach(p.mesh); else tcontrols.detach();
   }
   renderNow();
 }
@@ -1719,7 +1713,7 @@ async function loadPinsFromActiveSheet(spreadsheetId){
         color: normalizeHex(color || '#ff6b6b'),
         images: [],
         mesh: null
-      };
+      }
       try{ p.images = JSON.parse(imagesJson||'[]'); }catch{ p.images = []; }
       pins.push(p);
     });
@@ -1773,7 +1767,7 @@ el.btnAttach.addEventListener('click', async ()=>{
   const fileInput = el.imgLocal;
   fileInput.value = '';
   fileInput.onchange = async ()=>{
-    const file = fileInput.files?.[0];
+    const file = (fileInput.files && fileInput.files[0]);
     const p = pins.find(x=>x.id===selectedPinId);
     if(!file || !p){ return; }
     try{
@@ -1786,7 +1780,7 @@ el.btnAttach.addEventListener('click', async ()=>{
       toast('画像をアップロードしました');
       upsertPinToSheet();
     }catch(err){ console.error(err); alert('画像アップロードに失敗しました'); }
-  };
+  }
   fileInput.click();
 });
 function sanitizeName(n){ return n.replace(/[^\p{Letter}\p{Number}\s._-]+/gu,'_'); }
@@ -1801,7 +1795,7 @@ async function toUploadableBlob(file){
   return file;
 }
 async function driveMultipartUpload(blob, name, parents){
-  const meta = { name, parents: parents && parents.length ? parents : undefined };
+  const meta = { name, parents: parents && parents.length ? parents : undefined }
   const boundary = '-------loci' + Math.random().toString(36).slice(2);
   const bufMeta = new TextEncoder().encode(`\r\n--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(meta)}\r\n\r\n--${boundary}\r\nContent-Type: ${blob.type || 'application/octet-stream'}\r\n\r\n`);
   const bufTail = new TextEncoder().encode(`\r\n--${boundary}--`);
@@ -1860,7 +1854,7 @@ async function loadFolderImages(){
               const url = await resolveImageObjectURL(ref, {preferThumb:true});
               img.src = url;
             }catch{ cell.style.opacity='.5'; cell.style.pointerEvents='none'; }
-          };
+          }
         }else{
           try{
             const url = await resolveImageObjectURL(ref, {preferThumb:true});
@@ -1911,7 +1905,7 @@ async function refreshCaptionLists(spreadsheetId){
   });
   let pick = sheets.find(s => s.title === 'pins') || sheets[0];
   if (!activeSheet.sheetId) {
-    if (pick){ activeSheet = { sheetId: pick.sheetId, title: pick.title }; }
+    if (pick){ activeSheet = { sheetId: pick.sheetId, title: pick.title } }
   } else {
     const same = sheets.find(s => s.sheetId === activeSheet.sheetId);
     if (!same) {
@@ -2082,7 +2076,7 @@ async function loadGLBByFileId(fileId){
   }catch(err){
     console.error(err);
     el.statusLabel.textContent = 'Load failed';
-    alert('GLB読み込みに失敗しました：' + (err?.message || 'unknown error'));
+    alert('GLB読み込みに失敗しました：' + (((err)&&(err).message) || 'unknown error'));
   }finally{
     el.loading.hidden = true;
   }
