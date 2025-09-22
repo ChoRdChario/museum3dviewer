@@ -638,7 +638,7 @@ function toggleProjection(useOrtho){
 function addUndo(u){ undoStack.push(u); }
 function createPin(pos,color){
   if(viewOnly) return;
-  const id=`p_${Date.now()}_${Math.random().toString(36).slice(2,7)}`;
+  const id='p_' + (Date.now()) + '_' + (Math.random().toString(36).slice(2,7));
   const pin={id,pos:pos.clone(),color:normalizeHex(color||'#ff6b6b'),title:'',body:'',images:[],mesh:null};
   pins.push(pin);
   filterColors.add(pin.color);
@@ -706,60 +706,128 @@ function updateConnector(){
   const bx = (rectPrev.left - rect.left);
   const by = (rectPrev.top - rect.top) + rectPrev.height/2;
   const svg = el.connector;
-  svg.setAttribute('viewBox', `0 0 ${rect.width} ${rect.height});
-  el.connLine.setAttribute('x1', x); el.connLine.setAttribute('y1', y);
-  el.connLine.setAttribute('x2', bx); el.connLine.setAttribute('y2', by);
-  el.connLine.style.display = 'block';
-  el.connDot.setAttribute('cx', x); el.connDot.setAttribute('cy', y);
-  el.connDot.style.display = 'block';
+  svg.setAttribute('viewBox', '0 0 ' + (rect.width) + ' ' + (rect.height) + ');
+  el.connLine.setAttribute(\'x1\', x); el.connLine.setAttribute(\'y1\', y);
+  el.connLine.setAttribute(\'x2\', bx); el.connLine.setAttribute(\'y2\', by);
+  el.connLine.style.display = \'block\';
+  el.connDot.setAttribute(\'cx\', x); el.connDot.setAttribute(\'cy\', y);
+  el.connDot.style.display = \'block\';
 }
+
 
 /* ========= Preview ========= */
 let previewZoom = 1.0;
-function applyPreviewZoom(){ el.previewInner.style.transform = `scale(${previewZoom}); }
-el.previewZoom.addEventListener('input', ()=>{ previewZoom = parseFloat(el.previewZoom.value)||1; el.previewZoomVal.textContent = previewZoom.toFixed(2) + '×'; applyPreviewZoom(); });
-el.previewReset.addEventListener('click', ()=>{ previewZoom = 1; el.previewZoom.value = 1; el.previewZoomVal.textContent = '1.00×'; applyPreviewZoom(); });
+let previewOffsetX = 0, previewOffsetY = 0;
+
+function applyPreviewZoom(){
+  try{
+    if(!el.previewInner) return;
+    el.previewInner.style.transform = \'translate(\' + previewOffsetX + \'px,\' + previewOffsetY + \'px) scale(\' + previewZoom + \')\';
+    if (typeof sizePreviewToZoomed === \'function\') sizePreviewToZoomed();
+  }catch(e){}
+}
+
+function sizePreviewToZoomed(){
+  try{
+    var vp = el.viewerPreview;
+    var iw = (el.previewImg ? el.previewImg.naturalWidth : 0) || 0;
+    var ih = (el.previewImg ? el.previewImg.naturalHeight : 0) || 0;
+    if(!vp){ return; }
+    if(!iw || !ih){ vp.style.width=\'auto\'; vp.style.height=\'auto\'; return; }
+    var zw = iw * previewZoom, zh = ih * previewZoom;
+    var maxW = Math.max(160, Math.floor((window.innerWidth||320)*0.95));
+    var maxH = Math.max(160, Math.floor((window.innerHeight||480)*0.8));
+    vp.style.width = Math.min(maxW, Math.max(zw, 120)) + \'px\';
+    vp.style.height = Math.min(maxH, Math.max(zh + 120, 180)) + \'px\';
+  }catch(e){}
+}
+
+if(el.previewZoom){
+  if(!el.previewZoom.min) el.previewZoom.min = \'0.05\';
+  el.previewZoom.addEventListener(\'input\', function(){
+    previewZoom = parseFloat(el.previewZoom.value) || 1;
+    if(el.previewZoomVal){ el.previewZoomVal.textContent = previewZoom.toFixed(2) + \'×\'; }
+    applyPreviewZoom();
+  });
+}
+
+if(el.previewReset){
+  el.previewReset.addEventListener(\'click\', function(){
+    previewZoom = 1; previewOffsetX = 0; previewOffsetY = 0;
+    if(el.previewZoom){ el.previewZoom.value = \'1\'; }
+    if(el.previewZoomVal){ el.previewZoomVal.textContent = \'1.00×\'; }
+    applyPreviewZoom();
+  });
+}
 
 async function setPreview(ref, p){
-  if(!ref){ el.viewerPreview.classList.add('hidden'); return; }
   try{
-    el.previewErr.style.display='none';
+    el.previewErr.style.display=\'none\';
+    var noMsg = document.getElementById(\'previewNoImageMsg\');
+    if(!ref){
+      if(noMsg){ noMsg.style.display=\'flex\'; }
+      if(el.previewImg){ el.previewImg.removeAttribute(\'src\'); }
+      if(el.capTitleLine) el.capTitleLine.textContent = (p && p.title) ? p.title : \'\';
+      if(el.capBodyLine)  el.capBodyLine.textContent  = (p && p.body)  ? p.body  : \'\';
+      el.viewerPreview.classList.remove(\'hidden\');
+      var minz = parseFloat((el.previewZoom && el.previewZoom.min) || \'0.05\') || 0.05;
+      previewZoom = Math.max(minz, 0.05);
+      if(el.previewZoom){ el.previewZoom.value = String(previewZoom); }
+      if(el.previewZoomVal){ el.previewZoomVal.textContent = previewZoom.toFixed(2) + \'×\'; }
+      previewOffsetX = 0; previewOffsetY = 0;
+      applyPreviewZoom(); updateConnector();
+      return;
+    }
     const src = await resolveImageObjectURL(ref, {preferThumb:false});
+    if(noMsg){ noMsg.style.display=\'none\'; }
+    el.previewImg.onload = function(){
+      try{
+        var nw = el.previewImg.naturalWidth || 0;
+        var viewer = document.getElementById(\'viewer\');
+        var vw = (viewer && viewer.clientWidth) ? viewer.clientWidth : window.innerWidth;
+        var baseW = Math.max(1, Math.floor(vw * 0.5));
+        var target = nw ? Math.min(1, baseW / nw) : 1;
+        var minz = parseFloat((el.previewZoom && el.previewZoom.min) || \'0.05\') || 0.05;
+        previewZoom = Math.max(minz, target || 1);
+        if(el.previewZoom){ el.previewZoom.value = String(previewZoom); }
+        if(el.previewZoomVal){ el.previewZoomVal.textContent = previewZoom.toFixed(2) + \'×\'; }
+        previewOffsetX = 0; previewOffsetY = 0;
+        applyPreviewZoom(); updateConnector();
+      }catch(e){}
+    };
+    el.previewImg.onerror = function(){ el.previewErr.style.display=\'inline\'; };
     el.previewImg.src = src;
-    el.previewImg.onerror = ()=>{ el.previewErr.style.display='inline'; };
-    el.capTitleLine.textContent = ((p)&&(p).title) || '';
-    el.capBodyLine.textContent  = ((p)&&(p).body)  || '';
-    el.viewerPreview.classList.remove('hidden');
+    if(el.capTitleLine) el.capTitleLine.textContent = (p && p.title) ? p.title : \'\';
+    if(el.capBodyLine)  el.capBodyLine.textContent  = (p && p.body)  ? p.body  : \'\';
+    el.viewerPreview.classList.remove(\'hidden\');
     applyPreviewZoom(); updateConnector();
   }catch(e){
-    console.warn('preview failed', e);
-    el.previewErr.style.display='inline';
-    el.viewerPreview.classList.remove('hidden');
+    console.warn(\'preview failed\', e);
+    el.previewErr.style.display=\'inline\';
+    el.viewerPreview.classList.remove(\'hidden\');
   }
 }
-function updateViewerPreviewForPin(p){ setPreview(p && p.images && p.images[0] ? p.images[0] : null, p); }
 
-/* ========= Image resolve & Drive ========= */
 function parseImageRef(ref){
-  if(typeof ref === 'string' && /^(blob:|data:|https?:)/i.test(ref)){ return { kind:'url', url: ref }; }
-  if(typeof ref === 'string' && ref.startsWith('drive:')){
-    const [, rest] = ref.split(':'); const [id, mime] = rest.split('|');
-    return { kind:'drive', id, mime: mime||null };
+  if(typeof ref === \'string\' && /^(blob:|data:|https?:)/i.test(ref)){ return { kind:\'url\', url: ref }; }
+  if(typeof ref === \'string\' && ref.startsWith(\'drive:\')){
+    const [, rest] = ref.split(\':\'); const [id, mime] = rest.split(\'|\');
+    return { kind:\'drive\', id, mime: mime||null };
   }
-  if(typeof ref === 'string'){
+  if(typeof ref === \'string\'){
     const id = extractDriveFileId(ref);
-    if(id){ return { kind:'drive', id, mime:null }; }
+    if(id){ return { kind:\'drive\', id, mime:null }; }
   }
-  return { kind:'url', url: String(ref) };
+  return { kind:\'url\', url: String(ref) };
 }
 async function resolveImageObjectURL(ref, {preferThumb=false}={}){
-  const key = typeof ref==='string'?ref:JSON.stringify(ref);
+  const key = typeof ref===\'string\'?ref:JSON.stringify(ref);
   if(imageBlobCache.has(key)) return imageBlobCache.get(key);
 
   const info = parseImageRef(ref);
   let outUrl;
 
-  if(info.kind === 'url'){ imageBlobCache.set(key, info.url); return info.url; }
+  if(info.kind === \'url\'){ imageBlobCache.set(key, info.url); return info.url; }
 
   const meta = await driveFileMeta(info.id);
   const isHeic = isHeicMimeOrExt(meta.mimeType, meta.fileExtension);
@@ -768,21 +836,21 @@ async function resolveImageObjectURL(ref, {preferThumb=false}={}){
     const ok = await ensureHeic2any();
     if(ok){
       const blob = await driveFileFetchBlob(meta.id);
-      const jpegBlob = await window.heic2any({ blob, toType:'image/jpeg', quality:1.0 });
+      const jpegBlob = await window.heic2any({ blob, toType:\'image/jpeg\', quality:1.0 });
       const jpg = Array.isArray(jpegBlob) ? jpegBlob[0] : jpegBlob;
       outUrl = URL.createObjectURL(jpg);
     }else if(meta.hasThumbnail && meta.thumbnailLink){
       const hi = upscaleThumbnailUrl(meta.thumbnailLink, 2048);
-      const sep = hi.includes('?') ? '&' : '?';
-      outUrl = hi + sep + 'access_token=' + encodeURIComponent(accessToken);
+      const sep = hi.includes(\'?\') ? \'&\' : \'?\';
+      outUrl = hi + sep + \'access_token=\' + encodeURIComponent(accessToken);
     }else{
-      throw new Error('HEIC preview unavailable (no heic2any & no thumbnailLink)');
+      throw new Error(\'HEIC preview unavailable (no heic2any & no thumbnailLink)\');
     }
   }else{
     if(preferThumb && meta.hasThumbnail && meta.thumbnailLink){
       const hi = upscaleThumbnailUrl(meta.thumbnailLink, 1024);
-      const sep = hi.includes('?') ? '&' : '?';
-      outUrl = hi + sep + 'access_token=' + encodeURIComponent(accessToken);
+      const sep = hi.includes(\'?\') ? \'&\' : \'?\';
+      outUrl = hi + sep + \'access_token=\' + encodeURIComponent(accessToken);
     }else{
       const blob = await driveFileFetchBlob(meta.id);
       outUrl = URL.createObjectURL(blob);
@@ -794,37 +862,37 @@ async function resolveImageObjectURL(ref, {preferThumb=false}={}){
 }
 async function driveFileMeta(fileId){
   const meta = await gapi.client.drive.files.get({
-    fileId, fields:'id,name,mimeType,fileExtension,hasThumbnail,thumbnailLink,parents',
+    fileId, fields:\'id,name,mimeType,fileExtension,hasThumbnail,thumbnailLink,parents\',
     supportsAllDrives:true
   });
   return meta.result;
 }
 async function driveFileFetchBlob(fileId, retry=1){
-  const dlUrl = `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media&supportsAllDrives=true`;
-  const res = await fetch(dlUrl, { headers:{ Authorization:`Bearer ${accessToken}` } });
+  const dlUrl = 'https://www.googleapis.com/drive/v3/files/${fileId}?alt=media&supportsAllDrives=true';
+  const res = await fetch(dlUrl, { headers:{ Authorization:'Bearer ${accessToken}' } });
   if(res.status === 401 && retry>0){
-    try{ tokenClient && tokenClient.requestAccessToken({ prompt:'' }); }catch{}
+    try{ tokenClient && tokenClient.requestAccessToken({ prompt:\'\' }); }catch{}
     return driveFileFetchBlob(fileId, retry-1);
   }
-  if(!res.ok) throw new Error('image fetch failed '+res.status);
+  if(!res.ok) throw new Error(\'image fetch failed \'+res.status);
   return await res.blob();
 }
-function isHeicMimeOrExt(mime, ext){ return /heic|heif/i.test(mime||'') || /heic|heif/i.test(ext||''); }
+function isHeicMimeOrExt(mime, ext){ return /heic|heif/i.test(mime||\'\') || /heic|heif/i.test(ext||\'\'); }
 function extractDriveFileId(input){
-  if(!input) return '';
-  const m1 = input.match(/\/file\/d\/([a-zA-Z0-9_-]{10,})/); if(m1) return m1[1];
+  if(!input) return \'\';
+  const m1 = input.match(/\\/file\\/d\\/([a-zA-Z0-9_-]{10,})/); if(m1) return m1[1];
   const m2 = input.match(/[?&]id=([a-zA-Z0-9_-]{10,})/);     if(m2) return m2[1];
   const m3 = input.match(/^([a-zA-Z0-9_-]{20,})$/);          if(m3) return m3[1];
-  return '';
+  return \'\';
 }
 function extractSpreadsheetId(input){
-  if(!input) return '';
-  const m1 = input.match(/spreadsheets\/d\/([a-zA-Z0-9_-]{10,})/); if(m1) return m1[1];
+  if(!input) return \'\';
+  const m1 = input.match(/spreadsheets\\/d\\/([a-zA-Z0-9_-]{10,})/); if(m1) return m1[1];
   const m2 = input.match(/[?&]id=([a-zA-Z0-9_-]{10,})/);           if(m2) return m2[1];
   const m3 = input.match(/^([a-zA-Z0-9_-]{20,})$/);                if(m3) return m3[1];
-  return '';
+  return \'\';
 }
-function makeDriveRef(id, mime){ return `drive:${id}|${mime||''}`; }
+function makeDriveRef(id, mime){ return 'drive:${id}|${mime||''}'; }
 
 /* ========= Materials ========= */
 function ensureMatRecord(m){
@@ -849,11 +917,11 @@ function objectPath(node) {
   const names = [];
   let cur = node;
   while (cur && cur.parent) {
-    names.push(cur.name && cur.name.trim() ? cur.name : '_' + (((cur.uuid)&&(cur.uuid).slice)&&(cur.uuid).slice(0,8) || 'node'));
+    names.push(cur.name && cur.name.trim() ? cur.name : \'_\' + (((cur.uuid)&&(cur.uuid).slice)&&(cur.uuid).slice(0,8) || \'node\'));
     cur = cur.parent;
   }
   names.reverse();
-  return names.join('/');
+  return names.join(\'/\');
 }
 function indexMaterialsByKey(){
   materialKeyByMaterial.clear();
@@ -864,7 +932,7 @@ function indexMaterialsByKey(){
     const basePath = objectPath(obj);
     if (Array.isArray(obj.material)) {
       obj.material.forEach((m, idx)=>{
-        const key = `${basePath}#${idx}`;
+        const key = '${basePath}#${idx}';
         materialKeyByMaterial.set(m, key);
         materialByKey.set(key, m);
         ensureMatRecord(m);
@@ -873,7 +941,7 @@ function indexMaterialsByKey(){
         }
       });
     } else {
-      const key = `${basePath}#0`;
+      const key = '${basePath}#0';
       materialKeyByMaterial.set(obj.material, key);
       materialByKey.set(key, obj.material);
       const m = obj.material; ensureMatRecord(m);
@@ -895,12 +963,12 @@ function collectMaterials(){
     else if(m){ if(!set.has(m)){ set.add(m); materials.push(m); ensureMatRecord(m); } }
   });
 
-  el.matSelect.innerHTML = '<option value="__all__">（全マテリアル：編集不可）</option>';
+  el.matSelect.innerHTML = \'<option value="__all__">（全マテリアル：編集不可）</option>\';
   materials.forEach((m,idx)=>{
     const key = materialKeyByMaterial.get(m);
     if(!key) return;
-    const name = (m.name && m.name.trim()) ? m.name : `Material_${idx}`;
-    const opt=document.createElement('option'); 
+    const name = (m.name && m.name.trim()) ? m.name : 'Material_${idx}';
+    const opt=document.createElement(\'option\'); 
     opt.value=key;
     opt.textContent=name;
     el.matSelect.appendChild(opt);
@@ -919,19 +987,19 @@ function collectMaterials(){
   if(el.matSelect.options.length>1){
     el.matSelect.value = el.matSelect.options[1].value;
   }else{
-    el.matSelect.value = '__all__';
+    el.matSelect.value = \'__all__\';
   }
   applyMaterialUIFromSelection();
 }
 function getSelectedOriginalMaterial(){
   const val=el.matSelect.value;
-  if(val==='__all__') return null;
+  if(val===\'__all__\') return null;
   return materialByKey.get(val) || null;
 }
 function applyMaterialUIFromSelection(){
   const key = el.matSelect.value;
-  const disable = (key === '__all__');
-  ['matUnlit','matDoubleSided','matOpacity','matInvert','matWhiteTransparent','matThreshold']
+  const disable = (key === \'__all__\');
+  [\'matUnlit\',\'matDoubleSided\',\'matOpacity\',\'matInvert\',\'matWhiteTransparent\',\'matThreshold\']
     .forEach(id=>{ document.getElementById(id).disabled = disable || viewOnly; });
   if(disable) return;
   const st = matState.get(key) || { unlit:false,doubleSided:false,opacity:1,invertRGB:false,whiteToAlpha:false,alphaTest:0 };
@@ -944,7 +1012,7 @@ function applyMaterialUIFromSelection(){
   el.matThreshold.value = String(((st.alphaTest)!=null?(st.alphaTest):(0)));
   el.matThresholdVal.textContent = (Number(((st.alphaTest)!=null?(st.alphaTest):(0)))).toFixed(2);
 }
-el.matSelect.addEventListener('change', ()=> applyMaterialUIFromSelection());
+el.matSelect.addEventListener(\'change\', ()=> applyMaterialUIFromSelection());
 
 async function applyMaterialFromUIToSelected(){
   const orig = getSelectedOriginalMaterial();
@@ -962,12 +1030,12 @@ async function applyMaterialFromUIToSelected(){
   renderNow();
   debouncedSaveMaterials();
 }
-['change','input'].forEach(ev=>{
-  ['matUnlit','matDoubleSided','matOpacity','matInvert','matWhiteTransparent','matThreshold']
+[\'change\',\'input\'].forEach(ev=>{
+  [\'matUnlit\',\'matDoubleSided\',\'matOpacity\',\'matInvert\',\'matWhiteTransparent\',\'matThreshold\']
     .forEach(id=> document.getElementById(id).addEventListener(ev, ()=> applyMaterialFromUIToSelected()));
 });
-el.matOpacity.addEventListener('input', ()=> el.matOpacityVal.textContent = parseFloat(el.matOpacity.value).toFixed(2));
-el.matThreshold.addEventListener('input', ()=> el.matThresholdVal.textContent = parseFloat(el.matThreshold.value).toFixed(2));
+el.matOpacity.addEventListener(\'input\', ()=> el.matOpacityVal.textContent = parseFloat(el.matOpacity.value).toFixed(2));
+el.matThreshold.addEventListener(\'input\', ()=> el.matThresholdVal.textContent = parseFloat(el.matThreshold.value).toFixed(2));
 
 function getActiveMaterialFor(originalM){
   const rec = matOriginals.get(originalM);
@@ -989,8 +1057,8 @@ async function processTextureToCanvasTextureFromOriginal(originalTex, { invertRG
   const w = image.width || image.videoWidth || 0;
   const h = image.height || image.videoHeight || 0;
   if(!w || !h) return null;
-  const canvas = document.createElement('canvas'); canvas.width = w; canvas.height = h;
-  const ctx = canvas.getContext('2d');
+  const canvas = document.createElement(\'canvas\'); canvas.width = w; canvas.height = h;
+  const ctx = canvas.getContext(\'2d\');
   try{ ctx.drawImage(image, 0, 0, w, h); }
   catch(e){ try{ const bmp = await createImageBitmap(image); ctx.drawImage(bmp,0,0,w,h); } catch(e2){ return null; } }
   const img = ctx.getImageData(0,0,w,h); const data = img.data;
@@ -1056,7 +1124,7 @@ async function applyStateToMaterial(origM, st){
     try{
       const processed = await processTextureToCanvasTextureFromOriginal(matOriginals.get(origM).map, { invertRGB: st.invertRGB, alphaFromWhite: st.whiteToAlpha, threshold: st.alphaTest||0 });
       if(processed){ mat.map = processed; mat.map.needsUpdate = true; }
-    }catch(e){ console.warn('texture process failed', e); }
+    }catch(e){ console.warn(\'texture process failed\', e); }
   }else{
     const rec0 = matOriginals.get(origM);
     mat.map = rec0.map || null;
@@ -1068,24 +1136,24 @@ async function applyStateToMaterial(origM, st){
 }
 
 /* ========= Camera views ========= */
-el.viewFront.addEventListener('click', ()=> { setNamedView('front'); debouncedSaveMaterials(); });
-el.viewBack.addEventListener('click',  ()=> { setNamedView('back');  debouncedSaveMaterials(); });
-el.viewLeft.addEventListener('click',  ()=> { setNamedView('left');  debouncedSaveMaterials(); });
-el.viewRight.addEventListener('click', ()=> { setNamedView('right'); debouncedSaveMaterials(); });
-el.viewTop.addEventListener('click',   ()=> { setNamedView('top');   debouncedSaveMaterials(); });
-el.viewBottom.addEventListener('click',()=> { setNamedView('bottom');debouncedSaveMaterials(); });
+el.viewFront.addEventListener(\'click\', ()=> { setNamedView(\'front\'); debouncedSaveMaterials(); });
+el.viewBack.addEventListener(\'click\',  ()=> { setNamedView(\'back\');  debouncedSaveMaterials(); });
+el.viewLeft.addEventListener(\'click\',  ()=> { setNamedView(\'left\');  debouncedSaveMaterials(); });
+el.viewRight.addEventListener(\'click\', ()=> { setNamedView(\'right\'); debouncedSaveMaterials(); });
+el.viewTop.addEventListener(\'click\',   ()=> { setNamedView(\'top\');   debouncedSaveMaterials(); });
+el.viewBottom.addEventListener(\'click\',()=> { setNamedView(\'bottom\');debouncedSaveMaterials(); });
 
 function setNamedView(name){
   const { radius } = sceneBounds();
   const d = Math.max(radius*2.2, 1.5);
   let dir = new THREE.Vector3(d,0,0);
   switch(name){
-    case 'front': dir.set(d,0,0); break;
-    case 'back':  dir.set(-d,0,0); break;
-    case 'left':  dir.set(0,0,-d); break;
-    case 'right': dir.set(0,0,d); break;
-    case 'top':   dir.set(0,d,0); break;
-    case 'bottom':dir.set(0,-d,0); break;
+    case \'front\': dir.set(d,0,0); break;
+    case \'back\':  dir.set(-d,0,0); break;
+    case \'left\':  dir.set(0,0,-d); break;
+    case \'right\': dir.set(0,0,d); break;
+    case \'top\':   dir.set(0,d,0); break;
+    case \'bottom\':dir.set(0,-d,0); break;
   }
   const origin = new THREE.Vector3(0,0,0);
   camera.position.copy(origin.clone().add(dir));
@@ -1096,33 +1164,33 @@ function setNamedView(name){
 
 /* ========= Sheets：同階層で作成/検索 ========= */
 async function findOrCreateSpreadsheetInGlbFolder(glbMeta){
-  if (!glbMeta || !glbMeta.id) throw new Error('GLBメタデータがありません');
+  if (!glbMeta || !glbMeta.id) throw new Error(\'GLBメタデータがありません\');
   const parents = glbMeta.parents || [];
   let found = null;
-  for (const parent of (parents.length ? parents : ['root'])) {
+  for (const parent of (parents.length ? parents : [\'root\'])) {
     const q = [
-      `'${parent}' in parents`,
-      `mimeType='application/vnd.google-apps.spreadsheet'`,
-      `trashed=false`,
-      `appProperties has { key='lociFor' and value='${glbMeta.id}' }`
-    ].join(' and ');
+      ''${parent}' in parents',
+      'mimeType='application/vnd.google-apps.spreadsheet'',
+      'trashed=false',
+      'appProperties has { key='lociFor' and value='${glbMeta.id}' }'
+    ].join(\' and \');
     const resp = await gapi.client.drive.files.list({
-      q, fields: 'files(id,name)',
+      q, fields: \'files(id,name)\',
       includeItemsFromAllDrives: true, supportsAllDrives: true, pageSize: 10,
     });
     if (((resp.result.files)&&(resp.result.files).length)) { found = resp.result.files[0]; break; }
   }
   if (found) return found.id;
 
-  const name = `LociMyu - ${glbMeta.name}`;
+  const name = 'LociMyu - ${glbMeta.name}';
   const create = await gapi.client.drive.files.create({
     resource: {
       name,
-      mimeType: 'application/vnd.google-apps.spreadsheet',
+      mimeType: \'application/vnd.google-apps.spreadsheet\',
       parents: (parents && parents.length) ? parents : undefined,
       appProperties: { lociFor: glbMeta.id },
     },
-    fields: 'id',
+    fields: \'id\',
     supportsAllDrives: true
   });
   const spreadsheetId = create.result.id;
@@ -1131,23 +1199,23 @@ async function findOrCreateSpreadsheetInGlbFolder(glbMeta){
     spreadsheetId,
     resource: {
       requests: [
-        { updateSpreadsheetProperties: { properties: { title: name }, fields: 'title' } },
-        { addSheet: { properties: { title: 'pins' } } }
+        { updateSpreadsheetProperties: { properties: { title: name }, fields: \'title\' } },
+        { addSheet: { properties: { title: \'pins\' } } }
       ]
     }
   });
   await gapi.client.sheets.spreadsheets.values.update({
-    spreadsheetId, range: 'pins!A1',
-    valueInputOption:'RAW',
-    resource:{ values: [[ 'pin_id','title','body','x','y','z','color','images','updated_at' ]] }
+    spreadsheetId, range: \'pins!A1\',
+    valueInputOption:\'RAW\',
+    resource:{ values: [[ \'pin_id\',\'title\',\'body\',\'x\',\'y\',\'z\',\'color\',\'images\',\'updated_at\' ]] }
   });
   return spreadsheetId;
 }
 
 /* ========= Meta（K/L列） 保存・復元 ========= */
-const META_MARKER_RANGE = ()=> `${activeSheet.title}!K1`;
-const META_MAT_KEY_RANGE = ()=> `${activeSheet.title}!K2:L2`;
-const META_VIEW_KEY_RANGE = ()=> `${activeSheet.title}!K3:L3`;
+const META_MARKER_RANGE = ()=> '${activeSheet.title}!K1';
+const META_MAT_KEY_RANGE = ()=> '${activeSheet.title}!K2:L2';
+const META_VIEW_KEY_RANGE = ()=> '${activeSheet.title}!K3:L3';
 
 function safeParseJSON(s, fallback){ try{ return s ? JSON.parse(s) : fallback; }catch{ return fallback; } }
 
@@ -1158,15 +1226,15 @@ async function loadSheetMeta(spreadsheetId){
       ranges: [ META_MARKER_RANGE(), META_MAT_KEY_RANGE(), META_VIEW_KEY_RANGE() ]
     });
     const vals = (get.result.valueRanges || []).map(v=>v.values||[]);
-    const matJson = (vals[1] && vals[1][0]) ? (vals[1][0][1] || '') : '';
-    const viewJson = (vals[2] && vals[2][0]) ? (vals[2][0][1] || '') : '';
+    const matJson = (vals[1] && vals[1][0]) ? (vals[1][0][1] || \'\') : \'\';
+    const viewJson = (vals[2] && vals[2][0]) ? (vals[2][0][1] || \'\') : \'\';
     const m = safeParseJSON(matJson, null);
     const materials = normalizeMaterialsJSON(m);
-    const viewer = safeParseJSON(viewJson, { version:1, bgColor:'#0a0f16', projection:'perspective' });
+    const viewer = safeParseJSON(viewJson, { version:1, bgColor:\'#0a0f16\', projection:\'perspective\' });
     return { materials, viewer };
   }catch(e){
-    console.warn('loadSheetMeta failed', e);
-    return { materials:{version:2,byKey:{}}, viewer:{version:1,bgColor:'#0a0f16',projection:'perspective'} };
+    console.warn(\'loadSheetMeta failed\', e);
+    return { materials:{version:2,byKey:{}}, viewer:{version:1,bgColor:\'#0a0f16\',projection:\'perspective\'} };
   }
 }
 function normalizeMaterialsJSON(m){
@@ -1192,13 +1260,13 @@ function normalizeMaterialsJSON(m){
 async function saveSheetMeta(spreadsheetId, { materials, viewer }){
   if(viewOnly) return;
   const data = [
-    { range: META_MARKER_RANGE(), values: [[ 'LOCI_META_V1' ]] },
-    { range: META_MAT_KEY_RANGE(), values: [[ 'materials_json', JSON.stringify(materials) ]] },
-    { range: META_VIEW_KEY_RANGE(), values: [[ 'viewer_json', JSON.stringify(viewer) ]] },
+    { range: META_MARKER_RANGE(), values: [[ \'LOCI_META_V1\' ]] },
+    { range: META_MAT_KEY_RANGE(), values: [[ \'materials_json\', JSON.stringify(materials) ]] },
+    { range: META_VIEW_KEY_RANGE(), values: [[ \'viewer_json\', JSON.stringify(viewer) ]] },
   ];
   await gapi.client.sheets.spreadsheets.values.batchUpdate({
     spreadsheetId,
-    valueInputOption:'RAW',
+    valueInputOption:\'RAW\',
     data
   });
 }
@@ -1221,8 +1289,8 @@ function serializeMaterialsForSheet(){
 function serializeViewerPrefs(){
   return {
     version: 1,
-    bgColor: el.bgColor.value || '#0a0f16',
-    projection: usingOrtho ? 'orthographic' : 'perspective'
+    bgColor: el.bgColor.value || \'#0a0f16\',
+    projection: usingOrtho ? \'orthographic\' : \'perspective\'
   };
 }
 async function applyMaterialsFromSheet(materialsData){
@@ -1245,7 +1313,7 @@ async function applyViewerPrefs(viewerData){
     scene.background = new THREE.Color(viewerData.bgColor);
   }
   if(viewerData.projection){
-    const wantOrtho = (viewerData.projection === 'orthographic');
+    const wantOrtho = (viewerData.projection === \'orthographic\');
     el.projOrtho.checked = wantOrtho;
     toggleProjection(wantOrtho);
   }
@@ -1258,18 +1326,18 @@ const debouncedSaveMaterials = debounce(async ()=>{
   const materialsData = serializeMaterialsForSheet();
   const viewerData = serializeViewerPrefs();
   try{ await saveSheetMeta(spreadsheetId, { materials: materialsData, viewer: viewerData }); }
-  catch(e){ console.warn('saveSheetMeta failed', e); }
+  catch(e){ console.warn(\'saveSheetMeta failed\', e); }
 }, 600);
-el.bgColor.addEventListener('input', ()=>{ scene.background = new THREE.Color(el.bgColor.value); renderNow(); debouncedSaveMaterials(); });
+el.bgColor.addEventListener(\'input\', ()=>{ scene.background = new THREE.Color(el.bgColor.value); renderNow(); debouncedSaveMaterials(); });
 
 /* ========= Thumbs / Preview ========= */
 function renderThumbs(p){
-  const thumbs=el.thumbs; thumbs.innerHTML='';
+  const thumbs=el.thumbs; thumbs.innerHTML=\'\';
   ensureArray(p.images).forEach(async (ref, idx)=>{
-    const wrap=document.createElement('div'); wrap.className='thumb'; thumbs.appendChild(wrap);
-    const img=document.createElement('img'); img.alt = 'thumb';
-    const del=document.createElement('div'); del.className='del'; del.textContent='×'; del.title='この画像をキャプションから外す';
-    del.addEventListener('click', (ev)=>{
+    const wrap=document.createElement(\'div\'); wrap.className=\'thumb\'; thumbs.appendChild(wrap);
+    const img=document.createElement(\'img\'); img.alt = \'thumb\';
+    const del=document.createElement(\'div\'); del.className=\'del\'; del.textContent=\'×\'; del.title=\'この画像をキャプションから外す\';
+    del.addEventListener(\'click\', (ev)=>{
       if(viewOnly) return;
       ev.stopPropagation(); const wasPreview = (el.previewImg.src && el.previewImg.src === img.src);
       p.images.splice(idx,1); renderThumbs(p);
@@ -1280,28 +1348,28 @@ function renderThumbs(p){
     try{
       const src = await resolveImageObjectURL(ref, {preferThumb:true});
       img.src = src;
-      img.addEventListener('click', async ()=>{ setPreview(ref, p); });
+      img.addEventListener(\'click\', async ()=>{ setPreview(ref, p); });
     }catch{
-      wrap.classList.add('error'); wrap.title = '画像を読み込めませんでした';
+      wrap.classList.add(\'error\'); wrap.title = \'画像を読み込めませんでした\';
     }
   });
 }
 
 /* ========= Caption bindings ========= */
-document.getElementById('btnSavePin').addEventListener('click', ()=> upsertPinToSheet());
-el.capTitle.addEventListener('input', ()=>{ const p=pins.find(x=>x.id===selectedPinId); if(p){ p.title=el.capTitle.value; refreshPinsList(); upsertPinToSheet(); updateViewerPreviewForPin(p); } });
-el.capBody.addEventListener('input',  ()=>{ const p=pins.find(x=>x.id===selectedPinId); if(p){ p.body=el.capBody.value; upsertPinToSheet(); updateViewerPreviewForPin(p); } });
+document.getElementById(\'btnSavePin\').addEventListener(\'click\', ()=> upsertPinToSheet());
+el.capTitle.addEventListener(\'input\', ()=>{ const p=pins.find(x=>x.id===selectedPinId); if(p){ p.title=el.capTitle.value; refreshPinsList(); upsertPinToSheet(); updateViewerPreviewForPin(p); } });
+el.capBody.addEventListener(\'input\',  ()=>{ const p=pins.find(x=>x.id===selectedPinId); if(p){ p.body=el.capBody.value; upsertPinToSheet(); updateViewerPreviewForPin(p); } });
 
 /* ========= Pin color presets ========= */
-const PRESET_LIST = ['#ff6b6b','#ffd166','#06d6a0','#118ab2','#ef476f','#b5179e','#4361ee','#4cc9f0','#ff9f1c'];
+const PRESET_LIST = [\'#ff6b6b\',\'#ffd166\',\'#06d6a0\',\'#118ab2\',\'#ef476f\',\'#b5179e\',\'#4361ee\',\'#4cc9f0\',\'#ff9f1c\'];
 function buildColorPresets(){
-  const holder = el.colorPresets; holder.innerHTML='';
+  const holder = el.colorPresets; holder.innerHTML=\'\';
   PRESET_LIST.forEach(c=>{
-    const b=document.createElement('button');
-    b.style.width='18px'; b.style.height='18px';
-    b.style.borderRadius='999px'; b.style.border='2px solid #223146';
+    const b=document.createElement(\'button\');
+    b.style.width=\'18px\'; b.style.height=\'18px\';
+    b.style.borderRadius=\'999px\'; b.style.border=\'2px solid #223146\';
     b.style.background=c; b.title=c;
-    b.addEventListener('click',()=>{
+    b.addEventListener(\'click\',()=>{
       currentColor=c;
       const pId=selectedPinId;
       if(pId){
@@ -1321,16 +1389,16 @@ buildColorPresets();
 
 function uniquePinColors(){ const set = new Set(); pins.forEach(p=> set.add(normalizeHex(p.color))); return Array.from(set); }
 function buildColorFilter(){
-  const list = el.colorFilterList; list.innerHTML='';
+  const list = el.colorFilterList; list.innerHTML=\'\';
   const colors = uniquePinColors().sort();
-  if(colors.length===0){ list.innerHTML = '<div class="small">ピンがありません</div>'; return; }
+  if(colors.length===0){ list.innerHTML = \'<div class="small">ピンがありません</div>\'; return; }
   colors.forEach(c=>{
-    const row = document.createElement('label'); row.style.display='flex'; row.style.alignItems='center'; row.style.gap='8px'; row.style.margin='4px 0';
-    const sw = document.createElement('span'); sw.style.width='14px'; sw.style.height='14px'; sw.style.borderRadius='50%'; sw.style.border='2px solid #223146'; sw.style.display='inline-block'; sw.style.background=c;
-    const cb = document.createElement('input'); cb.type='checkbox'; cb.value=c; cb.checked = (filterColors.size===0 || filterColors.has(c));
-    const name = document.createElement('span'); name.textContent = c; name.className='small';
+    const row = document.createElement(\'label\'); row.style.display=\'flex\'; row.style.alignItems=\'center\'; row.style.gap=\'8px\'; row.style.margin=\'4px 0\';
+    const sw = document.createElement(\'span\'); sw.style.width=\'14px\'; sw.style.height=\'14px\'; sw.style.borderRadius=\'50%\'; sw.style.border=\'2px solid #223146\'; sw.style.display=\'inline-block\'; sw.style.background=c;
+    const cb = document.createElement(\'input\'); cb.type=\'checkbox\'; cb.value=c; cb.checked = (filterColors.size===0 || filterColors.has(c));
+    const name = document.createElement(\'span\'); name.textContent = c; name.className=\'small\';
     row.appendChild(cb); row.appendChild(sw); row.appendChild(name);
-    cb.addEventListener('change', ()=>{
+    cb.addEventListener(\'change\', ()=>{
       if(cb.checked) filterColors.add(c); else filterColors.delete(c);
       if(filterColors.size===0){ colors.forEach(k=> filterColors.add(k)); }
       applyPinVisibilityFilter();
@@ -1345,24 +1413,24 @@ function applyPinVisibilityFilter(){
   pins.forEach(p=>{ if(p.mesh){ p.mesh.visible = pinPassesFilter(p); } });
   refreshPinsList(); renderNow();
 }
-el.btnColorFilter.addEventListener('click', ()=>{
-  el.colorFilterPanel.style.display = (el.colorFilterPanel.style.display==='none' || !el.colorFilterPanel.style.display) ? 'block' : 'none';
+el.btnColorFilter.addEventListener(\'click\', ()=>{
+  el.colorFilterPanel.style.display = (el.colorFilterPanel.style.display===\'none\' || !el.colorFilterPanel.style.display) ? \'block\' : \'none\';
 });
-document.getElementById('btnFilterAll').addEventListener('click', ()=>{ filterColors.clear(); uniquePinColors().forEach(c=> filterColors.add(c)); buildColorFilter(); });
-document.getElementById('btnFilterNone').addEventListener('click', ()=>{ filterColors.clear(); applyPinVisibilityFilter(); buildColorFilter(); });
-document.getElementById('btnFilterClose').addEventListener('click', ()=> el.colorFilterPanel.style.display='none');
+document.getElementById(\'btnFilterAll\').addEventListener(\'click\', ()=>{ filterColors.clear(); uniquePinColors().forEach(c=> filterColors.add(c)); buildColorFilter(); });
+document.getElementById(\'btnFilterNone\').addEventListener(\'click\', ()=>{ filterColors.clear(); applyPinVisibilityFilter(); buildColorFilter(); });
+document.getElementById(\'btnFilterClose\').addEventListener(\'click\', ()=> el.colorFilterPanel.style.display=\'none\');
 
 function refreshPinsList(){
-  el.pinsList.innerHTML='';
+  el.pinsList.innerHTML=\'\';
   pins.filter(pinPassesFilter).forEach(p=>{
-    const row=document.createElement('div'); row.className='row'; row.dataset.id=p.id;
-    const left=document.createElement('div'); left.style.display='flex'; left.style.alignItems='center'; left.style.gap='8px';
-    const dot=document.createElement('div'); dot.style.width='10px'; dot.style.height='10px'; dot.style.borderRadius='999px'; dot.style.background=p.color;
-    const title=document.createElement('div'); title.className='title'; title.textContent=p.title||'(無題)';
-    const meta=document.createElement('div'); meta.className='meta'; meta.textContent=`x:${p.pos.x.toFixed(2)} y:${p.pos.y.toFixed(2)} z:${p.pos.z.toFixed(2)}`;
+    const row=document.createElement(\'div\'); row.className=\'row\'; row.dataset.id=p.id;
+    const left=document.createElement(\'div\'); left.style.display=\'flex\'; left.style.alignItems=\'center\'; left.style.gap=\'8px\';
+    const dot=document.createElement(\'div\'); dot.style.width=\'10px\'; dot.style.height=\'10px\'; dot.style.borderRadius=\'999px\'; dot.style.background=p.color;
+    const title=document.createElement(\'div\'); title.className=\'title\'; title.textContent=p.title||\'(無題)\';
+    const meta=document.createElement(\'div\'); meta.className=\'meta\'; meta.textContent='x:${p.pos.x.toFixed(2)} y:${p.pos.y.toFixed(2)} z:${p.pos.z.toFixed(2)}';
     left.appendChild(dot); left.appendChild(title);
     row.appendChild(left); row.appendChild(meta);
-    row.addEventListener('click',()=>selectPin(p.id,{fly:true}));
+    row.addEventListener(\'click\',()=>selectPin(p.id,{fly:true}));
     el.pinsList.appendChild(row);
   });
 }
@@ -1378,24 +1446,24 @@ function rebuildPinsScene(){
   renderNow();
 }
 async function loadPinsFromActiveSheet(spreadsheetId){
-  pins=[]; selectedPinId=null; el.rightEditor.classList.add('hidden'); el.rightNoSel.classList.remove('hidden');
+  pins=[]; selectedPinId=null; el.rightEditor.classList.add(\'hidden\'); el.rightNoSel.classList.remove(\'hidden\');
   try{
     const resp = await gapi.client.sheets.spreadsheets.values.get({
-      spreadsheetId, range: `${activeSheet.title}!A2:I`
+      spreadsheetId, range: '${activeSheet.title}!A2:I'
     });
     const rows = resp.result.values || [];
     rows.forEach(r=>{
       const [pid, title, body, x, y, z, color, imagesJson] = r;
       const p = {
-        id: pid || `p_${Math.random().toString(36).slice(2)}`,
-        title: title || '',
-        body: body || '',
+        id: pid || 'p_${Math.random().toString(36).slice(2)}',
+        title: title || \'\',
+        body: body || \'\',
         pos: new THREE.Vector3(parseFloat(x)||0, parseFloat(y)||0, parseFloat(z)||0),
-        color: normalizeHex(color || '#ff6b6b'),
+        color: normalizeHex(color || \'#ff6b6b\'),
         images: [],
         mesh: null
       };
-      try{ p.images = JSON.parse(imagesJson||'[]'); }catch{ p.images = []; }
+      try{ p.images = JSON.parse(imagesJson||\'[]\'); }catch{ p.images = []; }
       pins.push(p);
     });
     rebuildPinsScene();
@@ -1406,28 +1474,28 @@ async function loadPinsFromActiveSheet(spreadsheetId){
     await applyMaterialsFromSheet(meta.materials);
     await applyViewerPrefs(meta.viewer);
     applyMaterialUIFromSelection();
-  }catch(e){ console.error('loadPinsFromActiveSheet failed', e); }
+  }catch(e){ console.error(\'loadPinsFromActiveSheet failed\', e); }
 }
 async function upsertPinToSheet(){
   if(viewOnly) return;
   const spreadsheetId = extractSpreadsheetId(el.inputSheet.value.trim()); if(!spreadsheetId) return;
   const p = pins.find(x=>x.id===selectedPinId) || pins[pins.length-1]; if(!p) return;
   try{
-    const col = await gapi.client.sheets.spreadsheets.values.get({ spreadsheetId, range: `${activeSheet.title}!A:A` });
+    const col = await gapi.client.sheets.spreadsheets.values.get({ spreadsheetId, range: '${activeSheet.title}!A:A' });
     const rows = col.result.values || [];
     let rowIndex = -1;
     for(let i=0;i<rows.length;i++){ if(rows[i][0]===p.id){ rowIndex=i; break; } }
-    const values = [[ p.id, p.title||'', p.body||'', p.pos.x, p.pos.y, p.pos.z, p.color, JSON.stringify(ensureArray(p.images)), new Date().toISOString() ]];
+    const values = [[ p.id, p.title||\'\', p.body||\'\', p.pos.x, p.pos.y, p.pos.z, p.color, JSON.stringify(ensureArray(p.images)), new Date().toISOString() ]];
     if(rowIndex>=0){
-      const range = `${activeSheet.title}!A${rowIndex+1}:I${rowIndex+1}`;
-      await gapi.client.sheets.spreadsheets.values.update({ spreadsheetId, range, valueInputOption:'RAW', resource:{ values } });
+      const range = '${activeSheet.title}!A${rowIndex+1}:I${rowIndex+1}';
+      await gapi.client.sheets.spreadsheets.values.update({ spreadsheetId, range, valueInputOption:\'RAW\', resource:{ values } });
     }else{
-      await gapi.client.sheets.spreadsheets.values.append({ spreadsheetId, range: `${activeSheet.title}!A1`, valueInputOption:'RAW', resource:{ values } });
+      await gapi.client.sheets.spreadsheets.values.append({ spreadsheetId, range: '${activeSheet.title}!A1', valueInputOption:\'RAW\', resource:{ values } });
     }
   }catch(e){ console.error(e); }
 }
 async function deletePinFromActiveSheet(spreadsheetId, pinId){
-  const col = await gapi.client.sheets.spreadsheets.values.get({ spreadsheetId, range: `${activeSheet.title}!A:A` });
+  const col = await gapi.client.sheets.spreadsheets.values.get({ spreadsheetId, range: '${activeSheet.title}!A:A' });
   const rows = col.result.values || [];
   let rowIndex = -1;
   for(let i=0;i<rows.length;i++){ if(rows[i][0]===pinId){ rowIndex=i; break; } }
@@ -1436,17 +1504,17 @@ async function deletePinFromActiveSheet(spreadsheetId, pinId){
     spreadsheetId,
     resource:{
       requests:[{ deleteDimension:{
-        range:{ sheetId: activeSheet.sheetId, dimension:'ROWS', startIndex:rowIndex, endIndex:rowIndex+1 }
+        range:{ sheetId: activeSheet.sheetId, dimension:\'ROWS\', startIndex:rowIndex, endIndex:rowIndex+1 }
       }}]
     }
   });
 }
 
 /* ========= Attach / Upload ========= */
-el.btnAttach.addEventListener('click', async ()=>{
+el.btnAttach.addEventListener(\'click\', async ()=>{
   if(viewOnly) return;
   const fileInput = el.imgLocal;
-  fileInput.value = '';
+  fileInput.value = \'\';
   fileInput.onchange = async ()=>{
     const file = (fileInput.files && fileInput.files[0]);
     const p = pins.find(x=>x.id===selectedPinId);
@@ -1454,116 +1522,116 @@ el.btnAttach.addEventListener('click', async ()=>{
     try{
       const blob = await toUploadableBlob(file);
       const uploaded = await driveMultipartUpload(blob, sanitizeName(file.name), glbParents);
-      const ref = makeDriveRef(uploaded.id, blob.type || 'image/jpeg');
+      const ref = makeDriveRef(uploaded.id, blob.type || \'image/jpeg\');
       p.images = ensureArray(p.images); p.images.push(ref);
       renderThumbs(p);
       setPreview(ref, p);
-      toast('画像をアップロードしました');
+      toast(\'画像をアップロードしました\');
       upsertPinToSheet();
-    }catch(err){ console.error(err); alert('画像アップロードに失敗しました'); }
+    }catch(err){ console.error(err); alert(\'画像アップロードに失敗しました\'); }
   };
   fileInput.click();
 });
-function sanitizeName(n){ return n.replace(/[^\p{Letter}\p{Number}\s._-]+/gu,'_'); }
+function sanitizeName(n){ return n.replace(/[^\\p{Letter}\\p{Number}\\s._-]+/gu,\'_\'); }
 async function toUploadableBlob(file){
-  const ext = (file.name.split('.').pop()||'').toLowerCase();
-  if(ext==='heic' || ext==='heif'){
+  const ext = (file.name.split(\'.\').pop()||\'\').toLowerCase();
+  if(ext===\'heic\' || ext===\'heif\'){
     const ok = await ensureHeic2any();
-    if(!ok) throw new Error('heic2any unavailable');
-    const jpegBlob = await window.heic2any({ blob:file, toType:'image/jpeg', quality:0.95 });
+    if(!ok) throw new Error(\'heic2any unavailable\');
+    const jpegBlob = await window.heic2any({ blob:file, toType:\'image/jpeg\', quality:0.95 });
     return Array.isArray(jpegBlob) ? jpegBlob[0] : jpegBlob;
   }
   return file;
 }
 async function driveMultipartUpload(blob, name, parents){
   const meta = { name, parents: parents && parents.length ? parents : undefined };
-  const boundary = '-------loci' + Math.random().toString(36).slice(2);
-  const bufMeta = new TextEncoder().encode(`\r\n--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(meta)}\r\n\r\n--${boundary}\r\nContent-Type: ${blob.type || 'application/octet-stream'}\r\n\r\n);
-  const bufTail = new TextEncoder().encode(`\r\n--${boundary}--);
-  const stream = new Blob([ bufMeta, blob, bufTail ], { type: 'multipart/related; boundary='+boundary });
-  const res = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&supportsAllDrives=true', {
-    method: 'POST',
-    headers: { 'Authorization': 'Bearer ' + accessToken },
+  const boundary = \'-------loci\' + Math.random().toString(36).slice(2);
+  const bufMeta = new TextEncoder().encode('\r\n--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(meta)}\r\n\r\n--${boundary}\r\nContent-Type: ${blob.type || 'application/octet-stream'}\r\n\r\n);
+  const bufTail = new TextEncoder().encode('\\r\\n--' + (boundary) + '--);
+  const stream = new Blob([ bufMeta, blob, bufTail ], { type: \'multipart/related; boundary=\'+boundary });
+  const res = await fetch(\'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&supportsAllDrives=true\', {
+    method: \'POST\',
+    headers: { \'Authorization\': \'Bearer \' + accessToken },
     body: stream
   });
-  if(!res.ok) throw new Error('Drive upload failed ' + res.status);
+  if(!res.ok) throw new Error(\'Drive upload failed \' + res.status);
   return await res.json();
 }
 
 /* ========= Folder Picker ========= */
-el.btnPickFromFolder.addEventListener('click', openPickerModal);
-el.btnPickerClose.addEventListener('click', ()=> el.pickerModal.style.display='none');
-el.btnPickerReload.addEventListener('click', loadFolderImages);
+el.btnPickFromFolder.addEventListener(\'click\', openPickerModal);
+el.btnPickerClose.addEventListener(\'click\', ()=> el.pickerModal.style.display=\'none\');
+el.btnPickerReload.addEventListener(\'click\', loadFolderImages);
 
 async function openPickerModal(){
-  if(!glbParents || !glbParents.length){ alert('GLBの親フォルダが不明です。先にGLBを読み込んでください。'); return; }
+  if(!glbParents || !glbParents.length){ alert(\'GLBの親フォルダが不明です。先にGLBを読み込んでください。\'); return; }
   await loadFolderImages();
-  el.pickerModal.style.display='grid';
+  el.pickerModal.style.display=\'grid\';
 }
 async function loadFolderImages(){
-  if(!accessToken){ alert('先にサインインしてください'); return; }
-  el.pickerGrid.innerHTML = '<div class="small">読み込み中…</div>';
+  if(!accessToken){ alert(\'先にサインインしてください\'); return; }
+  el.pickerGrid.innerHTML = \'<div class="small">読み込み中…</div>\';
   const cells = [];
   try{
     for(const parent of glbParents){
-      const q = `'${parent}' in parents and trashed=false and (mimeType contains 'image/')`;
+      const q = ''${parent}' in parents and trashed=false and (mimeType contains 'image/')';
       const resp = await gapi.client.drive.files.list({
         q, pageSize: 200,
-        fields: 'files(id,name,mimeType,fileExtension,hasThumbnail,thumbnailLink)',
+        fields: \'files(id,name,mimeType,fileExtension,hasThumbnail,thumbnailLink)\',
         includeItemsFromAllDrives: true,
         supportsAllDrives: true
       });
       const files = resp.result.files || [];
       for(const f of files){
         const id = f.id;
-        const mime = f.mimeType || '';
+        const mime = f.mimeType || \'\';
         const isHeic = isHeicMimeOrExt(mime, f.fileExtension);
         const ref = makeDriveRef(id, mime);
-        const cell = document.createElement('div'); cell.style.background='#0c1118'; cell.style.border='1px solid #223146'; cell.style.borderRadius='12px'; cell.style.padding='8px'; cell.style.cursor='pointer'; cell.style.display='flex'; cell.style.flexDirection='column'; cell.style.gap='6px';
-        const img = document.createElement('img'); img.alt = f.name; img.style.width='100%'; img.style.height='110px'; img.style.objectFit='cover'; img.style.borderRadius='8px';
-        const tag = document.createElement('div'); tag.className='small'; tag.textContent = isHeic ? 'HEIC/HEIF (変換/サムネ表示)' : (mime||'image');
-        const cap = document.createElement('div'); cap.textContent = f.name; cap.className='small';
+        const cell = document.createElement(\'div\'); cell.style.background=\'#0c1118\'; cell.style.border=\'1px solid #223146\'; cell.style.borderRadius=\'12px\'; cell.style.padding=\'8px\'; cell.style.cursor=\'pointer\'; cell.style.display=\'flex\'; cell.style.flexDirection=\'column\'; cell.style.gap=\'6px\';
+        const img = document.createElement(\'img\'); img.alt = f.name; img.style.width=\'100%\'; img.style.height=\'110px\'; img.style.objectFit=\'cover\'; img.style.borderRadius=\'8px\';
+        const tag = document.createElement(\'div\'); tag.className=\'small\'; tag.textContent = isHeic ? \'HEIC/HEIF (変換/サムネ表示)\' : (mime||\'image\');
+        const cap = document.createElement(\'div\'); cap.textContent = f.name; cap.className=\'small\';
 
         let usedFallback = false;
         if(f.hasThumbnail && f.thumbnailLink){
           const hi = upscaleThumbnailUrl(f.thumbnailLink, isHeic? 1024 : 512);
-          const sep = hi.includes('?') ? '&' : '?';
-          img.src = hi + sep + 'access_token=' + encodeURIComponent(accessToken);
+          const sep = hi.includes(\'?\') ? \'&\' : \'?\';
+          img.src = hi + sep + \'access_token=\' + encodeURIComponent(accessToken);
           img.onerror = async ()=>{
             usedFallback = true;
             try{
               const url = await resolveImageObjectURL(ref, {preferThumb:true});
               img.src = url;
-            }catch{ cell.style.opacity='.5'; cell.style.pointerEvents='none'; }
+            }catch{ cell.style.opacity=\'.5\'; cell.style.pointerEvents=\'none\'; }
           };
         }else{
           try{
             const url = await resolveImageObjectURL(ref, {preferThumb:true});
             img.src = url;
-          }catch{ cell.style.opacity='.5'; cell.style.pointerEvents='none'; }
+          }catch{ cell.style.opacity=\'.5\'; cell.style.pointerEvents=\'none\'; }
         }
 
-        img.onerror = ()=>{ if(!usedFallback){ cell.style.opacity='.5'; cell.style.pointerEvents='none'; } };
+        img.onerror = ()=>{ if(!usedFallback){ cell.style.opacity=\'.5\'; cell.style.pointerEvents=\'none\'; } };
         cell.appendChild(img); cell.appendChild(cap); cell.appendChild(tag);
-        cell.addEventListener('click', ()=>{ if(cell.style.pointerEvents==='none') return; chooseFolderImage(ref); });
+        cell.addEventListener(\'click\', ()=>{ if(cell.style.pointerEvents===\'none\') return; chooseFolderImage(ref); });
         cells.push(cell);
       }
     }
-    el.pickerGrid.innerHTML='';
+    el.pickerGrid.innerHTML=\'\';
     if(!cells.length){
-      el.pickerGrid.innerHTML = '<div class="small">フォルダに画像が見つかりませんでした。</div>';
+      el.pickerGrid.innerHTML = \'<div class="small">フォルダに画像が見つかりませんでした。</div>\';
     }else{
       cells.forEach(c=> el.pickerGrid.appendChild(c));
     }
   }catch(e){
     console.error(e);
-    el.pickerGrid.innerHTML = '<div class="small">読み込みに失敗しました。</div>';
+    el.pickerGrid.innerHTML = \'<div class="small">読み込みに失敗しました。</div>\';
   }
 }
 function chooseFolderImage(ref){
-  el.pickerModal.style.display='none';
+  el.pickerModal.style.display=\'none\';
   const p = pins.find(x=>x.id===selectedPinId);
-  if(!p){ alert('先にピンを選択してください'); return; }
+  if(!p){ alert(\'先にピンを選択してください\'); return; }
   p.images = ensureArray(p.images); p.images.push(ref);
   renderThumbs(p);
   setPreview(ref, p);
@@ -1574,45 +1642,45 @@ function chooseFolderImage(ref){
 async function refreshCaptionLists(spreadsheetId){
   const resp = await gapi.client.sheets.spreadsheets.get({
     spreadsheetId,
-    fields: 'sheets(properties(sheetId,title,index))'
+    fields: \'sheets(properties(sheetId,title,index))\'
   });
   const sheets = (resp.result.sheets || []).map(s => s.properties);
-  el.listSelect.innerHTML = '';
+  el.listSelect.innerHTML = \'\';
   sheets.forEach(p => {
-    const o = document.createElement('option');
+    const o = document.createElement(\'option\');
     o.value = String(p.sheetId);
     o.textContent = p.title;
     el.listSelect.appendChild(o);
   });
-  let pick = sheets.find(s => s.title === 'pins') || sheets[0];
+  let pick = sheets.find(s => s.title === \'pins\') || sheets[0];
   if (!activeSheet.sheetId) {
     if (pick){ activeSheet = { sheetId: pick.sheetId, title: pick.title }; }
   } else {
     const same = sheets.find(s => s.sheetId === activeSheet.sheetId);
     if (!same) {
-      pick = sheets.find(s => s.title === 'pins') || sheets[0];
+      pick = sheets.find(s => s.title === \'pins\') || sheets[0];
       if (pick){ activeSheet = { sheetId: pick.sheetId, title: pick.title }; }
     } else {
       activeSheet.title = same.title;
     }
   }
   if (activeSheet.sheetId){ el.listSelect.value = String(activeSheet.sheetId); }
-  if(!viewOnly){ ['listNew','listDelete'].forEach(id=>document.getElementById(id).disabled=false); }
+  if(!viewOnly){ [\'listNew\',\'listDelete\'].forEach(id=>document.getElementById(id).disabled=false); }
 }
-el.listSelect.addEventListener('change', async (e)=>{
+el.listSelect.addEventListener(\'change\', async (e)=>{
   const spreadsheetId = extractSpreadsheetId(el.inputSheet.value.trim());
   if(!spreadsheetId) return;
   const sheetId = Number(e.target.value);
   const title = e.target.options[e.target.selectedIndex].textContent;
   activeSheet = { sheetId, title };
   await loadPinsFromActiveSheet(spreadsheetId);
-  toast(`キャプションリストを切替: ${title});
+  toast('キャプションリストを切替: ${title});
 });
 el.listNew.addEventListener('click', async ()=>{
   if(viewOnly) return;
   const spreadsheetId = extractSpreadsheetId(el.inputSheet.value.trim());
   if(!spreadsheetId) return;
-  const title = prompt('新しいキャプションリスト名を入力', `pins_${Date.now().toString().slice(-5)});
+  const title = prompt('新しいキャプションリスト名を入力', 'pins_' + (Date.now().toString().slice(-5)) + ');
   if(!title) return;
   const add = await gapi.client.sheets.spreadsheets.batchUpdate({
     spreadsheetId,
@@ -1620,9 +1688,9 @@ el.listNew.addEventListener('click', async ()=>{
   });
   const newSheetId = add.result.replies[0].addSheet.properties.sheetId;
   await gapi.client.sheets.spreadsheets.values.update({
-    spreadsheetId, range: `${title}!A1`,
-    valueInputOption:'RAW',
-    resource:{ values: [[ 'pin_id','title','body','x','y','z','color','images','updated_at' ]] }
+    spreadsheetId, range: '${title}!A1',
+    valueInputOption:\'RAW\',
+    resource:{ values: [[ \'pin_id\',\'title\',\'body\',\'x\',\'y\',\'z\',\'color\',\'images\',\'updated_at\' ]] }
   });
   await refreshCaptionLists(spreadsheetId);
   activeSheet = { sheetId: newSheetId, title };
@@ -1631,10 +1699,10 @@ el.listNew.addEventListener('click', async ()=>{
 
   await saveSheetMeta(spreadsheetId, {
     materials: {version:2, byKey:{}},
-    viewer: {version:1, bgColor: el.bgColor.value || '#0a0f16', projection: usingOrtho ? 'orthographic' : 'perspective' }
+    viewer: {version:1, bgColor: el.bgColor.value || \'#0a0f16\', projection: usingOrtho ? \'orthographic\' : \'perspective\' }
   });
 
-  toast(`新しいリストを作成: ${title});
+  toast('新しいリストを作成: ${title});
 });
 el.listDelete.addEventListener('click', async ()=>{
   if(viewOnly) return;
@@ -1643,7 +1711,7 @@ el.listDelete.addEventListener('click', async ()=>{
   const g = await gapi.client.sheets.spreadsheets.get({ spreadsheetId, fields: 'sheets(properties(sheetId))' });
   const count = (g.result.sheets||[]).length;
   if(count <= 1){ alert('最後のシートは削除できません'); return; }
-  if(!confirm(`キャプションリスト「${activeSheet.title}」を削除しますか？`)) return;
+  if(!confirm('キャプションリスト「' + (activeSheet.title) + '」を削除しますか？')) return;
   await gapi.client.sheets.spreadsheets.batchUpdate({
     spreadsheetId,
     resource:{ requests:[ { deleteSheet:{ sheetId: activeSheet.sheetId } } ] }
@@ -1716,12 +1784,12 @@ async function loadGLBByFileId(fileId){
     el.statusLabel.textContent = 'GLBを読み込み中…';
     const meta = await driveFileMeta(fileId);
     glbMetaCache = meta; glbParents = meta.parents || [];
-    const dlUrl = `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media&supportsAllDrives=true`;
+    const dlUrl = 'https://www.googleapis.com/drive/v3/files/' + (fileId) + '?alt=media&supportsAllDrives=true';
 
-    const res = await fetch(dlUrl, { headers:{ Authorization:`Bearer ${accessToken}` } });
+    const res = await fetch(dlUrl, { headers:{ Authorization:'Bearer ' + (accessToken) } });
     if(!res.ok){
       let hint = ''; if(res.status === 403 || res === 404){ hint = '（IDや共有設定を確認してください）'; }
-      throw new Error(`Drive download failed: ${res.status} ${res.statusText} ${hint});
+      throw new Error('Drive download failed: ' + (res.status) + ' ' + (res.statusText) + ' ' + (hint) + ');
     }
 
     // ★★ 低負荷：Blob URL + loadAsync（ArrayBufferを避ける）
@@ -1742,39 +1810,39 @@ async function loadGLBByFileId(fileId){
       URL.revokeObjectURL(url);
     }
 
-    el.statusLabel.textContent = `Loaded: ${meta.name}`;
+    el.statusLabel.textContent = 'Loaded: ${meta.name}';
 
     let sheetId = extractSpreadsheetId(el.inputSheet.value.trim());
     if(!sheetId){
       sheetId = await findOrCreateSpreadsheetInGlbFolder(meta);
       el.inputSheet.value = sheetId;
-      toast('スプレッドシートを同階層に用意しました');
+      toast(\'スプレッドシートを同階層に用意しました\');
     }
     await refreshCaptionLists(sheetId);
     await loadPinsFromActiveSheet(sheetId);
   }catch(err){
     console.error(err);
-    el.statusLabel.textContent = 'Load failed';
-    alert('GLB読み込みに失敗しました：' + (((err)&&(err).message) || 'unknown error'));
+    el.statusLabel.textContent = \'Load failed\';
+    alert(\'GLB読み込みに失敗しました：\' + (((err)&&(err).message) || \'unknown error\'));
   }finally{
     el.loading.hidden = true;
   }
 }
 
 /* ========= Save viewer prefs ========= */
-['viewFront','viewBack','viewLeft','viewRight','viewTop','viewBottom'].forEach(id=>{
-  document.getElementById(id).addEventListener('click', ()=> debouncedSaveMaterials());
+[\'viewFront\',\'viewBack\',\'viewLeft\',\'viewRight\',\'viewTop\',\'viewBottom\'].forEach(id=>{
+  document.getElementById(id).addEventListener(\'click\', ()=> debouncedSaveMaterials());
 });
 
 /* ========= Entry ========= */
 function buildColorPresetsOnce(){
-  el.colorPresets.innerHTML='';
+  el.colorPresets.innerHTML=\'\';
   PRESET_COLORS.forEach(c=>{
-    const b=document.createElement('button');
-    b.style.width='18px'; b.style.height='18px';
-    b.style.borderRadius='999px'; b.style.border='2px solid #223146';
+    const b=document.createElement(\'button\');
+    b.style.width=\'18px\'; b.style.height=\'18px\';
+    b.style.borderRadius=\'999px\'; b.style.border=\'2px solid #223146\';
     b.style.background=c; b.title=c;
-    b.addEventListener('click',()=>{
+    b.addEventListener(\'click\',()=>{
       currentColor=c;
       if(selectedPinId){
         const p=pins.find(x=>x.id===selectedPinId);
@@ -1797,3 +1865,4 @@ viewerInitWrap();
 </script>
 </body>
 </html>
+'
