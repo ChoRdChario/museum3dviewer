@@ -74,51 +74,6 @@
     @media (max-width:1100px){
       .main{grid-template-columns:1fr; grid-template-rows: 360px 1fr 480px}
     }
-  
-    /* === Mobile bottom sheet & FAB === */
-    @media (max-width: 900px){
-      .main{ grid-template-columns: 1fr; }
-      #leftToolbox{ display:none; }
-      #rightCaption{ display:none; }
-      #mobileFab{ display:flex; }
-    }
-    #mobileFab{
-      position: fixed; right: 16px; bottom: 16px; z-index: 3000;
-      display:none; align-items:center; justify-content:center;
-      width:56px; height:56px; border-radius:999px;
-      background:#2a7bbb; color:white; font-weight:700; box-shadow: var(--shadow);
-      user-select:none; pointer-events:auto;
-    }
-    #mobileFab:active{ transform: translateY(1px); }
-    .bs-backdrop{ position: fixed; inset:0; background: rgba(0,0,0,.35); z-index: 2998; display:none; }
-    .bs-backdrop.show{ display:block; }
-    .bottom-sheet{
-      position: fixed; left:0; right:0; bottom:0; z-index: 2999;
-      height: 60vh; max-height: 80vh;
-      background: var(--panel); border-top-left-radius: 16px; border-top-right-radius:16px;
-      border: 1px solid #1e2837; transform: translateY(calc(100% - 54px)); transition: transform .25s ease;
-      display:flex; flex-direction:column; overflow:hidden;
-    }
-    .bottom-sheet.expanded{ transform: translateY(0); }
-    .bs-handle{ height: 54px; display:flex; align-items:center; justify-content:center; cursor:pointer; }
-    .bs-handle::before{ content:''; width:42px; height:4px; border-radius: 999px; background: rgba(255,255,255,.25); }
-    #bottomSheetContent{ flex:1; overflow:auto; padding:10px; }
-    .bs-tabs{ display:flex; border-bottom:1px solid #1e2837; }
-    .bs-tab{ flex:1; text-align:center; padding:10px; cursor:pointer; user-select:none; }
-    .bs-tab[aria-selected="true"]{ background:#0f1722; font-weight:700; }
-
-      #previewReset{ order:-1; }
-  
-    /* Mobile: place caption below viewer */
-    @media (max-width: 900px){
-      #rightCaption{ display:none; }
-      .mobile-caption{ display:block; margin-top:8px; }
-    }
-    @media (min-width: 901px){
-      .mobile-caption{ display:none; }
-    }
-
-      .bs-caption-bar{ padding:8px 10px; border-bottom:1px solid #1e2837; }
   </style>
 
   <!-- ES Modules -->
@@ -144,21 +99,6 @@
       <span id="statusLabel" class="chip">サインイン待ち…</span>
     </div>
   </header>
-
-  <div id="mobileFab" aria-label="ツール">ツール</div>
-  <div id="backdrop" class="bs-backdrop"></div>
-  <div id="bottomSheet" class="bottom-sheet" aria-modal="true" aria-hidden="true">
-    <div class="bs-handle" id="bsHandle"></div>
-    <div id="bsTabs" class="bs-tabs" role="tablist">
-      <div id="tabTools" class="bs-tab" role="tab" aria-selected="true">編集ツール</div>
-      <div id="tabCaption" class="bs-tab" role="tab" aria-selected="false">キャプション</div>
-    </div>
-    <div id="bottomSheetContent">
-      <div id="sheetTools" role="tabpanel"></div>
-      <div id="sheetCaption" role="tabpanel" style="display:none"></div>
-    </div>
-  </div>
-
 
   <div class="main">
     <!-- 左：ツール -->
@@ -211,7 +151,6 @@
     <section class="panel" id="viewer">
       <div class="spinner" id="loading" hidden><div class="lds"></div></div>
       <canvas id="viewerCanvas"></canvas>
-  <div id="mobileCaptionBelow" class="mobile-caption"></div>
       <svg id="connector">
         <defs><filter id="dropshadow" x="-20%" y="-20%" width="140%"><feDropShadow dx="0" dy="0" stdDeviation="2" flood-color="#001a33" flood-opacity="0.9"/></filter></defs>
         <line id="connLine" x1="0" y1="0" x2="0" y2="0" style="display:none"/>
@@ -219,7 +158,6 @@
       </svg>
 
       <div id="viewerPreview" class="hidden">
-  <button id="previewClose" aria-label="閉じる" style="position:absolute;right:8px;top:8px;z-index:3;background:#162234;border:1px solid #24324b;color:#e6edf3;border-radius:10px;padding:6px 10px;cursor:pointer">閉じる</button>
         <div id="previewControls">
           <span class="small">倍率</span>
           <input id="previewZoom" type="range" min="0.1" max="3" step="0.05" value="1">
@@ -227,7 +165,7 @@
           <button id="previewReset">リセット</button>
           <span id="previewErr" class="small" style="margin-left:auto;color:#ffb4b4;display:none">画像を読み込めませんでした</span>
         </div>
-        <div id="previewWrap"><div id="previewInner"><img id="previewImg" alt="preview"/></div><div id="previewEmptyMsg" style="position:absolute;inset:0;display:none;align-items:center;justify-content:center;color:#c9d7ea;opacity:.9;font-size:.95rem;text-align:center;">画像が設定されていません</div></div>
+        <div id="previewWrap"><div id="previewInner"><img id="previewImg" alt="preview"/></div></div>
         <div class="cap">
           <div id="capTitleLine"></div>
           <div id="capBodyLine"></div>
@@ -552,148 +490,9 @@ function upscaleThumbnailUrl(u, size=2048){
 
 /* ========= UI wire ========= */
 document.getElementById('btnSignIn').addEventListener('click', startSignIn);
-const _pc = document.getElementById('previewClose'); if(_pc){ _pc.addEventListener('click', ()=>{ el.viewerPreview.classList.add('hidden'); }); }
 (async () => { ensureGIS().catch(()=>{}); ensureGapiClient().catch(()=>{}); })();
 
-function placeCaptionForMobile(){
-  if(!(window.matchMedia('(max-width: 900px)').matches)) return;
-  const below = document.getElementById('mobileCaptionBelow');
-  const right = document.getElementById('rightCaption');
-  if(below && right){
-    const body = right.querySelector('.body');
-    if(body && !below.contains(body)) below.appendChild(body);
-  }
-}
-document.addEventListener('DOMContentLoaded', placeCaptionForMobile);
-
-/* Copy caption select controls into bottom sheet (mobile) */
-function wireMobileCaptionMenu(){
-  if(!(window.matchMedia('(max-width: 900px)').matches)) return;
-  const sheetCaption = document.getElementById('sheetCaption');
-  if(!sheetCaption) return;
-  if(sheetCaption.dataset.wired==='1') return;
-
-  const btnColor = document.getElementById('btnColorFilter');
-  const listSel  = document.getElementById('listSelect');
-  const btnNew   = document.getElementById('listNew');
-  const btnDel   = document.getElementById('listDelete');
-
-  if(btnColor || listSel || btnNew || btnDel){
-    const bar = document.createElement('div');
-    bar.className = 'bs-caption-bar';
-    bar.style.display='flex';
-    bar.style.justifyContent='space-between';
-    bar.style.alignItems='center';
-    bar.style.gap='8px';
-    const left = document.createElement('div'); left.style.display='flex'; left.style.gap='8px'; left.style.alignItems='center';
-    const right = document.createElement('div'); right.style.display='flex'; right.style.gap='6px'; right.style.alignItems='center';
-
-    if(btnColor && btnColor.parentElement) left.appendChild(btnColor);
-    if(listSel  && listSel.parentElement ) right.appendChild(listSel);
-    if(btnNew   && btnNew.parentElement  ) right.appendChild(btnNew);
-    if(btnDel   && btnDel.parentElement  ) right.appendChild(btnDel);
-
-    bar.appendChild(left); bar.appendChild(right);
-    sheetCaption.appendChild(bar);
-    sheetCaption.dataset.wired='1';
-  }
-}
-document.addEventListener('DOMContentLoaded', wireMobileCaptionMenu);
-window.addEventListener('resize', wireMobileCaptionMenu, {passive:true});
-
-window.addEventListener('resize', placeCaptionForMobile, {passive:true});
-
-
-function isMobileLayout(){ return window.matchMedia('(max-width: 900px)').matches || (typeof IS_IOS!=='undefined' ? IS_IOS : false); }
-function initMobileSheet(){
-  const fab = document.getElementById('mobileFab');
-  const sheet = document.getElementById('bottomSheet');
-  const tabs = document.getElementById('bsTabs');
-  const tabTools = document.getElementById('tabTools');
-  const tabCaption = document.getElementById('tabCaption');
-  const content = document.getElementById('bottomSheetContent');
-  const sheetTools = document.getElementById('sheetTools');
-  const sheetCaption = document.getElementById('sheetCaption');
-  const backdrop = document.getElementById('backdrop');
-  const handle = document.getElementById('bsHandle');
-  if(!fab || !sheet || !content || !sheetTools || !sheetCaption) return;
-  if(sheet.dataset.bound==='1') return; sheet.dataset.bound='1';
-
-  const expand=()=>{ sheet.classList.add('expanded'); sheet.setAttribute('aria-hidden','false'); backdrop && backdrop.classList.add('show'); };
-  const collapse=()=>{ sheet.classList.remove('expanded'); sheet.setAttribute('aria-hidden','true'); backdrop && backdrop.classList.remove('show'); };
-
-  fab.addEventListener('click', expand);
-  handle && handle.addEventListener('click', ()=>{ if(sheet.classList.contains('expanded')) collapse(); else expand(); });
-  backdrop && backdrop.addEventListener('click', collapse);
-
-  // Move panel bodies into tabs
-  const right = document.getElementById('rightCaption'); if(right){ /* body is placed below viewer on mobile */ }
-  const left  = document.getElementById('leftToolbox'); if(left){ const bodyL = left.querySelector('.body'); if(bodyL && !sheetTools.contains(bodyL)) sheetTools.appendChild(bodyL); }
-
-  // Tabs
-  const showTools=()=>{ tabTools.setAttribute('aria-selected','true'); tabCaption.setAttribute('aria-selected','false'); sheetTools.style.display='block'; sheetCaption.style.display='none'; };
-  const showCaption=()=>{ tabTools.setAttribute('aria-selected','false'); tabCaption.setAttribute('aria-selected','true'); sheetTools.style.display='none'; sheetCaption.style.display='block'; };
-  tabTools.addEventListener('click', showTools);
-  tabCaption.addEventListener('click', showCaption);
-  showTools();
-}
-document.addEventListener('DOMContentLoaded', ()=>{ try{ if(isMobileLayout()) initMobileSheet(); }catch(e){} });
-window.addEventListener('resize', ()=>{ try{ if(isMobileLayout()) initMobileSheet(); }catch(e){} }, {passive:true});
-
-
 /* ========= Viewer ========= */
-
-function layoutCaptionMobileMenus(){
-  if(!(window.matchMedia('(max-width: 900px)').matches)) return;
-  const rightBody = document.querySelector('#rightCaption .body');
-  const sheetCap = document.getElementById('sheetCaption');
-  const below = document.getElementById('mobileCaptionBelow');
-  if(!rightBody || !sheetCap || !below) return;
-  // header bar with buttons/selects
-  const headerBar = rightBody.querySelector(':scope > .flex');
-  if(headerBar && !sheetCap.contains(headerBar)) sheetCap.appendChild(headerBar);
-  // color filter
-  const filterPanel = rightBody.querySelector('#colorFilterPanel');
-  if(filterPanel && !sheetCap.contains(filterPanel)) sheetCap.appendChild(filterPanel);
-  // pins list
-  const pinsList = rightBody.querySelector('#pinsList');
-  if(pinsList && !sheetCap.contains(pinsList)) sheetCap.appendChild(pinsList);
-  // editor and noSelection below viewer
-  const editor = rightBody.querySelector('#editor');
-  const noSel = rightBody.querySelector('#noSelection');
-  if(noSel && !below.contains(noSel)) below.appendChild(noSel);
-  if(editor && !below.contains(editor)) below.appendChild(editor);
-}
-document.addEventListener('DOMContentLoaded', ()=>{ try{ layoutCaptionMobileMenus(); }catch(e){} });
-window.addEventListener('resize', ()=>{ try{ layoutCaptionMobileMenus(); }catch(e){} }, {passive:true});
-
-
-// ========== GLB reload robustness ==========
-let currentLoadToken = 0;
-function disposeCurrentModel(){
-  try{
-    if(currentModel){
-      currentModel.traverse((o)=>{
-        if(o.geometry){ o.geometry.dispose?.(); }
-        if(o.material){
-          const mats = Array.isArray(o.material)? o.material : [o.material];
-          mats.forEach(m=>{
-            if(m.map) m.map.dispose?.();
-            if(m.normalMap) m.normalMap.dispose?.();
-            if(m.roughnessMap) m.roughnessMap.dispose?.();
-            if(m.metalnessMap) m.metalnessMap.dispose?.();
-            if(m.emissiveMap) m.emissiveMap.dispose?.();
-            if(m.aoMap) m.aoMap.dispose?.();
-          });
-        }
-      });
-      scene.remove(currentModel);
-      currentModel = null;
-    }
-  }catch(e){ /* ignore */ }
-}
-function sanitizeDriveId(id){ return (id||'').replace(/[^A-Za-z0-9_-]/g,''); }
-
 let rendererLoopId=null;
 function viewerInit(){
   renderer = new THREE.WebGLRenderer({
@@ -883,147 +682,15 @@ function updateConnector(){
 
 /* ========= Preview ========= */
 let previewZoom = 1.0;
+function sizePreviewToZoomed(){ try{ const vp=el.viewerPreview, iw=el.previewImg?.naturalWidth||0, ih=el.previewImg?.naturalHeight||0; if(!vp||!iw||!ih) return; const zw=iw*previewZoom, zh=ih*previewZoom; vp.style.width=Math.max(240, zw)+'px'; vp.style.height=Math.max(240, zh+120)+'px'; }catch{} }
 function applyPreviewZoom(){ if(!el.previewInner) return; el.previewInner.style.transform = `translate(${previewOffsetX}px, ${previewOffsetY}px) scale(${previewZoom})`; sizePreviewToZoomed && sizePreviewToZoomed(); })`; }
-
-// ===== Gestures: pan & pinch & double-tap =====
-let previewOffsetX = 0, previewOffsetY = 0;
-const _origApplyPreviewZoom = applyPreviewZoom;
-function sizePreviewToZoomed(){
-  const vp = el.viewerPreview;
-  const imgW = el.previewImg.naturalWidth||0, imgH = el.previewImg.naturalHeight||0;
-  if(!imgW || !imgH){ vp.style.width='auto'; vp.style.height='auto'; return; }
-  const zw = imgW * previewZoom, zh = imgH * previewZoom;
-  const maxW = Math.max(320, Math.floor(window.innerWidth*0.9));
-  const maxH = Math.max(240, Math.floor(window.innerHeight*0.8));
-  vp.style.width  = Math.min(maxW, Math.max(zw, 240)) + 'px';
-  vp.style.height = Math.min(maxH, Math.max(zh + 120, 240)) + 'px'; // + controls/caption approx
-}
-applyPreviewZoom = function(){
-  _origApplyPreviewZoom();
-  // include pan translate
-  el.previewInner.style.transform = `translate(${previewOffsetX}px, ${previewOffsetY}px) scale(${previewZoom})`;
-  sizePreviewToZoomed();
-};
-
-(function wirePreviewGestures(){
-  const wrap = document.getElementById('previewWrap');
-  if(!wrap) return;
-  let mode = 'idle';
-  let startZoom = 1;
-  let startOffsetX = 0, startOffsetY = 0;
-  let startDist = 0;
-  let startCx = 0, startCy = 0;
-  let lastTap = 0;
-  const clamp = (v,min,max)=> Math.max(min, Math.min(max, v));
-
-  wrap.addEventListener('touchstart', (ev)=>{
-    if(ev.touches.length===1){
-      const now = performance.now();
-      if(now - lastTap < 300){
-        // double-tap: fit-to-width <-> previous
-        const prev = parseFloat(el.previewZoom.value);
-        const w = wrap.clientWidth;
-        const imgW = el.previewImg.naturalWidth||0;
-        if(imgW){
-          const fitW = Math.max(0.1, (w-16)/imgW);
-          const target = Math.abs(prev - fitW) < 0.01 ? 1 : fitW;
-          previewZoom = clamp(target, parseFloat(el.previewZoom.min)||0.1, parseFloat(el.previewZoom.max)||3);
-          el.previewZoom.value = String(previewZoom);
-          el.previewZoomVal.textContent = previewZoom.toFixed(2) + '×';
-          applyPreviewZoom();
-        }
-        lastTap = 0; ev.preventDefault(); return;
-      }
-      lastTap = now;
-      mode = 'pan';
-      startOffsetX = previewOffsetX; startOffsetY = previewOffsetY;
-      // store starting position for delta
-      const t = ev.touches[0]; wrap.dataset.sx = t.clientX; wrap.dataset.sy = t.clientY;
-    } else if(ev.touches.length===2){
-      mode = 'gesture';
-      startZoom = previewZoom;
-      startOffsetX = previewOffsetX; startOffsetY = previewOffsetY;
-      const [t1,t2] = ev.touches;
-      startDist = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
-      startCx = (t1.clientX + t2.clientX)/2;
-      startCy = (t1.clientY + t2.clientY)/2;
-      ev.preventDefault();
-    }
-  }, {passive:false});
-
-  wrap.addEventListener('touchmove', (ev)=>{
-    if(mode==='pan' && ev.touches.length===1){
-      const t = ev.touches[0];
-      const sx = parseFloat(wrap.dataset.sx||t.clientX), sy = parseFloat(wrap.dataset.sy||t.clientY);
-      previewOffsetX = startOffsetX + (t.clientX - sx);
-      previewOffsetY = startOffsetY + (t.clientY - sy);
-      applyPreviewZoom();
-    } else if(mode==='gesture' && ev.touches.length===2){
-      const [t1,t2] = ev.touches;
-      const dist = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY) || 1;
-      const cx = (t1.clientX + t2.clientX)/2;
-      const cy = (t1.clientY + t2.clientY)/2;
-      const scale = dist / (startDist||1);
-      const min = parseFloat(el.previewZoom.min)||0.1;
-      const max = parseFloat(el.previewZoom.max)||3;
-      previewZoom = clamp(startZoom * scale, min, max);
-      el.previewZoom.value = String(previewZoom);
-      el.previewZoomVal.textContent = previewZoom.toFixed(2) + '×';
-      // follow center shift as pan
-      previewOffsetX = startOffsetX + (cx - startCx);
-      previewOffsetY = startOffsetY + (cy - startCy);
-      applyPreviewZoom(); ev.preventDefault();
-    }
-  }, {passive:false});
-
-  wrap.addEventListener('touchend', (ev)=>{
-    if(ev.touches.length===0) mode='idle';
-    if(ev.touches.length===1 && mode==='gesture'){ mode='pan'; }
-  }, {passive:true});
-})();
-
 el.previewZoom.addEventListener('input', ()=>{ previewZoom = parseFloat(el.previewZoom.value)||1; el.previewZoomVal.textContent = previewZoom.toFixed(2) + '×'; applyPreviewZoom(); });
 el.previewReset.addEventListener('click', ()=>{ previewZoom = 1; el.previewZoom.value = 1; el.previewZoomVal.textContent = '1.00×'; applyPreviewZoom(); });
 
-
 async function setPreview(ref, p){
+  if(!ref){ el.viewerPreview.classList.add('hidden'); return; }
   try{
-    const empty = document.getElementById('previewEmptyMsg');
-    if(empty) empty.style.display='none';
     el.previewErr.style.display='none';
-
-    if(!ref){
-      if(empty) empty.style.display='flex';
-      el.previewImg.removeAttribute('src');
-      el.capTitleLine.textContent = p?.title || '';
-      el.capBodyLine.textContent  = p?.body  || '';
-      el.viewerPreview.classList.remove('hidden');
-      applyPreviewZoom(); updateConnector();
-      return;
-    }
-
-    // Handlers first, then assign src
-    el.previewImg.onload = ()=>{
-      const empty=document.getElementById('previewEmptyMsg');
-      if(empty) empty.style.display='none';
-      el.previewErr.style.display='none';
-      // initial zoom to long edge <= 500px
-      const nw = el.previewImg.naturalWidth||0, nh = el.previewImg.naturalHeight||0;
-      if(nw && nh){
-        const target = Math.min(1, 500/Math.max(nw,nh));
-        previewZoom = target || 1;
-        el.previewZoom.value = String(previewZoom);
-        el.previewZoomVal.textContent = previewZoom.toFixed(2)+'×';
-      }
-      previewOffsetX=0; previewOffsetY=0;
-      applyPreviewZoom();
-    };
-    el.previewImg.onerror = ()=>{
-      el.previewErr.style.display='inline';
-      const empty=document.getElementById('previewEmptyMsg');
-      if(empty) empty.style.display='none';
-    };
-
     const src = await resolveImageObjectURL(ref, {preferThumb:false});
 el.previewImg.onload = ()=>{
   const wrap = document.getElementById('previewWrap') || el.viewerPreview;
@@ -1037,7 +704,7 @@ el.previewImg.onload = ()=>{
   previewOffsetX = 0; previewOffsetY = 0; applyPreviewZoom();
 };
 el.previewImg.src = src;
-
+    el.previewImg.onerror = ()=>{ el.previewErr.style.display='inline'; };
     el.capTitleLine.textContent = p?.title || '';
     el.capBodyLine.textContent  = p?.body  || '';
     el.viewerPreview.classList.remove('hidden');
@@ -1048,7 +715,6 @@ el.previewImg.src = src;
     el.viewerPreview.classList.remove('hidden');
   }
 }
-
 function updateViewerPreviewForPin(p){ setPreview(p && p.images && p.images[0] ? p.images[0] : null, p); }
 
 /* ========= Image resolve & Drive ========= */
@@ -1246,7 +912,7 @@ function applyMaterialUIFromSelection(){
   ['matUnlit','matDoubleSided','matOpacity','matInvert','matWhiteTransparent','matThreshold']
     .forEach(id=>{ document.getElementById(id).disabled = disable || viewOnly; });
   if(disable) return;
-  const st = matState.get(key) || { unlit:false,doubleSided:false,opacity:1,invertRGB:false,whiteToAlpha:false,alphaTest:0 };
+  const st = matState.get(key) || { unlit:false, doubleSided:false, opacity:1, invertRGB:false, whiteToAlpha:false, alphaTest:0 };
   el.matUnlit.checked = !!st.unlit;
   el.matDoubleSided.checked = !!st.doubleSided;
   el.matOpacity.value = String(st.opacity ?? 1);
@@ -2021,8 +1687,6 @@ el.btnDeletePin.addEventListener('click', async ()=>{
 
 /* ========= GLB Load (LOW-MEM for iOS) ========= */
 async function loadGLBByFileId(fileId){
-  fileId = sanitizeDriveId(fileId);
-  const myToken = ++currentLoadToken;
   if(!accessToken){ alert('先にサインインしてください'); return; }
   if(!fileId){ alert('GLBの fileId または共有URLを入力してください'); return; }
   el.loading.hidden = false;
