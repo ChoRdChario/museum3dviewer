@@ -74,7 +74,32 @@
     @media (max-width:1100px){
       .main{grid-template-columns:1fr; grid-template-rows: 360px 1fr 480px}
     }
-  </style>
+  
+@media (max-width: 900px){
+  #leftToolbox{ display:none; }
+  #rightCaption{ display:none; }
+  .mobile-caption{ display:block; margin-top:8px; }
+  .bottom-sheet{
+    position: fixed; left:0; right:0; bottom:0; z-index: 2999;
+    height: 60vh; max-height: 80vh;
+    background: var(--panel, #0b1320);
+    border-top-left-radius: 16px; border-top-right-radius: 16px;
+    border: 1px solid #1e2837;
+    transform: translateY(calc(100% - 54px)); transition: transform .25s ease;
+    display:flex; flex-direction:column; overflow:hidden;
+  }
+  .bottom-sheet.expanded{ transform: translateY(0); }
+  .bs-backdrop{ position: fixed; inset:0; background: rgba(0,0,0,.35); z-index: 2998; display:none; }
+  .bs-backdrop.show{ display:block; }
+  .bs-handle{ height: 54px; display:flex; align-items:center; justify-content:center; cursor:pointer; touch-action: manipulation; }
+  .bs-handle::before{ content:''; width:42px; height:4px; border-radius: 999px; background: rgba(255,255,255,.25); }
+  #bottomSheetContent{ flex:1; overflow:auto; padding:10px; }
+  .bs-tabs{ display:flex; border-bottom:1px solid #1e2837; }
+  .bs-tab{ flex:1; text-align:center; padding:10px; cursor:pointer; user-select:none; }
+  .bs-tab[aria-selected="true"]{ background:#0f1722; font-weight:700; }
+}
+
+</style>
 
   <!-- ES Modules -->
   <script type="importmap">
@@ -99,6 +124,19 @@
       <span id="statusLabel" class="chip">サインイン待ち…</span>
     </div>
   </header>
+<div id="backdrop" class="bs-backdrop"></div>
+<div id="bottomSheet" class="bottom-sheet" aria-modal="true" aria-hidden="true">
+  <div class="bs-handle" id="bsHandle" aria-label="メニューを展開/収納"></div>
+  <div id="bsTabs" class="bs-tabs" role="tablist">
+    <div id="tabTools" class="bs-tab" role="tab" aria-selected="true">編集ツール</div>
+    <div id="tabCaption" class="bs-tab" role="tab" aria-selected="false">キャプション</div>
+  </div>
+  <div id="bottomSheetContent">
+    <div id="sheetTools" role="tabpanel"></div>
+    <div id="sheetCaption" role="tabpanel" style="display:none"></div>
+  </div>
+</div>
+
 
   <div class="main">
     <!-- 左：ツール -->
@@ -151,6 +189,7 @@
     <section class="panel" id="viewer">
       <div class="spinner" id="loading" hidden><div class="lds"></div></div>
       <canvas id="viewerCanvas"></canvas>
+<div id="mobileCaptionBelow" class="mobile-caption"></div>
       <svg id="connector">
         <defs><filter id="dropshadow" x="-20%" y="-20%" width="140%"><feDropShadow dx="0" dy="0" stdDeviation="2" flood-color="#001a33" flood-opacity="0.9"/></filter></defs>
         <line id="connLine" x1="0" y1="0" x2="0" y2="0" style="display:none"/>
@@ -160,7 +199,7 @@
       <div id="viewerPreview" class="hidden">
         <div id="previewControls">
           <span class="small">倍率</span>
-          <input id="previewZoom" type="range" min="0.25" max="3" step="0.05" value="1">
+          <input id="previewZoom" type="range" min="0.1" max="3" step="0.05" value="1">
           <span id="previewZoomVal" class="small">1.00×</span>
           <button id="previewReset">リセット</button>
           <span id="previewErr" class="small" style="margin-left:auto;color:#ffb4b4;display:none">画像を読み込めませんでした</span>
@@ -493,6 +532,33 @@ document.getElementById('btnSignIn').addEventListener('click', startSignIn);
 (async () => { ensureGIS().catch(()=>{}); ensureGapiClient().catch(()=>{}); })();
 
 /* ========= Viewer ========= */
+
+function layoutCaptionMobileMenus(){
+  try{
+    if(!(window.matchMedia('(max-width: 900px)').matches)) return;
+    var rightBody = document.querySelector('#rightCaption .body');
+    var sheetCap = document.getElementById('sheetCaption');
+    var below = document.getElementById('mobileCaptionBelow');
+    if(!rightBody || !sheetCap || !below) return;
+    // header bar (buttons/selects)
+    var headerBar = rightBody.querySelector(':scope > .flex');
+    if(headerBar && !sheetCap.contains(headerBar)) sheetCap.appendChild(headerBar);
+    // color filter panel
+    var filterPanel = rightBody.querySelector('#colorFilterPanel');
+    if(filterPanel && !sheetCap.contains(filterPanel)) sheetCap.appendChild(filterPanel);
+    // pins list
+    var pinsList = rightBody.querySelector('#pinsList');
+    if(pinsList && !sheetCap.contains(pinsList)) sheetCap.appendChild(pinsList);
+    // editor & noSelection under viewer
+    var editor = rightBody.querySelector('#editor');
+    var noSel = rightBody.querySelector('#noSelection');
+    if(noSel && !below.contains(noSel)) below.appendChild(noSel);
+    if(editor && !below.contains(editor)) below.appendChild(editor);
+  }catch(e){}
+}
+document.addEventListener('DOMContentLoaded', function(){ try{ layoutCaptionMobileMenus(); }catch(e){} });
+window.addEventListener('resize', function(){ try{ layoutCaptionMobileMenus(); }catch(e){} }, {passive:true});
+
 let rendererLoopId=null;
 function viewerInit(){
   renderer = new THREE.WebGLRenderer({
@@ -682,7 +748,8 @@ function updateConnector(){
 
 /* ========= Preview ========= */
 let previewZoom = 1.0;
-function applyPreviewZoom(){ el.previewInner.style.transform = `scale(${previewZoom})`; }
+function sizePreviewToZoomed(){ try{ var vp=el.viewerPreview, iw=(el.previewImg?el.previewImg.naturalWidth:0)||0, ih=(el.previewImg?el.previewImg.naturalHeight:0)||0; if(!vp){ return; } if(!iw||!ih){ vp.style.width='auto'; vp.style.height='auto'; return; } var zw=iw*previewZoom, zh=ih*previewZoom; var maxW=Math.max(240, Math.floor(window.innerWidth*0.95)); var maxH=Math.max(220, Math.floor(window.innerHeight*0.8)); vp.style.width=Math.min(maxW, Math.max(zw, 240))+'px'; vp.style.height=Math.min(maxH, Math.max(zh+120, 240))+'px'; }catch(e){} }
+function applyPreviewZoom(){ try{ if(!el.previewInner) return; el.previewInner.style.transform = 'translate(' + previewOffsetX + 'px,' + previewOffsetY + 'px) scale(' + previewZoom + ')'; if(typeof sizePreviewToZoomed==='function') sizePreviewToZoomed(); }catch(e){} })`; }
 el.previewZoom.addEventListener('input', ()=>{ previewZoom = parseFloat(el.previewZoom.value)||1; el.previewZoomVal.textContent = previewZoom.toFixed(2) + '×'; applyPreviewZoom(); });
 el.previewReset.addEventListener('click', ()=>{ previewZoom = 1; el.previewZoom.value = 1; el.previewZoomVal.textContent = '1.00×'; applyPreviewZoom(); });
 
@@ -691,7 +758,19 @@ async function setPreview(ref, p){
   try{
     el.previewErr.style.display='none';
     const src = await resolveImageObjectURL(ref, {preferThumb:false});
-    el.previewImg.src = src;
+el.previewImg.onload = function(){
+  try{
+    var nw = el.previewImg.naturalWidth||0, nh = el.previewImg.naturalHeight||0;
+    if(nw && nh){
+      var target = Math.min(1, 500/Math.max(nw,nh));
+      var minz = 0.1; if(el.previewZoom && el.previewZoom.min){ var mz=parseFloat(el.previewZoom.min); if(!isNaN(mz)) minz=mz; }
+      previewZoom = Math.max(minz, target||1);
+      if(el.previewZoom){ el.previewZoom.value=String(previewZoom); if(el.previewZoomVal) el.previewZoomVal.textContent = previewZoom.toFixed(2)+'×'; }
+      previewOffsetX=0; previewOffsetY=0; applyPreviewZoom();
+    }
+  }catch(e){}
+};
+el.previewImg.src = src;
     el.previewImg.onerror = ()=>{ el.previewErr.style.display='inline'; };
     el.capTitleLine.textContent = ((p)&&(p).title) || '';
     el.capBodyLine.textContent  = ((p)&&(p).body)  || '';
