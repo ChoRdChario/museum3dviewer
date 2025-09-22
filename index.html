@@ -74,54 +74,7 @@
     @media (max-width:1100px){
       .main{grid-template-columns:1fr; grid-template-rows: 360px 1fr 480px}
     }
-  
-    /* === Mobile bottom sheet & FAB === */
-    @media (max-width: 900px){
-      .main{ grid-template-columns: 1fr; }
-      #leftToolbox{ display:none; }
-      #rightCaption{ display:none; }
-      #mobileFab{ display:flex; }
-    }
-    #mobileFab{
-      position: fixed; right: 16px; bottom: 16px; z-index: 3000;
-      display:none; align-items:center; justify-content:center;
-      width:56px; height:56px; border-radius:999px;
-      background:#2a7bbb; color:white; font-weight:700; box-shadow: var(--shadow);
-      user-select:none; pointer-events:auto;
-    }
-    #mobileFab:active{ transform: translateY(1px); }
-    .bs-backdrop{ position: fixed; inset:0; background: rgba(0,0,0,.35); z-index: 2998; display:none; }
-    .bs-backdrop.show{ display:block; }
-    .bottom-sheet{
-      position: fixed; left:0; right:0; bottom:0; z-index: 2999;
-      height: 60vh; max-height: 80vh;
-      background: var(--panel); border-top-left-radius: 16px; border-top-right-radius:16px;
-      border: 1px solid #1e2837; transform: translateY(calc(100% - 54px)); transition: transform .25s ease;
-      display:flex; flex-direction:column; overflow:hidden;
-    }
-    .bottom-sheet.expanded{ transform: translateY(0); }
-    .bs-handle{ height: 54px; display:flex; align-items:center; justify-content:center; cursor:pointer; }
-    .bs-handle::before{ content:''; width:42px; height:4px; border-radius: 999px; background: rgba(255,255,255,.25); }
-    #bottomSheetContent{ flex:1; overflow:auto; padding:10px; }
-    .bs-tabs{ display:flex; border-bottom:1px solid #1e2837; }
-    .bs-tab{ flex:1; text-align:center; padding:10px; cursor:pointer; user-select:none; }
-    .bs-tab[aria-selected="true"]{ background:#0f1722; font-weight:700; }
-
-      #previewReset{ order:-1; }
-  
-    /* Mobile: place caption below viewer */
-    @media (max-width: 900px){
-      #rightCaption{ display:none; }
-      .mobile-caption{ display:block; margin-top:8px; }
-    }
-    @media (min-width: 901px){
-      .mobile-caption{ display:none; }
-    }
-
-      .bs-caption-bar{ padding:8px 10px; border-bottom:1px solid #1e2837; }
-  
-@media (max-width: 900px){ #viewer{ min-height: calc(100vw * 1.8); } }
-</style>
+  </style>
 
   <!-- ES Modules -->
   <script type="importmap">
@@ -146,21 +99,6 @@
       <span id="statusLabel" class="chip">サインイン待ち…</span>
     </div>
   </header>
-
-  <div id="mobileFab" aria-label="ツール">ツール</div>
-  <div id="backdrop" class="bs-backdrop"></div>
-  <div id="bottomSheet" class="bottom-sheet" aria-modal="true" aria-hidden="true">
-    <div class="bs-handle" id="bsHandle"></div>
-    <div id="bsTabs" class="bs-tabs" role="tablist">
-      <div id="tabTools" class="bs-tab" role="tab" aria-selected="true">編集ツール</div>
-      <div id="tabCaption" class="bs-tab" role="tab" aria-selected="false">キャプション</div>
-    </div>
-    <div id="bottomSheetContent">
-      <div id="sheetTools" role="tabpanel"></div>
-      <div id="sheetCaption" role="tabpanel" style="display:none"></div>
-    </div>
-  </div>
-
 
   <div class="main">
     <!-- 左：ツール -->
@@ -213,27 +151,21 @@
     <section class="panel" id="viewer">
       <div class="spinner" id="loading" hidden><div class="lds"></div></div>
       <canvas id="viewerCanvas"></canvas>
-  <div id="mobileCaptionBelow" class="mobile-caption"></div>
       <svg id="connector">
         <defs><filter id="dropshadow" x="-20%" y="-20%" width="140%"><feDropShadow dx="0" dy="0" stdDeviation="2" flood-color="#001a33" flood-opacity="0.9"/></filter></defs>
         <line id="connLine" x1="0" y1="0" x2="0" y2="0" style="display:none"/>
         <circle id="connDot" r="3" cx="0" cy="0" style="display:none"/>
       </svg>
 
-      <div id="viewerPreview"
-     style="position:relative;">
-  <div id="previewNoImageMsg" style="display:none;position:absolute;inset:0;align-items:center;justify-content:center;opacity:.75;">画像が設定されていません</div>
-</div>
-<div id="viewerPreview" class="hidden">
-  <button id="previewClose" aria-label="閉じる" style="position:absolute;right:8px;top:8px;z-index:3;background:#162234;border:1px solid #24324b;color:#e6edf3;border-radius:10px;padding:6px 10px;cursor:pointer">閉じる</button>
+      <div id="viewerPreview" class="hidden">
         <div id="previewControls">
           <span class="small">倍率</span>
-          <input id="previewZoom" type="range" min="0.05" max="3" step="0.05" value="1">
+          <input id="previewZoom" type="range" min="0.25" max="3" step="0.05" value="1">
           <span id="previewZoomVal" class="small">1.00×</span>
           <button id="previewReset">リセット</button>
           <span id="previewErr" class="small" style="margin-left:auto;color:#ffb4b4;display:none">画像を読み込めませんでした</span>
         </div>
-        <div id="previewWrap"><div id="previewInner"><img id="previewImg" alt="preview"/></div><div id="previewEmptyMsg" style="position:absolute;inset:0;display:none;align-items:center;justify-content:center;color:#c9d7ea;opacity:.9;font-size:.95rem;text-align:center;">画像が設定されていません</div></div>
+        <div id="previewWrap"><div id="previewInner"><img id="previewImg" alt="preview"/></div><div id="previewNoImageMsg" style="position:absolute;inset:0;display:none;align-items:center;justify-content:center;opacity:.75;">画像が設定されていません</div></div>
         <div class="cap">
           <div id="capTitleLine"></div>
           <div id="capBodyLine"></div>
@@ -394,6 +326,40 @@ async function ensureTokenClient() {
         accessToken = resp.access_token;
         document.getElementById('gate').style.display = 'none';
         const viewOnly = new URLSearchParams(location.search).get('view') === '1';
+
+
+function onClickLoadGLB(){
+  try{
+    const raw = (el.inputGLB && el.inputGLB.value || '').trim();
+    if(!raw){ toast('GLBのファイルIDまたはURLを入力してください'); return; }
+    const id = extractDriveFileId(raw) || raw;
+    if(!id){ toast('GLBのファイルID/URLが不正です'); return; }
+    if(typeof loadGLBByFileId === 'function'){
+      loadGLBByFileId(id).catch(err=>{ console.error(err); alert('GLBの読み込みに失敗しました'); });
+    }else if(typeof loadGLB === 'function'){
+      loadGLB(id);
+    }else{
+      alert('読み込み関数が見つかりません (loadGLBByFileId)');
+    }
+  }catch(e){ console.error('onClickLoadGLB', e); }
+}
+document.addEventListener('DOMContentLoaded', function(){
+  try{
+    if(el && el.btnLoad && !el.btnLoad.dataset.bound){
+      el.btnLoad.dataset.bound='1';
+      el.btnLoad.addEventListener('click', onClickLoadGLB);
+    } else {
+      var btn = document.getElementById('btnLoad');
+      if(btn && !btn.dataset.bound){
+        btn.dataset.bound='1';
+        btn.addEventListener('click', onClickLoadGLB);
+      }
+    }
+  }catch(e){}
+});
+
+
+
         document.getElementById('statusLabel').textContent = viewOnly ? '閲覧モード' : 'Ready';
         ['btnLoad','btnTogglePins','projOrtho','listSelect'].forEach(id=> document.getElementById(id).removeAttribute('disabled'));
         if(!viewOnly){
@@ -495,7 +461,7 @@ const el = {
   listSelect: document.getElementById('listSelect'),
   listNew: document.getElementById('listNew'),
   listDelete: document.getElementById('listDelete'),
-}
+};
 const viewOnly = new URLSearchParams(location.search).get('view') === '1';
 
 /* ================== Viewer State ================== */
@@ -558,168 +524,9 @@ function upscaleThumbnailUrl(u, size=2048){
 
 /* ========= UI wire ========= */
 document.getElementById('btnSignIn').addEventListener('click', startSignIn);
-const _pc = document.getElementById('previewClose'); if(_pc){ _pc.addEventListener('click', ()=>{ el.viewerPreview.classList.add('hidden'); }); }
 (async () => { ensureGIS().catch(()=>{}); ensureGapiClient().catch(()=>{}); })();
 
-function placeCaptionForMobile(){
-  if(!(window.matchMedia('(max-width: 900px)').matches)) return;
-  const below = document.getElementById('mobileCaptionBelow');
-  const right = document.getElementById('rightCaption');
-  if(below && right){
-    const body = right.querySelector('.body');
-    if(body && !below.contains(body)) below.appendChild(body);
-  }
-}
-document.addEventListener('DOMContentLoaded', placeCaptionForMobile);
-
-/* Copy caption select controls into bottom sheet (mobile) */
-function wireMobileCaptionMenu(){
-  if(!(window.matchMedia('(max-width: 900px)').matches)) return;
-  const sheetCaption = document.getElementById('sheetCaption');
-  if(!sheetCaption) return;
-  if(sheetCaption.dataset.wired==='1') return;
-
-  const btnColor = document.getElementById('btnColorFilter');
-  const listSel  = document.getElementById('listSelect');
-  const btnNew   = document.getElementById('listNew');
-  const btnDel   = document.getElementById('listDelete');
-
-  if(btnColor || listSel || btnNew || btnDel){
-    const bar = document.createElement('div');
-    bar.className = 'bs-caption-bar';
-    bar.style.display='flex';
-    bar.style.justifyContent='space-between';
-    bar.style.alignItems='center';
-    bar.style.gap='8px';
-    const left = document.createElement('div'); left.style.display='flex'; left.style.gap='8px'; left.style.alignItems='center';
-    const right = document.createElement('div'); right.style.display='flex'; right.style.gap='6px'; right.style.alignItems='center';
-
-    if(btnColor && btnColor.parentElement) left.appendChild(btnColor);
-    if(listSel  && listSel.parentElement ) right.appendChild(listSel);
-    if(btnNew   && btnNew.parentElement  ) right.appendChild(btnNew);
-    if(btnDel   && btnDel.parentElement  ) right.appendChild(btnDel);
-
-    bar.appendChild(left); bar.appendChild(right);
-    sheetCaption.appendChild(bar);
-    sheetCaption.dataset.wired='1';
-  }
-}
-document.addEventListener('DOMContentLoaded', wireMobileCaptionMenu);
-window.addEventListener('resize', wireMobileCaptionMenu, {passive:true});
-
-window.addEventListener('resize', placeCaptionForMobile, {passive:true});
-
-
-function isMobileLayout(){ return window.matchMedia('(max-width: 900px)').matches || (typeof IS_IOS!=='undefined' ? IS_IOS : false); }
-function initMobileSheet(){
-  const fab = document.getElementById('mobileFab');
-  const sheet = document.getElementById('bottomSheet');
-  const tabs = document.getElementById('bsTabs');
-  const tabTools = document.getElementById('tabTools');
-  const tabCaption = document.getElementById('tabCaption');
-  const content = document.getElementById('bottomSheetContent');
-  const sheetTools = document.getElementById('sheetTools');
-  const sheetCaption = document.getElementById('sheetCaption');
-  const backdrop = document.getElementById('backdrop');
-  const handle = document.getElementById('bsHandle');
-  if(!fab || !sheet || !content || !sheetTools || !sheetCaption) return;
-  if(sheet.dataset.bound==='1') return; sheet.dataset.bound='1';
-
-  const expand=()=>{ sheet.classList.add('expanded'); sheet.setAttribute('aria-hidden','false'); backdrop && backdrop.classList.add('show'); }
-  const collapse=()=>{ sheet.classList.remove('expanded'); sheet.setAttribute('aria-hidden','true'); backdrop && backdrop.classList.remove('show'); };
-
-  fab.addEventListener('click', expand);
-  handle && handle.addEventListener('click', ()=>{ if(sheet.classList.contains('expanded')) collapse(); else expand(); });
-  backdrop && backdrop.addEventListener('click', collapse);
-
-  // Move panel bodies into tabs
-  const right = document.getElementById('rightCaption'); if(right){ /* body is placed below viewer on mobile */ }
-  const left  = document.getElementById('leftToolbox'); if(left){ const bodyL = left.querySelector('.body'); if(bodyL && !sheetTools.contains(bodyL)) sheetTools.appendChild(bodyL); }
-
-  // Tabs
-  const showTools=()=>{ tabTools.setAttribute('aria-selected','true'); tabCaption.setAttribute('aria-selected','false'); sheetTools.style.display='block'; sheetCaption.style.display='none'; };
-  const showCaption=()=>{ tabTools.setAttribute('aria-selected','false'); tabCaption.setAttribute('aria-selected','true'); sheetTools.style.display='none'; sheetCaption.style.display='block'; };
-  tabTools.addEventListener('click', showTools);
-  tabCaption.addEventListener('click', showCaption);
-  showTools();
-}
-document.addEventListener('DOMContentLoaded', ()=>{ try{ if(isMobileLayout()) initMobileSheet(); }catch(e){} });
-window.addEventListener('resize', ()=>{ try{ if(isMobileLayout()) initMobileSheet(); }catch(e){} }, {passive:true});
-
-
 /* ========= Viewer ========= */
-
-function ensureGLBLoadWiring(){
-  try{
-    var btn = document.getElementById('btnLoadGLB') || document.getElementById('loadGLB') || document.querySelector('[data-action="load-glb"]');
-    var fileInput = document.getElementById('fileInput') || document.getElementById('glbFileInput') || document.querySelector('input[type="file"]');
-    if(!fileInput){ return; }
-    // Click on button should open the file chooser
-    if(btn && !btn.dataset.bound){
-      btn.dataset.bound='1';
-      btn.addEventListener('click', function(e){ e.preventDefault(); fileInput.click(); });
-    }
-    // When a local file is picked, load it
-    if(!fileInput.dataset.bound){
-      fileInput.dataset.bound='1';
-      fileInput.addEventListener('change', function(){
-        try{
-          var file = (fileInput.files && fileInput.files[0]);
-          if(file){
-            if(typeof loadLocalGLB==='function'){ loadLocalGLB(file); }
-            else if(typeof loadGLB==='function'){ loadGLB(file); }
-            else if(typeof loadGLBByFileId==='function'){ /* fallback: create blob url */ var url = URL.createObjectURL(file); loadGLBByFileId({blobUrl:url, name:file.name}); }
-          }
-        }catch(err){ console.error('local glb load failed', err); }
-      }, {passive:true});
-    }
-  }catch(e){ console.error('ensureGLBLoadWiring error', e); }
-}
-document.addEventListener('DOMContentLoaded', function(){ try{ ensureGLBLoadWiring(); }catch(e){} });
-
-
-function syncToolPlacement(){
-  try{
-    var isMobile = window.matchMedia('(max-width: 900px)').matches;
-    var leftTool = document.getElementById('leftToolbox');
-    var lb = leftTool ? leftTool.querySelector('.body') : null;
-    var sheetTools = document.getElementById('sheetTools');
-    if(!leftTool || !lb || !sheetTools) return;
-    if(isMobile){
-      if(!sheetTools.contains(lb)) sheetTools.appendChild(lb);
-    }else{
-      if(!leftTool.contains(lb)) leftTool.appendChild(lb);
-    }
-  }catch(e){}
-}
-
-
-// ========== GLB reload robustness ==========
-let currentLoadToken = 0;
-function disposeCurrentModel(){
-  try{
-    if(currentModel){
-      currentModel.traverse((o)=>{
-        if(o.geometry){ (o.geometry.dispose && o.geometry.dispose()); }
-        if(o.material){
-          const mats = Array.isArray(o.material)? o.material : [o.material];
-          mats.forEach(m=>{
-            if(m.map) (m.map && m.map.dispose) && m.map.dispose();
-            if(m.normalMap) (m.normalMap && m.normalMap.dispose) && m.normalMap.dispose();
-            if(m.roughnessMap) (m.roughnessMap && m.roughnessMap.dispose) && m.roughnessMap.dispose();
-            if(m.metalnessMap) (m.metalnessMap && m.metalnessMap.dispose) && m.metalnessMap.dispose();
-            if(m.emissiveMap) (m.emissiveMap && m.emissiveMap.dispose) && m.emissiveMap.dispose();
-            if(m.aoMap) (m.aoMap && m.aoMap.dispose) && m.aoMap.dispose();
-          });
-        }
-      });
-      scene.remove(currentModel);
-      currentModel = null;
-    }
-  }catch(e){ /* ignore */ }
-}
-function sanitizeDriveId(id){ return (id||'').replace(/[^A-Za-z0-9_-]/g,''); }
-
 let rendererLoopId=null;
 function viewerInit(){
   renderer = new THREE.WebGLRenderer({
@@ -750,7 +557,7 @@ function viewerInit(){
   el.viewerCanvas.addEventListener('pointerdown', onPointerDown, { passive:false });
   el.projOrtho.addEventListener('change', ()=> { toggleProjection(el.projOrtho.checked); debouncedSaveMaterials(); });
   resize();
-  const loop = ()=>{ renderer.render(scene,camera); updateConnector(); rendererLoopId=requestAnimationFrame(loop); }
+  const loop = ()=>{ renderer.render(scene,camera); updateConnector(); rendererLoopId=requestAnimationFrame(loop); };
   loop();
 }
 function buildControls(){
@@ -758,7 +565,7 @@ function buildControls(){
   controls = new OrbitControls(camera, el.viewerCanvas);
   controls.target.set(0,0,0); controls.update();
   controls.addEventListener('change', updateConnector);
-  if(tcontrols){ scene.remove(tcontrols); (tcontrols && tcontrols.dispose) && tcontrols.dispose(); }
+  if(tcontrols){ scene.remove(tcontrols); tcontrols.dispose?.(); }
   tcontrols = new TransformControls(camera, el.viewerCanvas);
   tcontrols.setSize(0.9); tcontrols.setSpace('world');
   tcontrols.addEventListener('dragging-changed', e=>{ controls.enabled = !e.value; });
@@ -781,7 +588,7 @@ function resize(){
 }
 function renderNow(){ renderer.render(scene,camera); updateConnector(); }
 function sceneBounds(){
-  if(!currentModel){ return { center:new THREE.Vector3(0,0,0), radius: 2 } }
+  if(!currentModel){ return { center:new THREE.Vector3(0,0,0), radius: 2 }; }
   const box = new THREE.Box3().setFromObject(currentModel);
   const size = box.getSize(new THREE.Vector3());
   const center = box.getCenter(new THREE.Vector3());
@@ -832,7 +639,7 @@ function addUndo(u){ undoStack.push(u); }
 function createPin(pos,color){
   if(viewOnly) return;
   const id=`p_${Date.now()}_${Math.random().toString(36).slice(2,7)}`;
-  const pin={id,pos:pos.clone(),color:normalizeHex(color||'#ff6b6b'),title:'',body:'',images:[],mesh:null}
+  const pin={id,pos:pos.clone(),color:normalizeHex(color||'#ff6b6b'),title:'',body:'',images:[],mesh:null};
   pins.push(pin);
   filterColors.add(pin.color);
   placePinMesh(pin);
@@ -910,172 +717,18 @@ function updateConnector(){
 /* ========= Preview ========= */
 let previewZoom = 1.0;
 function applyPreviewZoom(){ el.previewInner.style.transform = `scale(${previewZoom})`; }
-
-// ===== Gestures: pan & pinch & double-tap =====
-let previewOffsetX = 0, previewOffsetY = 0;
-const _origApplyPreviewZoom = applyPreviewZoom;
-function sizePreviewToZoomed(){ try{ 
-  var vp=el.viewerPreview, iw=(el.previewImg?el.previewImg.naturalWidth:0)||0, ih=(el.previewImg?el.previewImg.naturalHeight:0)||0; 
-  if(!vp){ return; }
-  if(!iw||!ih){ vp.style.width='auto'; vp.style.height='auto'; return; }
-  var zw=iw*previewZoom, zh=ih*previewZoom; 
-  var maxW=Math.max(160, Math.floor((window.innerWidth||320)*0.95));
-  var maxH=Math.max(160, Math.floor((window.innerHeight||480)*0.8));
-  vp.style.width = Math.min(maxW, Math.max(zw, 120)) + 'px';
-  vp.style.height = Math.min(maxH, Math.max(zh + 120, 180)) + 'px';
-}catch(e){} 
-applyPreviewZoom = function(){
-  _origApplyPreviewZoom();
-  // include pan translate
-  el.previewInner.style.transform = `translate(${previewOffsetX}px, ${previewOffsetY}px) scale(${previewZoom})`;
-  sizePreviewToZoomed();
-}
-
-(function wirePreviewGestures(){
-  const wrap = document.getElementById('previewWrap');
-  if(!wrap) return;
-  let mode = 'idle';
-  let startZoom = 1;
-  let startOffsetX = 0, startOffsetY = 0;
-  let startDist = 0;
-  let startCx = 0, startCy = 0;
-  let lastTap = 0;
-  const clamp = (v,min,max)=> Math.max(min, Math.min(max, v));
-
-  wrap.addEventListener('touchstart', (ev)=>{
-    if(ev.touches.length===1){
-      const now = performance.now();
-      if(now - lastTap < 300){
-        // double-tap: fit-to-width <-> previous
-        const prev = parseFloat(el.previewZoom.value);
-        const w = wrap.clientWidth;
-        const imgW = el.previewImg.naturalWidth||0;
-        if(imgW){
-          const fitW = Math.max(0.1, (w-16)/imgW);
-          const target = Math.abs(prev - fitW) < 0.01 ? 1 : fitW;
-          previewZoom = clamp(target, parseFloat(el.previewZoom.min)||0.1, parseFloat(el.previewZoom.max)||3);
-          el.previewZoom.value = String(previewZoom);
-          el.previewZoomVal.textContent = previewZoom.toFixed(2) + '×';
-          applyPreviewZoom();
-        }
-        lastTap = 0; ev.preventDefault(); return;
-      }
-      lastTap = now;
-      mode = 'pan';
-      startOffsetX = previewOffsetX; startOffsetY = previewOffsetY;
-      // store starting position for delta
-      const t = ev.touches[0]; wrap.dataset.sx = t.clientX; wrap.dataset.sy = t.clientY;
-    } else if(ev.touches.length===2){
-      mode = 'gesture';
-      startZoom = previewZoom;
-      startOffsetX = previewOffsetX; startOffsetY = previewOffsetY;
-      const [t1,t2] = ev.touches;
-      startDist = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
-      startCx = (t1.clientX + t2.clientX)/2;
-      startCy = (t1.clientY + t2.clientY)/2;
-      ev.preventDefault();
-    }
-  }, {passive:false});
-
-  wrap.addEventListener('touchmove', (ev)=>{
-    if(mode==='pan' && ev.touches.length===1){
-      const t = ev.touches[0];
-      const sx = parseFloat(wrap.dataset.sx||t.clientX), sy = parseFloat(wrap.dataset.sy||t.clientY);
-      previewOffsetX = startOffsetX + (t.clientX - sx);
-      previewOffsetY = startOffsetY + (t.clientY - sy);
-      applyPreviewZoom();
-    } else if(mode==='gesture' && ev.touches.length===2){
-      const [t1,t2] = ev.touches;
-      const dist = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY) || 1;
-      const cx = (t1.clientX + t2.clientX)/2;
-      const cy = (t1.clientY + t2.clientY)/2;
-      const scale = dist / (startDist||1);
-      const min = parseFloat(el.previewZoom.min)||0.1;
-      const max = parseFloat(el.previewZoom.max)||3;
-      previewZoom = clamp(startZoom * scale, min, max);
-      el.previewZoom.value = String(previewZoom);
-      el.previewZoomVal.textContent = previewZoom.toFixed(2) + '×';
-      // follow center shift as pan
-      previewOffsetX = startOffsetX + (cx - startCx);
-      previewOffsetY = startOffsetY + (cy - startCy);
-      applyPreviewZoom(); ev.preventDefault();
-    }
-  }, {passive:false});
-
-  wrap.addEventListener('touchend', (ev)=>{
-    if(ev.touches.length===0) mode='idle';
-    if(ev.touches.length===1 && mode==='gesture'){ mode='pan'; }
-  }, {passive:true});
-})();
-
 el.previewZoom.addEventListener('input', ()=>{ previewZoom = parseFloat(el.previewZoom.value)||1; el.previewZoomVal.textContent = previewZoom.toFixed(2) + '×'; applyPreviewZoom(); });
 el.previewReset.addEventListener('click', ()=>{ previewZoom = 1; el.previewZoom.value = 1; el.previewZoomVal.textContent = '1.00×'; applyPreviewZoom(); });
 
-
 async function setPreview(ref, p){
+  if(!ref){ el.viewerPreview.classList.add('hidden'); return; }
   try{
-    const empty = document.getElementById('previewEmptyMsg');
-    if(empty) empty.style.display='none';
     el.previewErr.style.display='none';
-
-    if(!ref){
-      if(empty) empty.style.display='flex';
-      el.previewImg.removeAttribute('src');
-      el.capTitleLine.textContent = ((p)&&(p).title) || '';
-      el.capBodyLine.textContent  = ((p)&&(p).body)  || '';
-      el.viewerPreview.classList.remove('hidden');
-      applyPreviewZoom(); updateConnector();
-      return;
-    }
-
-    // Handlers first, then assign src
-    el.previewImg.onload = ()=>{
-      const empty=document.getElementById('previewEmptyMsg');
-      if(empty) empty.style.display='none';
-      el.previewErr.style.display='none';
-      // initial zoom to long edge <= 500px
-      const nw = el.previewImg.naturalWidth||0, nh = el.previewImg.naturalHeight||0;
-      if(nw && nh){
-        const target = Math.min(1, 500/Math.max(nw,nh));
-        previewZoom = target || 1;
-        el.previewZoom.value = String(previewZoom);
-        el.previewZoomVal.textContent = previewZoom.toFixed(2)+'×';
-      }
-      previewOffsetX=0; previewOffsetY=0;
-      applyPreviewZoom();
-    }
-    el.previewImg.onerror = ()=>{
-      el.previewErr.style.display='inline';
-      const empty=document.getElementById('previewEmptyMsg');
-      if(empty) empty.style.display='none';
-    };
-
-    if(!ref){
-  if(el.previewImg){ el.previewImg.removeAttribute('src'); }
-  var noMsg = document.getElementById('previewNoImageMsg');
-  if(noMsg){ noMsg.style.display='flex'; noMsg.textContent='画像が設定されていません'; }
-  if(el.previewErr){ el.previewErr.style.display='none'; }
-  previewOffsetX=0; previewOffsetY=0; previewZoom = Math.max(0.05, parseFloat((el.previewZoom&&el.previewZoom.min)||'0.05')||0.05);
-  if(el.previewZoom){ el.previewZoom.value = String(previewZoom); if(el.previewZoomVal) el.previewZoomVal.textContent = previewZoom.toFixed(2)+'×'; }
-  if(typeof applyPreviewZoom==='function') applyPreviewZoom();
-  return;
-}
-const src = await resolveImageObjectURL(ref, {preferThumb:false});
-el.previewImg.onload = function(){ try{ 
-  var nw=el.previewImg.naturalWidth||0, nh=el.previewImg.naturalHeight||0;
-  var viewer = document.getElementById('viewer') || document.body;
-  var vw = (viewer && viewer.clientWidth) ? viewer.clientWidth : window.innerWidth;
-  var baseW = Math.max(1, Math.floor(vw * 0.5));
-  var target = nw? Math.min(1, baseW / nw) : 1;
-  var minz = 0.05; if(el.previewZoom && el.previewZoom.min){ var mz=parseFloat(el.previewZoom.min); if(!isNaN(mz)) minz=mz; }
-  previewZoom = Math.max(minz, target||1);
-  if(el.previewZoom){ el.previewZoom.value = String(previewZoom); if(el.previewZoomVal) el.previewZoomVal.textContent = previewZoom.toFixed(2)+'×'; }
-  previewOffsetX=0; previewOffsetY=0; if(typeof applyPreviewZoom==='function') applyPreviewZoom();
-}catch(e){} };
-el.previewImg.src = src;
-
-    el.capTitleLine.textContent = ((p)&&(p).title) || '';
-    el.capBodyLine.textContent  = ((p)&&(p).body)  || '';
+    const src = await resolveImageObjectURL(ref, {preferThumb:false});
+    el.previewImg.src = src;
+    el.previewImg.onerror = ()=>{ el.previewErr.style.display='inline'; };
+    el.capTitleLine.textContent = p?.title || '';
+    el.capBodyLine.textContent  = p?.body  || '';
     el.viewerPreview.classList.remove('hidden');
     applyPreviewZoom(); updateConnector();
   }catch(e){
@@ -1084,12 +737,11 @@ el.previewImg.src = src;
     el.viewerPreview.classList.remove('hidden');
   }
 }
-
 function updateViewerPreviewForPin(p){ setPreview(p && p.images && p.images[0] ? p.images[0] : null, p); }
 
 /* ========= Image resolve & Drive ========= */
 function parseImageRef(ref){
-  if(typeof ref === 'string' && /^(blob:|data:|https?:)/i.test(ref)){ return { kind:'url', url: ref } }
+  if(typeof ref === 'string' && /^(blob:|data:|https?:)/i.test(ref)){ return { kind:'url', url: ref }; }
   if(typeof ref === 'string' && ref.startsWith('drive:')){
     const [, rest] = ref.split(':'); const [id, mime] = rest.split('|');
     return { kind:'drive', id, mime: mime||null };
@@ -1182,9 +834,9 @@ function ensureMatRecord(m){
     map: m.map || null,
     alphaMap: m.alphaMap || null,
     transparent: !!m.transparent,
-    opacity: (((m.opacity)!=null?(m.opacity):(1))),
-    alphaTest: (((m.alphaTest)!=null?(m.alphaTest):(0))),
-    side: ((m.side)!=null?(m.side):(THREE.FrontSide)),
+    opacity: (m.opacity ?? 1),
+    alphaTest: (m.alphaTest ?? 0),
+    side: m.side ?? THREE.FrontSide,
     depthWrite: m.depthWrite,
     depthTest: m.depthTest,
     blending: m.blending,
@@ -1197,7 +849,7 @@ function objectPath(node) {
   const names = [];
   let cur = node;
   while (cur && cur.parent) {
-    names.push(cur.name && cur.name.trim() ? cur.name : '_' + (((cur.uuid)&&(cur.uuid).slice)&&(cur.uuid).slice(0,8) || 'node'));
+    names.push(cur.name && cur.name.trim() ? cur.name : '_' + (cur.uuid?.slice(0,8) || 'node'));
     cur = cur.parent;
   }
   names.reverse();
@@ -1217,7 +869,7 @@ function indexMaterialsByKey(){
         materialByKey.set(key, m);
         ensureMatRecord(m);
         if(!matState.has(key)){
-          matState.set(key, { unlit:false, doubleSided:(m.side===THREE.DoubleSide), opacity:(((m.opacity)!=null?(m.opacity):(1))), invertRGB:false, whiteToAlpha:false, alphaTest:(((m.alphaTest)!=null?(m.alphaTest):(0))) });
+          matState.set(key, { unlit:false, doubleSided:(m.side===THREE.DoubleSide), opacity:(m.opacity??1), invertRGB:false, whiteToAlpha:false, alphaTest:(m.alphaTest??0) });
         }
       });
     } else {
@@ -1226,7 +878,7 @@ function indexMaterialsByKey(){
       materialByKey.set(key, obj.material);
       const m = obj.material; ensureMatRecord(m);
       if(!matState.has(key)){
-        matState.set(key, { unlit:false, doubleSided:(m.side===THREE.DoubleSide), opacity:(((m.opacity)!=null?(m.opacity):(1))), invertRGB:false, whiteToAlpha:false, alphaTest:(((m.alphaTest)!=null?(m.alphaTest):(0))) });
+        matState.set(key, { unlit:false, doubleSided:(m.side===THREE.DoubleSide), opacity:(m.opacity??1), invertRGB:false, whiteToAlpha:false, alphaTest:(m.alphaTest??0) });
       }
     }
   });
@@ -1256,10 +908,10 @@ function collectMaterials(){
       matState.set(key, {
         unlit:false,
         doubleSided:(m.side===THREE.DoubleSide),
-        opacity:(((m.opacity)!=null?(m.opacity):(1))),
+        opacity:(m.opacity??1),
         invertRGB:false,
         whiteToAlpha:false,
-        alphaTest:(((m.alphaTest)!=null?(m.alphaTest):(0)))
+        alphaTest:(m.alphaTest??0)
       });
     }
   });
@@ -1282,15 +934,15 @@ function applyMaterialUIFromSelection(){
   ['matUnlit','matDoubleSided','matOpacity','matInvert','matWhiteTransparent','matThreshold']
     .forEach(id=>{ document.getElementById(id).disabled = disable || viewOnly; });
   if(disable) return;
-  const st = matState.get(key) || { unlit:false,doubleSided:false,opacity:1,invertRGB:false,whiteToAlpha:false,alphaTest:0 }
+  const st = matState.get(key) || { unlit:false,doubleSided:false,opacity:1,invertRGB:false,whiteToAlpha:false,alphaTest:0 };
   el.matUnlit.checked = !!st.unlit;
   el.matDoubleSided.checked = !!st.doubleSided;
-  el.matOpacity.value = String(((st.opacity)!=null?(st.opacity):(1)));
-  el.matOpacityVal.textContent = (Number(((st.opacity)!=null?(st.opacity):(1)))).toFixed(2);
+  el.matOpacity.value = String(st.opacity ?? 1);
+  el.matOpacityVal.textContent = (Number(st.opacity ?? 1)).toFixed(2);
   el.matInvert.checked = !!st.invertRGB;
   el.matWhiteTransparent.checked = !!st.whiteToAlpha;
-  el.matThreshold.value = String(((st.alphaTest)!=null?(st.alphaTest):(0)));
-  el.matThresholdVal.textContent = (Number(((st.alphaTest)!=null?(st.alphaTest):(0)))).toFixed(2);
+  el.matThreshold.value = String(st.alphaTest ?? 0);
+  el.matThresholdVal.textContent = (Number(st.alphaTest ?? 0)).toFixed(2);
 }
 el.matSelect.addEventListener('change', ()=> applyMaterialUIFromSelection());
 
@@ -1298,13 +950,13 @@ async function applyMaterialFromUIToSelected(){
   const orig = getSelectedOriginalMaterial();
   if(!orig) return;
   const key = materialKeyByMaterial.get(orig);
-  const st = matState.get(key) || {}
+  const st = matState.get(key) || {};
   st.unlit = !!el.matUnlit.checked;
   st.doubleSided = !!el.matDoubleSided.checked;
-  st.opacity = Number(((el.matOpacity.value)!=null?(el.matOpacity.value):(1)));
+  st.opacity = Number(el.matOpacity.value ?? 1);
   st.invertRGB = !!el.matInvert.checked;
   st.whiteToAlpha = !!el.matWhiteTransparent.checked;
-  st.alphaTest = Number(((el.matThreshold.value)!=null?(el.matThreshold.value):(0)));
+  st.alphaTest = Number(el.matThreshold.value ?? 0);
   matState.set(key, st);
   await applyStateToMaterial(orig, st);
   renderNow();
@@ -1329,7 +981,7 @@ function copyTextureParams(from, to){
   to.magFilter = from.magFilter; to.minFilter = from.minFilter;
   to.generateMipmaps = from.generateMipmaps;
   to.anisotropy = from.anisotropy;
-  to.colorSpace = ((from.colorSpace)!=null?(from.colorSpace):(THREE.SRGBColorSpace));
+  to.colorSpace = from.colorSpace ?? THREE.SRGBColorSpace;
 }
 async function processTextureToCanvasTextureFromOriginal(originalTex, { invertRGB=false, alphaFromWhite=false, threshold=0 }){
   if(!originalTex || !originalTex.image) return null;
@@ -1396,8 +1048,8 @@ async function applyStateToMaterial(origM, st){
   mat.side = st.doubleSided ? THREE.DoubleSide : THREE.FrontSide;
   const willTransparent = (st.whiteToAlpha || (st.opacity < 1.0));
   mat.transparent = willTransparent;
-  mat.opacity = ((st.opacity)!=null?(st.opacity):(1));
-  mat.alphaTest = ((st.alphaTest)!=null?(st.alphaTest):(0));
+  mat.opacity = st.opacity ?? 1;
+  mat.alphaTest = st.alphaTest ?? 0;
   mat.depthWrite = !mat.transparent || (mat.alphaTest>0);
 
   if((st.invertRGB || st.whiteToAlpha) && matOriginals.get(origM).map){
@@ -1458,7 +1110,7 @@ async function findOrCreateSpreadsheetInGlbFolder(glbMeta){
       q, fields: 'files(id,name)',
       includeItemsFromAllDrives: true, supportsAllDrives: true, pageSize: 10,
     });
-    if (((resp.result.files)&&(resp.result.files).length)) { found = resp.result.files[0]; break; }
+    if (resp.result.files?.length) { found = resp.result.files[0]; break; }
   }
   if (found) return found.id;
 
@@ -1506,19 +1158,19 @@ async function loadSheetMeta(spreadsheetId){
       ranges: [ META_MARKER_RANGE(), META_MAT_KEY_RANGE(), META_VIEW_KEY_RANGE() ]
     });
     const vals = (get.result.valueRanges || []).map(v=>v.values||[]);
-    const matJson = ((vals[1] && vals[1][0]) ? (vals[1][0][1] || '') : '');
-    const viewJson = ((vals[2] && vals[2][0]) ? (vals[2][0][1] || '') : '');
+    const matJson = vals[1]?.[0]?.[1] || '';
+    const viewJson = vals[2]?.[0]?.[1] || '';
     const m = safeParseJSON(matJson, null);
     const materials = normalizeMaterialsJSON(m);
     const viewer = safeParseJSON(viewJson, { version:1, bgColor:'#0a0f16', projection:'perspective' });
-    return { materials, viewer }
+    return { materials, viewer };
   }catch(e){
     console.warn('loadSheetMeta failed', e);
     return { materials:{version:2,byKey:{}}, viewer:{version:1,bgColor:'#0a0f16',projection:'perspective'} };
   }
 }
 function normalizeMaterialsJSON(m){
-  if(!m) return { version:2, byKey:{} }
+  if(!m) return { version:2, byKey:{} };
   if(m.version===2 && m.byKey) return m;
   if(Array.isArray(m.items)){
     const byKey = {};
@@ -1527,10 +1179,10 @@ function normalizeMaterialsJSON(m){
       byKey[it.key] = {
         unlit: !!it.unlit,
         doubleSided: !!it.doubleSided,
-        opacity: Number(((it.opacity)!=null?(it.opacity):(1))),
+        opacity: Number(it.opacity ?? 1),
         invertRGB: !!it.invertRGB,
         whiteToAlpha: !!it.whiteToAlpha,
-        alphaTest: Number(((it.alphaTest)!=null?(it.alphaTest):(0)))
+        alphaTest: Number(it.alphaTest ?? 0)
       };
     });
     return { version:2, byKey };
@@ -1551,16 +1203,16 @@ async function saveSheetMeta(spreadsheetId, { materials, viewer }){
   });
 }
 function serializeMaterialsForSheet(){
-  const byKey = {}
+  const byKey = {};
   for(const [key, st] of matState){
     if(materialByKey.has(key)){
       byKey[key] = {
         unlit: !!st.unlit,
         doubleSided: !!st.doubleSided,
-        opacity: Number(((st.opacity)!=null?(st.opacity):(1))),
+        opacity: Number(st.opacity ?? 1),
         invertRGB: !!st.invertRGB,
         whiteToAlpha: !!st.whiteToAlpha,
-        alphaTest: Number(((st.alphaTest)!=null?(st.alphaTest):(0)))
+        alphaTest: Number(st.alphaTest ?? 0)
       };
     }
   }
@@ -1571,7 +1223,7 @@ function serializeViewerPrefs(){
     version: 1,
     bgColor: el.bgColor.value || '#0a0f16',
     projection: usingOrtho ? 'orthographic' : 'perspective'
-  }
+  };
 }
 async function applyMaterialsFromSheet(materialsData){
   if(!materialsData || !materialsData.byKey) return;
@@ -1721,7 +1373,7 @@ function rebuildPinsScene(){
   pins.forEach(p=> placePinMesh(p));
   if(tcontrols.visible && selectedPinId){
     const p=pins.find(x=>x.id===selectedPinId);
-    if(((p)&&(p).mesh)) tcontrols.attach(p.mesh); else tcontrols.detach();
+    if(p?.mesh) tcontrols.attach(p.mesh); else tcontrols.detach();
   }
   renderNow();
 }
@@ -1742,7 +1394,7 @@ async function loadPinsFromActiveSheet(spreadsheetId){
         color: normalizeHex(color || '#ff6b6b'),
         images: [],
         mesh: null
-      }
+      };
       try{ p.images = JSON.parse(imagesJson||'[]'); }catch{ p.images = []; }
       pins.push(p);
     });
@@ -1796,7 +1448,7 @@ el.btnAttach.addEventListener('click', async ()=>{
   const fileInput = el.imgLocal;
   fileInput.value = '';
   fileInput.onchange = async ()=>{
-    const file = (fileInput.files && fileInput.files[0]);
+    const file = fileInput.files?.[0];
     const p = pins.find(x=>x.id===selectedPinId);
     if(!file || !p){ return; }
     try{
@@ -1809,7 +1461,7 @@ el.btnAttach.addEventListener('click', async ()=>{
       toast('画像をアップロードしました');
       upsertPinToSheet();
     }catch(err){ console.error(err); alert('画像アップロードに失敗しました'); }
-  }
+  };
   fileInput.click();
 });
 function sanitizeName(n){ return n.replace(/[^\p{Letter}\p{Number}\s._-]+/gu,'_'); }
@@ -1824,7 +1476,7 @@ async function toUploadableBlob(file){
   return file;
 }
 async function driveMultipartUpload(blob, name, parents){
-  const meta = { name, parents: parents && parents.length ? parents : undefined }
+  const meta = { name, parents: parents && parents.length ? parents : undefined };
   const boundary = '-------loci' + Math.random().toString(36).slice(2);
   const bufMeta = new TextEncoder().encode(`\r\n--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(meta)}\r\n\r\n--${boundary}\r\nContent-Type: ${blob.type || 'application/octet-stream'}\r\n\r\n`);
   const bufTail = new TextEncoder().encode(`\r\n--${boundary}--`);
@@ -1883,7 +1535,7 @@ async function loadFolderImages(){
               const url = await resolveImageObjectURL(ref, {preferThumb:true});
               img.src = url;
             }catch{ cell.style.opacity='.5'; cell.style.pointerEvents='none'; }
-          }
+          };
         }else{
           try{
             const url = await resolveImageObjectURL(ref, {preferThumb:true});
@@ -1934,7 +1586,7 @@ async function refreshCaptionLists(spreadsheetId){
   });
   let pick = sheets.find(s => s.title === 'pins') || sheets[0];
   if (!activeSheet.sheetId) {
-    if (pick){ activeSheet = { sheetId: pick.sheetId, title: pick.title } }
+    if (pick){ activeSheet = { sheetId: pick.sheetId, title: pick.title }; }
   } else {
     const same = sheets.find(s => s.sheetId === activeSheet.sheetId);
     if (!same) {
@@ -2057,8 +1709,6 @@ el.btnDeletePin.addEventListener('click', async ()=>{
 
 /* ========= GLB Load (LOW-MEM for iOS) ========= */
 async function loadGLBByFileId(fileId){
-  fileId = sanitizeDriveId(fileId);
-  const myToken = ++currentLoadToken;
   if(!accessToken){ alert('先にサインインしてください'); return; }
   if(!fileId){ alert('GLBの fileId または共有URLを入力してください'); return; }
   el.loading.hidden = false;
@@ -2105,7 +1755,7 @@ async function loadGLBByFileId(fileId){
   }catch(err){
     console.error(err);
     el.statusLabel.textContent = 'Load failed';
-    alert('GLB読み込みに失敗しました：' + (((err)&&(err).message) || 'unknown error'));
+    alert('GLB読み込みに失敗しました：' + (err?.message || 'unknown error'));
   }finally{
     el.loading.hidden = true;
   }
@@ -2144,6 +1794,6 @@ buildColorPresetsOnce();
 function viewerInitWrap(){ viewerInit(); }
 viewerInitWrap();
 
-}</script>
+</script>
 </body>
 </html>
