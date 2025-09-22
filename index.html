@@ -160,7 +160,7 @@
       <div id="viewerPreview" class="hidden">
         <div id="previewControls">
           <span class="small">倍率</span>
-          <input id="previewZoom" type="range" min="0.25" max="3" step="0.05" value="1">
+          <input id="previewZoom" type="range" min="0.05" max="3" step="0.05" value="1">
           <span id="previewZoomVal" class="small">1.00×</span>
           <button id="previewReset">リセット</button>
           <span id="previewErr" class="small" style="margin-left:auto;color:#ffb4b4;display:none">画像を読み込めませんでした</span>
@@ -327,39 +327,6 @@ async function ensureTokenClient() {
         document.getElementById('gate').style.display = 'none';
         const viewOnly = new URLSearchParams(location.search).get('view') === '1';
 
-
-function onClickLoadGLB(){
-  try{
-    const raw = (el.inputGLB && el.inputGLB.value || '').trim();
-    if(!raw){ toast('GLBのファイルIDまたはURLを入力してください'); return; }
-    const id = extractDriveFileId(raw) || raw;
-    if(!id){ toast('GLBのファイルID/URLが不正です'); return; }
-    if(typeof loadGLBByFileId === 'function'){
-      loadGLBByFileId(id).catch(err=>{ console.error(err); alert('GLBの読み込みに失敗しました'); });
-    }else if(typeof loadGLB === 'function'){
-      loadGLB(id);
-    }else{
-      alert('読み込み関数が見つかりません (loadGLBByFileId)');
-    }
-  }catch(e){ console.error('onClickLoadGLB', e); }
-}
-document.addEventListener('DOMContentLoaded', function(){
-  try{
-    if(el && el.btnLoad && !el.btnLoad.dataset.bound){
-      el.btnLoad.dataset.bound='1';
-      el.btnLoad.addEventListener('click', onClickLoadGLB);
-    } else {
-      var btn = document.getElementById('btnLoad');
-      if(btn && !btn.dataset.bound){
-        btn.dataset.bound='1';
-        btn.addEventListener('click', onClickLoadGLB);
-      }
-    }
-  }catch(e){}
-});
-
-
-
         document.getElementById('statusLabel').textContent = viewOnly ? '閲覧モード' : 'Ready';
         ['btnLoad','btnTogglePins','projOrtho','listSelect'].forEach(id=> document.getElementById(id).removeAttribute('disabled'));
         if(!viewOnly){
@@ -462,6 +429,43 @@ const el = {
   listNew: document.getElementById('listNew'),
   listDelete: document.getElementById('listDelete'),
 };
+
+// ==== GLB load button wiring ====
+
+function onClickLoadGLB(){
+  try{
+    const raw = (el.inputGLB && el.inputGLB.value || '').trim();
+    if(!raw){ toast('GLBのファイルIDまたはURLを入力してください'); return; }
+    const id = extractDriveFileId(raw) || raw;
+    if(!id){ toast('GLBのファイルID/URLが不正です'); return; }
+    if(typeof loadGLBByFileId === 'function'){
+      loadGLBByFileId(id).catch(err=>{ console.error(err); alert('GLBの読み込みに失敗しました'); });
+    }else if(typeof loadGLB === 'function'){
+      loadGLB(id);
+    }else{
+      alert('読み込み関数が見つかりません (loadGLBByFileId)');
+    }
+  }catch(e){ console.error('onClickLoadGLB', e); }
+}
+document.addEventListener('DOMContentLoaded', function(){
+  try{
+    if(el && el.btnLoad && !el.btnLoad.dataset.bound){
+      el.btnLoad.dataset.bound='1';
+      el.btnLoad.addEventListener('click', onClickLoadGLB);
+    } else {
+      var btn = document.getElementById('btnLoad');
+      if(btn && !btn.dataset.bound){
+        btn.dataset.bound='1';
+        btn.addEventListener('click', onClickLoadGLB);
+      }
+    }
+  }catch(e){}
+});
+
+
+
+
+
 const viewOnly = new URLSearchParams(location.search).get('view') === '1';
 
 /* ================== Viewer State ================== */
@@ -868,8 +872,8 @@ async function driveFileMeta(fileId){
   return meta.result;
 }
 async function driveFileFetchBlob(fileId, retry=1){
-  const dlUrl = 'https://www.googleapis.com/drive/v3/files/${fileId}?alt=media&supportsAllDrives=true';
-  const res = await fetch(dlUrl, { headers:{ Authorization:'Bearer ${accessToken}' } });
+  const dlUrl = 'https://www.googleapis.com/drive/v3/files/\" + fileId + \"?alt=media&supportsAllDrives=true';
+  const res = await fetch(dlUrl, { headers:{ Authorization: 'Bearer ' + accessToken } });
   if(res.status === 401 && retry>0){
     try{ tokenClient && tokenClient.requestAccessToken({ prompt:\'\' }); }catch{}
     return driveFileFetchBlob(fileId, retry-1);
@@ -892,7 +896,7 @@ function extractSpreadsheetId(input){
   const m3 = input.match(/^([a-zA-Z0-9_-]{20,})$/);                if(m3) return m3[1];
   return \'\';
 }
-function makeDriveRef(id, mime){ return 'drive:${id}|${mime||''}'; }
+function makeDriveRef(id, mime){ return 'drive:' + id + '|' + (mime || ''); }
 
 /* ========= Materials ========= */
 function ensureMatRecord(m){
@@ -932,7 +936,7 @@ function indexMaterialsByKey(){
     const basePath = objectPath(obj);
     if (Array.isArray(obj.material)) {
       obj.material.forEach((m, idx)=>{
-        const key = '${basePath}#${idx}';
+        const key = basePath + '#' + idx;
         materialKeyByMaterial.set(m, key);
         materialByKey.set(key, m);
         ensureMatRecord(m);
@@ -941,7 +945,7 @@ function indexMaterialsByKey(){
         }
       });
     } else {
-      const key = '${basePath}#0';
+      const key = basePath + '#0';
       materialKeyByMaterial.set(obj.material, key);
       materialByKey.set(key, obj.material);
       const m = obj.material; ensureMatRecord(m);
@@ -967,7 +971,7 @@ function collectMaterials(){
   materials.forEach((m,idx)=>{
     const key = materialKeyByMaterial.get(m);
     if(!key) return;
-    const name = (m.name && m.name.trim()) ? m.name : 'Material_${idx}';
+    const name = (m.name && m.name.trim()) ? m.name : ('Material_' + idx);
     const opt=document.createElement(\'option\'); 
     opt.value=key;
     opt.textContent=name;
@@ -1182,7 +1186,7 @@ async function findOrCreateSpreadsheetInGlbFolder(glbMeta){
   }
   if (found) return found.id;
 
-  const name = 'LociMyu - ${glbMeta.name}';
+  const name = 'LociMyu - ' + glbMeta.name;
   const create = await gapi.client.drive.files.create({
     resource: {
       name,
@@ -1213,9 +1217,9 @@ async function findOrCreateSpreadsheetInGlbFolder(glbMeta){
 }
 
 /* ========= Meta（K/L列） 保存・復元 ========= */
-const META_MARKER_RANGE = ()=> '${activeSheet.title}!K1';
-const META_MAT_KEY_RANGE = ()=> '${activeSheet.title}!K2:L2';
-const META_VIEW_KEY_RANGE = ()=> '${activeSheet.title}!K3:L3';
+const META_MARKER_RANGE = ()=> activeSheet.title + '!K1';
+const META_MAT_KEY_RANGE = ()=> activeSheet.title + '!K2:L2';
+const META_VIEW_KEY_RANGE = ()=> activeSheet.title + '!K3:L3';
 
 function safeParseJSON(s, fallback){ try{ return s ? JSON.parse(s) : fallback; }catch{ return fallback; } }
 
