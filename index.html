@@ -766,6 +766,7 @@ async function setPreview(ref, p){
       el.viewerPreview.classList.remove('hidden');
       applyPreviewZoom(); updateConnector();
     }
+  }
     catch(e){
     console.warn('preview failed', e);
     el.previewErr.style.display='inline';
