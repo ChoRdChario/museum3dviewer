@@ -79,7 +79,7 @@
 
 /* === Desktop grid layout to stabilize panels === */
 @media (min-width: 901px){
-  body:not(.is-mobile) #appRoot .main{
+  body:not(.is-mobile) #appRoot{
     display: grid;
     grid-template-columns: 280px 1fr 360px;
     grid-template-areas: 'left main right';
@@ -87,72 +87,23 @@
     align-items: stretch;
   }
   #leftToolbox{ grid-area: left; display:flex; flex-direction:column; }
-  #viewer{ grid-area: main; }
+  #viewerWrap, #viewer{ grid-area: main; }
   #rightCaption{ grid-area: right; display:flex; flex-direction:column; }
   #bottomSheet{ display:none !important; }
-}
-
-/* Normalize panel widths inside grid */
-@media (min-width: 901px){
-  body:not(.is-mobile) #appRoot .main .panel{ width:auto; max-width: none; }
 }
 
 </style>
 
   <!-- ES Modules -->
-  <script type="importmap">
-  { "imports": {
-      "three": "https://unpkg.com/three@0.157.0/build/three.module.js",
-      "three/examples/jsm/": "https://unpkg.com/three@0.157.0/examples/jsm/"
-    } }
-  
-/* === Drive helpers: normalize FileId & token guard === */
-(function(){
-  if(window.M3D && M3D.driveHelpersInstalled) return;
-  function normalizeDriveFileId(input){
-    try{
-      if(!input) return '';
-      var s = String(input).trim();
-      // strip fragment and query early
-      s = s.replace(/[?#].*$/, '');
-      // If it's a full URL pattern
-      // - https://drive.google.com/file/d/FILEID/view?usp=...
-      var m = s.match(/\/file\/d\/([a-zA-Z0-9_-]{20,})/);
-      if(m && m[1]) return m[1];
-      // - https://drive.google.com/open?id=FILEID or ...?id=FILEID
-      m = s.match(/[?&]id=([a-zA-Z0-9_-]{20,})/);
-      if(m && m[1]) return m[1];
-      // - shortened share "https://drive.google.com/uc?id=FILEID&export=download"
-      m = s.match(/[?&]id=([a-zA-Z0-9_-]{20,})/);
-      if(m && m[1]) return m[1];
-      // If it's likely a bare id
-      if(/^[a-zA-Z0-9_-]{20,}$/.test(s)) return s;
-      return '';
-    }catch(e){ return ''; }
+  <!-- Import Maps polyfill for Safari/older browsers -->
+<script async src="https://cdn.jsdelivr.net/npm/es-module-shims@1.9.0/dist/es-module-shims.min.js"></script>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.154.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.154.0/examples/jsm/"
   }
-  window.normalizeDriveFileId = normalizeDriveFileId;
-
-  // Ensure OAuth token is set before Drive calls
-  window.ensureGapiToken = async function(){
-    try{
-      if(window.google && window.google.accounts && window.google.accounts.oauth2){
-        // if gapi has no token, try to get one via GIS token client if available
-        var tok = (window.gapi && window.gapi.client && window.gapi.client.getToken) ? window.gapi.client.getToken() : null;
-        if(!tok || !tok.access_token){
-          if(window.requestAccessToken){
-            await window.requestAccessToken();
-            tok = (window.gapi && window.gapi.client) ? window.gapi.client.getToken() : null;
-          }
-        }
-        return !!(tok && tok.access_token);
-      }
-    }catch(e){}
-    return false;
-  };
-  if(!window.M3D) window.M3D = {};
-  window.M3D.driveHelpersInstalled = true;
-})();
-
+}
 </script>
   <!-- HEIC fallback -->
   <script src="https://unpkg.com/heic2any@0.0.5/dist/heic2any.min.js"></script>
@@ -1007,16 +958,8 @@ async function driveFileMeta(fileId){
   });
   return meta.result;
 }
-
-async function driveFileFetchBlob(fileId){
-  // Always use OAuth bearer to avoid 404 on private files
-  const tok = (gapi && gapi.client && gapi.client.getToken) ? gapi.client.getToken() : null;
-  const accessToken = tok && tok.access_token ? tok.access_token : null;
-  if(!accessToken){
-    throw new Error('No OAuth token for file download');
-  }
+async function driveFileFetchBlob(fileId, retry=1){
   const dlUrl = 'https://www.googleapis.com/drive/v3/files/' + fileId + '?alt=media&supportsAllDrives=true';
-
   const res = await fetch(dlUrl, { headers:{ Authorization: 'Bearer ' + accessToken } });
   if(res.status === 401 && retry>0){
     try{ tokenClient && tokenClient.requestAccessToken({ prompt:'' }); }catch(e){}
