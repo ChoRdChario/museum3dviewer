@@ -743,10 +743,40 @@ function updateConnector(){
 
 /* ========= Preview ========= */
 let previewZoom = 1.0;
-function sizePreviewToZoomed(){ try{ var vp=el.viewerPreview, iw=(el.previewImg?el.previewImg.naturalWidth:0)||0, ih=(el.previewImg?el.previewImg.naturalHeight:0)||0; if(!vp){ return; } if(!iw||!ih){ vp.style.width='auto'; vp.style.height='auto'; return; } var zw=iw*previewZoom, zh=ih*previewZoom; var maxW=Math.max(240, Math.floor(window.innerWidth*0.95)); var maxH=Math.max(220, Math.floor(window.innerHeight*0.8)); vp.style.width=Math.min(maxW, Math.max(zw, 240))+'px'; vp.style.height=Math.min(maxH, Math.max(zh+120, 240))+'px'; }catch(e){} }
-function applyPreviewZoom(){ try{ if(!el.previewInner) return; el.previewInner.style.transform = 'translate(' + previewOffsetX + 'px,' + previewOffsetY + 'px) scale(' + previewZoom + ')'; if(typeof sizePreviewToZoomed==='function') sizePreviewToZoomed(); }catch(e){} })`; }
-el.previewZoom.addEventListener('input', ()=>{ previewZoom = parseFloat(el.previewZoom.value)||1; el.previewZoomVal.textContent = previewZoom.toFixed(2) + '×'; applyPreviewZoom(); });
-el.previewReset.addEventListener('click', ()=>{ previewZoom = 1; el.previewZoom.value = 1; el.previewZoomVal.textContent = '1.00×'; applyPreviewZoom(); });
+let previewOffsetX = 0, previewOffsetY = 0;
+function sizePreviewToZoomed(){
+  try{
+    var vp = el.viewerPreview;
+    var iw = (el.previewImg ? el.previewImg.naturalWidth : 0) || 0;
+    var ih = (el.previewImg ? el.previewImg.naturalHeight : 0) || 0;
+    if(!vp){ return; }
+    if(!iw || !ih){ vp.style.width='auto'; vp.style.height='auto'; return; }
+    var zw = iw * previewZoom, zh = ih * previewZoom;
+    var maxW = Math.max(240, Math.floor(window.innerWidth*0.95));
+    var maxH = Math.max(220, Math.floor(window.innerHeight*0.8));
+    vp.style.width  = Math.min(maxW, Math.max(zw, 240)) + 'px';
+    vp.style.height = Math.min(maxH, Math.max(zh + 120, 240)) + 'px';
+  }catch(e){}
+}
+function applyPreviewZoom(){
+  try{
+    if(!el.previewInner) return;
+    el.previewInner.style.transform = 'translate(' + previewOffsetX + 'px,' + previewOffsetY + 'px) scale(' + previewZoom + ')';
+    if(typeof sizePreviewToZoomed === 'function') sizePreviewToZoomed();
+  }catch(e){}
+}
+el.previewZoom && el.previewZoom.addEventListener('input', function(){
+  previewZoom = parseFloat(el.previewZoom.value) || 1;
+  if(el.previewZoomVal) el.previewZoomVal.textContent = previewZoom.toFixed(2) + '×';
+  applyPreviewZoom();
+});
+el.previewReset && el.previewReset.addEventListener('click', function(){
+  previewZoom = 1;
+  previewOffsetX = 0; previewOffsetY = 0;
+  if(el.previewZoom){ el.previewZoom.value = '1'; }
+  if(el.previewZoomVal){ el.previewZoomVal.textContent = '1.00×'; }
+  applyPreviewZoom();
+});
 
 async function setPreview(ref, p){
   if(!ref){ el.viewerPreview.classList.add('hidden'); return; }
@@ -1535,7 +1565,7 @@ async function loadFolderImages(){
   const cells = [];
   try{
     for(const parent of glbParents){
-      const q = `'${parent}' in parents and trashed=false and (mimeType contains 'image/')`;
+      const q = `'${parent}' in parents and trashed=false and (mimeType contains 'image/');
       const resp = await gapi.client.drive.files.list({
         q, pageSize: 200,
         fields: 'files(id,name,mimeType,fileExtension,hasThumbnail,thumbnailLink)',
