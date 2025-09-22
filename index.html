@@ -75,32 +75,10 @@
       .main{grid-template-columns:1fr; grid-template-rows: 360px 1fr 480px}
     }
   
-/* === Classic Bottom Sheet (mobile) & caption below viewer === */
 @media (max-width: 900px){
-  #leftToolbox{ display:none; }
-  #rightCaption{ display:none; }
-  .mobile-caption{ display:block; margin-top:8px; }
-  .bottom-sheet{
-    position: fixed; left:0; right:0; bottom:0; z-index: 2999;
-    height: 60vh; max-height: 80vh;
-    background: var(--panel, #0b1320);
-    border-top-left-radius: 16px; border-top-right-radius: 16px;
-    border: 1px solid #1e2837;
-    transform: translateY(calc(100% - 54px)); transition: transform .25s ease;
-    display:flex; flex-direction:column; overflow:hidden;
-  }
-  .bottom-sheet.expanded{ transform: translateY(0); }
-  .bs-backdrop{ position: fixed; inset:0; background: rgba(0,0,0,.35); z-index: 2998; display:none; }
-  .bs-backdrop.show{ display:block; }
-  .bs-handle{ height: 54px; display:flex; align-items:center; justify-content:center; cursor:pointer; touch-action: manipulation; }
-  .bs-handle::before{ content:''; width:42px; height:4px; border-radius: 999px; background: rgba(255,255,255,.25); }
-  #bottomSheetContent{ flex:1; overflow:auto; padding:10px; }
-  .bs-tabs{ display:flex; border-bottom:1px solid #1e2837; }
-  .bs-tab{ flex:1; text-align:center; padding:10px; cursor:pointer; user-select:none; }
-  .bs-tab[aria-selected="true"]{ background:#0f1722; font-weight:700; }
-  .bs-caption-bar{ padding:8px 10px; border-bottom:1px solid #1e2837; display:flex; justify-content:space-between; align-items:center; gap:8px; }
+  /* make viewer area tall so model & caption don't overlap; allow scrolling */
+  #viewer{ min-height: calc(100vw * 1.8); }
 }
-
 </style>
 
   <!-- ES Modules -->
@@ -126,19 +104,6 @@
       <span id="statusLabel" class="chip">サインイン待ち…</span>
     </div>
   </header>
-<div id="backdrop" class="bs-backdrop"></div>
-<div id="bottomSheet" class="bottom-sheet" aria-modal="true" aria-hidden="true">
-  <div class="bs-handle" id="bsHandle" aria-label="メニューを展開/収納"></div>
-  <div id="bsTabs" class="bs-tabs" role="tablist">
-    <div id="tabTools" class="bs-tab" role="tab" aria-selected="true">編集ツール</div>
-    <div id="tabCaption" class="bs-tab" role="tab" aria-selected="false">キャプション</div>
-  </div>
-  <div id="bottomSheetContent">
-    <div id="sheetTools" role="tabpanel"></div>
-    <div id="sheetCaption" role="tabpanel" style="display:none"></div>
-  </div>
-</div>
-
 
   <div class="main">
     <!-- 左：ツール -->
@@ -191,7 +156,6 @@
     <section class="panel" id="viewer">
       <div class="spinner" id="loading" hidden><div class="lds"></div></div>
       <canvas id="viewerCanvas"></canvas>
-<div id="mobileCaptionBelow" class="mobile-caption"></div>
       <svg id="connector">
         <defs><filter id="dropshadow" x="-20%" y="-20%" width="140%"><feDropShadow dx="0" dy="0" stdDeviation="2" flood-color="#001a33" flood-opacity="0.9"/></filter></defs>
         <line id="connLine" x1="0" y1="0" x2="0" y2="0" style="display:none"/>
@@ -199,10 +163,9 @@
       </svg>
 
       <div id="viewerPreview" class="hidden">
-  <div id="modelError" style="display:none;color:#ffb4b4;background:#441e1e;border:1px solid #7a2f2f;padding:6px 8px;border-radius:8px;margin:8px 0;"></div>
         <div id="previewControls">
           <span class="small">倍率</span>
-          <input id="previewZoom" type="range" min="0.25" max="3" step="0.05" value="1">
+          <input id="previewZoom" type="range" min="0.1" max="3" step="0.05" value="1">
           <span id="previewZoomVal" class="small">1.00×</span>
           <button id="previewReset">リセット</button>
           <span id="previewErr" class="small" style="margin-left:auto;color:#ffb4b4;display:none">画像を読み込めませんでした</span>
@@ -536,59 +499,33 @@ document.getElementById('btnSignIn').addEventListener('click', startSignIn);
 
 /* ========= Viewer ========= */
 
-function isMobileLayout(){ return window.matchMedia('(max-width: 900px)').matches || (typeof IS_IOS!=='undefined' ? IS_IOS:false); }
-
-function layoutCaptionMobile(){
-  if(!isMobileLayout()) return;
-  const sheetCap = document.getElementById('sheetCaption');
-  const rightBody = document.querySelector('#rightCaption .body');
-  const below = document.getElementById('mobileCaptionBelow');
-  if(!sheetCap || !rightBody || !below) return;
-  // Header bar (buttons/select)
-  const headerBar = rightBody.querySelector(':scope > div.flex');
-  if(headerBar && !sheetCap.contains(headerBar)) sheetCap.appendChild(headerBar);
-  // Color filter panel
-  const filterPanel = rightBody.querySelector('#colorFilterPanel');
-  if(filterPanel && !sheetCap.contains(filterPanel)) sheetCap.appendChild(filterPanel);
-  // Pins list
-  const pinsList = rightBody.querySelector('#pinsList');
-  if(pinsList && !sheetCap.contains(pinsList)) sheetCap.appendChild(pinsList);
-  // Move editor + noSelection under the viewer (below)
-  const noSel = rightBody.querySelector('#noSelection');
-  const editor = rightBody.querySelector('#editor');
-  if(noSel && !below.contains(noSel)) below.appendChild(noSel);
-  if(editor && !below.contains(editor)) below.appendChild(editor);
+function setupCaptionAspectSelect(){
+  try{
+    if(!isMobileLayout || !isMobileLayout()) return;
+  }catch{}
+  const bar = document.querySelector('#rightCaption .body > .flex, #sheetCaption .bs-caption-bar');
+  if(!bar || bar.querySelector('#capAspectSelect')) return;
+  const sel = document.createElement('select');
+  sel.id='capAspectSelect';
+  sel.title='縦横比';
+  sel.innerHTML = '<option value="auto">自由</option>' +
+                  '<option value="1/1">1:1</option>' +
+                  '<option value="3/2">3:2</option>' +
+                  '<option value="4/3">4:3</option>' +
+                  '<option value="16/9">16:9</option>';
+  sel.style.marginLeft='auto';
+  sel.addEventListener('change', ()=>{
+    const vp = document.getElementById('viewerPreview');
+    if(!vp) return;
+    const v = sel.value;
+    if(v==='auto'){ vp.style.aspectRatio=''; }
+    else { vp.style.aspectRatio = v; }
+    sizePreviewToZoomed && sizePreviewToZoomed();
+  });
+  bar.appendChild(sel);
 }
-
-function initClassicBottomSheet(){
-  if(!isMobileLayout()) return;
-  const sheet = document.getElementById('bottomSheet');
-  const tabTools = document.getElementById('tabTools');
-  const tabCaption = document.getElementById('tabCaption');
-  const sheetTools = document.getElementById('sheetTools');
-  const sheetCaption = document.getElementById('sheetCaption');
-  const backdrop = document.getElementById('backdrop');
-  const handle = document.getElementById('bsHandle');
-  if(!sheet || sheet.dataset.bound==='1') return; sheet.dataset.bound='1';
-
-  const expand=()=>{ sheet.classList.add('expanded'); sheet.setAttribute('aria-hidden','false'); backdrop&&backdrop.classList.add('show'); };
-  const collapse=()=>{ sheet.classList.remove('expanded'); sheet.setAttribute('aria-hidden','true'); backdrop&&backdrop.classList.remove('show'); };
-  handle && handle.addEventListener('click', ()=>{ if(sheet.classList.contains('expanded')) collapse(); else expand(); });
-  backdrop && backdrop.addEventListener('click', collapse);
-
-  // Move left toolbox body into sheet tools
-  const leftTool = document.getElementById('leftToolbox');
-  if(leftTool){ const lb = leftTool.querySelector('.body'); if(lb && !sheetTools.contains(lb)) sheetTools.appendChild(lb); }
-
-  const showTools=()=>{ tabTools.setAttribute('aria-selected','true'); tabCaption.setAttribute('aria-selected','false'); sheetTools.style.display='block'; sheetCaption.style.display='none'; };
-  const showCaption=()=>{ tabTools.setAttribute('aria-selected','false'); tabCaption.setAttribute('aria-selected','true'); sheetTools.style.display='none'; sheetCaption.style.display='block'; };
-  tabTools.addEventListener('click', showTools);
-  tabCaption.addEventListener('click', showCaption);
-  showTools();
-}
-
-document.addEventListener('DOMContentLoaded', ()=>{ try{ initClassicBottomSheet(); layoutCaptionMobile(); }catch(e){} });
-window.addEventListener('resize', ()=>{ try{ initClassicBottomSheet(); layoutCaptionMobile(); }catch(e){} }, {passive:true});
+document.addEventListener('DOMContentLoaded', setupCaptionAspectSelect);
+window.addEventListener('resize', setupCaptionAspectSelect, {passive:true});
 
 let rendererLoopId=null;
 function viewerInit(){
@@ -779,7 +716,17 @@ function updateConnector(){
 
 /* ========= Preview ========= */
 let previewZoom = 1.0;
-function applyPreviewZoom(){ el.previewInner.style.transform = `scale(${previewZoom})`; }
+function sizePreviewToZoomed(){
+  const vp = el.viewerPreview;
+  const imgW = el.previewImg.naturalWidth||0, imgH = el.previewImg.naturalHeight||0;
+  if(!imgW || !imgH){ vp.style.width='auto'; vp.style.height='auto'; return; }
+  const zw = imgW * previewZoom, zh = imgH * previewZoom;
+  const maxW = Math.max(320, Math.floor(window.innerWidth*0.95));
+  const maxH = Math.max(240, Math.floor(window.innerHeight*0.8));
+  vp.style.width  = Math.min(maxW, Math.max(zw, 240)) + 'px';
+  vp.style.height = Math.min(maxH, Math.max(zh + 120, 240)) + 'px';
+}
+function applyPreviewZoom(){ el.previewInner.style.transform = `translate(${previewOffsetX}px, ${previewOffsetY}px) scale(${previewZoom})`; sizePreviewToZoomed(); }
 el.previewZoom.addEventListener('input', ()=>{ previewZoom = parseFloat(el.previewZoom.value)||1; el.previewZoomVal.textContent = previewZoom.toFixed(2) + '×'; applyPreviewZoom(); });
 el.previewReset.addEventListener('click', ()=>{ previewZoom = 1; el.previewZoom.value = 1; el.previewZoomVal.textContent = '1.00×'; applyPreviewZoom(); });
 
@@ -790,6 +737,17 @@ async function setPreview(ref, p){
     const src = await resolveImageObjectURL(ref, {preferThumb:false});
     el.previewImg.src = src;
     el.previewImg.onerror = ()=>{ el.previewErr.style.display='inline'; };
+    el.previewImg.onload = ()=>{
+      const nw = el.previewImg.naturalWidth||0, nh = el.previewImg.naturalHeight||0;
+      if(nw && nh){
+        const target = Math.min(1, 500/Math.max(nw,nh));
+        previewZoom = target || 1;
+        el.previewZoom.value = String(previewZoom);
+        el.previewZoomVal.textContent = previewZoom.toFixed(2)+'×';
+      }
+      previewOffsetX = 0; previewOffsetY = 0;
+      applyPreviewZoom();
+    };
     el.capTitleLine.textContent = p?.title || '';
     el.capBodyLine.textContent  = p?.body  || '';
     el.viewerPreview.classList.remove('hidden');
@@ -1788,33 +1746,16 @@ async function loadGLBByFileId(fileId){
     }
 
     // ★★ 低負荷：Blob URL + loadAsync（ArrayBufferを避ける）
-    
     const blob = await res.blob();
-    let url = URL.createObjectURL(blob);
+    const url = URL.createObjectURL(blob);
     try {
       if(currentModel){
         scene.remove(currentModel);
-        try{ currentModel.traverse(o=>{ if(o.geometry) o.geometry.dispose?.(); if(o.material){ if(Array.isArray(o.material)) o.material.forEach(m=>m.dispose?.()); else o.material.dispose?.(); } }); }catch{}
+        currentModel.traverse(o=>{ if(o.geometry) o.geometry.dispose(); if(o.material){ if(Array.isArray(o.material)) o.material.forEach(m=>m.dispose()); else o.material.dispose(); } });
         currentModel=null;
       }
-      // iOS Safari: initial attempt (no compressed/DRACO), then retry once with fresh loader
-      let gltf = null;
-      try{
-        gltf = await loader.loadAsync(url);
-      }catch(e1){
-        console.warn('loadAsync failed (1st)', e1);
-        try{ URL.revokeObjectURL(url); }catch{}
-        url = URL.createObjectURL(blob); // fresh URL for retry
-        try{
-          loader = new GLTFLoader();
-          gltf = await loader.loadAsync(url);
-        }catch(e2){
-          console.error('loadAsync failed (2nd)', e2);
-          throw e2;
-        }
-      }
+      const gltf = await loader.loadAsync(url);
       currentModel = gltf.scene; scene.add(currentModel);
-
       collectMaterials();
       focusOrigin();
       renderNow();
@@ -1835,9 +1776,8 @@ async function loadGLBByFileId(fileId){
   }catch(err){
     console.error(err);
     el.statusLabel.textContent = 'Load failed';
-    console.error('GLB読み込みに失敗', err); const me=document.getElementById('modelError'); if(me){ me.textContent='GLBの読み込みに失敗しました: '+(err?.message||'unknown error'); me.style.display='block'; }
+    alert('GLB読み込みに失敗しました：' + (err?.message || 'unknown error'));
   }finally{
-    try{ if(typeof url!=='undefined' && url) URL.revokeObjectURL(url); }catch{}
     el.loading.hidden = true;
   }
 }
