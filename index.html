@@ -531,7 +531,7 @@ function buildControls(){
   controls = new OrbitControls(camera, el.viewerCanvas);
   controls.target.set(0,0,0); controls.update();
   controls.addEventListener('change', updateConnector);
-  if(tcontrols){ scene.remove(tcontrols); tcontrols.dispose?.(); }
+  if(tcontrols){ scene.remove(tcontrols); (tcontrols.dispose && tcontrols.dispose()); }
   tcontrols = new TransformControls(camera, el.viewerCanvas);
   tcontrols.setSize(0.9); tcontrols.setSpace('world');
   tcontrols.addEventListener('dragging-changed', e=>{ controls.enabled = !e.value; });
@@ -693,8 +693,8 @@ async function setPreview(ref, p){
     const src = await resolveImageObjectURL(ref, {preferThumb:false});
     el.previewImg.src = src;
     el.previewImg.onerror = ()=>{ el.previewErr.style.display='inline'; };
-    el.capTitleLine.textContent = p?.title || '';
-    el.capBodyLine.textContent  = p?.body  || '';
+    el.capTitleLine.textContent = (p&&p.title) || '';
+    el.capBodyLine.textContent  = (p&&p.body)  || '';
     el.viewerPreview.classList.remove('hidden');
     applyPreviewZoom(); updateConnector();
   }catch(e){
@@ -800,9 +800,9 @@ function ensureMatRecord(m){
     map: m.map || null,
     alphaMap: m.alphaMap || null,
     transparent: !!m.transparent,
-    opacity: (m.(opacity!=null?opacity:1)),
-    alphaTest: (m.(alphaTest!=null?alphaTest:0)),
-    side: m.side ?? THREE.FrontSide,
+    opacity: ((m.opacity!=null?m.opacity:1)),
+    alphaTest: ((m.alphaTest!=null?m.alphaTest:0)),
+    side: (m.side!=null?m.side:THREE.FrontSide),
     depthWrite: m.depthWrite,
     depthTest: m.depthTest,
     blending: m.blending,
@@ -815,7 +815,7 @@ function objectPath(node) {
   const names = [];
   let cur = node;
   while (cur && cur.parent) {
-    names.push(cur.name && cur.name.trim() ? cur.name : '_' + (cur.uuid?.slice(0,8) || 'node'));
+    names.push(cur.name && cur.name.trim() ? cur.name : '_' + (((cur.uuid&&cur.uuid.slice))&& cur.uuid.slice(0,8) || 'node'));
     cur = cur.parent;
   }
   names.reverse();
@@ -835,7 +835,7 @@ function indexMaterialsByKey(){
         materialByKey.set(key, m);
         ensureMatRecord(m);
         if(!matState.has(key)){
-          matState.set(key, { unlit:false, doubleSided:(m.side===THREE.DoubleSide), opacity:(m.opacity!=null?m.opacity:1), invertRGB:false, whiteToAlpha:false, alphaTest:(m.alphaTest!=null?m.alphaTest:0) });
+          matState.set(key, { unlit:false, doubleSided:(m.side===THREE.DoubleSide), opacity:((m.opacity!=null?m.opacity:1)), invertRGB:false, whiteToAlpha:false, alphaTest:((m.alphaTest!=null?m.alphaTest:0)) });
         }
       });
     } else {
@@ -844,7 +844,7 @@ function indexMaterialsByKey(){
       materialByKey.set(key, obj.material);
       const m = obj.material; ensureMatRecord(m);
       if(!matState.has(key)){
-        matState.set(key, { unlit:false, doubleSided:(m.side===THREE.DoubleSide), opacity:(m.opacity!=null?m.opacity:1), invertRGB:false, whiteToAlpha:false, alphaTest:(m.alphaTest!=null?m.alphaTest:0) });
+        matState.set(key, { unlit:false, doubleSided:(m.side===THREE.DoubleSide), opacity:((m.opacity!=null?m.opacity:1)), invertRGB:false, whiteToAlpha:false, alphaTest:((m.alphaTest!=null?m.alphaTest:0)) });
       }
     }
   });
@@ -874,10 +874,10 @@ function collectMaterials(){
       matState.set(key, {
         unlit:false,
         doubleSided:(m.side===THREE.DoubleSide),
-        opacity:(m.opacity!=null?m.opacity:1),
+        opacity:((m.opacity!=null?m.opacity:1)),
         invertRGB:false,
         whiteToAlpha:false,
-        alphaTest:(m.alphaTest!=null?m.alphaTest:0)
+        alphaTest:((m.alphaTest!=null?m.alphaTest:0))
       });
     }
   });
@@ -919,10 +919,10 @@ async function applyMaterialFromUIToSelected(){
   const st = matState.get(key) || {};
   st.unlit = !!el.matUnlit.checked;
   st.doubleSided = !!el.matDoubleSided.checked;
-  st.opacity = Number(el.matOpacity.(value!=null?value:1));
+  st.opacity = Number(((el.matOpacity&&el.matOpacity.value)!=null?el.matOpacity.value:1));
   st.invertRGB = !!el.matInvert.checked;
   st.whiteToAlpha = !!el.matWhiteTransparent.checked;
-  st.alphaTest = Number(el.matThreshold.(value!=null?value:0));
+  st.alphaTest = Number(((el.matThreshold&&el.matThreshold.value)!=null?el.matThreshold.value:0));
   matState.set(key, st);
   await applyStateToMaterial(orig, st);
   renderNow();
@@ -947,7 +947,7 @@ function copyTextureParams(from, to){
   to.magFilter = from.magFilter; to.minFilter = from.minFilter;
   to.generateMipmaps = from.generateMipmaps;
   to.anisotropy = from.anisotropy;
-  to.colorSpace = from.colorSpace ?? THREE.SRGBColorSpace;
+  to.colorSpace = ((from&&from.colorSpace)!=null?from.colorSpace:THREE.SRGBColorSpace);
 }
 async function processTextureToCanvasTextureFromOriginal(originalTex, { invertRGB=false, alphaFromWhite=false, threshold=0 }){
   if(!originalTex || !originalTex.image) return null;
@@ -1076,7 +1076,7 @@ async function findOrCreateSpreadsheetInGlbFolder(glbMeta){
       q, fields: 'files(id,name)',
       includeItemsFromAllDrives: true, supportsAllDrives: true, pageSize: 10,
     });
-    if (resp.result.files?.length) { found = resp.result.files[0]; break; }
+    if ((resp.result.files&&resp.result.files.length)) { found = resp.result.files[0]; break; }
   }
   if (found) return found.id;
 
@@ -1124,8 +1124,8 @@ async function loadSheetMeta(spreadsheetId){
       ranges: [ META_MARKER_RANGE(), META_MAT_KEY_RANGE(), META_VIEW_KEY_RANGE() ]
     });
     const vals = (get.result.valueRanges || []).map(v=>v.values||[]);
-    const matJson = vals[1]?.[0]?.[1] || '';
-    const viewJson = vals[2]?.[0]?.[1] || '';
+    const matJson = ((vals[1] && vals[1][0]) ? vals[1][0][1] : undefined) || '';
+    const viewJson = ((vals[2] && vals[2][0]) ? vals[2][0][1] : undefined) || '';
     const m = safeParseJSON(matJson, null);
     const materials = normalizeMaterialsJSON(m);
     const viewer = safeParseJSON(viewJson, { version:1, bgColor:'#0a0f16', projection:'perspective' });
@@ -1145,10 +1145,10 @@ function normalizeMaterialsJSON(m){
       byKey[it.key] = {
         unlit: !!it.unlit,
         doubleSided: !!it.doubleSided,
-        opacity: Number(it.(opacity!=null?opacity:1)),
+        opacity: Number((it.opacity!=null?it.opacity:1)),
         invertRGB: !!it.invertRGB,
         whiteToAlpha: !!it.whiteToAlpha,
-        alphaTest: Number(it.(alphaTest!=null?alphaTest:0))
+        alphaTest: Number((it.alphaTest!=null?it.alphaTest:0))
       };
     });
     return { version:2, byKey };
@@ -1339,7 +1339,7 @@ function rebuildPinsScene(){
   pins.forEach(p=> placePinMesh(p));
   if(tcontrols.visible && selectedPinId){
     const p=pins.find(x=>x.id===selectedPinId);
-    if(p?.mesh) tcontrols.attach(p.mesh); else tcontrols.detach();
+    if((p&&p.mesh)) tcontrols.attach(p.mesh); else tcontrols.detach();
   }
   renderNow();
 }
@@ -1414,7 +1414,7 @@ el.btnAttach.addEventListener('click', async ()=>{
   const fileInput = el.imgLocal;
   fileInput.value = '';
   fileInput.onchange = async ()=>{
-    const file = fileInput.files?.[0];
+    const file = (fileInput.files && fileInput.files[0]);
     const p = pins.find(x=>x.id===selectedPinId);
     if(!file || !p){ return; }
     try{
@@ -1721,7 +1721,7 @@ async function loadGLBByFileId(fileId){
   }catch(err){
     console.error(err);
     el.statusLabel.textContent = 'Load failed';
-    alert('GLB読み込みに失敗しました：' + ((err && err.message) || 'unknown error'));
+    alert('GLB読み込みに失敗しました：' + ((err&&err.message) || 'unknown error'));
   }finally{
     el.loading.hidden = true;
   }
