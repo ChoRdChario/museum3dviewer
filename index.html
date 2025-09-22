@@ -1507,7 +1507,7 @@ el.btnAttach.addEventListener('click', async ()=>{
   const fileInput = el.imgLocal;
   fileInput.value = '';
   fileInput.onchange = async ()=>{
-    const file = fileInput.files && 0];
+    const file = (fileInput.files && fileInput.files[0]);
     const p = pins.find(x=>x.id===selectedPinId);
     if(!file || !p){ return; }
     try{
