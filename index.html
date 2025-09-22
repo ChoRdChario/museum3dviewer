@@ -79,7 +79,7 @@
 
 /* === Desktop grid layout to stabilize panels === */
 @media (min-width: 901px){
-  body:not(.is-mobile) #appRoot{
+  body:not(.is-mobile) #appRoot .main{
     display: grid;
     grid-template-columns: 280px 1fr 360px;
     grid-template-areas: 'left main right';
@@ -87,16 +87,51 @@
     align-items: stretch;
   }
   #leftToolbox{ grid-area: left; display:flex; flex-direction:column; }
-  #viewerWrap, #viewer{ grid-area: main; }
+  #viewer{ grid-area: main; }
   #rightCaption{ grid-area: right; display:flex; flex-direction:column; }
   #bottomSheet{ display:none !important; }
+}
+
+/* Normalize panel widths inside grid */
+@media (min-width: 901px){
+  body:not(.is-mobile) #appRoot .main .panel{ width:auto; max-width: none; }
 }
 
 </style>
 
   <!-- ES Modules -->
-  <!-- Import Maps polyfill for Safari/older browsers -->
-<script async src="https://cdn.jsdelivr.net/npm/es-module-shims@1.9.0/dist/es-module-shims.min.js"></script>
+  <script async src="https://cdn.jsdelivr.net/npm/es-module-shims@1.9.0/dist/es-module-shims.min.js">
+/* === Drive helpers: normalize FileId & token guard === */
+(function(){
+  if(window.M3D && M3D.driveHelpersInstalled) return;
+  function normalizeDriveFileId(input){
+    try{
+      if(!input) return '';
+      var s = String(input).trim();
+      s = s.replace(/[?#].*$/, '');
+      var m = s.match(/\/file\/d\/([a-zA-Z0-9_-]{20,})/);
+      if(m && m[1]) return m[1];
+      m = s.match(/[?&]id=([a-zA-Z0-9_-]{20,})/);
+      if(m && m[1]) return m[1];
+      if(/^[a-zA-Z0-9_-]{20,}$/.test(s)) return s;
+      return '';
+    }catch(e){ return ''; }
+  }
+  window.normalizeDriveFileId = normalizeDriveFileId;
+  window.ensureGapiToken = async function(){
+    try{
+      var tok = (gapi && gapi.client && gapi.client.getToken) ? gapi.client.getToken() : null;
+      if(!tok || !tok.access_token){
+        if(window.requestAccessToken){ await window.requestAccessToken(); }
+      }
+      tok = (gapi && gapi.client && gapi.client.getToken) ? gapi.client.getToken() : null;
+      return !!(tok && tok.access_token);
+    }catch(e){ return false; }
+  };
+  if(!window.M3D) window.M3D = {};
+  window.M3D.driveHelpersInstalled = true;
+})();
+</script>
 <script type="importmap">
 {
   "imports": {
@@ -959,8 +994,13 @@ async function driveFileMeta(fileId){
   });
   return meta.result;
 }
-async function driveFileFetchBlob(fileId, retry=1){
+
+async function driveFileFetchBlob(fileId){
+  const tok = (gapi && gapi.client && gapi.client.getToken) ? gapi.client.getToken() : null;
+  const accessToken = tok && tok.access_token ? tok.access_token : null;
+  if(!accessToken){ throw new Error('No OAuth token for file download'); }
   const dlUrl = 'https://www.googleapis.com/drive/v3/files/' + fileId + '?alt=media&supportsAllDrives=true';
+
   const res = await fetch(dlUrl, { headers:{ Authorization: 'Bearer ' + accessToken } });
   if(res.status === 401 && retry>0){
     try{ tokenClient && tokenClient.requestAccessToken({ prompt:'' }); }catch(e){}
