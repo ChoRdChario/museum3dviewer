@@ -649,6 +649,35 @@ window.addEventListener('resize', ()=>{ try{ if(isMobileLayout()) initMobileShee
 
 /* ========= Viewer ========= */
 
+function ensureGLBLoadWiring(){
+  try{
+    var btn = document.getElementById('btnLoadGLB') || document.getElementById('loadGLB') || document.querySelector('[data-action="load-glb"]');
+    var fileInput = document.getElementById('fileInput') || document.getElementById('glbFileInput') || document.querySelector('input[type="file"]');
+    if(!fileInput){ return; }
+    // Click on button should open the file chooser
+    if(btn && !btn.dataset.bound){
+      btn.dataset.bound='1';
+      btn.addEventListener('click', function(e){ e.preventDefault(); fileInput.click(); });
+    }
+    // When a local file is picked, load it
+    if(!fileInput.dataset.bound){
+      fileInput.dataset.bound='1';
+      fileInput.addEventListener('change', function(){
+        try{
+          var file = (fileInput.files && fileInput.files[0]);
+          if(file){
+            if(typeof loadLocalGLB==='function'){ loadLocalGLB(file); }
+            else if(typeof loadGLB==='function'){ loadGLB(file); }
+            else if(typeof loadGLBByFileId==='function'){ /* fallback: create blob url */ var url = URL.createObjectURL(file); loadGLBByFileId({blobUrl:url, name:file.name}); }
+          }
+        }catch(err){ console.error('local glb load failed', err); }
+      }, {passive:true});
+    }
+  }catch(e){ console.error('ensureGLBLoadWiring error', e); }
+}
+document.addEventListener('DOMContentLoaded', function(){ try{ ensureGLBLoadWiring(); }catch(e){} });
+
+
 function syncToolPlacement(){
   try{
     var isMobile = window.matchMedia('(max-width: 900px)').matches;
