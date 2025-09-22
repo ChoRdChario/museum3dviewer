@@ -160,7 +160,7 @@
       <div id="viewerPreview" class="hidden">
         <div id="previewControls">
           <span class="small">倍率</span>
-          <input id="previewZoom" type="range" min="0.1" max="3" step="0.05" value="1">
+          <input id="previewZoom" type="range" min="0.25" max="3" step="0.05" value="1">
           <span id="previewZoomVal" class="small">1.00×</span>
           <button id="previewReset">リセット</button>
           <span id="previewErr" class="small" style="margin-left:auto;color:#ffb4b4;display:none">画像を読み込めませんでした</span>
@@ -682,8 +682,7 @@ function updateConnector(){
 
 /* ========= Preview ========= */
 let previewZoom = 1.0;
-function sizePreviewToZoomed(){ try{ const vp=el.viewerPreview, iw=el.previewImg?.naturalWidth||0, ih=el.previewImg?.naturalHeight||0; if(!vp||!iw||!ih) return; const zw=iw*previewZoom, zh=ih*previewZoom; vp.style.width=Math.max(240, zw)+'px'; vp.style.height=Math.max(240, zh+120)+'px'; }catch{} }
-function applyPreviewZoom(){ if(!el.previewInner) return; el.previewInner.style.transform = `translate(${previewOffsetX}px, ${previewOffsetY}px) scale(${previewZoom})`; sizePreviewToZoomed && sizePreviewToZoomed(); })`; }
+function applyPreviewZoom(){ el.previewInner.style.transform = `scale(${previewZoom})`; }
 el.previewZoom.addEventListener('input', ()=>{ previewZoom = parseFloat(el.previewZoom.value)||1; el.previewZoomVal.textContent = previewZoom.toFixed(2) + '×'; applyPreviewZoom(); });
 el.previewReset.addEventListener('click', ()=>{ previewZoom = 1; el.previewZoom.value = 1; el.previewZoomVal.textContent = '1.00×'; applyPreviewZoom(); });
 
@@ -692,18 +691,7 @@ async function setPreview(ref, p){
   try{
     el.previewErr.style.display='none';
     const src = await resolveImageObjectURL(ref, {preferThumb:false});
-el.previewImg.onload = ()=>{
-  const wrap = document.getElementById('previewWrap') || el.viewerPreview;
-  const nw = el.previewImg.naturalWidth||0, nh = el.previewImg.naturalHeight||0;
-  const vw = Math.max(1, (wrap?.clientWidth||window.innerWidth) - 16);
-  const vh = Math.max(1, (wrap?.clientHeight||window.innerHeight*0.6) - 16);
-  const fit = nw&&nh ? Math.min(1, Math.min(vw/nw, vh/nh)) : 1;
-  const minz = parseFloat((el.previewZoom && el.previewZoom.min) || '0.1') || 0.1;
-  previewZoom = Math.max(minz, fit || 1);
-  if(el.previewZoom){ el.previewZoom.value = String(previewZoom); if(el.previewZoomVal) el.previewZoomVal.textContent = previewZoom.toFixed(2)+'×'; }
-  previewOffsetX = 0; previewOffsetY = 0; applyPreviewZoom();
-};
-el.previewImg.src = src;
+    el.previewImg.src = src;
     el.previewImg.onerror = ()=>{ el.previewErr.style.display='inline'; };
     el.capTitleLine.textContent = p?.title || '';
     el.capBodyLine.textContent  = p?.body  || '';
@@ -812,8 +800,8 @@ function ensureMatRecord(m){
     map: m.map || null,
     alphaMap: m.alphaMap || null,
     transparent: !!m.transparent,
-    opacity: (m.opacity ?? 1),
-    alphaTest: (m.alphaTest ?? 0),
+    opacity: (m.(opacity!=null?opacity:1)),
+    alphaTest: (m.(alphaTest!=null?alphaTest:0)),
     side: m.side ?? THREE.FrontSide,
     depthWrite: m.depthWrite,
     depthTest: m.depthTest,
@@ -847,7 +835,7 @@ function indexMaterialsByKey(){
         materialByKey.set(key, m);
         ensureMatRecord(m);
         if(!matState.has(key)){
-          matState.set(key, { unlit:false, doubleSided:(m.side===THREE.DoubleSide), opacity:(m.opacity??1), invertRGB:false, whiteToAlpha:false, alphaTest:(m.alphaTest??0) });
+          matState.set(key, { unlit:false, doubleSided:(m.side===THREE.DoubleSide), opacity:(m.opacity!=null?m.opacity:1), invertRGB:false, whiteToAlpha:false, alphaTest:(m.alphaTest!=null?m.alphaTest:0) });
         }
       });
     } else {
@@ -856,7 +844,7 @@ function indexMaterialsByKey(){
       materialByKey.set(key, obj.material);
       const m = obj.material; ensureMatRecord(m);
       if(!matState.has(key)){
-        matState.set(key, { unlit:false, doubleSided:(m.side===THREE.DoubleSide), opacity:(m.opacity??1), invertRGB:false, whiteToAlpha:false, alphaTest:(m.alphaTest??0) });
+        matState.set(key, { unlit:false, doubleSided:(m.side===THREE.DoubleSide), opacity:(m.opacity!=null?m.opacity:1), invertRGB:false, whiteToAlpha:false, alphaTest:(m.alphaTest!=null?m.alphaTest:0) });
       }
     }
   });
@@ -886,10 +874,10 @@ function collectMaterials(){
       matState.set(key, {
         unlit:false,
         doubleSided:(m.side===THREE.DoubleSide),
-        opacity:(m.opacity??1),
+        opacity:(m.opacity!=null?m.opacity:1),
         invertRGB:false,
         whiteToAlpha:false,
-        alphaTest:(m.alphaTest??0)
+        alphaTest:(m.alphaTest!=null?m.alphaTest:0)
       });
     }
   });
@@ -912,15 +900,15 @@ function applyMaterialUIFromSelection(){
   ['matUnlit','matDoubleSided','matOpacity','matInvert','matWhiteTransparent','matThreshold']
     .forEach(id=>{ document.getElementById(id).disabled = disable || viewOnly; });
   if(disable) return;
-  const st = matState.get(key) || { unlit:false, doubleSided:false, opacity:1, invertRGB:false, whiteToAlpha:false, alphaTest:0 };
+  const st = matState.get(key) || { unlit:false,doubleSided:false,opacity:1,invertRGB:false,whiteToAlpha:false,alphaTest:0 };
   el.matUnlit.checked = !!st.unlit;
   el.matDoubleSided.checked = !!st.doubleSided;
-  el.matOpacity.value = String(st.opacity ?? 1);
-  el.matOpacityVal.textContent = (Number(st.opacity ?? 1)).toFixed(2);
+  el.matOpacity.value = String((st.opacity!=null?st.opacity:1));
+  el.matOpacityVal.textContent = (Number((st.opacity!=null?st.opacity:1))).toFixed(2);
   el.matInvert.checked = !!st.invertRGB;
   el.matWhiteTransparent.checked = !!st.whiteToAlpha;
-  el.matThreshold.value = String(st.alphaTest ?? 0);
-  el.matThresholdVal.textContent = (Number(st.alphaTest ?? 0)).toFixed(2);
+  el.matThreshold.value = String((st.alphaTest!=null?st.alphaTest:0));
+  el.matThresholdVal.textContent = (Number((st.alphaTest!=null?st.alphaTest:0))).toFixed(2);
 }
 el.matSelect.addEventListener('change', ()=> applyMaterialUIFromSelection());
 
@@ -931,10 +919,10 @@ async function applyMaterialFromUIToSelected(){
   const st = matState.get(key) || {};
   st.unlit = !!el.matUnlit.checked;
   st.doubleSided = !!el.matDoubleSided.checked;
-  st.opacity = Number(el.matOpacity.value ?? 1);
+  st.opacity = Number(el.matOpacity.(value!=null?value:1));
   st.invertRGB = !!el.matInvert.checked;
   st.whiteToAlpha = !!el.matWhiteTransparent.checked;
-  st.alphaTest = Number(el.matThreshold.value ?? 0);
+  st.alphaTest = Number(el.matThreshold.(value!=null?value:0));
   matState.set(key, st);
   await applyStateToMaterial(orig, st);
   renderNow();
@@ -1026,8 +1014,8 @@ async function applyStateToMaterial(origM, st){
   mat.side = st.doubleSided ? THREE.DoubleSide : THREE.FrontSide;
   const willTransparent = (st.whiteToAlpha || (st.opacity < 1.0));
   mat.transparent = willTransparent;
-  mat.opacity = st.opacity ?? 1;
-  mat.alphaTest = st.alphaTest ?? 0;
+  mat.opacity = (st.opacity!=null?st.opacity:1);
+  mat.alphaTest = (st.alphaTest!=null?st.alphaTest:0);
   mat.depthWrite = !mat.transparent || (mat.alphaTest>0);
 
   if((st.invertRGB || st.whiteToAlpha) && matOriginals.get(origM).map){
@@ -1157,10 +1145,10 @@ function normalizeMaterialsJSON(m){
       byKey[it.key] = {
         unlit: !!it.unlit,
         doubleSided: !!it.doubleSided,
-        opacity: Number(it.opacity ?? 1),
+        opacity: Number(it.(opacity!=null?opacity:1)),
         invertRGB: !!it.invertRGB,
         whiteToAlpha: !!it.whiteToAlpha,
-        alphaTest: Number(it.alphaTest ?? 0)
+        alphaTest: Number(it.(alphaTest!=null?alphaTest:0))
       };
     });
     return { version:2, byKey };
@@ -1187,10 +1175,10 @@ function serializeMaterialsForSheet(){
       byKey[key] = {
         unlit: !!st.unlit,
         doubleSided: !!st.doubleSided,
-        opacity: Number(st.opacity ?? 1),
+        opacity: Number((st.opacity!=null?st.opacity:1)),
         invertRGB: !!st.invertRGB,
         whiteToAlpha: !!st.whiteToAlpha,
-        alphaTest: Number(st.alphaTest ?? 0)
+        alphaTest: Number((st.alphaTest!=null?st.alphaTest:0))
       };
     }
   }
@@ -1733,7 +1721,7 @@ async function loadGLBByFileId(fileId){
   }catch(err){
     console.error(err);
     el.statusLabel.textContent = 'Load failed';
-    alert('GLB読み込みに失敗しました：' + (err?.message || 'unknown error'));
+    alert('GLB読み込みに失敗しました：' + ((err && err.message) || 'unknown error'));
   }finally{
     el.loading.hidden = true;
   }
