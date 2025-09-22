@@ -473,9 +473,9 @@ function loadScriptOnce(src){
 }
 async function ensureHeic2any(){
   if(typeof window.heic2any === 'function') return true;
-  try{ await loadScriptOnce('https://cdn.jsdelivr.net/npm/heic2any@0.0.5/dist/heic2any.min.js'); }catch{}
+  try{ await loadScriptOnce('https://cdn.jsdelivr.net/npm/heic2any@0.0.5/dist/heic2any.min.js'); }catch(e){}
   if(typeof window.heic2any === 'function') return true;
-  try{ await loadScriptOnce('https://unpkg.com/heic2any@0.0.5/dist/heic2any.min.js'); }catch{}
+  try{ await loadScriptOnce('https://unpkg.com/heic2any@0.0.5/dist/heic2any.min.js'); }catch(e){}
   return (typeof window.heic2any === 'function');
 }
 function upscaleThumbnailUrl(u, size=2048){
@@ -488,7 +488,7 @@ function upscaleThumbnailUrl(u, size=2048){
       url.searchParams.set('s', String(size));
     }
     return url.toString();
-  }catch{ return u.replace(/=s(\d+)/, '=s' + (size) + ''); }
+  }catch(e){ return u.replace(/=s(\d+)/, '=s' + (size) + ''); }
 }
 
 /* ========= UI wire ========= */
@@ -941,7 +941,7 @@ async function driveFileFetchBlob(fileId, retry=1){
   const dlUrl = 'https://www.googleapis.com/drive/v3/files/' + fileId + '?alt=media&supportsAllDrives=true';
   const res = await fetch(dlUrl, { headers:{ Authorization: 'Bearer ' + accessToken } });
   if(res.status === 401 && retry>0){
-    try{ tokenClient && tokenClient.requestAccessToken({ prompt:'' }); }catch{}
+    try{ tokenClient && tokenClient.requestAccessToken({ prompt:'' }); }catch(e){}
     return driveFileFetchBlob(fileId, retry-1);
   }
   if(!res.ok) throw new Error('image fetch failed '+res.status);
@@ -1288,7 +1288,7 @@ const META_MARKER_RANGE = ()=> '' + (activeSheet.title) + '!K1';
 const META_MAT_KEY_RANGE = ()=> '' + (activeSheet.title) + '!K2:L2';
 const META_VIEW_KEY_RANGE = ()=> '' + (activeSheet.title) + '!K3:L3';
 
-function safeParseJSON(s, fallback){ try{ return s ? JSON.parse(s) : fallback; }catch{ return fallback; } }
+function safeParseJSON(s, fallback){ try{ return s ? JSON.parse(s) : fallback; }catch(e){ return fallback; } }
 
 async function loadSheetMeta(spreadsheetId){
   try{
@@ -1420,7 +1420,7 @@ function renderThumbs(p){
       const src = await resolveImageObjectURL(ref, {preferThumb:true});
       img.src = src;
       img.addEventListener('click', async ()=>{ setPreview(ref, p); });
-    }catch{
+    }catch(e){
       wrap.classList.add('error'); wrap.title = '画像を読み込めませんでした';
     }
   });
@@ -1534,7 +1534,7 @@ async function loadPinsFromActiveSheet(spreadsheetId){
         images: [],
         mesh: null
       };
-      try{ p.images = JSON.parse(imagesJson||'[]'); }catch{ p.images = []; }
+      try{ p.images = JSON.parse(imagesJson||'[]'); }catch(e){ p.images = []; }
       pins.push(p);
     });
     rebuildPinsScene();
@@ -1645,7 +1645,7 @@ async function loadFolderImages(){
   const cells = [];
   try{
     for(const parent of glbParents){
-      const q = ''' + (parent) + '' in parents and trashed=false and (mimeType contains 'image/')';
+      const q = "'" + parent + "' in parents and trashed=false and (mimeType contains 'image/')";
       const resp = await gapi.client.drive.files.list({
         q, pageSize: 200,
         fields: 'files(id,name,mimeType,fileExtension,hasThumbnail,thumbnailLink)',
@@ -1673,13 +1673,13 @@ async function loadFolderImages(){
             try{
               const url = await resolveImageObjectURL(ref, {preferThumb:true});
               img.src = url;
-            }catch{ cell.style.opacity='.5'; cell.style.pointerEvents='none'; }
+            }catch(e){ cell.style.opacity='.5'; cell.style.pointerEvents='none'; }
           };
         }else{
           try{
             const url = await resolveImageObjectURL(ref, {preferThumb:true});
             img.src = url;
-          }catch{ cell.style.opacity='.5'; cell.style.pointerEvents='none'; }
+          }catch(e){ cell.style.opacity='.5'; cell.style.pointerEvents='none'; }
         }
 
         img.onerror = ()=>{ if(!usedFallback){ cell.style.opacity='.5'; cell.style.pointerEvents='none'; } };
