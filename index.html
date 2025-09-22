@@ -76,6 +76,22 @@
     }
   
 @media (max-width: 900px){ #viewer{ min-height: calc(100vw * 1.8); } }
+
+/* === Desktop grid layout to stabilize panels === */
+@media (min-width: 901px){
+  body:not(.is-mobile) #appRoot{
+    display: grid;
+    grid-template-columns: 280px 1fr 360px;
+    grid-template-areas: 'left main right';
+    gap: 10px;
+    align-items: stretch;
+  }
+  #leftToolbox{ grid-area: left; display:flex; flex-direction:column; }
+  #viewerWrap, #viewer{ grid-area: main; }
+  #rightCaption{ grid-area: right; display:flex; flex-direction:column; }
+  #bottomSheet{ display:none !important; }
+}
+
 </style>
 
   <!-- ES Modules -->
@@ -89,7 +105,7 @@
   <script src="https://unpkg.com/heic2any@0.0.5/dist/heic2any.min.js"></script>
 </head>
 <body>
-<div class="app">
+<div id="appRoot" class="app">
   <header>
     <span class="pill">LociMyu</span>
     <div class="toolbar" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
@@ -473,9 +489,9 @@ function loadScriptOnce(src){
 }
 async function ensureHeic2any(){
   if(typeof window.heic2any === 'function') return true;
-  try{ await loadScriptOnce('https://cdn.jsdelivr.net/npm/heic2any@0.0.5/dist/heic2any.min.js'); }catch(e){}
+  try{ await loadScriptOnce('https://cdn.jsdelivr.net/npm/heic2any@0.0.5/dist/heic2any.min.js'); }catch{}
   if(typeof window.heic2any === 'function') return true;
-  try{ await loadScriptOnce('https://unpkg.com/heic2any@0.0.5/dist/heic2any.min.js'); }catch(e){}
+  try{ await loadScriptOnce('https://unpkg.com/heic2any@0.0.5/dist/heic2any.min.js'); }catch{}
   return (typeof window.heic2any === 'function');
 }
 function upscaleThumbnailUrl(u, size=2048){
@@ -488,7 +504,7 @@ function upscaleThumbnailUrl(u, size=2048){
       url.searchParams.set('s', String(size));
     }
     return url.toString();
-  }catch(e){ return u.replace(/=s(\d+)/, '=s' + (size) + ''); }
+  }catch{ return u.replace(/=s(\d+)/, '=s' + (size) + ''); }
 }
 
 /* ========= UI wire ========= */
@@ -582,6 +598,7 @@ const _pc = document.getElementById('previewClose'); if(_pc){ _pc.addEventListen
   window.layoutMobile = function(){
     try{
       var isMobile = window.matchMedia && window.matchMedia('(max-width: 900px)').matches;
+      try{ document.body.classList[isMobile?'add':'remove']('is-mobile'); }catch(_){ }
       var left = q('leftToolbox'); var right = q('rightCaption');
       var bs = q('bottomSheet'); var paneTools=q('bsPaneTools'); var paneCaps=q('bsPaneCaps');
       var viewer = q('viewer'); var viewerPreview=q('viewerPreview'); var editor=q('editor');
@@ -941,7 +958,7 @@ async function driveFileFetchBlob(fileId, retry=1){
   const dlUrl = 'https://www.googleapis.com/drive/v3/files/' + fileId + '?alt=media&supportsAllDrives=true';
   const res = await fetch(dlUrl, { headers:{ Authorization: 'Bearer ' + accessToken } });
   if(res.status === 401 && retry>0){
-    try{ tokenClient && tokenClient.requestAccessToken({ prompt:'' }); }catch(e){}
+    try{ tokenClient && tokenClient.requestAccessToken({ prompt:'' }); }catch{}
     return driveFileFetchBlob(fileId, retry-1);
   }
   if(!res.ok) throw new Error('image fetch failed '+res.status);
@@ -1288,7 +1305,7 @@ const META_MARKER_RANGE = ()=> '' + (activeSheet.title) + '!K1';
 const META_MAT_KEY_RANGE = ()=> '' + (activeSheet.title) + '!K2:L2';
 const META_VIEW_KEY_RANGE = ()=> '' + (activeSheet.title) + '!K3:L3';
 
-function safeParseJSON(s, fallback){ try{ return s ? JSON.parse(s) : fallback; }catch(e){ return fallback; } }
+function safeParseJSON(s, fallback){ try{ return s ? JSON.parse(s) : fallback; }catch{ return fallback; } }
 
 async function loadSheetMeta(spreadsheetId){
   try{
@@ -1420,7 +1437,7 @@ function renderThumbs(p){
       const src = await resolveImageObjectURL(ref, {preferThumb:true});
       img.src = src;
       img.addEventListener('click', async ()=>{ setPreview(ref, p); });
-    }catch(e){
+    }catch{
       wrap.classList.add('error'); wrap.title = '画像を読み込めませんでした';
     }
   });
@@ -1534,7 +1551,7 @@ async function loadPinsFromActiveSheet(spreadsheetId){
         images: [],
         mesh: null
       };
-      try{ p.images = JSON.parse(imagesJson||'[]'); }catch(e){ p.images = []; }
+      try{ p.images = JSON.parse(imagesJson||'[]'); }catch{ p.images = []; }
       pins.push(p);
     });
     rebuildPinsScene();
@@ -1645,7 +1662,7 @@ async function loadFolderImages(){
   const cells = [];
   try{
     for(const parent of glbParents){
-      const q = "'" + parent + "' in parents and trashed=false and (mimeType contains 'image/')";
+      const q = ''' + (parent) + '' in parents and trashed=false and (mimeType contains 'image/')';
       const resp = await gapi.client.drive.files.list({
         q, pageSize: 200,
         fields: 'files(id,name,mimeType,fileExtension,hasThumbnail,thumbnailLink)',
@@ -1673,13 +1690,13 @@ async function loadFolderImages(){
             try{
               const url = await resolveImageObjectURL(ref, {preferThumb:true});
               img.src = url;
-            }catch(e){ cell.style.opacity='.5'; cell.style.pointerEvents='none'; }
+            }catch{ cell.style.opacity='.5'; cell.style.pointerEvents='none'; }
           };
         }else{
           try{
             const url = await resolveImageObjectURL(ref, {preferThumb:true});
             img.src = url;
-          }catch(e){ cell.style.opacity='.5'; cell.style.pointerEvents='none'; }
+          }catch{ cell.style.opacity='.5'; cell.style.pointerEvents='none'; }
         }
 
         img.onerror = ()=>{ if(!usedFallback){ cell.style.opacity='.5'; cell.style.pointerEvents='none'; } };
