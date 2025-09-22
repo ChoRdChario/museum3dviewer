@@ -74,7 +74,9 @@
     @media (max-width:1100px){
       .main{grid-template-columns:1fr; grid-template-rows: 360px 1fr 480px}
     }
-  </style>
+  
+@media (max-width: 900px){ #viewer{ min-height: calc(100vw * 1.8); } }
+</style>
 
   <!-- ES Modules -->
   <script type="importmap">
@@ -480,13 +482,13 @@ function upscaleThumbnailUrl(u, size=2048){
   if(!u) return u;
   try{
     const url = new URL(u);
-    url.search = url.search.replace(/(\bs=)(\d+)/, `$1${size}`);
-    url.pathname = url.pathname.replace(/=s(\d+)/, `=s${size}`);
+    url.search = url.search.replace(/(\bs=)(\d+)/, '$1${size}');
+    url.pathname = url.pathname.replace(/=s(\d+)/, '=s${size}');
     if(!/(\bs=)/.test(url.search) && !/=s\d+/.test(url.pathname)){
       url.searchParams.set('s', String(size));
     }
     return url.toString();
-  }catch{ return u.replace(/=s(\d+)/, `=s${size}`); }
+  }catch{ return u.replace(/=s(\d+)/, '=s${size}'); }
 }
 
 /* ========= UI wire ========= */
@@ -548,7 +550,108 @@ const _pc = document.getElementById('previewClose'); if(_pc){ _pc.addEventListen
     window.addEventListener('resize', function(){ try{ /* future: layoutMobile etc. */ }catch(e){} }, {passive:true});
   }catch(e){ console.warn('Scaffold init error', e); }
 })();
-/* ========== /Scaffold ========== */
+/* ========== /Scaffold ==========
+
+/* === Mobile Layout / Bottom Sheet wiring === */
+(function(){
+  if(window.M3D && M3D.ui_initialized){ return; }
+  function q(id){ return document.getElementById(id); }
+  function openBS(){ var bs=q('bottomSheet'); if(!bs) return; bs.style.transform='translateY(0%)'; bs.classList.remove('bs-closed'); }
+  function closeBS(){ var bs=q('bottomSheet'); if(!bs) return; bs.style.transform='translateY(72%)'; bs.classList.add('bs-closed'); }
+  window.initBottomSheet = function(){
+    var bs = q('bottomSheet'); if(!bs) return;
+    var handle = bs.querySelector ? bs.querySelector('.bs-handle') : null;
+    var tabTools = q('bsTabTools'); var tabCaps = q('bsTabCaps');
+    var paneTools = q('bsPaneTools'); var paneCaps = q('bsPaneCaps');
+    function switchTab(which){
+      if(paneTools && paneCaps && tabTools && tabCaps){
+        if(which==='tools'){
+          paneTools.style.display='block'; paneCaps.style.display='none';
+          tabTools.classList.add('accent'); tabCaps.classList.remove('accent');
+        }else{
+          paneTools.style.display='none'; paneCaps.style.display='block';
+          tabTools.classList.remove('accent'); tabCaps.classList.add('accent');
+        }
+      }
+    }
+    if(handle){ handle.addEventListener('click', function(){ if(bs.classList.contains('bs-closed')) openBS(); else closeBS(); }, {passive:true}); }
+    if(tabTools){ tabTools.addEventListener('click', function(){ switchTab('tools'); }, {passive:true}); }
+    if(tabCaps){ tabCaps.addEventListener('click', function(){ switchTab('caps'); }, {passive:true}); }
+    switchTab('tools');
+  };
+  window.layoutMobile = function(){
+    try{
+      var isMobile = window.matchMedia && window.matchMedia('(max-width: 900px)').matches;
+      var left = q('leftToolbox'); var right = q('rightCaption');
+      var bs = q('bottomSheet'); var paneTools=q('bsPaneTools'); var paneCaps=q('bsPaneCaps');
+      var viewer = q('viewer'); var viewerPreview=q('viewerPreview'); var editor=q('editor');
+      // Holder under viewer for preview+editor in mobile
+      var mobileHolder = q('mobileCaptionBelow');
+      if(!mobileHolder){
+        mobileHolder = document.createElement('div'); mobileHolder.id='mobileCaptionBelow';
+        mobileHolder.style.margin = '8px 0';
+        if(viewer && viewer.parentElement){ viewer.parentElement.insertBefore(mobileHolder, viewer.nextSibling); }
+      }
+      // Panels' body
+      var leftBody = null, rightBody = null;
+      if(left){ leftBody = left.querySelector ? left.querySelector('.body') : null; }
+      if(right){ rightBody = right.querySelector ? right.querySelector('.body') : null; }
+      if(isMobile){
+        if(left){ left.style.display='none'; }
+        if(right){ right.style.display='none'; }
+        if(bs){ bs.style.display='block'; }
+        // Move left tools into Tools tab
+        if(leftBody && paneTools && !paneTools.contains(leftBody)){ paneTools.appendChild(leftBody); }
+        // Move caption list/filter into Caps tab
+        if(rightBody && paneCaps){
+          var colorPanel = rightBody.querySelector ? rightBody.querySelector('#colorFilterPanel') : null;
+          var pinsList   = rightBody.querySelector ? rightBody.querySelector('#pinsList') : null;
+          var listOps    = rightBody.querySelector ? rightBody.querySelector('#listSelect') : null;
+          var noSel      = rightBody.querySelector ? rightBody.querySelector('#noSelection') : null;
+          if(listOps && !paneCaps.contains(listOps)){ paneCaps.appendChild(listOps); }
+          if(colorPanel && !paneCaps.contains(colorPanel)){ paneCaps.appendChild(colorPanel); }
+          if(pinsList && !paneCaps.contains(pinsList)){ paneCaps.appendChild(pinsList); }
+          if(noSel && !paneCaps.contains(noSel)){ paneCaps.appendChild(noSel); }
+        }
+        // Place preview+editor under viewer (not inside bottom sheet)
+        if(mobileHolder){
+          if(viewerPreview && !mobileHolder.contains(viewerPreview)){ mobileHolder.appendChild(viewerPreview); }
+          if(editor && !mobileHolder.contains(editor)){ mobileHolder.appendChild(editor); }
+          if(viewerPreview){
+            viewerPreview.style.position='relative'; viewerPreview.style.right='auto'; viewerPreview.style.top='auto';
+            viewerPreview.style.maxHeight='none'; viewerPreview.style.width='auto';
+          }
+        }
+      }else{
+        // Desktop restore
+        if(left){ left.style.display='flex'; }
+        if(right){ right.style.display='flex'; }
+        if(bs){ bs.style.display='none'; }
+        // Return bodies
+        if(left && leftBody && !left.contains(leftBody)){ left.appendChild(leftBody); }
+        if(right && rightBody){
+          var colorPanel = document.getElementById('colorFilterPanel');
+          var pinsList   = document.getElementById('pinsList');
+          var listOps    = document.getElementById('listSelect');
+          var noSel      = document.getElementById('noSelection');
+          if(listOps && !rightBody.contains(listOps)){ rightBody.insertBefore(listOps, rightBody.firstChild); }
+          if(colorPanel && !rightBody.contains(colorPanel)){ rightBody.appendChild(colorPanel); }
+          if(pinsList && !rightBody.contains(pinsList)){ rightBody.appendChild(pinsList); }
+          if(noSel && !rightBody.contains(noSel)){ rightBody.appendChild(noSel); }
+          if(editor && !rightBody.contains(editor)){ rightBody.appendChild(editor); }
+        }
+        if(viewer && viewerPreview && !viewer.contains(viewerPreview)){
+          viewer.appendChild(viewerPreview);
+          viewerPreview.style.position='absolute'; viewerPreview.style.right='10px'; viewerPreview.style.top='10px'; viewerPreview.style.maxHeight='60%';
+        }
+      }
+    }catch(e){ try{ console.warn('layoutMobile error', e); }catch(_){} }
+  };
+  document.addEventListener('DOMContentLoaded', function(){ try{ initBottomSheet(); layoutMobile(); }catch(e){} }, {passive:true});
+  window.addEventListener('resize', function(){ try{ layoutMobile(); }catch(e){} }, {passive:true});
+  if(window.M3D){ window.M3D.ui_initialized = true; }
+})();
+ */
 
 /* ========= Viewer ========= */
 let rendererLoopId=null;
@@ -662,7 +765,7 @@ function toggleProjection(useOrtho){
 function addUndo(u){ undoStack.push(u); }
 function createPin(pos,color){
   if(viewOnly) return;
-  const id=`p_${Date.now()}_${Math.random().toString(36).slice(2,7)}`;
+  const id='p_${Date.now()}_${Math.random().toString(36).slice(2,7)}';
   const pin={id,pos:pos.clone(),color:normalizeHex(color||'#ff6b6b'),title:'',body:'',images:[],mesh:null};
   pins.push(pin);
   filterColors.add(pin.color);
@@ -730,7 +833,7 @@ function updateConnector(){
   const bx = (rectPrev.left - rect.left);
   const by = (rectPrev.top - rect.top) + rectPrev.height/2;
   const svg = el.connector;
-  svg.setAttribute('viewBox', `0 0 ${rect.width} ${rect.height}`);
+  svg.setAttribute('viewBox', '0 0 ${rect.width} ${rect.height}');
   el.connLine.setAttribute('x1', x); el.connLine.setAttribute('y1', y);
   el.connLine.setAttribute('x2', bx); el.connLine.setAttribute('y2', by);
   el.connLine.style.display = 'block';
@@ -740,7 +843,7 @@ function updateConnector(){
 
 /* ========= Preview ========= */
 let previewZoom = 1.0;
-function applyPreviewZoom(){ el.previewInner.style.transform = `scale(${previewZoom})`; }
+function applyPreviewZoom(){ el.previewInner.style.transform = 'scale(${previewZoom})'; }
 el.previewZoom.addEventListener('input', ()=>{ previewZoom = parseFloat(el.previewZoom.value)||1; el.previewZoomVal.textContent = previewZoom.toFixed(2) + '×'; applyPreviewZoom(); });
 el.previewReset.addEventListener('click', ()=>{ previewZoom = 1; el.previewZoom.value = 1; el.previewZoomVal.textContent = '1.00×'; applyPreviewZoom(); });
 
@@ -836,8 +939,8 @@ async function driveFileMeta(fileId){
   return meta.result;
 }
 async function driveFileFetchBlob(fileId, retry=1){
-  const dlUrl = `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media&supportsAllDrives=true`;
-  const res = await fetch(dlUrl, { headers:{ Authorization:`Bearer ${accessToken}` } });
+  const dlUrl = 'https://www.googleapis.com/drive/v3/files/${fileId}?alt=media&supportsAllDrives=true';
+  const res = await fetch(dlUrl, { headers:{ Authorization:'Bearer ${accessToken}' } });
   if(res.status === 401 && retry>0){
     try{ tokenClient && tokenClient.requestAccessToken({ prompt:'' }); }catch{}
     return driveFileFetchBlob(fileId, retry-1);
@@ -860,7 +963,7 @@ function extractSpreadsheetId(input){
   const m3 = input.match(/^([a-zA-Z0-9_-]{20,})$/);                if(m3) return m3[1];
   return '';
 }
-function makeDriveRef(id, mime){ return `drive:${id}|${mime||''}`; }
+function makeDriveRef(id, mime){ return 'drive:${id}|${mime||''}'; }
 
 /* ========= Materials ========= */
 function ensureMatRecord(m){
@@ -900,7 +1003,7 @@ function indexMaterialsByKey(){
     const basePath = objectPath(obj);
     if (Array.isArray(obj.material)) {
       obj.material.forEach((m, idx)=>{
-        const key = `${basePath}#${idx}`;
+        const key = '${basePath}#${idx}';
         materialKeyByMaterial.set(m, key);
         materialByKey.set(key, m);
         ensureMatRecord(m);
@@ -909,7 +1012,7 @@ function indexMaterialsByKey(){
         }
       });
     } else {
-      const key = `${basePath}#0`;
+      const key = '${basePath}#0';
       materialKeyByMaterial.set(obj.material, key);
       materialByKey.set(key, obj.material);
       const m = obj.material; ensureMatRecord(m);
@@ -935,7 +1038,7 @@ function collectMaterials(){
   materials.forEach((m,idx)=>{
     const key = materialKeyByMaterial.get(m);
     if(!key) return;
-    const name = (m.name && m.name.trim()) ? m.name : `Material_${idx}`;
+    const name = (m.name && m.name.trim()) ? m.name : 'Material_${idx}';
     const opt=document.createElement('option'); 
     opt.value=key;
     opt.textContent=name;
@@ -1137,10 +1240,10 @@ async function findOrCreateSpreadsheetInGlbFolder(glbMeta){
   let found = null;
   for (const parent of (parents.length ? parents : ['root'])) {
     const q = [
-      `'${parent}' in parents`,
-      `mimeType='application/vnd.google-apps.spreadsheet'`,
-      `trashed=false`,
-      `appProperties has { key='lociFor' and value='${glbMeta.id}' }`
+      ''${parent}' in parents',
+      'mimeType='application/vnd.google-apps.spreadsheet'',
+      'trashed=false',
+      'appProperties has { key='lociFor' and value='${glbMeta.id}' }'
     ].join(' and ');
     const resp = await gapi.client.drive.files.list({
       q, fields: 'files(id,name)',
@@ -1150,7 +1253,7 @@ async function findOrCreateSpreadsheetInGlbFolder(glbMeta){
   }
   if (found) return found.id;
 
-  const name = `LociMyu - ${glbMeta.name}`;
+  const name = 'LociMyu - ${glbMeta.name}';
   const create = await gapi.client.drive.files.create({
     resource: {
       name,
@@ -1181,9 +1284,9 @@ async function findOrCreateSpreadsheetInGlbFolder(glbMeta){
 }
 
 /* ========= Meta（K/L列） 保存・復元 ========= */
-const META_MARKER_RANGE = ()=> `${activeSheet.title}!K1`;
-const META_MAT_KEY_RANGE = ()=> `${activeSheet.title}!K2:L2`;
-const META_VIEW_KEY_RANGE = ()=> `${activeSheet.title}!K3:L3`;
+const META_MARKER_RANGE = ()=> '${activeSheet.title}!K1';
+const META_MAT_KEY_RANGE = ()=> '${activeSheet.title}!K2:L2';
+const META_VIEW_KEY_RANGE = ()=> '${activeSheet.title}!K3:L3';
 
 function safeParseJSON(s, fallback){ try{ return s ? JSON.parse(s) : fallback; }catch{ return fallback; } }
 
@@ -1395,7 +1498,7 @@ function refreshPinsList(){
     const left=document.createElement('div'); left.style.display='flex'; left.style.alignItems='center'; left.style.gap='8px';
     const dot=document.createElement('div'); dot.style.width='10px'; dot.style.height='10px'; dot.style.borderRadius='999px'; dot.style.background=p.color;
     const title=document.createElement('div'); title.className='title'; title.textContent=p.title||'(無題)';
-    const meta=document.createElement('div'); meta.className='meta'; meta.textContent=`x:${p.pos.x.toFixed(2)} y:${p.pos.y.toFixed(2)} z:${p.pos.z.toFixed(2)}`;
+    const meta=document.createElement('div'); meta.className='meta'; meta.textContent='x:${p.pos.x.toFixed(2)} y:${p.pos.y.toFixed(2)} z:${p.pos.z.toFixed(2)}';
     left.appendChild(dot); left.appendChild(title);
     row.appendChild(left); row.appendChild(meta);
     row.addEventListener('click',()=>selectPin(p.id,{fly:true}));
@@ -1417,13 +1520,13 @@ async function loadPinsFromActiveSheet(spreadsheetId){
   pins=[]; selectedPinId=null; el.rightEditor.classList.add('hidden'); el.rightNoSel.classList.remove('hidden');
   try{
     const resp = await gapi.client.sheets.spreadsheets.values.get({
-      spreadsheetId, range: `${activeSheet.title}!A2:I`
+      spreadsheetId, range: '${activeSheet.title}!A2:I'
     });
     const rows = resp.result.values || [];
     rows.forEach(r=>{
       const [pid, title, body, x, y, z, color, imagesJson] = r;
       const p = {
-        id: pid || `p_${Math.random().toString(36).slice(2)}`,
+        id: pid || 'p_${Math.random().toString(36).slice(2)}',
         title: title || '',
         body: body || '',
         pos: new THREE.Vector3(parseFloat(x)||0, parseFloat(y)||0, parseFloat(z)||0),
@@ -1449,21 +1552,21 @@ async function upsertPinToSheet(){
   const spreadsheetId = extractSpreadsheetId(el.inputSheet.value.trim()); if(!spreadsheetId) return;
   const p = pins.find(x=>x.id===selectedPinId) || pins[pins.length-1]; if(!p) return;
   try{
-    const col = await gapi.client.sheets.spreadsheets.values.get({ spreadsheetId, range: `${activeSheet.title}!A:A` });
+    const col = await gapi.client.sheets.spreadsheets.values.get({ spreadsheetId, range: '${activeSheet.title}!A:A' });
     const rows = col.result.values || [];
     let rowIndex = -1;
     for(let i=0;i<rows.length;i++){ if(rows[i][0]===p.id){ rowIndex=i; break; } }
     const values = [[ p.id, p.title||'', p.body||'', p.pos.x, p.pos.y, p.pos.z, p.color, JSON.stringify(ensureArray(p.images)), new Date().toISOString() ]];
     if(rowIndex>=0){
-      const range = `${activeSheet.title}!A${rowIndex+1}:I${rowIndex+1}`;
+      const range = '${activeSheet.title}!A${rowIndex+1}:I${rowIndex+1}';
       await gapi.client.sheets.spreadsheets.values.update({ spreadsheetId, range, valueInputOption:'RAW', resource:{ values } });
     }else{
-      await gapi.client.sheets.spreadsheets.values.append({ spreadsheetId, range: `${activeSheet.title}!A1`, valueInputOption:'RAW', resource:{ values } });
+      await gapi.client.sheets.spreadsheets.values.append({ spreadsheetId, range: '${activeSheet.title}!A1', valueInputOption:'RAW', resource:{ values } });
     }
   }catch(e){ console.error(e); }
 }
 async function deletePinFromActiveSheet(spreadsheetId, pinId){
-  const col = await gapi.client.sheets.spreadsheets.values.get({ spreadsheetId, range: `${activeSheet.title}!A:A` });
+  const col = await gapi.client.sheets.spreadsheets.values.get({ spreadsheetId, range: '${activeSheet.title}!A:A' });
   const rows = col.result.values || [];
   let rowIndex = -1;
   for(let i=0;i<rows.length;i++){ if(rows[i][0]===pinId){ rowIndex=i; break; } }
@@ -1514,8 +1617,8 @@ async function toUploadableBlob(file){
 async function driveMultipartUpload(blob, name, parents){
   const meta = { name, parents: parents && parents.length ? parents : undefined };
   const boundary = '-------loci' + Math.random().toString(36).slice(2);
-  const bufMeta = new TextEncoder().encode(`\r\n--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(meta)}\r\n\r\n--${boundary}\r\nContent-Type: ${blob.type || 'application/octet-stream'}\r\n\r\n`);
-  const bufTail = new TextEncoder().encode(`\r\n--${boundary}--`);
+  const bufMeta = new TextEncoder().encode('\r\n--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(meta)}\r\n\r\n--${boundary}\r\nContent-Type: ${blob.type || 'application/octet-stream'}\r\n\r\n');
+  const bufTail = new TextEncoder().encode('\r\n--${boundary}--');
   const stream = new Blob([ bufMeta, blob, bufTail ], { type: 'multipart/related; boundary='+boundary });
   const res = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&supportsAllDrives=true', {
     method: 'POST',
@@ -1542,7 +1645,7 @@ async function loadFolderImages(){
   const cells = [];
   try{
     for(const parent of glbParents){
-      const q = `'${parent}' in parents and trashed=false and (mimeType contains 'image/')`;
+      const q = ''${parent}' in parents and trashed=false and (mimeType contains 'image/')';
       const resp = await gapi.client.drive.files.list({
         q, pageSize: 200,
         fields: 'files(id,name,mimeType,fileExtension,hasThumbnail,thumbnailLink)',
@@ -1642,13 +1745,13 @@ el.listSelect.addEventListener('change', async (e)=>{
   const title = e.target.options[e.target.selectedIndex].textContent;
   activeSheet = { sheetId, title };
   await loadPinsFromActiveSheet(spreadsheetId);
-  toast(`キャプションリストを切替: ${title}`);
+  toast('キャプションリストを切替: ${title}');
 });
 el.listNew.addEventListener('click', async ()=>{
   if(viewOnly) return;
   const spreadsheetId = extractSpreadsheetId(el.inputSheet.value.trim());
   if(!spreadsheetId) return;
-  const title = prompt('新しいキャプションリスト名を入力', `pins_${Date.now().toString().slice(-5)}`);
+  const title = prompt('新しいキャプションリスト名を入力', 'pins_${Date.now().toString().slice(-5)}');
   if(!title) return;
   const add = await gapi.client.sheets.spreadsheets.batchUpdate({
     spreadsheetId,
@@ -1656,7 +1759,7 @@ el.listNew.addEventListener('click', async ()=>{
   });
   const newSheetId = add.result.replies[0].addSheet.properties.sheetId;
   await gapi.client.sheets.spreadsheets.values.update({
-    spreadsheetId, range: `${title}!A1`,
+    spreadsheetId, range: '${title}!A1',
     valueInputOption:'RAW',
     resource:{ values: [[ 'pin_id','title','body','x','y','z','color','images','updated_at' ]] }
   });
@@ -1670,7 +1773,7 @@ el.listNew.addEventListener('click', async ()=>{
     viewer: {version:1, bgColor: el.bgColor.value || '#0a0f16', projection: usingOrtho ? 'orthographic' : 'perspective' }
   });
 
-  toast(`新しいリストを作成: ${title}`);
+  toast('新しいリストを作成: ${title}');
 });
 el.listDelete.addEventListener('click', async ()=>{
   if(viewOnly) return;
@@ -1679,7 +1782,7 @@ el.listDelete.addEventListener('click', async ()=>{
   const g = await gapi.client.sheets.spreadsheets.get({ spreadsheetId, fields: 'sheets(properties(sheetId))' });
   const count = (g.result.sheets||[]).length;
   if(count <= 1){ alert('最後のシートは削除できません'); return; }
-  if(!confirm(`キャプションリスト「${activeSheet.title}」を削除しますか？`)) return;
+  if(!confirm('キャプションリスト「${activeSheet.title}」を削除しますか？')) return;
   await gapi.client.sheets.spreadsheets.batchUpdate({
     spreadsheetId,
     resource:{ requests:[ { deleteSheet:{ sheetId: activeSheet.sheetId } } ] }
@@ -1752,12 +1855,12 @@ async function loadGLBByFileId(fileId){
     el.statusLabel.textContent = 'GLBを読み込み中…';
     const meta = await driveFileMeta(fileId);
     glbMetaCache = meta; glbParents = meta.parents || [];
-    const dlUrl = `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media&supportsAllDrives=true`;
+    const dlUrl = 'https://www.googleapis.com/drive/v3/files/${fileId}?alt=media&supportsAllDrives=true';
 
-    const res = await fetch(dlUrl, { headers:{ Authorization:`Bearer ${accessToken}` } });
+    const res = await fetch(dlUrl, { headers:{ Authorization:'Bearer ${accessToken}' } });
     if(!res.ok){
       let hint = ''; if(res.status === 403 || res === 404){ hint = '（IDや共有設定を確認してください）'; }
-      throw new Error(`Drive download failed: ${res.status} ${res.statusText} ${hint}`);
+      throw new Error('Drive download failed: ${res.status} ${res.statusText} ${hint}');
     }
 
     // ★★ 低負荷：Blob URL + loadAsync（ArrayBufferを避ける）
@@ -1778,7 +1881,7 @@ async function loadGLBByFileId(fileId){
       URL.revokeObjectURL(url);
     }
 
-    el.statusLabel.textContent = `Loaded: ${meta.name}`;
+    el.statusLabel.textContent = 'Loaded: ${meta.name}';
 
     let sheetId = extractSpreadsheetId(el.inputSheet.value.trim());
     if(!sheetId){
@@ -1831,5 +1934,21 @@ function viewerInitWrap(){ viewerInit(); }
 viewerInitWrap();
 
 </script>
+
+<!-- === Mobile Bottom Sheet === -->
+<div id="bottomSheet" class="bs bs-closed" style="position:fixed;left:0;right:0;bottom:0;z-index:15;border-top-left-radius:16px;border-top-right-radius:16px;background:#0c1118;border:1px solid #1d2a3d;box-shadow:0 -20px 60px rgba(0,0,0,.5);transform:translateY(72%);transition:transform .25s ease">
+  <div class="bs-handle" style="display:grid;place-items:center;padding:10px;cursor:pointer">
+    <div style="width:56px;height:5px;border-radius:999px;background:#27405e"></div>
+  </div>
+  <div class="bs-tabs" style="display:flex;gap:6px;padding:6px 10px;border-bottom:1px solid #1d2a3d;background:#0f1722">
+    <button data-bs-tab="tools" class="accent" id="bsTabTools">ツール</button>
+    <button data-bs-tab="caps" id="bsTabCaps">キャプション</button>
+  </div>
+  <div class="bs-content" style="max-height:44vh;overflow:auto;padding:8px 10px">
+    <div id="bsPaneTools"></div>
+    <div id="bsPaneCaps" style="display:none"></div>
+  </div>
+</div>
+
 </body>
 </html>
