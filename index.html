@@ -513,13 +513,13 @@ function upscaleThumbnailUrl(u, size=2048){
   if(!u) return u;
   try{
     const url = new URL(u);
-    url.search = url.search.replace(/(\bs=)(\d+)/, `$1${size});
-    url.pathname = url.pathname.replace(/=s(\d+)/, `=s${size});
+    url.search = url.search.replace(/(\bs=)(\d+)/, '$1' + size);
+    url.pathname = url.pathname.replace(/=s(\d+)/, '=s' + size);
     if(!/(\bs=)/.test(url.search) && !/=s\d+/.test(url.pathname)){
       url.searchParams.set('s', String(size));
     }
     return url.toString();
-  }catch{ return u.replace(/=s(\d+)/, `=s${size}); }
+  }catch{ return u.replace(/=s(\d+)/, '=s' + size); }
 }
 
 /* ========= UI wire ========= */
@@ -565,7 +565,7 @@ function buildControls(){
   controls = new OrbitControls(camera, el.viewerCanvas);
   controls.target.set(0,0,0); controls.update();
   controls.addEventListener('change', updateConnector);
-  if(tcontrols){ scene.remove(tcontrols); tcontrols.dispose?.(); }
+  if(tcontrols){ scene.remove(tcontrols); (tcontrols.dispose && tcontrols.dispose()); }
   tcontrols = new TransformControls(camera, el.viewerCanvas);
   tcontrols.setSize(0.9); tcontrols.setSpace('world');
   tcontrols.addEventListener('dragging-changed', e=>{ controls.enabled = !e.value; });
@@ -1158,8 +1158,8 @@ async function loadSheetMeta(spreadsheetId){
       ranges: [ META_MARKER_RANGE(), META_MAT_KEY_RANGE(), META_VIEW_KEY_RANGE() ]
     });
     const vals = (get.result.valueRanges || []).map(v=>v.values||[]);
-    const matJson = vals[1] && [0]?.[1] || '';
-    const viewJson = vals[2] && [0]?.[1] || '';
+    const matJson = (vals[1] && vals[1][0]) ? (vals[1][0][1] || '') : '';
+    const viewJson = (vals[2] && vals[2][0]) ? (vals[2][0][1] || '') : '';
     const m = safeParseJSON(matJson, null);
     const materials = normalizeMaterialsJSON(m);
     const viewer = safeParseJSON(viewJson, { version:1, bgColor:'#0a0f16', projection:'perspective' });
@@ -1448,7 +1448,7 @@ el.btnAttach.addEventListener('click', async ()=>{
   const fileInput = el.imgLocal;
   fileInput.value = '';
   fileInput.onchange = async ()=>{
-    const file = fileInput.files && [0];
+    const file = (fileInput.files && fileInput.files[0]);
     const p = pins.find(x=>x.id===selectedPinId);
     if(!file || !p){ return; }
     try{
