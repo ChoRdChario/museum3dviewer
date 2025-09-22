@@ -946,7 +946,7 @@ applyPreviewZoom = function(){
       startCy = (t1.clientY + t2.clientY)/2;
       ev.preventDefault();
     }
-  , {passive:false});
+  }, {passive:false});
 
   wrap.addEventListener('touchmove', (ev)=>{
     if(mode==='pan' && ev.touches.length===1){
