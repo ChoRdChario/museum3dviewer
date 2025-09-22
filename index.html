@@ -1217,8 +1217,8 @@ async function loadSheetMeta(spreadsheetId){
       ranges: [ META_MARKER_RANGE(), META_MAT_KEY_RANGE(), META_VIEW_KEY_RANGE() ]
     });
     const vals = (get.result.valueRanges || []).map(v=>v.values||[]);
-    const matJson = vals[1] && 0] && 1] || '';
-    const viewJson = vals[2] && 0] && 1] || '';
+    const matJson = (vals[1] && vals[1][0]) ? (vals[1][0][1] || '') : '';
+    const viewJson = (vals[2] && vals[2][0]) ? (vals[2][0][1] || '') : '';
     const m = safeParseJSON(matJson, null);
     const materials = normalizeMaterialsJSON(m);
     const viewer = safeParseJSON(viewJson, { version:1, bgColor:'#0a0f16', projection:'perspective' });
