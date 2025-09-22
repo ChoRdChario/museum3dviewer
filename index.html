@@ -79,7 +79,7 @@
 
 /* === Desktop grid layout to stabilize panels === */
 @media (min-width: 901px){
-  body:not(.is-mobile) #appRoot{
+  body:not(.is-mobile) #appRoot .main{
     display: grid;
     grid-template-columns: 280px 1fr 360px;
     grid-template-areas: 'left main right';
@@ -87,9 +87,14 @@
     align-items: stretch;
   }
   #leftToolbox{ grid-area: left; display:flex; flex-direction:column; }
-  #viewerWrap, #viewer{ grid-area: main; }
+  #viewer{ grid-area: main; }
   #rightCaption{ grid-area: right; display:flex; flex-direction:column; }
   #bottomSheet{ display:none !important; }
+}
+
+/* Normalize panel widths inside grid */
+@media (min-width: 901px){
+  body:not(.is-mobile) #appRoot .main .panel{ width:auto; max-width: none; }
 }
 
 </style>
