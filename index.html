@@ -1241,12 +1241,10 @@ async function findOrCreateSpreadsheetInGlbFolder(glbMeta){
   const parents = glbMeta.parents || [];
   let found = null;
   for (const parent of (parents.length ? parents : ['root'])) {
-    const q = [
-      ''' + (parent) + '' in parents',
-      'mimeType='application/vnd.google-apps.spreadsheet'',
-      'trashed=false',
-      'appProperties has { key='lociFor' and value='' + (glbMeta.id) + '' }'
-    ].join(' and ');
+    const q = "'" + parent + "' in parents and " +
+              "mimeType='application/vnd.google-apps.spreadsheet' and " +
+              "trashed=false and " +
+              ("appProperties has { key='lociFor' and value='" + glbMeta.id + "' }");
     const resp = await gapi.client.drive.files.list({
       q, fields: 'files(id,name)',
       includeItemsFromAllDrives: true, supportsAllDrives: true, pageSize: 10,
@@ -1255,7 +1253,7 @@ async function findOrCreateSpreadsheetInGlbFolder(glbMeta){
   }
   if (found) return found.id;
 
-  const name = 'LociMyu - ' + (glbMeta.name) + '';
+  const name = 'LociMyu - ' + glbMeta.name;
   const create = await gapi.client.drive.files.create({
     resource: {
       name,
