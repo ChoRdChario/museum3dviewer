@@ -189,6 +189,7 @@
     <section class="panel" id="viewer">
       <div class="spinner" id="loading" hidden><div class="lds"></div></div>
       <canvas id="viewerCanvas"></canvas>
+<div id="mobileCaptionBelow" class="mobile-caption"></div>
       <svg id="connector">
         <defs><filter id="dropshadow" x="-20%" y="-20%" width="140%"><feDropShadow dx="0" dy="0" stdDeviation="2" flood-color="#001a33" flood-opacity="0.9"/></filter></defs>
         <line id="connLine" x1="0" y1="0" x2="0" y2="0" style="display:none"/>
@@ -551,7 +552,30 @@ function layoutCaptionMobileMenus(){
     if(editor && !below.contains(editor)) below.appendChild(editor);
   }catch(e){}
 }
-document.addEventListener('DOMContentLoaded', function(){ try{ layoutCaptionMobileMenus(); }catch(e){} });
+function initClassicBottomSheet(){
+  try{
+    var sheet = document.getElementById('bottomSheet');
+    if(!sheet || sheet.dataset.bound==='1') return; sheet.dataset.bound='1';
+    var tabTools = document.getElementById('tabTools');
+    var tabCaption = document.getElementById('tabCaption');
+    var sheetTools = document.getElementById('sheetTools');
+    var sheetCaption = document.getElementById('sheetCaption');
+    var backdrop = document.getElementById('backdrop');
+    var handle = document.getElementById('bsHandle');
+    var expand=function(){ sheet.classList.add('expanded'); sheet.setAttribute('aria-hidden','false'); if(backdrop) backdrop.classList.add('show'); };
+    var collapse=function(){ sheet.classList.remove('expanded'); sheet.setAttribute('aria-hidden','true'); if(backdrop) backdrop.classList.remove('show'); };
+    if(handle) handle.addEventListener('click', function(){ if(sheet.classList.contains('expanded')) collapse(); else expand(); });
+    if(backdrop) backdrop.addEventListener('click', collapse);
+    var leftTool = document.getElementById('leftToolbox');
+    if(leftTool){ var lb = leftTool.querySelector('.body'); if(lb && !sheetTools.contains(lb)) sheetTools.appendChild(lb); }
+    var showTools=function(){ tabTools.setAttribute('aria-selected','true'); tabCaption.setAttribute('aria-selected','false'); sheetTools.style.display='block'; sheetCaption.style.display='none'; };
+    var showCaption=function(){ tabTools.setAttribute('aria-selected','false'); tabCaption.setAttribute('aria-selected','true'); sheetTools.style.display='none'; sheetCaption.style.display='block'; };
+    if(tabTools) tabTools.addEventListener('click', showTools);
+    if(tabCaption) tabCaption.addEventListener('click', showCaption);
+    showTools();
+  }catch(e){}
+}
+document.addEventListener('DOMContentLoaded', function(){ try{ initClassicBottomSheet(); layoutCaptionMobileMenus(); }catch(e){} });
 window.addEventListener('resize', function(){ try{ layoutCaptionMobileMenus(); }catch(e){} }, {passive:true});
 
 let rendererLoopId=null;
@@ -592,7 +616,7 @@ function buildControls(){
   controls = new OrbitControls(camera, el.viewerCanvas);
   controls.target.set(0,0,0); controls.update();
   controls.addEventListener('change', updateConnector);
-  if(tcontrols){ scene.remove(tcontrols); (tcontrols && tcontrols.dispose) && tcontrols.dispose(); }
+  if(tcontrols){ scene.remove(tcontrols); tcontrols.dispose?.(); }
   tcontrols = new TransformControls(camera, el.viewerCanvas);
   tcontrols.setSize(0.9); tcontrols.setSpace('world');
   tcontrols.addEventListener('dragging-changed', e=>{ controls.enabled = !e.value; });
@@ -743,51 +767,20 @@ function updateConnector(){
 
 /* ========= Preview ========= */
 let previewZoom = 1.0;
-let previewOffsetX = 0, previewOffsetY = 0;
-function sizePreviewToZoomed(){
-  try{
-    var vp = el.viewerPreview;
-    var iw = (el.previewImg ? el.previewImg.naturalWidth : 0) || 0;
-    var ih = (el.previewImg ? el.previewImg.naturalHeight : 0) || 0;
-    if(!vp){ return; }
-    if(!iw || !ih){ vp.style.width='auto'; vp.style.height='auto'; return; }
-    var zw = iw * previewZoom, zh = ih * previewZoom;
-    var maxW = Math.max(240, Math.floor(window.innerWidth*0.95));
-    var maxH = Math.max(220, Math.floor(window.innerHeight*0.8));
-    vp.style.width  = Math.min(maxW, Math.max(zw, 240)) + 'px';
-    vp.style.height = Math.min(maxH, Math.max(zh + 120, 240)) + 'px';
-  }catch(e){}
-}
-function applyPreviewZoom(){
-  try{
-    if(!el.previewInner) return;
-    el.previewInner.style.transform = 'translate(' + previewOffsetX + 'px,' + previewOffsetY + 'px) scale(' + previewZoom + ')';
-    if(typeof sizePreviewToZoomed === 'function') sizePreviewToZoomed();
-  }catch(e){}
-}
-el.previewZoom && el.previewZoom.addEventListener('input', function(){
-  previewZoom = parseFloat(el.previewZoom.value) || 1;
-  if(el.previewZoomVal) el.previewZoomVal.textContent = previewZoom.toFixed(2) + '×';
-  applyPreviewZoom();
-});
-el.previewReset && el.previewReset.addEventListener('click', function(){
-  previewZoom = 1;
-  previewOffsetX = 0; previewOffsetY = 0;
-  if(el.previewZoom){ el.previewZoom.value = '1'; }
-  if(el.previewZoomVal){ el.previewZoomVal.textContent = '1.00×'; }
-  applyPreviewZoom();
-});
+function applyPreviewZoom(){ el.previewInner.style.transform = `scale(${previewZoom})`; }
+el.previewZoom.addEventListener('input', ()=>{ previewZoom = parseFloat(el.previewZoom.value)||1; el.previewZoomVal.textContent = previewZoom.toFixed(2) + '×'; applyPreviewZoom(); });
+el.previewReset.addEventListener('click', ()=>{ previewZoom = 1; el.previewZoom.value = 1; el.previewZoomVal.textContent = '1.00×'; applyPreviewZoom(); });
 
 async function setPreview(ref, p){
   if(!ref){ el.viewerPreview.classList.add('hidden'); return; }
   try{
     el.previewErr.style.display='none';
     const src = await resolveImageObjectURL(ref, {preferThumb:false});
-el.previewImg.onload = function(){ try{ var nw=el.previewImg.naturalWidth||0, nh=el.previewImg.naturalHeight||0; if(nw&&nh){ var target=Math.min(1, 500/Math.max(nw,nh)); var minz=0.1; if(el.previewZoom && el.previewZoom.min){ var mz=parseFloat(el.previewZoom.min); if(!isNaN(mz)) minz=mz; } previewZoom=Math.max(minz, target||1); if(el.previewZoom){ el.previewZoom.value=String(previewZoom); if(el.previewZoomVal) el.previewZoomVal.textContent=previewZoom.toFixed(2)+'×'; } previewOffsetX=0; previewOffsetY=0; applyPreviewZoom(); } }catch(e){} };
+el.previewImg.onload = function(){ try{ var nw=el.previewImg.naturalWidth||0, nh=el.previewImg.naturalHeight||0; if(nw&&nh){ var target=Math.min(1, 500/Math.max(nw,nh)); var minz=0.1; var mz = (el.previewZoom && el.previewZoom.min) ? parseFloat(el.previewZoom.min) : NaN; if(!isNaN(mz)) minz=mz; previewZoom=Math.max(minz, target||1); if(el.previewZoom){ el.previewZoom.value=String(previewZoom); if(el.previewZoomVal) el.previewZoomVal.textContent=previewZoom.toFixed(2)+'×'; } previewOffsetX=0; previewOffsetY=0; if(typeof applyPreviewZoom==='function') applyPreviewZoom(); } }catch(e){} };
 el.previewImg.src = src;
     el.previewImg.onerror = ()=>{ el.previewErr.style.display='inline'; };
-    el.capTitleLine.textContent = ((p)&&(p).title) || '';
-    el.capBodyLine.textContent  = ((p)&&(p).body)  || '';
+    el.capTitleLine.textContent = p?.title || '';
+    el.capBodyLine.textContent  = p?.body  || '';
     el.viewerPreview.classList.remove('hidden');
     applyPreviewZoom(); updateConnector();
   }catch(e){
@@ -893,9 +886,9 @@ function ensureMatRecord(m){
     map: m.map || null,
     alphaMap: m.alphaMap || null,
     transparent: !!m.transparent,
-    opacity: ((m.opacity!=null?m.opacity:1)),
-    alphaTest: ((m.alphaTest!=null?m.alphaTest:0)),
-    side: (m.side!=null?m.side:THREE.FrontSide),
+    opacity: (m.opacity ?? 1),
+    alphaTest: (m.alphaTest ?? 0),
+    side: m.side ?? THREE.FrontSide,
     depthWrite: m.depthWrite,
     depthTest: m.depthTest,
     blending: m.blending,
@@ -908,7 +901,7 @@ function objectPath(node) {
   const names = [];
   let cur = node;
   while (cur && cur.parent) {
-    names.push(cur.name && cur.name.trim() ? cur.name : '_' + (((cur.uuid)&&(cur.uuid).slice)&&(cur.uuid).slice(0,8) || 'node'));
+    names.push(cur.name && cur.name.trim() ? cur.name : '_' + (cur.uuid?.slice(0,8) || 'node'));
     cur = cur.parent;
   }
   names.reverse();
@@ -928,7 +921,7 @@ function indexMaterialsByKey(){
         materialByKey.set(key, m);
         ensureMatRecord(m);
         if(!matState.has(key)){
-          matState.set(key, { unlit:false, doubleSided:(m.side===THREE.DoubleSide), opacity:(((m.opacity)!=null?(m.opacity):(1))), invertRGB:false, whiteToAlpha:false, alphaTest:(((m.alphaTest)!=null?(m.alphaTest):(0))) });
+          matState.set(key, { unlit:false, doubleSided:(m.side===THREE.DoubleSide), opacity:(m.opacity??1), invertRGB:false, whiteToAlpha:false, alphaTest:(m.alphaTest??0) });
         }
       });
     } else {
@@ -937,7 +930,7 @@ function indexMaterialsByKey(){
       materialByKey.set(key, obj.material);
       const m = obj.material; ensureMatRecord(m);
       if(!matState.has(key)){
-        matState.set(key, { unlit:false, doubleSided:(m.side===THREE.DoubleSide), opacity:(((m.opacity)!=null?(m.opacity):(1))), invertRGB:false, whiteToAlpha:false, alphaTest:(((m.alphaTest)!=null?(m.alphaTest):(0))) });
+        matState.set(key, { unlit:false, doubleSided:(m.side===THREE.DoubleSide), opacity:(m.opacity??1), invertRGB:false, whiteToAlpha:false, alphaTest:(m.alphaTest??0) });
       }
     }
   });
@@ -967,10 +960,10 @@ function collectMaterials(){
       matState.set(key, {
         unlit:false,
         doubleSided:(m.side===THREE.DoubleSide),
-        opacity:(((m.opacity)!=null?(m.opacity):(1))),
+        opacity:(m.opacity??1),
         invertRGB:false,
         whiteToAlpha:false,
-        alphaTest:(((m.alphaTest)!=null?(m.alphaTest):(0)))
+        alphaTest:(m.alphaTest??0)
       });
     }
   });
@@ -996,12 +989,12 @@ function applyMaterialUIFromSelection(){
   const st = matState.get(key) || { unlit:false,doubleSided:false,opacity:1,invertRGB:false,whiteToAlpha:false,alphaTest:0 };
   el.matUnlit.checked = !!st.unlit;
   el.matDoubleSided.checked = !!st.doubleSided;
-  el.matOpacity.value = String((st.opacity!=null?st.opacity:1));
-  el.matOpacityVal.textContent = (Number((st.opacity!=null?st.opacity:1))).toFixed(2);
+  el.matOpacity.value = String(st.opacity ?? 1);
+  el.matOpacityVal.textContent = (Number(st.opacity ?? 1)).toFixed(2);
   el.matInvert.checked = !!st.invertRGB;
   el.matWhiteTransparent.checked = !!st.whiteToAlpha;
-  el.matThreshold.value = String((st.alphaTest!=null?st.alphaTest:0));
-  el.matThresholdVal.textContent = (Number((st.alphaTest!=null?st.alphaTest:0))).toFixed(2);
+  el.matThreshold.value = String(st.alphaTest ?? 0);
+  el.matThresholdVal.textContent = (Number(st.alphaTest ?? 0)).toFixed(2);
 }
 el.matSelect.addEventListener('change', ()=> applyMaterialUIFromSelection());
 
@@ -1012,10 +1005,10 @@ async function applyMaterialFromUIToSelected(){
   const st = matState.get(key) || {};
   st.unlit = !!el.matUnlit.checked;
   st.doubleSided = !!el.matDoubleSided.checked;
-  st.opacity = Number(((el.matOpacity.value)!=null?(el.matOpacity.value):(1)));
+  st.opacity = Number(el.matOpacity.value ?? 1);
   st.invertRGB = !!el.matInvert.checked;
   st.whiteToAlpha = !!el.matWhiteTransparent.checked;
-  st.alphaTest = Number(((el.matThreshold.value)!=null?(el.matThreshold.value):(0)));
+  st.alphaTest = Number(el.matThreshold.value ?? 0);
   matState.set(key, st);
   await applyStateToMaterial(orig, st);
   renderNow();
@@ -1040,7 +1033,7 @@ function copyTextureParams(from, to){
   to.magFilter = from.magFilter; to.minFilter = from.minFilter;
   to.generateMipmaps = from.generateMipmaps;
   to.anisotropy = from.anisotropy;
-  to.colorSpace = ((from.colorSpace)!=null?(from.colorSpace):(THREE.SRGBColorSpace));
+  to.colorSpace = from.colorSpace ?? THREE.SRGBColorSpace;
 }
 async function processTextureToCanvasTextureFromOriginal(originalTex, { invertRGB=false, alphaFromWhite=false, threshold=0 }){
   if(!originalTex || !originalTex.image) return null;
@@ -1107,8 +1100,8 @@ async function applyStateToMaterial(origM, st){
   mat.side = st.doubleSided ? THREE.DoubleSide : THREE.FrontSide;
   const willTransparent = (st.whiteToAlpha || (st.opacity < 1.0));
   mat.transparent = willTransparent;
-  mat.opacity = (st.opacity!=null?st.opacity:1);
-  mat.alphaTest = (st.alphaTest!=null?st.alphaTest:0);
+  mat.opacity = st.opacity ?? 1;
+  mat.alphaTest = st.alphaTest ?? 0;
   mat.depthWrite = !mat.transparent || (mat.alphaTest>0);
 
   if((st.invertRGB || st.whiteToAlpha) && matOriginals.get(origM).map){
@@ -1169,7 +1162,7 @@ async function findOrCreateSpreadsheetInGlbFolder(glbMeta){
       q, fields: 'files(id,name)',
       includeItemsFromAllDrives: true, supportsAllDrives: true, pageSize: 10,
     });
-    if (((resp.result.files)&&(resp.result.files).length)) { found = resp.result.files[0]; break; }
+    if (resp.result.files?.length) { found = resp.result.files[0]; break; }
   }
   if (found) return found.id;
 
@@ -1217,8 +1210,8 @@ async function loadSheetMeta(spreadsheetId){
       ranges: [ META_MARKER_RANGE(), META_MAT_KEY_RANGE(), META_VIEW_KEY_RANGE() ]
     });
     const vals = (get.result.valueRanges || []).map(v=>v.values||[]);
-    const matJson = (vals[1] && vals[1][0]) ? (vals[1][0][1] || '') : '';
-    const viewJson = (vals[2] && vals[2][0]) ? (vals[2][0][1] || '') : '';
+    const matJson = vals[1]?.[0]?.[1] || '';
+    const viewJson = vals[2]?.[0]?.[1] || '';
     const m = safeParseJSON(matJson, null);
     const materials = normalizeMaterialsJSON(m);
     const viewer = safeParseJSON(viewJson, { version:1, bgColor:'#0a0f16', projection:'perspective' });
@@ -1238,10 +1231,10 @@ function normalizeMaterialsJSON(m){
       byKey[it.key] = {
         unlit: !!it.unlit,
         doubleSided: !!it.doubleSided,
-        opacity: Number((it.opacity!=null?it.opacity:1)),
+        opacity: Number(it.opacity ?? 1),
         invertRGB: !!it.invertRGB,
         whiteToAlpha: !!it.whiteToAlpha,
-        alphaTest: Number((it.alphaTest!=null?it.alphaTest:0))
+        alphaTest: Number(it.alphaTest ?? 0)
       };
     });
     return { version:2, byKey };
@@ -1268,10 +1261,10 @@ function serializeMaterialsForSheet(){
       byKey[key] = {
         unlit: !!st.unlit,
         doubleSided: !!st.doubleSided,
-        opacity: Number((st.opacity!=null?st.opacity:1)),
+        opacity: Number(st.opacity ?? 1),
         invertRGB: !!st.invertRGB,
         whiteToAlpha: !!st.whiteToAlpha,
-        alphaTest: Number((st.alphaTest!=null?st.alphaTest:0))
+        alphaTest: Number(st.alphaTest ?? 0)
       };
     }
   }
@@ -1432,7 +1425,7 @@ function rebuildPinsScene(){
   pins.forEach(p=> placePinMesh(p));
   if(tcontrols.visible && selectedPinId){
     const p=pins.find(x=>x.id===selectedPinId);
-    if(((p)&&(p).mesh)) tcontrols.attach(p.mesh); else tcontrols.detach();
+    if(p?.mesh) tcontrols.attach(p.mesh); else tcontrols.detach();
   }
   renderNow();
 }
@@ -1507,7 +1500,7 @@ el.btnAttach.addEventListener('click', async ()=>{
   const fileInput = el.imgLocal;
   fileInput.value = '';
   fileInput.onchange = async ()=>{
-    const file = (fileInput.files && fileInput.files[0]);
+    const file = fileInput.files?.[0];
     const p = pins.find(x=>x.id===selectedPinId);
     if(!file || !p){ return; }
     try{
@@ -1565,7 +1558,7 @@ async function loadFolderImages(){
   const cells = [];
   try{
     for(const parent of glbParents){
-      const q = `'${parent}' in parents and trashed=false and (mimeType contains 'image/');
+      const q = `'${parent}' in parents and trashed=false and (mimeType contains 'image/')`;
       const resp = await gapi.client.drive.files.list({
         q, pageSize: 200,
         fields: 'files(id,name,mimeType,fileExtension,hasThumbnail,thumbnailLink)',
@@ -1665,7 +1658,7 @@ el.listSelect.addEventListener('change', async (e)=>{
   const title = e.target.options[e.target.selectedIndex].textContent;
   activeSheet = { sheetId, title };
   await loadPinsFromActiveSheet(spreadsheetId);
-  toast(`キャプションリストを切替: ${title}`);
+  toast('キャプションリストを切替: ' + title);
 });
 el.listNew.addEventListener('click', async ()=>{
   if(viewOnly) return;
@@ -1814,7 +1807,7 @@ async function loadGLBByFileId(fileId){
   }catch(err){
     console.error(err);
     el.statusLabel.textContent = 'Load failed';
-    alert('GLB読み込みに失敗しました：' + (((err)&&(err).message) || 'unknown error'));
+    alert('GLB読み込みに失敗しました：' + (err?.message || 'unknown error'));
   }finally{
     el.loading.hidden = true;
   }
