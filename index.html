@@ -74,7 +74,9 @@
     @media (max-width:1100px){
       .main{grid-template-columns:1fr; grid-template-rows: 360px 1fr 480px}
     }
-  </style>
+  
+@media (max-width: 900px){ #viewer{ min-height: calc(100vw * 1.8); } }
+</style>
 
   <!-- ES Modules -->
   <script type="importmap">
@@ -160,7 +162,7 @@
       <div id="viewerPreview" class="hidden">
         <div id="previewControls">
           <span class="small">倍率</span>
-          <input id="previewZoom" type="range" min="0.25" max="3" step="0.05" value="1">
+          <input id="previewZoom" type="range" min="0.05" max="3" step="0.05" value="1">
           <span id="previewZoomVal" class="small">1.00×</span>
           <button id="previewReset">リセット</button>
           <span id="previewErr" class="small" style="margin-left:auto;color:#ffb4b4;display:none">画像を読み込めませんでした</span>
@@ -524,9 +526,122 @@ function upscaleThumbnailUrl(u, size=2048){
 
 /* ========= UI wire ========= */
 document.getElementById('btnSignIn').addEventListener('click', startSignIn);
+document.addEventListener('DOMContentLoaded', function(){ try{ initBottomSheet(); layoutMobile(); }catch(e){} });
+window.addEventListener('resize', function(){ try{ layoutMobile(); }catch(e){} }, {passive:true});
 (async () => { ensureGIS().catch(()=>{}); ensureGapiClient().catch(()=>{}); })();
 
 /* ========= Viewer ========= */
+
+function layoutMobile(){
+  try{
+    var isMobile = window.matchMedia('(max-width: 900px)').matches;
+    var left = document.getElementById('leftToolbox');
+    var leftBody = left ? left.querySelector('.body') : null;
+    var right = document.getElementById('rightCaption');
+    var rightBody = right ? right.querySelector('.body') : null;
+    var bs = document.getElementById('bottomSheet');
+    var paneTools = document.getElementById('bsPaneTools');
+    var paneCaps  = document.getElementById('bsPaneCaps');
+
+    // 編集UIとプレビューをビューワ下へ
+    var mobileHolder = document.getElementById('mobileCaptionBelow');
+    if(!mobileHolder){
+      mobileHolder = document.createElement('div');
+      mobileHolder.id = 'mobileCaptionBelow';
+      mobileHolder.style.margin = '8px 0';
+      var viewer = document.getElementById('viewer');
+      if(viewer && viewer.parentElement){ viewer.parentElement.insertBefore(mobileHolder, viewer.nextSibling); }
+    }
+    var viewer = document.getElementById('viewer');
+    var viewerPreview = document.getElementById('viewerPreview');
+    var editor = document.getElementById('editor');
+
+    if(isMobile){
+      // 左/右パネルは非表示（中身はボトムシートへ移設）
+      if(left) left.style.display = 'none';
+      if(right) right.style.display = 'none';
+      if(bs) bs.style.display = 'block';
+
+      // ツール：left.body -> bsPaneTools
+      if(leftBody && paneTools && !paneTools.contains(leftBody)){
+        paneTools.appendChild(leftBody);
+      }
+      // キャプションタブ：ピン一覧 + フィルタ類のみ移設
+      if(rightBody && paneCaps){
+        var filterRow = rightBody.querySelector('#btnColorFilter')?.closest('.flex');
+        var listOps   = rightBody.querySelector('#listSelect')?.closest('.flex');
+        var colorPanel= rightBody.querySelector('#colorFilterPanel');
+        var pinsList  = rightBody.querySelector('#pinsList');
+        var noSel     = rightBody.querySelector('#noSelection');
+        // エディタは移設しない（ビュー下へ）
+        if(filterRow && !paneCaps.contains(filterRow)) paneCaps.appendChild(filterRow);
+        if(listOps && !paneCaps.contains(listOps)) paneCaps.appendChild(listOps);
+        if(colorPanel && !paneCaps.contains(colorPanel)) paneCaps.appendChild(colorPanel);
+        if(pinsList && !paneCaps.contains(pinsList)) paneCaps.appendChild(pinsList);
+        if(noSel && !paneCaps.contains(noSel)) paneCaps.appendChild(noSel);
+      }
+      // ビュー下：プレビュー＋エディタ
+      if(mobileHolder){
+        if(viewerPreview && !mobileHolder.contains(viewerPreview)) mobileHolder.appendChild(viewerPreview);
+        if(editor && !mobileHolder.contains(editor)) mobileHolder.appendChild(editor);
+        viewerPreview && (viewerPreview.style.position='relative');
+        viewerPreview && (viewerPreview.style.right='auto');
+        viewerPreview && (viewerPreview.style.top='auto');
+        viewerPreview && (viewerPreview.style.maxHeight='none');
+        viewerPreview && (viewerPreview.style.width='auto');
+      }
+    }else{
+      // デスクトップ復帰
+      if(left) left.style.display='flex';
+      if(right) right.style.display='flex';
+      if(bs) bs.style.display='none';
+      // left.body を戻す
+      if(left && leftBody && !left.contains(leftBody)){
+        left.appendChild(leftBody);
+      }
+      // キャプション要素を right.body に戻す（エディタ含む）
+      if(rightBody){
+        ['colorFilterPanel','pinsList','noSelection'].forEach(function(id){
+          var n = document.getElementById(id);
+          if(n && !rightBody.contains(n)) rightBody.insertBefore(n, rightBody.firstChild);
+        });
+        if(editor && !rightBody.contains(editor)) rightBody.appendChild(editor);
+      }
+      // プレビューはビュー内に戻す
+      if(viewer && viewerPreview && !viewer.contains(viewerPreview)){
+        viewer.appendChild(viewerPreview);
+        viewerPreview.style.position='absolute';
+        viewerPreview.style.right='10px';
+        viewerPreview.style.top='10px';
+        viewerPreview.style.maxHeight='60%';
+      }
+    }
+  }catch(e){ console.error('layoutMobile error', e); }
+}
+function initBottomSheet(){
+  var bs = document.getElementById('bottomSheet');
+  if(!bs) return;
+  var handle = bs.querySelector('.bs-handle');
+  var tabTools = document.getElementById('bsTabTools');
+  var tabCaps  = document.getElementById('bsTabCaps');
+  var paneTools= document.getElementById('bsPaneTools');
+  var paneCaps = document.getElementById('bsPaneCaps');
+
+  function open(){ bs.style.transform='translateY(0%)'; bs.classList.remove('bs-closed'); }
+  function close(){ bs.style.transform='translateY(72%)'; bs.classList.add('bs-closed'); }
+  handle && handle.addEventListener('click', function(){ if(bs.classList.contains('bs-closed')) open(); else close(); }, {passive:true});
+
+  function switchTab(which){
+    if(which==='tools'){ paneTools.style.display='block'; paneCaps.style.display='none'; tabTools.classList.add('accent'); tabCaps.classList.remove('accent'); }
+    else { paneTools.style.display='none'; paneCaps.style.display='block'; tabTools.classList.remove('accent'); tabCaps.classList.add('accent'); }
+  }
+  tabTools && tabTools.addEventListener('click', function(){ switchTab('tools'); }, {passive:true});
+  tabCaps && tabCaps.addEventListener('click', function(){ switchTab('caps'); }, {passive:true});
+
+  // 初期はツールタブを表示
+  switchTab('tools');
+}
+
 let rendererLoopId=null;
 function viewerInit(){
   renderer = new THREE.WebGLRenderer({
@@ -720,8 +835,55 @@ function applyPreviewZoom(){ el.previewInner.style.transform = `scale(${previewZ
 el.previewZoom.addEventListener('input', ()=>{ previewZoom = parseFloat(el.previewZoom.value)||1; el.previewZoomVal.textContent = previewZoom.toFixed(2) + '×'; applyPreviewZoom(); });
 el.previewReset.addEventListener('click', ()=>{ previewZoom = 1; el.previewZoom.value = 1; el.previewZoomVal.textContent = '1.00×'; applyPreviewZoom(); });
 
+
 async function setPreview(ref, p){
-  if(!ref){ el.viewerPreview.classList.add('hidden'); return; }
+  try{
+    el.previewErr.style.display='none';
+    const noMsg = document.getElementById('previewNoImageMsg');
+    if(!ref){
+      // 画像なし：メッセージ表示、プレビューは開く
+      if(noMsg){ noMsg.style.display='flex'; }
+      if(el.previewImg){ el.previewImg.removeAttribute('src'); }
+      el.capTitleLine.textContent = (p && p.title) ? p.title : '';
+      el.capBodyLine.textContent  = (p && p.body)  ? p.body  : '';
+      el.viewerPreview.classList.remove('hidden');
+      // 初期倍率を下限に合わせて適用
+      var minz = parseFloat((el.previewZoom && el.previewZoom.min) || '0.05') || 0.05;
+      previewZoom = Math.max(minz, 0.05);
+      if(el.previewZoom){ el.previewZoom.value = String(previewZoom); }
+      if(el.previewZoomVal){ el.previewZoomVal.textContent = previewZoom.toFixed(2) + '×'; }
+      applyPreviewZoom(); updateConnector();
+      return;
+    }
+    const src = await resolveImageObjectURL(ref, {preferThumb:false});
+    if(noMsg){ noMsg.style.display='none'; }
+    el.previewImg.onload = function(){
+      try{
+        var nw = el.previewImg.naturalWidth || 0;
+        var viewer = document.getElementById('viewer') || document.body;
+        var vw = (viewer && viewer.clientWidth) ? viewer.clientWidth : window.innerWidth;
+        var baseW = Math.max(1, Math.floor(vw * 0.5));  // 端末幅の約50%
+        var target = nw ? Math.min(1, baseW / nw) : 1;
+        var minz = parseFloat((el.previewZoom && el.previewZoom.min) || '0.05') || 0.05;
+        previewZoom = Math.max(minz, target || 1);
+        if(el.previewZoom){ el.previewZoom.value = String(previewZoom); }
+        if(el.previewZoomVal){ el.previewZoomVal.textContent = previewZoom.toFixed(2) + '×'; }
+        applyPreviewZoom(); updateConnector();
+      }catch(e){}
+    };
+    el.previewImg.onerror = ()=>{ el.previewErr.style.display='inline'; };
+    el.previewImg.src = src;
+    el.capTitleLine.textContent = p?.title || '';
+    el.capBodyLine.textContent  = p?.body  || '';
+    el.viewerPreview.classList.remove('hidden');
+    applyPreviewZoom(); updateConnector();
+  }catch(e){
+    console.warn('preview failed', e);
+    el.previewErr.style.display='inline';
+    el.viewerPreview.classList.remove('hidden');
+  }
+}
+
   try{
     el.previewErr.style.display='none';
     const src = await resolveImageObjectURL(ref, {preferThumb:false});
@@ -1795,5 +1957,20 @@ function viewerInitWrap(){ viewerInit(); }
 viewerInitWrap();
 
 </script>
+
+<div id="bottomSheet" class="bs bs-closed" style="position:fixed;left:0;right:0;bottom:0;z-index:15;border-top-left-radius:16px;border-top-right-radius:16px;background:#0c1118;border:1px solid #1d2a3d;box-shadow:0 -20px 60px rgba(0,0,0,.5);transform:translateY(72%);transition:transform .25s ease">
+  <div class="bs-handle" style="display:grid;place-items:center;padding:8px;cursor:pointer">
+    <div style="width:52px;height:5px;border-radius:999px;background:#27405e"></div>
+  </div>
+  <div class="bs-tabs" style="display:flex;gap:6px;padding:6px 10px;border-bottom:1px solid #1d2a3d;background:#0f1722">
+    <button data-bs-tab="tools" class="accent" id="bsTabTools">ツール</button>
+    <button data-bs-tab="caps" id="bsTabCaps">キャプション</button>
+  </div>
+  <div class="bs-content" style="max-height:44vh;overflow:auto;padding:8px 10px">
+    <div id="bsPaneTools"></div>
+    <div id="bsPaneCaps" style="display:none"></div>
+  </div>
+</div>
+
 </body>
 </html>
