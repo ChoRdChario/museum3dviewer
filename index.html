@@ -222,7 +222,7 @@
   <button id="previewClose" aria-label="閉じる" style="position:absolute;right:8px;top:8px;z-index:3;background:#162234;border:1px solid #24324b;color:#e6edf3;border-radius:10px;padding:6px 10px;cursor:pointer">閉じる</button>
         <div id="previewControls">
           <span class="small">倍率</span>
-          <input id="previewZoom" type="range" min="0.1" max="3" step="0.05" value="1">
+          <input id="previewZoom" type="range" min="0.25" max="3" step="0.05" value="1">
           <span id="previewZoomVal" class="small">1.00×</span>
           <button id="previewReset">リセット</button>
           <span id="previewErr" class="small" style="margin-left:auto;color:#ffb4b4;display:none">画像を読み込めませんでした</span>
@@ -327,8 +327,6 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
-import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js';
-import { KTX2Loader } from 'three/examples/jsm/loaders/KTX2Loader.js';
 import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js';
 
 /* ================== iOS Detection & constants ================== */
@@ -645,6 +643,60 @@ window.addEventListener('resize', ()=>{ try{ if(isMobileLayout()) initMobileShee
 
 /* ========= Viewer ========= */
 
+/* ========= Mobile GLTF optimization (safe, lightweight) ========= */
+async function optimizeGLTFForMobile(gltf, opts={}){
+  try{
+    const maxTex = Math.max(256, Math.min(4096, opts.maxTex || 1536));
+    const T = (typeof THREE!=='undefined') ? THREE : null;
+    const isCompressed = (tex)=> tex && (tex.isCompressedTexture || (tex.image && (tex.image instanceof ImageBitmap) && tex.mipmaps && tex.mipmaps.length>0));
+    const downscaleTex = (tex)=>{
+      if(!tex || !tex.image) return;
+      try{
+        const img = tex.image;
+        const w = img.naturalWidth || img.videoWidth || img.width || 0;
+        const h = img.naturalHeight || img.videoHeight || img.height || 0;
+        if(!w || !h) return;
+        const maxSide = Math.max(w,h);
+        if(maxSide <= maxTex) return; // within limit
+        const scale = maxTex / maxSide;
+        const nw = Math.max(1, Math.round(w*scale));
+        const nh = Math.max(1, Math.round(h*scale));
+        if(isCompressed(tex)) return;
+        const cv = document.createElement('canvas');
+        cv.width = nw; cv.height = nh;
+        const ctx = cv.getContext('2d', {alpha: true, desynchronized: true});
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high';
+        ctx.drawImage(img, 0, 0, nw, nh);
+        tex.image = cv;
+        tex.needsUpdate = true;
+        if(T){
+          tex.generateMipmaps = false;
+          tex.minFilter = T.LinearFilter;
+          tex.magFilter = T.LinearFilter;
+          tex.anisotropy = 1;
+        }
+      }catch(e){ /* ignore individual texture issues */ }
+    };
+
+    const handleMat = (m)=>{
+      ['map','normalMap','roughnessMap','metalnessMap','emissiveMap','aoMap','alphaMap'].forEach(k=> downscaleTex(m[k]));
+      try{ if(m.envMap && T) m.envMap.anisotropy = 1; }catch{}
+    };
+
+    gltf.scene && gltf.scene.traverse((obj)=>{
+      if(obj.isMesh && obj.material){
+        const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+        mats.forEach(handleMat);
+        obj.frustumCulled = true;
+      }
+    });
+  }catch(e){
+    console.warn('optimizeGLTFForMobile failed, continuing without optimization', e);
+  }
+}
+
+
 // ========== GLB reload robustness ==========
 let currentLoadToken = 0;
 function disposeCurrentModel(){
@@ -696,7 +748,6 @@ function viewerInit(){
 
   pinGroup = new THREE.Group(); scene.add(pinGroup);
   loader = new GLTFLoader();
-  try{ loader.setCrossOrigin && loader.setCrossOrigin('anonymous'); }catch{}
 
   window.addEventListener('resize', resize, { passive:true });
   el.viewerCanvas.addEventListener('pointerdown', onPointerDown, { passive:false });
@@ -981,17 +1032,11 @@ async function setPreview(ref, p){
     }
 
     // Handlers first, then assign src
-    
-    el.previewImg.onerror = ()=>{
-      el.previewErr.style.display='inline';
+    el.previewImg.onload = ()=>{
       const empty=document.getElementById('previewEmptyMsg');
       if(empty) empty.style.display='none';
-    };
-
-    const src = await resolveImageObjectURL(ref, {preferThumb:false});
-    el.previewImg.onload = ()=>{
-      const empty=document.getElementById('previewEmptyMsg'); if(empty) empty.style.display='none';
       el.previewErr.style.display='none';
+      // initial zoom to long edge <= 500px
       const nw = el.previewImg.naturalWidth||0, nh = el.previewImg.naturalHeight||0;
       if(nw && nh){
         const target = Math.min(1, 500/Math.max(nw,nh));
@@ -999,12 +1044,16 @@ async function setPreview(ref, p){
         el.previewZoom.value = String(previewZoom);
         el.previewZoomVal.textContent = previewZoom.toFixed(2)+'×';
       }
-      previewOffsetX=0; previewOffsetY=0; applyPreviewZoom();
+      previewOffsetX=0; previewOffsetY=0;
+      applyPreviewZoom();
     };
     el.previewImg.onerror = ()=>{
       el.previewErr.style.display='inline';
-      const empty=document.getElementById('previewEmptyMsg'); if(empty) empty.style.display='none';
+      const empty=document.getElementById('previewEmptyMsg');
+      if(empty) empty.style.display='none';
     };
+
+    const src = await resolveImageObjectURL(ref, {preferThumb:false});
     el.previewImg.src = src;
 
     el.capTitleLine.textContent = p?.title || '';
@@ -2016,35 +2065,8 @@ async function loadGLBByFileId(fileId){
         currentModel.traverse(o=>{ if(o.geometry) o.geometry.dispose(); if(o.material){ if(Array.isArray(o.material)) o.material.forEach(m=>m.dispose()); else o.material.dispose(); } });
         currentModel=null;
       }
-      
-      let gltf = null;
-      async function tryLoad(attempt){
-        try{
-          console.info('GLB load attempt', attempt, { url });
-          const res = await loader.loadAsync(url);
-          return res;
-        }catch(e){
-          console.warn('GLB load failed', attempt, e);
-          if(attempt===1){
-            try{ loader.setKTX2Loader(null); }catch{}
-          }else if(attempt===2){
-            try{ loader.setDRACOLoader(null); }catch{}
-          }else{
-            throw e;
-          }
-          return null;
-        }
-      }
-      for(let attempt=1; attempt<=3; attempt++){
-        const res = await tryLoad(attempt);
-        if(res){ gltf = res; break; }
-      }
-      if(!gltf) throw new Error('GLB loading failed after fallbacks');
-      if(myToken !== currentLoadToken) { /* stale */ return; }
-      disposeCurrentModel();
-      await optimizeGLTFForMobile(gltf, {maxTex: IS_IOS? 1024 : 1536});
+      const gltf = await loader.loadAsync(url);
       currentModel = gltf.scene; scene.add(currentModel);
-    
       collectMaterials();
       focusOrigin();
       renderNow();
