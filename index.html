@@ -706,7 +706,7 @@ function updateConnector(){
   const bx = (rectPrev.left - rect.left);
   const by = (rectPrev.top - rect.top) + rectPrev.height/2;
   const svg = el.connector;
-  svg.setAttribute('viewBox', '0 0 ' + (rect.width) + ' ' + (rect.height) + ');
+  svg.setAttribute('viewBox', '0 0 ' + (rect.width) + ' ' + (rect.height) );
   el.connLine.setAttribute(\'x1\', x); el.connLine.setAttribute(\'y1\', y);
   el.connLine.setAttribute(\'x2\', bx); el.connLine.setAttribute(\'y2\', by);
   el.connLine.style.display = \'block\';
