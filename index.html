@@ -1813,22 +1813,25 @@ async function loadGLBFromURL(url, opts={}){
 
 /* ========= GLB Load (LOW-MEM for iOS) ========= */
 
+
 async function loadGLBByFileId(fileId){
   try{
     const tokenObj = (window.gapi && gapi.client && gapi.client.getToken && gapi.client.getToken()) || null;
     const token = (tokenObj && tokenObj.access_token) || window.accessToken || '';
     if(!token){ alert('サインインしてください'); return; }
 
-    // Try to fetch metadata (non-fatal)
-    let modelName = 'model.glb';
+    // 1) Fetch Drive metadata (need parents to locate spreadsheet)
+    let meta = null;
     try{
-      if(window.gapi && gapi.client && gapi.client.drive && gapi.client.drive.files){
-        const meta = await gapi.client.drive.files.get({ fileId, fields: 'id,name,mimeType', supportsAllDrives: true });
-        if(meta && meta.result && meta.result.name) modelName = meta.result.name;
-      }
-    }catch(e){ console.warn('meta fetch failed (non-fatal)', e); }
+      const r = await gapi.client.drive.files.get({
+        fileId, fields: 'id,name,mimeType,parents', supportsAllDrives: true
+      });
+      meta = r.result;
+    }catch(e){
+      console.warn('meta fetch failed (non-fatal)', e);
+    }
 
-    // Download binary with Bearer
+    // 2) Download GLB binary with Bearer
     const url = `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?alt=media&supportsAllDrives=true`;
     const res = await fetch(url, { headers: { 'Authorization': 'Bearer ' + token } });
     if(!res.ok){
@@ -1837,17 +1840,28 @@ async function loadGLBByFileId(fileId){
     }
     const blob = await res.blob();
     const objUrl = URL.createObjectURL(blob);
-
     try{
-      await loadGLBFromURL(objUrl, {name: modelName});
+      await loadGLBFromURL(objUrl, {name: (meta && meta.name) || 'model.glb'});
     }finally{
       URL.revokeObjectURL(objUrl);
+    }
+
+    // 3) Spreadsheetを確定してピン読み込み
+    try{
+      const spreadsheetId = await findOrCreateSpreadsheetInGlbFolder(meta || {id:fileId, name:'model'});
+      if (spreadsheetId){
+        if (el && el.inputSheet) el.inputSheet.value = spreadsheetId;
+        await loadPinsFromActiveSheet(spreadsheetId);
+      }
+    }catch(e){
+      console.warn('pin spreadsheet resolve failed', e);
     }
   }catch(e){
     console.error('loadGLBByFileId failed', e);
     alert('GLBの読み込みに失敗しました: ' + (e && e.message ? e.message : e));
   }
 }
+
 
 
 /* ========= Save viewer prefs ========= */
