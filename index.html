@@ -301,7 +301,7 @@ async function ensureGapiClient() {
     });
   }
   await new Promise((resolve) => gapi.load('client', resolve));
-  await gapi.client.init({ apiKey: API_KEY, discoveryDocs: DISCOVERY_DOCS });
+  await gapi.client.init({ discoveryDocs: DISCOVERY_DOCS });
   gapiReady = true;
 }
 async function ensureGIS() {
@@ -324,13 +324,14 @@ async function ensureTokenClient() {
     callback: (resp) => {
       if (resp && resp.access_token) {
         accessToken = resp.access_token;
+        try{ if(window.gapi && gapi.client && gapi.client.setToken){ gapi.client.setToken({ access_token: accessToken }); } }catch(e){}
         document.getElementById('gate').style.display = 'none';
         const viewOnly = new URLSearchParams(location.search).get('view') === '1';
         document.getElementById('statusLabel').textContent = viewOnly ? '閲覧モード' : 'Ready';
-        ['btnLoad','btnTogglePins','projOrtho','listSelect'].forEach(id=> document.getElementById(id).removeAttribute('disabled'));
+        removeDisabledForIds(['btnLoad','btnTogglePins','projOrtho','listSelect']);
         if(!viewOnly){
           ['btnAddPin','btnGizmo','btnUndo','btnSavePin','btnDeletePin','btnAttach','btnPickFromFolder','listNew','listDelete']
-            .forEach(id=> document.getElementById(id).removeAttribute('disabled'));
+            .forEach(id=>{ var el=document.getElementById(id); if(el) el.removeAttribute('disabled'); });
         }
         enforceViewOnlyMode();
 
@@ -759,11 +760,17 @@ async function resolveImageObjectURL(ref, {preferThumb=false}={}){
   return outUrl;
 }
 async function driveFileMeta(fileId){
-  const meta = await gapi.client.drive.files.get({
-    fileId, fields:'id,name,mimeType,fileExtension,hasThumbnail,thumbnailLink,parents',
-    supportsAllDrives:true
-  });
-  return meta.result;
+  // OAuth-only metadata fetch (avoid apiKey/content.googleapis.com path)
+  const tok = (gapi && gapi.client && gapi.client.getToken) ? gapi.client.getToken() : null;
+  const at = tok && tok.access_token ? tok.access_token : null;
+  if(!at) throw new Error('No OAuth token');
+  const url = 'https://www.googleapis.com/drive/v3/files/' + encodeURIComponent(fileId) +
+              '?supportsAllDrives=true&fields=id,name,mimeType,fileExtension,hasThumbnail,thumbnailLink,parents';
+  const res = await fetch(url, { headers: { 'Authorization': 'Bearer ' + at } });
+  if(!res.ok){ const txt = await res.text().catch(()=>'');
+    throw new Error('meta ' + res.status + ' ' + txt);
+  }
+  return await res.json();
 }
 async function driveFileFetchBlob(fileId, retry=1){
   const dlUrl = `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media&supportsAllDrives=true`;
@@ -898,7 +905,7 @@ function applyMaterialUIFromSelection(){
   const key = el.matSelect.value;
   const disable = (key === '__all__');
   ['matUnlit','matDoubleSided','matOpacity','matInvert','matWhiteTransparent','matThreshold']
-    .forEach(id=>{ document.getElementById(id).disabled = disable || viewOnly; });
+    .forEach(id=>{ var el=document.getElementById(id); if(el && 'disabled' in el) el.disabled = disable || viewOnly; });
   if(disable) return;
   const st = matState.get(key) || { unlit:false,doubleSided:false,opacity:1,invertRGB:false,whiteToAlpha:false,alphaTest:0 };
   el.matUnlit.checked = !!st.unlit;
@@ -1563,7 +1570,7 @@ async function refreshCaptionLists(spreadsheetId){
     }
   }
   if (activeSheet.sheetId){ el.listSelect.value = String(activeSheet.sheetId); }
-  if(!viewOnly){ ['listNew','listDelete'].forEach(id=>document.getElementById(id).disabled=false); }
+  if(!viewOnly){ setDisabledForIds(['listNew','listDelete'], false); }
 }
 el.listSelect.addEventListener('change', async (e)=>{
   const spreadsheetId = extractSpreadsheetId(el.inputSheet.value.trim());
@@ -1931,10 +1938,10 @@ viewerInitWrap();
       var fitH = (vh * coefH) / ih;
       var slider = document.getElementById('previewZoom');
       var minz = 0.05;
-      if(slider){ var mv = parseFloat(slider.min||'0.05'); if(!isNaN(mv)) minz = mv; }
+      if(slider){ slider.value = String(target); }
       var target = Math.min(1, Math.max(minz, Math.min(fitW, fitH)));
-      if(typeof previewZoom === 'undefined') window.previewZoom = 1;
-      window.previewZoom = target;
+      try{ previewZoom; }catch(_){ /* fallback no-op */ }
+      previewZoom = target;
       if(slider){ slider.value = String(target); }
       var val = document.getElementById('previewZoomVal');
       if(val){ try{ val.textContent = target.toFixed(2) + '×'; }catch(_){ val.textContent = target + '×'; } }
@@ -1991,6 +1998,31 @@ viewerInitWrap();
   document.addEventListener('DOMContentLoaded', function(){
     try{ layoutMobile(); }catch(_){ }
   });
+})();
+</script>
+
+
+<script>
+(function(){
+  if(window.M3D && M3D._disableUtil) return;
+  function setDisabledForIds(ids, disable){
+    if(!ids || !ids.length) return;
+    for(var i=0;i<ids.length;i++){
+      var el = document.getElementById(ids[i]);
+      if(el && 'disabled' in el){ el.disabled = !!disable; }
+    }
+  }
+  function removeDisabledForIds(ids){
+    if(!ids || !ids.length) return;
+    for(var i=0;i<ids.length;i++){
+      var el = document.getElementById(ids[i]);
+      if(el){ el.removeAttribute('disabled'); }
+    }
+  }
+  if(!window.M3D) window.M3D = {};
+  window.M3D._disableUtil = { setDisabledForIds, removeDisabledForIds };
+  window.setDisabledForIds = setDisabledForIds;
+  window.removeDisabledForIds = removeDisabledForIds;
 })();
 </script>
 
