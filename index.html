@@ -2186,7 +2186,7 @@ document.addEventListener('DOMContentLoaded', function(){
                     border-left:1px solid var(--ui-border); display:flex; flex-direction:column; gap:8px; padding:12px; box-sizing:border-box; z-index:1; }
         .caplist{ flex:1; overflow:auto; background:var(--ui-bg); border-radius:10px; box-shadow:0 1px 2px rgba(0,0,0,.05); }
         .capeditor{ height:28%; min-height:140px; background:var(--ui-bg); border-radius:10px; box-shadow:0 1px 2px rgba(0,0,0,.05); }
-        @media (max-width: 900px){ .rightpane{ display:none; } }
+        @media (max-width: 900px){ .rightpane{ display:none; } .chip{ display:none; } .panel{ bottom: calc(56px + 10px); max-height: 40vh; } }
 
         .mobilebar{ position: fixed; left:0; right:0; bottom:0; height:56px; background:var(--glass);
                     border-top:1px solid var(--ui-border); display:flex; align-items:center; gap:8px; padding:0 12px; box-sizing:border-box; z-index:2; }
@@ -2216,6 +2216,7 @@ document.addEventListener('DOMContentLoaded', function(){
           <div class="capeditor" id="capeditor" part="capeditor"></div>
         </aside>
         <div class="mobilebar" part="mobilebar">
+          <button class="mb-btn" id="btnHUD">診断</button>
           <button class="mb-btn" id="btnReader">読書</button>
           <button class="mb-btn" id="btnList">一覧</button>
           <button class="mb-btn" id="btnAdd">追加</button>
@@ -2284,6 +2285,11 @@ document.addEventListener('DOMContentLoaded', function(){
       }, {capture:true});
 
       const show = (el)=>{ [this.$reader,this.$list,this.$add].forEach(x=>x.style.display='none'); el.style.display='block'; };
+      this.shadowRoot.getElementById('btnHUD').addEventListener('click', ()=>{
+        const st = (this.__panel.style.display==='none' || !this.__panel.style.display) ? 'block' : 'none';
+        this.__panel.style.display = st; this.__userClosed = (st==='none');
+        if(st!=='none') this.__panel.scrollTop = this.__panel.scrollHeight;
+      });
       this.shadowRoot.getElementById('btnReader').addEventListener('click', ()=> show(this.$reader));
       this.shadowRoot.getElementById('btnList').addEventListener('click', ()=>{ show(this.$list); this.renderList(); });
       this.shadowRoot.getElementById('btnAdd').addEventListener('click', ()=> show(this.$add));
@@ -2303,6 +2309,7 @@ document.addEventListener('DOMContentLoaded', function(){
       window.addEventListener('m3d:model-loaded', ()=> this.log('modelLoaded'));
       window.addEventListener('m3d:pin-selected', (ev)=> this.onSelect(ev && ev.detail));
 
+      try{ const sp = new URLSearchParams(location.search); if (sp.get('hud')==='0'){ this.__chip.style.display='none'; this.__panel.style.display='none'; this.shadowRoot.querySelector('#btnHUD').style.display='none'; } }catch(_){}
       this.log('vNext Phase2 mounted');
     }
 
