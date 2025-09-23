@@ -2149,7 +2149,7 @@ document.addEventListener('DOMContentLoaded', function(){
 </script>
 
 
-<!-- === Phase 1.5: vNext Shadow UI Shell (self-contained) === -->
+<!-- === Phase 2: vNext Mobile BottomPanel + Reader + Quick-Add === -->
 <script>
 (function(){
   function vnextEnabled(){
@@ -2166,7 +2166,9 @@ document.addEventListener('DOMContentLoaded', function(){
       super();
       this.attachShadow({mode:'open'});
       const css = `
+        :root{ --ui-bg:#fff; --ui-border:rgba(0,0,0,.08); --glass:rgba(255,255,255,.96); }
         :host{ all: initial; }
+        /* HUD */
         .chip{ position: fixed; left:12px; bottom:12px; padding:8px 12px; border-radius:999px;
                background:#222; color:#fff; border:1px solid #444; font:13px system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
                cursor:pointer; opacity:.92; box-shadow:0 2px 8px rgba(0,0,0,.25); user-select:none; z-index:4; }
@@ -2183,29 +2185,82 @@ document.addEventListener('DOMContentLoaded', function(){
         .spinner{ width:48px; height:48px; border:4px solid rgba(255,255,255,.3); border-top-color:#fff; border-radius:50%;
                  animation:spin 1s linear infinite; margin:0 auto 10px; }
         @keyframes spin{ to{ transform: rotate(360deg); } }
-        /* vNext containers (skeletons) */
+
+        /* vNext right-pane (desktop placeholder) */
         .rightpane{ position: fixed; top:0; right:0; width:360px; height:100vh; background:rgba(16,16,16,.04);
-                    border-left:1px solid rgba(0,0,0,.08); display:flex; flex-direction:column; gap:8px; padding:12px; box-sizing:border-box; z-index:1; }
-        .caplist{ flex:1; overflow:auto; background:#fff; border-radius:10px; box-shadow:0 1px 2px rgba(0,0,0,.05); }
-        .capeditor{ height:28%; min-height:140px; background:#fff; border-radius:10px; box-shadow:0 1px 2px rgba(0,0,0,.05); }
-        .mobilebar{ position: fixed; left:0; right:0; bottom:0; height:56px; background:rgba(255,255,255,.96);
-                    border-top:1px solid rgba(0,0,0,.08); display:flex; align-items:center; gap:8px; padding:0 12px; box-sizing:border-box; }
-        @media (max-width: 900px){ .rightpane{ display:none; } .mobilebar{ display:flex; } }
-        @media (min-width: 901px){ .mobilebar{ display:none; } }
+                    border-left:1px solid var(--ui-border); display:flex; flex-direction:column; gap:8px; padding:12px; box-sizing:border-box; z-index:1; }
+        .caplist{ flex:1; overflow:auto; background:var(--ui-bg); border-radius:10px; box-shadow:0 1px 2px rgba(0,0,0,.05); }
+        .capeditor{ height:28%; min-height:140px; background:var(--ui-bg); border-radius:10px; box-shadow:0 1px 2px rgba(0,0,0,.05); }
+        @media (max-width: 900px){ .rightpane{ display:none; } }
+
+        /* Mobile bottom panel */
+        .mobilebar{ position: fixed; left:0; right:0; bottom:0; height:56px; background:var(--glass);
+                    border-top:1px solid var(--ui-border); display:flex; align-items:center; gap:8px; padding:0 12px; box-sizing:border-box; z-index:2; }
+        .mb-btn{ appearance:none; border:1px solid var(--ui-border); background:#fff; border-radius:10px; padding:6px 10px; font:13px system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
+        .mb-btn:active{ transform:translateY(1px); }
+        .mobilepanel{ position: fixed; left:0; right:0; bottom:56px; background:var(--glass); border-top:1px solid var(--ui-border);
+                      max-height:55vh; display:none; z-index:2; box-shadow:0 -10px 24px rgba(0,0,0,.12); }
+        .mobilepanel .h{ display:flex; align-items:center; gap:8px; padding:10px 12px; border-bottom:1px solid var(--ui-border); }
+        .mobilepanel .b{ padding:12px; overflow:auto; max-height:calc(55vh - 48px); }
+        .pinimg{ width:100%; max-height:38vh; object-fit:contain; background:#f6f6f6; border:1px solid var(--ui-border); border-radius:8px; }
+        .pinmeta{ font:13px/1.5 system-ui, -apple-system, Segoe UI, Roboto, sans-serif; color:#222; white-space:pre-wrap; }
+        .title{ font-weight:600; margin:6px 0 4px; }
+        .row{ display:grid; grid-template-columns: 90px 1fr; gap:8px; align-items:center; margin:6px 0; }
+        .row input, .row textarea{ width:100%; box-sizing:border-box; border:1px solid var(--ui-border); border-radius:8px; padding:8px; font:13px system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
+        .row textarea{ min-height:72px; }
+        .actions{ display:flex; gap:8px; justify-content:flex-end; margin-top:8px; }
+        .ghost{ opacity:.65; }
+        @media (min-width: 901px){ .mobilebar, .mobilepanel{ display:none; } }
       `;
       const tpl = document.createElement('template');
       tpl.innerHTML = `<style>${css}</style>
+        <!-- HUD -->
         <button id="chip" class="chip" title="診断ログ（チルダ横キーで開閉）">診断ログ</button>
         <div id="panel" class="panel"><h3>診断ログ</h3><ul id="list" class="list"></ul></div>
         <div id="overlay" class="overlay"><div class="center"><div class="spinner"></div><div id="msg">読み込み中…</div></div></div>
+
+        <!-- Desktop placeholder -->
         <aside class="rightpane" part="rightpane" aria-label="vNext右ペイン">
           <div class="caplist" id="caplist" part="caplist"></div>
           <div class="capeditor" id="capeditor" part="capeditor"></div>
         </aside>
+
+        <!-- Mobile controls -->
         <div class="mobilebar" part="mobilebar">
-          <div id="mobileStatus">vNext モバイルUI（骨）</div>
+          <button class="mb-btn" id="btnReader">読書</button>
+          <button class="mb-btn" id="btnList">一覧</button>
+          <button class="mb-btn" id="btnAdd">追加</button>
+          <div id="mobileStatus" class="ghost">vNext モバイル</div>
+        </div>
+
+        <!-- Mobile panels -->
+        <div class="mobilepanel" id="panelReader">
+          <div class="h"><div style="font-weight:600">キャプション</div><div style="margin-left:auto"><button class="mb-btn" id="btnRClose">閉じる</button></div></div>
+          <div class="b">
+            <img id="rImg" class="pinimg" alt="画像が設定されていません" />
+            <div class="pinmeta">
+              <div id="rTitle" class="title"></div>
+              <div id="rBody"></div>
+            </div>
+          </div>
+        </div>
+        <div class="mobilepanel" id="panelList">
+          <div class="h"><div style="font-weight:600">ピン一覧</div><div style="margin-left:auto"><button class="mb-btn" id="btnLClose">閉じる</button></div></div>
+          <div class="b" id="listBody">読み込み待ち…</div>
+        </div>
+        <div class="mobilepanel" id="panelAdd">
+          <div class="h"><div style="font-weight:600">ピン追加</div><div style="margin-left:auto"><button class="mb-btn" id="btnAClose">閉じる</button></div></div>
+          <div class="b">
+            <div class="row"><label for="aTitle">タイトル</label><input id="aTitle" placeholder="例：口縁部の欠損" /></div>
+            <div class="row"><label for="aBody">本文</label><textarea id="aBody" placeholder="メモ…"></textarea></div>
+            <div class="row"><label for="aImg">画像URL</label><input id="aImg" placeholder="https://..." /></div>
+            <div class="actions"><button class="mb-btn" id="btnSave">保存</button></div>
+            <div class="ghost">※ 現段階では URL 指定で保存します（Driveアップロード統合は後続）</div>
+          </div>
         </div>`;
       this.shadowRoot.appendChild(tpl.content.cloneNode(true));
+
+      // HUD refs
       this.__list = this.shadowRoot.getElementById('list');
       this.__panel = this.shadowRoot.getElementById('panel');
       this.__msg = this.shadowRoot.getElementById('msg');
@@ -2214,55 +2269,205 @@ document.addEventListener('DOMContentLoaded', function(){
       this.__autoOpened = false;
       this.__userClosed = false;
       this.__refCount = 0;
+
+      // Mobile refs
+      this.$reader = this.shadowRoot.getElementById('panelReader');
+      this.$list = this.shadowRoot.getElementById('panelList');
+      this.$add = this.shadowRoot.getElementById('panelAdd');
+      this.$listBody = this.shadowRoot.getElementById('listBody');
+      this.$rImg = this.shadowRoot.getElementById('rImg');
+      this.$rTitle = this.shadowRoot.getElementById('rTitle');
+      this.$rBody = this.shadowRoot.getElementById('rBody');
+      this.$aTitle = this.shadowRoot.getElementById('aTitle');
+      this.$aBody = this.shadowRoot.getElementById('aBody');
+      this.$aImg = this.shadowRoot.getElementById('aImg');
+      this.__pins = [];
+      this.__sheetId = null;
+      this.__selected = null;
     }
     connectedCallback(){
+      // HUD toggle
       this.__chip.addEventListener('click', ()=>{
-        const newState = (this.__panel.style.display==='none' || !this.__panel.style.display) ? 'block' : 'none';
-        this.__panel.style.display = newState;
-        this.__userClosed = (newState === 'none');
-        if(this.__panel.style.display!=='none'){ this.__panel.scrollTop = this.__panel.scrollHeight; }
+        const st = (this.__panel.style.display==='none' || !this.__panel.style.display) ? 'block' : 'none';
+        this.__panel.style.display = st; this.__userClosed = (st==='none');
+        if(st!=='none') this.__panel.scrollTop = this.__panel.scrollHeight;
       }, {capture:true});
       window.addEventListener('keydown', (e)=>{
-        if(e.key === '`'){ // backquote
-          const newState = (this.__panel.style.display==='none' || !this.__panel.style.display) ? 'block' : 'none';
-          this.__panel.style.display = newState;
-          this.__userClosed = (newState === 'none');
+        if(e.key === '`'){
+          const st = (this.__panel.style.display==='none' || !this.__panel.style.display) ? 'block' : 'none';
+          this.__panel.style.display = st; this.__userClosed = (st==='none');
         }
       }, {capture:true});
 
-      // Listen bridges
-      window.addEventListener('m3d:model-loaded', ()=> this.log('modelLoaded'));
-      window.addEventListener('m3d:pin-selected', (ev)=> this.log('pinSelected: ' + (ev && ev.detail && (ev.detail.title || ev.detail.id || ''))));
+      // Mobile buttons
+      const show = (el)=>{ [this.$reader,this.$list,this.$add].forEach(x=>x.style.display='none'); el.style.display='block'; };
+      this.shadowRoot.getElementById('btnReader').addEventListener('click', ()=> show(this.$reader));
+      this.shadowRoot.getElementById('btnList').addEventListener('click', ()=>{ show(this.$list); this.renderList(); });
+      this.shadowRoot.getElementById('btnAdd').addEventListener('click', ()=> show(this.$add));
+      this.shadowRoot.getElementById('btnRClose').addEventListener('click', ()=> this.$reader.style.display='none');
+      this.shadowRoot.getElementById('btnLClose').addEventListener('click', ()=> this.$list.style.display='none');
+      this.shadowRoot.getElementById('btnAClose').addEventListener('click', ()=> this.$add.style.display='none');
+      this.shadowRoot.getElementById('btnSave').addEventListener('click', ()=> this.quickSave());
 
-      // Global conveniences
-      if (!window.M3DBusy){
-        window.M3DBusy = { show: (m)=>this.showBusy(m), hide: ()=>this.hideBusy() };
-      }
+      // Global helpers
+      if (!window.M3DBusy) window.M3DBusy = { show: (m)=>this.showBusy(m), hide: ()=>this.hideBusy() };
       if (!window.logStep) window.logStep = (s)=>this.log(String(s||''));
       if (!window.logError) window.logError = (s)=>this.log(String(s||''), 'error');
 
       // Hooks
       this.hookGapi();
       this.hookFetchAndXHR();
-      this.log('vNext shell mounted');
-    }
-    log(s, level){
-      try{
-        const li = document.createElement('li');
-        li.textContent = '[' + new Date().toLocaleTimeString() + '] ' + s;
-        if(level==='error') li.classList.add('error');
-        this.__list.appendChild(li);
-        if((!this.__autoOpened && !this.__userClosed) || level==='error'){
-          this.__panel.style.display = 'block';
-          this.__autoOpened = true;
-        }
-        if(this.__panel.style.display!=='none'){ this.__panel.scrollTop = this.__panel.scrollHeight; }
-        while(this.__list.children.length>250) this.__list.removeChild(this.__list.firstChild);
-      }catch(_){}
-    }
-    showBusy(m){ this.__refCount++; this.__overlay.style.display = 'block'; if(m) this.__msg.textContent = m; }
-    hideBusy(){ this.__refCount = Math.max(0, this.__refCount - 1); if(this.__refCount===0) this.__overlay.style.display = 'none'; }
+      this.hookLegacyAPIs();
 
+      // Events
+      window.addEventListener('m3d:model-loaded', ()=> this.log('modelLoaded'));
+      window.addEventListener('m3d:pin-selected', (ev)=> this.onSelect(ev && ev.detail));
+
+      this.log('vNext Phase2 mounted');
+    }
+
+    /* ---- Pins ---- */
+    onSelect(pin){
+      this.__selected = pin || null;
+      // Update reader panel
+      if (!pin){
+        this.$rImg.src = ''; this.$rTitle.textContent = ''; this.$rBody.textContent = '';
+        return;
+      }
+      const t = pin.title || pin.name || pin.id || '';
+      const b = pin.body || pin.note || pin.caption || '';
+      const img = pin.img || pin.image || '';
+      this.$rTitle.textContent = t;
+      this.$rBody.textContent = b;
+      if (img){ this.$rImg.src = img; this.$rImg.style.display='block'; }
+      else { this.$rImg.removeAttribute('src'); this.$rImg.style.display='none'; }
+    }
+    async renderList(){
+      try{
+        if (!this.__sheetId){ this.$listBody.textContent = 'シート未取得（GLBを読み込むと取得します）'; return; }
+        if (!this.__pins.length) await this.fetchPins(this.__sheetId);
+        if (!this.__pins.length){ this.$listBody.textContent = 'ピンがありません'; return; }
+        const frag = document.createDocumentFragment();
+        this.__pins.forEach((p, idx)=>{
+          const div = document.createElement('div');
+          div.style.cssText = 'padding:8px 4px;border-bottom:1px solid var(--ui-border);display:grid;grid-template-columns:44px 1fr;gap:8px;align-items:center;';
+          const ph = document.createElement('div'); ph.style.cssText='width:44px;height:44px;border-radius:6px;background:#f2f2f2;border:1px solid var(--ui-border);overflow:hidden;';
+          if (p.img){ const im = document.createElement('img'); im.src = p.img; im.style.cssText='width:100%;height:100%;object-fit:cover;'; ph.appendChild(im); }
+          const text = document.createElement('div'); text.innerHTML = '<div style="font-weight:600">'+(p.title||p.name||('Pin '+(idx+1)))+'</div><div style="font-size:12px;opacity:.8">'+(p.body||'')+'</div>';
+          div.appendChild(ph); div.appendChild(text);
+          div.addEventListener('click', ()=>{
+            try{ if (typeof window.selectPin === 'function') window.selectPin(p.id || p._row || idx); }catch(_){}
+            this.onSelect(p);
+            this.$reader.style.display='block';
+          });
+          frag.appendChild(div);
+        });
+        this.$listBody.innerHTML='';
+        this.$listBody.appendChild(frag);
+      }catch(e){
+        this.$listBody.textContent = '一覧描画エラー';
+        this.log('一覧描画エラー: '+(e&&e.message?e.message:e), 'error');
+      }
+    }
+    async fetchPins(sheetId){
+      try{
+        if (!window.gapi || !gapi.client || !gapi.client.sheets){ this.log('Sheets API未初期化'); return; }
+        this.showBusy('ピン・シートを読み込み中…');
+        // まずメタから先頭シート名を取る（ヘッダ推定しやすくするため）
+        const meta = await gapi.client.sheets.spreadsheets.get({ spreadsheetId: sheetId });
+        const firstSheet = meta.result.sheets && meta.result.sheets[0] && meta.result.sheets[0].properties && meta.result.sheets[0].properties.title || 'Sheet1';
+        // 先頭シート全体を取る（A:Zまで）
+        const vals = await gapi.client.sheets.spreadsheets.values.get({ spreadsheetId: sheetId, range: firstSheet + '!A:Z' });
+        const rows = vals.result.values || [];
+        if (!rows.length){ this.__pins=[]; this.$listBody.textContent='ピンがありません'; return; }
+        const header = rows[0].map(x=>String(x||'').trim().toLowerCase());
+        const pins = [];
+        for (let i=1;i<rows.length;i++){
+          const r = rows[i]; const obj = {_row: i+1};
+          for (let c=0;c<header.length;c++){
+            const key = header[c] || ('c'+(c+1));
+            obj[key] = r[c] || '';
+          }
+          // 正規化
+          obj.id = obj.id || obj.pinid || obj.key || obj._row;
+          obj.title = obj.title || obj.name || obj.captiontitle || obj.c2 || '';
+          obj.body = obj.body || obj.note || obj.caption || obj.description || obj.c3 || '';
+          obj.img = obj.img || obj.image || obj.photourl || obj.thumbnail || '';
+          pins.push(obj);
+        }
+        this.__pins = pins;
+        this.log('ピン取得: ' + pins.length + '件');
+      }catch(e){
+        this.log('ピン取得失敗: ' + (e && e.result && e.result.error && e.result.error.message ? e.result.error.message : (e.message || e)), 'error');
+      }finally{
+        this.hideBusy();
+      }
+    }
+    async quickSave(){
+      try{
+        const pin = {
+          title: (this.$aTitle.value||'').trim(),
+          body: (this.$aBody.value||'').trim(),
+          img: (this.$aImg.value||'').trim()
+        };
+        if (!pin.title && !pin.body){ this.log('タイトルか本文を入力してください', 'error'); return; }
+        if (typeof window.upsertPinToSheet === 'function'){
+          this.showBusy('保存中…');
+          await Promise.resolve(window.upsertPinToSheet(pin));
+          this.hideBusy();
+          this.log('保存完了');
+          this.$aTitle.value=''; this.$aBody.value=''; this.$aImg.value='';
+          // 再読込
+          if (this.__sheetId) this.fetchPins(this.__sheetId);
+        }else{
+          this.log('upsertPinToSheet が見つかりません（旧実装の保存API）', 'error');
+        }
+      }catch(e){
+        this.hideBusy();
+        this.log('保存失敗: ' + (e && e.message ? e.message : e), 'error');
+      }
+    }
+
+    /* ---- HUD ---- */
+    log(s, level){
+      const li = document.createElement('li'); li.textContent = '[' + new Date().toLocaleTimeString() + '] ' + s;
+      if(level==='error') li.classList.add('error');
+      this.__list.appendChild(li);
+      if((!this.__autoOpened && !this.__userClosed) || level==='error'){ this.__panel.style.display='block'; this.__autoOpened = true; }
+      if(this.__panel.style.display!=='none'){ this.__panel.scrollTop = this.__panel.scrollHeight; }
+      while(this.__list.children.length>250) this.__list.removeChild(this.__list.firstChild);
+    }
+    showBusy(m){ this.__refCount++; this.__overlay.style.display='block'; if(m) this.__msg.textContent=m; }
+    hideBusy(){ this.__refCount = Math.max(0,this.__refCount-1); if(this.__refCount===0) this.__overlay.style.display='none'; }
+
+    /* ---- Hooks ---- */
+    hookLegacyAPIs(){
+      const self = this;
+      // Wrap loadPinsFromActiveSheet to capture spreadsheetId and fetch pins
+      let tries = 0;
+      const t = setInterval(function(){
+        tries++;
+        try{
+          if (typeof window.loadPinsFromActiveSheet === 'function'){
+            const orig = window.loadPinsFromActiveSheet;
+            window.loadPinsFromActiveSheet = async function(spreadsheetId){
+              self.__sheetId = spreadsheetId || self.__sheetId;
+              self.log('シートID取得: ' + self.__sheetId);
+              try{ self.showBusy('ピン・シートを読み込み中…'); }catch(_){}
+              try{
+                const r = await orig.apply(this, arguments);
+                // 自前でも値取得（旧UIに依存せず表示）
+                if (self.__sheetId) self.fetchPins(self.__sheetId);
+                return r;
+              } finally { try{ self.hideBusy(); }catch(_){ } }
+            };
+            self.log('legacy loadPinsFromActiveSheet をフック');
+            clearInterval(t);
+          }
+        }catch(_){}
+        if (tries>50) clearInterval(t);
+      }, 200);
+    }
     hookGapi(){
       let tries = 0;
       const timer = setInterval(()=>{
@@ -2305,7 +2510,6 @@ document.addEventListener('DOMContentLoaded', function(){
         if (tries>50) clearInterval(timer);
       }, 200);
     }
-
     hookFetchAndXHR(){
       // fetch
       try{
@@ -2316,12 +2520,8 @@ document.addEventListener('DOMContentLoaded', function(){
           const isMedia = url.includes('alt=media') || url.includes('/uc?export=download');
           const isSheet = url.includes('sheets.googleapis.com') || url.includes('/spreadsheets/');
           if (isMedia || isSheet) this.showBusy(isMedia ? 'GLB/画像取得中…' : 'シート通信中…');
-          try{
-            const res = await origFetch(input, init);
-            return res;
-          } finally {
-            if (isMedia || isSheet) this.hideBusy();
-          }
+          try{ const res = await origFetch(input, init); return res; }
+          finally{ if (isMedia || isSheet) this.hideBusy(); }
         };
       }catch(_){}
       // XHR
@@ -2353,7 +2553,7 @@ document.addEventListener('DOMContentLoaded', function(){
   }
   customElements.define('locimyu-ui', LocimyuUI);
 
-  // Bridge legacy -> events
+  // Bridge legacy -> events (kept minimal)
   (function(){
     if (!window.M3DUI) window.M3DUI = {};
     const origPin = window.M3DUI.onPinSelected;
@@ -2366,15 +2566,6 @@ document.addEventListener('DOMContentLoaded', function(){
       try{ window.dispatchEvent(new Event('m3d:model-loaded')); }catch(_){}
       if (typeof origLoaded === 'function') return origLoaded.apply(this, arguments);
     };
-    // vNext -> legacy adapter
-    if (!window.LocimyuVNext){
-      window.LocimyuVNext = {
-        savePin: function(pin){
-          if (typeof window.upsertPinToSheet === 'function') return window.upsertPinToSheet(pin);
-          throw new Error('upsertPinToSheet が見つかりません');
-        }
-      };
-    }
   })();
 
   // Mount
