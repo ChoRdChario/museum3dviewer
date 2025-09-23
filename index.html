@@ -2548,5 +2548,96 @@ if (document.readyState === 'loading') {
 })();
 </script>
 
+
+<!-- M3D Bootstrap Reinforce -->
+<script id="m3d-bootstrap-reinforce">
+(function(){
+  function setDisplayImportant(el, value){
+    try{ el.style.setProperty('display', value, 'important'); }catch(_){ el.style.display = value; }
+  }
+  function ensureDiagInfra(){
+    try{
+      let panel = document.getElementById('diagPanel');
+      if(!panel){
+        panel = document.createElement('div');
+        panel.id = 'diagPanel';
+        panel.innerHTML = '<div style="opacity:.85;margin-bottom:6px;font-size:12px">診断ログ</div><ul id="diagList" style="list-style:none;margin:0;padding:0;display:grid;gap:4px;font-size:12px"></ul>';
+        document.body.appendChild(panel);
+      }
+      let chip = document.getElementById('diagChip');
+      if(!chip){
+        chip = document.createElement('button');
+        chip.id='diagChip'; chip.type='button'; chip.textContent='診断ログ';
+        chip.addEventListener('click', function(){
+          const p = document.getElementById('diagPanel'); if(!p) return;
+          setDisplayImportant(p, (p.style.display==='none' || !p.style.display)?'block':'none');
+          if(p.style.display!=='none'){ p.scrollTop = p.scrollHeight; }
+        }, {capture:true});
+        document.body.appendChild(chip);
+      }
+    }catch(e){}
+  }
+  function ensureSpinner(){
+    let ov = document.getElementById('busyOverlay');
+    if(!ov){
+      ov = document.createElement('div');
+      ov.id='busyOverlay';
+      ov.innerHTML = '<div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);text-align:center;color:#fff;font-family:system-ui,sans-serif"><div style="width:48px;height:48px;border:4px solid rgba(255,255,255,.3);border-top-color:#fff;border-radius:50%;animation:__m3d_spin 1s linear infinite;margin:0 auto 10px"></div><div id="busyMsg" style="font-size:14px;opacity:.9">読み込み中…</div></div>';
+      document.body.appendChild(ov);
+    }
+  }
+  function openDiag(){
+    ensureDiagInfra();
+    const p = document.getElementById('diagPanel'); if(p){ setDisplayImportant(p,'block'); p.scrollTop=p.scrollHeight; }
+  }
+  function log(msg, level){
+    ensureDiagInfra();
+    const ul = document.getElementById('diagList');
+    if(ul){
+      const li = document.createElement('li');
+      li.textContent = '[' + new Date().toLocaleTimeString() + '] ' + msg;
+      if(level==='error') li.style.color='#ff9a9a';
+      ul.appendChild(li);
+      openDiag();
+      while(ul.children.length>200) ul.removeChild(ul.firstChild);
+    }
+  }
+  window.__m3d_forceLog = log;
+
+  // Make global toggles if missing
+  if (!window.M3DBusy){
+    let count = 0;
+    window.M3DBusy = {
+      show(msg){ ensureSpinner(); count++; const ov=document.getElementById('busyOverlay'); if(ov){ setDisplayImportant(ov,'block'); } const m=document.getElementById('busyMsg'); if(m && msg) m.textContent=msg; },
+      hide(){ count=Math.max(0,count-1); if(count===0){ const ov=document.getElementById('busyOverlay'); if(ov){ setDisplayImportant(ov,'none'); } } }
+    };
+  }
+
+  // Keep widgets alive even if body is re-rendered
+  const mo = new MutationObserver(()=>{
+    if(!document.getElementById('diagChip') || !document.getElementById('diagPanel')) ensureDiagInfra();
+    if(!document.getElementById('busyOverlay')) ensureSpinner();
+  });
+  mo.observe(document.documentElement, {childList:true, subtree:true});
+
+  // Keyboard toggle: backquote (`) to toggle diag panel
+  window.addEventListener('keydown', (e)=>{
+    if(e.key === '`'){
+      ensureDiagInfra();
+      const p = document.getElementById('diagPanel'); if(p){ setDisplayImportant(p, (p.style.display==='none'||!p.style.display)?'block':'none'); }
+    }
+  }, {capture:true});
+
+  // Test ping: creates a log and shows spinner briefly
+  window.__M3D_TEST_PING = function(){
+    try{ log('テストログ：ブート完了'); }catch(_){}
+    try{ M3DBusy.show('テスト表示'); setTimeout(()=>M3DBusy.hide(), 600); }catch(_){}
+  };
+
+  // First activation
+  ensureDiagInfra(); ensureSpinner(); openDiag(); log('ブート完了');
+  setTimeout(()=>{ try{ window.__M3D_TEST_PING(); }catch(_){} }, 200);
+})();
+</script>
 </body>
 </html>
