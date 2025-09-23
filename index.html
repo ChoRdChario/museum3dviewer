@@ -784,8 +784,20 @@ async function driveFileFetchBlob(fileId, retry=1){
 }
 function isHeicMimeOrExt(mime, ext){ return /heic|heif/i.test(mime||'') || /heic|heif/i.test(ext||''); }
 function extractDriveFileId(input){
-  if(!input) return '';
-  const m1 = input.match(/\/file\/d\/([a-zA-Z0-9_-]{10,})/); if(m1) return m1[1];
+  try{
+    if(!input) return '';
+    let s = String(input).trim();
+    // URL patterns
+    let m = s.match(/\/file\/d\/([A-Za-z0-9_-]{20,})/); if(m && m[1]) return m[1];
+    m = s.match(/[?&]id=([A-Za-z0-9_-]{20,})/); if(m && m[1]) return m[1];
+    // If pasted as "id, ..." or contains JP punctuation/whitespace
+    s = s.split(/[\s,、。]+/)[0];
+    // Strip leading/trailing non-id chars (quotes, brackets, etc.)
+    s = s.replace(/^[^A-Za-z0-9_-]+|[^A-Za-z0-9_-]+$/g, '');
+    // Final validation
+    return /^[A-Za-z0-9_-]{20,}$/.test(s) ? s : '';
+  }catch(e){ return ''; }
+})/); if(m1) return m1[1];
   const m2 = input.match(/[?&]id=([a-zA-Z0-9_-]{10,})/);     if(m2) return m2[1];
   const m3 = input.match(/^([a-zA-Z0-9_-]{20,})$/);          if(m3) return m3[1];
   return '';
@@ -1628,7 +1640,8 @@ el.listDelete.addEventListener('click', async ()=>{
 
 /* ========= Buttons ========= */
 el.btnLoad.addEventListener('click', ()=>{
-  const fid = extractDriveFileId(el.inputGLB.value.trim()) || el.inputGLB.value.trim();
+  const fid = extractDriveFileId(el.inputGLB.value.trim());
+  if(!fid){ alert('GLBの FileId/URL を正しく指定してください。共有リンクの貼り付け後の末尾に句読点やカンマが付いていないか確認してください。'); return; }
   el.inputGLB.value = fid; loadGLBByFileId(fid);
 });
 el.btnViewOnly.addEventListener('click', ()=>{
