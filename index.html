@@ -851,12 +851,22 @@ async function driveFileFetchBlob(fileId, retry=1){
 }
 function isHeicMimeOrExt(mime, ext){ return /heic|heif/i.test(mime||'') || /heic|heif/i.test(ext||''); }
 
+
 function extractDriveFileId(input){
   try{
     if(!input) return '';
     let s = String(input).trim();
-    // If it's a clean ID (only A-Z a-z 0-9 _ -) and 20+ chars, accept as-is
-    if(/^[A-Za-z0-9_-]{20,}$/.test(s)) return s;
+    // URL patterns first
+    let m = s.match(/\bfile\/d\/([A-Za-z0-9_-]{20,})/); if(m && m[1]) return m[1];
+    m = s.match(/[?&]id=([A-Za-z0-9_-]{20,})/); if(m && m[1]) return m[1];
+    // bare-like
+    s = s.split(/[\s\u3000]+/)[0];
+    s = s.replace(/^[^A-Za-z0-9_-]+|[^A-Za-z0-9_-]+$/g, '');
+    if(/^[A-Za-z0-9_-]{30,}$/.test(s)) return s; // Drive IDs are typically >=30 chars
+    return '';
+  }catch(e){ return ''; }
+}
+$/.test(s)) return s;
     // Try to pull from URL patterns
     let m = s.match(/\bfile\/d\/([A-Za-z0-9_-]{20,})/); if(m && m[1]) return m[1];
     m = s.match(/[?&]id=([A-Za-z0-9_-]{20,})/); if(m && m[1]) return m[1];
@@ -1710,10 +1720,14 @@ el.listDelete.addEventListener('click', async ()=>{
 
 /* ========= Buttons ========= */
 el.btnLoad.addEventListener('click', ()=>{
-  const fid = extractDriveFileId(el.inputGLB.value.trim());
-  if(!fid){ alert('GLBの FileId/URL を正しく指定してください。'); return; }
-  el.inputGLB.value = fid;
-  loadGLBByFileId(fid);
+  const raw = el.inputGLB.value.trim();
+const fid = extractDriveFileId(raw);
+if(!fid){
+  alert('GLBの FileId/URL を正しく指定してください。\n\nヒント: 共有URLのまま貼付でOKです。ID単体の場合は30文字以上で、末尾が _ で終わっていない完全なIDを指定してください。');
+  return;
+}
+el.inputGLB.value = fid;
+await loadGLBByFileId(fid);
 });
 el.btnViewOnly.addEventListener('click', ()=>{
   const fid = extractDriveFileId(el.inputGLB.value.trim());
@@ -1836,7 +1850,9 @@ async function loadGLBByFileId(fileId){
     const res = await fetch(url, { headers: { 'Authorization': 'Bearer ' + token } });
     if(!res.ok){
       const txt = await res.text().catch(()=>'');
-      throw new Error('GLB download failed: ' + res.status + ' ' + txt);
+      throw new Error('GLB download failed: ' + res.status + ' ' + txt + '
+
+IDが正しいか確認してください。共有URLのコピペ、または30文字以上の完全なFileIdを貼り付けてください。');
     }
     const blob = await res.blob();
     const objUrl = URL.createObjectURL(blob);
@@ -1957,6 +1973,7 @@ viewerInitWrap();
   }
 
   function createCapWindow(pin){
+    try{ if(!(window.M3DUI && window.M3DUI.__modelReady)) return null; }catch(_){ return null; }
     var overlay = $("m3d-caption-layer");
     if(!overlay) return null;
     overlay.hidden = false;
