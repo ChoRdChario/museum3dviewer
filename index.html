@@ -2148,10 +2148,10 @@ document.addEventListener('DOMContentLoaded', function(){
 
 
 <!-- M3D Shadow HUD (late load) -->
+
 <script id="m3d-shadow-hud">
 (function(){
   if (window.__M3D_SHADOW_HUD__) return; window.__M3D_SHADOW_HUD__ = true;
-
   function installShadowHUD(){
     try{
       let host = document.getElementById('m3d-hud-host');
@@ -2167,35 +2167,20 @@ document.addEventListener('DOMContentLoaded', function(){
           <style>
             :host{ all: initial; }
             .chip{
-              position: fixed; left: 12px; bottom: 12px;
-              padding: 8px 12px; border-radius: 999px;
-              background: #222; color: #fff; border: 1px solid #444;
-              font: 13px system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
-              cursor: pointer; opacity: .92; pointer-events: auto;
-              box-shadow: 0 2px 8px rgba(0,0,0,.25);
-              user-select: none;
+              position: fixed; left: 12px; bottom: 12px; padding: 8px 12px; border-radius: 999px;
+              background: #222; color: #fff; border: 1px solid #444; font: 13px system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+              cursor: pointer; opacity: .92; pointer-events: auto; box-shadow: 0 2px 8px rgba(0,0,0,.25); user-select: none;
             }
             .panel{
-              position: fixed; right: 12px; bottom: 56px;
-              width: 320px; max-height: 46vh; overflow: auto;
-              padding: 10px; border-radius: 12px;
-              background: rgba(0,0,0,.78); color: #fff;
-              font: 12px/1.5 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
-              display: none; pointer-events: auto;
-              box-shadow: 0 10px 24px rgba(0,0,0,.35);
-              -webkit-backdrop-filter: blur(2px); backdrop-filter: blur(2px);
+              position: fixed; right: 12px; bottom: 56px; width: 320px; max-height: 46vh; overflow: auto; padding: 10px; border-radius: 12px;
+              background: rgba(0,0,0,.78); color: #fff; font: 12px/1.5 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+              display: none; pointer-events: auto; box-shadow: 0 10px 24px rgba(0,0,0,.35); -webkit-backdrop-filter: blur(2px); backdrop-filter: blur(2px);
             }
             .panel h3{ margin: 0 0 6px; font-size: 12px; opacity: .85; }
             .list{ list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
             .list li.error{ color:#ff9a9a; }
-            .overlay{
-              position: fixed; inset: 0; background: rgba(0,0,0,.35);
-              display: none; pointer-events: auto;
-              z-index: 2147483646;
-              -webkit-backdrop-filter: blur(1px); backdrop-filter: blur(1px);
-            }
-            .center{ position:absolute; top:50%; left:50%; transform:translate(-50%,-50%);
-              text-align:center; color:#fff; font: 14px system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
+            .overlay{ position: fixed; inset: 0; background: rgba(0,0,0,.35); display: none; pointer-events: auto; z-index: 2147483646; -webkit-backdrop-filter: blur(1px); backdrop-filter: blur(1px); }
+            .center{ position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); text-align:center; color:#fff; font: 14px system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
             .spinner{ width:48px; height:48px; border:4px solid rgba(255,255,255,.3); border-top-color:#fff; border-radius:50%; animation:spin 1s linear infinite; margin:0 auto 10px; }
             @keyframes spin{ to{ transform: rotate(360deg); } }
           </style>
@@ -2207,88 +2192,103 @@ document.addEventListener('DOMContentLoaded', function(){
         `;
         const chip = shadow.getElementById('chip');
         const panel = shadow.getElementById('panel');
+        const overlay = shadow.getElementById('overlay');
+        const msg = shadow.getElementById('msg');
+        const list = shadow.getElementById('list');
+        let refCount = 0;
+        let autoOpened = false;
         chip.addEventListener('click', ()=>{
           panel.style.display = (panel.style.display==='none' || !panel.style.display) ? 'block' : 'none';
           if(panel.style.display!=='none'){ panel.scrollTop = panel.scrollHeight; }
         }, {capture:true});
-        shadow.addEventListener('click', (e)=>{ e.stopPropagation(); }, {capture:true});
-        // expose API
-        let refCount = 0;
-        const overlay = shadow.getElementById('overlay');
-        const msg = shadow.getElementById('msg');
-        const list = shadow.getElementById('list');
         function log(s, level){
           const li = document.createElement('li'); li.textContent = `[${new Date().toLocaleTimeString()}] ${s}`;
           if(level==='error') li.classList.add('error');
-          list.appendChild(li); panel.style.display='block'; panel.scrollTop = panel.scrollHeight;
+          list.appendChild(li);
+          if (!autoOpened || level==='error'){ panel.style.display='block'; autoOpened = true; }
+          if(panel.style.display!=='none'){ panel.scrollTop = panel.scrollHeight; }
           while(list.children.length>250) list.removeChild(list.firstChild);
         }
         function showBusy(m){ refCount++; overlay.style.display='block'; if(m) msg.textContent = m; }
         function hideBusy(){ refCount=Math.max(0,refCount-1); if(refCount===0) overlay.style.display='none'; }
         window.M3DHUD = { log, error:(s)=>log(s,'error'), showBusy, hideBusy };
-        // global convenience
         if (!window.logStep) window.logStep = (s)=>M3DHUD.log(s);
         if (!window.logError) window.logError = (s)=>M3DHUD.error(s);
         if (!window.M3DBusy) window.M3DBusy = { show:(m)=>M3DHUD.showBusy(m), hide:()=>M3DHUD.hideBusy() };
-        // keyboard toggle
         window.addEventListener('keydown', (e)=>{ if(e.key==='`'){ panel.style.display = (panel.style.display==='none'||!panel.style.display)?'block':'none'; } }, {capture:true});
-        // first log
         M3DHUD.log('Shadow HUD ready');
       }
     }catch(e){ console.warn('[m3d] shadow hud install fail', e); }
   }
-
   function later(fn){ try{ setTimeout(fn, 0); }catch(_){} }
   window.addEventListener('load', ()=>{ later(installShadowHUD); later(()=>{ try{ M3DHUD && M3DHUD.log('window.load'); }catch(_){}}); });
   later(installShadowHUD); setTimeout(installShadowHUD, 300); setTimeout(installShadowHUD, 1200);
 
-  // Hook XMLHttpRequest (gapi uses XHR)
-  (function(){
-    const OrigXHR = window.XMLHttpRequest;
-    if (!OrigXHR) return;
-    const Hook = function(){ const x = new OrigXHR(); return hook(x); };
-    function hook(x){
+  // Click-capture: show spinner on common load actions
+  window.addEventListener('click', function(e){
+    try{
+      const el = e.target.closest ? e.target.closest('button, a, [role="button"], input[type="submit"]') : e.target;
+      if (!el) return;
+      const id = (el.id||'').toLowerCase();
+      const name = (el.name||'').toLowerCase();
+      const txt = (el.textContent||'').toLowerCase();
+      const hint = id+ ' ' + name + ' ' + txt;
+      if (/(btnload|loadglb|読み込|load by id|open|開く)/.test(hint)){
+        M3DBusy && M3DBusy.show('読み込み中…');
+        setTimeout(()=>{ try{ M3DBusy && M3DBusy.hide(); }catch(_){} }, 15000);
+      }
+    }catch(_){}
+  }, true);
+
+  // Wrap gapi.client.request when available
+  (function wrapGapi(){
+    let tried = 0;
+    const t = setInterval(function(){
+      tried++;
       try{
-        let url = '';
-        const open = x.open; x.open = function(method, u){ url = String(u||''); return open.apply(this, arguments); };
-        const send = x.send; x.send = function(){
-          try{
-            const isMedia = url.includes('alt=media') || url.includes('/uc?export=download');
-            const isGapi = url.includes('googleapis.com') || url.includes('gapi') || url.includes('/spreadsheets/');
-            if (isMedia || isGapi){ try{ M3DHUD && M3DHUD.showBusy(isMedia ? 'GLB/画像を取得中…' : '通信中…'); }catch(_){ } }
-          }catch(_){}
-          x.addEventListener('loadend', function(){ try{ M3DHUD && M3DHUD.hideBusy(); }catch(_){ } }, {once:false});
-          return send.apply(this, arguments);
-        };
+        const req = window.gapi && gapi.client && gapi.client.request;
+        if (typeof req === 'function'){
+          const orig = req;
+          gapi.client.request = function(){
+            try{ M3DBusy && M3DBusy.show('通信中…'); }catch(_){}
+            const r = orig.apply(this, arguments);
+            try{
+              if (r && typeof r.then === 'function'){
+                return r.then((v)=>{ try{ M3DBusy && M3DBusy.hide(); }catch(_){ } return v; },
+                               (e)=>{ try{ M3DBusy && M3DBusy.hide(); M3DHUD && M3DHUD.error('gapi error'); }catch(_){ } throw e; });
+              }
+            }catch(_){}
+            try{ M3DBusy && M3DBusy.hide(); }catch(_){}
+            return r;
+          };
+          clearInterval(t);
+        }
       }catch(_){}
-      return x;
-    }
-    Hook.prototype = OrigXHR.prototype;
-    window.XMLHttpRequest = Hook;
+      if (tried > 50) clearInterval(t);
+    }, 200);
   })();
 
-  // Wrap loadGLBByFileId / loadPinsFromActiveSheet if they appear later
   (function pollWrap(){
     let doneGLB=false, donePins=false;
     const id = setInterval(function(){
       try{
         if (!doneGLB && typeof window.loadGLBByFileId === 'function'){
           const o = window.loadGLBByFileId;
-          window.loadGLBByFileId = async function(fid){ try{ M3DHUD && M3DHUD.log('GLB読み込み開始'); }catch(_){ } M3DHUD && M3DHUD.showBusy('GLBを読み込み中…'); try{ const r=await o.apply(this, arguments); try{ M3DHUD && M3DHUD.log('GLB読み込み完了'); }catch(_){ } return r; } finally { M3DHUD && M3DHUD.hideBusy(); } };
+          window.loadGLBByFileId = async function(fid){ try{ M3DHUD && M3DHUD.log('GLB読み込み開始'); }catch(_){ } M3DBusy && M3DBusy.show('GLBを読み込み中…'); try{ const r=await o.apply(this, arguments); try{ M3DHUD && M3DHUD.log('GLB読み込み完了'); }catch(_){ } return r; } finally { M3DBusy && M3DBusy.hide(); } };
           doneGLB = true;
         }
         if (!donePins && typeof window.loadPinsFromActiveSheet === 'function'){
           const p = window.loadPinsFromActiveSheet;
-          window.loadPinsFromActiveSheet = async function(){ try{ M3DHUD && M3DHUD.log('シート読み込み開始'); }catch(_){ } M3DHUD && M3DHUD.showBusy('ピン・シートを読み込み中…'); try{ const r=await p.apply(this, arguments); try{ M3DHUD && M3DHUD.log('シート読み込み完了'); }catch(_){ } return r; } finally { M3DHUD && M3DHUD.hideBusy(); } };
+          window.loadPinsFromActiveSheet = async function(){ try{ M3DHUD && M3DHUD.log('シート読み込み開始'); }catch(_){ } M3DBusy && M3DBusy.show('ピン・シートを読み込み中…'); try{ const r=await p.apply(this, arguments); try{ M3DHUD && M3DHUD.log('シート読み込み完了'); }catch(_){ } return r; } finally { M3DBusy && M3DBusy.hide(); } };
           donePins = true;
         }
         if (doneGLB && donePins) clearInterval(id);
-      }catch(e){ /* keep polling */ }
+      }catch(e){ }
     }, 200);
-    setTimeout(()=>clearInterval(id), 10000);
+    setTimeout(()=>clearInterval(id), 15000);
   })();
-
 })();
 </script>
+
 </body>
 </html>
