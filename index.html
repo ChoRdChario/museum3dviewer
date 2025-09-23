@@ -145,6 +145,11 @@
   </script>
   <!-- HEIC fallback -->
   <script src="https://unpkg.com/heic2any@0.0.5/dist/heic2any.min.js"></script>
+
+<style>
+  #diagPanel.panel.body.small{ position: sticky; bottom: 0; z-index: 10; background: rgba(0,0,0,.08); border-radius: 8px; }
+  #rightCaption{ position: relative; }
+</style>
 </head>
 <body>
 <div class="app">
@@ -535,6 +540,38 @@ function logStep(msg, level='info'){
   }catch(_){}
 }
 function logError(msg){ logStep(msg, 'error'); }
+
+// === Diagnostics Infra (visible fallback) ===
+function __ensureDiagInfra(){
+  try{
+    let panel = document.getElementById('diagPanel');
+    let ul = document.getElementById('diagList');
+    if(!panel){
+      panel = document.createElement('div');
+      panel.id = 'diagPanel';
+      panel.style.cssText = 'position:fixed;right:12px;bottom:56px;width:300px;max-height:40vh;overflow:auto;padding:8px 10px;border-radius:10px;background:rgba(0,0,0,.66);color:#fff;z-index:2147480000;display:none;box-shadow:0 6px 16px rgba(0,0,0,.35)';
+      const head = document.createElement('div'); head.textContent='診断ログ'; head.style.cssText='opacity:.85;margin-bottom:6px;font-size:12px';
+      ul = document.createElement('ul'); ul.id='diagList'; ul.style.cssText='list-style:none;margin:0;padding:0;display:grid;gap:4px;font-size:12px;';
+      panel.appendChild(head); panel.appendChild(ul);
+      document.body.appendChild(panel);
+    }
+    if(!document.getElementById('diagChip')){
+      const chip = document.createElement('button');
+      chip.id='diagChip';
+      chip.textContent='診断ログ';
+      chip.className='btn sm';
+      chip.style.cssText='position:fixed;left:12px;bottom:12px;z-index:2147480001;padding:6px 10px;border-radius:999px;opacity:.9';
+      chip.addEventListener('click', ()=>{
+        const p = document.getElementById('diagPanel');
+        if(!p) return;
+        p.style.display = (p.style.display==='none' || !p.style.display) ? '' : 'none';
+        if(p.style.display!=='none'){ p.scrollTop = p.scrollHeight; }
+      });
+      document.body.appendChild(chip);
+    }
+  }catch(e){ console.warn('diag infra fail', e); }
+}
+window.addEventListener('DOMContentLoaded', __ensureDiagInfra, {once:true});
 function ensureArray(x){ return Array.isArray(x)?x:[]; }
 function normalizeHex(c){ const t = new THREE.Color(c); return '#' + t.getHexString(); }
 function disableEditingUIAll(){
@@ -2180,6 +2217,52 @@ document.addEventListener('DOMContentLoaded', function(){
       return orig.apply(this, arguments);
     };
   }
+})();
+
+// === Flush pending sheet-apply when modelLoaded fires ===
+(function(){
+  try{
+    if (window.M3DUI && typeof M3DUI.modelLoaded === 'function'){
+      const __orig_modelLoaded = M3DUI.modelLoaded;
+      M3DUI.modelLoaded = function(){
+        try{
+          return __orig_modelLoaded.apply(this, arguments);
+        } finally {
+          try{
+            window.__modelReady = true;
+            if (window.__pendingSheetApply){
+              try{ logStep('モデル準備完了：保留していた材質適用を実行'); }catch(_){}
+              const fn = window.__pendingSheetApply; window.__pendingSheetApply = null; fn();
+            }
+          }catch(_){}
+        }
+      }
+    }
+  }catch(e){ console.warn('modelLoaded patch fail', e); }
+})();
+
+// === Guard & queue material-apply until model is ready ===
+(function(){
+  try{
+    if (typeof applyMaterialsFromSheet === 'function'){
+      const __orig_applyMaterialsFromSheet = applyMaterialsFromSheet;
+      window.__pendingSheetApply = null;
+      applyMaterialsFromSheet = async function(...args){
+        try{
+          const hasRoot = (typeof root !== 'undefined') && !!root && typeof root.traverse === 'function';
+          if(!hasRoot){
+            try{ logStep('モデル未読込のため材質適用を保留します'); }catch(_){}
+            window.__pendingSheetApply = ()=>__orig_applyMaterialsFromSheet(...args);
+            return;
+          }
+          return await __orig_applyMaterialsFromSheet.apply(this, args);
+        }catch(e){
+          try{ logError('材質適用エラー: ' + (e && e.message ? e.message : e)); }catch(_){}
+          throw e;
+        }
+      }
+    }
+  }catch(e){ console.warn('applyMaterialsFromSheet wrap fail', e); }
 })();
 </script>
 
