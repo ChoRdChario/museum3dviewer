@@ -879,11 +879,6 @@ function extractSpreadsheetId(input){
     return /^[A-Za-z0-9_-]{10,}$/.test(s) ? s : '';
   }catch(e){ return ''; }
 }
-)/); if(m1) return m1[1];
-  const m2 = input.match(/[?&]id=([a-zA-Z0-9_-]{10,})/);           if(m2) return m2[1];
-  const m3 = input.match(/^([a-zA-Z0-9_-]{20,})$/);                if(m3) return m3[1];
-  return '';
-}
 function makeDriveRef(id, mime){ return `drive:${id}|${mime||''}`; }
 
 /* ========= Materials ========= */
@@ -1991,13 +1986,10 @@ viewerInitWrap();
       var orig = window.selectPin;
       window.selectPin = function(){
         try{ orig.apply(this, arguments); }catch(e){ console.warn(e); }
-        try{ onPinSelected(); }catch(e){ console.warn(e); }
+        try{ if(window.M3DUI && window.M3DUI.onPinSelected) window.M3DUI.onPinSelected(); }catch(e){ console.warn(e); }
       };
     }
-    try{ onPinSelected(readCurrentPinFromLegacy()); }catch(_){}
-  });
-
-  window.addEventListener('resize', function(){
+    });window.addEventListener('resize', function(){
     try{ if (isMobile() && state.activePin) showMobileCaption(state.activePin); }catch(_){}
   });
 })();
