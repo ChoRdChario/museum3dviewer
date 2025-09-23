@@ -105,18 +105,19 @@
 (function(){
   if(window.M3D && M3D.driveHelpersInstalled) return;
   function normalizeDriveFileId(input){
-    try{
-      if(!input) return '';
-      var s = String(input).trim();
-      s = s.replace(/[?#].*$/, '');
-      var m = s.match(/\/file\/d\/([a-zA-Z0-9_-]{20,})/);
-      if(m && m[1]) return m[1];
-      m = s.match(/[?&]id=([a-zA-Z0-9_-]{20,})/);
-      if(m && m[1]) return m[1];
-      if(/^[a-zA-Z0-9_-]{20,}$/.test(s)) return s;
-      return '';
-    }catch(e){ return ''; }
-  }
+  try{
+    if(!input) return '';
+    var s = String(input).trim();
+    s = s.replace(/^[\'"\s]+|[\'"\s]+$/g, '');
+    s = s.replace(/[?#].*$/, '');
+    var m = s.match(/\/(?:file\/d\/|uc\?id=)([a-zA-Z0-9_-]{20,})/);
+    if(m && m[1]) return m[1];
+    m = s.match(/[?&]id=([a-zA-Z0-9_-]{20,})/);
+    if(m && m[1]) return m[1];
+    if(/^[a-zA-Z0-9_-]{20,}$/.test(s)) return s;
+    return '';
+  }catch(e){ return ''; }
+}
   window.normalizeDriveFileId = normalizeDriveFileId;
   window.ensureGapiToken = async function(){
     try{
@@ -131,6 +132,19 @@
   if(!window.M3D) window.M3D = {};
   window.M3D.driveHelpersInstalled = true;
 })();
+async function fetchDriveMeta(fileId){
+  if(!(await ensureGapiToken())) throw new Error('No OAuth token');
+  const t = (gapi && gapi.client && gapi.client.getToken) ? gapi.client.getToken() : null;
+  const at = t && t.access_token ? t.access_token : null;
+  if(!at) throw new Error('No OAuth token');
+  const url = 'https://www.googleapis.com/drive/v3/files/' + encodeURIComponent(fileId) +
+              '?supportsAllDrives=true&fields=id,name,mimeType,parents,md5Checksum,size';
+  const res = await fetch(url, { headers: { 'Authorization': 'Bearer ' + at } });
+  if(!res.ok){ const txt = await res.text().catch(()=>'');
+    throw new Error('meta ' + res.status + ' ' + txt);
+  }
+  return await res.json();
+}
 </script>
 <script type="importmap">
 {
@@ -1000,14 +1014,11 @@ async function driveFileFetchBlob(fileId){
   const accessToken = tok && tok.access_token ? tok.access_token : null;
   if(!accessToken){ throw new Error('No OAuth token for file download'); }
   const dlUrl = 'https://www.googleapis.com/drive/v3/files/' + fileId + '?alt=media&supportsAllDrives=true';
-
-  const res = await fetch(dlUrl, { headers:{ Authorization: 'Bearer ' + accessToken } });
-  if(res.status === 401 && retry>0){
-    try{ tokenClient && tokenClient.requestAccessToken({ prompt:'' }); }catch(e){}
-    return driveFileFetchBlob(fileId, retry-1);
+  const resp = await fetch(dlUrl, { method:'GET', headers: { 'Authorization': 'Bearer ' + accessToken } });
+  if(!resp.ok){ const txt = await resp.text().catch(()=>'');
+    throw new Error('download ' + resp.status + ' ' + txt);
   }
-  if(!res.ok) throw new Error('image fetch failed '+res.status);
-  return await res.blob();
+  return await resp.blob();
 }
 function isHeicMimeOrExt(mime, ext){ return /heic|heif/i.test(mime||'') || /heic|heif/i.test(ext||''); }
 function extractDriveFileId(input){
