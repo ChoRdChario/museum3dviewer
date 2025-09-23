@@ -593,7 +593,7 @@ function buildControls(){
   controls = new OrbitControls(camera, el.viewerCanvas);
   controls.target.set(0,0,0); controls.update();
   controls.addEventListener('change', updateConnector);
-  if(tcontrols){ scene.remove(tcontrols); tcontrols.dispose?.(); }
+  if(tcontrols){ scene.remove(tcontrols); if(tcontrols && typeof tcontrols.dispose==='function'){ tcontrols.dispose(); } }
   tcontrols = new TransformControls(camera, el.viewerCanvas);
   tcontrols.setSize(0.9); tcontrols.setSpace('world');
   tcontrols.addEventListener('dragging-changed', e=>{ controls.enabled = !e.value; });
@@ -866,17 +866,6 @@ function extractDriveFileId(input){
     return '';
   }catch(e){ return ''; }
 }
-$/.test(s)) return s;
-    // Try to pull from URL patterns
-    let m = s.match(/\bfile\/d\/([A-Za-z0-9_-]{20,})/); if(m && m[1]) return m[1];
-    m = s.match(/[?&]id=([A-Za-z0-9_-]{20,})/); if(m && m[1]) return m[1];
-    // Trim common trailing punctuation/spaces without touching valid ID chars
-    s = s.split(/[\s\u3000]+/)[0];
-    s = s.replace(/^[^A-Za-z0-9_-]+|[^A-Za-z0-9_-]+$/g, '');
-    return /^[A-Za-z0-9_-]{20,}$/.test(s) ? s : '';
-  }catch(e){ return ''; }
-}
-
 function extractSpreadsheetId(input){
   try{
     if(!input) return '';
@@ -914,7 +903,7 @@ function objectPath(node) {
   const names = [];
   let cur = node;
   while (cur && cur.parent) {
-    names.push(cur.name && cur.name.trim() ? cur.name : '_' + (cur.uuid?.slice(0,8) || 'node'));
+    names.push(cur.name && cur.name.trim() ? cur.name : '_' + ((cur.uuid && cur.uuid.slice ? cur.uuid.slice(0,8) : '') || 'node'));
     cur = cur.parent;
   }
   names.reverse();
@@ -1175,7 +1164,7 @@ async function findOrCreateSpreadsheetInGlbFolder(glbMeta){
       q, fields: 'files(id,name)',
       includeItemsFromAllDrives: true, supportsAllDrives: true, pageSize: 10,
     });
-    if (resp.result.files?.length) { found = resp.result.files[0]; break; }
+    if ((resp.result && resp.result.files && resp.result.files.length)) { found = resp.result.files[0]; break; }
   }
   if (found) return found.id;
 
@@ -1223,8 +1212,8 @@ async function loadSheetMeta(spreadsheetId){
       ranges: [ META_MARKER_RANGE(), META_MAT_KEY_RANGE(), META_VIEW_KEY_RANGE() ]
     });
     const vals = (get.result.valueRanges || []).map(v=>v.values||[]);
-    const matJson = vals[1]?.[0]?.[1] || '';
-    const viewJson = vals[2]?.[0]?.[1] || '';
+    const matJson = ((vals[1] && vals[1][0]) ? vals[1][0][1] : undefined) || '';
+    const viewJson = ((vals[2] && vals[2][0]) ? vals[2][0][1] : undefined) || '';
     const m = safeParseJSON(matJson, null);
     const materials = normalizeMaterialsJSON(m);
     const viewer = safeParseJSON(viewJson, { version:1, bgColor:'#0a0f16', projection:'perspective' });
@@ -1438,7 +1427,7 @@ function rebuildPinsScene(){
   pins.forEach(p=> placePinMesh(p));
   if(tcontrols.visible && selectedPinId){
     const p=pins.find(x=>x.id===selectedPinId);
-    if(p?.mesh) tcontrols.attach(p.mesh); else tcontrols.detach();
+    if((p && p.mesh)) tcontrols.attach(p.mesh); else tcontrols.detach();
   }
   renderNow();
 }
@@ -1513,7 +1502,7 @@ el.btnAttach.addEventListener('click', async ()=>{
   const fileInput = el.imgLocal;
   fileInput.value = '';
   fileInput.onchange = async ()=>{
-    const file = fileInput.files?.[0];
+    const file = (fileInput.files && fileInput.files[0]);
     const p = pins.find(x=>x.id===selectedPinId);
     if(!file || !p){ return; }
     try{
