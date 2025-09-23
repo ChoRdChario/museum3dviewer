@@ -1158,8 +1158,8 @@ async function findOrCreateSpreadsheetInGlbFolder(glbMeta){
       `'${parent}' in parents`,
       `mimeType='application/vnd.google-apps.spreadsheet'`,
       `trashed=false`,
-      `appProperties has { key='lociFor' && value='${glbMeta.id}' }`
-    ].join(' && ');
+      `appProperties has { key='lociFor' and value='${glbMeta.id}' }`
+    ].join(' and ');
     const resp = await gapi.client.drive.files.list({
       q, fields: 'files(id,name)',
       includeItemsFromAllDrives: true, supportsAllDrives: true, pageSize: 10,
@@ -1560,7 +1560,7 @@ async function loadFolderImages(){
   const cells = [];
   try{
     for(const parent of glbParents){
-      const q = `'${parent}' in parents && trashed=false && (mimeType contains 'image/')`;
+      const q = `'${parent}' in parents and trashed=false and (mimeType contains 'image/')`;
       const resp = await gapi.client.drive.files.list({
         q, pageSize: 200,
         fields: 'files(id,name,mimeType,fileExtension,hasThumbnail,thumbnailLink)',
@@ -2411,6 +2411,14 @@ document.addEventListener('DOMContentLoaded', function(){
           if (typeof req === 'function'){
             const orig = req;
             gapi.client.request = function(){
+            try{
+              var args = arguments && arguments[0] || {};
+              var url = (args.path || args.url || '') + '';
+              if (url.includes('/drive/v3/files')){
+                var q = args.params && args.params.q; if (q) { try{ window.logStep && window.logStep('DriveQ: ' + q); }catch(_){}}
+              }
+            }catch(_){}
+            
               try{ window.M3DBusy && window.M3DBusy.show('通信中…'); }catch(_){}
               const r = orig.apply(this, arguments);
               if (r && typeof r.then === 'function'){
