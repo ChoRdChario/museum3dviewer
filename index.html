@@ -74,7 +74,57 @@
     @media (max-width:1100px){
       .main{grid-template-columns:1fr; grid-template-rows: 360px 1fr 480px}
     }
-  </style>
+  /* ===== M3D UI vNext (namespaced) ===== */
+.m3d-ui-vnext #rightCaption{ display:none !important; }
+@media (max-width: 900px){
+  .m3d-ui-vnext #leftToolbox, 
+  .m3d-ui-vnext #rightCaption{ display:none !important; }
+}
+
+/* Overlay caption layer (desktop) */
+#m3d-caption-layer{
+  position:absolute; inset:0;
+  pointer-events:none; z-index: 1200;
+}
+#m3d-caption-layer .m3d-capwin{
+  position:absolute; min-width:220px; max-width:340px;
+  background:#0b132b; color:#d6e4ff; border:1px solid #1f2a44; border-radius:12px;
+  box-shadow:0 8px 28px rgba(0,0,0,.35);
+  pointer-events:auto; user-select:none; overflow:hidden;
+}
+.m3d-capwin__titlebar{
+  cursor:move; padding:8px 12px; font-weight:600; background:#16223a;
+  display:flex; align-items:center; gap:8px;
+}
+.m3d-capwin__close{
+  margin-left:auto; background:transparent; border:none; color:#aac4ff; font-size:16px; cursor:pointer;
+}
+.m3d-capwin__body{ padding:10px 12px; }
+.m3d-capwin__img{ display:block; max-width:240px; max-height:180px; width:auto; height:auto; border-radius:8px; margin:6px 0; }
+.m3d-capwin__meta{ font-size:12px; opacity:.8; }
+.m3d-capwin__actions{ display:flex; gap:8px; margin-top:8px; }
+
+/* Mobile caption panel (single) */
+#m3d-mobile-caption{
+  display:none;
+  position:relative;
+  background:#0b132b; color:#d6e4ff; border-top:1px solid #1f2a44;
+  padding:10px 12px; z-index:1100;
+}
+@media (max-width: 900px){
+  #m3d-mobile-caption{ display:block; }
+}
+#m3d-mobile-caption .m3d-cap__img{
+  max-width:50vw; max-height:40vh; width:auto; height:auto; border-radius:8px; display:block;
+}
+#m3d-mobile-caption .m3d-cap__placeholder{
+  border:1px dashed #345; border-radius:10px; color:#9aa;
+  min-height:80px; display:flex; align-items:center; justify-content:center; margin:6px 0;
+}
+
+/* Ensure viewer container is a positioning context for overlay */
+.m3d-ui-vnext #viewer{ position:relative; }
+</style>
 
   <!-- ES Modules -->
   <script type="importmap">
@@ -687,34 +737,35 @@ let previewZoom = 1.0;
 function applyPreviewZoom(){ el.previewInner.style.transform = `scale(${previewZoom})`; }
 el.previewZoom.addEventListener('input', ()=>{ previewZoom = parseFloat(el.previewZoom.value)||1; el.previewZoomVal.textContent = previewZoom.toFixed(2) + '×'; applyPreviewZoom(); });
 el.previewReset.addEventListener('click', ()=>{ previewZoom = 1; el.previewZoom.value = 1; el.previewZoomVal.textContent = '1.00×'; applyPreviewZoom(); });
+
 async function setPreview(ref, p){
   try{
     const msg = document.getElementById('previewMsg'); if(msg) msg.style.display='none';
     if(ref){
-      el.previewErr.style.display='none';
-      const src = await resolveImageObjectURL(ref, {preferThumb:false});
-      el.previewImg.src = src;
-      el.previewImg.onerror = ()=>{ el.previewErr.style.display='inline'; };
-      el.capTitleLine.textContent = (p && p.title) ? p.title : '';
-      el.capBodyLine.textContent  = (p && p.body)  ? p.body  : '';
-      el.viewerPreview.classList.remove('hidden');
-      applyPreviewZoom(); updateConnector();
-    } else {
-      const msg2 = document.getElementById('previewMsg');
-      if(msg2){ msg2.textContent = '画像が設定されていません'; msg2.style.display = 'block'; }
+    el.previewErr.style.display='none';
+    const src = await resolveImageObjectURL(ref, {preferThumb:false});
+    el.previewImg.src = src;
+    el.previewImg.onerror = ()=>{ el.previewErr.style.display='inline'; };
+    el.capTitleLine.textContent = p?.title || '';
+    el.capBodyLine.textContent  = p?.body  || '';
+    el.viewerPreview.classList.remove('hidden');
+    applyPreviewZoom(); updateConnector();
+    }
+    else {
+      const msg = document.getElementById('previewMsg');
+      if(msg){ msg.textContent = '画像が設定されていません'; msg.style.display = 'block'; }
       const img = document.getElementById('previewImg'); if(img){ img.removeAttribute('src'); }
-      el.capTitleLine.textContent = (p && p.title) ? p.title : '';
-      el.capBodyLine.textContent  = (p && p.body)  ? p.body  : '';
+      el.capTitleLine.textContent = p?.title || '';
+      el.capBodyLine.textContent  = p?.body  || '';
       el.viewerPreview.classList.remove('hidden');
       applyPreviewZoom(); updateConnector();
     }
-  }catch(e){
-    try{ console.warn('preview failed', e); }catch(_){}
-    try{ el.previewErr.style.display='inline'; }catch(_){}
-    try{ el.viewerPreview.classList.remove('hidden'); }catch(_){}
+    catch(e){
+    console.warn('preview failed', e);
+    el.previewErr.style.display='inline';
+    el.viewerPreview.classList.remove('hidden');
   }
 }
-
 function updateViewerPreviewForPin(p){ setPreview(p && p.images && p.images[0] ? p.images[0] : null, p); }
 
 /* ========= Image resolve & Drive ========= */
@@ -1773,64 +1824,160 @@ function viewerInitWrap(){ viewerInit(); }
 viewerInitWrap();
 
 </script>
-
+<!-- M3D vNext UI containers -->
+<div id="m3d-caption-layer" aria-label="caption overlay layer" hidden></div>
+<div id="m3d-mobile-caption" aria-label="mobile caption panel" hidden>
+  <div class="m3d-cap__title" id="m3d-mcap-title"></div>
+  <div class="m3d-cap__imgwrap">
+    <img id="m3d-mcap-img" class="m3d-cap__img" alt="caption image" />
+    <div id="m3d-mcap-ph" class="m3d-cap__placeholder">画像が設定されていません</div>
+  </div>
+  <div class="m3d-cap__body" id="m3d-mcap-body"></div>
+  <div class="m3d-cap__actions" id="m3d-mcap-actions"></div>
+</div>
 <script>
-// ---- Console noise filter (non-fatal 3rd-party logs) ----
 (function(){
-  try{
-    var noise = [
-      /Could not establish connection\. Receiving end does not exist/i,
-      /Cross-Origin-Opener-Policy policy would block the window\.opener call/i
-    ];
-    var origError = console.error ? console.error.bind(console) : function(){};
-    var origWarn  = console.warn  ? console.warn.bind(console)  : function(){};
+  if (window.M3DUI && window.M3DUI.__ready) return;
 
-    function isNoise(args){
-      try{
-        for (var i=0;i<args.length;i++){
-          var a = args[i];
-          if (typeof a === 'string'){
-            for (var j=0;j<noise.length;j++){
-              if (noise[j].test(a)) return true;
-            }
-          }
-        }
-      }catch(_){};
-      return false;
+  function $(id){ return document.getElementById(id); }
+  function isMobile(){
+    try{ return window.matchMedia("(max-width: 900px)").matches; }
+    catch(e){ return (window.innerWidth||1024) <= 900; }
+  }
+
+  var state = { desktopWindows:{}, activePin:null };
+
+  function ensureRoot(){
+    document.body.classList.add('m3d-ui-vnext');
+    var overlay = $("m3d-caption-layer");
+    var mcap    = $("m3d-mobile-caption");
+    var viewer  = $("viewer");
+    if (overlay) overlay.hidden = false;
+    if (mcap)    mcap.hidden = false;
+    if (viewer){
+      if (getComputedStyle(viewer).position === 'static'){ viewer.style.position = 'relative'; }
+      // ensure overlay is a child of #viewer for proper absolute positioning
+      if (overlay && overlay.parentElement !== viewer){ viewer.appendChild(overlay); }
+      // on mobile, place mobile caption just after viewer
+      if (isMobile() && mcap && mcap.parentElement !== viewer.parentElement){
+        viewer.parentElement.insertBefore(mcap, viewer.nextSibling);
+      }
     }
+  }
 
-    console.error = function(){
-      if (isNoise(arguments)) return;
-      return origError.apply(null, arguments);
-    };
-    console.warn = function(){
-      if (isNoise(arguments)) return;
-      return origWarn.apply(null, arguments);
-    };
+  function makeDraggable(handle, target){
+    var sx=0, sy=0, ox=0, oy=0, dragging=false;
+    handle.addEventListener('mousedown', function(e){
+      dragging=true; sx=e.clientX; sy=e.clientY;
+      var r = target.getBoundingClientRect(); ox=r.left + window.scrollX; oy=r.top + window.scrollY;
+      e.preventDefault();
+    });
+    document.addEventListener('mousemove', function(e){
+      if(!dragging) return;
+      var dx=e.clientX-sx, dy=e.clientY-sy;
+      target.style.left = (ox+dx) + 'px';
+      target.style.top  = (oy+dy) + 'px';
+    });
+    document.addEventListener('mouseup', function(){ dragging=false; });
+  }
 
-    window.addEventListener('error', function(e){
-      try{
-        var msg = (e && e.message) || '';
-        for (var i=0;i<noise.length;i++){
-          if (noise[i].test(msg)){ e.preventDefault(); return false; }
-        }
-      }catch(_){}
-    }, true);
+  function createCapWindow(pin){
+    var overlay = $("m3d-caption-layer");
+    if(!overlay) return null;
+    overlay.hidden = false;
+    var div = document.createElement('div');
+    div.className = 'm3d-capwin';
+    div.style.left = (24 + Math.floor(Math.random()*60)) + 'px';
+    div.style.top  = (24 + Math.floor(Math.random()*40)) + 'px';
 
-    window.addEventListener('unhandledrejection', function(e){
-      try{
-        var r = e && e.reason;
-        var msg = (r && r.message) || r || '';
-        if (typeof msg === 'string'){
-          for (var i=0;i<noise.length;i++){
-            if (noise[i].test(msg)){ e.preventDefault(); return false; }
-          }
-        }
-      }catch(_){}
-    }, true);
-  }catch(_){}
+    var bar = document.createElement('div'); bar.className = 'm3d-capwin__titlebar';
+    var title = document.createElement('div'); title.textContent = (pin && pin.title) ? pin.title : 'キャプション';
+    var btnX = document.createElement('button'); btnX.className='m3d-capwin__close'; btnX.textContent='✕';
+    btnX.addEventListener('click', function(){ if(div.parentElement) div.parentElement.removeChild(div); });
+    bar.appendChild(title); bar.appendChild(btnX);
+    div.appendChild(bar);
+
+    var body = document.createElement('div'); body.className='m3d-capwin__body';
+    if(pin && pin.img){
+      var img = document.createElement('img'); img.className='m3d-capwin__img'; img.src=pin.img; img.alt='caption image';
+      body.appendChild(img);
+      var act = document.createElement('div'); act.className='m3d-capwin__actions';
+      var a = document.createElement('a'); a.href=pin.img; a.target='_blank'; a.rel='noopener'; a.textContent='元画像を開く';
+      act.appendChild(a); body.appendChild(act);
+    }else{
+      var ph = document.createElement('div'); ph.className='m3d-cap__placeholder'; ph.textContent='画像が設定されていません';
+      body.appendChild(ph);
+    }
+    var meta = document.createElement('div'); meta.className='m3d-capwin__meta'; meta.textContent = (pin && pin.id) ? ('#'+pin.id) : '';
+    body.appendChild(meta);
+    var text = document.createElement('div'); text.textContent = (pin && pin.body) ? pin.body : '';
+    body.appendChild(text);
+
+    div.appendChild(body);
+    overlay.appendChild(div);
+    makeDraggable(bar, div);
+    return div;
+  }
+
+  function showMobileCaption(pin){
+    var panel = $("m3d-mobile-caption"); if(!panel) return;
+    var t=$("m3d-mcap-title"), b=$("m3d-mcap-body"), img=$("m3d-mcap-img"), ph=$("m3d-mcap-ph"), acts=$("m3d-mcap-actions");
+    t.textContent = (pin && pin.title) ? pin.title : 'キャプション';
+    b.textContent = (pin && pin.body)  ? pin.body  : '';
+    acts.innerHTML = '';
+    if(pin && pin.img){
+      img.src = pin.img; img.style.display='block'; ph.style.display='none';
+      var a = document.createElement('a'); a.href=pin.img; a.target='_blank'; a.rel='noopener'; a.textContent='元画像を開く';
+      acts.appendChild(a);
+    }else{
+      img.removeAttribute('src'); img.style.display='none'; ph.style.display='flex';
+    }
+    try{
+      var viewer=$("viewer");
+      if(viewer){
+        var vw = viewer.clientWidth || window.innerWidth || 360;
+        var vh = viewer.clientHeight|| Math.max(320, Math.floor((window.innerHeight||640)*0.6));
+        img.style.maxWidth  = Math.round(vw*0.5) + 'px';
+        img.style.maxHeight = Math.round(vh*0.4) + 'px';
+      }
+    }catch(_){}
+  }
+
+  function readCurrentPinFromLegacy(){
+    var imgEl = document.getElementById('previewImg');
+    var title = (document.getElementById('capTitleLine')||{}).textContent || '';
+    var body  = (document.getElementById('capBodyLine')||{}).textContent || '';
+    var id    = (window.currentPin && window.currentPin.id) || '';
+    var src   = (imgEl && imgEl.src) || '';
+    var hasImg= !!(imgEl && imgEl.naturalWidth);
+    return { id:id||'', title:title||'', body:body||'', img: hasImg ? src : '' };
+  }
+
+  function onPinSelected(pinLike){
+    var pin = pinLike || readCurrentPinFromLegacy();
+    state.activePin = pin;
+    if (isMobile()){ showMobileCaption(pin); }
+    else { createCapWindow(pin); }
+  }
+
+  window.M3DUI = { __ready:true, onPinSelected:onPinSelected, showMobileCaption:showMobileCaption, createCapWindow:createCapWindow };
+
+  document.addEventListener('DOMContentLoaded', function(){
+    ensureRoot();
+    if (typeof window.selectPin === 'function'){
+      var orig = window.selectPin;
+      window.selectPin = function(){
+        try{ orig.apply(this, arguments); }catch(e){ console.warn(e); }
+        try{ onPinSelected(); }catch(e){ console.warn(e); }
+      };
+    }
+    try{ onPinSelected(readCurrentPinFromLegacy()); }catch(_){}
+  });
+
+  window.addEventListener('resize', function(){
+    try{ if (isMobile() && state.activePin) showMobileCaption(state.activePin); }catch(_){}
+  });
 })();
 </script>
-
 </body>
 </html>
