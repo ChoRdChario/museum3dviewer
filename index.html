@@ -283,7 +283,12 @@
             <span class="small" id="autosaveTip">入力は数秒後に自動保存</span>
           </div>
         </div>
-      </div>
+      
+        <div id="diagPanel" class="panel body small" style="margin-top:8px; max-height:120px; overflow:auto; display:none">
+          <div class="small" style="opacity:.8;margin-bottom:4px">診断ログ</div>
+          <ul id="diagList" style="list-style:none;padding:0;margin:0;display:grid;gap:4px"></ul>
+        </div>
+</div>
     </section>
   </div>
 </div>
@@ -385,6 +390,7 @@ async function ensureTokenClient() {
     callback: (resp) => {
       if (resp && resp.access_token) {
         accessToken = resp.access_token;
+        logStep('サインイン成功');
         document.getElementById('gate').style.display = 'none';
         const viewOnly = new URLSearchParams(location.search).get('view') === '1';
         document.getElementById('statusLabel').textContent = viewOnly ? '閲覧モード' : 'Ready';
@@ -514,12 +520,37 @@ const debouncedSave = debounce(()=> upsertPinToSheet(), 500);
 const PRESET_COLORS = ['#ff6b6b','#ffd166','#06d6a0','#118ab2','#ef476f','#b5179e','#4361ee','#4cc9f0','#ff9f1c'];
 
 function toast(msg){ el.statusLabel.textContent=msg; setTimeout(()=> el.statusLabel.textContent= viewOnly ? '閲覧モード' : 'Ready', 1800); }
+
+function logStep(msg, level='info'){
+  try{
+    const panel = document.getElementById('diagPanel');
+    const ul = document.getElementById('diagList');
+    if(!ul || !panel) return;
+    const li = document.createElement('li');
+    li.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+    if(level==='error') li.style.color = '#ff8080';
+    ul.appendChild(li);
+    panel.style.display = '';
+    while(ul.children.length > 100){ ul.removeChild(ul.firstChild); }
+  }catch(_){}
+}
+function logError(msg){ logStep(msg, 'error'); }
 function ensureArray(x){ return Array.isArray(x)?x:[]; }
 function normalizeHex(c){ const t = new THREE.Color(c); return '#' + t.getHexString(); }
+function disableEditingUIAll(){
+  const editIds = ['btnAddPin','btnGizmo','btnUndo','btnSavePin','btnDeletePin','btnAttach','btnPickFromFolder','listNew','listDelete','capTitle','capBody'];
+  editIds.forEach(id=>{
+    const n = document.getElementById(id);
+    if(n){
+      n.setAttribute('disabled','');
+      if(n.tagName==='INPUT' || n.tagName==='TEXTAREA') n.readOnly = true;
+    }
+  });
+}
 function enforceViewOnlyMode(){
   if (!viewOnly) return;
   document.body.classList.add('viewonly');
-  el.capTitle.readOnly = true; el.capBody.readOnly  = true;
+  disableEditingUIAll();
 }
 
 /* ========= HEIC helpers ========= */
@@ -581,18 +612,17 @@ function viewerInit(){
   pinGroup = new THREE.Group(); scene.add(pinGroup);
   loader = new GLTFLoader();
 
-  window.addEventListener('resize', resize, { passive:true });
+  window.addEventListener('resize', ()=>{ resize(); renderNow(); }, { passive:true });
   el.viewerCanvas.addEventListener('pointerdown', onPointerDown, { passive:false });
   el.projOrtho.addEventListener('change', ()=> { toggleProjection(el.projOrtho.checked); debouncedSaveMaterials(); });
   resize();
-  const loop = ()=>{ renderer.render(scene,camera); updateConnector(); rendererLoopId=requestAnimationFrame(loop); };
-  loop();
+  renderNow();
 }
 function buildControls(){
   if(controls){ controls.dispose(); }
   controls = new OrbitControls(camera, el.viewerCanvas);
   controls.target.set(0,0,0); controls.update();
-  controls.addEventListener('change', updateConnector);
+  controls.addEventListener('change', renderNow);
   if(tcontrols){ scene.remove(tcontrols); if(tcontrols && typeof tcontrols.dispose==='function'){ tcontrols.dispose(); } }
   tcontrols = new TransformControls(camera, el.viewerCanvas);
   tcontrols.setSize(0.9); tcontrols.setSpace('world');
@@ -814,7 +844,8 @@ async function resolveImageObjectURL(ref, {preferThumb=false}={}){
     }else if(meta.hasThumbnail && meta.thumbnailLink){
       const hi = upscaleThumbnailUrl(meta.thumbnailLink, 2048);
       const sep = hi.includes('?') ? '&' : '?';
-      outUrl = hi + sep + 'access_token=' + encodeURIComponent(accessToken);
+      const blob = await driveFileFetchBlob(meta.id);
+      outUrl = URL.createObjectURL(blob);
     }else{
       throw new Error('HEIC preview unavailable (no heic2any & no thumbnailLink)');
     }
@@ -822,7 +853,8 @@ async function resolveImageObjectURL(ref, {preferThumb=false}={}){
     if(preferThumb && meta.hasThumbnail && meta.thumbnailLink){
       const hi = upscaleThumbnailUrl(meta.thumbnailLink, 1024);
       const sep = hi.includes('?') ? '&' : '?';
-      outUrl = hi + sep + 'access_token=' + encodeURIComponent(accessToken);
+      const blob = await driveFileFetchBlob(meta.id);
+      outUrl = URL.createObjectURL(blob);
     }else{
       const blob = await driveFileFetchBlob(meta.id);
       outUrl = URL.createObjectURL(blob);
@@ -1582,7 +1614,7 @@ async function loadFolderImages(){
         if(f.hasThumbnail && f.thumbnailLink){
           const hi = upscaleThumbnailUrl(f.thumbnailLink, isHeic? 1024 : 512);
           const sep = hi.includes('?') ? '&' : '?';
-          img.src = hi + sep + 'access_token=' + encodeURIComponent(accessToken);
+          img.src = await resolveImageObjectURL(ref, {preferThumb:true});
           img.onerror = async ()=>{
             usedFallback = true;
             try{
@@ -1805,6 +1837,7 @@ async function loadGLBFromURL(url, opts={}){
     if(!root) throw new Error('GLB has no scene');
     currentModel = root;
     scene.add(root);
+    try{ logStep('GLBロードOK'); }catch(_){}
     // reset pins group above model if needed
     if(pinGroup) scene.add(pinGroup);
     // collect materials/UI refresh
@@ -1823,6 +1856,8 @@ async function loadGLBFromURL(url, opts={}){
 
 async function loadGLBByFileId(fileId){
   try{
+    if(!fileId || fileId.length < 30){ alert('IDが短すぎます。共有URLを貼り付けるか、30文字以上のfileIdを指定してください'); return; }
+    
     const tokenObj = (window.gapi && gapi.client && gapi.client.getToken && gapi.client.getToken()) || null;
     const token = (tokenObj && tokenObj.access_token) || window.accessToken || '';
     if(!token){ alert('サインインしてください'); return; }
@@ -1834,6 +1869,7 @@ async function loadGLBByFileId(fileId){
         fileId, fields: 'id,name,mimeType,parents', supportsAllDrives: true
       });
       meta = r.result;
+      logStep('メタ取得OK');
     }catch(e){
       console.warn('meta fetch failed (non-fatal)', e);
     }
@@ -1867,6 +1903,7 @@ IDが正しいか確認してください。共有URLのコピペ、または30�
     }
   }catch(e){
     console.error('loadGLBByFileId failed', e);
+    try{ logError('GLB読み込みエラー: ' + (e && e.message ? e.message : e)); }catch(_){}
     alert('GLBの読み込みに失敗しました: ' + (e && e.message ? e.message : e));
   }
 }
