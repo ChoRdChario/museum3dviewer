@@ -687,8 +687,6 @@ let previewZoom = 1.0;
 function applyPreviewZoom(){ el.previewInner.style.transform = `scale(${previewZoom})`; }
 el.previewZoom.addEventListener('input', ()=>{ previewZoom = parseFloat(el.previewZoom.value)||1; el.previewZoomVal.textContent = previewZoom.toFixed(2) + '×'; applyPreviewZoom(); });
 el.previewReset.addEventListener('click', ()=>{ previewZoom = 1; el.previewZoom.value = 1; el.previewZoomVal.textContent = '1.00×'; applyPreviewZoom(); });
-
-async 
 async function setPreview(ref, p){
   try{
     const msg = document.getElementById('previewMsg'); if(msg) msg.style.display='none';
