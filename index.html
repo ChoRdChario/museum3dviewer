@@ -2086,53 +2086,80 @@ async function loadGLBByFileId(fileId){
   if(!accessToken){ alert('先にサインインしてください'); return; }
   if(!fileId){ alert('GLBの fileId または共有URLを入力してください'); return; }
   el.loading.hidden = false;
-  try{
-    el.statusLabel.textContent = 'GLBを読み込み中…';
-    const meta = await driveFileMeta(fileId);
-    glbMetaCache = meta; glbParents = meta.parents || [];
-    const dlUrl = `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media&supportsAllDrives=true`;
-
-    const res = await fetch(dlUrl, { headers:{ Authorization:`Bearer ${accessToken}` } });
-    if(!res.ok){
-      let hint = ''; if(res.status === 403 || res === 404){ hint = '（IDや共有設定を確認してください）'; }
-      throw new Error(`Drive download failed: ${res.status} ${res.statusText} ${hint}`);
+  el.statusLabel.textContent = 'GLBを読み込み中…';
+  (async ()=>{
+    let meta = null;
+    try{
+      meta = await driveFileMeta(fileId);
+      glbMetaCache = meta; glbParents = meta.parents || [];
+    }catch(e){
+      console.warn('meta fetch failed, continue to download', e);
+      glbMetaCache = null; glbParents = [];
     }
-
-    // ★★ 低負荷：Blob URL + loadAsync（ArrayBufferを避ける）
-    const blob = await res.blob();
-    const url = URL.createObjectURL(blob);
-    try {
-      if(currentModel){
-        scene.remove(currentModel);
-        currentModel.traverse(o=>{ if(o.geometry) o.geometry.dispose(); if(o.material){ if(Array.isArray(o.material)) o.material.forEach(m=>m.dispose()); else o.material.dispose(); } });
-        currentModel=null;
+    try{
+      const dlUrl = `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media&supportsAllDrives=true`;
+      const res = await fetch(dlUrl, { headers:{ Authorization:`Bearer ${accessToken}` } });
+      if(!res.ok){
+        let hint = (res.status===403||res.status===404) ? '（IDや共有設定を確認してください）' : '';
+        throw new Error(`Drive download failed: ${res.status} ${res.statusText} ${hint}`);
       }
-      const gltf = await loader.loadAsync(url);
-      currentModel = gltf.scene; scene.add(currentModel);
-      collectMaterials();
-      focusOrigin();
-      renderNow();
-    } finally {
-      URL.revokeObjectURL(url);
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      try{
+        if(currentLoadToken !== myToken) return; // canceled
+        if(currentModel){
+          try{
+            scene.remove(currentModel);
+            currentModel.traverse(o=>{
+              try{
+                if(o.geometry) o.geometry.dispose && o.geometry.dispose();
+                if(o.material){
+                  if(Array.isArray(o.material)) o.material.forEach(m=>m && m.dispose && m.dispose());
+                  else o.material.dispose && o.material.dispose();
+                }
+              }catch(_){}
+            });
+          }catch(_){}
+          currentModel = null;
+        }
+        const gltf = await loader.loadAsync(url);
+        if(currentLoadToken !== myToken) return;
+        currentModel = gltf.scene; scene.add(currentModel);
+        collectMaterials();
+        focusOrigin();
+        renderNow();
+        el.statusLabel.textContent = `Loaded: ${(meta && meta.name) ? meta.name : 'GLB'}`;
+      }finally{
+        URL.revokeObjectURL(url);
+      }
+    }catch(err){
+      console.error(err);
+      el.statusLabel.textContent = 'Load failed';
+      alert('GLB読み込みに失敗しました：' + (err && err.message ? err.message : 'unknown error'));
+      return;
     }
 
-    el.statusLabel.textContent = `Loaded: ${meta.name}`;
-
-    let sheetId = extractSpreadsheetId(el.inputSheet.value.trim());
-    if(!sheetId){
-      sheetId = await findOrCreateSpreadsheetInGlbFolder(meta);
-      el.inputSheet.value = sheetId;
-      toast('スプレッドシートを同階層に用意しました');
+    // 非致命：シート連携（失敗してもモデルは残す）
+    try{
+      let sheetId = extractSpreadsheetId(el.inputSheet.value.trim());
+      if(!sheetId && meta){
+        sheetId = await findOrCreateSpreadsheetInGlbFolder(meta);
+        el.inputSheet.value = sheetId || '';
+        if(sheetId) toast('スプレッドシートを同階層に用意しました');
+      }
+      if(sheetId){
+        await refreshCaptionLists(sheetId);
+        await loadPinsFromActiveSheet(sheetId);
+      }else{
+        console.warn('No sheetId; skip caption lists');
+      }
+    }catch(e){
+      console.warn('Sheet link failed (non-fatal):', e);
+      toast('ピン/キャプションの読み込みに失敗しました（モデルは読み込まれています）');
+    }finally{
+      el.loading.hidden = true;
     }
-    await refreshCaptionLists(sheetId);
-    await loadPinsFromActiveSheet(sheetId);
-  }catch(err){
-    console.error(err);
-    el.statusLabel.textContent = 'Load failed';
-    alert('GLB読み込みに失敗しました：' + (((err)&&(err).message) || 'unknown error'));
-  }finally{
-    el.loading.hidden = true;
-  }
+  })();
 }
 
 /* ========= Save viewer prefs ========= */
