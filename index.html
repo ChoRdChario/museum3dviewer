@@ -1764,6 +1764,53 @@ el.btnDeletePin.addEventListener('click', async ()=>{
   if(spreadsheetId){ try{ await deletePinFromActiveSheet(spreadsheetId, p.id); }catch(e){ console.error(e); } }
 });
 
+
+/* ========= GLB Load from URL ========= */
+async function loadGLBFromURL(url, opts={}){
+  try{
+    if(!loader) loader = new GLTFLoader();
+    // cleanup previous model
+    if(currentModel){
+      try{
+        scene.remove(currentModel);
+        currentModel.traverse(obj=>{
+          if(obj.geometry) obj.geometry.dispose();
+          if(obj.material){
+            const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+            mats.forEach(m=>{
+              try{
+                if(m.map) m.map.dispose();
+                if(m.normalMap) m.normalMap.dispose();
+                if(m.roughnessMap) m.roughnessMap.dispose();
+                if(m.metalnessMap) m.metalnessMap.dispose();
+                if(m.aoMap) m.aoMap.dispose();
+                if(m.emissiveMap) m.emissiveMap.dispose();
+                m.dispose && m.dispose();
+              }catch(_){}
+            });
+          }
+        });
+      }catch(_){}
+      currentModel = null;
+    }
+    const gltf = await loader.loadAsync(url);
+    const root = gltf.scene || (gltf.scenes && gltf.scenes[0]);
+    if(!root) throw new Error('GLB has no scene');
+    currentModel = root;
+    scene.add(root);
+    // reset pins group above model if needed
+    if(pinGroup) scene.add(pinGroup);
+    // collect materials/UI refresh
+    try{ collectMaterials(); }catch(_){}
+    try{ focusOrigin(); }catch(_){}
+    try{ if(window.M3DUI && typeof window.M3DUI.modelLoaded==='function') window.M3DUI.modelLoaded(); }catch(_){}
+    return root;
+  }catch(e){
+    console.error('loadGLBFromURL failed', e);
+    throw e;
+  }
+}
+
 /* ========= GLB Load (LOW-MEM for iOS) ========= */
 
 async function loadGLBByFileId(fileId){
@@ -1968,10 +2015,6 @@ viewerInitWrap();
   }
 
   function onPinSelected(pinLike){
-    var overlayEl=document.getElementById('m3d-caption-layer');
-    var mcapEl=document.getElementById('m3d-mobile-caption');
-    if(overlayEl) overlayEl.hidden = false;
-    if(mcapEl && window.matchMedia && window.matchMedia('(max-width: 900px)').matches) mcapEl.hidden = false;
     var pin = pinLike || readCurrentPinFromLegacy();
     state.activePin = pin;
     if (isMobile()){ showMobileCaption(pin); }
