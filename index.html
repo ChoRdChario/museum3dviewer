@@ -152,6 +152,167 @@
 </style>
 </head>
 <body>
+
+<!-- M3D Bootstrap Style -->
+<style id="m3d-bootstrap-style">
+  #diagChip{position:fixed;left:12px;bottom:12px;padding:8px 12px;border-radius:999px;background:#222;color:#fff;border:1px solid #444;z-index:2147483647;cursor:pointer;opacity:.92;box-shadow:0 2px 8px rgba(0,0,0,.25)}
+  #diagPanel{position:fixed;right:12px;bottom:56px;width:320px;max-height:45vh;overflow:auto;padding:10px;border-radius:12px;background:rgba(0,0,0,.76);color:#fff;z-index:2147483646;display:none;backdrop-filter:blur(2px);box-shadow:0 6px 20px rgba(0,0,0,.35)}
+  #diagPanel ul{list-style:none;margin:0;padding:0;display:grid;gap:4px;font-size:12px}
+  #busyOverlay{position:fixed;inset:0;background:rgba(0,0,0,.35);display:none;z-index:2147483645;backdrop-filter:blur(1px)}
+  @keyframes __m3d_spin{to{transform:rotate(360deg)}}
+</style>
+
+
+<!-- M3D Bootstrap Script -->
+<script id="m3d-bootstrap-script">
+(function(){
+  // Guard against multiple execution
+  if (window.__M3D_BOOTSTRAPPED__) return; window.__M3D_BOOTSTRAPPED__ = true;
+
+  function ensureDiagInfra(){
+    try{
+      if(!document.getElementById('diagPanel')){
+        const panel = document.createElement('div'); panel.id='diagPanel';
+        const head = document.createElement('div'); head.textContent='診断ログ'; head.style.cssText='opacity:.85;margin-bottom:6px;font-size:12px';
+        const ul = document.createElement('ul'); ul.id='diagList';
+        panel.appendChild(head); panel.appendChild(ul);
+        document.body.appendChild(panel);
+      }
+      if(!document.getElementById('diagChip')){
+        const chip = document.createElement('button'); chip.id='diagChip'; chip.type='button'; chip.textContent='診断ログ';
+        chip.addEventListener('click', function(){
+          const p = document.getElementById('diagPanel'); if(!p) return;
+          p.style.display = (p.style.display==='none' || !p.style.display) ? '' : 'none';
+          if(p.style.display!=='none'){ p.scrollTop = p.scrollHeight; }
+        });
+        document.body.appendChild(chip);
+      }
+    }catch(e){ console.warn('[m3d] diag init fail', e); }
+  }
+  function logStep(msg, level){
+    try{
+      ensureDiagInfra();
+      const ul = document.getElementById('diagList'); if(!ul) return;
+      const li = document.createElement('li');
+      li.textContent = '[' + new Date().toLocaleTimeString() + '] ' + msg;
+      if(level==='error') li.style.color='#ff9a9a';
+      ul.appendChild(li);
+      const p = document.getElementById('diagPanel'); if(p && p.style.display!=='none'){ p.scrollTop = p.scrollHeight; }
+      while(ul.children.length > 200){ ul.removeChild(ul.firstChild); }
+    }catch(_){}
+  }
+  function logError(msg){ logStep(msg, 'error'); }
+  window.__m3d_logStep = logStep; window.__m3d_logError = logError;
+
+  // Spinner
+  let spinCount = 0;
+  function ensureSpinner(){
+    if(document.getElementById('busyOverlay')) return;
+    const ov = document.createElement('div'); ov.id='busyOverlay';
+    const center = document.createElement('div'); center.style.cssText='position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);text-align:center;color:#fff;font-family:system-ui,sans-serif';
+    const sp = document.createElement('div'); sp.style.cssText='width:48px;height:48px;border:4px solid rgba(255,255,255,.3);border-top-color:#fff;border-radius:50%;animation:__m3d_spin 1s linear infinite;margin:0 auto 10px';
+    const msg = document.createElement('div'); msg.id='busyMsg'; msg.textContent='読み込み中…'; msg.style.cssText='font-size:14px;opacity:.9';
+    center.appendChild(sp); center.appendChild(msg); ov.appendChild(center); document.body.appendChild(ov);
+  }
+  function busyShow(message){
+    ensureSpinner();
+    spinCount++;
+    const ov = document.getElementById('busyOverlay'); if(ov) ov.style.display='';
+    const m = document.getElementById('busyMsg'); if(m && message) m.textContent = message;
+  }
+  function busyHide(){
+    spinCount = Math.max(0, spinCount-1);
+    if(spinCount===0){ const ov = document.getElementById('busyOverlay'); if(ov) ov.style.display='none'; }
+  }
+  window.M3DBusy = { show: busyShow, hide: busyHide };
+
+  // Poll for API readiness and wrap
+  function wrapOnce(){
+    try{
+      // loadGLBByFileId
+      if (!window.__WRAPPED_loadGLBByFileId && typeof window.loadGLBByFileId === 'function'){
+        const __orig = window.loadGLBByFileId;
+        window.loadGLBByFileId = async function(fileId){
+          try{ __m3d_logStep('GLB読み込み開始'); }catch(_){}
+          M3DBusy.show('GLBを読み込み中…');
+          try{
+            const r = await __orig.apply(this, arguments);
+            try{ __m3d_logStep('GLB読み込み完了'); }catch(_){}
+            return r;
+          }finally{ M3DBusy.hide(); }
+        };
+        window.__WRAPPED_loadGLBByFileId = true;
+      }
+      // loadPinsFromActiveSheet
+      if (!window.__WRAPPED_loadPinsFromActiveSheet && typeof window.loadPinsFromActiveSheet === 'function'){
+        const __orig2 = window.loadPinsFromActiveSheet;
+        window.loadPinsFromActiveSheet = async function(){
+          try{ __m3d_logStep('シート読み込み開始'); }catch(_){}
+          M3DBusy.show('ピン・シートを読み込み中…');
+          try{
+            const r = await __orig2.apply(this, arguments);
+            try{ __m3d_logStep('シート読み込み完了'); }catch(_){}
+            return r;
+          }finally{ M3DBusy.hide(); }
+        };
+        window.__WRAPPED_loadPinsFromActiveSheet = true;
+      }
+      // M3DUI.modelLoaded flush pending applies if hook exists
+      if (!window.__WRAPPED_modelLoaded && window.M3DUI && typeof window.M3DUI.modelLoaded === 'function'){
+        const __origML = window.M3DUI.modelLoaded;
+        window.M3DUI.modelLoaded = function(){
+          const r = __origML.apply(this, arguments);
+          try{
+            window.__modelReady = true;
+            if (window.__pendingSheetApply){
+              __m3d_logStep('モデル準備完了：保留していた材質適用を実行');
+              const fn = window.__pendingSheetApply; window.__pendingSheetApply = null; fn();
+            }
+          }catch(_){}
+          return r;
+        };
+        window.__WRAPPED_modelLoaded = true;
+      }
+    }catch(e){ console.warn('[m3d] wrapOnce failed', e); }
+  }
+  // Continuous but light polling until everything is wrapped
+  const poll = setInterval(function(){
+    wrapOnce();
+    if (window.__WRAPPED_loadGLBByFileId && window.__WRAPPED_loadPinsFromActiveSheet && window.__WRAPPED_modelLoaded){
+      clearInterval(poll);
+    }
+  }, 200);
+
+  // Conservative fetch hook (only for Drive alt=media and Sheets)
+  const _origFetch = window.fetch;
+  try{
+    window.fetch = async function(input, init){
+      try{
+        const url = (typeof input === 'string') ? input : (input && input.url ? input.url : '');
+        const isMedia = url.includes('alt=media') || url.includes('/drivesdk/') || url.includes('/uc?export=download');
+        const isSheet = url.includes('sheets.googleapis.com') || url.includes('/spreadsheets/');
+        if (isMedia || isSheet){ M3DBusy.show(isMedia ? 'GLB/画像を取得中…' : 'シート通信中…'); }
+        const res = await _origFetch(input, init);
+        if (isMedia || isSheet){ M3DBusy.hide(); }
+        return res;
+      }catch(e){
+        try{ __m3d_logError('fetchエラー: ' + (e && e.message ? e.message : e)); }catch(_){}
+        M3DBusy.hide();
+        throw e;
+      }
+    };
+  }catch(e){ /* ignore */ }
+
+  // Expose minimal logger if original ones don't exist
+  if (!('logStep' in window)) window.logStep = __m3d_logStep;
+  if (!('logError' in window)) window.logError = __m3d_logError;
+
+  // Ensure infra immediately
+  try{ ensureDiagInfra(); }catch(_){}
+})();
+</script>
+
+
 <div class="app">
   <header>
     <span class="pill">LociMyu</span>
