@@ -688,34 +688,35 @@ function applyPreviewZoom(){ el.previewInner.style.transform = `scale(${previewZ
 el.previewZoom.addEventListener('input', ()=>{ previewZoom = parseFloat(el.previewZoom.value)||1; el.previewZoomVal.textContent = previewZoom.toFixed(2) + '×'; applyPreviewZoom(); });
 el.previewReset.addEventListener('click', ()=>{ previewZoom = 1; el.previewZoom.value = 1; el.previewZoomVal.textContent = '1.00×'; applyPreviewZoom(); });
 
+async 
 async function setPreview(ref, p){
   try{
     const msg = document.getElementById('previewMsg'); if(msg) msg.style.display='none';
     if(ref){
-    el.previewErr.style.display='none';
-    const src = await resolveImageObjectURL(ref, {preferThumb:false});
-    el.previewImg.src = src;
-    el.previewImg.onerror = ()=>{ el.previewErr.style.display='inline'; };
-    el.capTitleLine.textContent = p?.title || '';
-    el.capBodyLine.textContent  = p?.body  || '';
-    el.viewerPreview.classList.remove('hidden');
-    applyPreviewZoom(); updateConnector();
-    }
-    else {
-      const msg = document.getElementById('previewMsg');
-      if(msg){ msg.textContent = '画像が設定されていません'; msg.style.display = 'block'; }
+      el.previewErr.style.display='none';
+      const src = await resolveImageObjectURL(ref, {preferThumb:false});
+      el.previewImg.src = src;
+      el.previewImg.onerror = ()=>{ el.previewErr.style.display='inline'; };
+      el.capTitleLine.textContent = (p && p.title) ? p.title : '';
+      el.capBodyLine.textContent  = (p && p.body)  ? p.body  : '';
+      el.viewerPreview.classList.remove('hidden');
+      applyPreviewZoom(); updateConnector();
+    } else {
+      const msg2 = document.getElementById('previewMsg');
+      if(msg2){ msg2.textContent = '画像が設定されていません'; msg2.style.display = 'block'; }
       const img = document.getElementById('previewImg'); if(img){ img.removeAttribute('src'); }
-      el.capTitleLine.textContent = p?.title || '';
-      el.capBodyLine.textContent  = p?.body  || '';
+      el.capTitleLine.textContent = (p && p.title) ? p.title : '';
+      el.capBodyLine.textContent  = (p && p.body)  ? p.body  : '';
       el.viewerPreview.classList.remove('hidden');
       applyPreviewZoom(); updateConnector();
     }
-    catch(e){
-    console.warn('preview failed', e);
-    el.previewErr.style.display='inline';
-    el.viewerPreview.classList.remove('hidden');
+  }catch(e){
+    try{ console.warn('preview failed', e); }catch(_){}
+    try{ el.previewErr.style.display='inline'; }catch(_){}
+    try{ el.viewerPreview.classList.remove('hidden'); }catch(_){}
   }
 }
+
 function updateViewerPreviewForPin(p){ setPreview(p && p.images && p.images[0] ? p.images[0] : null, p); }
 
 /* ========= Image resolve & Drive ========= */
