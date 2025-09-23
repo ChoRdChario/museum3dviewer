@@ -145,174 +145,8 @@
   </script>
   <!-- HEIC fallback -->
   <script src="https://unpkg.com/heic2any@0.0.5/dist/heic2any.min.js"></script>
-
-<style>
-  #diagPanel.panel.body.small{ position: sticky; bottom: 0; z-index: 10; background: rgba(0,0,0,.08); border-radius: 8px; }
-  #rightCaption{ position: relative; }
-</style>
 </head>
 <body>
-
-<!-- M3D Bootstrap Style -->
-<style id="m3d-bootstrap-style">
-  #diagChip{position:fixed;left:12px;bottom:12px;padding:8px 12px;border-radius:999px;background:#222;color:#fff;border:1px solid #444;z-index:2147483647;cursor:pointer;opacity:.92;box-shadow:0 2px 8px rgba(0,0,0,.25)}
-  #diagPanel{position:fixed;right:12px;bottom:56px;width:320px;max-height:45vh;overflow:auto;padding:10px;border-radius:12px;background:rgba(0,0,0,.76);color:#fff;z-index:2147483646;display:none;backdrop-filter:blur(2px);box-shadow:0 6px 20px rgba(0,0,0,.35)}
-  #diagPanel ul{list-style:none;margin:0;padding:0;display:grid;gap:4px;font-size:12px}
-  #busyOverlay{position:fixed;inset:0;background:rgba(0,0,0,.35);display:none;z-index:2147483645;backdrop-filter:blur(1px)}
-  @keyframes __m3d_spin{to{transform:rotate(360deg)}}
-</style>
-
-
-<!-- M3D Bootstrap Script -->
-<script id="m3d-bootstrap-script">
-(function(){
-  // Guard against multiple execution
-  if (window.__M3D_BOOTSTRAPPED__) return; window.__M3D_BOOTSTRAPPED__ = true;
-
-  function ensureDiagInfra(){
-    try{
-      if(!document.getElementById('diagPanel')){
-        const panel = document.createElement('div'); panel.id='diagPanel';
-        const head = document.createElement('div'); head.textContent='診断ログ'; head.style.cssText='opacity:.85;margin-bottom:6px;font-size:12px';
-        const ul = document.createElement('ul'); ul.id='diagList';
-        panel.appendChild(head); panel.appendChild(ul);
-        document.body.appendChild(panel);
-      }
-      if(!document.getElementById('diagChip')){
-        const chip = document.createElement('button'); chip.id='diagChip'; chip.type='button'; chip.textContent='診断ログ';
-        chip.addEventListener('click', function(){
-          const p = document.getElementById('diagPanel'); if(!p) return;
-          p.style.display = (p.style.display==='none' || !p.style.display) ? '' : 'none';
-          if(p.style.display!=='none'){ p.scrollTop = p.scrollHeight; }
-        });
-        document.body.appendChild(chip);
-      }
-    }catch(e){ console.warn('[m3d] diag init fail', e); }
-  }
-  function logStep(msg, level){
-    try{
-      ensureDiagInfra();
-      const ul = document.getElementById('diagList'); if(!ul) return;
-      const li = document.createElement('li');
-      li.textContent = '[' + new Date().toLocaleTimeString() + '] ' + msg;
-      if(level==='error') li.style.color='#ff9a9a';
-      ul.appendChild(li);
-      const p = document.getElementById('diagPanel'); if(p && p.style.display!=='none'){ p.scrollTop = p.scrollHeight; }
-      while(ul.children.length > 200){ ul.removeChild(ul.firstChild); }
-    }catch(_){}
-  }
-  function logError(msg){ logStep(msg, 'error'); }
-  window.__m3d_logStep = logStep; window.__m3d_logError = logError;
-
-  // Spinner
-  let spinCount = 0;
-  function ensureSpinner(){
-    if(document.getElementById('busyOverlay')) return;
-    const ov = document.createElement('div'); ov.id='busyOverlay';
-    const center = document.createElement('div'); center.style.cssText='position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);text-align:center;color:#fff;font-family:system-ui,sans-serif';
-    const sp = document.createElement('div'); sp.style.cssText='width:48px;height:48px;border:4px solid rgba(255,255,255,.3);border-top-color:#fff;border-radius:50%;animation:__m3d_spin 1s linear infinite;margin:0 auto 10px';
-    const msg = document.createElement('div'); msg.id='busyMsg'; msg.textContent='読み込み中…'; msg.style.cssText='font-size:14px;opacity:.9';
-    center.appendChild(sp); center.appendChild(msg); ov.appendChild(center); document.body.appendChild(ov);
-  }
-  function busyShow(message){
-    ensureSpinner();
-    spinCount++;
-    const ov = document.getElementById('busyOverlay'); if(ov) ov.style.display='';
-    const m = document.getElementById('busyMsg'); if(m && message) m.textContent = message;
-  }
-  function busyHide(){
-    spinCount = Math.max(0, spinCount-1);
-    if(spinCount===0){ const ov = document.getElementById('busyOverlay'); if(ov) ov.style.display='none'; }
-  }
-  window.M3DBusy = { show: busyShow, hide: busyHide };
-
-  // Poll for API readiness and wrap
-  function wrapOnce(){
-    try{
-      // loadGLBByFileId
-      if (!window.__WRAPPED_loadGLBByFileId && typeof window.loadGLBByFileId === 'function'){
-        const __orig = window.loadGLBByFileId;
-        window.loadGLBByFileId = async function(fileId){
-          try{ __m3d_logStep('GLB読み込み開始'); }catch(_){}
-          M3DBusy.show('GLBを読み込み中…');
-          try{
-            const r = await __orig.apply(this, arguments);
-            try{ __m3d_logStep('GLB読み込み完了'); }catch(_){}
-            return r;
-          }finally{ M3DBusy.hide(); }
-        };
-        window.__WRAPPED_loadGLBByFileId = true;
-      }
-      // loadPinsFromActiveSheet
-      if (!window.__WRAPPED_loadPinsFromActiveSheet && typeof window.loadPinsFromActiveSheet === 'function'){
-        const __orig2 = window.loadPinsFromActiveSheet;
-        window.loadPinsFromActiveSheet = async function(){
-          try{ __m3d_logStep('シート読み込み開始'); }catch(_){}
-          M3DBusy.show('ピン・シートを読み込み中…');
-          try{
-            const r = await __orig2.apply(this, arguments);
-            try{ __m3d_logStep('シート読み込み完了'); }catch(_){}
-            return r;
-          }finally{ M3DBusy.hide(); }
-        };
-        window.__WRAPPED_loadPinsFromActiveSheet = true;
-      }
-      // M3DUI.modelLoaded flush pending applies if hook exists
-      if (!window.__WRAPPED_modelLoaded && window.M3DUI && typeof window.M3DUI.modelLoaded === 'function'){
-        const __origML = window.M3DUI.modelLoaded;
-        window.M3DUI.modelLoaded = function(){
-          const r = __origML.apply(this, arguments);
-          try{
-            window.__modelReady = true;
-            if (window.__pendingSheetApply){
-              __m3d_logStep('モデル準備完了：保留していた材質適用を実行');
-              const fn = window.__pendingSheetApply; window.__pendingSheetApply = null; fn();
-            }
-          }catch(_){}
-          return r;
-        };
-        window.__WRAPPED_modelLoaded = true;
-      }
-    }catch(e){ console.warn('[m3d] wrapOnce failed', e); }
-  }
-  // Continuous but light polling until everything is wrapped
-  const poll = setInterval(function(){
-    wrapOnce();
-    if (window.__WRAPPED_loadGLBByFileId && window.__WRAPPED_loadPinsFromActiveSheet && window.__WRAPPED_modelLoaded){
-      clearInterval(poll);
-    }
-  }, 200);
-
-  // Conservative fetch hook (only for Drive alt=media and Sheets)
-  const _origFetch = window.fetch;
-  try{
-    window.fetch = async function(input, init){
-      try{
-        const url = (typeof input === 'string') ? input : (input && input.url ? input.url : '');
-        const isMedia = url.includes('alt=media') || url.includes('/drivesdk/') || url.includes('/uc?export=download');
-        const isSheet = url.includes('sheets.googleapis.com') || url.includes('/spreadsheets/');
-        if (isMedia || isSheet){ M3DBusy.show(isMedia ? 'GLB/画像を取得中…' : 'シート通信中…'); }
-        const res = await _origFetch(input, init);
-        if (isMedia || isSheet){ M3DBusy.hide(); }
-        return res;
-      }catch(e){
-        try{ __m3d_logError('fetchエラー: ' + (e && e.message ? e.message : e)); }catch(_){}
-        M3DBusy.hide();
-        throw e;
-      }
-    };
-  }catch(e){ /* ignore */ }
-
-  // Expose minimal logger if original ones don't exist
-  if (!('logStep' in window)) window.logStep = __m3d_logStep;
-  if (!('logError' in window)) window.logError = __m3d_logError;
-
-  // Ensure infra immediately
-  try{ ensureDiagInfra(); }catch(_){}
-})();
-</script>
-
-
 <div class="app">
   <header>
     <span class="pill">LociMyu</span>
@@ -449,12 +283,7 @@
             <span class="small" id="autosaveTip">入力は数秒後に自動保存</span>
           </div>
         </div>
-      
-        <div id="diagPanel" class="panel body small" style="margin-top:8px; max-height:120px; overflow:auto; display:none">
-          <div class="small" style="opacity:.8;margin-bottom:4px">診断ログ</div>
-          <ul id="diagList" style="list-style:none;padding:0;margin:0;display:grid;gap:4px"></ul>
-        </div>
-</div>
+      </div>
     </section>
   </div>
 </div>
@@ -556,7 +385,6 @@ async function ensureTokenClient() {
     callback: (resp) => {
       if (resp && resp.access_token) {
         accessToken = resp.access_token;
-        logStep('サインイン成功');
         document.getElementById('gate').style.display = 'none';
         const viewOnly = new URLSearchParams(location.search).get('view') === '1';
         document.getElementById('statusLabel').textContent = viewOnly ? '閲覧モード' : 'Ready';
@@ -686,69 +514,12 @@ const debouncedSave = debounce(()=> upsertPinToSheet(), 500);
 const PRESET_COLORS = ['#ff6b6b','#ffd166','#06d6a0','#118ab2','#ef476f','#b5179e','#4361ee','#4cc9f0','#ff9f1c'];
 
 function toast(msg){ el.statusLabel.textContent=msg; setTimeout(()=> el.statusLabel.textContent= viewOnly ? '閲覧モード' : 'Ready', 1800); }
-
-function logStep(msg, level='info'){
-  try{
-    const panel = document.getElementById('diagPanel');
-    const ul = document.getElementById('diagList');
-    if(!ul || !panel) return;
-    const li = document.createElement('li');
-    li.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
-    if(level==='error') li.style.color = '#ff8080';
-    ul.appendChild(li);
-    panel.style.display = '';
-    while(ul.children.length > 100){ ul.removeChild(ul.firstChild); }
-  }catch(_){}
-}
-function logError(msg){ logStep(msg, 'error'); }
-
-// === Diagnostics Infra (visible fallback) ===
-function __ensureDiagInfra(){
-  try{
-    let panel = document.getElementById('diagPanel');
-    let ul = document.getElementById('diagList');
-    if(!panel){
-      panel = document.createElement('div');
-      panel.id = 'diagPanel';
-      panel.style.cssText = 'position:fixed;right:12px;bottom:56px;width:300px;max-height:40vh;overflow:auto;padding:8px 10px;border-radius:10px;background:rgba(0,0,0,.66);color:#fff;z-index:2147480000;display:none;box-shadow:0 6px 16px rgba(0,0,0,.35)';
-      const head = document.createElement('div'); head.textContent='診断ログ'; head.style.cssText='opacity:.85;margin-bottom:6px;font-size:12px';
-      ul = document.createElement('ul'); ul.id='diagList'; ul.style.cssText='list-style:none;margin:0;padding:0;display:grid;gap:4px;font-size:12px;';
-      panel.appendChild(head); panel.appendChild(ul);
-      document.body.appendChild(panel);
-    }
-    if(!document.getElementById('diagChip')){
-      const chip = document.createElement('button');
-      chip.id='diagChip';
-      chip.textContent='診断ログ';
-      chip.className='btn sm';
-      chip.style.cssText='position:fixed;left:12px;bottom:12px;z-index:2147480001;padding:6px 10px;border-radius:999px;opacity:.9';
-      chip.addEventListener('click', ()=>{
-        const p = document.getElementById('diagPanel');
-        if(!p) return;
-        p.style.display = (p.style.display==='none' || !p.style.display) ? '' : 'none';
-        if(p.style.display!=='none'){ p.scrollTop = p.scrollHeight; }
-      });
-      document.body.appendChild(chip);
-    }
-  }catch(e){ console.warn('diag infra fail', e); }
-}
-window.addEventListener('DOMContentLoaded', __ensureDiagInfra, {once:true});
 function ensureArray(x){ return Array.isArray(x)?x:[]; }
 function normalizeHex(c){ const t = new THREE.Color(c); return '#' + t.getHexString(); }
-function disableEditingUIAll(){
-  const editIds = ['btnAddPin','btnGizmo','btnUndo','btnSavePin','btnDeletePin','btnAttach','btnPickFromFolder','listNew','listDelete','capTitle','capBody'];
-  editIds.forEach(id=>{
-    const n = document.getElementById(id);
-    if(n){
-      n.setAttribute('disabled','');
-      if(n.tagName==='INPUT' || n.tagName==='TEXTAREA') n.readOnly = true;
-    }
-  });
-}
 function enforceViewOnlyMode(){
   if (!viewOnly) return;
   document.body.classList.add('viewonly');
-  disableEditingUIAll();
+  el.capTitle.readOnly = true; el.capBody.readOnly  = true;
 }
 
 /* ========= HEIC helpers ========= */
@@ -810,17 +581,18 @@ function viewerInit(){
   pinGroup = new THREE.Group(); scene.add(pinGroup);
   loader = new GLTFLoader();
 
-  window.addEventListener('resize', ()=>{ resize(); renderNow(); }, { passive:true });
+  window.addEventListener('resize', resize, { passive:true });
   el.viewerCanvas.addEventListener('pointerdown', onPointerDown, { passive:false });
   el.projOrtho.addEventListener('change', ()=> { toggleProjection(el.projOrtho.checked); debouncedSaveMaterials(); });
   resize();
-  renderNow();
+  const loop = ()=>{ renderer.render(scene,camera); updateConnector(); rendererLoopId=requestAnimationFrame(loop); };
+  loop();
 }
 function buildControls(){
   if(controls){ controls.dispose(); }
   controls = new OrbitControls(camera, el.viewerCanvas);
   controls.target.set(0,0,0); controls.update();
-  controls.addEventListener('change', renderNow);
+  controls.addEventListener('change', updateConnector);
   if(tcontrols){ scene.remove(tcontrols); if(tcontrols && typeof tcontrols.dispose==='function'){ tcontrols.dispose(); } }
   tcontrols = new TransformControls(camera, el.viewerCanvas);
   tcontrols.setSize(0.9); tcontrols.setSpace('world');
@@ -1042,8 +814,7 @@ async function resolveImageObjectURL(ref, {preferThumb=false}={}){
     }else if(meta.hasThumbnail && meta.thumbnailLink){
       const hi = upscaleThumbnailUrl(meta.thumbnailLink, 2048);
       const sep = hi.includes('?') ? '&' : '?';
-      const blob = await driveFileFetchBlob(meta.id);
-      outUrl = URL.createObjectURL(blob);
+      outUrl = hi + sep + 'access_token=' + encodeURIComponent(accessToken);
     }else{
       throw new Error('HEIC preview unavailable (no heic2any & no thumbnailLink)');
     }
@@ -1051,8 +822,7 @@ async function resolveImageObjectURL(ref, {preferThumb=false}={}){
     if(preferThumb && meta.hasThumbnail && meta.thumbnailLink){
       const hi = upscaleThumbnailUrl(meta.thumbnailLink, 1024);
       const sep = hi.includes('?') ? '&' : '?';
-      const blob = await driveFileFetchBlob(meta.id);
-      outUrl = URL.createObjectURL(blob);
+      outUrl = hi + sep + 'access_token=' + encodeURIComponent(accessToken);
     }else{
       const blob = await driveFileFetchBlob(meta.id);
       outUrl = URL.createObjectURL(blob);
@@ -1812,7 +1582,7 @@ async function loadFolderImages(){
         if(f.hasThumbnail && f.thumbnailLink){
           const hi = upscaleThumbnailUrl(f.thumbnailLink, isHeic? 1024 : 512);
           const sep = hi.includes('?') ? '&' : '?';
-          img.src = await resolveImageObjectURL(ref, {preferThumb:true});
+          img.src = hi + sep + 'access_token=' + encodeURIComponent(accessToken);
           img.onerror = async ()=>{
             usedFallback = true;
             try{
@@ -2035,7 +1805,6 @@ async function loadGLBFromURL(url, opts={}){
     if(!root) throw new Error('GLB has no scene');
     currentModel = root;
     scene.add(root);
-    try{ logStep('GLBロードOK'); }catch(_){}
     // reset pins group above model if needed
     if(pinGroup) scene.add(pinGroup);
     // collect materials/UI refresh
@@ -2054,8 +1823,6 @@ async function loadGLBFromURL(url, opts={}){
 
 async function loadGLBByFileId(fileId){
   try{
-    if(!fileId || fileId.length < 30){ alert('IDが短すぎます。共有URLを貼り付けるか、30文字以上のfileIdを指定してください'); return; }
-    
     const tokenObj = (window.gapi && gapi.client && gapi.client.getToken && gapi.client.getToken()) || null;
     const token = (tokenObj && tokenObj.access_token) || window.accessToken || '';
     if(!token){ alert('サインインしてください'); return; }
@@ -2067,7 +1834,6 @@ async function loadGLBByFileId(fileId){
         fileId, fields: 'id,name,mimeType,parents', supportsAllDrives: true
       });
       meta = r.result;
-      logStep('メタ取得OK');
     }catch(e){
       console.warn('meta fetch failed (non-fatal)', e);
     }
@@ -2077,7 +1843,9 @@ async function loadGLBByFileId(fileId){
     const res = await fetch(url, { headers: { 'Authorization': 'Bearer ' + token } });
     if(!res.ok){
       const txt = await res.text().catch(()=>'');
-      throw new Error(`GLB download failed: ${res.status} ${txt}\n\nIDが正しいか確認してください。共有URLのコピペ、または30文字以上の完全なFileIdを貼り付けてください。`);
+      throw new Error('GLB download failed: ' + res.status + ' ' + txt + '
+
+IDが正しいか確認してください。共有URLのコピペ、または30文字以上の完全なFileIdを貼り付けてください。');
     }
     const blob = await res.blob();
     const objUrl = URL.createObjectURL(blob);
@@ -2099,7 +1867,6 @@ async function loadGLBByFileId(fileId){
     }
   }catch(e){
     console.error('loadGLBByFileId failed', e);
-    try{ logError('GLB読み込みエラー: ' + (e && e.message ? e.message : e)); }catch(_){}
     alert('GLBの読み込みに失敗しました: ' + (e && e.message ? e.message : e));
   }
 }
@@ -2379,264 +2146,150 @@ document.addEventListener('DOMContentLoaded', function(){
     };
   }
 })();
-
-// === Flush pending sheet-apply when modelLoaded fires ===
-(function(){
-  try{
-    if (window.M3DUI && typeof M3DUI.modelLoaded === 'function'){
-      const __orig_modelLoaded = M3DUI.modelLoaded;
-      M3DUI.modelLoaded = function(){
-        try{
-          return __orig_modelLoaded.apply(this, arguments);
-        } finally {
-          try{
-            window.__modelReady = true;
-            if (window.__pendingSheetApply){
-              try{ logStep('モデル準備完了：保留していた材質適用を実行'); }catch(_){}
-              const fn = window.__pendingSheetApply; window.__pendingSheetApply = null; fn();
-            }
-          }catch(_){}
-        }
-      }
-    }
-  }catch(e){ console.warn('modelLoaded patch fail', e); }
-})();
-
-// === Guard & queue material-apply until model is ready ===
-(function(){
-  try{
-    if (typeof applyMaterialsFromSheet === 'function'){
-      const __orig_applyMaterialsFromSheet = applyMaterialsFromSheet;
-      window.__pendingSheetApply = null;
-      applyMaterialsFromSheet = async function(...args){
-        try{
-          const hasRoot = (typeof root !== 'undefined') && !!root && typeof root.traverse === 'function';
-          if(!hasRoot){
-            try{ logStep('モデル未読込のため材質適用を保留します'); }catch(_){}
-            window.__pendingSheetApply = ()=>__orig_applyMaterialsFromSheet(...args);
-            return;
-          }
-          return await __orig_applyMaterialsFromSheet.apply(this, args);
-        }catch(e){
-          try{ logError('材質適用エラー: ' + (e && e.message ? e.message : e)); }catch(_){}
-          throw e;
-        }
-      }
-    }
-  }catch(e){ console.warn('applyMaterialsFromSheet wrap fail', e); }
-})();
-
-// === Busy hooks for GLB and Sheet operations ===
-(function(){
-  try{
-    if (typeof loadGLBByFileId === 'function'){
-      const __orig = loadGLBByFileId;
-      window.loadGLBByFileId = async function(fileId){
-        M3DBusy.show('GLBを読み込み中…');
-        try{
-          const r = await __orig.apply(this, arguments);
-          return r;
-        } finally {
-          M3DBusy.hide();
-        }
-      }
-    }
-  }catch(e){ console.warn('wrap loadGLBByFileId failed', e); }
-  try{
-    if (typeof loadPinsFromActiveSheet === 'function'){
-      const __orig2 = loadPinsFromActiveSheet;
-      window.loadPinsFromActiveSheet = async function(sheetId){
-        M3DBusy.show('ピン・シートを読み込み中…');
-        try{
-          const r = await __orig2.apply(this, arguments);
-          return r;
-        } finally {
-          M3DBusy.hide();
-        }
-      }
-    }
-  }catch(e){ console.warn('wrap loadPinsFromActiveSheet failed', e); }
-})();
-
-// === Busy Spinner Overlay (ref-count) ===
-(function(){
-  let count = 0;
-  function ensureSpinner(){
-    if (document.getElementById('busyOverlay')) return;
-    const ov = document.createElement('div');
-    ov.id = 'busyOverlay';
-    ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.35);display:none;z-index:2147483645;backdrop-filter:blur(1px)';
-    const center = document.createElement('div');
-    center.style.cssText = 'position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);text-align:center;color:#fff;font-family:system-ui, sans-serif';
-    const spinner = document.createElement('div');
-    spinner.style.cssText = 'width:48px;height:48px;border:4px solid rgba(255,255,255,.3);border-top-color:#fff;border-radius:50%;animation:__m3d_spin 1s linear infinite;margin:0 auto 10px';
-    const msg = document.createElement('div'); msg.id='busyMsg'; msg.textContent='読み込み中…'; msg.style.cssText='font-size:14px;opacity:.9';
-    const style = document.createElement('style');
-    style.textContent='@keyframes __m3d_spin{to{transform:rotate(360deg)}}';
-    center.appendChild(spinner); center.appendChild(msg);
-    ov.appendChild(center); document.body.appendChild(ov); document.head.appendChild(style);
-  }
-  function show(msg){
-    ensureSpinner();
-    count++;
-    const ov = document.getElementById('busyOverlay');
-    const m = document.getElementById('busyMsg');
-    if(m && msg) m.textContent = msg;
-    ov.style.display='';
-  }
-  function hide(){
-    count = Math.max(0, count-1);
-    if (count===0){
-      const ov = document.getElementById('busyOverlay');
-      if(ov) ov.style.display='none';
-    }
-  }
-  window.M3DBusy = { show, hide };
-})();
-
-// === Diagnostics Boost ===
-function __ensureDiagInfra(){
-  try{
-    let panel = document.getElementById('diagPanel');
-    let ul = document.getElementById('diagList');
-    if(!panel){
-      panel = document.createElement('div');
-      panel.id = 'diagPanel';
-      panel.style.cssText = 'position:fixed;right:12px;bottom:56px;width:320px;max-height:45vh;overflow:auto;padding:10px;border-radius:12px;background:rgba(0,0,0,.75);color:#fff;z-index:2147483646;display:none;backdrop-filter:blur(2px)';
-      const head = document.createElement('div');
-      head.textContent='診断ログ';
-      head.style.cssText='opacity:.85;margin-bottom:6px;font-size:12px';
-      ul = document.createElement('ul');
-      ul.id='diagList';
-      ul.style.cssText='list-style:none;margin:0;padding:0;display:grid;gap:4px;font-size:12px;';
-      panel.appendChild(head); panel.appendChild(ul);
-      document.body.appendChild(panel);
-    }
-    if(!document.getElementById('diagChip')){
-      const chip = document.createElement('button');
-      chip.id='diagChip';
-      chip.type='button';
-      chip.textContent='診断ログ';
-      chip.style.cssText='position:fixed;left:12px;bottom:12px;padding:8px 12px;border-radius:999px;background:#222;color:#fff;border:1px solid #444;z-index:2147483647;cursor:pointer;opacity:.9';
-      chip.addEventListener('click', ()=>{
-        const p = document.getElementById('diagPanel');
-        if(!p) return;
-        p.style.display = (p.style.display==='none' || !p.style.display) ? '' : 'none';
-        if(p.style.display!=='none'){ p.scrollTop = p.scrollHeight; }
-      });
-      document.body.appendChild(chip);
-    }
-  }catch(e){ console.warn('diag infra fail', e); }
-}
-if (document.readyState === 'loading') {
-  window.addEventListener('DOMContentLoaded', __ensureDiagInfra, { once:true });
-} else {
-  __ensureDiagInfra();
-}
-// Wrap existing logStep to always ensure infra
-(function(){
-  try{
-    if (typeof logStep === 'function'){
-      const __oldLogStep = logStep;
-      window.logStep = function(msg, level){ try{ __ensureDiagInfra(); }catch(_){ } return __oldLogStep(msg, level); };
-    }
-    if (typeof logError === 'function'){
-      const __oldLogError = logError;
-      window.logError = function(msg){ try{ __ensureDiagInfra(); }catch(_){ } return __oldLogError(msg); };
-    }
-  }catch(e){}
-})();
 </script>
 
 
-<!-- M3D Bootstrap Reinforce -->
-<script id="m3d-bootstrap-reinforce">
+<!-- M3D Shadow HUD (late load) -->
+<script id="m3d-shadow-hud">
 (function(){
-  function setDisplayImportant(el, value){
-    try{ el.style.setProperty('display', value, 'important'); }catch(_){ el.style.display = value; }
-  }
-  function ensureDiagInfra(){
+  if (window.__M3D_SHADOW_HUD__) return; window.__M3D_SHADOW_HUD__ = true;
+
+  function installShadowHUD(){
     try{
-      let panel = document.getElementById('diagPanel');
-      if(!panel){
-        panel = document.createElement('div');
-        panel.id = 'diagPanel';
-        panel.innerHTML = '<div style="opacity:.85;margin-bottom:6px;font-size:12px">診断ログ</div><ul id="diagList" style="list-style:none;margin:0;padding:0;display:grid;gap:4px;font-size:12px"></ul>';
-        document.body.appendChild(panel);
+      let host = document.getElementById('m3d-hud-host');
+      if (!host){
+        host = document.createElement('div');
+        host.id = 'm3d-hud-host';
+        host.style.cssText = 'position:fixed;inset:auto 0 0 auto;z-index:2147483647;pointer-events:none;';
+        document.body.appendChild(host);
       }
-      let chip = document.getElementById('diagChip');
-      if(!chip){
-        chip = document.createElement('button');
-        chip.id='diagChip'; chip.type='button'; chip.textContent='診断ログ';
-        chip.addEventListener('click', function(){
-          const p = document.getElementById('diagPanel'); if(!p) return;
-          setDisplayImportant(p, (p.style.display==='none' || !p.style.display)?'block':'none');
-          if(p.style.display!=='none'){ p.scrollTop = p.scrollHeight; }
+      if (!host.shadowRoot){
+        const shadow = host.attachShadow({mode:'open'});
+        shadow.innerHTML = `
+          <style>
+            :host{ all: initial; }
+            .chip{
+              position: fixed; left: 12px; bottom: 12px;
+              padding: 8px 12px; border-radius: 999px;
+              background: #222; color: #fff; border: 1px solid #444;
+              font: 13px system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+              cursor: pointer; opacity: .92; pointer-events: auto;
+              box-shadow: 0 2px 8px rgba(0,0,0,.25);
+              user-select: none;
+            }
+            .panel{
+              position: fixed; right: 12px; bottom: 56px;
+              width: 320px; max-height: 46vh; overflow: auto;
+              padding: 10px; border-radius: 12px;
+              background: rgba(0,0,0,.78); color: #fff;
+              font: 12px/1.5 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+              display: none; pointer-events: auto;
+              box-shadow: 0 10px 24px rgba(0,0,0,.35);
+              -webkit-backdrop-filter: blur(2px); backdrop-filter: blur(2px);
+            }
+            .panel h3{ margin: 0 0 6px; font-size: 12px; opacity: .85; }
+            .list{ list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+            .list li.error{ color:#ff9a9a; }
+            .overlay{
+              position: fixed; inset: 0; background: rgba(0,0,0,.35);
+              display: none; pointer-events: auto;
+              z-index: 2147483646;
+              -webkit-backdrop-filter: blur(1px); backdrop-filter: blur(1px);
+            }
+            .center{ position:absolute; top:50%; left:50%; transform:translate(-50%,-50%);
+              text-align:center; color:#fff; font: 14px system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
+            .spinner{ width:48px; height:48px; border:4px solid rgba(255,255,255,.3); border-top-color:#fff; border-radius:50%; animation:spin 1s linear infinite; margin:0 auto 10px; }
+            @keyframes spin{ to{ transform: rotate(360deg); } }
+          </style>
+          <button id="chip" class="chip" title="診断ログ（`でも開閉）">診断ログ</button>
+          <div id="panel" class="panel"><h3>診断ログ</h3><ul id="list" class="list"></ul></div>
+          <div id="overlay" class="overlay">
+            <div class="center"><div class="spinner"></div><div id="msg">読み込み中…</div></div>
+          </div>
+        `;
+        const chip = shadow.getElementById('chip');
+        const panel = shadow.getElementById('panel');
+        chip.addEventListener('click', ()=>{
+          panel.style.display = (panel.style.display==='none' || !panel.style.display) ? 'block' : 'none';
+          if(panel.style.display!=='none'){ panel.scrollTop = panel.scrollHeight; }
         }, {capture:true});
-        document.body.appendChild(chip);
+        shadow.addEventListener('click', (e)=>{ e.stopPropagation(); }, {capture:true});
+        // expose API
+        let refCount = 0;
+        const overlay = shadow.getElementById('overlay');
+        const msg = shadow.getElementById('msg');
+        const list = shadow.getElementById('list');
+        function log(s, level){
+          const li = document.createElement('li'); li.textContent = `[${new Date().toLocaleTimeString()}] ${s}`;
+          if(level==='error') li.classList.add('error');
+          list.appendChild(li); panel.style.display='block'; panel.scrollTop = panel.scrollHeight;
+          while(list.children.length>250) list.removeChild(list.firstChild);
+        }
+        function showBusy(m){ refCount++; overlay.style.display='block'; if(m) msg.textContent = m; }
+        function hideBusy(){ refCount=Math.max(0,refCount-1); if(refCount===0) overlay.style.display='none'; }
+        window.M3DHUD = { log, error:(s)=>log(s,'error'), showBusy, hideBusy };
+        // global convenience
+        if (!window.logStep) window.logStep = (s)=>M3DHUD.log(s);
+        if (!window.logError) window.logError = (s)=>M3DHUD.error(s);
+        if (!window.M3DBusy) window.M3DBusy = { show:(m)=>M3DHUD.showBusy(m), hide:()=>M3DHUD.hideBusy() };
+        // keyboard toggle
+        window.addEventListener('keydown', (e)=>{ if(e.key==='`'){ panel.style.display = (panel.style.display==='none'||!panel.style.display)?'block':'none'; } }, {capture:true});
+        // first log
+        M3DHUD.log('Shadow HUD ready');
       }
-    }catch(e){}
+    }catch(e){ console.warn('[m3d] shadow hud install fail', e); }
   }
-  function ensureSpinner(){
-    let ov = document.getElementById('busyOverlay');
-    if(!ov){
-      ov = document.createElement('div');
-      ov.id='busyOverlay';
-      ov.innerHTML = '<div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);text-align:center;color:#fff;font-family:system-ui,sans-serif"><div style="width:48px;height:48px;border:4px solid rgba(255,255,255,.3);border-top-color:#fff;border-radius:50%;animation:__m3d_spin 1s linear infinite;margin:0 auto 10px"></div><div id="busyMsg" style="font-size:14px;opacity:.9">読み込み中…</div></div>';
-      document.body.appendChild(ov);
+
+  function later(fn){ try{ setTimeout(fn, 0); }catch(_){} }
+  window.addEventListener('load', ()=>{ later(installShadowHUD); later(()=>{ try{ M3DHUD && M3DHUD.log('window.load'); }catch(_){}}); });
+  later(installShadowHUD); setTimeout(installShadowHUD, 300); setTimeout(installShadowHUD, 1200);
+
+  // Hook XMLHttpRequest (gapi uses XHR)
+  (function(){
+    const OrigXHR = window.XMLHttpRequest;
+    if (!OrigXHR) return;
+    const Hook = function(){ const x = new OrigXHR(); return hook(x); };
+    function hook(x){
+      try{
+        let url = '';
+        const open = x.open; x.open = function(method, u){ url = String(u||''); return open.apply(this, arguments); };
+        const send = x.send; x.send = function(){
+          try{
+            const isMedia = url.includes('alt=media') || url.includes('/uc?export=download');
+            const isGapi = url.includes('googleapis.com') || url.includes('gapi') || url.includes('/spreadsheets/');
+            if (isMedia || isGapi){ try{ M3DHUD && M3DHUD.showBusy(isMedia ? 'GLB/画像を取得中…' : '通信中…'); }catch(_){ } }
+          }catch(_){}
+          x.addEventListener('loadend', function(){ try{ M3DHUD && M3DHUD.hideBusy(); }catch(_){ } }, {once:false});
+          return send.apply(this, arguments);
+        };
+      }catch(_){}
+      return x;
     }
-  }
-  function openDiag(){
-    ensureDiagInfra();
-    const p = document.getElementById('diagPanel'); if(p){ setDisplayImportant(p,'block'); p.scrollTop=p.scrollHeight; }
-  }
-  function log(msg, level){
-    ensureDiagInfra();
-    const ul = document.getElementById('diagList');
-    if(ul){
-      const li = document.createElement('li');
-      li.textContent = '[' + new Date().toLocaleTimeString() + '] ' + msg;
-      if(level==='error') li.style.color='#ff9a9a';
-      ul.appendChild(li);
-      openDiag();
-      while(ul.children.length>200) ul.removeChild(ul.firstChild);
-    }
-  }
-  window.__m3d_forceLog = log;
+    Hook.prototype = OrigXHR.prototype;
+    window.XMLHttpRequest = Hook;
+  })();
 
-  // Make global toggles if missing
-  if (!window.M3DBusy){
-    let count = 0;
-    window.M3DBusy = {
-      show(msg){ ensureSpinner(); count++; const ov=document.getElementById('busyOverlay'); if(ov){ setDisplayImportant(ov,'block'); } const m=document.getElementById('busyMsg'); if(m && msg) m.textContent=msg; },
-      hide(){ count=Math.max(0,count-1); if(count===0){ const ov=document.getElementById('busyOverlay'); if(ov){ setDisplayImportant(ov,'none'); } } }
-    };
-  }
+  // Wrap loadGLBByFileId / loadPinsFromActiveSheet if they appear later
+  (function pollWrap(){
+    let doneGLB=false, donePins=false;
+    const id = setInterval(function(){
+      try{
+        if (!doneGLB && typeof window.loadGLBByFileId === 'function'){
+          const o = window.loadGLBByFileId;
+          window.loadGLBByFileId = async function(fid){ try{ M3DHUD && M3DHUD.log('GLB読み込み開始'); }catch(_){ } M3DHUD && M3DHUD.showBusy('GLBを読み込み中…'); try{ const r=await o.apply(this, arguments); try{ M3DHUD && M3DHUD.log('GLB読み込み完了'); }catch(_){ } return r; } finally { M3DHUD && M3DHUD.hideBusy(); } };
+          doneGLB = true;
+        }
+        if (!donePins && typeof window.loadPinsFromActiveSheet === 'function'){
+          const p = window.loadPinsFromActiveSheet;
+          window.loadPinsFromActiveSheet = async function(){ try{ M3DHUD && M3DHUD.log('シート読み込み開始'); }catch(_){ } M3DHUD && M3DHUD.showBusy('ピン・シートを読み込み中…'); try{ const r=await p.apply(this, arguments); try{ M3DHUD && M3DHUD.log('シート読み込み完了'); }catch(_){ } return r; } finally { M3DHUD && M3DHUD.hideBusy(); } };
+          donePins = true;
+        }
+        if (doneGLB && donePins) clearInterval(id);
+      }catch(e){ /* keep polling */ }
+    }, 200);
+    setTimeout(()=>clearInterval(id), 10000);
+  })();
 
-  // Keep widgets alive even if body is re-rendered
-  const mo = new MutationObserver(()=>{
-    if(!document.getElementById('diagChip') || !document.getElementById('diagPanel')) ensureDiagInfra();
-    if(!document.getElementById('busyOverlay')) ensureSpinner();
-  });
-  mo.observe(document.documentElement, {childList:true, subtree:true});
-
-  // Keyboard toggle: backquote (`) to toggle diag panel
-  window.addEventListener('keydown', (e)=>{
-    if(e.key === '`'){
-      ensureDiagInfra();
-      const p = document.getElementById('diagPanel'); if(p){ setDisplayImportant(p, (p.style.display==='none'||!p.style.display)?'block':'none'); }
-    }
-  }, {capture:true});
-
-  // Test ping: creates a log and shows spinner briefly
-  window.__M3D_TEST_PING = function(){
-    try{ log('テストログ：ブート完了'); }catch(_){}
-    try{ M3DBusy.show('テスト表示'); setTimeout(()=>M3DBusy.hide(), 600); }catch(_){}
-  };
-
-  // First activation
-  ensureDiagInfra(); ensureSpinner(); openDiag(); log('ブート完了');
-  setTimeout(()=>{ try{ window.__M3D_TEST_PING(); }catch(_){} }, 200);
 })();
 </script>
 </body>
