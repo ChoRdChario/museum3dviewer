@@ -84,7 +84,7 @@
 /* Overlay caption layer (desktop) */
 #m3d-caption-layer{
   position:absolute; inset:0;
-   z-index: 1200;
+  pointer-events:none; z-index: 1200;
 }
 #m3d-caption-layer .m3d-capwin{
   position:absolute; min-width:220px; max-width:340px;
@@ -151,8 +151,8 @@
   <header>
     <span class="pill">LociMyu</span>
     <div class="toolbar" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-      <input id="inputGLB" type="text" placeholder="GLB fileId || share URL" />
-      <input id="inputSheet" type="text" placeholder="SpreadsheetId || share URL（空なら自動作成）" />
+      <input id="inputGLB" type="text" placeholder="GLB fileId or share URL" />
+      <input id="inputSheet" type="text" placeholder="SpreadsheetId or share URL（空なら自動作成）" />
       <button id="btnLoad" class="accent" disabled>GLBを読み込む</button>
       <button id="btnViewOnly">閲覧リンクを生成</button>
       <button id="btnWide">📺 ビューア拡大</button>
@@ -1843,8 +1843,10 @@ async function loadGLBByFileId(fileId){
     const res = await fetch(url, { headers: { 'Authorization': 'Bearer ' + token } });
     if(!res.ok){
       const txt = await res.text().catch(()=>'');
-      throw new Error(`GLB download failed: ${res.status} ${txt}\n\nIDが正しいか確認してください。共有URLのコピペ、または30文字以上の完全なFileIdを貼り付けてください。`);
-}
+      throw new Error('GLB download failed: ' + res.status + ' ' + txt + '
+
+IDが正しいか確認してください。共有URLのコピペ、または30文字以上の完全なFileIdを貼り付けてください。');
+    }
     const blob = await res.blob();
     const objUrl = URL.createObjectURL(blob);
     try{
@@ -2080,7 +2082,7 @@ document.addEventListener('DOMContentLoaded', function(){
     // Move known preview out of right pane (overlay/mobile handles viewing)
     var prev = document.getElementById('viewerPreview');
     if(prev && prev.parentElement === body){
-      // leave it where it is || let overlay handle; no action
+      // leave it where it is or let overlay handle; no action
     }
     // Heuristic: move non-editor controls to list
     var caplist = document.getElementById('m3d-caplist');
@@ -2147,151 +2149,7 @@ document.addEventListener('DOMContentLoaded', function(){
 </script>
 
 
-<!-- M3D Shadow HUD (late load) -->
-<script id="m3d-shadow-hud">
-(function(){
-  if (window.__M3D_SHADOW_HUD__) return; window.__M3D_SHADOW_HUD__ = true;
-
-  function installShadowHUD(){
-    try{
-      let host = document.getElementById('m3d-hud-host');
-      if (!host){
-        host = document.createElement('div');
-        host.id = 'm3d-hud-host';
-        host.style.cssText = 'position:fixed;inset:auto 0 0 auto;z-index:2147483647;';
-        document.body.appendChild(host);
-      }
-      if (!host.shadowRoot){
-        const shadow = host.attachShadow({mode:'open'});
-        shadow.innerHTML = `
-          <style>
-            :host{ all: initial; }
-            .chip{
-              position: fixed; left: 12px; bottom: 12px;
-              padding: 8px 12px; border-radius: 999px;
-              background: #222; color: #fff; border: 1px solid #444;
-              font: 13px system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
-              cursor: pointer; opacity: .92; pointer-events: auto;
-              box-shadow: 0 2px 8px rgba(0,0,0,.25);
-              user-select: none;
-            }
-            .panel{
-              position: fixed; right: 12px; bottom: 56px;
-              width: 320px; max-height: 46vh; overflow: auto;
-              padding: 10px; border-radius: 12px;
-              background: rgba(0,0,0,.78); color: #fff;
-              font: 12px/1.5 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
-              display: none; pointer-events: auto;
-              box-shadow: 0 10px 24px rgba(0,0,0,.35);
-              -webkit-backdrop-filter: blur(2px); backdrop-filter: blur(2px);
-            }
-            .panel h3{ margin: 0 0 6px; font-size: 12px; opacity: .85; }
-            .list{ list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
-            .list li.error{ color:#ff9a9a; }
-            .overlay{
-              position: fixed; inset: 0; background: rgba(0,0,0,.35);
-              display: none; pointer-events: auto;
-              z-index: 2147483646;
-              -webkit-backdrop-filter: blur(1px); backdrop-filter: blur(1px);
-            }
-            .center{ position:absolute; top:50%; left:50%; transform:translate(-50%,-50%);
-              text-align:center; color:#fff; font: 14px system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
-            .spinner{ width:48px; height:48px; border:4px solid rgba(255,255,255,.3); border-top-color:#fff; border-radius:50%; animation:spin 1s linear infinite; margin:0 auto 10px; }
-            @keyframes spin{ to{ transform: rotate(360deg); } }
-          </style>
-          <button id="chip" class="chip" title="診断ログ（\`でも開閉）">診断ログ</button>
-          <div id="panel" class="panel"><h3>診断ログ</h3><ul id="list" class="list"></ul></div>
-          <div id="overlay" class="overlay">
-            <div class="center"><div class="spinner"></div><div id="msg">読み込み中…</div></div>
-          </div>
-        `;
-        const chip = shadow.getElementById('chip');
-        const panel = shadow.getElementById('panel');
-        chip.addEventListener('click', ()=>{
-          panel.style.display = (panel.style.display==='none' || !panel.style.display) ? 'block' : 'none';
-          if(panel.style.display!=='none'){ panel.scrollTop = panel.scrollHeight; }
-        }, {capture:true});
-        shadow.addEventListener('click', (e)=>{ e.stopPropagation(); }, {capture:true});
-        // expose API
-        let refCount = 0;
-        const overlay = shadow.getElementById('overlay');
-        const msg = shadow.getElementById('msg');
-        const list = shadow.getElementById('list');
-        function log(s, level){
-          const li = document.createElement('li'); li.textContent = `[${new Date().toLocaleTimeString()}] ${s}`;
-          if(level==='error') li.classList.add('error');
-          list.appendChild(li); panel.style.display='block'; panel.scrollTop = panel.scrollHeight;
-          while(list.children.length>250) list.removeChild(list.firstChild);
-        }
-        function showBusy(m){ refCount++; overlay.style.display='block'; if(m) msg.textContent = m; }
-        function hideBusy(){ refCount=Math.max(0,refCount-1); if(refCount===0) overlay.style.display='none'; }
-        window.M3DHUD = { log, error:(s)=>log(s,'error'), showBusy, hideBusy };
-        // global convenience
-        if (!window.logStep) window.logStep = (s)=>M3DHUD.log(s);
-        if (!window.logError) window.logError = (s)=>M3DHUD.error(s);
-        if (!window.M3DBusy) window.M3DBusy = { show:(m)=>M3DHUD.showBusy(m), hide:()=>M3DHUD.hideBusy() };
-        // keyboard toggle
-        window.addEventListener('keydown', (e)=>{ if(e.key==='`'){ panel.style.display = (panel.style.display==='none'||!panel.style.display)?'block':'none'; } }, {capture:true});
-        // first log
-        M3DHUD.log('Shadow HUD ready');
-      }
-    }catch(e){ console.warn('[m3d] shadow hud install fail', e); }
-  }
-
-  function later(fn){ try{ setTimeout(fn, 0); }catch(_){} }
-  window.addEventListener('load', ()=>{ later(installShadowHUD); later(()=>{ try{ M3DHUD && M3DHUD.log('window.load'); }catch(_){}}); });
-  later(installShadowHUD); setTimeout(installShadowHUD, 300); setTimeout(installShadowHUD, 1200);
-
-  // Hook XMLHttpRequest (gapi uses XHR)
-  (function(){
-    const OrigXHR = window.XMLHttpRequest;
-    if (!OrigXHR) return;
-    const Hook = function(){ const x = new OrigXHR(); return hook(x); };
-    function hook(x){
-      try{
-        let url = '';
-        const open = x.open; x.open = function(method, u){ url = String(u||''); return open.apply(this, arguments); };
-        const send = x.send; x.send = function(){
-          try{
-            const isMedia = url.includes('alt=media') || url.includes('/uc?export=download');
-            const isGapi = url.includes('googleapis.com') || url.includes('gapi') || url.includes('/spreadsheets/');
-            if (isMedia || isGapi){ try{ M3DHUD && M3DHUD.showBusy(isMedia ? 'GLB/画像を取得中…' : '通信中…'); }catch(_){ } }
-          }catch(_){}
-          x.addEventListener('loadend', function(){ try{ M3DHUD && M3DHUD.hideBusy(); }catch(_){ } }, {once:false});
-          return send.apply(this, arguments);
-        };
-      }catch(_){}
-      return x;
-    }
-    Hook.prototype = OrigXHR.prototype;
-    window.XMLHttpRequest = Hook;
-  })();
-
-  // Wrap loadGLBByFileId / loadPinsFromActiveSheet if they appear later
-  (function pollWrap(){
-    let doneGLB=false, donePins=false;
-    const id = setInterval(function(){
-      try{
-        if (!doneGLB && typeof window.loadGLBByFileId === 'function'){
-          const o = window.loadGLBByFileId;
-          window.loadGLBByFileId = async function(fid){ try{ M3DHUD && M3DHUD.log('GLB読み込み開始'); }catch(_){ } M3DHUD && M3DHUD.showBusy('GLBを読み込み中…'); try{ const r=await o.apply(this, arguments); try{ M3DHUD && M3DHUD.log('GLB読み込み完了'); }catch(_){ } return r; } finally { M3DHUD && M3DHUD.hideBusy(); } };
-          doneGLB = true;
-        }
-        if (!donePins && typeof window.loadPinsFromActiveSheet === 'function'){
-          const p = window.loadPinsFromActiveSheet;
-          window.loadPinsFromActiveSheet = async function(){ try{ M3DHUD && M3DHUD.log('シート読み込み開始'); }catch(_){ } M3DHUD && M3DHUD.showBusy('ピン・シートを読み込み中…'); try{ const r=await p.apply(this, arguments); try{ M3DHUD && M3DHUD.log('シート読み込み完了'); }catch(_){ } return r; } finally { M3DHUD && M3DHUD.hideBusy(); } };
-          donePins = true;
-        }
-        if (doneGLB && donePins) clearInterval(id);
-      }catch(e){ /* keep polling */ }
-    }, 200);
-    setTimeout(()=>clearInterval(id), 10000);
-  })();
-
-})();
-</script>
-
-<!-- === Phase 1.5: vNext Shadow UI Shell & Bridges === -->
+<!-- === Phase 1.5: vNext Shadow UI Shell (self-contained) === -->
 <script>
 (function(){
   function vnextEnabled(){
@@ -2299,7 +2157,7 @@ document.addEventListener('DOMContentLoaded', function(){
       const sp = new URLSearchParams(location.search);
       if (sp.has('vnext')) localStorage.setItem('m3d_vnext', sp.get('vnext'));
       return sp.get('vnext')==='1' || localStorage.getItem('m3d_vnext')==='1';
-    }catch(_){ return false; }
+    }catch(e){ return false; }
   }
   if (!vnextEnabled()) return;
 
@@ -2309,20 +2167,29 @@ document.addEventListener('DOMContentLoaded', function(){
       this.attachShadow({mode:'open'});
       const css = `
         :host{ all: initial; }
-        .chip{ position: fixed; left:12px; bottom:12px; padding:8px 12px; border-radius:999px; background:#222; color:#fff; border:1px solid #444; font:13px system-ui, -apple-system, Segoe UI, Roboto, sans-serif; cursor:pointer; opacity:.92; box-shadow:0 2px 8px rgba(0,0,0,.25); user-select:none; }
-        .panel{ position: fixed; right:12px; bottom:56px; width:320px; max-height:46vh; overflow:auto; padding:10px; border-radius:12px; background:rgba(0,0,0,.78); color:#fff; font:12px/1.5 system-ui, -apple-system, Segoe UI, Roboto, sans-serif; display:none; box-shadow:0 10px 24px rgba(0,0,0,.35); -webkit-backdrop-filter: blur(2px); backdrop-filter: blur(2px); }
+        .chip{ position: fixed; left:12px; bottom:12px; padding:8px 12px; border-radius:999px;
+               background:#222; color:#fff; border:1px solid #444; font:13px system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+               cursor:pointer; opacity:.92; box-shadow:0 2px 8px rgba(0,0,0,.25); user-select:none; z-index:4; }
+        .panel{ position: fixed; right:12px; bottom:56px; width:320px; max-height:46vh; overflow:auto; padding:10px; border-radius:12px;
+               background:rgba(0,0,0,.78); color:#fff; font:12px/1.5 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+               display:none; box-shadow:0 10px 24px rgba(0,0,0,.35); -webkit-backdrop-filter: blur(2px); backdrop-filter: blur(2px); z-index:3; }
         .panel h3{ margin:0 0 6px; font-size:12px; opacity:.85; }
         .list{ list-style:none; margin:0; padding:0; display:grid; gap:4px; }
         .list li.error{ color:#ff9a9a; }
-        .overlay{ position:fixed; inset:0; background:rgba(0,0,0,.35); display:none; z-index:2; -webkit-backdrop-filter: blur(1px); backdrop-filter: blur(1px); }
-        .center{ position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); text-align:center; color:#fff; font:14px system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
-        .spinner{ width:48px; height:48px; border:4px solid rgba(255,255,255,.3); border-top-color:#fff; border-radius:50%; animation:spin 1s linear infinite; margin:0 auto 10px; }
+        .overlay{ position:fixed; inset:0; background:rgba(0,0,0,.35); display:none; z-index:2;
+                 -webkit-backdrop-filter: blur(1px); backdrop-filter: blur(1px); }
+        .center{ position:absolute; top:50%; left:50%; transform:translate(-50%,-50%);
+                 text-align:center; color:#fff; font:14px system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
+        .spinner{ width:48px; height:48px; border:4px solid rgba(255,255,255,.3); border-top-color:#fff; border-radius:50%;
+                 animation:spin 1s linear infinite; margin:0 auto 10px; }
         @keyframes spin{ to{ transform: rotate(360deg); } }
         /* vNext containers (skeletons) */
-        .rightpane{ position: fixed; top:0; right:0; width:360px; height:100vh; background:rgba(16,16,16,.04); border-left:1px solid rgba(0,0,0,.08); display:flex; flex-direction:column; gap:8px; padding:12px; box-sizing:border-box; z-index:1; }
+        .rightpane{ position: fixed; top:0; right:0; width:360px; height:100vh; background:rgba(16,16,16,.04);
+                    border-left:1px solid rgba(0,0,0,.08); display:flex; flex-direction:column; gap:8px; padding:12px; box-sizing:border-box; z-index:1; }
         .caplist{ flex:1; overflow:auto; background:#fff; border-radius:10px; box-shadow:0 1px 2px rgba(0,0,0,.05); }
         .capeditor{ height:28%; min-height:140px; background:#fff; border-radius:10px; box-shadow:0 1px 2px rgba(0,0,0,.05); }
-        .mobilebar{ position: fixed; left:0; right:0; bottom:0; height:56px; background:rgba(255,255,255,.96); border-top:1px solid rgba(0,0,0,.08); display:flex; align-items:center; gap:8px; padding:0 12px; box-sizing:border-box; }
+        .mobilebar{ position: fixed; left:0; right:0; bottom:0; height:56px; background:rgba(255,255,255,.96);
+                    border-top:1px solid rgba(0,0,0,.08); display:flex; align-items:center; gap:8px; padding:0 12px; box-sizing:border-box; }
         @media (max-width: 900px){ .rightpane{ display:none; } .mobilebar{ display:flex; } }
         @media (min-width: 901px){ .mobilebar{ display:none; } }
       `;
@@ -2345,8 +2212,8 @@ document.addEventListener('DOMContentLoaded', function(){
       this.__overlay = this.shadowRoot.getElementById('overlay');
       this.__chip = this.shadowRoot.getElementById('chip');
       this.__autoOpened = false;
-      this.__refCount = 0;
       this.__userClosed = false;
+      this.__refCount = 0;
     }
     connectedCallback(){
       this.__chip.addEventListener('click', ()=>{
@@ -2367,14 +2234,14 @@ document.addEventListener('DOMContentLoaded', function(){
       window.addEventListener('m3d:model-loaded', ()=> this.log('modelLoaded'));
       window.addEventListener('m3d:pin-selected', (ev)=> this.log('pinSelected: ' + (ev && ev.detail && (ev.detail.title || ev.detail.id || ''))));
 
-      // Global exposure for convenience
+      // Global conveniences
       if (!window.M3DBusy){
         window.M3DBusy = { show: (m)=>this.showBusy(m), hide: ()=>this.hideBusy() };
       }
-      if (!window.logStep) window.logStep = (s)=>this.log(String(s || ''));
-      if (!window.logError) window.logError = (s)=>this.log(String(s || ''), 'error');
+      if (!window.logStep) window.logStep = (s)=>this.log(String(s||''));
+      if (!window.logError) window.logError = (s)=>this.log(String(s||''), 'error');
 
-      // Network hooks
+      // Hooks
       this.hookGapi();
       this.hookFetchAndXHR();
       this.log('vNext shell mounted');
@@ -2393,15 +2260,9 @@ document.addEventListener('DOMContentLoaded', function(){
         while(this.__list.children.length>250) this.__list.removeChild(this.__list.firstChild);
       }catch(_){}
     }
-    showBusy(m){
-      this.__refCount++;
-      this.__overlay.style.display = 'block';
-      if(m) this.__msg.textContent = m;
-    }
-    hideBusy(){
-      this.__refCount = Math.max(0, this.__refCount - 1);
-      if(this.__refCount===0) this.__overlay.style.display = 'none';
-    }
+    showBusy(m){ this.__refCount++; this.__overlay.style.display = 'block'; if(m) this.__msg.textContent = m; }
+    hideBusy(){ this.__refCount = Math.max(0, this.__refCount - 1); if(this.__refCount===0) this.__overlay.style.display = 'none'; }
+
     hookGapi(){
       let tries = 0;
       const timer = setInterval(()=>{
@@ -2411,21 +2272,30 @@ document.addEventListener('DOMContentLoaded', function(){
           if (typeof req === 'function'){
             const orig = req;
             gapi.client.request = function(){
-            try{
-              var args = arguments && arguments[0] || {};
-              var url = (args.path || args.url || '') + '';
-              if (url.includes('/drive/v3/files')){
-                var q = args.params && args.params.q; if (q) { try{ window.logStep && window.logStep('DriveQ: ' + q); }catch(_){}}
-              }
-            }catch(_){}
-            
-              try{ window.M3DBusy && window.M3DBusy.show('通信中…'); }catch(_){}
+              try{
+                var args = (arguments && arguments[0]) || {};
+                // sanitize Drive 'q'
+                if (args && args.params && typeof args.params.q === 'string'){
+                  var q0 = args.params.q;
+                  var q1 = q0.replace(/\s*&&\s*/g, ' and ')
+                             .replace(/appProperties has \{\s*key=([^}]+)\s*&&\s*value=([^}]+)\s*\}/g, 'appProperties has { key=$1 and value=$2 }');
+                  if (q1 !== q0){ args.params.q = q1; try{ window.logStep && window.logStep('DriveQSanitized: ' + q1); }catch(_){ } }
+                }
+                var url = (args.path || args.url || '') + '';
+                if (url.includes('/drive/v3/files')){
+                  var q = args.params && args.params.q;
+                  if (q){ try{ window.logStep && window.logStep('DriveQ: ' + q); }catch(_){ } }
+                }
+                try{ window.M3DBusy && window.M3DBusy.show('通信中…'); }catch(_){}
+              }catch(_){}
               const r = orig.apply(this, arguments);
-              if (r && typeof r.then === 'function'){
-                return r.then((v)=>{ try{ window.M3DBusy && window.M3DBusy.hide(); }catch(_){ } return v; },
-                              (e)=>{ try{ window.M3DBusy && window.M3DBusy.hide(); }catch(_){ } throw e; });
-              }
-              try{ window.M3DBusy && window.M3DBusy.hide(); }catch(_){}
+              try{
+                if (r && typeof r.then === 'function'){
+                  return r.then((v)=>{ try{ M3DBusy && M3DBusy.hide(); }catch(_){ } return v; },
+                                 (e)=>{ try{ M3DBusy && M3DBusy.hide(); }catch(_){ } throw e; });
+                }
+              }catch(_){}
+              try{ M3DBusy && M3DBusy.hide(); }catch(_){}
               return r;
             };
             this.log('gapi hook ready');
@@ -2435,6 +2305,7 @@ document.addEventListener('DOMContentLoaded', function(){
         if (tries>50) clearInterval(timer);
       }, 200);
     }
+
     hookFetchAndXHR(){
       // fetch
       try{
@@ -2462,7 +2333,7 @@ document.addEventListener('DOMContentLoaded', function(){
         function hook(x){
           try{
             let url = '';
-            const open = x.open; x.open = function(method, u){ url = String(u || ''); return open.apply(this, arguments); };
+            const open = x.open; x.open = function(method, u){ url = String(u||''); return open.apply(this, arguments); };
             const send = x.send; x.send = function(){
               try{
                 const isMedia = url.includes('alt=media') || url.includes('/uc?export=download');
@@ -2482,7 +2353,7 @@ document.addEventListener('DOMContentLoaded', function(){
   }
   customElements.define('locimyu-ui', LocimyuUI);
 
-  // Bridge: wrap existing API to emit events
+  // Bridge legacy -> events
   (function(){
     if (!window.M3DUI) window.M3DUI = {};
     const origPin = window.M3DUI.onPinSelected;
@@ -2495,7 +2366,7 @@ document.addEventListener('DOMContentLoaded', function(){
       try{ window.dispatchEvent(new Event('m3d:model-loaded')); }catch(_){}
       if (typeof origLoaded === 'function') return origLoaded.apply(this, arguments);
     };
-    // Saving adapter from vNext -> legacy
+    // vNext -> legacy adapter
     if (!window.LocimyuVNext){
       window.LocimyuVNext = {
         savePin: function(pin){
