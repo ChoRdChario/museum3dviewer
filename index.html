@@ -866,14 +866,20 @@ function extractDriveFileId(input){
     return /^[A-Za-z0-9_-]{20,}$/.test(s) ? s : '';
   }catch(e){ return ''; }
 }
-)/); if(m1) return m1[1];
-  const m2 = input.match(/[?&]id=([a-zA-Z0-9_-]{10,})/);     if(m2) return m2[1];
-  const m3 = input.match(/^([a-zA-Z0-9_-]{20,})$/);          if(m3) return m3[1];
-  return '';
-}
+
 function extractSpreadsheetId(input){
-  if(!input) return '';
-  const m1 = input.match(/spreadsheets\/d\/([a-zA-Z0-9_-]{10,})/); if(m1) return m1[1];
+  try{
+    if(!input) return '';
+    let s = String(input).trim();
+    if(/^[A-Za-z0-9_-]{20,}$/.test(s)) return s;
+    let m = s.match(/spreadsheets\/d\/([A-Za-z0-9_-]{10,})/); if(m && m[1]) return m[1];
+    m = s.match(/[?&]id=([A-Za-z0-9_-]{10,})/); if(m && m[1]) return m[1];
+    s = s.split(/[\s\u3000]+/)[0];
+    s = s.replace(/^[^A-Za-z0-9_-]+|[^A-Za-z0-9_-]+$/g, '');
+    return /^[A-Za-z0-9_-]{10,}$/.test(s) ? s : '';
+  }catch(e){ return ''; }
+}
+)/); if(m1) return m1[1];
   const m2 = input.match(/[?&]id=([a-zA-Z0-9_-]{10,})/);           if(m2) return m2[1];
   const m3 = input.match(/^([a-zA-Z0-9_-]{20,})$/);                if(m3) return m3[1];
   return '';
@@ -2034,5 +2040,54 @@ document.addEventListener('DOMContentLoaded', function(){
 });
 
 </script>
+
+<script>
+(function(){
+  if(!window.M3DUI) return;
+  window.M3DUI.__modelReady = false;
+  window.M3DUI.modelLoaded = function(){
+    window.M3DUI.__modelReady = true;
+    try{
+      var p = window.M3DUI.__pendingPin;
+      if(p){
+        window.M3DUI.__pendingPin = null;
+        if (window.matchMedia && window.matchMedia('(max-width: 900px)').matches){
+          window.M3DUI.showMobileCaption(p);
+          var mcapEl=document.getElementById('m3d-mobile-caption'); if(mcapEl) mcapEl.hidden=false;
+        }else{
+          window.M3DUI.createCapWindow(p);
+          var overlayEl=document.getElementById('m3d-caption-layer'); if(overlayEl) overlayEl.hidden=false;
+        }
+      }
+    }catch(_){}
+  };
+  function wrapSuccess(fnName){
+    try{
+      var fn = window[fnName];
+      if(typeof fn !== 'function') return;
+      window[fnName] = async function(){
+        var res = await fn.apply(this, arguments);
+        try{ window.M3DUI.modelLoaded(); }catch(_){}
+        return res;
+      };
+    }catch(_){}
+  }
+  wrapSuccess('loadGLBFromURL');
+  wrapSuccess('loadGLBByFileId');
+  if(typeof window.M3DUI.onPinSelected === 'function'){
+    var orig = window.M3DUI.onPinSelected;
+    window.M3DUI.onPinSelected = function(pinLike){
+      try{
+        if(!window.M3DUI.__modelReady){
+          window.M3DUI.__pendingPin = pinLike;
+          return;
+        }
+      }catch(_){}
+      return orig.apply(this, arguments);
+    };
+  }
+})();
+</script>
+
 </body>
 </html>
