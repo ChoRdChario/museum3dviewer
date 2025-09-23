@@ -124,6 +124,16 @@
 
 /* Ensure viewer container is a positioning context for overlay */
 .m3d-ui-vnext #viewer{ position:relative; }
+
+/* vNext: right caption panel split (desktop) */
+@media (min-width: 901px){
+  #rightCaption .body{
+    display:grid; grid-template-rows: 7fr 3fr; gap:10px;
+  }
+  #m3d-caplist{ overflow:auto; }
+  #m3d-capeditor{ overflow:auto; }
+}
+
 </style>
 
   <!-- ES Modules -->
@@ -352,7 +362,7 @@ async function ensureGapiClient() {
     });
   }
   await new Promise((resolve) => gapi.load('client', resolve));
-  await gapi.client.init({ apiKey: API_KEY, discoveryDocs: DISCOVERY_DOCS });
+  await gapi.client.init({ discoveryDocs: DISCOVERY_DOCS });
   gapiReady = true;
 }
 async function ensureGIS() {
@@ -840,9 +850,23 @@ async function driveFileFetchBlob(fileId, retry=1){
   return await res.blob();
 }
 function isHeicMimeOrExt(mime, ext){ return /heic|heif/i.test(mime||'') || /heic|heif/i.test(ext||''); }
+
 function extractDriveFileId(input){
-  if(!input) return '';
-  const m1 = input.match(/\/file\/d\/([a-zA-Z0-9_-]{10,})/); if(m1) return m1[1];
+  try{
+    if(!input) return '';
+    let s = String(input).trim();
+    // If it's a clean ID (only A-Z a-z 0-9 _ -) and 20+ chars, accept as-is
+    if(/^[A-Za-z0-9_-]{20,}$/.test(s)) return s;
+    // Try to pull from URL patterns
+    let m = s.match(/\bfile\/d\/([A-Za-z0-9_-]{20,})/); if(m && m[1]) return m[1];
+    m = s.match(/[?&]id=([A-Za-z0-9_-]{20,})/); if(m && m[1]) return m[1];
+    // Trim common trailing punctuation/spaces without touching valid ID chars
+    s = s.split(/[\s\u3000]+/)[0];
+    s = s.replace(/^[^A-Za-z0-9_-]+|[^A-Za-z0-9_-]+$/g, '');
+    return /^[A-Za-z0-9_-]{20,}$/.test(s) ? s : '';
+  }catch(e){ return ''; }
+}
+)/); if(m1) return m1[1];
   const m2 = input.match(/[?&]id=([a-zA-Z0-9_-]{10,})/);     if(m2) return m2[1];
   const m3 = input.match(/^([a-zA-Z0-9_-]{20,})$/);          if(m3) return m3[1];
   return '';
@@ -1685,8 +1709,10 @@ el.listDelete.addEventListener('click', async ()=>{
 
 /* ========= Buttons ========= */
 el.btnLoad.addEventListener('click', ()=>{
-  const fid = extractDriveFileId(el.inputGLB.value.trim()) || el.inputGLB.value.trim();
-  el.inputGLB.value = fid; loadGLBByFileId(fid);
+  const fid = extractDriveFileId(el.inputGLB.value.trim());
+  if(!fid){ alert('GLBの FileId/URL を正しく指定してください。'); return; }
+  el.inputGLB.value = fid;
+  loadGLBByFileId(fid);
 });
 el.btnViewOnly.addEventListener('click', ()=>{
   const fid = extractDriveFileId(el.inputGLB.value.trim());
@@ -1738,58 +1764,43 @@ el.btnDeletePin.addEventListener('click', async ()=>{
 });
 
 /* ========= GLB Load (LOW-MEM for iOS) ========= */
+
 async function loadGLBByFileId(fileId){
-  if(!accessToken){ alert('先にサインインしてください'); return; }
-  if(!fileId){ alert('GLBの fileId または共有URLを入力してください'); return; }
-  el.loading.hidden = false;
   try{
-    el.statusLabel.textContent = 'GLBを読み込み中…';
-    const meta = await driveFileMeta(fileId);
-    glbMetaCache = meta; glbParents = meta.parents || [];
-    const dlUrl = `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media&supportsAllDrives=true`;
+    const tokenObj = (window.gapi && gapi.client && gapi.client.getToken && gapi.client.getToken()) || null;
+    const token = (tokenObj && tokenObj.access_token) || window.accessToken || '';
+    if(!token){ alert('サインインしてください'); return; }
 
-    const res = await fetch(dlUrl, { headers:{ Authorization:`Bearer ${accessToken}` } });
-    if(!res.ok){
-      let hint = ''; if(res.status === 403 || res === 404){ hint = '（IDや共有設定を確認してください）'; }
-      throw new Error(`Drive download failed: ${res.status} ${res.statusText} ${hint}`);
-    }
-
-    // ★★ 低負荷：Blob URL + loadAsync（ArrayBufferを避ける）
-    const blob = await res.blob();
-    const url = URL.createObjectURL(blob);
-    try {
-      if(currentModel){
-        scene.remove(currentModel);
-        currentModel.traverse(o=>{ if(o.geometry) o.geometry.dispose(); if(o.material){ if(Array.isArray(o.material)) o.material.forEach(m=>m.dispose()); else o.material.dispose(); } });
-        currentModel=null;
+    // Try to fetch metadata (non-fatal)
+    let modelName = 'model.glb';
+    try{
+      if(window.gapi && gapi.client && gapi.client.drive && gapi.client.drive.files){
+        const meta = await gapi.client.drive.files.get({ fileId, fields: 'id,name,mimeType', supportsAllDrives: true });
+        if(meta && meta.result && meta.result.name) modelName = meta.result.name;
       }
-      const gltf = await loader.loadAsync(url);
-      currentModel = gltf.scene; scene.add(currentModel);
-      collectMaterials();
-      focusOrigin();
-      renderNow();
-    } finally {
-      URL.revokeObjectURL(url);
-    }
+    }catch(e){ console.warn('meta fetch failed (non-fatal)', e); }
 
-    el.statusLabel.textContent = `Loaded: ${meta.name}`;
-
-    let sheetId = extractSpreadsheetId(el.inputSheet.value.trim());
-    if(!sheetId){
-      sheetId = await findOrCreateSpreadsheetInGlbFolder(meta);
-      el.inputSheet.value = sheetId;
-      toast('スプレッドシートを同階層に用意しました');
+    // Download binary with Bearer
+    const url = `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?alt=media&supportsAllDrives=true`;
+    const res = await fetch(url, { headers: { 'Authorization': 'Bearer ' + token } });
+    if(!res.ok){
+      const txt = await res.text().catch(()=>'');
+      throw new Error('GLB download failed: ' + res.status + ' ' + txt);
     }
-    await refreshCaptionLists(sheetId);
-    await loadPinsFromActiveSheet(sheetId);
-  }catch(err){
-    console.error(err);
-    el.statusLabel.textContent = 'Load failed';
-    alert('GLB読み込みに失敗しました：' + (err?.message || 'unknown error'));
-  }finally{
-    el.loading.hidden = true;
+    const blob = await res.blob();
+    const objUrl = URL.createObjectURL(blob);
+
+    try{
+      await loadGLBFromURL(objUrl, {name: modelName});
+    }finally{
+      URL.revokeObjectURL(objUrl);
+    }
+  }catch(e){
+    console.error('loadGLBByFileId failed', e);
+    alert('GLBの読み込みに失敗しました: ' + (e && e.message ? e.message : e));
   }
 }
+
 
 /* ========= Save viewer prefs ========= */
 ['viewFront','viewBack','viewLeft','viewRight','viewTop','viewBottom'].forEach(id=>{
@@ -1853,8 +1864,9 @@ viewerInitWrap();
     var overlay = $("m3d-caption-layer");
     var mcap    = $("m3d-mobile-caption");
     var viewer  = $("viewer");
-    if (overlay) overlay.hidden = false;
-    if (mcap)    mcap.hidden = false;
+    // keep hidden until first use
+    /* if (overlay) overlay.hidden = false;
+    if (mcap)    mcap.hidden = false; */
     if (viewer){
       if (getComputedStyle(viewer).position === 'static'){ viewer.style.position = 'relative'; }
       // ensure overlay is a child of #viewer for proper absolute positioning
@@ -1955,6 +1967,10 @@ viewerInitWrap();
   }
 
   function onPinSelected(pinLike){
+    var overlayEl=document.getElementById('m3d-caption-layer');
+    var mcapEl=document.getElementById('m3d-mobile-caption');
+    if(overlayEl) overlayEl.hidden = false;
+    if(mcapEl && window.matchMedia && window.matchMedia('(max-width: 900px)').matches) mcapEl.hidden = false;
     var pin = pinLike || readCurrentPinFromLegacy();
     state.activePin = pin;
     if (isMobile()){ showMobileCaption(pin); }
@@ -1979,6 +1995,44 @@ viewerInitWrap();
     try{ if (isMobile() && state.activePin) showMobileCaption(state.activePin); }catch(_){}
   });
 })();
+</script>
+<script>
+
+document.addEventListener('DOMContentLoaded', function(){
+  try{
+    var rc = document.getElementById('rightCaption');
+    if(!rc) return;
+    var body = rc.querySelector('.body') || rc;
+    if(!document.getElementById('m3d-caplist')){
+      var list = document.createElement('div'); list.id='m3d-caplist'; body.insertBefore(list, body.firstChild);
+    }
+    if(!document.getElementById('m3d-capeditor')){
+      var ed = document.createElement('div'); ed.id='m3d-capeditor'; body.appendChild(ed);
+    }
+    // Move known editor block to bottom if exists
+    var editor = document.getElementById('editor');
+    if(editor && editor.parentElement !== document.getElementById('m3d-capeditor')){
+      document.getElementById('m3d-capeditor').appendChild(editor);
+    }
+    // Move known preview out of right pane (overlay/mobile handles viewing)
+    var prev = document.getElementById('viewerPreview');
+    if(prev && prev.parentElement === body){
+      // leave it where it is or let overlay handle; no action
+    }
+    // Heuristic: move non-editor controls to list
+    var caplist = document.getElementById('m3d-caplist');
+    Array.from(body.children).forEach(function(node){
+      var id = node.id||'';
+      if(id==='m3d-caplist' || id==='m3d-capeditor' || id==='editor') return;
+      if(node === caplist || node === document.getElementById('m3d-capeditor')) return;
+      // keep tabs/headers at top of list
+      if(caplist && node.parentElement===body){
+        caplist.appendChild(node);
+      }
+    });
+  }catch(e){ console.warn('right panel split failed', e); }
+});
+
 </script>
 </body>
 </html>
