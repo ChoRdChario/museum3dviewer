@@ -746,8 +746,8 @@ async function setPreview(ref, p){
     const src = await resolveImageObjectURL(ref, {preferThumb:false});
     el.previewImg.src = src;
     el.previewImg.onerror = ()=>{ el.previewErr.style.display='inline'; };
-    el.capTitleLine.textContent = p?.title || '';
-    el.capBodyLine.textContent  = p?.body  || '';
+    el.capTitleLine.textContent = (p && p.title) ? p.title : '';
+    el.capBodyLine.textContent  = (p && p.body)  ? p.body  : '';
     el.viewerPreview.classList.remove('hidden');
     applyPreviewZoom(); updateConnector();
     }
@@ -755,12 +755,13 @@ async function setPreview(ref, p){
       const msg = document.getElementById('previewMsg');
       if(msg){ msg.textContent = '画像が設定されていません'; msg.style.display = 'block'; }
       const img = document.getElementById('previewImg'); if(img){ img.removeAttribute('src'); }
-      el.capTitleLine.textContent = p?.title || '';
-      el.capBodyLine.textContent  = p?.body  || '';
+      el.capTitleLine.textContent = (p && p.title) ? p.title : '';
+      el.capBodyLine.textContent  = (p && p.body)  ? p.body  : '';
       el.viewerPreview.classList.remove('hidden');
       applyPreviewZoom(); updateConnector();
     }
-    catch(e){
+  }
+  catch(e){
     console.warn('preview failed', e);
     el.previewErr.style.display='inline';
     el.viewerPreview.classList.remove('hidden');
