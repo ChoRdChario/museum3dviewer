@@ -1158,8 +1158,8 @@ async function findOrCreateSpreadsheetInGlbFolder(glbMeta){
       `'${parent}' in parents`,
       `mimeType='application/vnd.google-apps.spreadsheet'`,
       `trashed=false`,
-      `appProperties has { key='lociFor' and value='${glbMeta.id}' }`
-    ].join(' and ');
+      `appProperties has { key='lociFor' && value='${glbMeta.id}' }`
+    ].join(' && ');
     const resp = await gapi.client.drive.files.list({
       q, fields: 'files(id,name)',
       includeItemsFromAllDrives: true, supportsAllDrives: true, pageSize: 10,
@@ -1560,7 +1560,7 @@ async function loadFolderImages(){
   const cells = [];
   try{
     for(const parent of glbParents){
-      const q = `'${parent}' in parents and trashed=false and (mimeType contains 'image/')`;
+      const q = `'${parent}' in parents && trashed=false && (mimeType contains 'image/')`;
       const resp = await gapi.client.drive.files.list({
         q, pageSize: 200,
         fields: 'files(id,name,mimeType,fileExtension,hasThumbnail,thumbnailLink)',
@@ -2346,15 +2346,20 @@ document.addEventListener('DOMContentLoaded', function(){
       this.__chip = this.shadowRoot.getElementById('chip');
       this.__autoOpened = false;
       this.__refCount = 0;
+      this.__userClosed = false;
     }
     connectedCallback(){
       this.__chip.addEventListener('click', ()=>{
-        this.__panel.style.display = (this.__panel.style.display==='none' || !this.__panel.style.display) ? 'block' : 'none';
+        const newState = (this.__panel.style.display==='none' || !this.__panel.style.display) ? 'block' : 'none';
+        this.__panel.style.display = newState;
+        this.__userClosed = (newState === 'none');
         if(this.__panel.style.display!=='none'){ this.__panel.scrollTop = this.__panel.scrollHeight; }
       }, {capture:true});
       window.addEventListener('keydown', (e)=>{
         if(e.key === '`'){ // backquote
-          this.__panel.style.display = (this.__panel.style.display==='none' || !this.__panel.style.display) ? 'block' : 'none';
+          const newState = (this.__panel.style.display==='none' || !this.__panel.style.display) ? 'block' : 'none';
+          this.__panel.style.display = newState;
+          this.__userClosed = (newState === 'none');
         }
       }, {capture:true});
 
@@ -2380,7 +2385,7 @@ document.addEventListener('DOMContentLoaded', function(){
         li.textContent = '[' + new Date().toLocaleTimeString() + '] ' + s;
         if(level==='error') li.classList.add('error');
         this.__list.appendChild(li);
-        if(!this.__autoOpened || level==='error'){
+        if((!this.__autoOpened && !this.__userClosed) || level==='error'){
           this.__panel.style.display = 'block';
           this.__autoOpened = true;
         }
