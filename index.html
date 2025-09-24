@@ -2291,7 +2291,7 @@ document.addEventListener('DOMContentLoaded', function(){
         if(st!=='none') this.__panel.scrollTop = this.__panel.scrollHeight;
       });
       this.shadowRoot.getElementById('btnReader').addEventListener('click', ()=> show(this.$reader));
-      this.shadowRoot.getElementById('btnList').addEventListener('click', ()=>{ show(this.$list); this.renderList(); });
+      this.shadowRoot.getElementById('btnList').addEventListener('click', async ()=>{ show(this.$list); await this.ensureSheetResolved(); this.renderList(); });
       this.shadowRoot.getElementById('btnAdd').addEventListener('click', ()=> show(this.$add));
       this.shadowRoot.getElementById('btnRClose').addEventListener('click', ()=> this.$reader.style.display='none');
       this.shadowRoot.getElementById('btnLClose').addEventListener('click', ()=> this.$list.style.display='none');
@@ -2306,10 +2306,16 @@ document.addEventListener('DOMContentLoaded', function(){
       this.hookFetchAndXHR();
       this.hookLegacyAPIs();
 
-      window.addEventListener('m3d:model-loaded', ()=> this.log('modelLoaded'));
+      window.addEventListener('m3d:model-loaded', async ()=>{ this.log('modelLoaded'); await this.ensureSheetResolved(); });
       window.addEventListener('m3d:pin-selected', (ev)=> this.onSelect(ev && ev.detail));
 
       try{ const sp = new URLSearchParams(location.search); if (sp.get('hud')==='0'){ this.__chip.style.display='none'; this.__panel.style.display='none'; this.shadowRoot.querySelector('#btnHUD').style.display='none'; } }catch(_){}
+      
+      // Mobile: hide any legacy floating "診断ログ" chip overlapping bottom bar
+      this.hideLegacyChipOnMobile();
+      // Try to resolve sheet after model load
+      this.ensureSheetResolved().catch(()=>{});
+
       this.log('vNext Phase2 mounted');
     }
 
@@ -2464,6 +2470,8 @@ document.addEventListener('DOMContentLoaded', function(){
                 }
                 var url = (args.path || args.url || '') + '';
                 if (url.includes('/drive/v3/files')){
+                  // capture file id when possible
+                  try{ var m = url.match(/\/drive\/v3\/files\/([^/?]+)/); if (m && m[1]) this.__glbFileId = decodeURIComponent(m[1]); }catch(_){ }
                   var q = args.params && args.params.q;
                   if (q){ try{ window.logStep && window.logStep('DriveQ: ' + q); }catch(_){ } }
                 }
@@ -2495,7 +2503,9 @@ document.addEventListener('DOMContentLoaded', function(){
           const isMedia = url.includes('alt=media') || url.includes('/uc?export=download');
           const isSheet = url.includes('sheets.googleapis.com') || url.includes('/spreadsheets/');
           if (isMedia || isSheet) this.showBusy(isMedia ? 'GLB/画像取得中…' : 'シート通信中…');
-          try{ const res = await origFetch(input, init); return res; }
+          try{ const res = await origFetch(input, init);
+            try{ if (isMedia) { this.__lastAltMediaURL = url; this.captureGLBIdFromURL(url); } }catch(_){ }
+            return res; }
           finally{ if (isMedia || isSheet) this.hideBusy(); }
         };
       }catch(_){}
@@ -2524,25 +2534,33 @@ document.addEventListener('DOMContentLoaded', function(){
         window.XMLHttpRequest = Hook;
       }catch(_){}
     }
-  }
-  customElements.define('locimyu-ui', LocimyuUI);
 
-  (function(){
-    if (!window.M3DUI) window.M3DUI = {};
-    const origPin = window.M3DUI.onPinSelected;
-    window.M3DUI.onPinSelected = function(pin){
-      try{ window.dispatchEvent(new CustomEvent('m3d:pin-selected', { detail: pin })); }catch(_){}
-      if (typeof origPin === 'function') return origPin.apply(this, arguments);
-    };
-    const origLoaded = window.M3DUI.modelLoaded;
-    window.M3DUI.modelLoaded = function(){
-      try{ window.dispatchEvent(new Event('m3d:model-loaded')); }catch(_){}
-      if (typeof origLoaded === 'function') return origLoaded.apply(this, arguments);
-    };
-  })();
-
-  function mount(){ document.body.appendChild(document.createElement('locimyu-ui')); }
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', mount, {once:true}); else mount();
-})();
-</script></body>
+    hideLegacyChipOnMobile(){
+      try{
+        if (!window.matchMedia) return;
+        if (!matchMedia('(max-width: 900px)').matches) return;
+        const cands = Array.from(document.querySelectorAll('button,div,a,span'));
+        for(const el of cands){
+          const txt = (el.textContent||'').trim();
+          if (!txt) continue;
+          if (txt.includes('診断ログ') || txt.includes('Diagnostics')){
+            const cs = getComputedStyle(el);
+            if (cs.position==='fixed'){ try{ el.style.display='none'; el.setAttribute('data-m3d-hidden','chip'); }catch(_){ } }
+          }
+        }
+      }catch(_){}
+    }
+    captureGLBIdFromURL(u){
+      try{
+        if (!u) return;
+        // alt=media pattern: .../drive/v3/files/<ID>?alt=media
+        const m = String(u).match(/\/drive\/v3\/files\/([^/?]+)\?[^#]*alt=media/i);
+        if (m && m[1]){ this.__glbFileId = decodeURIComponent(m[1]); }
+      }catch(_){}
+    }
+    async ensureSheetResolved(){
+      try{
+        if (this.__sheetId) return this.__sheetId;
+        if (!window.gapi || !gapi.client || !gapi.client.drive){ return null; }
+        // If we don't yet know GLB file id, try to fetch it from last alt=media or bail\n        if (!this.__glbFileId && this.__lastAltMediaURL){ this.captureGLBIdFromURL(this.__lastAltMediaURL); }\n        if (!this.__glbFileId){ return null; }\n        // get parent\n        const meta = await gapi.client.drive.files.get({ fileId: this.__glbFileId, fields: 'parents' });\n        const parents = (meta.result && meta.result.parents) || [];\n        const parent = parents[0];\n        if (!parent){ return null; }\n        // search spreadsheet with appProperties lociFor\n        const q = [\n          `'${parent}' in parents`,\n          `mimeType='application/vnd.google-apps.spreadsheet'`,\n          `trashed=false`,\n          `appProperties has { key='lociFor' and value='${this.__glbFileId}' }`\n        ].join(' and ');\n        let res = await gapi.client.drive.files.list({ q, pageSize: 10, fields: 'files(id,name)', includeItemsFromAllDrives: true, supportsAllDrives: true });\n        let files = (res.result && res.result.files) || [];\n        if (!files.length){\n          // fallback: first spreadsheet in folder\n          const q2 = [`'${parent}' in parents`, `mimeType='application/vnd.google-apps.spreadsheet'`, `trashed=false`].join(' and ');\n          res = await gapi.client.drive.files.list({ q: q2, pageSize: 10, fields: 'files(id,name)', includeItemsFromAllDrives: true, supportsAllDrives: true });\n          files = (res.result && res.result.files) || [];\n        }\n        if (files.length){\n          this.__sheetId = files[0].id;\n          this.log('シート自動解決: ' + files[0].name + ' (' + this.__sheetId + ')');\n          try{ this.fetchPins(this.__sheetId); }catch(_){}\n          return this.__sheetId;\n        }\n        return null;\n      }catch(e){\n        this.log('シート自動解決失敗: ' + (e && e.message ? e.message : e), 'error');\n        return null;\n      }\n    }\n  }\n  customElements.define('locimyu-ui', LocimyuUI);\n\n  (function(){\n    if (!window.M3DUI) window.M3DUI = {};\n    const origPin = window.M3DUI.onPinSelected;\n    window.M3DUI.onPinSelected = function(pin){\n      try{ window.dispatchEvent(new CustomEvent('m3d:pin-selected', { detail: pin })); }catch(_){}\n      if (typeof origPin === 'function') return origPin.apply(this, arguments);\n    };\n    const origLoaded = window.M3DUI.modelLoaded;\n    window.M3DUI.modelLoaded = function(){\n      try{ window.dispatchEvent(new Event('m3d:model-loaded')); }catch(_){}\n      if (typeof origLoaded === 'function') return origLoaded.apply(this, arguments);\n    };\n  })();\n\n  function mount(){ document.body.appendChild(document.createElement('locimyu-ui')); }\n  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', mount, {once:true}); else mount();\n})();\n</script></body>
 </html>
