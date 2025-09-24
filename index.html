@@ -1158,7 +1158,7 @@ async function findOrCreateSpreadsheetInGlbFolder(glbMeta){
       `'${parent}' in parents`,
       `mimeType='application/vnd.google-apps.spreadsheet'`,
       `trashed=false`,
-      `appProperties has { key='lociFor'  and value='${glbMeta.id }' }`
+      `appProperties has { key='lociFor' and value='${glbMeta.id}' }`
     ].join(' and ');
     const resp = await gapi.client.drive.files.list({
       q, fields: 'files(id,name)',
@@ -1843,7 +1843,9 @@ async function loadGLBByFileId(fileId){
     const res = await fetch(url, { headers: { 'Authorization': 'Bearer ' + token } });
     if(!res.ok){
       const txt = await res.text().catch(()=>'');
-      throw new Error('GLB download failed: ' + res.status + ' ' + txt + '\n\nIDが正しいか確認してください。共有URLのコピペ、または30文字以上の完全なFileIdを貼り付けてください。');
+      throw new Error('GLB download failed: ' + res.status + ' ' + txt + '
+
+IDが正しいか確認してください。共有URLのコピペ、または30文字以上の完全なFileIdを貼り付けてください。');
     }
     const blob = await res.blob();
     const objUrl = URL.createObjectURL(blob);
@@ -2147,459 +2149,64 @@ document.addEventListener('DOMContentLoaded', function(){
 </script>
 
 
-<!-- === vNext Phase2 bundle (clean E) === -->
+<!-- Locimyu hotfix: mobile chip hide + List fetch reinforcement -->
 <script>
-(function(){
-  function vnextEnabled(){
+(function hideBottomLeftOverlays(){
+  try{
+    if (!window.matchMedia || !matchMedia('(max-width: 900px)').matches) return;
+    requestAnimationFrame(function(){
+      var els = document.querySelectorAll('button,div,a,span');
+      for (var i=0;i<els.length;i++){
+        var el = els[i];
+        var cs = (el && window.getComputedStyle) ? getComputedStyle(el) : null;
+        if (!cs) continue;
+        var pos = cs.position;
+        if (pos !== 'fixed' && pos !== 'absolute') continue;
+        var r = el.getBoundingClientRect();
+        var nearBL = (r.left < 120) && ((window.innerHeight - r.bottom) < 140);
+        var txt = (el.textContent || '').trim();
+        var looksDiag = !!(txt && (txt.indexOf('診断ログ')>=0 || txt.indexOf('Diagnostics')>=0));
+        if (nearBL || looksDiag){
+          try { el.style.display = 'none'; el.setAttribute('data-m3d-hidden','chip'); } catch(e){}
+        }
+      }
+    });
+  }catch(e){}
+})();
+
+(function reinforceListFetch(){
+  function patch(){
     try{
-      const sp = new URLSearchParams(location.search);
-      if (sp.has('vnext')) localStorage.setItem('m3d_vnext', sp.get('vnext'));
-      return sp.get('vnext')==='1' || localStorage.getItem('m3d_vnext')==='1';
-    }catch(e){ return false; }
-  }
-  if (!vnextEnabled()) return;
-
-  class LocimyuUI extends HTMLElement {
-    constructor(){
-      super();
-      this.attachShadow({mode:'open'});
-      const css = `
-        :root{ --ui-bg:#fff; --ui-border:rgba(0,0,0,.08); --glass:rgba(255,255,255,.96); }
-        :host{ all: initial; }
-        .chip{ position: fixed; left:12px; bottom:12px; padding:8px 12px; border-radius:999px;
-               background:#222; color:#fff; border:1px solid #444; font:13px system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
-               cursor:pointer; opacity:.92; box-shadow:0 2px 8px rgba(0,0,0,.25); user-select:none; z-index:4; }
-        .panel{ position: fixed; right:12px; bottom:56px; width:320px; max-height:46vh; overflow:auto; padding:10px; border-radius:12px;
-               background:rgba(0,0,0,.78); color:#fff; font:12px/1.5 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
-               display:none; box-shadow:0 10px 24px rgba(0,0,0,.35); -webkit-backdrop-filter: blur(2px); backdrop-filter: blur(2px); z-index:3; }
-        .panel h3{ margin:0 0 6px; font-size:12px; opacity:.85; }
-        .list{ list-style:none; margin:0; padding:0; display:grid; gap:4px; }
-        .list li.error{ color:#ff9a9a; }
-        .overlay{ position:fixed; inset:0; background:rgba(0,0,0,.35); display:none; z-index:2;
-                 -webkit-backdrop-filter: blur(1px); backdrop-filter: blur(1px); }
-        .center{ position:absolute; top:50%; left:50%; transform:translate(-50%,-50%);
-                 text-align:center; color:#fff; font:14px system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
-        .spinner{ width:48px; height:48px; border:4px solid rgba(255,255,255,.3); border-top-color:#fff; border-radius:50%;
-                 animation:spin 1s linear infinite; margin:0 auto 10px; }
-        @keyframes spin{ to{ transform: rotate(360deg); } }
-
-        .rightpane{ position: fixed; top:0; right:0; width:360px; height:100vh; background:rgba(16,16,16,.04);
-                    border-left:1px solid var(--ui-border); display:flex; flex-direction:column; gap:8px; padding:12px; box-sizing:border-box; z-index:1; }
-        .caplist{ flex:1; overflow:auto; background:var(--ui-bg); border-radius:10px; box-shadow:0 1px 2px rgba(0,0,0,.05); }
-        .capeditor{ height:28%; min-height:140px; background:var(--ui-bg); border-radius:10px; box-shadow:0 1px 2px rgba(0,0,0,.05); }
-        @media (max-width: 900px){ .rightpane{ display:none; } }
-
-        .mobilebar{ position: fixed; left:0; right:0; bottom:0; height:56px; background:var(--glass);
-                    border-top:1px solid var(--ui-border); display:flex; align-items:center; gap:8px; padding:0 8px; box-sizing:border-box; z-index:2; }
-        .mb-btn{ appearance:none; border:1px solid var(--ui-border); background:#fff; border-radius:10px; padding:6px 10px; font:13px system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
-        .mb-btn:active{ transform:translateY(1px); }
-        .mobilepanel{ position: fixed; left:0; right:0; bottom:56px; background:var(--glass); border-top:1px solid var(--ui-border);
-                      max-height:55vh; display:none; z-index:2; box-shadow:0 -10px 24px rgba(0,0,0,.12); }
-        .mobilepanel .h{ display:flex; align-items:center; gap:8px; padding:10px 12px; border-bottom:1px solid var(--ui-border); }
-        .mobilepanel .b{ padding:12px; overflow:auto; max-height:calc(55vh - 48px); }
-        .pinimg{ width:100%; max-height:38vh; object-fit:contain; background:#f6f6f6; border:1px solid var(--ui-border); border-radius:8px; }
-        .pinmeta{ font:13px/1.5 system-ui, -apple-system, Segoe UI, Roboto, sans-serif; color:#222; white-space:pre-wrap; }
-        .title{ font-weight:600; margin:6px 0 4px; }
-        .row{ display:grid; grid-template-columns: 90px 1fr; gap:8px; align-items:center; margin:6px 0; }
-        .row input, .row textarea{ width:100%; box-sizing:border-box; border:1px solid var(--ui-border); border-radius:8px; padding:8px; font:13px system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
-        .row textarea{ min-height:72px; }
-        .actions{ display:flex; gap:8px; justify-content:flex-end; margin-top:8px; }
-        .ghost{ opacity:.65; }
-        @media (max-width: 900px){ .chip{ display:none; } .panel{ bottom: calc(56px + 10px); max-height: 40vh; } }
-      `;
-      const tpl = document.createElement('template');
-      tpl.innerHTML = `<style>${css}</style>
-        <button id="chip" class="chip" title="診断ログ（チルダ横キーで開閉）">診断ログ</button>
-        <div id="panel" class="panel"><h3>診断ログ</h3><ul id="list" class="list"></ul></div>
-        <div id="overlay" class="overlay"><div class="center"><div class="spinner"></div><div id="msg">読み込み中…</div></div></div>
-        <aside class="rightpane" part="rightpane" aria-label="vNext右ペイン">
-          <div class="caplist" id="caplist" part="caplist"></div>
-          <div class="capeditor" id="capeditor" part="capeditor"></div>
-        </aside>
-        <div class="mobilebar" part="mobilebar">
-          <button class="mb-btn" id="btnHUD">診断</button>
-          <button class="mb-btn" id="btnReader">読書</button>
-          <button class="mb-btn" id="btnList">一覧</button>
-          <button class="mb-btn" id="btnAdd">追加</button>
-          <div id="mobileStatus" class="ghost">vNext モバイル</div>
-        </div>
-        <div class="mobilepanel" id="panelReader">
-          <div class="h"><div style="font-weight:600">キャプション</div><div style="margin-left:auto"><button class="mb-btn" id="btnRClose">閉じる</button></div></div>
-          <div class="b">
-            <img id="rImg" class="pinimg" alt="画像が設定されていません" />
-            <div class="pinmeta">
-              <div id="rTitle" class="title"></div>
-              <div id="rBody"></div>
-            </div>
-          </div>
-        </div>
-        <div class="mobilepanel" id="panelList">
-          <div class="h"><div style="font-weight:600">ピン一覧</div><div style="margin-left:auto"><button class="mb-btn" id="btnLClose">閉じる</button></div></div>
-          <div class="b" id="listBody">読み込み待ち…</div>
-        </div>
-        <div class="mobilepanel" id="panelAdd">
-          <div class="h"><div style="font-weight:600">ピン追加</div><div style="margin-left:auto"><button class="mb-btn" id="btnAClose">閉じる</button></div></div>
-          <div class="b">
-            <div class="row"><label for="aTitle">タイトル</label><input id="aTitle" placeholder="例：口縁部の欠損" /></div>
-            <div class="row"><label for="aBody">本文</label><textarea id="aBody" placeholder="メモ…"></textarea></div>
-            <div class="row"><label for="aImg">画像URL</label><input id="aImg" placeholder="https://..." /></div>
-            <div class="actions"><button class="mb-btn" id="btnSave">保存</button></div>
-            <div class="ghost">※ 現段階では URL 指定で保存します（Driveアップロード統合は後続）</div>
-          </div>
-        </div>`;
-      this.shadowRoot.appendChild(tpl.content.cloneNode(true));
-
-      // HUD refs
-      this.__list = this.shadowRoot.getElementById('list');
-      this.__panel = this.shadowRoot.getElementById('panel');
-      this.__msg = this.shadowRoot.getElementById('msg');
-      this.__overlay = this.shadowRoot.getElementById('overlay');
-      this.__chip = this.shadowRoot.getElementById('chip');
-      this.__autoOpened = false;
-      this.__userClosed = false;
-      this.__refCount = 0;
-
-      // Mobile refs
-      this.$reader = this.shadowRoot.getElementById('panelReader');
-      this.$list = this.shadowRoot.getElementById('panelList');
-      this.$add = this.shadowRoot.getElementById('panelAdd');
-      this.$listBody = this.shadowRoot.getElementById('listBody');
-      this.$rImg = this.shadowRoot.getElementById('rImg');
-      this.$rTitle = this.shadowRoot.getElementById('rTitle');
-      this.$rBody = this.shadowRoot.getElementById('rBody');
-      this.$aTitle = this.shadowRoot.getElementById('aTitle');
-      this.$aBody = this.shadowRoot.getElementById('aBody');
-      this.$aImg = this.shadowRoot.getElementById('aImg');
-      this.__pins = [];
-      this.__sheetId = null;
-      this.__selected = null;
-      this.__glbFileId = null;
-      this.__lastAltMediaURL = null;
-    }
-    connectedCallback(){
-      const togglePanel = ()=>{
-        const st = (this.__panel.style.display==='none' || !this.__panel.style.display) ? 'block' : 'none';
-        this.__panel.style.display = st; this.__userClosed = (st==='none');
-        if(st!=='none') this.__panel.scrollTop = this.__panel.scrollHeight;
-      };
-      this.__chip.addEventListener('click', togglePanel, {capture:true});
-      this.shadowRoot.getElementById('btnHUD').addEventListener('click', togglePanel);
-      window.addEventListener('keydown', (e)=>{ if(e.key === '`'){ togglePanel(); } }, {capture:true});
-
-      const show = (el)=>{ [this.$reader,this.$list,this.$add].forEach(x=>x.style.display='none'); el.style.display='block'; };
-      this.shadowRoot.getElementById('btnReader').addEventListener('click', ()=> show(this.$reader));
-      this.shadowRoot.getElementById('btnList').addEventListener('click', async ()=>{ show(this.$list); await this.ensureSheetResolved(); this.renderList(); });
-      this.shadowRoot.getElementById('btnAdd').addEventListener('click', ()=> show(this.$add));
-      this.shadowRoot.getElementById('btnRClose').addEventListener('click', ()=> this.$reader.style.display='none');
-      this.shadowRoot.getElementById('btnLClose').addEventListener('click', ()=> this.$list.style.display='none');
-      this.shadowRoot.getElementById('btnAClose').addEventListener('click', ()=> this.$add.style.display='none');
-      this.shadowRoot.getElementById('btnSave').addEventListener('click', ()=> this.quickSave());
-
-      if (!window.M3DBusy) window.M3DBusy = { show: (m)=>this.showBusy(m), hide: ()=>this.hideBusy() };
-      if (!window.logStep) window.logStep = (s)=>this.log(String(s||''));
-      if (!window.logError) window.logError = (s)=>this.log(String(s||''), 'error');
-
-      this.hookGapi();
-      this.hookFetchAndXHR();
-      this.hookLegacyAPIs();
-
-      window.addEventListener('m3d:model-loaded', async ()=>{ this.log('modelLoaded'); await this.ensureSheetResolved(); });
-      window.addEventListener('m3d:pin-selected', (ev)=> this.onSelect(ev && ev.detail));
-
-      try{ const sp = new URLSearchParams(location.search); if (sp.get('hud')==='0'){ this.__chip.style.display='none'; this.__panel.style.display='none'; this.shadowRoot.querySelector('#btnHUD').style.display='none'; } }catch(_){}
-
-      this.hideLegacyChipOnMobile();
-
-      this.log('vNext Phase2 mounted');
-    }
-
-    log(s, level){
-      const li = document.createElement('li'); li.textContent = '[' + new Date().toLocaleTimeString() + '] ' + s;
-      if(level==='error') li.classList.add('error');
-      this.__list.appendChild(li);
-      if((!this.__autoOpened && !this.__userClosed) || level==='error'){ this.__panel.style.display='block'; this.__autoOpened = true; }
-      if(this.__panel.style.display!=='none'){ this.__panel.scrollTop = this.__panel.scrollHeight; }
-      while(this.__list.children.length>250) this.__list.removeChild(this.__list.firstChild);
-    }
-    showBusy(m){ this.__refCount++; this.__overlay.style.display='block'; if(m) this.__msg.textContent=m; }
-    hideBusy(){ this.__refCount = Math.max(0,this.__refCount-1); if(this.__refCount===0) this.__overlay.style.display='none'; }
-
-    onSelect(pin){
-      this.__selected = pin || null;
-      if (!pin){
-        this.$rImg.src = ''; this.$rTitle.textContent = ''; this.$rBody.textContent = '';
-        return;
-      }
-      const t = pin.title || pin.name || pin.id || '';
-      const b = pin.body || pin.note || pin.caption || '';
-      const img = pin.img || pin.image || '';
-      this.$rTitle.textContent = String(t);
-      this.$rBody.textContent = String(b);
-      if (img){ this.$rImg.src = img; this.$rImg.style.display='block'; }
-      else { this.$rImg.removeAttribute('src'); this.$rImg.style.display='none'; }
-    }
-    async renderList(){
-      try{
-        if (!this.__sheetId){ this.$listBody.textContent = 'シート未取得（GLBを読み込むと取得します）'; return; }
-        if (!this.__pins.length) await this.fetchPins(this.__sheetId);
-        if (!this.__pins.length){ this.$listBody.textContent = 'ピンがありません'; return; }
-        const frag = document.createDocumentFragment();
-        this.__pins.forEach((p, idx)=>{
-          const div = document.createElement('div');
-          div.style.cssText = 'padding:8px 4px;border-bottom:1px solid var(--ui-border);display:grid;grid-template-columns:44px 1fr;gap:8px;align-items:center;';
-          const ph = document.createElement('div'); ph.style.cssText='width:44px;height:44px;border-radius:6px;background:#f2f2f2;border:1px solid var(--ui-border);overflow:hidden;';
-          if (p.img){ const im = document.createElement('img'); im.src = p.img; im.style.cssText='width:100%;height:100%;object-fit:cover;'; ph.appendChild(im); }
-          const text = document.createElement('div'); text.innerHTML = '<div style="font-weight:600>'+ (p.title || p.name || ('Pin ' + (idx+1))) + '</div><div style="font-size:12px;opacity:.8">' + (p.body || '') + '</div>';
-          div.appendChild(ph); div.appendChild(text);
-          div.addEventListener('click', ()=>{
-            try{ if (typeof window.selectPin === 'function') window.selectPin(p.id || p._row || idx); }catch(_){}
-            this.onSelect(p);
-            this.$reader.style.display='block';
-          });
-          frag.appendChild(div);
-        });
-        this.$listBody.innerHTML='';
-        this.$listBody.appendChild(frag);
-      }catch(e){
-        this.$listBody.textContent = '一覧描画エラー';
-        this.log('一覧描画エラー: '+(e&&e.message?e.message:e), 'error');
-      }
-    }
-    async fetchPins(sheetId){
-      try{
-        if (!window.gapi || !gapi.client || !gapi.client.sheets){ this.log('Sheets API未初期化'); return; }
-        this.showBusy('ピン・シートを読み込み中…');
-        const meta = await gapi.client.sheets.spreadsheets.get({ spreadsheetId: sheetId });
-        const firstSheet = (meta.result.sheets && meta.result.sheets[0] && meta.result.sheets[0].properties && meta.result.sheets[0].properties.title) || 'Sheet1';
-        const vals = await gapi.client.sheets.spreadsheets.values.get({ spreadsheetId: sheetId, range: firstSheet + '!A:Z' });
-        const rows = vals.result.values || [];
-        if (!rows.length){ this.__pins=[]; this.$listBody.textContent='ピンがありません'; return; }
-        const header = rows[0].map(x=>String(x||'').trim().toLowerCase());
-        const pins = [];
-        for (let i=1;i<rows.length;i++){
-          const r = rows[i]; const obj = {_row: i+1};
-          for (let c=0;c<header.length;c++){ const key = header[c] || ('c'+(c+1)); obj[key] = r[c] || ''; }
-          obj.id = obj.id || obj.pinid || obj.key || obj._row;
-          obj.title = obj.title || obj.name || obj.captiontitle || obj.c2 || '';
-          obj.body = obj.body || obj.note || obj.caption || obj.description || obj.c3 || '';
-          obj.img = obj.img || obj.image || obj.photourl || obj.thumbnail || '';
-          pins.push(obj);
-        }
-        this.__pins = pins;
-        this.log('ピン取得: ' + pins.length + '件');
-      }catch(e){
-        this.log('ピン取得失敗: ' + (e && e.result && e.result.error && e.result.error.message ? e.result.error.message : (e.message || e)), 'error');
-      }finally{
-        this.hideBusy();
-      }
-    }
-    async quickSave(){
-      try{
-        const pin = {
-          title: (this.$aTitle.value||'').trim(),
-          body: (this.$aBody.value||'').trim(),
-          img: (this.$aImg.value||'').trim()
-        };
-        if (!pin.title && !pin.body){ this.log('タイトルか本文を入力してください', 'error'); return; }
-        if (typeof window.upsertPinToSheet === 'function'){
-          this.showBusy('保存中…');
-          await Promise.resolve(window.upsertPinToSheet(pin));
-          this.hideBusy();
-          this.log('保存完了');
-          this.$aTitle.value=''; this.$aBody.value=''; this.$aImg.value='';
-          if (this.__sheetId) this.fetchPins(this.__sheetId);
-        }else{
-          this.log('upsertPinToSheet が見つかりません（旧実装の保存API）', 'error');
-        }
-      }catch(e){
-        this.hideBusy();
-        this.log('保存失敗: ' + (e && e.message ? e.message : e), 'error');
-      }
-    }
-
-    hideLegacyChipOnMobile(){
-      try{
-        if (!window.matchMedia) return;
-        if (!matchMedia('(max-width: 900px)').matches) return;
-        const cands = Array.from(document.querySelectorAll('button,div,a,span'));
-        for(const el of cands){
-          const txt = (el.textContent||'').trim();
-          if (!txt) continue;
-          if (txt.includes('診断ログ') || txt.includes('Diagnostics')){
-            const cs = getComputedStyle(el);
-            if (cs.position==='fixed'){ try{ el.style.display='none'; el.setAttribute('data-m3d-hidden','chip'); }catch(_){ } }
-          }
-        }
-      }catch(_){}
-    }
-    captureGLBIdFromURL(u){
-      try{
-        if (!u) return;
-        const m = String(u).match(/\/drive\/v3\/files\/([^/?]+)\?[^#]*alt=media/i);
-        if (m && m[1]){ this.__glbFileId = decodeURIComponent(m[1]); }
-      }catch(_){}
-    }
-    async ensureSheetResolved(){
-      try{
-        if (this.__sheetId) return this.__sheetId;
-        if (!window.gapi || !gapi.client || !gapi.client.drive){ return null; }
-        if (!this.__glbFileId && this.__lastAltMediaURL){ this.captureGLBIdFromURL(this.__lastAltMediaURL); }
-        if (!this.__glbFileId){ return null; }
-        const meta = await gapi.client.drive.files.get({ fileId: this.__glbFileId, fields: 'parents' });
-        const parents = (meta.result && meta.result.parents) || [];
-        const parent = parents[0];
-        if (!parent){ return null; }
-        const q = [
-          "'" + parent + "' in parents",
-          "mimeType='application/vnd.google-apps.spreadsheet'",
-          "trashed=false",
-          "appProperties has { key='lociFor' and value='" + this.__glbFileId + "' }"
-        ].join(' and ');
-        let res = await gapi.client.drive.files.list({ q, pageSize: 10, fields: 'files(id,name)', includeItemsFromAllDrives: true, supportsAllDrives: true });
-        let files = (res.result && res.result.files) || [];
-        if (!files.length){
-          const q2 = ["'" + parent + "' in parents", "mimeType='application/vnd.google-apps.spreadsheet'", "trashed=false"].join(' and ');
-          res = await gapi.client.drive.files.list({ q: q2, pageSize: 10, fields: 'files(id,name)', includeItemsFromAllDrives: true, supportsAllDrives: true });
-          files = (res.result && res.result.files) || [];
-        }
-        if (files.length){
-          this.__sheetId = files[0].id;
-          this.log('シート自動解決: ' + files[0].name + ' (' + this.__sheetId + ')');
-          try{ this.fetchPins(this.__sheetId); }catch(_){}
-          return this.__sheetId;
-        }
-        return null;
-      }catch(e){
-        this.log('シート自動解決失敗: ' + (e && e.message ? e.message : e), 'error');
-        return null;
-      }
-    }
-    hookLegacyAPIs(){
-      const self = this;
-      let tries = 0;
-      const t = setInterval(function(){
-        tries++;
+      var ui = document.querySelector('locimyu-ui');
+      if (!ui || !ui.shadowRoot) return;
+      var btn = ui.shadowRoot.getElementById('btnList');
+      if (!btn || btn.dataset.m3dPatch==='1') return;
+      btn.dataset.m3dPatch = '1';
+      btn.addEventListener('click', function(e){
         try{
-          if (typeof window.loadPinsFromActiveSheet === 'function'){
-            const orig = window.loadPinsFromActiveSheet;
-            window.loadPinsFromActiveSheet = async function(spreadsheetId){
-              self.__sheetId = spreadsheetId || self.__sheetId;
-              self.log('シートID取得: ' + self.__sheetId);
-              try{ self.showBusy('ピン・シートを読み込み中…'); }catch(_){}
-              try{
-                const r = await orig.apply(this, arguments);
-                if (self.__sheetId) self.fetchPins(self.__sheetId);
-                return r;
-              } finally { try{ self.hideBusy(); }catch(_){ } }
-            };
-            self.log('legacy loadPinsFromActiveSheet をフック');
-            clearInterval(t);
-          }
+          e.stopImmediatePropagation();
+          e.preventDefault();
         }catch(_){}
-        if (tries>50) clearInterval(t);
-      }, 200);
-    }
-    hookGapi(){
-      let tries = 0;
-      const timer = setInterval(()=>{
-        tries++;
+        var host = (this && this.getRootNode) ? this.getRootNode().host : null;
+        if (!host){ return; }
         try{
-          const req = window.gapi && gapi.client && gapi.client.request;
-          if (typeof req === 'function'){
-            const orig = req;
-            const self = this;
-            gapi.client.request = function(){
-              try{
-                var args = (arguments && arguments[0]) || {};
-                if (args && args.params && typeof args.params.q === 'string'){
-                  var q0 = args.params.q;
-                  var q1 = q0.replace(/\s*&&\s*/g, ' and ')
-                             .replace(/appProperties has \{\s*key=([^}]+)\s*and\s*value=([^}]+)\s*\}/g, 'appProperties has { key=$1 and value=$2 }');
-                  if (q1 !== q0){ args.params.q = q1; try{ window.logStep && window.logStep('DriveQSanitized: ' + q1); }catch(_){ } }
-                }
-                var url = (args.path || args.url || '') + '';
-                if (url.includes('/drive/v3/files')){
-                  try{ var m = url.match(/\/drive\/v3\/files\/([^/?]+)/); if (m && m[1]) self.__glbFileId = decodeURIComponent(m[1]); }catch(_){ }
-                  var q = args.params && args.params.q;
-                  if (q){ try{ window.logStep && window.logStep('DriveQ: ' + q); }catch(_){ } }
-                }
-                try{ window.M3DBusy && window.M3DBusy.show('通信中…'); }catch(_){}
-              }catch(_){}
-              const r = orig.apply(this, arguments);
-              try{
-                if (r && typeof r.then === 'function'){
-                  return r.then((v)=>{ try{ M3DBusy && M3DBusy.hide(); }catch(_){ } return v; },
-                                 (e)=>{ try{ M3DBusy && M3DBusy.hide(); }catch(_){ } throw e; });
-                }
-              }catch(_){}
-              try{ M3DBusy && M3DBusy.hide(); }catch(_){}
-              return r;
-            };
-            this.log('gapi hook ready');
-            clearInterval(timer);
-          }
+          // show list panel
+          if (host.$reader) host.$reader.style.display='none';
+          if (host.$add) host.$add.style.display='none';
+          if (host.$list) host.$list.style.display='block';
         }catch(_){}
-        if (tries>50) clearInterval(timer);
-      }, 200);
-    }
-    hookFetchAndXHR(){
-      try{
-        const origFetch = window.fetch;
-        const self = this;
-        window.fetch = async (input, init)=>{
-          let url = '';
-          try{ url = (typeof input==='string') ? input : (input && input.url ? input.url : ''); }catch(_){}
-          const isMedia = url.includes('alt=media') || url.includes('/uc?export=download');
-          const isSheet = url.includes('sheets.googleapis.com') || url.includes('/spreadsheets/');
-          if (isMedia || isSheet) self.showBusy(isMedia ? 'GLB/画像取得中…' : 'シート通信中…');
-          try{ const res = await origFetch(input, init); return res; }
-          finally{ if (isMedia) { try{ self.__lastAltMediaURL = url; self.captureGLBIdFromURL(url); }catch(_){ } } if (isMedia || isSheet) self.hideBusy(); }
-        };
-      }catch(_){}
-      try{
-        const OrigXHR = window.XMLHttpRequest;
-        if (!OrigXHR) return;
-        const self = this;
-        const Hook = function(){ const x = new OrigXHR(); return hook(x); };
-        function hook(x){
+        (async function(){
           try{
-            let url = '';
-            const open = x.open; x.open = function(method, u){ url = String(u||''); return open.apply(this, arguments); };
-            const send = x.send; x.send = function(){
-              try{
-                const isMedia = url.includes('alt=media') || url.includes('/uc?export=download');
-                const isG = url.includes('googleapis.com') || url.includes('gapi') || url.includes('/spreadsheets/');
-                if (isMedia || isG){ self.showBusy(isMedia ? 'GLB/画像取得中…' : '通信中…'); }
-              }catch(_){}
-              x.addEventListener('loadend', function(){ try{ self.hideBusy(); }catch(_){ } }, {once:false});
-              return send.apply(this, arguments);
-            };
+            if (host.ensureSheetResolved) await host.ensureSheetResolved();
+            if (host.__sheetId && host.fetchPins) await host.fetchPins(host.__sheetId);
           }catch(_){}
-          return x;
-        }
-        Hook.prototype = OrigXHR.prototype;
-        window.XMLHttpRequest = Hook;
-      }catch(_){}
-    }
+          try{ if (host.renderList) host.renderList(); }catch(_){}
+        })();
+      }, {capture:true});
+    }catch(_){}
   }
-  customElements.define('locimyu-ui', LocimyuUI);
-
-  (function(){
-    if (!window.M3DUI) window.M3DUI = {};
-    const origPin = window.M3DUI.onPinSelected;
-    window.M3DUI.onPinSelected = function(pin){
-      try{ window.dispatchEvent(new CustomEvent('m3d:pin-selected', { detail: pin })); }catch(_){}
-      if (typeof origPin === 'function') return origPin.apply(this, arguments);
-    };
-    const origLoaded = window.M3DUI.modelLoaded;
-    window.M3DUI.modelLoaded = function(){
-      try{ window.dispatchEvent(new Event('m3d:model-loaded')); }catch(_){}
-      if (typeof origLoaded === 'function') return origLoaded.apply(this, arguments);
-    };
-  })();
-
-  function mount(){ document.body.appendChild(document.createElement('locimyu-ui')); }
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', mount, {once:true}); else mount();
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', patch, {once:true});
+  else patch();
 })();
 </script>
 </body>
