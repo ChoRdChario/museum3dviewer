@@ -1070,7 +1070,15 @@ async function applyStateToMaterial(origM, st){
   ensureMatRecord(origM);
   const rec = matOriginals.get(origM);
 
-  if(st.unlit && !rec.wasUnlit){
+  
+  // Guard: if model not ready, queue material update and return
+  try{
+    if (!currentModel){
+      (window.__matQueue || (window.__matQueue = [])).push([origM, st]);
+      return;
+    }
+  }catch(_){}
+if(st.unlit && !rec.wasUnlit){
     const active = getActiveMaterialFor(origM);
     const um = new THREE.MeshBasicMaterial();
     um.color = (active.color ? active.color.clone() : rec.color.clone());
@@ -1843,7 +1851,9 @@ async function loadGLBByFileId(fileId){
     const res = await fetch(url, { headers: { 'Authorization': 'Bearer ' + token } });
     if(!res.ok){
       const txt = await res.text().catch(()=>'');
-      throw new Error('GLB download failed: ' + res.status + ' ' + txt + '\n\nIDが正しいか確認してください。共有URLのコピペ、または30文字以上の完全なFileIdを貼り付けてください。');
+      throw new Error('GLB download failed: ' + res.status + ' ' + txt + '
+
+IDが正しいか確認してください。共有URLのコピペ、または30文字以上の完全なFileIdを貼り付けてください。');
     }
     const blob = await res.blob();
     const objUrl = URL.createObjectURL(blob);
@@ -2146,5 +2156,66 @@ document.addEventListener('DOMContentLoaded', function(){
 })();
 </script>
 
+
+<!-- Minimal HUD & material-queue drain -->
+<style>
+#_m3d_hud_overlay{position:fixed;inset:0;display:none;background:rgba(0,0,0,.35);z-index:99999}
+#_m3d_hud_center{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);color:#fff;text-align:center;font:14px system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+._m3d_spinner{width:48px;height:48px;border:4px solid rgba(255,255,255,.35);border-top-color:#fff;border-radius:50%;animation:m3dspin 1s linear infinite;margin:0 auto 10px}
+@keyframes m3dspin{to{transform:rotate(360deg)}}
+</style>
+<div id="_m3d_hud_overlay" aria-hidden="true"><div id="_m3d_hud_center"><div class="_m3d_spinner"></div><div id="_m3d_hud_msg">通信中…</div></div></div>
+<script>
+(function(){
+  var overlay, msg, ref=0;
+  function ensure(){
+    overlay = document.getElementById('_m3d_hud_overlay');
+    msg = document.getElementById('_m3d_hud_msg');
+  }
+  window.M3DBusy = {
+    show: function(m){ try{ ensure(); if(m) msg.textContent=m; ref++; overlay.style.display='block'; }catch(_){}},
+    hide: function(){ try{ ensure(); ref=Math.max(0,ref-1); if(ref===0) overlay.style.display='none'; }catch(_){} }
+  };
+  // Drain queued material updates after modelLoaded
+  (function(){
+    if(!window.M3DUI) window.M3DUI = {};
+    var orig = window.M3DUI.modelLoaded;
+    window.M3DUI.modelLoaded = function(){
+      try{
+        var q = window.__matQueue || [];
+        window.__matQueue = [];
+        for (var i=0;i<q.length;i++){
+          try{ applyStateToMaterial(q[i][0], q[i][1]); }catch(e){}
+        }
+      }catch(_){}
+      if (typeof orig==='function') return orig.apply(this, arguments);
+    };
+  })();
+  // Optional: hook fetch/XHR to show busy on Drive/Sheets calls
+  try{
+    var _fetch = window.fetch;
+    window.fetch = function(input, init){
+      try{
+        var url = (typeof input==='string') ? input : (input && input.url ? input.url : '');
+        var busy = url && (url.indexOf('alt=media')>0 || url.indexOf('googleapis.com')>0 || url.indexOf('/spreadsheets/')>0);
+        if (busy) M3DBusy.show('通信中…');
+        var p = _fetch.apply(this, arguments);
+        if (p && typeof p.then==='function'){
+          return p.then(function(v){ if(busy) M3DBusy.hide(); return v; }, function(e){ if(busy) M3DBusy.hide(); throw e; });
+        }
+        if (busy) M3DBusy.hide();
+        return p;
+      }catch(e){ try{ return _fetch.apply(this, arguments); }catch(e2){ throw e2; } }
+    };
+  }catch(_){}
+  try{
+    var X = window.XMLHttpRequest;
+    if (X){
+      var H = function(){ var x = new X(); var url=''; var open=x.open; x.open=function(m,u){url=String(u||''); return open.apply(this, arguments);}; var send=x.send; x.send=function(){ var busy=(url.indexOf('alt=media')>0||url.indexOf('googleapis.com')>0||url.indexOf('/spreadsheets/')>0); if(busy) M3DBusy.show('通信中…'); x.addEventListener('loadend', function(){ if(busy) M3DBusy.hide(); }); return send.apply(this, arguments); }; return x; };
+      H.prototype = X.prototype; window.XMLHttpRequest = H;
+    }
+  }catch(_){}
+})();
+</script>
 </body>
 </html>
