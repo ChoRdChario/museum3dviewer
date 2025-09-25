@@ -137,13 +137,12 @@
 </style>
 
   <!-- ES Modules -->
-  <script type="importmap">{
-  "imports": {
-    "three": "https://unpkg.com/three@0.157.0/build/three.module.js",
-    "three/addons/": "https://unpkg.com/three@0.157.0/examples/jsm/"
-  }
-}
-</script>
+  <script type="importmap">
+  { "imports": {
+      "three": "https://unpkg.com/three@0.157.0/build/three.module.js",
+      "three/examples/jsm/": "https://unpkg.com/three@0.157.0/examples/jsm/"
+    } }
+  </script>
   <!-- HEIC fallback -->
   <script src="https://unpkg.com/heic2any@0.0.5/dist/heic2any.min.js"></script>
 </head>
@@ -324,11 +323,1590 @@
 
 <script type="module">
 /* ===== Three.js imports ===== */
-/* ===== Three.js imports ===== */
 import * as THREE from 'three';
-import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { TransformControls } from 'three/addons/controls/TransformControls.js';
-import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';</script>
+import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js';
+
+/* ================== iOS Detection & constants ================== */
+const IS_IOS = /iP(hone|ad|od)/.test(navigator.platform) ||
+               (navigator.userAgent.includes('Mac') && 'ontouchend' in document);
+const ORTHO_MARGIN = IS_IOS ? 1.6 : 1.8;
+
+/* ================== Google Auth ================== */
+const CLIENT_ID = '595200751510-ncahnf7edci6b9925becn5to49r6cguv.apps.googleusercontent.com';
+const API_KEY   = 'AIzaSyCUnTCr5yWUWPdEXST9bKP1LpgawU5rIbI';
+const DISCOVERY_DOCS = [
+  'https://www.googleapis.com/discovery/v1/apis/drive/v3/rest',
+  'https://www.googleapis.com/discovery/v1/apis/sheets/v4/rest'
+];
+const SCOPES = [
+  'https://www.googleapis.com/auth/drive.file',
+  'https://www.googleapis.com/auth/drive.readonly',
+  'https://www.googleapis.com/auth/drive.metadata.readonly',
+  'https://www.googleapis.com/auth/spreadsheets'
+].join(' ');
+
+let tokenClient = null;
+let accessToken = null;
+let gapiReady = false;
+let gisReady  = false;
+
+async function ensureGapiClient() {
+  if (gapiReady) return;
+  if (!(window.gapi && gapi && gapi.load)) {
+    await new Promise(r => {
+      const t = setInterval(() => {
+        if (window.gapi && gapi && gapi.load) { clearInterval(t); r(); }
+      }, 50);
+    });
+  }
+  await new Promise((resolve) => gapi.load('client', resolve));
+  await gapi.client.init({ discoveryDocs: DISCOVERY_DOCS });
+  gapiReady = true;
+}
+async function ensureGIS() {
+  if (gisReady) return;
+  if (!(window.google && google.accounts && google.accounts.oauth2)) {
+    await new Promise(r => {
+      const t = setInterval(() => {
+        if (window.google && google.accounts && google.accounts.oauth2) { clearInterval(t); r(); }
+      }, 50);
+    });
+  }
+  gisReady = true;
+}
+async function ensureTokenClient() {
+  await ensureGIS();
+  if (tokenClient) return tokenClient;
+  tokenClient = google.accounts.oauth2.initTokenClient({
+    client_id: CLIENT_ID,
+    scope: SCOPES,
+    callback: (resp) => {
+      if (resp && resp.access_token) {
+        accessToken = resp.access_token;
+        document.getElementById('gate').style.display = 'none';
+        const viewOnly = new URLSearchParams(location.search).get('view') === '1';
+        document.getElementById('statusLabel').textContent = viewOnly ? '閲覧モード' : 'Ready';
+        ['btnLoad','btnTogglePins','projOrtho','listSelect'].forEach(id=> document.getElementById(id).removeAttribute('disabled'));
+        if(!viewOnly){
+          ['btnAddPin','btnGizmo','btnUndo','btnSavePin','btnDeletePin','btnAttach','btnPickFromFolder','listNew','listDelete']
+            .forEach(id=> document.getElementById(id).removeAttribute('disabled'));
+        }
+        enforceViewOnlyMode();
+
+        const qs = new URLSearchParams(location.search);
+        const fid = qs.get('fileId') || '';
+        const sid = qs.get('sheetId') || '';
+        if(fid) el.inputGLB.value = fid;
+        if(sid) el.inputSheet.value = sid;
+      }
+    }
+  });
+  return tokenClient;
+}
+async function startSignIn() {
+  try {
+    el.statusLabel.textContent = 'サインイン処理中…';
+    await ensureTokenClient();
+    tokenClient.requestAccessToken({ prompt: 'consent' });
+  } catch (e) {
+    console.error(e);
+    alert('サインインの初期化に失敗しました。ネットワーク状態をご確認ください。');
+  }
+}
+
+/* ================== Elements / State ================== */
+const el = {
+  gate: document.getElementById('gate'),
+  statusLabel: document.getElementById('statusLabel'),
+  inputGLB: document.getElementById('inputGLB'),
+  inputSheet: document.getElementById('inputSheet'),
+  btnLoad: document.getElementById('btnLoad'),
+  btnViewOnly: document.getElementById('btnViewOnly'),
+  btnWide: document.getElementById('btnWide'),
+  loading: document.getElementById('loading'),
+  viewerCanvas: document.getElementById('viewerCanvas'),
+  viewerPreview: document.getElementById('viewerPreview'),
+  previewWrap: document.getElementById('previewWrap'),
+  previewInner: document.getElementById('previewInner'),
+  previewImg: document.getElementById('previewImg'),
+  previewZoom: document.getElementById('previewZoom'),
+  previewZoomVal: document.getElementById('previewZoomVal'),
+  previewReset: document.getElementById('previewReset'),
+  previewErr: document.getElementById('previewErr'),
+  capTitleLine: document.getElementById('capTitleLine'),
+  capBodyLine: document.getElementById('capBodyLine'),
+  pinsList: document.getElementById('pinsList'),
+  rightNoSel: document.getElementById('noSelection'),
+  rightEditor: document.getElementById('editor'),
+  capTitle: document.getElementById('capTitle'),
+  capBody: document.getElementById('capBody'),
+  btnSavePin: document.getElementById('btnSavePin'),
+  btnDeletePin: document.getElementById('btnDeletePin'),
+  btnAddPin: document.getElementById('btnAddPin'),
+  btnGizmo: document.getElementById('btnGizmo'),
+  btnTogglePins: document.getElementById('btnTogglePins'),
+  btnUndo: document.getElementById('btnUndo'),
+  modeLabel: document.getElementById('modeLabel'),
+  btnSignIn: document.getElementById('btnSignIn'),
+  colorPresets: document.getElementById('colorPresets'),
+  btnColorFilter: document.getElementById('btnColorFilter'),
+  colorFilterPanel: document.getElementById('colorFilterPanel'),
+  colorFilterList: document.getElementById('colorFilterList'),
+  btnFilterAll: document.getElementById('btnFilterAll'),
+  btnFilterNone: document.getElementById('btnFilterNone'),
+  btnFilterClose: document.getElementById('btnFilterClose'),
+  imgLocal: document.getElementById('imgLocal'),
+  btnAttach: document.getElementById('btnAttach'),
+  btnPickFromFolder: document.getElementById('btnPickFromFolder'),
+  thumbs: document.getElementById('thumbs'),
+  matSelect: document.getElementById('matSelect'),
+  matUnlit: document.getElementById('matUnlit'),
+  matDoubleSided: document.getElementById('matDoubleSided'),
+  matOpacity: document.getElementById('matOpacity'),
+  matOpacityVal: document.getElementById('matOpacityVal'),
+  matInvert: document.getElementById('matInvert'),
+  matWhiteTransparent: document.getElementById('matWhiteTransparent'),
+  matThreshold: document.getElementById('matThreshold'),
+  matThresholdVal: document.getElementById('matThresholdVal'),
+  viewFront: document.getElementById('viewFront'),
+  viewBack: document.getElementById('viewBack'),
+  viewLeft: document.getElementById('viewLeft'),
+  viewRight: document.getElementById('viewRight'),
+  viewTop: document.getElementById('viewTop'),
+  viewBottom: document.getElementById('viewBottom'),
+  projOrtho: document.getElementById('projOrtho'),
+  bgColor: document.getElementById('bgColor'),
+  connector: document.getElementById('connector'),
+  connLine: document.getElementById('connLine'),
+  connDot: document.getElementById('connDot'),
+  pickerModal: document.getElementById('pickerModal'),
+  pickerGrid: document.getElementById('pickerGrid'),
+  btnPickerReload: document.getElementById('btnPickerReload'),
+  btnPickerClose: document.getElementById('btnPickerClose'),
+  listSelect: document.getElementById('listSelect'),
+  listNew: document.getElementById('listNew'),
+  listDelete: document.getElementById('listDelete'),
+};
+const viewOnly = new URLSearchParams(location.search).get('view') === '1';
+
+/* ================== Viewer State ================== */
+let renderer, scene, camera, controls, tcontrols, pinGroup, loader, currentModel=null;
+let perspCam, orthoCam; let usingOrtho=false;
+let raycaster = new THREE.Raycaster(), pointer = new THREE.Vector2();
+let addPinMode=false, currentColor='#ff6b6b';
+let pins=[], selectedPinId=null, undoStack=[];
+let glbParents=[], glbMetaCache=null;
+
+/* materials (per-material state persisted) */
+let materials=[];
+const materialKeyByMaterial = new Map();   // Material -> key
+const materialByKey = new Map();           // key -> Material
+const matOriginals=new WeakMap();
+const matState = new Map();                // key -> state
+const imageBlobCache = new Map();
+let filterColors = new Set();
+let activeSheet = { sheetId:null, title:'pins' };
+
+const debounce = (fn,ms)=>{ let t; return (...a)=>{ clearTimeout(t); t=setTimeout(()=>fn(...a),ms); }; };
+const debouncedSave = debounce(()=> upsertPinToSheet(), 500);
+const PRESET_COLORS = ['#ff6b6b','#ffd166','#06d6a0','#118ab2','#ef476f','#b5179e','#4361ee','#4cc9f0','#ff9f1c'];
+
+function toast(msg){ el.statusLabel.textContent=msg; setTimeout(()=> el.statusLabel.textContent= viewOnly ? '閲覧モード' : 'Ready', 1800); }
+function ensureArray(x){ return Array.isArray(x)?x:[]; }
+function normalizeHex(c){ const t = new THREE.Color(c); return '#' + t.getHexString(); }
+function enforceViewOnlyMode(){
+  if (!viewOnly) return;
+  document.body.classList.add('viewonly');
+  el.capTitle.readOnly = true; el.capBody.readOnly  = true;
+}
+
+/* ========= HEIC helpers ========= */
+function loadScriptOnce(src){
+  return new Promise((resolve,reject)=>{
+    const s=document.createElement('script'); s.src=src; s.async=true; s.onload=resolve; s.onerror=reject;
+    document.head.appendChild(s);
+  });
+}
+async function ensureHeic2any(){
+  if(typeof window.heic2any === 'function') return true;
+  try{ await loadScriptOnce('https://cdn.jsdelivr.net/npm/heic2any@0.0.5/dist/heic2any.min.js'); }catch{}
+  if(typeof window.heic2any === 'function') return true;
+  try{ await loadScriptOnce('https://unpkg.com/heic2any@0.0.5/dist/heic2any.min.js'); }catch{}
+  return (typeof window.heic2any === 'function');
+}
+function upscaleThumbnailUrl(u, size=2048){
+  if(!u) return u;
+  try{
+    const url = new URL(u);
+    url.search = url.search.replace(/(\bs=)(\d+)/, `$1${size}`);
+    url.pathname = url.pathname.replace(/=s(\d+)/, `=s${size}`);
+    if(!/(\bs=)/.test(url.search) && !/=s\d+/.test(url.pathname)){
+      url.searchParams.set('s', String(size));
+    }
+    return url.toString();
+  }catch{ return u.replace(/=s(\d+)/, `=s${size}`); }
+}
+
+/* ========= UI wire ========= */
+document.getElementById('btnSignIn').addEventListener('click', startSignIn);
+const _pc = document.getElementById('previewClose'); if(_pc){ _pc.addEventListener('click', ()=>{ el.viewerPreview.classList.add('hidden'); }); }
+(async () => { ensureGIS().catch(()=>{}); ensureGapiClient().catch(()=>{}); })();
+
+/* ========= Viewer ========= */
+let rendererLoopId=null;
+function viewerInit(){
+  renderer = new THREE.WebGLRenderer({
+    canvas: el.viewerCanvas,
+    antialias: !IS_IOS,                 // iOSはAAオフで安定性
+    powerPreference: 'low-power',
+    preserveDrawingBuffer: false
+  });
+  const cap = IS_IOS ? 1 : 1.5;         // iOSはDPR=1固定、他は1.5上限
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, cap));
+
+  scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x0a0f16);
+  perspCam = new THREE.PerspectiveCamera(60, 2, 0.1, 5000);
+  perspCam.position.set(2.8,1.6,3.6);
+  orthoCam = new THREE.OrthographicCamera(-2,2,2,-2, -5000, 5000);
+  camera = perspCam; usingOrtho=false;
+
+  const hemi = new THREE.HemisphereLight(0xffffff, 0x223355, 0.6); scene.add(hemi);
+  const dir = new THREE.DirectionalLight(0xffffff, 1.0); dir.position.set(3,5,4); scene.add(dir);
+
+  buildControls();
+
+  pinGroup = new THREE.Group(); scene.add(pinGroup);
+  loader = new GLTFLoader();
+
+  window.addEventListener('resize', resize, { passive:true });
+  el.viewerCanvas.addEventListener('pointerdown', onPointerDown, { passive:false });
+  el.projOrtho.addEventListener('change', ()=> { toggleProjection(el.projOrtho.checked); debouncedSaveMaterials(); });
+  resize();
+  const loop = ()=>{ renderer.render(scene,camera); updateConnector(); rendererLoopId=requestAnimationFrame(loop); };
+  loop();
+}
+function buildControls(){
+  if(controls){ controls.dispose(); }
+  controls = new OrbitControls(camera, el.viewerCanvas);
+  controls.target.set(0,0,0); controls.update();
+  controls.addEventListener('change', updateConnector);
+  if(tcontrols){ scene.remove(tcontrols); if(tcontrols && typeof tcontrols.dispose==='function'){ tcontrols.dispose(); } }
+  tcontrols = new TransformControls(camera, el.viewerCanvas);
+  tcontrols.setSize(0.9); tcontrols.setSpace('world');
+  tcontrols.addEventListener('dragging-changed', e=>{ controls.enabled = !e.value; });
+  tcontrols.addEventListener('change', ()=>{
+    if(!selectedPinId || !tcontrols.object || !tcontrols.visible) return;
+    const p=pins.find(x=>x.id===selectedPinId); if(!p) return;
+    p.pos.copy(tcontrols.object.position);
+    renderNow(); debouncedSave();
+  });
+  scene.add(tcontrols); tcontrols.visible=false; tcontrols.enabled=false;
+}
+function resize(){
+  const w = el.viewerCanvas.clientWidth || el.viewerCanvas.parentElement.clientWidth;
+  const h = el.viewerCanvas.clientHeight || el.viewerCanvas.parentElement.clientHeight;
+  renderer.setSize(w,h,false);
+  if(camera.isPerspectiveCamera){
+    camera.aspect = w/h;
+  }else{ fitOrthoFrustum(); }
+  camera.updateProjectionMatrix(); updateConnector();
+}
+function renderNow(){ renderer.render(scene,camera); updateConnector(); }
+function sceneBounds(){
+  if(!currentModel){ return { center:new THREE.Vector3(0,0,0), radius: 2 }; }
+  const box = new THREE.Box3().setFromObject(currentModel);
+  const size = box.getSize(new THREE.Vector3());
+  const center = box.getCenter(new THREE.Vector3());
+  const radius = Math.max(size.x,size.y,size.z)/2 || 1;
+  return { center, radius: radius*1.2 };
+}
+function focusOrigin(){
+  const { radius } = sceneBounds();
+  const dist = Math.max(radius*2.2, 1.5);
+  const dirv = new THREE.Vector3(1,0.6,1).normalize();
+  const origin = new THREE.Vector3(0,0,0);
+  camera.position.copy(origin.clone().addScaledVector(dirv, dist));
+  controls.target.copy(origin);
+  if(camera.isOrthographicCamera) fitOrthoFrustum();
+  controls.update(); updateConnector();
+}
+function fitOrthoFrustum(){
+  const { radius } = sceneBounds();
+  const w = el.viewerCanvas.clientWidth || 1;
+  const h = el.viewerCanvas.clientHeight || 1;
+  const aspect = w/h;
+  const size = radius*ORTHO_MARGIN;
+  orthoCam.left = -size*aspect;
+  orthoCam.right = size*aspect;
+  orthoCam.top = size;
+  orthoCam.bottom = -size;
+  orthoCam.updateProjectionMatrix();
+}
+function toggleProjection(useOrtho){
+  usingOrtho = !!useOrtho;
+  const origin = new THREE.Vector3(0,0,0);
+  const dir = camera.position.clone().sub(controls.target).normalize();
+  const dist = camera.position.distanceTo(controls.target);
+  if(usingOrtho){
+    fitOrthoFrustum();
+    orthoCam.position.copy(origin.clone().addScaledVector(dir, dist));
+    camera = orthoCam;
+  }else{
+    perspCam.position.copy(origin.clone().addScaledVector(dir, Math.max(dist, 0.1)));
+    camera = perspCam;
+  }
+  buildControls();
+  renderNow();
+}
+
+/* ========= Pins & Connector ========= */
+function addUndo(u){ undoStack.push(u); }
+function createPin(pos,color){
+  if(viewOnly) return;
+  const id=`p_${Date.now()}_${Math.random().toString(36).slice(2,7)}`;
+  const pin={id,pos:pos.clone(),color:normalizeHex(color||'#ff6b6b'),title:'',body:'',images:[],mesh:null};
+  pins.push(pin);
+  filterColors.add(pin.color);
+  placePinMesh(pin);
+  refreshPinsList();
+  buildColorFilter();
+  selectPin(id);
+  addUndo({type:'add',id});
+  upsertPinToSheet();
+}
+function placePinMesh(pin){
+  if(pin.mesh){ pinGroup.remove(pin.mesh); pin.mesh.geometry.dispose(); pin.mesh.material.dispose(); pin.mesh=null; }
+  const geo=new THREE.SphereGeometry(0.006,16,16);
+  const mat=new THREE.MeshBasicMaterial({color:new THREE.Color(pin.color)});
+  const mesh=new THREE.Mesh(geo,mat);
+  mesh.position.copy(pin.pos); mesh.userData.pinId=pin.id;
+  pin.mesh=mesh; pinGroup.add(mesh);
+  applyPinVisibilityFilter();
+}
+function selectPin(id,{fly}={}){
+  selectedPinId=id;
+  const p=pins.find(x=>x.id===id);
+  if(!p){ el.rightEditor.classList.add('hidden'); el.rightNoSel.classList.remove('hidden'); updateViewerPreviewForPin(null); return; }
+  el.rightNoSel.classList.add('hidden'); el.rightEditor.classList.remove('hidden');
+  el.capTitle.value = p.title || '';
+  el.capBody.value  = p.body  || '';
+  renderThumbs(p);
+  updateViewerPreviewForPin(p);
+  if(fly){ const {x,y,z}=p.pos; controls.target.set(0,0,0); camera.position.lerp(new THREE.Vector3(x,y,z).addScaledVector(new THREE.Vector3(1,0.6,1).normalize(), 0.6), 0.0); controls.update(); }
+  if(tcontrols.visible && p.mesh){ tcontrols.attach(p.mesh); }
+  updateConnector();
+}
+function onPointerDown(e){
+  if(!currentModel) return;
+  el.viewerCanvas.style.cursor = (addPinMode || e.shiftKey) && !viewOnly ? 'crosshair' : 'default';
+
+  const rect=el.viewerCanvas.getBoundingClientRect();
+  pointer.x=((e.clientX-rect.left)/rect.width)*2-1;
+  pointer.y=-((e.clientY-rect.top)/rect.height)*2+1;
+  raycaster.setFromCamera(pointer,camera);
+
+  const hitsPins = raycaster.intersectObjects(pinGroup.children,false);
+  if(hitsPins.length){ selectPin(hitsPins[0].object.userData.pinId, {fly:true}); return; }
+
+  if((e.shiftKey || addPinMode) && !viewOnly){
+    const hitModel = currentModel? raycaster.intersectObject(currentModel,true): [];
+    if(hitModel.length){
+      const pt = hitModel[0].point.clone();
+      createPin(pt,currentColor);
+      if(addPinMode){ addPinMode=false; el.btnAddPin.textContent='＋ ピン追加モード'; el.modeLabel.textContent='Orbit'; el.viewerCanvas.style.cursor='default'; }
+      return;
+    }
+  }
+}
+function updateConnector(){
+  const p = pins.find(x=>x.id===selectedPinId);
+  if(!p || !p.mesh || el.viewerPreview.classList.contains('hidden') || !pinGroup.visible || !p.mesh.visible){
+    el.connLine.style.display = 'none'; el.connDot.style.display = 'none'; return;
+  }
+  const v = p.pos.clone().project(camera);
+  const rect = el.viewerCanvas.getBoundingClientRect();
+  const x = (v.x + 1) / 2 * rect.width;
+  const y = (1 - (v.y + 1) / 2) * rect.height;
+  const rectPrev = el.viewerPreview.getBoundingClientRect();
+  const bx = (rectPrev.left - rect.left);
+  const by = (rectPrev.top - rect.top) + rectPrev.height/2;
+  const svg = el.connector;
+  svg.setAttribute('viewBox', `0 0 ${rect.width} ${rect.height}`);
+  el.connLine.setAttribute('x1', x); el.connLine.setAttribute('y1', y);
+  el.connLine.setAttribute('x2', bx); el.connLine.setAttribute('y2', by);
+  el.connLine.style.display = 'block';
+  el.connDot.setAttribute('cx', x); el.connDot.setAttribute('cy', y);
+  el.connDot.style.display = 'block';
+}
+
+/* ========= Preview ========= */
+let previewZoom = 1.0;
+function applyPreviewZoom(){ el.previewInner.style.transform = `scale(${previewZoom})`; }
+el.previewZoom.addEventListener('input', ()=>{ previewZoom = parseFloat(el.previewZoom.value)||1; el.previewZoomVal.textContent = previewZoom.toFixed(2) + '×'; applyPreviewZoom(); });
+el.previewReset.addEventListener('click', ()=>{ previewZoom = 1; el.previewZoom.value = 1; el.previewZoomVal.textContent = '1.00×'; applyPreviewZoom(); });
+
+async function setPreview(ref, p){
+  try{
+    const msg = document.getElementById('previewMsg'); if(msg) msg.style.display='none';
+    if(ref){
+    el.previewErr.style.display='none';
+    const src = await resolveImageObjectURL(ref, {preferThumb:false});
+    el.previewImg.src = src;
+    el.previewImg.onerror = ()=>{ el.previewErr.style.display='inline'; };
+    el.capTitleLine.textContent = (p && p.title) ? p.title : '';
+    el.capBodyLine.textContent  = (p && p.body)  ? p.body  : '';
+    el.viewerPreview.classList.remove('hidden');
+    applyPreviewZoom(); updateConnector();
+    }
+    else {
+      const msg = document.getElementById('previewMsg');
+      if(msg){ msg.textContent = '画像が設定されていません'; msg.style.display = 'block'; }
+      const img = document.getElementById('previewImg'); if(img){ img.removeAttribute('src'); }
+      el.capTitleLine.textContent = (p && p.title) ? p.title : '';
+      el.capBodyLine.textContent  = (p && p.body)  ? p.body  : '';
+      el.viewerPreview.classList.remove('hidden');
+      applyPreviewZoom(); updateConnector();
+    }
+  }
+  catch(e){
+    console.warn('preview failed', e);
+    el.previewErr.style.display='inline';
+    el.viewerPreview.classList.remove('hidden');
+  }
+}
+function updateViewerPreviewForPin(p){ setPreview(p && p.images && p.images[0] ? p.images[0] : null, p); }
+
+/* ========= Image resolve & Drive ========= */
+function parseImageRef(ref){
+  if(typeof ref === 'string' && /^(blob:|data:|https?:)/i.test(ref)){ return { kind:'url', url: ref }; }
+  if(typeof ref === 'string' && ref.startsWith('drive:')){
+    const [, rest] = ref.split(':'); const [id, mime] = rest.split('|');
+    return { kind:'drive', id, mime: mime||null };
+  }
+  if(typeof ref === 'string'){
+    const id = extractDriveFileId(ref);
+    if(id){ return { kind:'drive', id, mime:null }; }
+  }
+  return { kind:'url', url: String(ref) };
+}
+async function resolveImageObjectURL(ref, {preferThumb=false}={}){
+  const key = typeof ref==='string'?ref:JSON.stringify(ref);
+  if(imageBlobCache.has(key)) return imageBlobCache.get(key);
+
+  const info = parseImageRef(ref);
+  let outUrl;
+
+  if(info.kind === 'url'){ imageBlobCache.set(key, info.url); return info.url; }
+
+  const meta = await driveFileMeta(info.id);
+  const isHeic = isHeicMimeOrExt(meta.mimeType, meta.fileExtension);
+
+  if(isHeic){
+    const ok = await ensureHeic2any();
+    if(ok){
+      const blob = await driveFileFetchBlob(meta.id);
+      const jpegBlob = await window.heic2any({ blob, toType:'image/jpeg', quality:1.0 });
+      const jpg = Array.isArray(jpegBlob) ? jpegBlob[0] : jpegBlob;
+      outUrl = URL.createObjectURL(jpg);
+    }else if(meta.hasThumbnail && meta.thumbnailLink){
+      const hi = upscaleThumbnailUrl(meta.thumbnailLink, 2048);
+      const sep = hi.includes('?') ? '&' : '?';
+      outUrl = hi + sep + 'access_token=' + encodeURIComponent(accessToken);
+    }else{
+      throw new Error('HEIC preview unavailable (no heic2any & no thumbnailLink)');
+    }
+  }else{
+    if(preferThumb && meta.hasThumbnail && meta.thumbnailLink){
+      const hi = upscaleThumbnailUrl(meta.thumbnailLink, 1024);
+      const sep = hi.includes('?') ? '&' : '?';
+      outUrl = hi + sep + 'access_token=' + encodeURIComponent(accessToken);
+    }else{
+      const blob = await driveFileFetchBlob(meta.id);
+      outUrl = URL.createObjectURL(blob);
+    }
+  }
+
+  imageBlobCache.set(key, outUrl);
+  return outUrl;
+}
+async function driveFileMeta(fileId){
+  const meta = await gapi.client.drive.files.get({
+    fileId, fields:'id,name,mimeType,fileExtension,hasThumbnail,thumbnailLink,parents',
+    supportsAllDrives:true
+  });
+  return meta.result;
+}
+async function driveFileFetchBlob(fileId, retry=1){
+  const dlUrl = `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media&supportsAllDrives=true`;
+  const res = await fetch(dlUrl, { headers:{ Authorization:`Bearer ${accessToken}` } });
+  if(res.status === 401 && retry>0){
+    try{ tokenClient && tokenClient.requestAccessToken({ prompt:'' }); }catch{}
+    return driveFileFetchBlob(fileId, retry-1);
+  }
+  if(!res.ok) throw new Error('image fetch failed '+res.status);
+  return await res.blob();
+}
+function isHeicMimeOrExt(mime, ext){ return /heic|heif/i.test(mime||'') || /heic|heif/i.test(ext||''); }
+
+
+function extractDriveFileId(input){
+  try{
+    if(!input) return '';
+    let s = String(input).trim();
+    // URL patterns first
+    let m = s.match(/\bfile\/d\/([A-Za-z0-9_-]{20,})/); if(m && m[1]) return m[1];
+    m = s.match(/[?&]id=([A-Za-z0-9_-]{20,})/); if(m && m[1]) return m[1];
+    // bare-like
+    s = s.split(/[\s\u3000]+/)[0];
+    s = s.replace(/^[^A-Za-z0-9_-]+|[^A-Za-z0-9_-]+$/g, '');
+    if(/^[A-Za-z0-9_-]{30,}$/.test(s)) return s; // Drive IDs are typically >=30 chars
+    return '';
+  }catch(e){ return ''; }
+}
+function extractSpreadsheetId(input){
+  try{
+    if(!input) return '';
+    let s = String(input).trim();
+    if(/^[A-Za-z0-9_-]{20,}$/.test(s)) return s;
+    let m = s.match(/spreadsheets\/d\/([A-Za-z0-9_-]{10,})/); if(m && m[1]) return m[1];
+    m = s.match(/[?&]id=([A-Za-z0-9_-]{10,})/); if(m && m[1]) return m[1];
+    s = s.split(/[\s\u3000]+/)[0];
+    s = s.replace(/^[^A-Za-z0-9_-]+|[^A-Za-z0-9_-]+$/g, '');
+    return /^[A-Za-z0-9_-]{10,}$/.test(s) ? s : '';
+  }catch(e){ return ''; }
+}
+function makeDriveRef(id, mime){ return `drive:${id}|${mime||''}`; }
+
+/* ========= Materials ========= */
+function ensureMatRecord(m){
+  if(matOriginals.has(m)) return;
+  matOriginals.set(m, {
+    color: (m.color ? m.color.clone() : new THREE.Color(0xffffff)),
+    map: m.map || null,
+    alphaMap: m.alphaMap || null,
+    transparent: !!m.transparent,
+    opacity: (m.opacity ?? 1),
+    alphaTest: (m.alphaTest ?? 0),
+    side: m.side ?? THREE.FrontSide,
+    depthWrite: m.depthWrite,
+    depthTest: m.depthTest,
+    blending: m.blending,
+    toneMapped: m.toneMapped,
+    wasUnlit: false,
+    unlitMat: null
+  });
+}
+function objectPath(node) {
+  const names = [];
+  let cur = node;
+  while (cur && cur.parent) {
+    names.push(cur.name && cur.name.trim() ? cur.name : '_' + ((cur.uuid && cur.uuid.slice ? cur.uuid.slice(0,8) : '') || 'node'));
+    cur = cur.parent;
+  }
+  names.reverse();
+  return names.join('/');
+}
+function indexMaterialsByKey(){
+  materialKeyByMaterial.clear();
+  materialByKey.clear();
+  if (!currentModel) return;
+  currentModel.traverse(obj=>{
+    if (!obj.material) return;
+    const basePath = objectPath(obj);
+    if (Array.isArray(obj.material)) {
+      obj.material.forEach((m, idx)=>{
+        const key = `${basePath}#${idx}`;
+        materialKeyByMaterial.set(m, key);
+        materialByKey.set(key, m);
+        ensureMatRecord(m);
+        if(!matState.has(key)){
+          matState.set(key, { unlit:false, doubleSided:(m.side===THREE.DoubleSide), opacity:(m.opacity??1), invertRGB:false, whiteToAlpha:false, alphaTest:(m.alphaTest??0) });
+        }
+      });
+    } else {
+      const key = `${basePath}#0`;
+      materialKeyByMaterial.set(obj.material, key);
+      materialByKey.set(key, obj.material);
+      const m = obj.material; ensureMatRecord(m);
+      if(!matState.has(key)){
+        matState.set(key, { unlit:false, doubleSided:(m.side===THREE.DoubleSide), opacity:(m.opacity??1), invertRGB:false, whiteToAlpha:false, alphaTest:(m.alphaTest??0) });
+      }
+    }
+  });
+}
+function collectMaterials(){
+  materials=[]; 
+  const set = new Set();
+  if(!currentModel) return;
+
+  indexMaterialsByKey();
+  currentModel.traverse(obj=>{
+    const m=obj.material;
+    if(Array.isArray(m)){ m.forEach(mm=>{ if(mm && !set.has(mm)){ set.add(mm); materials.push(mm); ensureMatRecord(mm); } }); }
+    else if(m){ if(!set.has(m)){ set.add(m); materials.push(m); ensureMatRecord(m); } }
+  });
+
+  el.matSelect.innerHTML = '<option value="__all__">（全マテリアル：編集不可）</option>';
+  materials.forEach((m,idx)=>{
+    const key = materialKeyByMaterial.get(m);
+    if(!key) return;
+    const name = (m.name && m.name.trim()) ? m.name : `Material_${idx}`;
+    const opt=document.createElement('option'); 
+    opt.value=key;
+    opt.textContent=name;
+    el.matSelect.appendChild(opt);
+    if(!matState.has(key)){
+      matState.set(key, {
+        unlit:false,
+        doubleSided:(m.side===THREE.DoubleSide),
+        opacity:(m.opacity??1),
+        invertRGB:false,
+        whiteToAlpha:false,
+        alphaTest:(m.alphaTest??0)
+      });
+    }
+  });
+
+  if(el.matSelect.options.length>1){
+    el.matSelect.value = el.matSelect.options[1].value;
+  }else{
+    el.matSelect.value = '__all__';
+  }
+  applyMaterialUIFromSelection();
+}
+function getSelectedOriginalMaterial(){
+  const val=el.matSelect.value;
+  if(val==='__all__') return null;
+  return materialByKey.get(val) || null;
+}
+function applyMaterialUIFromSelection(){
+  const key = el.matSelect.value;
+  const disable = (key === '__all__');
+  ['matUnlit','matDoubleSided','matOpacity','matInvert','matWhiteTransparent','matThreshold']
+    .forEach(id=>{ document.getElementById(id).disabled = disable || viewOnly; });
+  if(disable) return;
+  const st = matState.get(key) || { unlit:false,doubleSided:false,opacity:1,invertRGB:false,whiteToAlpha:false,alphaTest:0 };
+  el.matUnlit.checked = !!st.unlit;
+  el.matDoubleSided.checked = !!st.doubleSided;
+  el.matOpacity.value = String(st.opacity ?? 1);
+  el.matOpacityVal.textContent = (Number(st.opacity ?? 1)).toFixed(2);
+  el.matInvert.checked = !!st.invertRGB;
+  el.matWhiteTransparent.checked = !!st.whiteToAlpha;
+  el.matThreshold.value = String(st.alphaTest ?? 0);
+  el.matThresholdVal.textContent = (Number(st.alphaTest ?? 0)).toFixed(2);
+}
+el.matSelect.addEventListener('change', ()=> applyMaterialUIFromSelection());
+
+async function applyMaterialFromUIToSelected(){
+  const orig = getSelectedOriginalMaterial();
+  if(!orig) return;
+  const key = materialKeyByMaterial.get(orig);
+  const st = matState.get(key) || {};
+  st.unlit = !!el.matUnlit.checked;
+  st.doubleSided = !!el.matDoubleSided.checked;
+  st.opacity = Number(el.matOpacity.value ?? 1);
+  st.invertRGB = !!el.matInvert.checked;
+  st.whiteToAlpha = !!el.matWhiteTransparent.checked;
+  st.alphaTest = Number(el.matThreshold.value ?? 0);
+  matState.set(key, st);
+  await applyStateToMaterial(orig, st);
+  renderNow();
+  debouncedSaveMaterials();
+}
+['change','input'].forEach(ev=>{
+  ['matUnlit','matDoubleSided','matOpacity','matInvert','matWhiteTransparent','matThreshold']
+    .forEach(id=> document.getElementById(id).addEventListener(ev, ()=> applyMaterialFromUIToSelected()));
+});
+el.matOpacity.addEventListener('input', ()=> el.matOpacityVal.textContent = parseFloat(el.matOpacity.value).toFixed(2));
+el.matThreshold.addEventListener('input', ()=> el.matThresholdVal.textContent = parseFloat(el.matThreshold.value).toFixed(2));
+
+function getActiveMaterialFor(originalM){
+  const rec = matOriginals.get(originalM);
+  return (rec && rec.wasUnlit && rec.unlitMat) ? rec.unlitMat : originalM;
+}
+function copyTextureParams(from, to){
+  to.wrapS = from.wrapS; to.wrapT = from.wrapT;
+  to.repeat.copy(from.repeat); to.offset.copy(from.offset);
+  to.center.copy(from.center); to.rotation = from.rotation;
+  to.flipY = from.flipY;
+  to.magFilter = from.magFilter; to.minFilter = from.minFilter;
+  to.generateMipmaps = from.generateMipmaps;
+  to.anisotropy = from.anisotropy;
+  to.colorSpace = from.colorSpace ?? THREE.SRGBColorSpace;
+}
+async function processTextureToCanvasTextureFromOriginal(originalTex, { invertRGB=false, alphaFromWhite=false, threshold=0 }){
+  if(!originalTex || !originalTex.image) return null;
+  const image = originalTex.image;
+  const w = image.width || image.videoWidth || 0;
+  const h = image.height || image.videoHeight || 0;
+  if(!w || !h) return null;
+  const canvas = document.createElement('canvas'); canvas.width = w; canvas.height = h;
+  const ctx = canvas.getContext('2d');
+  try{ ctx.drawImage(image, 0, 0, w, h); }
+  catch(e){ try{ const bmp = await createImageBitmap(image); ctx.drawImage(bmp,0,0,w,h); } catch(e2){ return null; } }
+  const img = ctx.getImageData(0,0,w,h); const data = img.data;
+  for(let i=0;i<data.length;i+=4){
+    let r=data[i], g=data[i+1], b=data[i+2], a=data[i+3];
+    if(invertRGB){ r=255-r; g=255-g; b=255-b; }
+    let alpha=a;
+    if(alphaFromWhite){
+      const L = (0.2126*r + 0.7152*g + 0.0722*b)/255;
+      let alf = 1 - L;
+      if(threshold>0){ alf = (alf >= threshold) ? alf : 0; }
+      alpha = Math.round(Math.min(1,Math.max(0,alf))*255);
+    }
+    data[i]=r; data[i+1]=g; data[i+2]=b; data[i+3]=alpha;
+  }
+  ctx.putImageData(img,0,0);
+  const ctex = new THREE.CanvasTexture(canvas);
+  copyTextureParams(originalTex, ctex);
+  ctex.needsUpdate = true;
+  return ctex;
+}
+async function applyStateToMaterial(origM, st){
+  ensureMatRecord(origM);
+  const rec = matOriginals.get(origM);
+
+  if(st.unlit && !rec.wasUnlit){
+    const active = getActiveMaterialFor(origM);
+    const um = new THREE.MeshBasicMaterial();
+    um.color = (active.color ? active.color.clone() : rec.color.clone());
+    um.map = active.map || rec.map || null;
+    um.transparent = active.transparent;
+    um.opacity = active.opacity;
+    um.alphaTest = active.alphaTest;
+    um.side = active.side;
+    um.depthWrite = active.depthWrite;
+    um.depthTest = active.depthTest;
+    um.blending = active.blending;
+    um.toneMapped = false;
+    rec.unlitMat = um; rec.wasUnlit = true;
+    currentModel.traverse(obj=>{
+      const m=obj.material;
+      if(m===origM || m===active){ obj.material = um; }
+      else if(Array.isArray(m)){ obj.material = m.map(x=> (x===origM||x===active)? um : x ); }
+    });
+  }else if(!st.unlit && rec.wasUnlit){
+    currentModel.traverse(obj=>{
+      const m=obj.material;
+      if(m===rec.unlitMat){ obj.material = origM; }
+      else if(Array.isArray(m)){ obj.material = m.map(x=> (x===rec.unlitMat)? origM : x ); }
+    });
+    rec.wasUnlit = false;
+  }
+
+  const mat = getActiveMaterialFor(origM);
+  mat.side = st.doubleSided ? THREE.DoubleSide : THREE.FrontSide;
+  const willTransparent = (st.whiteToAlpha || (st.opacity < 1.0));
+  mat.transparent = willTransparent;
+  mat.opacity = st.opacity ?? 1;
+  mat.alphaTest = st.alphaTest ?? 0;
+  mat.depthWrite = !mat.transparent || (mat.alphaTest>0);
+
+  if((st.invertRGB || st.whiteToAlpha) && matOriginals.get(origM).map){
+    try{
+      const processed = await processTextureToCanvasTextureFromOriginal(matOriginals.get(origM).map, { invertRGB: st.invertRGB, alphaFromWhite: st.whiteToAlpha, threshold: st.alphaTest||0 });
+      if(processed){ mat.map = processed; mat.map.needsUpdate = true; }
+    }catch(e){ console.warn('texture process failed', e); }
+  }else{
+    const rec0 = matOriginals.get(origM);
+    mat.map = rec0.map || null;
+    if(mat.map) mat.map.needsUpdate = true;
+  }
+  if(!mat.color && matOriginals.get(origM).color){ mat.color = matOriginals.get(origM).color.clone(); }
+  if(mat.color) mat.color.needsUpdate = true;
+  mat.needsUpdate = true;
+}
+
+/* ========= Camera views ========= */
+el.viewFront.addEventListener('click', ()=> { setNamedView('front'); debouncedSaveMaterials(); });
+el.viewBack.addEventListener('click',  ()=> { setNamedView('back');  debouncedSaveMaterials(); });
+el.viewLeft.addEventListener('click',  ()=> { setNamedView('left');  debouncedSaveMaterials(); });
+el.viewRight.addEventListener('click', ()=> { setNamedView('right'); debouncedSaveMaterials(); });
+el.viewTop.addEventListener('click',   ()=> { setNamedView('top');   debouncedSaveMaterials(); });
+el.viewBottom.addEventListener('click',()=> { setNamedView('bottom');debouncedSaveMaterials(); });
+
+function setNamedView(name){
+  const { radius } = sceneBounds();
+  const d = Math.max(radius*2.2, 1.5);
+  let dir = new THREE.Vector3(d,0,0);
+  switch(name){
+    case 'front': dir.set(d,0,0); break;
+    case 'back':  dir.set(-d,0,0); break;
+    case 'left':  dir.set(0,0,-d); break;
+    case 'right': dir.set(0,0,d); break;
+    case 'top':   dir.set(0,d,0); break;
+    case 'bottom':dir.set(0,-d,0); break;
+  }
+  const origin = new THREE.Vector3(0,0,0);
+  camera.position.copy(origin.clone().add(dir));
+  controls.target.copy(origin);
+  if(camera.isOrthographicCamera) fitOrthoFrustum();
+  controls.update(); renderNow();
+}
+
+/* ========= Sheets：同階層で作成/検索 ========= */
+async function findOrCreateSpreadsheetInGlbFolder(glbMeta){
+  if (!glbMeta || !glbMeta.id) throw new Error('GLBメタデータがありません');
+  const parents = glbMeta.parents || [];
+  let found = null;
+  for (const parent of (parents.length ? parents : ['root'])) {
+    const q = [
+      `'${parent}' in parents`,
+      `mimeType='application/vnd.google-apps.spreadsheet'`,
+      `trashed=false`,
+      `appProperties has { key='lociFor' and value='${glbMeta.id}' }`
+    ].join(' and ');
+    const resp = await gapi.client.drive.files.list({
+      q, fields: 'files(id,name)',
+      includeItemsFromAllDrives: true, supportsAllDrives: true, pageSize: 10,
+    });
+    if ((resp.result && resp.result.files && resp.result.files.length)) { found = resp.result.files[0]; break; }
+  }
+  if (found) return found.id;
+
+  const name = `LociMyu - ${glbMeta.name}`;
+  const create = await gapi.client.drive.files.create({
+    resource: {
+      name,
+      mimeType: 'application/vnd.google-apps.spreadsheet',
+      parents: (parents && parents.length) ? parents : undefined,
+      appProperties: { lociFor: glbMeta.id },
+    },
+    fields: 'id',
+    supportsAllDrives: true
+  });
+  const spreadsheetId = create.result.id;
+
+  await gapi.client.sheets.spreadsheets.batchUpdate({
+    spreadsheetId,
+    resource: {
+      requests: [
+        { updateSpreadsheetProperties: { properties: { title: name }, fields: 'title' } },
+        { addSheet: { properties: { title: 'pins' } } }
+      ]
+    }
+  });
+  await gapi.client.sheets.spreadsheets.values.update({
+    spreadsheetId, range: 'pins!A1',
+    valueInputOption:'RAW',
+    resource:{ values: [[ 'pin_id','title','body','x','y','z','color','images','updated_at' ]] }
+  });
+  return spreadsheetId;
+}
+
+/* ========= Meta（K/L列） 保存・復元 ========= */
+const META_MARKER_RANGE = ()=> `${activeSheet.title}!K1`;
+const META_MAT_KEY_RANGE = ()=> `${activeSheet.title}!K2:L2`;
+const META_VIEW_KEY_RANGE = ()=> `${activeSheet.title}!K3:L3`;
+
+function safeParseJSON(s, fallback){ try{ return s ? JSON.parse(s) : fallback; }catch{ return fallback; } }
+
+async function loadSheetMeta(spreadsheetId){
+  try{
+    const get = await gapi.client.sheets.spreadsheets.values.batchGet({
+      spreadsheetId,
+      ranges: [ META_MARKER_RANGE(), META_MAT_KEY_RANGE(), META_VIEW_KEY_RANGE() ]
+    });
+    const vals = (get.result.valueRanges || []).map(v=>v.values||[]);
+    const matJson = ((vals[1] && vals[1][0]) ? vals[1][0][1] : undefined) || '';
+    const viewJson = ((vals[2] && vals[2][0]) ? vals[2][0][1] : undefined) || '';
+    const m = safeParseJSON(matJson, null);
+    const materials = normalizeMaterialsJSON(m);
+    const viewer = safeParseJSON(viewJson, { version:1, bgColor:'#0a0f16', projection:'perspective' });
+    return { materials, viewer };
+  }catch(e){
+    console.warn('loadSheetMeta failed', e);
+    return { materials:{version:2,byKey:{}}, viewer:{version:1,bgColor:'#0a0f16',projection:'perspective'} };
+  }
+}
+function normalizeMaterialsJSON(m){
+  if(!m) return { version:2, byKey:{} };
+  if(m.version===2 && m.byKey) return m;
+  if(Array.isArray(m.items)){
+    const byKey = {};
+    m.items.forEach(it=>{
+      if(!it || !it.key) return;
+      byKey[it.key] = {
+        unlit: !!it.unlit,
+        doubleSided: !!it.doubleSided,
+        opacity: Number(it.opacity ?? 1),
+        invertRGB: !!it.invertRGB,
+        whiteToAlpha: !!it.whiteToAlpha,
+        alphaTest: Number(it.alphaTest ?? 0)
+      };
+    });
+    return { version:2, byKey };
+  }
+  return { version:2, byKey:{} };
+}
+async function saveSheetMeta(spreadsheetId, { materials, viewer }){
+  if(viewOnly) return;
+  const data = [
+    { range: META_MARKER_RANGE(), values: [[ 'LOCI_META_V1' ]] },
+    { range: META_MAT_KEY_RANGE(), values: [[ 'materials_json', JSON.stringify(materials) ]] },
+    { range: META_VIEW_KEY_RANGE(), values: [[ 'viewer_json', JSON.stringify(viewer) ]] },
+  ];
+  await gapi.client.sheets.spreadsheets.values.batchUpdate({
+    spreadsheetId,
+    valueInputOption:'RAW',
+    data
+  });
+}
+function serializeMaterialsForSheet(){
+  const byKey = {};
+  for(const [key, st] of matState){
+    if(materialByKey.has(key)){
+      byKey[key] = {
+        unlit: !!st.unlit,
+        doubleSided: !!st.doubleSided,
+        opacity: Number(st.opacity ?? 1),
+        invertRGB: !!st.invertRGB,
+        whiteToAlpha: !!st.whiteToAlpha,
+        alphaTest: Number(st.alphaTest ?? 0)
+      };
+    }
+  }
+  return { version:2, byKey };
+}
+function serializeViewerPrefs(){
+  return {
+    version: 1,
+    bgColor: el.bgColor.value || '#0a0f16',
+    projection: usingOrtho ? 'orthographic' : 'perspective'
+  };
+}
+async function applyMaterialsFromSheet(materialsData){
+  if(!materialsData || !materialsData.byKey) return;
+  for(const [key, st] of Object.entries(materialsData.byKey)){
+    matState.set(key, { ...st });
+  }
+  for(const [key, st] of matState){
+    const mat = materialByKey.get(key);
+    if(!mat) continue;
+    await applyStateToMaterial(mat, st);
+  }
+  applyMaterialUIFromSelection();
+  renderNow();
+}
+async function applyViewerPrefs(viewerData){
+  if(!viewerData) return;
+  if(viewerData.bgColor){
+    el.bgColor.value = viewerData.bgColor;
+    scene.background = new THREE.Color(viewerData.bgColor);
+  }
+  if(viewerData.projection){
+    const wantOrtho = (viewerData.projection === 'orthographic');
+    el.projOrtho.checked = wantOrtho;
+    toggleProjection(wantOrtho);
+  }
+  renderNow();
+}
+const debouncedSaveMaterials = debounce(async ()=>{
+  if(viewOnly) return;
+  const spreadsheetId = extractSpreadsheetId(el.inputSheet.value.trim());
+  if (!spreadsheetId || !activeSheet.sheetId) return;
+  const materialsData = serializeMaterialsForSheet();
+  const viewerData = serializeViewerPrefs();
+  try{ await saveSheetMeta(spreadsheetId, { materials: materialsData, viewer: viewerData }); }
+  catch(e){ console.warn('saveSheetMeta failed', e); }
+}, 600);
+el.bgColor.addEventListener('input', ()=>{ scene.background = new THREE.Color(el.bgColor.value); renderNow(); debouncedSaveMaterials(); });
+
+/* ========= Thumbs / Preview ========= */
+function renderThumbs(p){
+  const thumbs=el.thumbs; thumbs.innerHTML='';
+  ensureArray(p.images).forEach(async (ref, idx)=>{
+    const wrap=document.createElement('div'); wrap.className='thumb'; thumbs.appendChild(wrap);
+    const img=document.createElement('img'); img.alt = 'thumb';
+    const del=document.createElement('div'); del.className='del'; del.textContent='×'; del.title='この画像をキャプションから外す';
+    del.addEventListener('click', (ev)=>{
+      if(viewOnly) return;
+      ev.stopPropagation(); const wasPreview = (el.previewImg.src && el.previewImg.src === img.src);
+      p.images.splice(idx,1); renderThumbs(p);
+      if(wasPreview){ const next = p.images[0] || null; setPreview(next, p); }
+      upsertPinToSheet();
+    });
+    wrap.appendChild(img); wrap.appendChild(del);
+    try{
+      const src = await resolveImageObjectURL(ref, {preferThumb:true});
+      img.src = src;
+      img.addEventListener('click', async ()=>{ setPreview(ref, p); });
+    }catch{
+      wrap.classList.add('error'); wrap.title = '画像を読み込めませんでした';
+    }
+  });
+}
+
+/* ========= Caption bindings ========= */
+document.getElementById('btnSavePin').addEventListener('click', ()=> upsertPinToSheet());
+el.capTitle.addEventListener('input', ()=>{ const p=pins.find(x=>x.id===selectedPinId); if(p){ p.title=el.capTitle.value; refreshPinsList(); upsertPinToSheet(); updateViewerPreviewForPin(p); } });
+el.capBody.addEventListener('input',  ()=>{ const p=pins.find(x=>x.id===selectedPinId); if(p){ p.body=el.capBody.value; upsertPinToSheet(); updateViewerPreviewForPin(p); } });
+
+/* ========= Pin color presets ========= */
+const PRESET_LIST = ['#ff6b6b','#ffd166','#06d6a0','#118ab2','#ef476f','#b5179e','#4361ee','#4cc9f0','#ff9f1c'];
+function buildColorPresets(){
+  const holder = el.colorPresets; holder.innerHTML='';
+  PRESET_LIST.forEach(c=>{
+    const b=document.createElement('button');
+    b.style.width='18px'; b.style.height='18px';
+    b.style.borderRadius='999px'; b.style.border='2px solid #223146';
+    b.style.background=c; b.title=c;
+    b.addEventListener('click',()=>{
+      currentColor=c;
+      const pId=selectedPinId;
+      if(pId){
+        const p=pins.find(x=>x.id===pId);
+        p.color=normalizeHex(c);
+        placePinMesh(p);
+        refreshPinsList();
+        filterColors.add(p.color); // 新色を初期表示
+        buildColorFilter();
+        debouncedSave();
+      }
+    });
+    holder.appendChild(b);
+  });
+}
+buildColorPresets();
+
+function uniquePinColors(){ const set = new Set(); pins.forEach(p=> set.add(normalizeHex(p.color))); return Array.from(set); }
+function buildColorFilter(){
+  const list = el.colorFilterList; list.innerHTML='';
+  const colors = uniquePinColors().sort();
+  if(colors.length===0){ list.innerHTML = '<div class="small">ピンがありません</div>'; return; }
+  colors.forEach(c=>{
+    const row = document.createElement('label'); row.style.display='flex'; row.style.alignItems='center'; row.style.gap='8px'; row.style.margin='4px 0';
+    const sw = document.createElement('span'); sw.style.width='14px'; sw.style.height='14px'; sw.style.borderRadius='50%'; sw.style.border='2px solid #223146'; sw.style.display='inline-block'; sw.style.background=c;
+    const cb = document.createElement('input'); cb.type='checkbox'; cb.value=c; cb.checked = (filterColors.size===0 || filterColors.has(c));
+    const name = document.createElement('span'); name.textContent = c; name.className='small';
+    row.appendChild(cb); row.appendChild(sw); row.appendChild(name);
+    cb.addEventListener('change', ()=>{
+      if(cb.checked) filterColors.add(c); else filterColors.delete(c);
+      if(filterColors.size===0){ colors.forEach(k=> filterColors.add(k)); }
+      applyPinVisibilityFilter();
+    });
+    list.appendChild(row);
+  });
+  if(filterColors.size===0){ colors.forEach(k=> filterColors.add(k)); }
+  applyPinVisibilityFilter();
+}
+function pinPassesFilter(p){ if(filterColors.size===0) return true; return filterColors.has(normalizeHex(p.color)); }
+function applyPinVisibilityFilter(){
+  pins.forEach(p=>{ if(p.mesh){ p.mesh.visible = pinPassesFilter(p); } });
+  refreshPinsList(); renderNow();
+}
+el.btnColorFilter.addEventListener('click', ()=>{
+  el.colorFilterPanel.style.display = (el.colorFilterPanel.style.display==='none' || !el.colorFilterPanel.style.display) ? 'block' : 'none';
+});
+document.getElementById('btnFilterAll').addEventListener('click', ()=>{ filterColors.clear(); uniquePinColors().forEach(c=> filterColors.add(c)); buildColorFilter(); });
+document.getElementById('btnFilterNone').addEventListener('click', ()=>{ filterColors.clear(); applyPinVisibilityFilter(); buildColorFilter(); });
+document.getElementById('btnFilterClose').addEventListener('click', ()=> el.colorFilterPanel.style.display='none');
+
+function refreshPinsList(){
+  el.pinsList.innerHTML='';
+  pins.filter(pinPassesFilter).forEach(p=>{
+    const row=document.createElement('div'); row.className='row'; row.dataset.id=p.id;
+    const left=document.createElement('div'); left.style.display='flex'; left.style.alignItems='center'; left.style.gap='8px';
+    const dot=document.createElement('div'); dot.style.width='10px'; dot.style.height='10px'; dot.style.borderRadius='999px'; dot.style.background=p.color;
+    const title=document.createElement('div'); title.className='title'; title.textContent=p.title||'(無題)';
+    const meta=document.createElement('div'); meta.className='meta'; meta.textContent=`x:${p.pos.x.toFixed(2)} y:${p.pos.y.toFixed(2)} z:${p.pos.z.toFixed(2)}`;
+    left.appendChild(dot); left.appendChild(title);
+    row.appendChild(left); row.appendChild(meta);
+    row.addEventListener('click',()=>selectPin(p.id,{fly:true}));
+    el.pinsList.appendChild(row);
+  });
+}
+
+/* ========= Load/Save pins ========= */
+function rebuildPinsScene(){
+  pinGroup.children.slice().forEach(ch=> pinGroup.remove(ch));
+  pins.forEach(p=> placePinMesh(p));
+  if(tcontrols.visible && selectedPinId){
+    const p=pins.find(x=>x.id===selectedPinId);
+    if((p && p.mesh)) tcontrols.attach(p.mesh); else tcontrols.detach();
+  }
+  renderNow();
+}
+async function loadPinsFromActiveSheet(spreadsheetId){
+  pins=[]; selectedPinId=null; el.rightEditor.classList.add('hidden'); el.rightNoSel.classList.remove('hidden');
+  try{
+    const resp = await gapi.client.sheets.spreadsheets.values.get({
+      spreadsheetId, range: `${activeSheet.title}!A2:I`
+    });
+    const rows = resp.result.values || [];
+    rows.forEach(r=>{
+      const [pid, title, body, x, y, z, color, imagesJson] = r;
+      const p = {
+        id: pid || `p_${Math.random().toString(36).slice(2)}`,
+        title: title || '',
+        body: body || '',
+        pos: new THREE.Vector3(parseFloat(x)||0, parseFloat(y)||0, parseFloat(z)||0),
+        color: normalizeHex(color || '#ff6b6b'),
+        images: [],
+        mesh: null
+      };
+      try{ p.images = JSON.parse(imagesJson||'[]'); }catch{ p.images = []; }
+      pins.push(p);
+    });
+    rebuildPinsScene();
+    refreshPinsList();
+    buildColorFilter();
+
+    const meta = await loadSheetMeta(spreadsheetId);
+    await applyMaterialsFromSheet(meta.materials);
+    await applyViewerPrefs(meta.viewer);
+    applyMaterialUIFromSelection();
+  }catch(e){ console.error('loadPinsFromActiveSheet failed', e); }
+}
+async function upsertPinToSheet(){
+  if(viewOnly) return;
+  const spreadsheetId = extractSpreadsheetId(el.inputSheet.value.trim()); if(!spreadsheetId) return;
+  const p = pins.find(x=>x.id===selectedPinId) || pins[pins.length-1]; if(!p) return;
+  try{
+    const col = await gapi.client.sheets.spreadsheets.values.get({ spreadsheetId, range: `${activeSheet.title}!A:A` });
+    const rows = col.result.values || [];
+    let rowIndex = -1;
+    for(let i=0;i<rows.length;i++){ if(rows[i][0]===p.id){ rowIndex=i; break; } }
+    const values = [[ p.id, p.title||'', p.body||'', p.pos.x, p.pos.y, p.pos.z, p.color, JSON.stringify(ensureArray(p.images)), new Date().toISOString() ]];
+    if(rowIndex>=0){
+      const range = `${activeSheet.title}!A${rowIndex+1}:I${rowIndex+1}`;
+      await gapi.client.sheets.spreadsheets.values.update({ spreadsheetId, range, valueInputOption:'RAW', resource:{ values } });
+    }else{
+      await gapi.client.sheets.spreadsheets.values.append({ spreadsheetId, range: `${activeSheet.title}!A1`, valueInputOption:'RAW', resource:{ values } });
+    }
+  }catch(e){ console.error(e); }
+}
+async function deletePinFromActiveSheet(spreadsheetId, pinId){
+  const col = await gapi.client.sheets.spreadsheets.values.get({ spreadsheetId, range: `${activeSheet.title}!A:A` });
+  const rows = col.result.values || [];
+  let rowIndex = -1;
+  for(let i=0;i<rows.length;i++){ if(rows[i][0]===pinId){ rowIndex=i; break; } }
+  if(rowIndex<0) return;
+  await gapi.client.sheets.spreadsheets.batchUpdate({
+    spreadsheetId,
+    resource:{
+      requests:[{ deleteDimension:{
+        range:{ sheetId: activeSheet.sheetId, dimension:'ROWS', startIndex:rowIndex, endIndex:rowIndex+1 }
+      }}]
+    }
+  });
+}
+
+/* ========= Attach / Upload ========= */
+el.btnAttach.addEventListener('click', async ()=>{
+  if(viewOnly) return;
+  const fileInput = el.imgLocal;
+  fileInput.value = '';
+  fileInput.onchange = async ()=>{
+    const file = (fileInput.files && fileInput.files[0]);
+    const p = pins.find(x=>x.id===selectedPinId);
+    if(!file || !p){ return; }
+    try{
+      const blob = await toUploadableBlob(file);
+      const uploaded = await driveMultipartUpload(blob, sanitizeName(file.name), glbParents);
+      const ref = makeDriveRef(uploaded.id, blob.type || 'image/jpeg');
+      p.images = ensureArray(p.images); p.images.push(ref);
+      renderThumbs(p);
+      setPreview(ref, p);
+      toast('画像をアップロードしました');
+      upsertPinToSheet();
+    }catch(err){ console.error(err); alert('画像アップロードに失敗しました'); }
+  };
+  fileInput.click();
+});
+function sanitizeName(n){ return n.replace(/[^\p{Letter}\p{Number}\s._-]+/gu,'_'); }
+async function toUploadableBlob(file){
+  const ext = (file.name.split('.').pop()||'').toLowerCase();
+  if(ext==='heic' || ext==='heif'){
+    const ok = await ensureHeic2any();
+    if(!ok) throw new Error('heic2any unavailable');
+    const jpegBlob = await window.heic2any({ blob:file, toType:'image/jpeg', quality:0.95 });
+    return Array.isArray(jpegBlob) ? jpegBlob[0] : jpegBlob;
+  }
+  return file;
+}
+async function driveMultipartUpload(blob, name, parents){
+  const meta = { name, parents: parents && parents.length ? parents : undefined };
+  const boundary = '-------loci' + Math.random().toString(36).slice(2);
+  const bufMeta = new TextEncoder().encode(`\r\n--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(meta)}\r\n\r\n--${boundary}\r\nContent-Type: ${blob.type || 'application/octet-stream'}\r\n\r\n`);
+  const bufTail = new TextEncoder().encode(`\r\n--${boundary}--`);
+  const stream = new Blob([ bufMeta, blob, bufTail ], { type: 'multipart/related; boundary='+boundary });
+  const res = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&supportsAllDrives=true', {
+    method: 'POST',
+    headers: { 'Authorization': 'Bearer ' + accessToken },
+    body: stream
+  });
+  if(!res.ok) throw new Error('Drive upload failed ' + res.status);
+  return await res.json();
+}
+
+/* ========= Folder Picker ========= */
+el.btnPickFromFolder.addEventListener('click', openPickerModal);
+el.btnPickerClose.addEventListener('click', ()=> el.pickerModal.style.display='none');
+el.btnPickerReload.addEventListener('click', loadFolderImages);
+
+async function openPickerModal(){
+  if(!glbParents || !glbParents.length){ alert('GLBの親フォルダが不明です。先にGLBを読み込んでください。'); return; }
+  await loadFolderImages();
+  el.pickerModal.style.display='grid';
+}
+async function loadFolderImages(){
+  if(!accessToken){ alert('先にサインインしてください'); return; }
+  el.pickerGrid.innerHTML = '<div class="small">読み込み中…</div>';
+  const cells = [];
+  try{
+    for(const parent of glbParents){
+      const q = `'${parent}' in parents and trashed=false and (mimeType contains 'image/')`;
+      const resp = await gapi.client.drive.files.list({
+        q, pageSize: 200,
+        fields: 'files(id,name,mimeType,fileExtension,hasThumbnail,thumbnailLink)',
+        includeItemsFromAllDrives: true,
+        supportsAllDrives: true
+      });
+      const files = resp.result.files || [];
+      for(const f of files){
+        const id = f.id;
+        const mime = f.mimeType || '';
+        const isHeic = isHeicMimeOrExt(mime, f.fileExtension);
+        const ref = makeDriveRef(id, mime);
+        const cell = document.createElement('div'); cell.style.background='#0c1118'; cell.style.border='1px solid #223146'; cell.style.borderRadius='12px'; cell.style.padding='8px'; cell.style.cursor='pointer'; cell.style.display='flex'; cell.style.flexDirection='column'; cell.style.gap='6px';
+        const img = document.createElement('img'); img.alt = f.name; img.style.width='100%'; img.style.height='110px'; img.style.objectFit='cover'; img.style.borderRadius='8px';
+        const tag = document.createElement('div'); tag.className='small'; tag.textContent = isHeic ? 'HEIC/HEIF (変換/サムネ表示)' : (mime||'image');
+        const cap = document.createElement('div'); cap.textContent = f.name; cap.className='small';
+
+        let usedFallback = false;
+        if(f.hasThumbnail && f.thumbnailLink){
+          const hi = upscaleThumbnailUrl(f.thumbnailLink, isHeic? 1024 : 512);
+          const sep = hi.includes('?') ? '&' : '?';
+          img.src = hi + sep + 'access_token=' + encodeURIComponent(accessToken);
+          img.onerror = async ()=>{
+            usedFallback = true;
+            try{
+              const url = await resolveImageObjectURL(ref, {preferThumb:true});
+              img.src = url;
+            }catch{ cell.style.opacity='.5'; cell.style.pointerEvents='none'; }
+          };
+        }else{
+          try{
+            const url = await resolveImageObjectURL(ref, {preferThumb:true});
+            img.src = url;
+          }catch{ cell.style.opacity='.5'; cell.style.pointerEvents='none'; }
+        }
+
+        img.onerror = ()=>{ if(!usedFallback){ cell.style.opacity='.5'; cell.style.pointerEvents='none'; } };
+        cell.appendChild(img); cell.appendChild(cap); cell.appendChild(tag);
+        cell.addEventListener('click', ()=>{ if(cell.style.pointerEvents==='none') return; chooseFolderImage(ref); });
+        cells.push(cell);
+      }
+    }
+    el.pickerGrid.innerHTML='';
+    if(!cells.length){
+      el.pickerGrid.innerHTML = '<div class="small">フォルダに画像が見つかりませんでした。</div>';
+    }else{
+      cells.forEach(c=> el.pickerGrid.appendChild(c));
+    }
+  }catch(e){
+    console.error(e);
+    el.pickerGrid.innerHTML = '<div class="small">読み込みに失敗しました。</div>';
+  }
+}
+function chooseFolderImage(ref){
+  el.pickerModal.style.display='none';
+  const p = pins.find(x=>x.id===selectedPinId);
+  if(!p){ alert('先にピンを選択してください'); return; }
+  p.images = ensureArray(p.images); p.images.push(ref);
+  renderThumbs(p);
+  setPreview(ref, p);
+  upsertPinToSheet();
+}
+
+/* ========= Caption Lists ========= */
+async function refreshCaptionLists(spreadsheetId){
+  const resp = await gapi.client.sheets.spreadsheets.get({
+    spreadsheetId,
+    fields: 'sheets(properties(sheetId,title,index))'
+  });
+  const sheets = (resp.result.sheets || []).map(s => s.properties);
+  el.listSelect.innerHTML = '';
+  sheets.forEach(p => {
+    const o = document.createElement('option');
+    o.value = String(p.sheetId);
+    o.textContent = p.title;
+    el.listSelect.appendChild(o);
+  });
+  let pick = sheets.find(s => s.title === 'pins') || sheets[0];
+  if (!activeSheet.sheetId) {
+    if (pick){ activeSheet = { sheetId: pick.sheetId, title: pick.title }; }
+  } else {
+    const same = sheets.find(s => s.sheetId === activeSheet.sheetId);
+    if (!same) {
+      pick = sheets.find(s => s.title === 'pins') || sheets[0];
+      if (pick){ activeSheet = { sheetId: pick.sheetId, title: pick.title }; }
+    } else {
+      activeSheet.title = same.title;
+    }
+  }
+  if (activeSheet.sheetId){ el.listSelect.value = String(activeSheet.sheetId); }
+  if(!viewOnly){ ['listNew','listDelete'].forEach(id=>document.getElementById(id).disabled=false); }
+}
+el.listSelect.addEventListener('change', async (e)=>{
+  const spreadsheetId = extractSpreadsheetId(el.inputSheet.value.trim());
+  if(!spreadsheetId) return;
+  const sheetId = Number(e.target.value);
+  const title = e.target.options[e.target.selectedIndex].textContent;
+  activeSheet = { sheetId, title };
+  await loadPinsFromActiveSheet(spreadsheetId);
+  toast(`キャプションリストを切替: ${title}`);
+});
+el.listNew.addEventListener('click', async ()=>{
+  if(viewOnly) return;
+  const spreadsheetId = extractSpreadsheetId(el.inputSheet.value.trim());
+  if(!spreadsheetId) return;
+  const title = prompt('新しいキャプションリスト名を入力', `pins_${Date.now().toString().slice(-5)}`);
+  if(!title) return;
+  const add = await gapi.client.sheets.spreadsheets.batchUpdate({
+    spreadsheetId,
+    resource:{ requests:[ { addSheet:{ properties:{ title } } } ] }
+  });
+  const newSheetId = add.result.replies[0].addSheet.properties.sheetId;
+  await gapi.client.sheets.spreadsheets.values.update({
+    spreadsheetId, range: `${title}!A1`,
+    valueInputOption:'RAW',
+    resource:{ values: [[ 'pin_id','title','body','x','y','z','color','images','updated_at' ]] }
+  });
+  await refreshCaptionLists(spreadsheetId);
+  activeSheet = { sheetId: newSheetId, title };
+  el.listSelect.value = String(newSheetId);
+  pins = []; selectedPinId = null; rebuildPinsScene(); refreshPinsList();
+
+  await saveSheetMeta(spreadsheetId, {
+    materials: {version:2, byKey:{}},
+    viewer: {version:1, bgColor: el.bgColor.value || '#0a0f16', projection: usingOrtho ? 'orthographic' : 'perspective' }
+  });
+
+  toast(`新しいリストを作成: ${title}`);
+});
+el.listDelete.addEventListener('click', async ()=>{
+  if(viewOnly) return;
+  const spreadsheetId = extractSpreadsheetId(el.inputSheet.value.trim());
+  if(!spreadsheetId || !activeSheet.sheetId) return;
+  const g = await gapi.client.sheets.spreadsheets.get({ spreadsheetId, fields: 'sheets(properties(sheetId))' });
+  const count = (g.result.sheets||[]).length;
+  if(count <= 1){ alert('最後のシートは削除できません'); return; }
+  if(!confirm(`キャプションリスト「${activeSheet.title}」を削除しますか？`)) return;
+  await gapi.client.sheets.spreadsheets.batchUpdate({
+    spreadsheetId,
+    resource:{ requests:[ { deleteSheet:{ sheetId: activeSheet.sheetId } } ] }
+  });
+  await refreshCaptionLists(spreadsheetId);
+  await loadPinsFromActiveSheet(spreadsheetId);
+  toast('リストを削除しました');
+});
+
+/* ========= Buttons ========= */
+el.btnLoad.addEventListener('click', async ()=>{
+  const raw = el.inputGLB.value.trim();
+  const fid = extractDriveFileId(raw);
+  if(!fid){
+    alert('GLBの FileId/URL を正しく指定してください。\n\nヒント: 共有URLのまま貼付でOKです。ID単体の場合は30文字以上で、末尾が _ で終わっていない完全なIDを指定してください。');
+    return;
+  }
+  el.inputGLB.value = fid;
+  await loadGLBByFileId(fid);
+});
+el.btnViewOnly.addEventListener('click', ()=>{
+  const fid = extractDriveFileId(el.inputGLB.value.trim());
+  const sid = extractSpreadsheetId(el.inputSheet.value.trim());
+  const url = new URL(location.href);
+  if (fid) url.searchParams.set('fileId', fid);
+  if (sid) url.searchParams.set('sheetId', sid);
+  url.searchParams.set('view', '1');
+  navigator.clipboard.writeText(url.toString());
+  toast('閲覧リンクをコピーしました');
+});
+el.btnWide.addEventListener('click', ()=>{
+  document.body.classList.toggle('wide');
+  el.btnWide.textContent = document.body.classList.contains('wide') ? '📋 パネル表示' : '📺 ビューア拡大';
+  setTimeout(()=>{ resize(); updateConnector(); }, 50);
+});
+el.btnTogglePins.addEventListener('click', ()=>{
+  pinGroup.visible = !pinGroup.visible;
+  el.btnTogglePins.textContent = 'ピン表示: ' + (pinGroup.visible? 'ON' : 'OFF');
+  applyPinVisibilityFilter(); renderNow();
+});
+el.btnAddPin.addEventListener('click', ()=>{
+  if(viewOnly) return;
+  addPinMode = !addPinMode;
+  el.viewerCanvas.style.cursor = addPinMode ? 'crosshair' : 'default';
+  el.modeLabel.textContent = addPinMode ? 'AddPin' : 'Orbit';
+  el.btnAddPin.textContent = addPinMode ? '＋ ピン追加: ON' : '＋ ピン追加モード';
+});
+el.btnGizmo.addEventListener('click', ()=>{
+  if(viewOnly) return;
+  const enable = !tcontrols.visible;
+  tcontrols.visible = enable; tcontrols.enabled = enable;
+  el.btnGizmo.textContent = 'ギズモ: ' + (enable ? 'ON' : 'OFF');
+  const p = pins.find(x=>x.id===selectedPinId);
+  if(enable && p && p.mesh){ tcontrols.attach(p.mesh); }
+  else{ tcontrols.detach(); }
+});
+el.btnUndo.addEventListener('click', ()=>{
+  if(viewOnly) return;
+  const last = undoStack.pop(); if(!last) return;
+  if(last.type==='add'){ const idx = pins.findIndex(p=>p.id===last.id); if(idx>=0){ const pin = pins[idx]; if(pin.mesh) pinGroup.remove(pin.mesh); pins.splice(idx,1); refreshPinsList(); renderNow(); upsertPinToSheet(); } }
+});
+el.btnDeletePin.addEventListener('click', async ()=>{
+  if(viewOnly) return;
+  const p = pins.find(x=>x.id===selectedPinId); if(!p) return;
+  const spreadsheetId = extractSpreadsheetId(el.inputSheet.value.trim());
+  if(p.mesh) pinGroup.remove(p.mesh);
+  pins = pins.filter(x=>x.id!==p.id);
+  selectedPinId = null;
+  refreshPinsList(); updateViewerPreviewForPin(null); el.rightEditor.classList.add('hidden'); el.rightNoSel.classList.remove('hidden');
+  renderNow();
+  if(spreadsheetId){ try{ await deletePinFromActiveSheet(spreadsheetId, p.id); }catch(e){ console.error(e); } }
+});
+
+
+/* ========= GLB Load from URL ========= */
+async function loadGLBFromURL(url, opts={}){
+  try{
+    if(!loader) loader = new GLTFLoader();
+    // cleanup previous model
+    if(currentModel){
+      try{
+        scene.remove(currentModel);
+        currentModel.traverse(obj=>{
+          if(obj.geometry) obj.geometry.dispose();
+          if(obj.material){
+            const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+            mats.forEach(m=>{
+              try{
+                if(m.map) m.map.dispose();
+                if(m.normalMap) m.normalMap.dispose();
+                if(m.roughnessMap) m.roughnessMap.dispose();
+                if(m.metalnessMap) m.metalnessMap.dispose();
+                if(m.aoMap) m.aoMap.dispose();
+                if(m.emissiveMap) m.emissiveMap.dispose();
+                m.dispose && m.dispose();
+              }catch(_){}
+            });
+          }
+        });
+      }catch(_){}
+      currentModel = null;
+    }
+    const gltf = await loader.loadAsync(url);
+    const root = gltf.scene || (gltf.scenes && gltf.scenes[0]);
+    if(!root) throw new Error('GLB has no scene');
+    currentModel = root;
+    scene.add(root);
+    // reset pins group above model if needed
+    if(pinGroup) scene.add(pinGroup);
+    // collect materials/UI refresh
+    try{ collectMaterials(); }catch(_){}
+    try{ focusOrigin(); }catch(_){}
+    try{ if(window.M3DUI && typeof window.M3DUI.modelLoaded==='function') window.M3DUI.modelLoaded(); }catch(_){}
+    return root;
+  }catch(e){
+    console.error('loadGLBFromURL failed', e);
+    throw e;
+  }
+}
+
+/* ========= GLB Load (LOW-MEM for iOS) ========= */
+
+
+async function loadGLBByFileId(fileId){
+  try{
+    const tokenObj = (window.gapi && gapi.client && gapi.client.getToken && gapi.client.getToken()) || null;
+    const token = (tokenObj && tokenObj.access_token) || window.accessToken || '';
+    if(!token){ alert('サインインしてください'); return; }
+
+    // 1) Fetch Drive metadata (need parents to locate spreadsheet)
+    let meta = null;
+    try{
+      const r = await gapi.client.drive.files.get({
+        fileId, fields: 'id,name,mimeType,parents', supportsAllDrives: true
+      });
+      meta = r.result;
+    }catch(e){
+      console.warn('meta fetch failed (non-fatal)', e);
+    }
+
+    // 2) Download GLB binary with Bearer
+    const url = `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?alt=media&supportsAllDrives=true`;
+    const res = await fetch(url, { headers: { 'Authorization': 'Bearer ' + token } });
+    if(!res.ok){
+      const txt = await res.text().catch(()=>'');
+      throw new Error('GLB download failed: ' + res.status + ' ' + txt + '
+
+IDが正しいか確認してください。共有URLのコピペ、または30文字以上の完全なFileIdを貼り付けてください。');
+    }
+    const blob = await res.blob();
+    const objUrl = URL.createObjectURL(blob);
+    try{
+      await loadGLBFromURL(objUrl, {name: (meta && meta.name) || 'model.glb'});
+    }finally{
+      URL.revokeObjectURL(objUrl);
+    }
+
+    // 3) Spreadsheetを確定してピン読み込み
+    try{
+      const spreadsheetId = await findOrCreateSpreadsheetInGlbFolder(meta || {id:fileId, name:'model'});
+      if (spreadsheetId){
+        if (el && el.inputSheet) el.inputSheet.value = spreadsheetId;
+        await loadPinsFromActiveSheet(spreadsheetId);
+      }
+    }catch(e){
+      console.warn('pin spreadsheet resolve failed', e);
+    }
+  }catch(e){
+    console.error('loadGLBByFileId failed', e);
+    alert('GLBの読み込みに失敗しました: ' + (e && e.message ? e.message : e));
+  }
+}
+
+
+
+/* ========= Save viewer prefs ========= */
+['viewFront','viewBack','viewLeft','viewRight','viewTop','viewBottom'].forEach(id=>{
+  document.getElementById(id).addEventListener('click', ()=> debouncedSaveMaterials());
+});
+
+/* ========= Entry ========= */
+function buildColorPresetsOnce(){
+  el.colorPresets.innerHTML='';
+  PRESET_COLORS.forEach(c=>{
+    const b=document.createElement('button');
+    b.style.width='18px'; b.style.height='18px';
+    b.style.borderRadius='999px'; b.style.border='2px solid #223146';
+    b.style.background=c; b.title=c;
+    b.addEventListener('click',()=>{
+      currentColor=c;
+      if(selectedPinId){
+        const p=pins.find(x=>x.id===selectedPinId);
+        p.color=normalizeHex(c);
+        placePinMesh(p);
+        refreshPinsList();
+        filterColors.add(p.color);
+        buildColorFilter();
+        debouncedSave();
+      }
+    });
+    el.colorPresets.appendChild(b);
+  });
+}
+buildColorPresetsOnce();
+
+function viewerInitWrap(){ viewerInit(); }
+viewerInitWrap();
+
+</script>
 <!-- M3D vNext UI containers -->
 <div id="m3d-caption-layer" aria-label="caption overlay layer" hidden></div>
 <div id="m3d-mobile-caption" aria-label="mobile caption panel" hidden>
@@ -346,10 +1924,181 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';</script>
 
   function $(id){ return document.getElementById(id); }
   function isMobile(){
-    try{ return window.matchMedia("(max-width: 900px)").matches; }\n    catch(e){ return (window.innerWidth||1024) <= 900; }\n  }\n\n  var state = { desktopWindows:{}, activePin:null };\n\n  function ensureRoot(){\n    document.body.classList.add('m3d-ui-vnext');\n    var overlay = $("m3d-caption-layer");\n    var mcap    = $("m3d-mobile-caption");\n    var viewer  = $("viewer");\n    // keep hidden until first use\n    /* if (overlay) overlay.hidden = false;\n    if (mcap)    mcap.hidden = false; */\n    if (viewer){\n      if (getComputedStyle(viewer).position === 'static'){ viewer.style.position = 'relative'; }\n      // ensure overlay is a child of #viewer for proper absolute positioning\n      if (overlay && overlay.parentElement !== viewer){ viewer.appendChild(overlay); }\n      // on mobile, place mobile caption just after viewer\n      if (isMobile() && mcap && mcap.parentElement !== viewer.parentElement){\n        viewer.parentElement.insertBefore(mcap, viewer.nextSibling);\n      }\n    }\n  }\n\n  function makeDraggable(handle, target){\n    var sx=0, sy=0, ox=0, oy=0, dragging=false;\n    handle.addEventListener('mousedown', function(e){\n      dragging=true; sx=e.clientX; sy=e.clientY;\n      var r = target.getBoundingClientRect(); ox=r.left + window.scrollX; oy=r.top + window.scrollY;\n      e.preventDefault();\n    });\n    document.addEventListener('mousemove', function(e){\n      if(!dragging) return;\n      var dx=e.clientX-sx, dy=e.clientY-sy;\n      target.style.left = (ox+dx) + 'px';\n      target.style.top  = (oy+dy) + 'px';\n    });\n    document.addEventListener('mouseup', function(){ dragging=false; });\n  }\n\n  function createCapWindow(pin){\n    try{ if(!(window.M3DUI && window.M3DUI.__modelReady)) return null; }catch(_){ return null; }\n    var overlay = $("m3d-caption-layer");\n    if(!overlay) return null;\n    overlay.hidden = false;\n    var div = document.createElement('div');\n    div.className = 'm3d-capwin';\n    div.style.left = (24 + Math.floor(Math.random()*60)) + 'px';\n    div.style.top  = (24 + Math.floor(Math.random()*40)) + 'px';\n\n    var bar = document.createElement('div'); bar.className = 'm3d-capwin__titlebar';\n    var title = document.createElement('div'); title.textContent = (pin && pin.title) ? pin.title : 'キャプション';\n    var btnX = document.createElement('button'); btnX.className='m3d-capwin__close'; btnX.textContent='✕';\n    btnX.addEventListener('click', function(){ if(div.parentElement) div.parentElement.removeChild(div); });\n    bar.appendChild(title); bar.appendChild(btnX);\n    div.appendChild(bar);\n\n    var body = document.createElement('div'); body.className='m3d-capwin__body';\n    if(pin && pin.img){\n      var img = document.createElement('img'); img.className='m3d-capwin__img'; img.src=pin.img; img.alt='caption image';\n      body.appendChild(img);\n      var act = document.createElement('div'); act.className='m3d-capwin__actions';\n      var a = document.createElement('a'); a.href=pin.img; a.target='_blank'; a.rel='noopener'; a.textContent='元画像を開く';\n      act.appendChild(a); body.appendChild(act);\n    }else{\n      var ph = document.createElement('div'); ph.className='m3d-cap__placeholder'; ph.textContent='画像が設定されていません';\n      body.appendChild(ph);\n    }\n    var meta = document.createElement('div'); meta.className='m3d-capwin__meta'; meta.textContent = (pin && pin.id) ? ('#'+pin.id) : '';\n    body.appendChild(meta);\n    var text = document.createElement('div'); text.textContent = (pin && pin.body) ? pin.body : '';\n    body.appendChild(text);\n\n    div.appendChild(body);\n    overlay.appendChild(div);\n    makeDraggable(bar, div);\n    return div;\n  }\n\n  function showMobileCaption(pin){\n    var panel = $("m3d-mobile-caption"); if(!panel) return;\n    var t=$("m3d-mcap-title"), b=$("m3d-mcap-body"), img=$("m3d-mcap-img"), ph=$("m3d-mcap-ph"), acts=$("m3d-mcap-actions");\n    t.textContent = (pin && pin.title) ? pin.title : 'キャプション';\n    b.textContent = (pin && pin.body)  ? pin.body  : ';\n    acts.innerHTML = ';\n    if(pin && pin.img){\n      img.src = pin.img; img.style.display='block'; ph.style.display='none';\n      var a = document.createElement('a'); a.href=pin.img; a.target='_blank'; a.rel='noopener'; a.textContent='元画像を開く';\n      acts.appendChild(a);\n    }else{\n      img.removeAttribute('src'); img.style.display='none'; ph.style.display='flex';\n    }\n    try{\n      var viewer=$("viewer");\n      if(viewer){\n        var vw = viewer.clientWidth || window.innerWidth || 360;\n        var vh = viewer.clientHeight|| Math.max(320, Math.floor((window.innerHeight||640)*0.6));\n        img.style.maxWidth  = Math.round(vw*0.5) + 'px';\n        img.style.maxHeight = Math.round(vh*0.4) + 'px';\n      }\n    }catch(_){}\n  }\n\n  function readCurrentPinFromLegacy(){\n    var imgEl = document.getElementById('previewImg');\n    var title = (document.getElementById('capTitleLine')||{}).textContent || '';\n    var body  = (document.getElementById('capBodyLine')||{}).textContent || ';\n    var id    = (window.currentPin && window.currentPin.id) || ';\n    var src   = (imgEl && imgEl.src) || ';\n    var hasImg= !!(imgEl && imgEl.naturalWidth);\n    return { id:id||', title:title||', body:body||', img: hasImg ? src : '' };\n  }\n\n  function onPinSelected(pinLike){\n    var pin = pinLike || readCurrentPinFromLegacy();\n    state.activePin = pin;\n    if (isMobile()){ showMobileCaption(pin); }\n    else { createCapWindow(pin); }\n  }\n\n  window.M3DUI = { __ready:true, onPinSelected:onPinSelected, showMobileCaption:showMobileCaption, createCapWindow:createCapWindow };\n\n  document.addEventListener('DOMContentLoaded', function(){\n    ensureRoot();\n    if (typeof window.selectPin === 'function'){\n      var orig = window.selectPin;\n      window.selectPin = function(){\n        try{ orig.apply(this, arguments); }catch(e){ console.warn(e); }\n        try{ if(window.M3DUI && window.M3DUI.onPinSelected) window.M3DUI.onPinSelected(); }catch(e){ console.warn(e); }\n      };\n    }\n    });window.addEventListener('resize', function(){\n    try{ if (isMobile() && state.activePin) showMobileCaption(state.activePin); }catch(_){}\n  });\n})();\n</script>
+    try{ return window.matchMedia("(max-width: 900px)").matches; }
+    catch(e){ return (window.innerWidth||1024) <= 900; }
+  }
+
+  var state = { desktopWindows:{}, activePin:null };
+
+  function ensureRoot(){
+    document.body.classList.add('m3d-ui-vnext');
+    var overlay = $("m3d-caption-layer");
+    var mcap    = $("m3d-mobile-caption");
+    var viewer  = $("viewer");
+    // keep hidden until first use
+    /* if (overlay) overlay.hidden = false;
+    if (mcap)    mcap.hidden = false; */
+    if (viewer){
+      if (getComputedStyle(viewer).position === 'static'){ viewer.style.position = 'relative'; }
+      // ensure overlay is a child of #viewer for proper absolute positioning
+      if (overlay && overlay.parentElement !== viewer){ viewer.appendChild(overlay); }
+      // on mobile, place mobile caption just after viewer
+      if (isMobile() && mcap && mcap.parentElement !== viewer.parentElement){
+        viewer.parentElement.insertBefore(mcap, viewer.nextSibling);
+      }
+    }
+  }
+
+  function makeDraggable(handle, target){
+    var sx=0, sy=0, ox=0, oy=0, dragging=false;
+    handle.addEventListener('mousedown', function(e){
+      dragging=true; sx=e.clientX; sy=e.clientY;
+      var r = target.getBoundingClientRect(); ox=r.left + window.scrollX; oy=r.top + window.scrollY;
+      e.preventDefault();
+    });
+    document.addEventListener('mousemove', function(e){
+      if(!dragging) return;
+      var dx=e.clientX-sx, dy=e.clientY-sy;
+      target.style.left = (ox+dx) + 'px';
+      target.style.top  = (oy+dy) + 'px';
+    });
+    document.addEventListener('mouseup', function(){ dragging=false; });
+  }
+
+  function createCapWindow(pin){
+    try{ if(!(window.M3DUI && window.M3DUI.__modelReady)) return null; }catch(_){ return null; }
+    var overlay = $("m3d-caption-layer");
+    if(!overlay) return null;
+    overlay.hidden = false;
+    var div = document.createElement('div');
+    div.className = 'm3d-capwin';
+    div.style.left = (24 + Math.floor(Math.random()*60)) + 'px';
+    div.style.top  = (24 + Math.floor(Math.random()*40)) + 'px';
+
+    var bar = document.createElement('div'); bar.className = 'm3d-capwin__titlebar';
+    var title = document.createElement('div'); title.textContent = (pin && pin.title) ? pin.title : 'キャプション';
+    var btnX = document.createElement('button'); btnX.className='m3d-capwin__close'; btnX.textContent='✕';
+    btnX.addEventListener('click', function(){ if(div.parentElement) div.parentElement.removeChild(div); });
+    bar.appendChild(title); bar.appendChild(btnX);
+    div.appendChild(bar);
+
+    var body = document.createElement('div'); body.className='m3d-capwin__body';
+    if(pin && pin.img){
+      var img = document.createElement('img'); img.className='m3d-capwin__img'; img.src=pin.img; img.alt='caption image';
+      body.appendChild(img);
+      var act = document.createElement('div'); act.className='m3d-capwin__actions';
+      var a = document.createElement('a'); a.href=pin.img; a.target='_blank'; a.rel='noopener'; a.textContent='元画像を開く';
+      act.appendChild(a); body.appendChild(act);
+    }else{
+      var ph = document.createElement('div'); ph.className='m3d-cap__placeholder'; ph.textContent='画像が設定されていません';
+      body.appendChild(ph);
+    }
+    var meta = document.createElement('div'); meta.className='m3d-capwin__meta'; meta.textContent = (pin && pin.id) ? ('#'+pin.id) : '';
+    body.appendChild(meta);
+    var text = document.createElement('div'); text.textContent = (pin && pin.body) ? pin.body : '';
+    body.appendChild(text);
+
+    div.appendChild(body);
+    overlay.appendChild(div);
+    makeDraggable(bar, div);
+    return div;
+  }
+
+  function showMobileCaption(pin){
+    var panel = $("m3d-mobile-caption"); if(!panel) return;
+    var t=$("m3d-mcap-title"), b=$("m3d-mcap-body"), img=$("m3d-mcap-img"), ph=$("m3d-mcap-ph"), acts=$("m3d-mcap-actions");
+    t.textContent = (pin && pin.title) ? pin.title : 'キャプション';
+    b.textContent = (pin && pin.body)  ? pin.body  : '';
+    acts.innerHTML = '';
+    if(pin && pin.img){
+      img.src = pin.img; img.style.display='block'; ph.style.display='none';
+      var a = document.createElement('a'); a.href=pin.img; a.target='_blank'; a.rel='noopener'; a.textContent='元画像を開く';
+      acts.appendChild(a);
+    }else{
+      img.removeAttribute('src'); img.style.display='none'; ph.style.display='flex';
+    }
+    try{
+      var viewer=$("viewer");
+      if(viewer){
+        var vw = viewer.clientWidth || window.innerWidth || 360;
+        var vh = viewer.clientHeight|| Math.max(320, Math.floor((window.innerHeight||640)*0.6));
+        img.style.maxWidth  = Math.round(vw*0.5) + 'px';
+        img.style.maxHeight = Math.round(vh*0.4) + 'px';
+      }
+    }catch(_){}
+  }
+
+  function readCurrentPinFromLegacy(){
+    var imgEl = document.getElementById('previewImg');
+    var title = (document.getElementById('capTitleLine')||{}).textContent || '';
+    var body  = (document.getElementById('capBodyLine')||{}).textContent || '';
+    var id    = (window.currentPin && window.currentPin.id) || '';
+    var src   = (imgEl && imgEl.src) || '';
+    var hasImg= !!(imgEl && imgEl.naturalWidth);
+    return { id:id||'', title:title||'', body:body||'', img: hasImg ? src : '' };
+  }
+
+  function onPinSelected(pinLike){
+    var pin = pinLike || readCurrentPinFromLegacy();
+    state.activePin = pin;
+    if (isMobile()){ showMobileCaption(pin); }
+    else { createCapWindow(pin); }
+  }
+
+  window.M3DUI = { __ready:true, onPinSelected:onPinSelected, showMobileCaption:showMobileCaption, createCapWindow:createCapWindow };
+
+  document.addEventListener('DOMContentLoaded', function(){
+    ensureRoot();
+    if (typeof window.selectPin === 'function'){
+      var orig = window.selectPin;
+      window.selectPin = function(){
+        try{ orig.apply(this, arguments); }catch(e){ console.warn(e); }
+        try{ if(window.M3DUI && window.M3DUI.onPinSelected) window.M3DUI.onPinSelected(); }catch(e){ console.warn(e); }
+      };
+    }
+    });window.addEventListener('resize', function(){
+    try{ if (isMobile() && state.activePin) showMobileCaption(state.activePin); }catch(_){}
+  });
+})();
+</script>
 <script>
 
-document.addEventListener('DOMContentLoaded', function(){\n  try{\n    var rc = document.getElementById('rightCaption');\n    if(!rc) return;\n    var body = rc.querySelector('.body') || rc;\n    if(!document.getElementById('m3d-caplist')){\n      var list = document.createElement('div'); list.id='m3d-caplist'; body.insertBefore(list, body.firstChild);\n    }\n    if(!document.getElementById('m3d-capeditor')){\n      var ed = document.createElement('div'); ed.id='m3d-capeditor'; body.appendChild(ed);\n    }\n    // Move known editor block to bottom if exists\n    var editor = document.getElementById('editor');\n    if(editor && editor.parentElement !== document.getElementById('m3d-capeditor')){\n      document.getElementById('m3d-capeditor').appendChild(editor);\n    }\n    // Move known preview out of right pane (overlay/mobile handles viewing)\n    var prev = document.getElementById('viewerPreview');\n    if(prev && prev.parentElement === body){\n      // leave it where it is or let overlay handle; no action\n    }\n    // Heuristic: move non-editor controls to list\n    var caplist = document.getElementById('m3d-caplist');\n    Array.from(body.children).forEach(function(node){\n      var id = node.id||'''';\n      if(id==='m3d-caplist' || id==='m3d-capeditor' || id==='editor') return;\n      if(node === caplist || node === document.getElementById('m3d-capeditor')) return;\n      // keep tabs/headers at top of list\n      if(caplist && node.parentElement===body){\n        caplist.appendChild(node);\n      }\n    });\n  }catch(e){ console.warn('right panel split failed', e); }\n});\n\n</script>
+document.addEventListener('DOMContentLoaded', function(){
+  try{
+    var rc = document.getElementById('rightCaption');
+    if(!rc) return;
+    var body = rc.querySelector('.body') || rc;
+    if(!document.getElementById('m3d-caplist')){
+      var list = document.createElement('div'); list.id='m3d-caplist'; body.insertBefore(list, body.firstChild);
+    }
+    if(!document.getElementById('m3d-capeditor')){
+      var ed = document.createElement('div'); ed.id='m3d-capeditor'; body.appendChild(ed);
+    }
+    // Move known editor block to bottom if exists
+    var editor = document.getElementById('editor');
+    if(editor && editor.parentElement !== document.getElementById('m3d-capeditor')){
+      document.getElementById('m3d-capeditor').appendChild(editor);
+    }
+    // Move known preview out of right pane (overlay/mobile handles viewing)
+    var prev = document.getElementById('viewerPreview');
+    if(prev && prev.parentElement === body){
+      // leave it where it is or let overlay handle; no action
+    }
+    // Heuristic: move non-editor controls to list
+    var caplist = document.getElementById('m3d-caplist');
+    Array.from(body.children).forEach(function(node){
+      var id = node.id||'';
+      if(id==='m3d-caplist' || id==='m3d-capeditor' || id==='editor') return;
+      if(node === caplist || node === document.getElementById('m3d-capeditor')) return;
+      // keep tabs/headers at top of list
+      if(caplist && node.parentElement===body){
+        caplist.appendChild(node);
+      }
+    });
+  }catch(e){ console.warn('right panel split failed', e); }
+});
+
+</script>
 
 <script>
 (function(){
@@ -361,21 +2110,111 @@ document.addEventListener('DOMContentLoaded', function(){\n  try{\n    var rc = 
       var p = window.M3DUI.__pendingPin;
       if(p){
         window.M3DUI.__pendingPin = null;
-        if (window.matchMedia && window.matchMedia('(max-width: 900px)').matches){\n          window.M3DUI.showMobileCaption(p);\n          var mcapEl=document.getElementById('m3d-mobile-caption'); if(mcapEl) mcapEl.hidden=false;\n        }else{\n          window.M3DUI.createCapWindow(p);\n          var overlayEl=document.getElementById('m3d-caption-layer'); if(overlayEl) overlayEl.hidden=false;\n        }\n      }\n    }catch(_){}\n  };\n  function wrapSuccess(fnName){\n    try{\n      var fn = window[fnName];\n      if(typeof fn !== 'function') return;\n      window[fnName] = async function(){\n        var res = await fn.apply(this, arguments);\n        try{ window.M3DUI.modelLoaded(); }catch(_){}\n        return res;\n      };\n    }catch(_){}\n  }\n  wrapSuccess('loadGLBFromURL');\n  wrapSuccess('loadGLBByFileId');\n  if(typeof window.M3DUI.onPinSelected === 'function'){\n    var orig = window.M3DUI.onPinSelected;\n    window.M3DUI.onPinSelected = function(pinLike){\n      try{\n        if(!window.M3DUI.__modelReady){\n          window.M3DUI.__pendingPin = pinLike;\n          return;\n        }\n      }catch(_){}\n      return orig.apply(this, arguments);\n    };\n  }\n})();\n</script>
+        if (window.matchMedia && window.matchMedia('(max-width: 900px)').matches){
+          window.M3DUI.showMobileCaption(p);
+          var mcapEl=document.getElementById('m3d-mobile-caption'); if(mcapEl) mcapEl.hidden=false;
+        }else{
+          window.M3DUI.createCapWindow(p);
+          var overlayEl=document.getElementById('m3d-caption-layer'); if(overlayEl) overlayEl.hidden=false;
+        }
+      }
+    }catch(_){}
+  };
+  function wrapSuccess(fnName){
+    try{
+      var fn = window[fnName];
+      if(typeof fn !== 'function') return;
+      window[fnName] = async function(){
+        var res = await fn.apply(this, arguments);
+        try{ window.M3DUI.modelLoaded(); }catch(_){}
+        return res;
+      };
+    }catch(_){}
+  }
+  wrapSuccess('loadGLBFromURL');
+  wrapSuccess('loadGLBByFileId');
+  if(typeof window.M3DUI.onPinSelected === 'function'){
+    var orig = window.M3DUI.onPinSelected;
+    window.M3DUI.onPinSelected = function(pinLike){
+      try{
+        if(!window.M3DUI.__modelReady){
+          window.M3DUI.__pendingPin = pinLike;
+          return;
+        }
+      }catch(_){}
+      return orig.apply(this, arguments);
+    };
+  }
+})();
+</script>
 
 
-<!-- Minimal HUD & material-queue drain -->
-<style>
-#_m3d_hud_overlay{position:fixed;inset:0;display:none;background:rgba(0,0,0,.35);z-index:99999}
-#_m3d_hud_center{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);color:#fff;text-align:center;font:14px system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
-._m3d_spinner{width:48px;height:48px;border:4px solid rgba(255,255,255,.35);border-top-color:#fff;border-radius:50%;animation:m3dspin 1s linear infinite;margin:0 auto 10px}
-@keyframes m3dspin{to{transform:rotate(360deg)}}
-</style>
-<div id="_m3d_hud_overlay" aria-hidden="true"><div id="_m3d_hud_center"><div class="_m3d_spinner"></div><div id="_m3d_hud_msg">通信中…</div></div></div>
+<!-- Locimyu Hotfix: mobile chip hide & list force-fetch (non-destructive) -->
 <script>
 (function(){
-  var overlay, msg, ref=0;
-  function ensure(){
-    overlay = document.getElementById('_m3d_hud_overlay');\n    msg = document.getElementById('_m3d_hud_msg');\n  }\n  window.M3DBusy = {\n    show: function(m){ try{ ensure(); if(m) msg.textContent=m; ref++; overlay.style.display='block'; }catch(_){}},\n    hide: function(){ try{ ensure(); ref=Math.max(0,ref-1); if(ref===0) overlay.style.display='none'; }catch(_){} }\n  };\n  // Drain queued material updates after modelLoaded\n  (function(){\n    if(!window.M3DUI) window.M3DUI = {};\n    var orig = window.M3DUI.modelLoaded;\n    window.M3DUI.modelLoaded = function(){\n      try{\n        var q = window.__matQueue || [];\n        window.__matQueue = [];\n        for (var i=0;i<q.length;i++){\n          try{ applyStateToMaterial(q[i][0], q[i][1]); }catch(e){}\n        }\n      }catch(_){}\n      if (typeof orig==='function') return orig.apply(this, arguments);\n    };\n  })();\n  // Optional: hook fetch/XHR to show busy on Drive/Sheets calls\n  try{\n    var _fetch = window.fetch;\n    window.fetch = function(input, init){\n      try{\n        var url = (typeof input==='string') ? input : (input && input.url ? input.url : ''');\n        var busy = url && (url.indexOf('alt=media')>0 || url.indexOf('googleapis.com')>0 || url.indexOf('/spreadsheets/')>0);\n        if (busy) M3DBusy.show('通信中…');\n        var p = _fetch.apply(this, arguments);\n        if (p && typeof p.then==='function'){\n          return p.then(function(v){ if(busy) M3DBusy.hide(); return v; }, function(e){ if(busy) M3DBusy.hide(); throw e; });\n        }\n        if (busy) M3DBusy.hide();\n        return p;\n      }catch(e){ try{ return _fetch.apply(this, arguments); }catch(e2){ throw e2; } }\n    };\n  }catch(_){}\n  try{\n    var X = window.XMLHttpRequest;\n    if (X){\n      var H = function(){ var x = new X(); var url='''; var open=x.open; x.open=function(m,u){url=String(u||''); return open.apply(this, arguments);}; var send=x.send; x.send=function(){ var busy=(url.indexOf('alt=media')>0||url.indexOf('googleapis.com')>0||url.indexOf('/spreadsheets/')>0); if(busy) M3DBusy.show('通信中…'); x.addEventListener('loadend', function(){ if(busy) M3DBusy.hide(); }); return send.apply(this, arguments); }; return x; };\n      H.prototype = X.prototype; window.XMLHttpRequest = H;\n    }\n  }catch(_){}\n})();\n</script>
+  try{
+    function hideBottomLeftOverlays(){
+      try{
+        if (!window.matchMedia) return;
+        if (!window.matchMedia('(max-width: 900px)').matches) return;
+        var els = document.querySelectorAll('button,div,a,span');
+        for (var i=0;i<els.length;i++){
+          var el = els[i];
+          var txt = (el.textContent||'').trim();
+          var cs = window.getComputedStyle ? getComputedStyle(el) : null;
+          if (!cs) continue;
+          var pos = cs.position;
+          if (pos !== 'fixed' && pos !== 'absolute') continue;
+          var r = el.getBoundingClientRect();
+          var nearBL = (r.left < 120) && ((window.innerHeight - r.bottom) < 140);
+          var looksDiag = (txt.indexOf('診断ログ') >= 0) || (txt.indexOf('Diagnostics') >= 0);
+          if (nearBL || looksDiag){
+            try{ el.style.display='none'; el.setAttribute('data-m3d-hidden','chip'); }catch(_){}
+          }
+        }
+      }catch(_){}
+    }
+    function hookVnextList(){
+      try{
+        var ui = document.querySelector('locimyu-ui');
+        if (!ui || !ui.shadowRoot) return;
+        var btn = ui.shadowRoot.getElementById('btnList');
+        if (!btn || btn.getAttribute('data-m3d-hook')) return;
+        btn.setAttribute('data-m3d-hook','1');
+        btn.addEventListener('click', function(){
+          try{
+            if (typeof ui.ensureSheetResolved === 'function'){
+              Promise.resolve(ui.ensureSheetResolved()).then(function(){
+                try{
+                  if (ui.__sheetId && typeof ui.fetchPins === 'function'){
+                    ui.fetchPins(ui.__sheetId);
+                  }
+                }catch(_){}
+              });
+            }
+          }catch(_){}
+        }, true);
+      }catch(_){}
+    }
+    function start(){
+      hideBottomLeftOverlays();
+      hookVnextList();
+      var t = 0;
+      var id = setInterval(function(){
+        t++;
+        hideBottomLeftOverlays();
+        hookVnextList();
+        if (t > 60) clearInterval(id);
+      }, 500);
+      window.addEventListener('resize', hideBottomLeftOverlays);
+    }
+    if (document.readyState === 'loading'){
+      document.addEventListener('DOMContentLoaded', start, {once:true});
+    } else {
+      start();
+    }
+  }catch(_){}
+})();
+</script>
 </body>
 </html>
