@@ -2206,6 +2206,7 @@ document.addEventListener('DOMContentLoaded', function(){
         .ghost{ opacity:.65; }
         .empty{ color: var(--muted); padding: 12px; }
         @media (max-width: 900px){ .chip{ display:none; } .panel{ bottom: calc(56px + 10px); max-height: 40vh; } }
+        @media (min-width: 901px){ .mobilebar, #panelReader, #panelList, #panelAdd { display: none !important; } }
       `;
       const tpl = document.createElement('template');
       tpl.innerHTML = `<style>${css}</style>
@@ -2375,9 +2376,7 @@ document.addEventListener('DOMContentLoaded', function(){
         return null;
       }
     }
-    async fetchPins(sheetId){
-      try{
-        if (!window.gapi || !gapi.client || !gapi.client.sheets){ this.log('Sheets API未初期化'); return; }
+    async fetchPins(sheetId){ try{ if (!window.gapi || !gapi.client){ this.log('gapi未初期化'); return; } if (!gapi.client.sheets){ try{ this.log('Sheets APIをロード中…'); await gapi.client.load('sheets','v4'); } catch(e){ this.log('Sheets APIロード失敗', 'error'); return; } }
         this.showBusy('ピン・シートを読み込み中…');
         const meta = await gapi.client.sheets.spreadsheets.get({ spreadsheetId: sheetId });
         const firstSheet = (meta.result.sheets && meta.result.sheets[0] && meta.result.sheets[0].properties && meta.result.sheets[0].properties.title) || 'Sheet1';
