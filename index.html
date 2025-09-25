@@ -1712,7 +1712,7 @@ el.btnLoad.addEventListener('click', async ()=>{
   const raw = el.inputGLB.value.trim();
   const fid = extractDriveFileId(raw);
   if(!fid){
-    alert('GLBの FileId/URL を正しく指定してください。\n\nヒント: 共有URLのまま貼付でOKです。ID単体の場合は30文字以上で、末尾が _ で終わっていない完全なIDを指定してください。');
+    alert('GLBの FileId/URL を正しく指定してください。\\n\\nヒント: 共有URLのまま貼付でOKです。ID単体の場合は30文字以上で、末尾が _ で終わっていない完全なIDを指定してください。');
     return;
   }
   el.inputGLB.value = fid;
@@ -1843,9 +1843,7 @@ async function loadGLBByFileId(fileId){
     const res = await fetch(url, { headers: { 'Authorization': 'Bearer ' + token } });
     if(!res.ok){
       const txt = await res.text().catch(()=>'');
-      throw new Error('GLB download failed: ' + res.status + ' ' + txt + '
-
-IDが正しいか確認してください。共有URLのコピペ、または30文字以上の完全なFileIdを貼り付けてください。');
+      throw new Error('GLB download failed: ' + res.status + ' ' + txt + '\n\nIDが正しいか確認してください。共有URLのコピペ、または30文字以上の完全なFileIdを貼り付けてください。');
     }
     const blob = await res.blob();
     const objUrl = URL.createObjectURL(blob);
