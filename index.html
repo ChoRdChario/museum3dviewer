@@ -1843,9 +1843,7 @@ async function loadGLBByFileId(fileId){
     const res = await fetch(url, { headers: { 'Authorization': 'Bearer ' + token } });
     if(!res.ok){
       const txt = await res.text().catch(()=>'');
-      throw new Error('GLB download failed: ' + res.status + ' ' + txt + '
-
-IDが正しいか確認してください。共有URLのコピペ、または30文字以上の完全なFileIdを貼り付けてください。');
+      throw new Error('GLB download failed: ' + res.status + ' ' + txt + '\n\nIDが正しいか確認してください。共有URLのコピペ、または30文字以上の完全なFileIdを貼り付けてください。');
     }
     const blob = await res.blob();
     const objUrl = URL.createObjectURL(blob);
@@ -2148,73 +2146,5 @@ document.addEventListener('DOMContentLoaded', function(){
 })();
 </script>
 
-
-<!-- Locimyu Hotfix: mobile chip hide & list force-fetch (non-destructive) -->
-<script>
-(function(){
-  try{
-    function hideBottomLeftOverlays(){
-      try{
-        if (!window.matchMedia) return;
-        if (!window.matchMedia('(max-width: 900px)').matches) return;
-        var els = document.querySelectorAll('button,div,a,span');
-        for (var i=0;i<els.length;i++){
-          var el = els[i];
-          var txt = (el.textContent||'').trim();
-          var cs = window.getComputedStyle ? getComputedStyle(el) : null;
-          if (!cs) continue;
-          var pos = cs.position;
-          if (pos !== 'fixed' && pos !== 'absolute') continue;
-          var r = el.getBoundingClientRect();
-          var nearBL = (r.left < 120) && ((window.innerHeight - r.bottom) < 140);
-          var looksDiag = (txt.indexOf('診断ログ') >= 0) || (txt.indexOf('Diagnostics') >= 0);
-          if (nearBL || looksDiag){
-            try{ el.style.display='none'; el.setAttribute('data-m3d-hidden','chip'); }catch(_){}
-          }
-        }
-      }catch(_){}
-    }
-    function hookVnextList(){
-      try{
-        var ui = document.querySelector('locimyu-ui');
-        if (!ui || !ui.shadowRoot) return;
-        var btn = ui.shadowRoot.getElementById('btnList');
-        if (!btn || btn.getAttribute('data-m3d-hook')) return;
-        btn.setAttribute('data-m3d-hook','1');
-        btn.addEventListener('click', function(){
-          try{
-            if (typeof ui.ensureSheetResolved === 'function'){
-              Promise.resolve(ui.ensureSheetResolved()).then(function(){
-                try{
-                  if (ui.__sheetId && typeof ui.fetchPins === 'function'){
-                    ui.fetchPins(ui.__sheetId);
-                  }
-                }catch(_){}
-              });
-            }
-          }catch(_){}
-        }, true);
-      }catch(_){}
-    }
-    function start(){
-      hideBottomLeftOverlays();
-      hookVnextList();
-      var t = 0;
-      var id = setInterval(function(){
-        t++;
-        hideBottomLeftOverlays();
-        hookVnextList();
-        if (t > 60) clearInterval(id);
-      }, 500);
-      window.addEventListener('resize', hideBottomLeftOverlays);
-    }
-    if (document.readyState === 'loading'){
-      document.addEventListener('DOMContentLoaded', start, {once:true});
-    } else {
-      start();
-    }
-  }catch(_){}
-})();
-</script>
 </body>
 </html>
