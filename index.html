@@ -2146,5 +2146,250 @@ document.addEventListener('DOMContentLoaded', function(){
 })();
 </script>
 
+
+<!-- M3D FailSafe UI Injection -->
+<style id="m3d-fs-style">
+  #m3d-fs-chip{ position:fixed; left:12px; bottom:12px; padding:8px 12px; border-radius:999px;
+    background:#222; color:#fff; border:1px solid #444; font:13px system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+    cursor:pointer; opacity:.93; box-shadow:0 2px 8px rgba(0,0,0,.25); user-select:none; z-index:2147483647; }
+  #m3d-fs-panel{ position:fixed; right:12px; bottom:56px; width:340px; max-height:46vh; overflow:auto; padding:10px; border-radius:12px;
+    background:rgba(0,0,0,.85); color:#fff; font:12px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+    display:none; box-shadow:0 10px 24px rgba(0,0,0,.35); backdrop-filter: blur(2px); z-index:2147483646; }
+  #m3d-fs-right{ position:fixed; top:48px; right:0; width:360px; height:calc(100vh - 48px); background:#fff;
+    border-left:1px solid rgba(0,0,0,.08); display:flex; flex-direction:column; gap:8px; padding:12px; box-sizing:border-box; z-index:2147483600; }
+  #m3d-fs-list{ flex:1; overflow:auto; background:#fff; border-radius:10px; box-shadow:0 1px 2px rgba(0,0,0,.05); padding:8px; }
+  #m3d-fs-detail{ min-height:160px; background:#fff; border-radius:10px; box-shadow:0 1px 2px rgba(0,0,0,.05); padding:10px; overflow:auto; }
+  #m3d-fs-busy{ position:fixed; inset:0; display:none; align-items:center; justify-content:center; z-index:2147483645;
+    background:rgba(0,0,0,.35); backdrop-filter: blur(1px); }
+  #m3d-fs-busy .c{ text-align:center; color:#fff; font:14px system-ui,-apple-system,Segoe UI,Roboto,sans-serif; }
+  #m3d-fs-busy .s{ width:48px; height:48px; border:4px solid rgba(255,255,255,.3); border-top-color:#fff; border-radius:50%;
+    animation:m3dspin 1s linear infinite; margin:0 auto 10px; }
+  @keyframes m3dspin{ to{ transform: rotate(360deg); } }
+  @media (max-width: 900px){ #m3d-fs-right{ display:none; } }
+  /* Hide legacy conflicting panes safely */
+  #rightCaption, #m3d-caplist, #m3d-capeditor, #m3d-caption-layer, #m3d-mobile-caption{ display:none !important; }
+</style>
+<div id="m3d-fs-chip" title="診断ログ（クリックで開閉）">診断ログ</div>
+<div id="m3d-fs-panel"><div><strong>診断ログ</strong></div><div id="m3d-fs-log"></div></div>
+<div id="m3d-fs-right">
+  <div id="m3d-fs-list">ピンを読み込み中…</div>
+  <div id="m3d-fs-detail">ピンを選択すると詳細が表示されます</div>
+</div>
+<div id="m3d-fs-busy"><div class="c"><div class="s"></div><div id="m3d-fs-msg">通信中…</div></div></div>
+<script>
+(function(){
+  if (window.__M3D_FAILSAFE_ACTIVE__) return; window.__M3D_FAILSAFE_ACTIVE__ = true;
+  const $chip = document.getElementById('m3d-fs-chip');
+  const $panel = document.getElementById('m3d-fs-panel');
+  const $log = document.getElementById('m3d-fs-log');
+  const $right = document.getElementById('m3d-fs-right');
+  const $list = document.getElementById('m3d-fs-list');
+  const $detail = document.getElementById('m3d-fs-detail');
+  const $busy = document.getElementById('m3d-fs-busy');
+  const $msg = document.getElementById('m3d-fs-msg');
+
+  const S = { pins: [], sheetId: null, glbFileId: null, lastAltMediaURL: null };
+
+  function log(s, level){
+    if(!$log) return;
+    const d=document.createElement('div'); d.textContent='['+new Date().toLocaleTimeString()+'] '+String(s||'');
+    if(level==='error'){ d.style.color='#ff9a9a'; }
+    $log.appendChild(d); $panel.scrollTop = $panel.scrollHeight;
+  }
+  function busy(on, m){ if(on){ $busy.style.display='flex'; if(m) $msg.textContent = m; } else { $busy.style.display='none'; } }
+  $chip.addEventListener('click', function(){ $panel.style.display = ($panel.style.display==='none'||!$panel.style.display)?'block':'none'; });
+
+  // Public bridges
+  window.M3DBusy = { show: (m)=>busy(true, m||'通信中…'), hide: ()=>busy(false) };
+  window.logStep = (s)=>log(s);
+  window.logError = (s)=>log(s, 'error');
+
+  // Hook fetch to capture alt=media URL → GLB file id
+  try{
+    const origFetch = window.fetch;
+    window.fetch = async function(input, init){
+      let url = ''; try { url = (typeof input==='string') ? input : (input && input.url ? input.url : ''); } catch(_){}
+      const isMedia = url.indexOf('alt=media')>=0 || url.indexOf('/uc?export=download')>=0;
+      if (isMedia) busy(true, 'GLB/画像取得中…');
+      try {
+        const res = await origFetch.apply(this, arguments);
+        if (isMedia){ S.lastAltMediaURL = url; captureGLBIdFromURL(url); }
+        return res;
+      } finally {
+        if (isMedia) busy(false);
+      }
+    };
+  }catch(_){}
+
+  function captureGLBIdFromURL(u){
+    try{
+      const m = String(u||'').match(/\/drive\/v3\/files\/([^/?]+)\?[^#]*alt=media/i);
+      if (m && m[1]){ S.glbFileId = decodeURIComponent(m[1]); log('GLB FileId captured: '+S.glbFileId); }
+    }catch(_){}
+  }
+
+  // Hook gapi to normalize q and mark busy
+  (function hookGapi(){
+    let tries=0;
+    const t = setInterval(function(){
+      tries++;
+      try{
+        const req = window.gapi && gapi.client && gapi.client.request;
+        if (typeof req === 'function'){
+          const orig = req;
+          gapi.client.request = function(){
+            try{
+              const a=(arguments && arguments[0]) || {};
+              if (a && a.params && typeof a.params.q === 'string'){
+                const q0=a.params.q;
+                const q1=q0.replace(/\s*&&\s*/g, ' and ').replace(/appProperties has \{\s*key=([^}]+)\s*and\s*value=([^}]+)\s*\}/g, 'appProperties has { key=$1 and value=$2 }');
+                if (q1!==q0){ a.params.q = q1; log('DriveQSanitized: '+q1); }
+              }
+              const url = (a.path||a.url||'')+'';
+              if (url.indexOf('/drive/v3/files')>=0){ try{ const m = url.match(/\/drive\/v3\/files\/([^/?]+)/); if (m && m[1]) S.glbFileId = decodeURIComponent(m[1]); }catch(_){ } }
+              window.M3DBusy && window.M3DBusy.show('通信中…');
+            }catch(_){}
+            const r = orig.apply(this, arguments);
+            try{
+              if (r && typeof r.then === 'function'){
+                return r.then(function(v){ try{ M3DBusy && M3DBusy.hide(); }catch(_){ } return v; },
+                              function(e){ try{ M3DBusy && M3DBusy.hide(); }catch(_){ } throw e; });
+              }
+            }catch(_){}
+            try{ M3DBusy && M3DBusy.hide(); }catch(_){}
+            return r;
+          };
+          log('gapi hook ready'); clearInterval(t);
+        }
+      }catch(_){}
+      if (tries>60) clearInterval(t);
+    }, 200);
+  })();
+
+  // Ensure sheet resolve (parent folder → spreadsheet with appProperties.lociFor)
+  async function ensureSheetResolved(){
+    try{
+      if (S.sheetId) return S.sheetId;
+      if (!window.gapi || !gapi.client || !gapi.client.drive) return null;
+      if (!S.glbFileId && S.lastAltMediaURL) captureGLBIdFromURL(S.lastAltMediaURL);
+      if (!S.glbFileId) return null;
+      const meta = await gapi.client.drive.files.get({ fileId: S.glbFileId, fields: 'parents' });
+      const parent = (meta.result && meta.result.parents && meta.result.parents[0]) || null;
+      if (!parent) return null;
+      const q = ["'"+parent+"' in parents","mimeType='application/vnd.google-apps.spreadsheet'","trashed=false","appProperties has { key='lociFor' and value='"+S.glbFileId+"' }"].join(' and ');
+      let res = await gapi.client.drive.files.list({ q: q, pageSize: 10, fields: 'files(id,name)', includeItemsFromAllDrives: true, supportsAllDrives: true });
+      let files = (res.result && res.result.files) || [];
+      if (!files.length){
+        const q2 = ["'"+parent+"' in parents","mimeType='application/vnd.google-apps.spreadsheet'","trashed=false"].join(' and ');
+        res = await gapi.client.drive.files.list({ q: q2, pageSize: 10, fields: 'files(id,name)', includeItemsFromAllDrives: true, supportsAllDrives: true });
+        files = (res.result && res.result.files) || [];
+      }
+      if (files.length){ S.sheetId = files[0].id; log('シート自動解決: '+files[0].name+' ('+S.sheetId+')'); return S.sheetId; }
+      return null;
+    }catch(e){ log('シート自動解決失敗: ' + (e && e.message ? e.message : e), 'error'); return null; }
+  }
+
+  // Fetch pins via Sheets API, then fallback to Drive CSV
+  async function fetchPins(sheetId){
+    try{
+      if (!window.gapi || !gapi.client){ log('gapi未初期化'); return; }
+
+      let usedSheetsAPI = false, ok = false;
+
+      try{
+        if (!gapi.client.sheets){ log('Sheets APIをロード中…'); await gapi.client.load('sheets','v4'); log('Sheets APIロード完了'); }
+        usedSheetsAPI = !!gapi.client.sheets;
+      }catch(e){ log('Sheets APIロード失敗: '+(e && e.message ? e.message : e), 'error'); }
+
+      const parseRows = (rows)=>{
+        if (!rows || !rows.length){ S.pins=[]; return; }
+        const H = rows[0].map(x=>String(x||'').trim().toLowerCase());
+        const idx = names=>{ for(let i=0;i<names.length;i++){ const j=H.indexOf(names[i]); if(j>=0) return j; } return -1; };
+        const c_id   = idx(['id','pinid','key','番号','no','ＩＤ']);
+        const c_title= idx(['title','name','captiontitle','タイトル','名称','題名','見出し']);
+        const c_body = idx(['body','note','caption','description','本文','説明','メモ']);
+        const c_img  = idx(['img','image','photourl','thumbnail','画像','写真url','写真','サムネイル']);
+        const pins=[];
+        for(let i=1;i<rows.length;i++){ const r=rows[i]||[]; const o={_row:i+1};
+          o.id=(c_id>=0?r[c_id]:'')||o._row; o.title=(c_title>=0?r[c_title]:'')||''; o.body=(c_body>=0?r[c_body]:'')||''; o.img=(c_img>=0?r[c_img]:'')||''; pins.push(o); }
+        S.pins = pins; log('ピン取得: '+pins.length+'件');
+      };
+
+      if (usedSheetsAPI){
+        try{
+          const meta = await gapi.client.sheets.spreadsheets.get({ spreadsheetId: sheetId });
+          const first = (meta.result && meta.result.sheets && meta.result.sheets[0] && meta.result.sheets[0].properties && meta.result.sheets[0].properties.title) || 'Sheet1';
+          const vals = await gapi.client.sheets.spreadsheets.values.get({ spreadsheetId: sheetId, range: first+'!A:Z' });
+          const rows = (vals.result && vals.result.values) || [];
+          parseRows(rows);
+          ok = true;
+        }catch(e){
+          const msg=(e&&e.result&&e.result.error&&e.result.error.message)?e.result.error.message:(e&&e.message?e.message:String(e));
+          log('Sheets APIエラー: '+msg, 'error');
+        }
+      }
+
+      if (!ok){
+        try{
+          log('Driveエクスポート経由のフォールバックを試行中…');
+          const url='https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(sheetId)+'/export?mimeType=text/csv';
+          const res = await gapi.client.request({ path: url, method:'GET' });
+          const csv = (res.body||res.result||'')+'';
+          const rows=[]; let row=[], cell='', q=false;
+          for(let i=0;i<csv.length;i++){
+            const ch=csv[i];
+            if(q){
+              if(ch=='"'){ if(i+1<csv.length && csv[i+1]=='"'){ cell+='"'; i++; } else { q=false; } }
+              else { cell+=ch; }
+            }else{
+              if(ch=='"'){ q=true; }
+              else if(ch==','){ row.push(cell); cell=''; }
+              else if(ch=='\n' || ch=='\r'){ if(ch=='\r' && i+1<csv.length && csv[i+1]=='\n') i++; row.push(cell); rows.push(row); row=[]; cell=''; }
+              else { cell+=ch; }
+            }
+          }
+          if(cell.length>0 || row.length){ row.push(cell); rows.push(row); }
+          if(rows && rows.length){ parseRows(rows); ok = true; } else { log('Driveエクスポートで空データ'); }
+        }catch(e){
+          const msg=(e&&e.result&&e.result.error&&e.result.error.message)?e.result.error.message:(e&&e.message?e.message:String(e));
+          log('Driveエクスポート失敗: '+msg, 'error');
+        }
+      }
+
+      if (!ok){ log('ピン取得に失敗しました（Sheets/Drive経路ともNG）', 'error'); }
+    }catch(e){ log('ピン取得例外: '+(e && e.message ? e.message : e), 'error'); }
+  }
+
+  function renderRight(){
+    if (!$list) return;
+    if (!S.pins || !S.pins.length){ $list.textContent = 'ピンがありません'; return; }
+    const frag = document.createDocumentFragment();
+    S.pins.forEach(function(p,i){
+      const row=document.createElement('div'); row.style.cssText='padding:6px;border-bottom:1px solid rgba(0,0,0,.08);cursor:pointer;';
+      row.textContent=(p.title||('Pin '+(i+1)))+' — '+(p.body||'');
+      row.addEventListener('click', function(){ try{ if (typeof window.selectPin==='function') window.selectPin(p.id||p._row||i); }catch(_){ } });
+      frag.appendChild(row);
+    });
+    $list.innerHTML=''; $list.appendChild(frag);
+  }
+
+  // Wire modelLoaded
+  (function wireLoaded(){
+    // legacy bridge
+    if(!window.M3DUI) window.M3DUI = {};
+    const origLoaded = window.M3DUI.modelLoaded;
+    window.M3DUI.modelLoaded = function(){ try{ window.dispatchEvent(new Event('m3d:model-loaded')); }catch(_){ } if (typeof origLoaded==='function') return origLoaded.apply(this, arguments); };
+
+    window.addEventListener('m3d:model-loaded', async function(){
+      log('modelLoaded');
+      await ensureSheetResolved();
+      if (S.sheetId){ log('fetchPins start: '+S.sheetId); await fetchPins(S.sheetId); }
+      renderRight();
+    });
+  })();
+
+  log('failsafe UI ready');
+})();
+</script>
 </body>
 </html>
