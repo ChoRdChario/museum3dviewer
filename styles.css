@@ -1,0 +1,21 @@
+:root{
+  --m3d-bg: #0f1115;
+  --m3d-fg: #e7e9ee;
+  --m3d-sub: #a8b0bf;
+  --m3d-accent: #6aa9ff;
+  --m3d-danger: #ff6a6a;
+  --m3d-surface: #171a20;
+  --m3d-border: #2a2f3a;
+  --m3d-shadow: 0 8px 24px rgba(0,0,0,.35);
+  --m3d-radius: 12px;
+  --m3d-gap: 8px;
+  --m3d-toolbar-h: 48px;
+  --m3d-rightpane-w: 360px;
+  --m3d-z-hud: 9000;
+  --m3d-z-spinner: 8000;
+  --m3d-z-right: 7000;
+  --m3d-z-view: 1000;
+}
+
+html,body{height:100%;margin:0;font-family:system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;background:var(--m3d-bg);color:var(--m3d-fg);}
+locimyu-ui{display:block;height:100vh;}
