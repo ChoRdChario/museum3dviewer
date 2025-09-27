@@ -1,1 +1,0 @@
-import './locimyu-ui.js';
