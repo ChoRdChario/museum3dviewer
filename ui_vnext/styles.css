@@ -1,0 +1,3 @@
+/* Base styles */
+html, body { margin:0; padding:0; height:100%; background:#0b0d10; font-family: system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif; }
+locimyu-app { display:block; height:100%; }
