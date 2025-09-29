@@ -3,7 +3,8 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
-  <title>LociMyu • GLB+Sheets Pins (HEIC/HEIF, Solid Concurrency)</title>
+  <title>LociMyu • GLB+Sheets Pins (Fix regex/CRLF, HEIC, Solid Concurrency)</title>
+  <link rel="icon" href="data:;base64,iVBORw0KGgo=" />
   <style>
     :root {
       --bg: #0b0f14; --panel:#121821; --panel-2:#151c26; --text:#e6edf3; --muted:#9fb0c3; --accent:#68b5ff; --ok:#4ade80; --warn:#fbbf24; --danger:#fb7185;
@@ -295,7 +296,7 @@
       if(/^[a-zA-Z0-9_-]{20,}$/.test(s)) return s; // raw id
       try{
         const u = new URL(s);
-        const m1 = u.pathname.match(/\\/file\\/d\\/([a-zA-Z0-9_-]{20,})/);
+        const m1 = u.pathname.match(/\/file\/d\/([a-zA-Z0-9_-]{20,})/);
         if(m1) return m1[1];
         const id = u.searchParams.get('id'); if(id) return id;
         const d = u.searchParams.get('driveid'); if(d) return d;
@@ -452,7 +453,7 @@
     }
 
     async function driveFetchBlob(fileId){
-      const resp = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`,{ headers:{ Authorization: `Bearer ${state.token}`}});
+      const resp = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`,{ headers:{ Authorization: `Bearer ${state.token}`} });
       if(!resp.ok) throw new Error('ダウンロード失敗');
       return await resp.blob();
     }
@@ -659,7 +660,7 @@
       updatePinScreenPositions();
     }
 
-    function escapeHtml(s){ return (s||'').replace(/[&<>"']/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c])); }
+    function escapeHtml(s){ return (s||'').replace(/[&<>"']/g, c=>({"&":"&amp;","<":"&lt;"," >":"&gt;","\"":"&quot;","'":"&#39;"}[c])); }
 
     function updatePinScreenPositions(){
       const el=$('#viewer'); const w=el.clientWidth, h=el.clientHeight;
@@ -835,7 +836,6 @@
     function mergeRecord(local, server){
       const base = local._serverSnapshot || local; // 最後に読んだスナップショット
       const merged = structuredClone(server);
-      // これらの列で「自分が変更していれば」自分を優先
       const keys = ['title','body','pinColor','imageDriveId','imageName','imageWebContentLink','x','y','z','visible'];
       for(const k of keys){
         const baseVal = base[k];
@@ -844,7 +844,6 @@
           merged[k] = localVal;
         }
       }
-      // createdAt は最初のまま、updatedAt は保存直前に付与
       merged.id = local.id;
       merged.createdAt = server.createdAt || local.createdAt || nowIso();
       return merged;
@@ -866,10 +865,8 @@
       let row = state.rowIndex.get(id);
 
       if(!row){
-        // まだ存在しない → append して行番号を逆引き
         const result = await sheetsAppendRows(state.spreadsheetId, captions, [toRowValues(rec)]);
-        // updatedRange から行番号を取得
-        const ur = result.updates && result.updates.updatedRange; // e.g. 'Main_Captions!A2:N2'
+        const ur = result.updates && result.updates.updatedRange;
         if(ur){
           const m = ur.match(/![A-Z]+(\d+):/);
           if(m){ row = parseInt(m[1],10); state.rowIndex.set(id, row); }
@@ -882,10 +879,8 @@
         return;
       }
 
-      // 楽観ロック：最新サーバ値を取得
       const server = await getServerRowById(id);
       if(!server){
-        // 行が消えていた → append で復活
         const result = await sheetsAppendRows(state.spreadsheetId, captions, [toRowValues(rec)]);
         const ur = result.updates && result.updates.updatedRange;
         if(ur){ const m = ur.match(/![A-Z]+(\d+):/); if(m){ state.rowIndex.set(id, parseInt(m[1],10)); } }
@@ -896,10 +891,8 @@
 
       let next = null;
       if(!rec._serverUpdatedAt || server.updatedAt === rec._serverUpdatedAt){
-        // 衝突なし → そのまま保存
         next = structuredClone(rec);
       }else{
-        // 衝突 → フィールドごとに自分の変更を優先してマージ
         next = mergeRecord(rec, server);
       }
       next.updatedAt = nowIso();
@@ -911,15 +904,12 @@
         resource:{ values: [toRowValues(next)] }
       });
 
-      // ローカルのサーバスナップショット更新
       state.captions.set(id, next);
       next._serverSnapshot = structuredClone(next);
       next._serverUpdatedAt = next.updatedAt;
-      // lastSeenUpdatedAt を進める
       if(!state.lastSeenUpdatedAt || next.updatedAt > state.lastSeenUpdatedAt) state.lastSeenUpdatedAt = next.updatedAt;
     }
 
-    // ---- 軽ポーリングで他者編集を取り込み ----
     async function pollOthers(){
       if(!state.spreadsheetId) return;
       const {captions} = datasetSheetNames(state.dataset);
@@ -932,23 +922,20 @@
         serverMap.set(rec.id, rec);
         state.rowIndex.set(rec.id, i+2);
       });
-      // 追加/更新
       for(const [id, srec] of serverMap.entries()){
         const lrec = state.captions.get(id);
         if(!lrec){
           state.captions.set(id, srec); changed++;
           continue;
         }
-        if(state.dirtyIds.has(id)) continue; // ローカル編集中は保留
+        if(state.dirtyIds.has(id)) continue;
         if((lrec._serverUpdatedAt||lrec.updatedAt||'') < (srec.updatedAt||'')){
-          // サーバが新しい → ローカル置換
           srec._serverSnapshot = structuredClone(srec);
           srec._serverUpdatedAt = srec.updatedAt;
           state.captions.set(id, srec);
           changed++;
         }
       }
-      // 削除（= visible=false）等は上の置換で反映される
       if(changed>0){ refreshPinsDOM(); toast(\`他の編集を反映（\${changed}件）\`); }
     }
 
@@ -980,7 +967,6 @@
           state.imagesInFolder = await driveListImagesInParent(state.parentId);
           rebuildImageSelect();
           populateSaveSetSelect();
-          // Start polling
           if(state.pollTimer) clearInterval(state.pollTimer);
           state.pollTimer = setInterval(pollOthers, CONFIG.POLL_MS);
         }catch(err){ console.error(err); alert('読み込みに失敗しました: '+ err.message); }
@@ -1095,13 +1081,7 @@
       sel.value = pick; state.dataset = pick; setQueryParam('dataset', pick);
     }
 
-    // ====== Concurrency polling interval cleanup on unload ======
     window.addEventListener('beforeunload', ()=>{ if(state.pollTimer) clearInterval(state.pollTimer); });
-
-    // ====== Three helpers & events ======
-    function applyMaterialsDeferred(){ requestAnimationFrame(applyMaterials); }
-
-    // ====== End module ======
   </script>
 </body>
 </html>
