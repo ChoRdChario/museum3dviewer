@@ -6,7 +6,10 @@
   <title>LociMyu • GLB+Sheets Pins MVP (HEIC対応/広めDrive権限)</title>
   <link rel="icon" href="data:,">
   <style>
-    :root { --bg:#0b0f14; --panel:#121821; --panel-2:#151c26; --text:#e6edf3; --muted:#9fb0c3; --accent:#68b5ff; --ok:#4ade80; --warn:#fbbf24; --danger:#fb7185; --shadow:0 10px 35px rgba(0,0,0,.35); }
+    :root {
+      --bg: #0b0f14; --panel:#121821; --panel-2:#151c26; --text:#e6edf3; --muted:#9fb0c3; --accent:#68b5ff; --ok:#4ade80; --warn:#fbbf24; --danger:#fb7185;
+      --shadow: 0 10px 35px rgba(0,0,0,.35);
+    }
     *{box-sizing:border-box}
     body{margin:0; background:var(--bg); color:var(--text); font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, 'Helvetica Neue', Arial;}
     a{color:var(--accent)}
@@ -33,7 +36,7 @@
     label{font-size:.87rem; color:var(--muted)}
     input[type="range"]{width:100%}
     select, input[type="text"], textarea{width:100%; background:var(--panel-2); border:1px solid #243246; color:var(--text); padding:.5rem; border-radius:.5rem}
-    textarea{min-height:110px; resize:vertical}
+    textarea{min高さ:110px; resize:vertical}
     .muted{color:var(--muted)}
     .pill-badge{display:inline-flex; align-items:center; gap:6px; padding:.25rem .55rem; border-radius:999px; background:#1a2331; border:1px solid #263449; font-size:.75rem}
     .pin-dot{position:absolute; width:10px; height:10px; border-radius:50%; transform:translate(-50%, -50%); pointer-events:auto}
@@ -55,7 +58,7 @@
     .kbd{border:1px solid #223045; background:#101722; padding:0 .35rem; border-radius:.4rem; font-size:.8rem}
   </style>
 
-  <!-- Import map to resolve bare "three" specifier inside /examples/jsm/* -->
+  <!-- Import map so /examples/jsm/* can resolve "three" -->
   <script type="importmap">
   {
     "imports": {
@@ -211,47 +214,74 @@
   <script async defer src="https://apis.google.com/js/api.js"></script>
   <!-- HEIC/HEIF → 画像変換（プレビュー用） -->
   <script src="https://cdn.jsdelivr.net/npm/heic2any@0.0.4/dist/heic2any.min.js"></script>
-
   <!-- three.js modules -->
   <script type="module">
     import * as THREE from 'https://unpkg.com/three@0.159.0/build/three.module.js';
     import { OrbitControls } from 'https://unpkg.com/three@0.159.0/examples/jsm/controls/OrbitControls.js';
     import { GLTFLoader } from 'https://unpkg.com/three@0.159.0/examples/jsm/loaders/GLTFLoader.js';
 
+    // ====== App Config ======
     const CONFIG = {
       API_KEY: 'AIzaSyCUnTCr5yWUWPdEXST9bKP1LpgawU5rIbI',
       CLIENT_ID: '595200751510-ncahnf7edci6b9925becn5to49r6cguv.apps.googleusercontent.com',
-      SCOPES: ['https://www.googleapis.com/auth/spreadsheets','https://www.googleapis.com/auth/drive'].join(' '),
-      DISCOVERY_DOCS: ['https://www.googleapis.com/discovery/v1/apis/drive/v3/rest','https://www.googleapis.com/discovery/v1/apis/sheets/v4/rest'],
+      SCOPES: [
+        'https://www.googleapis.com/auth/spreadsheets',
+        'https://www.googleapis.com/auth/drive'
+      ].join(' '),
+      DISCOVERY_DOCS: [
+        'https://www.googleapis.com/discovery/v1/apis/drive/v3/rest',
+        'https://www.googleapis.com/discovery/v1/apis/sheets/v4/rest'
+      ],
       SPREADSHEET_NAME_PREFIX: 'LociMyu',
       DEFAULT_DATASET: 'Main',
       PIN_COLORS: ['#ff6b6b','#f9a825','#ffd166','#06d6a0','#32a4ff','#a66bff','#ff63d8','#89a2b8'],
       MOBILE_BREAKPOINT: 760
     };
 
+    // ====== Globals / State ======
     const state = {
-      token:null, isAuthed:false, userEmail:null,
-      fileId:null, fileMeta:null, parentId:null,
-      spreadsheetId:null, dataset:CONFIG.DEFAULT_DATASET,
-      captions:new Map(),
-      materials:{ alpha:1, unlit:false, doubleSided:false, whiteToAlpha:{enabled:false,threshold:240}, blackToAlpha:{enabled:false,threshold:16} },
-      selectedCaptionId:null, viewOnly:false, isMobileUI:false,
+      token: null, isAuthed: false, userEmail: null,
+      fileId: null, fileMeta: null, parentId: null,
+      spreadsheetId: null, dataset: CONFIG.DEFAULT_DATASET,
+      captions: new Map(),
+      materials: { alpha:1, unlit:false, doubleSided:false, whiteToAlpha:{enabled:false, threshold:240}, blackToAlpha:{enabled:false, threshold:16} },
+      selectedCaptionId: null,
+      viewOnly:false, isMobileUI:false,
       imagesInFolder:[], chromaPatchedMaterials:new Set(), displayUrlCache:new Map()
     };
 
-    const $ = (s)=>document.querySelector(s);
-    const $$ = (s)=>Array.from(document.querySelectorAll(s));
-    const sleep=(ms)=>new Promise(r=>setTimeout(r,ms));
-    const nowIso=()=>new Date().toISOString();
-    const objectURLFromBlob=(b)=>URL.createObjectURL(b);
-    function isMobileGuess(){ return window.innerWidth<CONFIG.MOBILE_BREAKPOINT || /iPhone|Android.+Mobile/.test(navigator.userAgent); }
-    function isSafariLike(){ const ua=navigator.userAgent; return (/Safari\//.test(ua)&&!/Chrome\//.test(ua)) || /iPhone|iPad|iPod/.test(ua); }
+    // ====== Utilities ======
+    const $ = sel => document.querySelector(sel);
+    const $$ = sel => Array.from(document.querySelectorAll(sel));
+    const sleep = ms => new Promise(r=>setTimeout(r,ms));
+    const nowIso = () => new Date().toISOString();
+    const objectURLFromBlob = b => URL.createObjectURL(b);
+
     function getQueryParam(name){ const u=new URL(location.href); return u.searchParams.get(name); }
     function setQueryParam(name,val){ const u=new URL(location.href); u.searchParams.set(name,val); history.replaceState(null,'',u.toString()); }
-    function copyToClipboard(t){ (navigator.clipboard&&navigator.clipboard.writeText?t=>navigator.clipboard.writeText(t):Promise.reject)(t).catch(()=>{ const ta=document.createElement('textarea'); ta.value=t; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove(); }); }
+    function copyToClipboard(text){ navigator.clipboard?.writeText(text).catch(()=>{ const ta=document.createElement('textarea'); ta.value=text; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove(); }); }
     function uuid(){return 'xxxxxxxx'.replace(/[x]/g,()=> (Math.random()*16|0).toString(16)) + '-' + Date.now().toString(36)}
-    function parseDriveFileId(input){ if(!input) return null; const s=input.trim(); if(/^[a-zA-Z0-9_-]{20,}$/.test(s)) return s; try{ const u=new URL(s); const m1=u.pathname.match(/\/file\/d\/([a-zA-Z0-9_-]{20,})/); if(m1) return m1[1]; const id=u.searchParams.get('id'); if(id) return id; const d=u.searchParams.get('driveid'); if(d) return d; }catch(e){} return s; }
+    function isMobileGuess(){ return window.innerWidth<CONFIG.MOBILE_BREAKPOINT || /iPhone|Android.+Mobile/.test(navigator.userAgent); }
+    function isSafariLike(){ const ua=navigator.userAgent; return (/Safari\//.test(ua)&&!/Chrome\//.test(ua)) || /iPhone|iPad|iPod/.test(ua); }
 
+    function parseDriveFileId(input){
+      if(!input) return null;
+      const s = input.trim();
+      if(/^[a-zA-Z0-9_-]{20,}$/.test(s)) return s;
+      try{
+        const u=new URL(s);
+        const m1=u.pathname.match(/\/file\/d\/([a-zA-Z0-9_-]{20,})/); if(m1) return m1[1];
+        const id=u.searchParams.get('id'); if(id) return id;
+        const d=u.searchParams.get('driveid'); if(d) return d;
+      }catch(e){}
+      return s;
+    }
+
+    // ====== DOM nodes needed by render() — define BEFORE starting the loop ======
+    const pinLayer = $('#pinLayer');
+    const lineSvg = $('#lineSvg');
+
+    // ====== Google API (GIS + gapi) ======
     let tokenClient=null;
     window.addEventListener('load', async()=>{
       while(!(window.gapi && window.google && window.google.accounts)) await sleep(50);
@@ -273,7 +303,7 @@
     function ensureAuthed(){ if(state.isAuthed) return Promise.resolve(true); return new Promise(resolve=>{ tokenClient.requestAccessToken({ prompt: 'consent' }); const iv=setInterval(()=>{ if(state.isAuthed){ clearInterval(iv); resolve(true);} },200); }); }
     function updateAuthBadge(){ const el=$('#authState'); el.textContent= state.isAuthed?'サインイン済':'未サインイン'; el.style.background = state.isAuthed? '#17301f':'#30171a'; el.style.border='1px solid ' + (state.isAuthed? '#245b37':'#5b242a'); }
 
-    // three.js setup
+    // ====== Three.js viewer ======
     const renderer = new THREE.WebGLRenderer({ canvas: $('#three'), antialias:false, alpha:false, powerPreference: 'low-power' });
     renderer.setClearColor(0x0b1118, 1);
     renderer.setPixelRatio(Math.min(1.5, window.devicePixelRatio||1));
@@ -285,34 +315,77 @@
     const controls = new OrbitControls(persp, $('#three')); controls.enableDamping=true; controls.dampingFactor=.05; controls.screenSpacePanning=false;
     const dir1=new THREE.DirectionalLight(0xffffff,.8); dir1.position.set(2,3,1); scene.add(dir1);
     const amb=new THREE.AmbientLight(0xffffff,.4); scene.add(amb);
-
     let model=null, bbox=null, bboxSize=1, bboxCenter=new THREE.Vector3();
-    function resize(){ const el=$('#viewer'); const w=el.clientWidth,h=el.clientHeight; renderer.setSize(w,h,false); persp.aspect=w/h; persp.updateProjectionMatrix(); const s=bboxSize||1; const aspect=w/h; const frustum=s*1.2; ortho.left=-frustum*aspect; ortho.right=frustum*aspect; ortho.top=frustum; ortho.bottom=-frustum; ortho.updateProjectionMatrix(); $('#lineSvg').setAttribute('viewBox',`0 0 ${w} ${h}`); }
+
+    function resize(){
+      const el=$('#viewer'); const w=el.clientWidth,h=el.clientHeight; renderer.setSize(w,h,false);
+      persp.aspect=w/h; persp.updateProjectionMatrix();
+      const s=bboxSize||1; const aspect=w/h; const frustum=s*1.2; ortho.left=-frustum*aspect; ortho.right=frustum*aspect; ortho.top=frustum; ortho.bottom=-frustum; ortho.updateProjectionMatrix();
+      if(lineSvg) lineSvg.setAttribute('viewBox',`0 0 ${w} ${h}`);
+    }
     window.addEventListener('resize', resize);
-    function render(){ controls.update(); renderer.render(scene,camera); updatePinScreenPositions(); requestAnimationFrame(render); }
+
+    function render(){
+      controls.update();
+      renderer.render(scene,camera);
+      if(pinLayer) updatePinScreenPositions();
+      requestAnimationFrame(render);
+    }
     render(); resize();
 
     function clearModel(){ group.clear(); model=null; bbox=null; bboxSize=1; bboxCenter.set(0,0,0); }
-    async function loadGLBFromDrive(fileId){ const meta=await driveGetFileMeta(fileId); state.fileMeta=meta; state.parentId=(meta.parents||[])[0]||null; state.fileId=fileId; const blob=await driveFetchBlob(fileId); const url=objectURLFromBlob(blob); const loader=new GLTFLoader(); return new Promise((res,rej)=>{ loader.load(url, g=>res(g), undefined, e=>rej(e)); }); }
-    function setupModel(gltf){ clearModel(); const root=gltf.scene || (gltf.scenes && gltf.scenes[0])||null; if(!root){ alert('GLBにsceneが見つかりません'); return; } model=root; group.add(model); bbox=new THREE.Box3().setFromObject(model); bbox.getCenter(bboxCenter); bboxSize=bbox.getSize(new THREE.Vector3()).length(); controls.target.copy(bboxCenter); fitCamera('front'); applyMaterials(); }
-    function fitCamera(preset){ const sz=bboxSize||1; const c=bboxCenter.clone(); const d=sz*0.9; const cam = (camera===ortho)?ortho:persp; const map={ front:new THREE.Vector3(0,0,1), back:new THREE.Vector3(0,0,-1), left:new THREE.Vector3(-1,0,0), right:new THREE.Vector3(1,0,0), top:new THREE.Vector3(0,1,0), bottom:new THREE.Vector3(0,-1,0)}; const dir=map[preset]||map.front; const pos=c.clone().add(dir.clone().multiplyScalar(d)); cam.position.copy(pos); cam.near=0.01; cam.far=Math.max(1000,d*10); cam.updateProjectionMatrix(); controls.target.copy(c); controls.update(); }
-    function setOrthoMode(enabled){ if(enabled){ ortho.position.copy(persp.position); ortho.lookAt(controls.target); camera=ortho; } else { persp.position.copy(camera.position); persp.lookAt(controls.target); camera=persp; } }
 
-    // Chroma key (白/黒→透明) patch
+    async function loadGLBFromDrive(fileId){
+      const meta=await gapi.client.drive.files.get({ fileId, fields:'id,name,parents,mimeType,webViewLink' });
+      state.fileMeta=meta.result; state.parentId=(state.fileMeta.parents||[])[0]||null; state.fileId=fileId;
+      const resp=await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`,{ headers:{ Authorization:`Bearer ${state.token}` }});
+      if(!resp.ok) throw new Error('ダウンロード失敗');
+      const blob=await resp.blob(); const url=objectURLFromBlob(blob);
+      const loader=new GLTFLoader();
+      return new Promise((res,rej)=> loader.load(url, g=>res(g), undefined, e=>rej(e)));
+    }
+
+    function setupModel(gltf){
+      clearModel();
+      const root=gltf.scene || gltf.scenes?.[0];
+      if(!root){ alert('GLBにsceneが見つかりません'); return; }
+      model=root; group.add(model);
+      bbox=new THREE.Box3().setFromObject(model); bbox.getCenter(bboxCenter); bboxSize=bbox.getSize(new THREE.Vector3()).length();
+      controls.target.copy(bboxCenter);
+      fitCamera('front'); applyMaterials();
+    }
+
+    function fitCamera(preset){
+      const sz=bboxSize||1, c=bboxCenter.clone(), d=sz*0.9;
+      const cam = (camera===ortho)?ortho:persp;
+      const map={ front:new THREE.Vector3(0,0,1), back:new THREE.Vector3(0,0,-1), left:new THREE.Vector3(-1,0,0), right:new THREE.Vector3(1,0,0), top:new THREE.Vector3(0,1,0), bottom:new THREE.Vector3(0,-1,0)};
+      const dir=map[preset]||map.front; const pos=c.clone().add(dir.clone().multiplyScalar(d));
+      cam.position.copy(pos); cam.near=0.01; cam.far=Math.max(1000,d*10); cam.updateProjectionMatrix();
+      controls.target.copy(c); controls.update();
+    }
+
+    function setOrthoMode(enabled){
+      if(enabled){ ortho.position.copy(persp.position); ortho.lookAt(controls.target); camera=ortho; }
+      else{ persp.position.copy(camera.position); persp.lookAt(controls.target); camera=persp; }
+    }
+
+    // ---- Chroma-key style（白/黒→透明）簡易処理 ----
     function patchChromaKey(material){
       if(!material || material.userData.__chromaPatched) return;
       if(!material.map) return;
       material.onBeforeCompile = (shader)=>{
-        // Declare uniforms at top so GLSL compiles
+        // uniforms を宣言（GLSL側）
         shader.fragmentShader = `uniform float whiteEnable;
 uniform float whiteThr;
 uniform float blackEnable;
 uniform float blackThr;
 ` + shader.fragmentShader;
+        // JS側 uniforms 値
         shader.uniforms.whiteEnable = { value: state.materials.whiteToAlpha.enabled ? 1.0 : 0.0 };
         shader.uniforms.whiteThr = { value: state.materials.whiteToAlpha.threshold/255.0 };
         shader.uniforms.blackEnable = { value: state.materials.blackToAlpha.enabled ? 1.0 : 0.0 };
         shader.uniforms.blackThr = { value: state.materials.blackToAlpha.threshold/255.0 };
+        // map 反映後（diffuseColor 有効）にルミナンス基準で透明化
         shader.fragmentShader = shader.fragmentShader.replace('#include <map_fragment>',
 `#include <map_fragment>
 float _luma_ = dot( diffuseColor.rgb, vec3(0.299, 0.587, 0.114) );
@@ -335,6 +408,7 @@ if (blackEnable > 0.5 && _luma_ <= blackThr) { diffuseColor.a = 0.0; }`);
         if(sh.uniforms.blackThr) sh.uniforms.blackThr.value = state.materials.blackToAlpha.threshold/255.0;
       });
     }
+
     function applyMaterials(){
       if(!model) return;
       state.chromaPatchedMaterials.clear();
@@ -364,54 +438,282 @@ if (blackEnable > 0.5 && _luma_ <= blackThr) { diffuseColor.a = 0.0; }`);
       renderer.setClearColor(new THREE.Color($('#bgColor').value));
     }
 
-    // Pins
-    const pinLayer=$('#pinLayer'); const lineSvg=$('#lineSvg');
-    const pinFiltersState = CONFIG.PIN_COLORS.reduce((a,c)=>{a[c]=true; return a;},{});
-    function updatePinFiltersUI(){ const wrap=$('#pinFilters'); if(!wrap) return; wrap.innerHTML=''; CONFIG.PIN_COLORS.forEach((c,i)=>{ const id=`pf_${i}`; const span=document.createElement('span'); span.className='row'; span.style.gap='6px'; span.innerHTML=`<input type="checkbox" id="${id}" checked/> <span class="color-swatch" style="background:${c}"></span>`; wrap.appendChild(span); span.querySelector('input').addEventListener('change',(e)=>{ pinFiltersState[c]=e.target.checked; refreshPinsDOM(); });});}
+    // ====== Pins & Captions ======
+    const pinFiltersState = CONFIG.PIN_COLORS.reduce((acc,c)=>{ acc[c]=true; return acc; },{});
+    function updatePinFiltersUI(){
+      const wrap = $('#pinFilters'); if(!wrap) return; wrap.innerHTML='';
+      CONFIG.PIN_COLORS.forEach((c,i)=>{
+        const id = `pf_${i}`;
+        const span = document.createElement('span'); span.className='row'; span.style.gap='6px';
+        span.innerHTML = `<input type="checkbox" id="${id}" checked/> <span class="color-swatch" style="background:${c}"></span>`;
+        wrap.appendChild(span);
+        span.querySelector('input').addEventListener('change', (e)=>{ pinFiltersState[c]=e.target.checked; refreshPinsDOM(); });
+      });
+    }
     updatePinFiltersUI();
-    function screenPosOf(v3){ const el=$('#viewer'); const w=el.clientWidth,h=el.clientHeight; const v=v3.clone().project(camera); return {x:(v.x*.5+.5)*w, y:(-v.y*.5+.5)*h}; }
-    function refreshPinsDOM(){ if(!pinLayer) return; pinLayer.innerHTML=''; lineSvg.innerHTML=''; const list=$('#pinList'); if(list) list.innerHTML=''; for(const rec of state.captions.values()){ if(rec.visible===false) continue; if(!pinFiltersState[rec.pinColor]) continue; const dot=document.createElement('div'); dot.className='pin-dot'; dot.dataset.id=rec.id; dot.style.background=rec.pinColor; pinLayer.appendChild(dot); dot.addEventListener('click',()=>selectCaption(rec.id,true)); if(list){ const item=document.createElement('div'); item.className='list-item'; item.innerHTML=`<span class="color-swatch" style="background:${rec.pinColor}"></span><div style="min-width:0"><div class="ellipsis">${escapeHtml(rec.title||'(無題)')}</div><div class="muted ellipsis" style="max-width:220px">${escapeHtml((rec.body||'').slice(0,80))}</div></div>`; item.addEventListener('click',()=>selectCaption(rec.id,true)); list.appendChild(item);} } updatePinScreenPositions(); }
-    function escapeHtml(s){ return (s||'').replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c])); }
-    function updatePinScreenPositions(){ const el=$('#viewer'); if(!el) return; const dots=[...pinLayer.querySelectorAll('.pin-dot')]; const idToPos=new Map(); dots.forEach(dot=>{ const id=dot.dataset.id; const rec=state.captions.get(id); if(!rec) return; const pos=screenPosOf(new THREE.Vector3(rec.x,rec.y,rec.z)); dot.style.left=pos.x+'px'; dot.style.top=pos.y+'px'; idToPos.set(id,pos); }); lineSvg.innerHTML=''; document.querySelectorAll('.floating-panel[data-id]').forEach(fp=>{ const id=fp.dataset.id; const pos=idToPos.get(id); if(!pos) return; const rect=fp.getBoundingClientRect(); const vRect=el.getBoundingClientRect(); const x2=rect.left - vRect.left + 10; const y2=rect.top - vRect.top + 20; const line=document.createElementNS('http://www.w3.org/2000/svg','line'); line.setAttribute('x1',pos.x); line.setAttribute('y1',pos.y); line.setAttribute('x2',x2); line.setAttribute('y2',y2); line.setAttribute('stroke','#9fb0c3'); line.setAttribute('stroke-width','1.5'); line.setAttribute('stroke-linecap','round'); lineSvg.appendChild(line); }); }
 
-    function selectCaption(id, openFloating=false){ state.selectedCaptionId=id; const rec=state.captions.get(id); if(!rec) return; const t=$('#capTitle'); const b=$('#capBody'); const sel=$('#imageSelect'); if(t) t.value=rec.title||''; if(b) b.value=rec.body||''; const idx=state.imagesInFolder.findIndex(f=>f.id===rec.imageDriveId); if(sel) sel.selectedIndex = idx>=0 ? idx+1 : 0; if(openFloating) openFloatingCaption(rec); }
-    async function openFloatingCaption(rec){ document.querySelectorAll(`.floating-panel[data-id="${rec.id}"]`).forEach(n=>n.remove()); const fp=document.createElement('div'); fp.className='floating-panel'; fp.dataset.id=rec.id; fp.innerHTML=`<div class="hd"><strong>${escapeHtml(rec.title||'(無題)')}</strong><button class="btn" data-close>×</button></div><div class="bd"><div class="muted" style="margin-bottom:6px">${escapeHtml((rec.body||'').slice(0,140))}</div>${rec.imageDriveId?`<div data-imgwrap><div class="muted">画像を読み込み中…</div></div>`:''}</div>`; fp.style.left='16px'; fp.style.top='16px'; fp.querySelector('[data-close]').addEventListener('click',()=>fp.remove()); $('#viewer').appendChild(fp); let drag=false,sx=0,sy=0,ox=0,oy=0; fp.querySelector('.hd').addEventListener('mousedown',e=>{drag=true; sx=e.clientX; sy=e.clientY; const r=fp.getBoundingClientRect(); ox=r.left; oy=r.top;}); window.addEventListener('mousemove',e=>{ if(!drag) return; fp.style.left=(ox+e.clientX-sx)+'px'; fp.style.top=(oy+e.clientY-sy)+'px'; updatePinScreenPositions();}); window.addEventListener('mouseup',()=>drag=false); updatePinScreenPositions(); if(rec.imageDriveId){ try{ const url=await getDisplayURLForFileId(rec.imageDriveId); const wrap=fp.querySelector('[data-imgwrap]'); if(wrap){ wrap.innerHTML=`<img src="${url}" style="max-width:100%; max-height:220px; display:block; border-radius:8px"/>`; } }catch(e){ const wrap=fp.querySelector('[data-imgwrap]'); if(wrap){ wrap.innerHTML = `<div class="muted">画像の表示に失敗：${escapeHtml(e.message)}</div>`; } } } }
+    function escapeHtml(s){ return (s||'').replace(/[&<>"']/g, c=>({"&":"&amp;","<":"&lt;"," >":"&gt;","\"":"&quot;","'":"&#39;"}[c])); }
 
-    let addPinMode=false; $('#addPinBtn').addEventListener('click',()=>{ addPinMode=true; $('#addPinBtn').textContent='モデル上をクリックしてください…'; });
-    $('#three').addEventListener('click',(e)=>{ if(!addPinMode || !model) return; const pt=raycastToModel(e.offsetX,e.offsetY); if(pt){ addPinMode=false; $('#addPinBtn').textContent='ピン追加 (次のクリックで配置)'; const rec={ id:uuid(), title:'', body:'', pinColor:CONFIG.PIN_COLORS[Math.floor(Math.random()*CONFIG.PIN_COLORS.length)], imageDriveId:null, imageName:null, imageWebContentLink:null, x:pt.x, y:pt.y, z:pt.z, createdAt:nowIso(), updatedAt:nowIso(), visible:true }; state.captions.set(rec.id,rec); refreshPinsDOM(); selectCaption(rec.id,true); autosaveCaptions(); } });
-    function raycastToModel(x,y){ const el=$('#viewer'); const rect=el.getBoundingClientRect(); const ndc=new THREE.Vector2((x/rect.width)*2-1, -(y/rect.height)*2+1); const ray=new THREE.Raycaster(); ray.setFromCamera(ndc,camera); const hits=ray.intersectObject(model,true); if(hits&&hits[0]) return hits[0].point.clone(); return null; }
+    function screenPosOf(v3){
+      const el=$('#viewer'); const w=el.clientWidth, h=el.clientHeight;
+      const v = v3.clone().project(camera);
+      return { x: (v.x * .5 + .5) * w, y: ( -v.y * .5 + .5) * h };
+    }
 
-    $('#saveCaptionBtn').addEventListener('click',()=>{ const id=state.selectedCaptionId; if(!id) return; const rec=state.captions.get(id); if(!rec) return; rec.title=$('#capTitle')?.value||''; rec.body=$('#capBody')?.value||''; rec.updatedAt=nowIso(); const sel=$('#imageSelect'); const idx=(sel?.selectedIndex??0)-1; if(idx>=0){ const f=state.imagesInFolder[idx]; rec.imageDriveId=f.id; rec.imageName=f.name; rec.imageWebContentLink=f.webContentLink; } else { rec.imageDriveId=null; rec.imageName=null; rec.imageWebContentLink=null; } refreshPinsDOM(); autosaveCaptions(); });
-    $('#deleteCaptionBtn').addEventListener('click',()=>{ const id=state.selectedCaptionId; if(!id) return; state.captions.delete(id); state.selectedCaptionId=null; refreshPinsDOM(); autosaveCaptions(); });
+    function refreshPinsDOM(){
+      if(!pinLayer || !lineSvg) return;
+      pinLayer.innerHTML=''; lineSvg.innerHTML='';
+      const list = $('#pinList'); if(list) list.innerHTML='';
+      for(const rec of state.captions.values()){
+        if(rec.visible===false) continue;
+        if(!pinFiltersState[rec.pinColor]) continue;
+        const dot = document.createElement('div'); dot.className='pin-dot'; dot.dataset.id = rec.id; dot.style.background=rec.pinColor; pinLayer.appendChild(dot);
+        dot.addEventListener('click', ()=> selectCaption(rec.id, true));
+        if(list){
+          const item = document.createElement('div'); item.className='list-item'; item.innerHTML=
+            `<span class="color-swatch" style="background:${rec.pinColor}"></span>`+
+            `<div style="min-width:0"><div class="ellipsis">${escapeHtml(rec.title||'(無題)')}</div>`+
+            `<div class="muted ellipsis" style="max-width:220px">${escapeHtml((rec.body||'').slice(0,80))}</div></div>`;
+          item.addEventListener('click', ()=> selectCaption(rec.id, true));
+          list.appendChild(item);
+        }
+      }
+      updatePinScreenPositions();
+    }
 
-    const autosaveCaptions = (fn=>{ let t=0; return async function(){ const now=Date.now(); if(now-t<1200) return; t=now; if(!state.spreadsheetId) return; const {captions}=datasetSheetNames(state.dataset); const rows=[['id','title','body','pinColor','#hex','imageDriveId','imageName','imageWebContentLink','x','y','z','createdAt','updatedAt','visible']]; for(const rec of state.captions.values()){ rows.push([ rec.id, rec.title||'', rec.body||'', rec.pinColor, rec.pinColor, rec.imageDriveId||'', rec.imageName||'', rec.imageWebContentLink||'', rec.x, rec.y, rec.z, rec.createdAt, rec.updatedAt, rec.visible!==false ]);} await gapi.client.sheets.spreadsheets.values.clear({ spreadsheetId: state.spreadsheetId, range: `${captions}!A:Z` }); await gapi.client.sheets.spreadsheets.values.update({ spreadsheetId: state.spreadsheetId, range: `${captions}!A1`, valueInputOption:'RAW', resource:{ values: rows } }); }; })();
+    function updatePinScreenPositions(){
+      if(!pinLayer || !lineSvg) return;
+      const el=$('#viewer');
+      const dots = [...pinLayer.querySelectorAll('.pin-dot')];
+      const idToPos = new Map();
+      dots.forEach(dot=>{
+        const id = dot.dataset.id; const rec = state.captions.get(id); if(!rec) return;
+        const pos = screenPosOf(new THREE.Vector3(rec.x, rec.y, rec.z));
+        dot.style.left = pos.x+'px'; dot.style.top = pos.y+'px';
+        idToPos.set(id, pos);
+      });
+      lineSvg.innerHTML='';
+      document.querySelectorAll('.floating-panel[data-id]').forEach(fp=>{
+        const id = fp.dataset.id; const pos = idToPos.get(id); if(!pos) return;
+        const rect = fp.getBoundingClientRect(); const vRect = el.getBoundingClientRect();
+        const x2 = rect.left - vRect.left + 10; const y2 = rect.top - vRect.top + 20;
+        const line = document.createElementNS('http://www.w3.org/2000/svg','line');
+        line.setAttribute('x1', pos.x); line.setAttribute('y1', pos.y); line.setAttribute('x2', x2); line.setAttribute('y2', y2);
+        line.setAttribute('stroke', '#9fb0c3'); line.setAttribute('stroke-width','1.5'); line.setAttribute('stroke-linecap','round');
+        lineSvg.appendChild(line);
+      });
+    }
 
-    async function loadCaptionsFromSheet(){ const {captions}=datasetSheetNames(state.dataset); const res=await gapi.client.sheets.spreadsheets.values.get({ spreadsheetId: state.spreadsheetId, range: `${captions}!A2:N` }); state.captions.clear(); const rows=res.result.values||[]; rows.forEach(r=>{ const [id,title,body,pinColor,hash,imageDriveId,imageName,imageWebContentLink,x,y,z,createdAt,updatedAt,visible]=r; state.captions.set(id,{ id, title, body, pinColor:pinColor||hash||CONFIG.PIN_COLORS[0], imageDriveId:imageDriveId||null, imageName:imageName||null, imageWebContentLink:imageWebContentLink||null, x:parseFloat(x||0), y:parseFloat(y||0), z:parseFloat(z||0), createdAt:createdAt||nowIso(), updatedAt:updatedAt||nowIso(), visible:String(visible).toLowerCase()!=='false' }); }); refreshPinsDOM(); }
-    async function loadMaterialsFromSheet(){ const {materials}=datasetSheetNames(state.dataset); const res=await gapi.client.sheets.spreadsheets.values.get({ spreadsheetId: state.spreadsheetId, range: `${materials}!A2:G2` }); const v=(res.result.values&&res.result.values[0])||[]; state.materials.alpha=parseFloat(v[0]??1); state.materials.unlit=(v[1]??'false')==='true'; state.materials.doubleSided=(v[2]??'false')==='true'; state.materials.whiteToAlpha.enabled=(v[3]??'false')==='true'; state.materials.whiteToAlpha.threshold=parseInt(v[4]??240); state.materials.blackToAlpha.enabled=(v[5]??'false')==='true'; state.materials.blackToAlpha.threshold=parseInt(v[6]??16); $('#alphaRange').value=state.materials.alpha; $('#unlitToggle').checked=state.materials.unlit; $('#doubleSidedToggle').checked=state.materials.doubleSided; $('#whiteToAlphaToggle').checked=state.materials.whiteToAlpha.enabled; $('#whiteThreshold').value=state.materials.whiteToAlpha.threshold; $('#blackToAlphaToggle').checked=state.materials.blackToAlpha.enabled; $('#blackThreshold').value=state.materials.blackToAlpha.threshold; applyMaterials(); }
-    async function saveMaterialsToSheet(){ const {materials}=datasetSheetNames(state.dataset); await sheetsSetValues(state.spreadsheetId, materials, 2, 1, [[ state.materials.alpha, state.materials.unlit, state.materials.doubleSided, state.materials.whiteToAlpha.enabled, state.materials.whiteToAlpha.threshold, state.materials.blackToAlpha.enabled, state.materials.blackToAlpha.threshold ]]); }
+    function selectCaption(id, openFloating=false){
+      state.selectedCaptionId = id; const rec = state.captions.get(id); if(!rec) return;
+      const t=$('#capTitle'); const b=$('#capBody'); const sel=$('#imageSelect');
+      if(t) t.value = rec.title||''; if(b) b.value = rec.body||'';
+      const idx = state.imagesInFolder.findIndex(f=>f.id===rec.imageDriveId);
+      if(sel) sel.selectedIndex = idx>=0 ? idx+1 : 0;
+      if(openFloating) openFloatingCaption(rec);
+    }
 
-    // Drive/Sheets helpers
-    async function driveGetFileMeta(fileId){ const res=await gapi.client.drive.files.get({ fileId, fields:'id,name,parents,mimeType,webViewLink' }); return res.result; }
-    async function driveFindSpreadsheetInParent(parentId){ const q=`'${parentId}' in parents and trashed=false and mimeType='application/vnd.google-apps.spreadsheet' and name contains '${CONFIG.SPREADSHEET_NAME_PREFIX}'`; const res=await gapi.client.drive.files.list({ q, fields:'files(id,name)', orderBy:'modifiedTime desc', pageSize:10 }); const files=res.result.files||[]; return files[0]||null; }
-    async function sheetsCreateAndMove(parentId,title){ const createRes=await gapi.client.sheets.spreadsheets.create({ resource:{ properties:{ title } } }); const spreadsheetId=createRes.result.spreadsheetId; await gapi.client.drive.files.update({ fileId: spreadsheetId, addParents: parentId, fields:'id, parents' }); return spreadsheetId; }
-    function datasetSheetNames(ds){ return { captions:`${ds}_Captions`, materials:`${ds}_Materials` }; }
-    async function sheetsEnsureDataset(spreadsheetId,ds){ const {captions,materials}=datasetSheetNames(ds); const meta=await gapi.client.sheets.spreadsheets.get({ spreadsheetId }); const existing=(meta.result.sheets||[]).map(s=>s.properties.title); const requests=[]; if(!existing.includes(captions)) requests.push({ addSheet:{ properties:{ title:captions } } }); if(!existing.includes(materials)) requests.push({ addSheet:{ properties:{ title:materials } } }); if(requests.length) await gapi.client.sheets.spreadsheets.batchUpdate({ spreadsheetId, resource:{ requests } }); await sheetsSetValues(spreadsheetId, captions, 1, 1, [[ 'id','title','body','pinColor','#hex','imageDriveId','imageName','imageWebContentLink','x','y','z','createdAt','updatedAt','visible' ]]); await sheetsSetValues(spreadsheetId, materials, 1, 1, [[ 'alpha','unlit','doubleSided','whiteToAlpha.enabled','whiteToAlpha.threshold','blackToAlpha.enabled','blackToAlpha.threshold' ]]); const cur=await gapi.client.sheets.spreadsheets.values.get({ spreadsheetId, range:`${materials}!A2:G2` }); if(!cur.result.values){ await sheetsSetValues(spreadsheetId, materials, 2, 1, [[ state.materials.alpha, state.materials.unlit, state.materials.doubleSided, state.materials.whiteToAlpha.enabled, state.materials.whiteToAlpha.threshold, state.materials.blackToAlpha.enabled, state.materials.blackToAlpha.threshold ]]); } }
-    async function sheetsSetValues(spreadsheetId,sheet,startRow,startCol,values){ const range=`${sheet}!${colName(startCol)}${startRow}`; await gapi.client.sheets.spreadsheets.values.update({ spreadsheetId, range, valueInputOption:'RAW', resource:{ values } }); }
-    function colName(n){ let s=''; while(n>0){ let m=(n-1)%26; s=String.fromCharCode(65+m)+s; n=(n-1-m)/26|0; } return s; }
-    async function driveListImagesInParent(parentId){ const q=`'${parentId}' in parents and trashed=false and (mimeType contains 'image/' or mimeType='image/heic' or mimeType='image/heif')`; const res=await gapi.client.drive.files.list({ q, fields:'files(id,name,webContentLink,mimeType)', pageSize:200, orderBy:'name' }); return res.result.files||[]; }
-    async function driveFetchBlob(fileId){ const resp=await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`,{ headers:{ Authorization:`Bearer ${state.token}` }}); if(!resp.ok) throw new Error('ダウンロード失敗'); return await resp.blob(); }
-    async function driveUploadImageToParent(parentId,file){ const metadata={ name:file.name, parents:[parentId], mimeType:file.type||'application/octet-stream' }; const boundary='-------314159265358979323846'; const delimiter="\r\n--"+boundary+"\r\n"; const closeDelim="\r\n--"+boundary+"--"; const reader=await file.arrayBuffer(); const base64Data=btoa(String.fromCharCode.apply(null, Array.from(new Uint8Array(reader)))); const body = delimiter + 'Content-Type: application/json; charset=UTF-8\r\n\r\n' + JSON.stringify(metadata) + delimiter + 'Content-Type: ' + metadata.mimeType + '\r\nContent-Transfer-Encoding: base64\r\n\r\n' + base64Data + closeDelim; const res=await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart',{ method:'POST', headers:{ 'Authorization': 'Bearer ' + state.token, 'Content-Type': 'multipart/related; boundary=' + boundary }, body }); if(!res.ok) throw new Error('Upload failed'); return await res.json(); }
-    function rebuildImageSelect(){ const sel=$('#imageSelect'); if(!sel) return; sel.innerHTML='<option value="">(画像なし)</option>' + state.imagesInFolder.map(f=>`<option value="${f.id}">${(f.name||'').replace(/</g,'&lt;')}${/heic|heif/i.test(f.mimeType)?' (HEIC)':''}</option>`).join(''); }
-    async function getDisplayURLForFileId(fileId){ if(state.displayUrlCache.has(fileId)) return state.displayUrlCache.get(fileId); const meta=state.imagesInFolder.find(f=>f.id===fileId); const isHeic=meta && /heic|heif/i.test(meta.mimeType||''); const blob=await driveFetchBlob(fileId); if(isHeic && !isSafariLike()){ if(typeof window.heic2any!=='function') throw new Error('heic2any が読み込めません'); const out=await window.heic2any({ blob, toType:'image/png' }); const url=objectURLFromBlob(out); state.displayUrlCache.set(fileId,url); return url; } else { const url=objectURLFromBlob(blob); state.displayUrlCache.set(fileId,url); return url; } }
-    async function populateSaveSetSelect(selectName){ if(!state.spreadsheetId) return; const meta=await gapi.client.sheets.spreadsheets.get({ spreadsheetId: state.spreadsheetId }); const titles=(meta.result.sheets||[]).map(s=>s.properties.title); const datasets=new Set(); titles.forEach(t=>{ const m=t.match(/(.+)_(Captions|Materials)$/); if(m) datasets.add(m[1]);}); const arr=Array.from(datasets); const sel=$('#saveSetSelect'); if(sel) sel.innerHTML=arr.map(n=>`<option value="${n}">${n.replace(/</g,'&lt;')}</option>`).join(''); const pick=selectName&&arr.includes(selectName)?selectName:(arr.includes(state.dataset)?state.dataset:arr[0]||CONFIG.DEFAULT_DATASET); if(sel) sel.value=pick; state.dataset=pick; setQueryParam('dataset',pick); }
+    async function getDisplayURLForFileId(fileId){
+      if(state.displayUrlCache.has(fileId)) return state.displayUrlCache.get(fileId);
+      const meta = state.imagesInFolder.find(f=>f.id===fileId);
+      const isHeic = meta && /heic|heif/i.test(meta.mimeType||'');
+      const resp=await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`,{ headers:{ Authorization:`Bearer ${state.token}` }});
+      if(!resp.ok) throw new Error('ダウンロード失敗');
+      const blob=await resp.blob();
+      if(isHeic && !isSafariLike()){
+        if(typeof window.heic2any!=='function') throw new Error('heic2any が読み込めません');
+        const out=await window.heic2any({ blob, toType:'image/png' });
+        const url=objectURLFromBlob(out);
+        state.displayUrlCache.set(fileId,url);
+        return url;
+      } else {
+        const url=objectURLFromBlob(blob);
+        state.displayUrlCache.set(fileId,url);
+        return url;
+      }
+    }
 
-    // UI wiring
+    async function openFloatingCaption(rec){
+      document.querySelectorAll(\`.floating-panel[data-id="${rec.id}"]\`).forEach(n=>n.remove());
+      const fp = document.createElement('div'); fp.className='floating-panel'; fp.dataset.id=rec.id;
+      fp.innerHTML = \`<div class="hd"><strong>\${(rec.title||'(無題)').replace(/[&<>"]/g, s=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;"}[s]))}</strong><button class="btn" data-close>×</button></div>\`+
+        \`<div class="bd"><div class="muted" style="margin-bottom:6px">\${(rec.body||'').slice(0,140).replace(/[&<>"]/g, s=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;"}[s]))}</div>\`+
+        (rec.imageDriveId? \`<div data-imgwrap><div class="muted">画像を読み込み中…</div></div>\` : '') +
+        \`</div>\`;
+      fp.style.left='16px'; fp.style.top='16px';
+      fp.querySelector('[data-close]').addEventListener('click', ()=>fp.remove());
+      $('#viewer').appendChild(fp);
+      let drag=false,sx=0,sy=0,ox=0,oy=0;
+      fp.querySelector('.hd').addEventListener('mousedown', e=>{drag=true; sx=e.clientX; sy=e.clientY; const r=fp.getBoundingClientRect(); ox=r.left; oy=r.top;});
+      window.addEventListener('mousemove', e=>{ if(!drag) return; fp.style.left=(ox+e.clientX-sx)+'px'; fp.style.top=(oy+e.clientY-sy)+'px'; updatePinScreenPositions();});
+      window.addEventListener('mouseup', ()=>drag=false);
+      updatePinScreenPositions();
+      if(rec.imageDriveId){
+        try{
+          const url = await getDisplayURLForFileId(rec.imageDriveId);
+          const wrap = fp.querySelector('[data-imgwrap]'); if(wrap){ wrap.innerHTML = \`<img src="\${url}" style="max-width:100%; max-height:220px; display:block; border-radius:8px"/>\`; }
+        }catch(e){ const wrap = fp.querySelector('[data-imgwrap]'); if(wrap){ wrap.innerHTML = \`<div class="muted">画像の表示に失敗：\${e.message.replace(/[&<>"]/g, s=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;"}[s]))}</div>\`; } }
+      }
+    }
+
+    // Add pin flow
+    let addPinMode=false; $('#addPinBtn').addEventListener('click', ()=>{ addPinMode=true; $('#addPinBtn').textContent='モデル上をクリックしてください…'; });
+    $('#three').addEventListener('click', (e)=>{
+      if(!addPinMode || !model) return;
+      const rect=$('#viewer').getBoundingClientRect();
+      const pt = raycastToModel(e.clientX-rect.left, e.clientY-rect.top);
+      if(pt){
+        addPinMode=false; $('#addPinBtn').textContent='ピン追加 (次のクリックで配置)';
+        const rec = { id: uuid(), title:'', body:'', pinColor: CONFIG.PIN_COLORS[Math.floor(Math.random()*CONFIG.PIN_COLORS.length)], imageDriveId:null, imageName:null, imageWebContentLink:null, x:pt.x, y:pt.y, z:pt.z, createdAt: nowIso(), updatedAt: nowIso(), visible:true };
+        state.captions.set(rec.id, rec); refreshPinsDOM(); selectCaption(rec.id, true); autosaveCaptions();
+      }
+    });
+
+    function raycastToModel(x, y){
+      const el=$('#viewer'); const rect=el.getBoundingClientRect();
+      const ndc = new THREE.Vector2( (x/rect.width)*2 - 1, -(y/rect.height)*2 + 1 );
+      const ray = new THREE.Raycaster(); ray.setFromCamera(ndc, camera);
+      const hits = ray.intersectObject(model, true);
+      if(hits && hits[0]) return hits[0].point.clone();
+      return null;
+    }
+
+    // ====== Sheets I/O for captions/materials ======
+    function rebuildImageSelect(){
+      const sel = $('#imageSelect'); if(!sel) return;
+      sel.innerHTML = '<option value="">(画像なし)</option>' + state.imagesInFolder.map(f=>`<option value="${f.id}">${(f.name||'').replace(/</g,'&lt;')}${/heic|heif/i.test(f.mimeType)?' (HEIC)':''}</option>`).join('');
+    }
+
+    async function populateSaveSetSelect(selectName){
+      if(!state.spreadsheetId) return;
+      const meta = await gapi.client.sheets.spreadsheets.get({ spreadsheetId: state.spreadsheetId });
+      const titles = (meta.result.sheets||[]).map(s=>s.properties.title);
+      const datasets = new Set();
+      titles.forEach(t=>{ const m=t.match(/(.+)_(Captions|Materials)$/); if(m) datasets.add(m[1]); });
+      const arr = Array.from(datasets);
+      const sel = $('#saveSetSelect'); if(!sel) return;
+      sel.innerHTML = arr.map(n=>`<option value="${n}">${(n||'').replace(/</g,'&lt;')}</option>`).join('');
+      const pick = selectName && arr.includes(selectName) ? selectName : (arr.includes(state.dataset)? state.dataset : arr[0] || CONFIG.DEFAULT_DATASET);
+      sel.value = pick; state.dataset=pick; setQueryParam('dataset', pick);
+    }
+
+    async function loadCaptionsFromSheet(){
+      const {captions} = { captions: `${state.dataset}_Captions` };
+      const res = await gapi.client.sheets.spreadsheets.values.get({ spreadsheetId: state.spreadsheetId, range: `${captions}!A2:N` });
+      state.captions.clear();
+      const rows = res.result.values || [];
+      rows.forEach(r=>{
+        const [id,title,body,pinColor,hash,imageDriveId,imageName,imageWebContentLink,x,y,z,createdAt,updatedAt,visible] = r;
+        state.captions.set(id, { id, title, body, pinColor: pinColor||hash||CONFIG.PIN_COLORS[0], imageDriveId:imageDriveId||null, imageName:imageName||null, imageWebContentLink:imageWebContentLink||null, x:parseFloat(x||0), y:parseFloat(y||0), z:parseFloat(z||0), createdAt: createdAt||nowIso(), updatedAt: updatedAt||nowIso(), visible: String(visible).toLowerCase()!=='false' });
+      });
+      refreshPinsDOM();
+    }
+
+    async function loadMaterialsFromSheet(){
+      const {materials} = { materials: `${state.dataset}_Materials` };
+      const res = await gapi.client.sheets.spreadsheets.values.get({ spreadsheetId: state.spreadsheetId, range: `${materials}!A2:G2` });
+      const v = (res.result.values && res.result.values[0]) || [];
+      state.materials.alpha = parseFloat(v[0] ?? 1);
+      state.materials.unlit = (v[1] ?? 'false') === 'true';
+      state.materials.doubleSided = (v[2] ?? 'false') === 'true';
+      state.materials.whiteToAlpha.enabled = (v[3] ?? 'false') === 'true';
+      state.materials.whiteToAlpha.threshold = parseInt(v[4] ?? 240);
+      state.materials.blackToAlpha.enabled = (v[5] ?? 'false') === 'true';
+      state.materials.blackToAlpha.threshold = parseInt(v[6] ?? 16);
+      $('#alphaRange').value = state.materials.alpha;
+      $('#unlitToggle').checked = state.materials.unlit;
+      $('#doubleSidedToggle').checked = state.materials.doubleSided;
+      $('#whiteToAlphaToggle').checked = state.materials.whiteToAlpha.enabled;
+      $('#whiteThreshold').value = state.materials.whiteToAlpha.threshold;
+      $('#blackToAlphaToggle').checked = state.materials.blackToAlpha.enabled;
+      $('#blackThreshold').value = state.materials.blackToAlpha.threshold;
+      applyMaterials();
+    }
+
+    const autosaveCaptions = (fn=>{
+      let t=0;
+      return async function(){
+        const now=Date.now(); if(now-t<1200) return; t=now;
+        if(!state.spreadsheetId) return;
+        const captions= `${state.dataset}_Captions`;
+        const rows=[['id','title','body','pinColor','#hex','imageDriveId','imageName','imageWebContentLink','x','y','z','createdAt','updatedAt','visible']];
+        for(const rec of state.captions.values()){
+          rows.push([ rec.id, rec.title||'', rec.body||'', rec.pinColor, rec.pinColor, rec.imageDriveId||'', rec.imageName||'', rec.imageWebContentLink||'', rec.x, rec.y, rec.z, rec.createdAt, rec.updatedAt, rec.visible!==false ]);
+        }
+        await gapi.client.sheets.spreadsheets.values.clear({ spreadsheetId: state.spreadsheetId, range: `${captions}!A:Z` });
+        await gapi.client.sheets.spreadsheets.values.update({ spreadsheetId: state.spreadsheetId, range: `${captions}!A1`, valueInputOption:'RAW', resource:{ values: rows } });
+      };
+    })();
+
+    async function saveMaterialsToSheet(){
+      const materials= `${state.dataset}_Materials`;
+      await gapi.client.sheets.spreadsheets.values.update({
+        spreadsheetId: state.spreadsheetId,
+        range: `${materials}!A2:G2`,
+        valueInputOption: 'RAW',
+        resource: { values: [[
+          state.materials.alpha,
+          state.materials.unlit,
+          state.materials.doubleSided,
+          state.materials.whiteToAlpha.enabled,
+          state.materials.whiteToAlpha.threshold,
+          state.materials.blackToAlpha.enabled,
+          state.materials.blackToAlpha.threshold
+        ]]} });
+    }
+
+    // ====== UI Wiring ======
     function uiInit(){
-      const tabs={ home:'#tabHome', materials:'#tabMaterials', camera:'#tabCamera', captions:'#tabCaptions' };
+      const tabs = { home:'#tabHome', materials:'#tabMaterials', camera:'#tabCamera', captions:'#tabCaptions' };
       function showTab(key){ Object.values(tabs).forEach(sel=>$(sel)?.classList.add('hidden')); $(tabs[key])?.classList.remove('hidden'); }
-      $$('.tab-btn').forEach(b=> b.addEventListener('click', ()=> showTab(b.dataset.tab)) ); showTab('home');
+      $$('.tab-btn').forEach(b=> b.addEventListener('click', ()=> showTab(b.dataset.tab)) );
+      showTab('home');
+
       $('#signinBtn').addEventListener('click', ()=> tokenClient && tokenClient.requestAccessToken({ prompt: state.isAuthed? '' : 'consent' }));
-      $('#loadBtn').addEventListener('click', async()=>{ try{ await ensureAuthed(); const input=$('#glbInput').value.trim(); const fileId=parseDriveFileId(input); if(!fileId) return alert('fileId/URLを確認してください'); const gltf=await loadGLBFromDrive(fileId); setupModel(gltf); if(!state.parentId){ const meta=await driveGetFileMeta(fileId); state.parentId=(meta.parents||[])[0]||null; } let ss=await driveFindSpreadsheetInParent(state.parentId); if(!ss){ const baseName=(state.fileMeta&&state.fileMeta.name)? state.fileMeta.name.replace(/\.[^.]+$/,'') : fileId; const title=CONFIG.SPREADSHEET_NAME_PREFIX + '_' + baseName; const sid=await sheetsCreateAndMove(state.parentId,title); state.spreadsheetId=sid; } else { state.spreadsheetId=ss.id; } await sheetsEnsureDataset(state.spreadsheetId, state.dataset); await Promise.all([loadMaterialsFromSheet(), loadCaptionsFromSheet()]); state.imagesInFolder=await driveListImagesInParent(state.parentId); rebuildImageSelect(); populateSaveSetSelect(); }catch(err){ console.error(err); alert('読み込みに失敗しました: '+ err.message); } });
+
+      $('#loadBtn').addEventListener('click', async()=>{
+        try{
+          await ensureAuthed();
+          const input=$('#glbInput').value.trim(); const fileId=parseDriveFileId(input);
+          if(!fileId) return alert('fileId/URLを確認してください');
+          const gltf=await loadGLBFromDrive(fileId);
+          setupModel(gltf);
+          if(!state.parentId){ const meta=await gapi.client.drive.files.get({ fileId, fields:'parents,name' }); state.parentId=(meta.result.parents||[])[0]||null; }
+          let ss=await (async()=>{
+            if(!state.parentId) return null;
+            const q=`'${state.parentId}' in parents and trashed=false and mimeType='application/vnd.google-apps.spreadsheet' and name contains '${CONFIG.SPREADSHEET_NAME_PREFIX}'`;
+            const res=await gapi.client.drive.files.list({ q, fields:'files(id,name)', orderBy:'modifiedTime desc', pageSize:10 });
+            return (res.result.files||[])[0]||null;
+          })();
+          if(!ss){
+            const baseName=(state.fileMeta&&state.fileMeta.name)? state.fileMeta.name.replace(/\.[^.]+$/,'') : fileId;
+            const title=CONFIG.SPREADSHEET_NAME_PREFIX + '_' + baseName;
+            const createRes = await gapi.client.sheets.spreadsheets.create({ resource:{ properties:{ title } } });
+            const sid=createRes.result.spreadsheetId;
+            if(state.parentId){ await gapi.client.drive.files.update({ fileId: sid, addParents: state.parentId, fields:'id, parents' }); }
+            state.spreadsheetId=sid;
+          } else {
+            state.spreadsheetId=ss.id;
+          }
+          await (async(spreadsheetId,ds)=>{
+            const captions=`${ds}_Captions`, materials=`${ds}_Materials`;
+            const meta=await gapi.client.sheets.spreadsheets.get({ spreadsheetId });
+            const existing=(meta.result.sheets||[]).map(s=>s.properties.title);
+            const requests=[];
+            if(!existing.includes(captions)) requests.push({ addSheet:{ properties:{ title:captions } } });
+            if(!existing.includes(materials)) requests.push({ addSheet:{ properties:{ title:materials } } });
+            if(requests.length) await gapi.client.sheets.spreadsheets.batchUpdate({ spreadsheetId, resource:{ requests } });
+            await gapi.client.sheets.spreadsheets.values.update({ spreadsheetId, range:`${captions}!A1`, valueInputOption:'RAW', resource:{ values:[[ 'id','title','body','pinColor','#hex','imageDriveId','imageName','imageWebContentLink','x','y','z','createdAt','updatedAt','visible' ]] } });
+            await gapi.client.sheets.spreadsheets.values.update({ spreadsheetId, range:`${materials}!A1`, valueInputOption:'RAW', resource:{ values:[[ 'alpha','unlit','doubleSided','whiteToAlpha.enabled','whiteToAlpha.threshold','blackToAlpha.enabled','blackToAlpha.threshold' ]] } });
+            const cur=await gapi.client.sheets.spreadsheets.values.get({ spreadsheetId, range:`${materials}!A2:G2` });
+            if(!cur.result.values){ await gapi.client.sheets.spreadsheets.values.update({ spreadsheetId, range:`${materials}!A2`, valueInputOption:'RAW', resource:{ values:[[ state.materials.alpha, state.materials.unlit, state.materials.doubleSided, state.materials.whiteToAlpha.enabled, state.materials.whiteToAlpha.threshold, state.materials.blackToAlpha.enabled, state.materials.blackToAlpha.threshold ]] } }); }
+          })(state.spreadsheetId, state.dataset);
+          await Promise.all([loadMaterialsFromSheet(), loadCaptionsFromSheet()]);
+          if(state.parentId){ const imgs=await gapi.client.drive.files.list({ q:`'${state.parentId}' in parents and trashed=false and (mimeType contains 'image/' or mimeType='image/heic' or mimeType='image/heif')`, fields:'files(id,name,webContentLink,mimeType)', pageSize:200, orderBy:'name' }); state.imagesInFolder=imgs.result.files||[]; rebuildImageSelect(); }
+          populateSaveSetSelect();
+        }catch(err){ console.error(err); alert('読み込みに失敗しました: '+ err.message); }
+      });
+
       $('#fitBtn').addEventListener('click', ()=> fitCamera('front'));
       $('#orthoToggle').addEventListener('change', (e)=> setOrthoMode(e.target.checked));
       $('#bgColor').addEventListener('input', applyMaterials);
@@ -424,11 +726,11 @@ if (blackEnable > 0.5 && _luma_ <= blackThr) { diffuseColor.a = 0.0; }`);
       $('#blackThreshold').addEventListener('input', (e)=>{ state.materials.blackToAlpha.threshold=parseInt(e.target.value); updateChromaUniforms(); });
       $('#saveMaterialsBtn').addEventListener('click', async()=>{ await saveMaterialsToSheet(); alert('保存しました'); });
       $$('#tabCamera .btn[data-cam]').forEach(b=> b.addEventListener('click', ()=> fitCamera(b.dataset.cam)) );
-      $('#newSaveSetBtn').addEventListener('click', async()=>{ const name=prompt('新しいセーブデータ名'); if(!name) return; await sheetsEnsureDataset(state.spreadsheetId,name); populateSaveSetSelect(name); state.dataset=name; await Promise.all([loadMaterialsFromSheet(), loadCaptionsFromSheet()]); });
-      $('#dupSaveSetBtn').addEventListener('click', async()=>{ const base=state.dataset; const name=prompt('複製先の名前', base+'Copy'); if(!name) return; await sheetsEnsureDataset(state.spreadsheetId,name); const fromC=datasetSheetNames(base).captions; const toC=datasetSheetNames(name).captions; const fromM=datasetSheetNames(base).materials; const toM=datasetSheetNames(name).materials; const cVals=await gapi.client.sheets.spreadsheets.values.get({ spreadsheetId: state.spreadsheetId, range:`${fromC}!A1:N` }); const rows=cVals.result.values||[]; await gapi.client.sheets.spreadsheets.values.clear({ spreadsheetId: state.spreadsheetId, range:`${toC}!A:Z` }); if(rows.length){ await gapi.client.sheets.spreadsheets.values.update({ spreadsheetId: state.spreadsheetId, range:`${toC}!A1`, valueInputOption:'RAW', resource:{ values: rows } }); } const mVals=await gapi.client.sheets.spreadsheets.values.get({ spreadsheetId: state.spreadsheetId, range:`${fromM}!A1:G2` }); const mRows=mVals.result.values||[]; await gapi.client.sheets.spreadsheets.values.clear({ spreadsheetId: state.spreadsheetId, range:`${toM}!A:Z` }); if(mRows.length){ await gapi.client.sheets.spreadsheets.values.update({ spreadsheetId: state.spreadsheetId, range:`${toM}!A1`, valueInputOption:'RAW', resource:{ values: mRows } }); } populateSaveSetSelect(name); state.dataset=name; await Promise.all([loadMaterialsFromSheet(), loadCaptionsFromSheet()]); });
-      $('#renameSaveSetBtn').addEventListener('click', async()=>{ const base=state.dataset; const name=prompt('新しい名前', base); if(!name || name===base) return; const from=datasetSheetNames(base); const to=datasetSheetNames(name); const meta=await gapi.client.sheets.spreadsheets.get({ spreadsheetId: state.spreadsheetId }); const sheetMap=new Map((meta.result.sheets||[]).map(s=>[s.properties.title, s.properties.sheetId])); const reqs=[]; if(sheetMap.has(from.captions)) reqs.push({ updateSheetProperties:{ properties:{ sheetId:sheetMap.get(from.captions), title:to.captions }, fields:'title' } }); if(sheetMap.has(from.materials)) reqs.push({ updateSheetProperties:{ properties:{ sheetId:sheetMap.get(from.materials), title:to.materials }, fields:'title' } }); if(reqs.length){ await gapi.client.sheets.spreadsheets.batchUpdate({ spreadsheetId: state.spreadsheetId, resource:{ requests:reqs } }); } state.dataset=name; populateSaveSetSelect(name); await Promise.all([loadMaterialsFromSheet(), loadCaptionsFromSheet()]); });
+      $('#newSaveSetBtn').addEventListener('click', async()=>{ const name=prompt('新しいセーブデータ名'); if(!name) return; await (async(id,ds)=>{ const captions=`${ds}_Captions`, materials=`${ds}_Materials`; const meta=await gapi.client.sheets.spreadsheets.get({ spreadsheetId:id }); const existing=(meta.result.sheets||[]).map(s=>s.properties.title); const requests=[]; if(!existing.includes(captions)) requests.push({ addSheet:{ properties:{ title:captions } } }); if(!existing.includes(materials)) requests.push({ addSheet:{ properties:{ title:materials } } }); if(requests.length) await gapi.client.sheets.spreadsheets.batchUpdate({ spreadsheetId:id, resource:{ requests } }); await gapi.client.sheets.spreadsheets.values.update({ spreadsheetId:id, range:`${captions}!A1`, valueInputOption:'RAW', resource:{ values:[[ 'id','title','body','pinColor','#hex','imageDriveId','imageName','imageWebContentLink','x','y','z','createdAt','updatedAt','visible' ]] } }); await gapi.client.sheets.spreadsheets.values.update({ spreadsheetId:id, range:`${materials}!A1`, valueInputOption:'RAW', resource:{ values:[[ 'alpha','unlit','doubleSided','whiteToAlpha.enabled','whiteToAlpha.threshold','blackToAlpha.enabled','blackToAlpha.threshold' ]] } }); })(state.spreadsheetId,name); populateSaveSetSelect(name); state.dataset=name; await Promise.all([loadMaterialsFromSheet(), loadCaptionsFromSheet()]); });
+      $('#dupSaveSetBtn').addEventListener('click', async()=>{ const base=state.dataset; const name=prompt('複製先の名前', base+'Copy'); if(!name) return; await (async(id,from,to)=>{ await (async(id2,ds)=>{ const captions=`${ds}_Captions`, materials=`${ds}_Materials`; const meta=await gapi.client.sheets.spreadsheets.get({ spreadsheetId:id2 }); const existing=(meta.result.sheets||[]).map(s=>s.properties.title); const requests=[]; if(!existing.includes(captions)) requests.push({ addSheet:{ properties:{ title:captions } } }); if(!existing.includes(materials)) requests.push({ addSheet:{ properties:{ title:materials } } }); if(requests.length) await gapi.client.sheets.spreadsheets.batchUpdate({ spreadsheetId:id2, resource:{ requests } }); await gapi.client.sheets.spreadsheets.values.update({ spreadsheetId:id2, range:`${captions}!A1`, valueInputOption:'RAW', resource:{ values:[[ 'id','title','body','pinColor','#hex','imageDriveId','imageName','imageWebContentLink','x','y','z','createdAt','updatedAt','visible' ]] } }); await gapi.client.sheets.spreadsheets.values.update({ spreadsheetId:id2, range:`${materials}!A1`, valueInputOption:'RAW', resource:{ values:[[ 'alpha','unlit','doubleSided','whiteToAlpha.enabled','whiteToAlpha.threshold','blackToAlpha.enabled','blackToAlpha.threshold' ]] } }); })(id,to); const cF=`${from}_Captions`, cT=`${to}_Captions`; const mF=`${from}_Materials`, mT=`${to}_Materials`; const cVals=await gapi.client.sheets.spreadsheets.values.get({ spreadsheetId:id, range: `${cF}!A1:N` }); const rows=cVals.result.values||[]; await gapi.client.sheets.spreadsheets.values.clear({ spreadsheetId:id, range:`${cT}!A:Z` }); if(rows.length){ await gapi.client.sheets.spreadsheets.values.update({ spreadsheetId:id, range:`${cT}!A1`, valueInputOption:'RAW', resource:{ values: rows } }); } const mVals=await gapi.client.sheets.spreadsheets.values.get({ spreadsheetId:id, range:`${mF}!A1:G2` }); const mRows=mVals.result.values||[]; await gapi.client.sheets.spreadsheets.values.clear({ spreadsheetId:id, range:`${mT}!A:Z` }); if(mRows.length){ await gapi.client.sheets.spreadsheets.values.update({ spreadsheetId:id, range:`${mT}!A1`, valueInputOption:'RAW', resource:{ values: mRows } }); } })(state.spreadsheetId, base, name); populateSaveSetSelect(name); state.dataset=name; await Promise.all([loadMaterialsFromSheet(), loadCaptionsFromSheet()]); });
+      $('#renameSaveSetBtn').addEventListener('click', async()=>{ const base=state.dataset; const name=prompt('新しい名前', base); if(!name || name===base) return; const from={c:`${base}_Captions`, m:`${base}_Materials`}, to={c:`${name}_Captions`, m:`${name}_Materials`}; const meta=await gapi.client.sheets.spreadsheets.get({ spreadsheetId: state.spreadsheetId }); const sheetMap=new Map((meta.result.sheets||[]).map(s=>[s.properties.title, s.properties.sheetId])); const reqs=[]; if(sheetMap.has(from.c)) reqs.push({ updateSheetProperties:{ properties:{ sheetId:sheetMap.get(from.c), title:to.c }, fields:'title' } }); if(sheetMap.has(from.m)) reqs.push({ updateSheetProperties:{ properties:{ sheetId:sheetMap.get(from.m), title:to.m }, fields:'title' } }); if(reqs.length){ await gapi.client.sheets.spreadsheets.batchUpdate({ spreadsheetId: state.spreadsheetId, resource:{ requests:reqs } }); } state.dataset=name; populateSaveSetSelect(name); await Promise.all([loadMaterialsFromSheet(), loadCaptionsFromSheet()]); });
       $('#saveSetSelect').addEventListener('change', async(e)=>{ state.dataset=e.target.value; setQueryParam('dataset',state.dataset); await Promise.all([loadMaterialsFromSheet(), loadCaptionsFromSheet()]); });
-      $('#uploadLocalImageBtn').addEventListener('click', async()=>{ try{ if(!state.parentId) return alert('まずGLBを読み込んでください'); const fi=$('#localImageInput'); const file=fi.files&&fi.files[0]; if(!file) return alert('ファイルを選択'); await ensureAuthed(); const res=await driveUploadImageToParent(state.parentId,file); alert('アップロードしました: '+res.name); state.imagesInFolder=await driveListImagesInParent(state.parentId); rebuildImageSelect(); }catch(err){ alert('アップロード失敗: '+err.message); } });
+      $('#uploadLocalImageBtn').addEventListener('click', async()=>{ try{ if(!state.parentId) return alert('まずGLBを読み込んでください'); const fi=$('#localImageInput'); const file=fi.files&&fi.files[0]; if(!file) return alert('ファイルを選択'); await ensureAuthed(); const boundary='-------314159265358979323846'; const delimiter="\\r\\n--"+boundary+"\\r\\n"; const closeDelim="\\r\\n--"+boundary+"--"; const metadata={ name:file.name, parents:[state.parentId], mimeType:file.type||'application/octet-stream' }; const reader=await file.arrayBuffer(); const base64Data=btoa(String.fromCharCode.apply(null, Array.from(new Uint8Array(reader)))); const body = delimiter + 'Content-Type: application/json; charset=UTF-8\\r\\n\\r\\n' + JSON.stringify(metadata) + delimiter + 'Content-Type: ' + metadata.mimeType + '\\r\\nContent-Transfer-Encoding: base64\\r\\n\\r\\n' + base64Data + closeDelim; const res=await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart',{ method:'POST', headers:{ 'Authorization': 'Bearer ' + state.token, 'Content-Type': 'multipart/related; boundary=' + boundary }, body }); if(!res.ok) throw new Error('Upload failed'); const j=await res.json(); alert('アップロードしました: '+j.name); state.imagesInFolder=await (async(pid)=>{ const q = `'${pid}' in parents and trashed=false and (mimeType contains "image/" or mimeType="image/heic" or mimeType="image/heif")`; const res=await gapi.client.drive.files.list({ q, fields:'files(id,name,webContentLink,mimeType)', pageSize:200, orderBy:'name' }); return res.result.files||[]; })(state.parentId); rebuildImageSelect(); }catch(err){ alert('アップロード失敗: '+err.message); } });
       $('#viewLinkBtn').addEventListener('click', ()=>{ const u=new URL(location.href); u.searchParams.set('mode','view'); copyToClipboard(u.toString()); alert('閲覧専用リンクをコピーしました'); });
       $('#viewModeToggle').addEventListener('change', (e)=>{ const u=new URL(location.href); if(e.target.checked){ u.searchParams.set('mode','view'); } else { u.searchParams.delete('mode'); } history.replaceState(null,'',u.toString()); });
       $('#mobileForceToggle').addEventListener('change', (e)=> toggleMobileUI(e.target.checked));
