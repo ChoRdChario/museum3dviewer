@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
-  <title>LociMyu • GLB+Sheets Pins (Fix regex/CRLF, HEIC, Solid Concurrency)</title>
+  <title>LociMyu • GLB+Sheets Pins MVP (HEIC対応/広めDrive権限)</title>
   <link rel="icon" href="data:;base64,iVBORw0KGgo=" />
   <style>
     :root {
@@ -48,7 +48,6 @@
     .mobile .layout{grid-template-columns: 1fr}
     .mobile .desk{position:fixed; left:0; right:0; bottom:0; height:52%; border-top-left-radius:18px; border-top-right-radius:18px; background:var(--panel); border-top:1px solid #1f2a3a}
     .mobile .desk .hd{cursor:grab}
-    .toast{position:fixed; left:50%; transform:translateX(-50%); bottom:16px; background:#111b28; border:1px solid #2a3a54; color:#e6edf3; padding:10px 14px; border-radius:10px; box-shadow:var(--shadow); z-index:99; opacity:.96}
     .tag{font-size:.75rem; opacity:.8}
     .sep{height:1px; background:#1c2838; margin:6px 0}
     .color-swatch{width:18px; height:18px; border-radius:50%; border:1px solid rgba(255,255,255,.35); display:inline-block; vertical-align:middle}
@@ -218,7 +217,7 @@
       CLIENT_ID: '595200751510-ncahnf7edci6b9925becn5to49r6cguv.apps.googleusercontent.com',
       SCOPES: [
         'https://www.googleapis.com/auth/spreadsheets',
-        'https://www.googleapis.com/auth/drive' // 広め権限
+        'https://www.googleapis.com/auth/drive'
       ].join(' '),
       DISCOVERY_DOCS: [
         'https://www.googleapis.com/discovery/v1/apis/drive/v3/rest',
@@ -227,8 +226,7 @@
       SPREADSHEET_NAME_PREFIX: 'LociMyu',
       DEFAULT_DATASET: 'Main',
       PIN_COLORS: ['#ff6b6b','#f9a825','#ffd166','#06d6a0','#32a4ff','#a66bff','#ff63d8','#89a2b8'],
-      MOBILE_BREAKPOINT: 760,
-      POLL_MS: 7000
+      MOBILE_BREAKPOINT: 760
     };
 
     // ====== Globals / State ======
@@ -242,8 +240,6 @@
       spreadsheetId: null,
       dataset: CONFIG.DEFAULT_DATASET,
       captions: new Map(), // id -> record
-      rowIndex: new Map(), // id -> rowNumber (1-based)
-      dirtyIds: new Set(),
       materials: {
         alpha: 1,
         unlit: false,
@@ -256,9 +252,7 @@
       isMobileUI: false,
       imagesInFolder: [],
       chromaPatchedMaterials: new Set(),
-      displayUrlCache: new Map(), // fileId -> objectURL
-      pollTimer: null,
-      lastSeenUpdatedAt: null // ISO string
+      displayUrlCache: new Map()
     };
 
     // ====== Utilities ======
@@ -266,6 +260,7 @@
     const $$ = sel => Array.from(document.querySelectorAll(sel));
     const sleep = ms => new Promise(r=>setTimeout(r,ms));
     const nowIso = () => new Date().toISOString();
+    const uuid = () => 'xxxxxxxx'.replace(/[x]/g,()=> (Math.random()*16|0).toString(16)) + '-' + Date.now().toString(36);
 
     function getQueryParam(name){
       const u = new URL(location.href);
@@ -279,15 +274,13 @@
         const ta=document.createElement('textarea'); ta.value=text; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove();
       });
     }
-    function uuid(){return 'xxxxxxxx'.replace(/[x]/g,()=> (Math.random()*16|0).toString(16)) + '-' + Date.now().toString(36)}
-    const clamp = (n, a, b)=> Math.max(a, Math.min(b, n));
 
     function isMobileGuess(){
       return window.innerWidth < CONFIG.MOBILE_BREAKPOINT || /iPhone|Android.+Mobile/.test(navigator.userAgent);
     }
     function isSafariLike(){
       const ua = navigator.userAgent;
-      return (/Safari\//.test(ua) && !/Chrome\//.test(ua)) || /iPhone|iPad|iPod/.test(ua);
+      return ((/Safari\\//.test(ua) && !/Chrome\\//.test(ua)) || /iPhone|iPad|iPod/.test(ua));
     }
 
     function parseDriveFileId(input){
@@ -296,7 +289,7 @@
       if(/^[a-zA-Z0-9_-]{20,}$/.test(s)) return s; // raw id
       try{
         const u = new URL(s);
-        const m1 = u.pathname.match(/\/file\/d\/([a-zA-Z0-9_-]{20,})/);
+        const m1 = u.pathname.match(/\\/file\\/d\\/([a-zA-Z0-9_-]{20,})/);
         if(m1) return m1[1];
         const id = u.searchParams.get('id'); if(id) return id;
         const d = u.searchParams.get('driveid'); if(d) return d;
@@ -310,37 +303,13 @@
       let t=0, lastArgs=null; return (...args)=>{ lastArgs=args; const now=Date.now(); if(now-t>ms){ t=now; fn(...lastArgs); } };
     }
 
-    function toast(msg){
-      const t = document.createElement('div');
-      t.className='toast'; t.textContent = msg;
-      document.body.appendChild(t);
-      setTimeout(()=>{ t.remove(); }, 2500);
-    }
-
     // ====== Google API (GIS + gapi) ======
-    let gapiReady=false, gisReady=false, tokenClient=null;
+    let tokenClient=null;
 
     window.addEventListener('load', async()=>{
       while(!(window.gapi && window.google && window.google.accounts)) await sleep(50);
-      await initGapi(); initGis();
-      uiInit();
-      const mode = getQueryParam('mode');
-      state.viewOnly = mode === 'view';
-      $('#viewModeToggle').checked = state.viewOnly;
-      const ds = getQueryParam('dataset'); if(ds) state.dataset = ds;
-      const fid = getQueryParam('fileId') || getQueryParam('glb');
-      if(fid){ $('#glbInput').value = fid; }
-      if(isMobileGuess()){ toggleMobileUI(true); }
-      if(state.viewOnly){ document.body.classList.add('viewonly'); }
-      updateAuthBadge();
-    });
-
-    async function initGapi(){
       await new Promise(res=> gapi.load('client', res));
       await gapi.client.init({ apiKey: CONFIG.API_KEY, discoveryDocs: CONFIG.DISCOVERY_DOCS });
-      gapiReady=true;
-    }
-    function initGis(){
       tokenClient = google.accounts.oauth2.initTokenClient({
         client_id: CONFIG.CLIENT_ID,
         scope: CONFIG.SCOPES,
@@ -352,8 +321,17 @@
           }
         }
       });
-      gisReady=true;
-    }
+      uiInit();
+      const mode = getQueryParam('mode');
+      state.viewOnly = mode === 'view';
+      $('#viewModeToggle').checked = state.viewOnly;
+      const ds = getQueryParam('dataset'); if(ds) state.dataset = ds;
+      const fid = getQueryParam('fileId') || getQueryParam('glb');
+      if(fid){ $('#glbInput').value = fid; }
+      if(isMobileGuess()){ toggleMobileUI(true); }
+      if(state.viewOnly){ document.body.classList.add('viewonly'); }
+      updateAuthBadge();
+    });
 
     function ensureAuthed(){
       if(state.isAuthed) return Promise.resolve(true);
@@ -432,16 +410,6 @@
       });
     }
 
-    async function sheetsAppendRows(spreadsheetId, sheet, rows){
-      const range = `${sheet}!A:A`;
-      const res = await gapi.client.sheets.spreadsheets.values.append({
-        spreadsheetId, range, valueInputOption:'RAW',
-        insertDataOption:'INSERT_ROWS', includeValuesInResponse:true,
-        resource:{ values: rows }
-      });
-      return res.result;
-    }
-
     function colName(n){
       let s=''; while(n>0){ let m=(n-1)%26; s=String.fromCharCode(65+m)+s; n=(n-1-m)/26|0; } return s;
     }
@@ -461,8 +429,8 @@
     async function driveUploadImageToParent(parentId, file){
       const metadata = { name:file.name, parents:[parentId], mimeType: file.type || 'application/octet-stream' };
       const boundary = '-------314159265358979323846';
-      const delimiter = `\r\n--${boundary}\r\n`;
-      const closeDelim = `\r\n--${boundary}--`;
+      const delimiter = "\r\n--" + boundary + "\r\n";
+      const closeDelim = "\r\n--" + boundary + "--";
       const reader = await file.arrayBuffer();
       const base64Data = btoa(String.fromCharCode(...new Uint8Array(reader)));
       const body =
@@ -526,8 +494,9 @@
 
     function setupModel(gltf){
       clearModel();
-      model = gltf.scene || gltf.scenes?.[0];
-      if(!model){ alert('GLBにsceneが見つかりません'); return; }
+      const root = gltf.scene || gltf.scenes?.[0];
+      if(!root){ alert('GLBにsceneが見つかりません'); return; }
+      model = root;
       group.add(model);
       bbox = new THREE.Box3().setFromObject(model);
       bbox.getCenter(bboxCenter); bboxSize = bbox.getSize(new THREE.Vector3()).length();
@@ -660,7 +629,7 @@
       updatePinScreenPositions();
     }
 
-    function escapeHtml(s){ return (s||'').replace(/[&<>"']/g, c=>({"&":"&amp;","<":"&lt;"," >":"&gt;","\"":"&quot;","'":"&#39;"}[c])); }
+    function escapeHtml(s){ return (s||'').replace(/[&<>"']/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c])); }
 
     function updatePinScreenPositions(){
       const el=$('#viewer'); const w=el.clientWidth, h=el.clientHeight;
@@ -693,12 +662,12 @@
     }
 
     async function openFloatingCaption(rec){
-      document.querySelectorAll(\`.floating-panel[data-id="\${rec.id}"]\`).forEach(n=>n.remove());
+      document.querySelectorAll(`.floating-panel[data-id="${rec.id}"]`).forEach(n=>n.remove());
       const fp = document.createElement('div'); fp.className='floating-panel'; fp.dataset.id=rec.id;
-      fp.innerHTML = \`<div class="hd"><strong>\${escapeHtml(rec.title||'(無題)')}</strong><button class="btn" data-close>×</button></div>\`+
-        \`<div class="bd"><div class="muted" style="margin-bottom:6px">\${escapeHtml((rec.body||'').slice(0,140))}</div>\`+
-        (rec.imageDriveId? \`<div data-imgwrap><div class="muted">画像を読み込み中…</div></div>\` : '') +
-        \`</div>\`;
+      fp.innerHTML = `<div class="hd"><strong>${escapeHtml(rec.title||'(無題)')}</strong><button class="btn" data-close>×</button></div>`+
+        `<div class="bd"><div class="muted" style="margin-bottom:6px">${escapeHtml((rec.body||'').slice(0,140))}</div>`+
+        (rec.imageDriveId? `<div data-imgwrap><div class="muted">画像を読み込み中…</div></div>` : '') +
+        `</div>`;
       fp.style.left='16px'; fp.style.top='16px';
       fp.querySelector('[data-close]').addEventListener('click', ()=>fp.remove());
       $('#viewer').appendChild(fp);
@@ -709,8 +678,8 @@
       if(rec.imageDriveId){
         try{
           const url = await getDisplayURLForFileId(rec.imageDriveId);
-          const wrap = fp.querySelector('[data-imgwrap]'); if(wrap){ wrap.innerHTML = \`<img src="\${url}" style="max-width:100%; max-height:220px; display:block; border-radius:8px"/>\`; }
-        }catch(e){ const wrap = fp.querySelector('[data-imgwrap]'); if(wrap){ wrap.innerHTML = \`<div class="muted">画像の表示に失敗：\${escapeHtml(e.message)}</div>\`; } }
+          const wrap = fp.querySelector('[data-imgwrap]'); if(wrap){ wrap.innerHTML = `<img src="${url}" style="max-width:100%; max-height:220px; display:block; border-radius:8px"/>`; }
+        }catch(e){ const wrap = fp.querySelector('[data-imgwrap]'); if(wrap){ wrap.innerHTML = `<div class="muted">画像の表示に失敗：${escapeHtml(e.message)}</div>`; } }
       }
     }
 
@@ -722,8 +691,7 @@
       if(pt){
         addPinMode=false; $('#addPinBtn').textContent='ピン追加 (次のクリックで配置)';
         const rec = { id: uuid(), title:'', body:'', pinColor: CONFIG.PIN_COLORS[Math.floor(Math.random()*CONFIG.PIN_COLORS.length)], imageDriveId:null, imageName:null, imageWebContentLink:null, x:pt.x, y:pt.y, z:pt.z, createdAt: nowIso(), updatedAt: nowIso(), visible:true };
-        rec._serverSnapshot = structuredClone(rec); rec._serverUpdatedAt = rec.updatedAt;
-        state.captions.set(rec.id, rec); markDirty(rec.id); refreshPinsDOM(); selectCaption(rec.id, true); queueSave();
+        state.captions.set(rec.id, rec); refreshPinsDOM(); selectCaption(rec.id, true); autosaveCaptions();
       }
     });
 
@@ -736,72 +704,32 @@
       return null;
     }
 
-    $('#saveCaptionBtn').addEventListener('click', ()=>{
-      const id = state.selectedCaptionId; if(!id) return; const rec = state.captions.get(id); if(!rec) return;
-      rec.title = $('#capTitle').value; rec.body = $('#capBody').value; rec.updatedAt = nowIso();
-      const sel = $('#imageSelect'); const idx = sel.selectedIndex - 1;
-      if(idx>=0){ const f = state.imagesInFolder[idx]; rec.imageDriveId=f.id; rec.imageName=f.name; rec.imageWebContentLink = f.webContentLink; } else { rec.imageDriveId=null; rec.imageName=null; rec.imageWebContentLink=null; }
-      markDirty(id); refreshPinsDOM(); queueSave();
-    });
-
-    $('#deleteCaptionBtn').addEventListener('click', ()=>{
-      const id = state.selectedCaptionId; if(!id) return;
-      const rec = state.captions.get(id); if(!rec) return;
-      rec.visible = false; rec.updatedAt = nowIso(); // 論理削除
-      markDirty(id); refreshPinsDOM(); queueSave();
-    });
-
-    function markDirty(id){ state.dirtyIds.add(id); }
-    const queueSave = throttle(async ()=>{ await processDirtySaves(); }, 900);
-
-    // ---- Option Solid: 行パッチ保存 + 楽観ロック + 軽ポーリング ----
-    async function processDirtySaves(){
-      if(!state.spreadsheetId || state.dirtyIds.size===0) return;
-      const ids = Array.from(state.dirtyIds);
-      for(const id of ids){
-        try{ await saveCaptionRow(id); state.dirtyIds.delete(id); }
-        catch(e){ console.warn('save failed', id, e); toast('保存の一部で競合/失敗がありました'); }
-      }
-    }
-
-    function toRowValues(rec){
-      return [ rec.id, rec.title||'', rec.body||'', rec.pinColor, rec.pinColor, rec.imageDriveId||'', rec.imageName||'', rec.imageWebContentLink||'', rec.x, rec.y, rec.z, rec.createdAt, rec.updatedAt, rec.visible!==false ];
-    }
-    function fromRowValues(r){
-      const [id,title,body,pinColor,hash,imageDriveId,imageName,imageWebContentLink,x,y,z,createdAt,updatedAt,visible] = r;
-      const rec = { id, title, body, pinColor: pinColor||hash||CONFIG.PIN_COLORS[0], imageDriveId:imageDriveId||null, imageName:imageName||null, imageWebContentLink:imageWebContentLink||null, x:parseFloat(x||0), y:parseFloat(y||0), z:parseFloat(z||0), createdAt: createdAt||nowIso(), updatedAt: updatedAt||nowIso(), visible: String(visible).toLowerCase()!=='false' };
-      rec._serverSnapshot = structuredClone(rec);
-      rec._serverUpdatedAt = rec.updatedAt;
-      return rec;
-    }
-
-    async function buildRowIndex(){
+    const autosaveCaptions = throttle(async ()=>{
+      if(!state.spreadsheetId) return;
       const {captions} = datasetSheetNames(state.dataset);
-      const res = await gapi.client.sheets.spreadsheets.values.get({ spreadsheetId: state.spreadsheetId, range: \`\${captions}!A2:A\` });
-      state.rowIndex.clear();
-      const rows = res.result.values || [];
-      rows.forEach((r,i)=>{ const id = r[0]; if(id) state.rowIndex.set(id, i+2); }); // +2 for header offset
-    }
+      const rows = [ ['id','title','body','pinColor','#hex','imageDriveId','imageName','imageWebContentLink','x','y','z','createdAt','updatedAt','visible'] ];
+      for(const rec of state.captions.values()){
+        rows.push([ rec.id, rec.title||'', rec.body||'', rec.pinColor, rec.pinColor, rec.imageDriveId||'', rec.imageName||'', rec.imageWebContentLink||'', rec.x, rec.y, rec.z, rec.createdAt, rec.updatedAt, rec.visible!==false ]);
+      }
+      await gapi.client.sheets.spreadsheets.values.clear({ spreadsheetId: state.spreadsheetId, range: `${captions}!A:Z` });
+      await gapi.client.sheets.spreadsheets.values.update({ spreadsheetId: state.spreadsheetId, range: `${captions}!A1`, valueInputOption:'RAW', resource:{ values: rows } });
+    }, 1200);
 
     async function loadCaptionsFromSheet(){
       const {captions} = datasetSheetNames(state.dataset);
-      const res = await gapi.client.sheets.spreadsheets.values.get({ spreadsheetId: state.spreadsheetId, range: \`\${captions}!A2:N\` });
-      state.captions.clear(); state.rowIndex.clear();
+      const res = await gapi.client.sheets.spreadsheets.values.get({ spreadsheetId: state.spreadsheetId, range: `${captions}!A2:N` });
+      state.captions.clear();
       const rows = res.result.values || [];
-      let maxU = null;
-      rows.forEach((r,i)=>{
-        const rec = fromRowValues(r);
-        state.captions.set(rec.id, rec);
-        state.rowIndex.set(rec.id, i+2);
-        if(!maxU || rec.updatedAt > maxU) maxU = rec.updatedAt;
+      rows.forEach(r=>{
+        const [id,title,body,pinColor,hash,imageDriveId,imageName,imageWebContentLink,x,y,z,createdAt,updatedAt,visible] = r;
+        state.captions.set(id, { id, title, body, pinColor: pinColor||hash||CONFIG.PIN_COLORS[0], imageDriveId:imageDriveId||null, imageName:imageName||null, imageWebContentLink:imageWebContentLink||null, x:parseFloat(x||0), y:parseFloat(y||0), z:parseFloat(z||0), createdAt: createdAt||nowIso(), updatedAt: updatedAt||nowIso(), visible: String(visible).toLowerCase()!=='false' });
       });
-      state.lastSeenUpdatedAt = maxU;
       refreshPinsDOM();
     }
 
     async function loadMaterialsFromSheet(){
       const {materials} = datasetSheetNames(state.dataset);
-      const res = await gapi.client.sheets.spreadsheets.values.get({ spreadsheetId: state.spreadsheetId, range: \`\${materials}!A2:G2\` });
+      const res = await gapi.client.sheets.spreadsheets.values.get({ spreadsheetId: state.spreadsheetId, range: `${materials}!A2:G2` });
       const v = (res.result.values && res.result.values[0]) || [];
       state.materials.alpha = parseFloat(v[0] ?? 1);
       state.materials.unlit = (v[1] ?? 'false') === 'true';
@@ -833,240 +761,30 @@
       ]]);
     }
 
-    function mergeRecord(local, server){
-      const base = local._serverSnapshot || local; // 最後に読んだスナップショット
-      const merged = structuredClone(server);
-      const keys = ['title','body','pinColor','imageDriveId','imageName','imageWebContentLink','x','y','z','visible'];
-      for(const k of keys){
-        const baseVal = base[k];
-        const localVal = local[k];
-        if(JSON.stringify(localVal) !== JSON.stringify(baseVal)){
-          merged[k] = localVal;
-        }
-      }
-      merged.id = local.id;
-      merged.createdAt = server.createdAt || local.createdAt || nowIso();
-      return merged;
-    }
-
-    async function getServerRowById(id){
-      const row = state.rowIndex.get(id);
-      if(!row) return null;
-      const {captions} = datasetSheetNames(state.dataset);
-      const res = await gapi.client.sheets.spreadsheets.values.get({ spreadsheetId: state.spreadsheetId, range: \`\${captions}!A\${row}:N\${row}\` });
-      const r = (res.result.values && res.result.values[0]) || null;
-      return r ? fromRowValues(r) : null;
-    }
-
-    async function saveCaptionRow(id){
-      const rec = state.captions.get(id);
-      if(!rec) return;
-      const {captions} = datasetSheetNames(state.dataset);
-      let row = state.rowIndex.get(id);
-
-      if(!row){
-        const result = await sheetsAppendRows(state.spreadsheetId, captions, [toRowValues(rec)]);
-        const ur = result.updates && result.updates.updatedRange;
-        if(ur){
-          const m = ur.match(/![A-Z]+(\d+):/);
-          if(m){ row = parseInt(m[1],10); state.rowIndex.set(id, row); }
-        }else{
-          await buildRowIndex();
-          row = state.rowIndex.get(id);
-        }
-        rec._serverSnapshot = structuredClone(rec);
-        rec._serverUpdatedAt = rec.updatedAt;
-        return;
-      }
-
-      const server = await getServerRowById(id);
-      if(!server){
-        const result = await sheetsAppendRows(state.spreadsheetId, captions, [toRowValues(rec)]);
-        const ur = result.updates && result.updates.updatedRange;
-        if(ur){ const m = ur.match(/![A-Z]+(\d+):/); if(m){ state.rowIndex.set(id, parseInt(m[1],10)); } }
-        rec._serverSnapshot = structuredClone(rec);
-        rec._serverUpdatedAt = rec.updatedAt;
-        return;
-      }
-
-      let next = null;
-      if(!rec._serverUpdatedAt || server.updatedAt === rec._serverUpdatedAt){
-        next = structuredClone(rec);
-      }else{
-        next = mergeRecord(rec, server);
-      }
-      next.updatedAt = nowIso();
-
-      await gapi.client.sheets.spreadsheets.values.update({
-        spreadsheetId: state.spreadsheetId,
-        range: \`\${captions}!A\${row}:N\${row}\`,
-        valueInputOption:'RAW',
-        resource:{ values: [toRowValues(next)] }
+    function updatePinScreenPositions(){
+      const el=$('#viewer'); const w=el.clientWidth, h=el.clientHeight;
+      const dots = [...pinLayer.querySelectorAll('.pin-dot')];
+      const idToPos = new Map();
+      dots.forEach(dot=>{
+        const id = dot.dataset.id; const rec = state.captions.get(id); if(!rec) return;
+        const pos = screenPosOf(new THREE.Vector3(rec.x, rec.y, rec.z));
+        dot.style.left = pos.x+'px'; dot.style.top = pos.y+'px';
+        idToPos.set(id, pos);
       });
-
-      state.captions.set(id, next);
-      next._serverSnapshot = structuredClone(next);
-      next._serverUpdatedAt = next.updatedAt;
-      if(!state.lastSeenUpdatedAt || next.updatedAt > state.lastSeenUpdatedAt) state.lastSeenUpdatedAt = next.updatedAt;
-    }
-
-    async function pollOthers(){
-      if(!state.spreadsheetId) return;
-      const {captions} = datasetSheetNames(state.dataset);
-      const res = await gapi.client.sheets.spreadsheets.values.get({ spreadsheetId: state.spreadsheetId, range: \`\${captions}!A2:N\` });
-      const rows = res.result.values || [];
-      let changed = 0;
-      const serverMap = new Map();
-      rows.forEach((r,i)=>{
-        const rec = fromRowValues(r);
-        serverMap.set(rec.id, rec);
-        state.rowIndex.set(rec.id, i+2);
+      lineSvg.innerHTML='';
+      document.querySelectorAll('.floating-panel[data-id]').forEach(fp=>{
+        const id = fp.dataset.id; const pos = idToPos.get(id); if(!pos) return;
+        const rect = fp.getBoundingClientRect(); const vRect = el.getBoundingClientRect();
+        const x2 = rect.left - vRect.left + 10; const y2 = rect.top - vRect.top + 20;
+        const line = document.createElementNS('http://www.w3.org/2000/svg','line');
+        line.setAttribute('x1', pos.x); line.setAttribute('y1', pos.y); line.setAttribute('x2', x2); line.setAttribute('y2', y2);
+        line.setAttribute('stroke', '#9fb0c3'); line.setAttribute('stroke-width','1.5'); line.setAttribute('stroke-linecap','round');
+        lineSvg.appendChild(line);
       });
-      for(const [id, srec] of serverMap.entries()){
-        const lrec = state.captions.get(id);
-        if(!lrec){
-          state.captions.set(id, srec); changed++;
-          continue;
-        }
-        if(state.dirtyIds.has(id)) continue;
-        if((lrec._serverUpdatedAt||lrec.updatedAt||'') < (srec.updatedAt||'')){
-          srec._serverSnapshot = structuredClone(srec);
-          srec._serverUpdatedAt = srec.updatedAt;
-          state.captions.set(id, srec);
-          changed++;
-        }
-      }
-      if(changed>0){ refreshPinsDOM(); toast(\`他の編集を反映（\${changed}件）\`); }
-    }
-
-    // ====== UI Wiring ======
-    function uiInit(){
-      const tabs = { home:'#tabHome', materials:'#tabMaterials', camera:'#tabCamera', captions:'#tabCaptions' };
-      function showTab(key){ Object.values(tabs).forEach(sel=>$(sel).classList.add('hidden')); $(tabs[key]).classList.remove('hidden'); }
-      $$('.tab-btn').forEach(b=> b.addEventListener('click', ()=> showTab(b.dataset.tab)) );
-      showTab('home');
-
-      $('#signinBtn').addEventListener('click', ()=> tokenClient?.requestAccessToken({ prompt: state.isAuthed? '' : 'consent' }));
-
-      $('#loadBtn').addEventListener('click', async()=>{
-        try{
-          await ensureAuthed();
-          const input = $('#glbInput').value.trim();
-          const fileId = parseDriveFileId(input);
-          if(!fileId) return alert('fileId/URLを確認してください');
-          const gltf = await loadGLBFromDrive(fileId);
-          setupModel(gltf);
-          if(!state.parentId){ const meta = await driveGetFileMeta(fileId); state.parentId = (meta.parents||[])[0]||null; }
-          let ss = await driveFindSpreadsheetInParent(state.parentId);
-          if(!ss){
-            const title = \`\${CONFIG.SPREADSHEET_NAME_PREFIX}_\${state.fileMeta?.name?.replace(/\\.[^.]+$/,'')||fileId}\`;
-            const sid = await sheetsCreateAndMove(state.parentId, title); state.spreadsheetId = sid;
-          }else{ state.spreadsheetId = ss.id; }
-          await sheetsEnsureDataset(state.spreadsheetId, state.dataset);
-          await Promise.all([loadMaterialsFromSheet(), loadCaptionsFromSheet()]);
-          state.imagesInFolder = await driveListImagesInParent(state.parentId);
-          rebuildImageSelect();
-          populateSaveSetSelect();
-          if(state.pollTimer) clearInterval(state.pollTimer);
-          state.pollTimer = setInterval(pollOthers, CONFIG.POLL_MS);
-        }catch(err){ console.error(err); alert('読み込みに失敗しました: '+ err.message); }
-      });
-
-      $('#fitBtn').addEventListener('click', ()=> fitCamera('front'));
-
-      $('#orthoToggle').addEventListener('change', (e)=> setOrthoMode(e.target.checked));
-      $('#bgColor').addEventListener('input', applyMaterials);
-      $('#alphaRange').addEventListener('input', (e)=>{ state.materials.alpha=parseFloat(e.target.value); applyMaterials(); });
-      $('#unlitToggle').addEventListener('change', (e)=>{ state.materials.unlit=e.target.checked; applyMaterials(); });
-      $('#doubleSidedToggle').addEventListener('change', (e)=>{ state.materials.doubleSided=e.target.checked; applyMaterials(); });
-      $('#whiteToAlphaToggle').addEventListener('change', (e)=>{ state.materials.whiteToAlpha.enabled=e.target.checked; updateChromaUniforms(); applyMaterials(); });
-      $('#whiteThreshold').addEventListener('input', (e)=>{ state.materials.whiteToAlpha.threshold=clamp(parseInt(e.target.value),0,255); updateChromaUniforms(); });
-      $('#blackToAlphaToggle').addEventListener('change', (e)=>{ state.materials.blackToAlpha.enabled=e.target.checked; updateChromaUniforms(); applyMaterials(); });
-      $('#blackThreshold').addEventListener('input', (e)=>{ state.materials.blackToAlpha.threshold=clamp(parseInt(e.target.value),0,255); updateChromaUniforms(); });
-      $('#saveMaterialsBtn').addEventListener('click', async()=>{ await saveMaterialsToSheet(); toast('マテリアルを保存しました'); });
-
-      $$('#tabCamera .btn[data-cam]').forEach(b=> b.addEventListener('click', ()=> fitCamera(b.dataset.cam)) );
-
-      $('#newSaveSetBtn').addEventListener('click', async()=>{
-        const name = prompt('新しいセーブデータ名'); if(!name) return;
-        await sheetsEnsureDataset(state.spreadsheetId, name);
-        populateSaveSetSelect(name); state.dataset=name; await Promise.all([loadMaterialsFromSheet(), loadCaptionsFromSheet()]);
-      });
-      $('#dupSaveSetBtn').addEventListener('click', async()=>{
-        const base = state.dataset; const name = prompt('複製先の名前', base+'Copy'); if(!name) return;
-        await sheetsEnsureDataset(state.spreadsheetId, name);
-        const fromC = datasetSheetNames(base).captions; const toC = datasetSheetNames(name).captions;
-        const fromM = datasetSheetNames(base).materials; const toM = datasetSheetNames(name).materials;
-        const cVals = await gapi.client.sheets.spreadsheets.values.get({ spreadsheetId: state.spreadsheetId, range: \`\${fromC}!A1:N\` });
-        const rows = cVals.result.values || [];
-        await gapi.client.sheets.spreadsheets.values.clear({ spreadsheetId: state.spreadsheetId, range: \`\${toC}!A:Z\` });
-        if(rows.length){ await gapi.client.sheets.spreadsheets.values.update({ spreadsheetId: state.spreadsheetId, range: \`\${toC}!A1\`, valueInputOption:'RAW', resource:{ values: rows } }); }
-        const mVals = await gapi.client.sheets.spreadsheets.values.get({ spreadsheetId: state.spreadsheetId, range: \`\${fromM}!A1:G2\` });
-        const mRows = mVals.result.values || [];
-        await gapi.client.sheets.spreadsheets.values.clear({ spreadsheetId: state.spreadsheetId, range: \`\${toM}!A:Z\` });
-        if(mRows.length){ await gapi.client.sheets.spreadsheets.values.update({ spreadsheetId: state.spreadsheetId, range: \`\${toM}!A1\`, valueInputOption:'RAW', resource:{ values: mRows } }); }
-        populateSaveSetSelect(name); state.dataset=name; await Promise.all([loadMaterialsFromSheet(), loadCaptionsFromSheet()]);
-      });
-      $('#renameSaveSetBtn').addEventListener('click', async()=>{
-        const base = state.dataset; const name = prompt('新しい名前', base); if(!name || name===base) return;
-        const from = datasetSheetNames(base); const to = datasetSheetNames(name);
-        const meta = await gapi.client.sheets.spreadsheets.get({ spreadsheetId: state.spreadsheetId });
-        const sheetMap = new Map((meta.result.sheets||[]).map(s=>[s.properties.title, s.properties.sheetId]));
-        const reqs=[]; if(sheetMap.has(from.captions)) reqs.push({ updateSheetProperties: { properties:{ sheetId: sheetMap.get(from.captions), title: to.captions }, fields:'title' } });
-        if(sheetMap.has(from.materials)) reqs.push({ updateSheetProperties: { properties:{ sheetId: sheetMap.get(from.materials), title: to.materials }, fields:'title' } });
-        if(reqs.length){ await gapi.client.sheets.spreadsheets.batchUpdate({ spreadsheetId: state.spreadsheetId, resource:{ requests: reqs } }); }
-        state.dataset=name; populateSaveSetSelect(name); await Promise.all([loadMaterialsFromSheet(), loadCaptionsFromSheet()]);
-      });
-
-      $('#saveSetSelect').addEventListener('change', async(e)=>{ state.dataset = e.target.value; setQueryParam('dataset', state.dataset); await Promise.all([loadMaterialsFromSheet(), loadCaptionsFromSheet()]); });
-
-      $('#uploadLocalImageBtn').addEventListener('click', async()=>{
-        try{ if(!state.parentId) return alert('まずGLBを読み込んでください');
-          const fi = $('#localImageInput'); const file = fi.files?.[0]; if(!file) return alert('ファイルを選択');
-          await ensureAuthed();
-          const res = await driveUploadImageToParent(state.parentId, file);
-          toast('アップロード: '+res.name);
-          state.imagesInFolder = await driveListImagesInParent(state.parentId); rebuildImageSelect();
-        }catch(err){ alert('アップロード失敗: '+err.message); }
-      });
-
-      $('#viewLinkBtn').addEventListener('click', ()=>{
-        const u = new URL(location.href); u.searchParams.set('mode','view'); copyToClipboard(u.toString()); toast('閲覧専用リンクをコピーしました');
-      });
-
-      $('#viewModeToggle').addEventListener('change', (e)=>{
-        const u = new URL(location.href); if(e.target.checked){ u.searchParams.set('mode','view'); } else { u.searchParams.delete('mode'); }
-        history.replaceState(null,'',u.toString());
-      });
-
-      $('#mobileForceToggle').addEventListener('change', (e)=> toggleMobileUI(e.target.checked));
-    }
-
-    function toggleMobileUI(force){
-      state.isMobileUI = !!force;
-      document.body.classList.toggle('mobile', state.isMobileUI);
     }
 
     function rebuildImageSelect(){
-      const sel = $('#imageSelect'); sel.innerHTML = '<option value="">(画像なし)</option>' + state.imagesInFolder.map(f=>\`<option value="\${f.id}">\${escapeHtml(f.name)}\${/heic|heif/i.test(f.mimeType)?' (HEIC/HEIF)':''}</option>\`).join('');
-    }
-
-    async function getDisplayURLForFileId(fileId){
-      if(state.displayUrlCache.has(fileId)) return state.displayUrlCache.get(fileId);
-      const meta = state.imagesInFolder.find(f=>f.id===fileId);
-      const isHeic = meta && /heic|heif/i.test(meta.mimeType||'');
-      const blob = await driveFetchBlob(fileId);
-      if(isHeic && !isSafariLike()){
-        if(typeof window.heic2any !== 'function') throw new Error('heic2any が読み込めません');
-        const out = await window.heic2any({ blob, toType: 'image/png' });
-        const url = objectURLFromBlob(out);
-        state.displayUrlCache.set(fileId, url);
-        return url;
-      } else {
-        const url = objectURLFromBlob(blob);
-        state.displayUrlCache.set(fileId, url);
-        return url;
-      }
+      const sel = $('#imageSelect'); sel.innerHTML = '<option value="">(画像なし)</option>' + state.imagesInFolder.map(f=>`<option value="${f.id}">${(f.name||'').replace(/[&<>"']/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]))}${/heic|heif/i.test(f.mimeType)?' (HEIC/HEIF)':''}</option>`).join('');
     }
 
     async function populateSaveSetSelect(selectName){
@@ -1076,12 +794,18 @@
       const datasets = new Set();
       titles.forEach(t=>{ const m=t.match(/(.+)_(Captions|Materials)$/); if(m) datasets.add(m[1]); });
       const arr = Array.from(datasets);
-      const sel = $('#saveSetSelect'); sel.innerHTML = arr.map(n=>\`<option value="\${n}">\${escapeHtml(n)}</option>\`).join('');
+      const sel = $('#saveSetSelect'); sel.innerHTML = arr.map(n=>`<option value="${n}">${n}</option>`).join('');
       const pick = selectName && arr.includes(selectName) ? selectName : (arr.includes(state.dataset)? state.dataset : arr[0] || CONFIG.DEFAULT_DATASET);
       sel.value = pick; state.dataset = pick; setQueryParam('dataset', pick);
     }
 
-    window.addEventListener('beforeunload', ()=>{ if(state.pollTimer) clearInterval(state.pollTimer); });
+    function updateAuthBadge(){} // no-op earlier defined
+
+    function screenPosOf(v3){
+      const el=$('#viewer'); const w=el.clientWidth, h=el.clientHeight;
+      const v = v3.clone().project(camera);
+      return { x: (v.x * .5 + .5) * w, y: ( -v.y * .5 + .5) * h };
+    }
   </script>
 </body>
 </html>
