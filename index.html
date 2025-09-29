@@ -3,7 +3,9 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
-  <title>LociMyu • GLB+Sheets Pins MVP (HEIC対応/広めDrive権限)</title>
+  <title>LociMyu • GLB+Sheets Pins MVP</title>
+  <!-- Avoid favicon 404 -->
+  <link rel="icon" href="data:,">
   <style>
     :root {
       --bg: #0b0f14; --panel:#121821; --panel-2:#151c26; --text:#e6edf3; --muted:#9fb0c3; --accent:#68b5ff; --ok:#4ade80; --warn:#fbbf24; --danger:#fb7185;
@@ -372,12 +374,11 @@
       else{ persp.position.copy(camera.position); persp.lookAt(controls.target); camera=persp; }
     }
 
-    // ====== Chroma-key style（白/黒→透明）簡易処理 ======
+    // ====== Chroma-key simple (white/black -> alpha) ======
     function patchChromaKey(material){
       if(!material || material.userData.__chromaPatched) return;
-      if(!material.map) return; // テクスチャを持たない場合はスキップ（不要＆安全）
+      if(!material.map) return;
       material.onBeforeCompile = (shader)=>{
-        // uniforms は GLSL 宣言が必要（これが無いと "Fragment shader is not compiled"）
         shader.fragmentShader = `uniform float whiteEnable;
 uniform float whiteThr;
 uniform float blackEnable;
@@ -419,7 +420,6 @@ if (blackEnable > 0.5 && _luma_ <= blackThr) { diffuseColor.a = 0.0; }`
       model.traverse((obj)=>{
         if(obj.isMesh){
           let m = obj.material; if(!m) return;
-          // 非配列材質のみ対応（GLBで配列の可能性があるためケア）
           if(Array.isArray(m)){ m.forEach(mm=>applyOne(obj, mm)); }
           else { applyOne(obj, m); }
         }
@@ -429,13 +429,11 @@ if (blackEnable > 0.5 && _luma_ <= blackThr) { diffuseColor.a = 0.0; }`
     }
 
     function applyOne(obj, mat){
-      // 表示系の基本プロパティ
       mat.transparent = true;
       mat.opacity = state.materials.alpha;
       mat.depthWrite = state.materials.alpha >= 1 && !state.materials.whiteToAlpha.enabled && !state.materials.blackToAlpha.enabled;
       mat.side = state.materials.doubleSided ? THREE.DoubleSide : THREE.FrontSide;
 
-      // Unlit 切替
       if(state.materials.unlit){
         if(!(mat instanceof THREE.MeshBasicMaterial)){
           const basic = new THREE.MeshBasicMaterial({ map:mat.map || null, color:0xffffff, transparent:true, opacity:mat.opacity, side:mat.side, alphaTest: mat.alphaTest||0.001 });
@@ -448,7 +446,6 @@ if (blackEnable > 0.5 && _luma_ <= blackThr) { diffuseColor.a = 0.0; }`
         }
       }
 
-      // テクスチャ付きのみクロマキー適用
       if(mat.map){ patchChromaKey(mat); }
       mat.needsUpdate = true;
     }
@@ -838,8 +835,6 @@ if (blackEnable > 0.5 && _luma_ <= blackThr) { diffuseColor.a = 0.0; }`
       $('#mobileForceToggle').addEventListener('change', (e)=> toggleMobileUI(e.target.checked));
     }
     function toggleMobileUI(force){ state.isMobileUI = !!force; document.body.classList.toggle('mobile', state.isMobileUI); }
-
-    // ====== Misc helpers already defined above ======
   </script>
 </body>
 </html>
