@@ -4,7 +4,6 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
   <title>LociMyu • GLB+Sheets Pins MVP (HEIC対応/広めDrive権限)</title>
-  <link rel="icon" href="data:;base64,iVBORw0KGgo=" />
   <style>
     :root {
       --bg: #0b0f14; --panel:#121821; --panel-2:#151c26; --text:#e6edf3; --muted:#9fb0c3; --accent:#68b5ff; --ok:#4ade80; --warn:#fbbf24; --danger:#fb7185;
@@ -206,7 +205,7 @@
   <!-- HEIC/HEIF → 画像変換（プレビュー用） -->
   <script src="https://cdn.jsdelivr.net/npm/heic2any@0.0.4/dist/heic2any.min.js"></script>
 
-  <!-- three.js via esm.sh (avoids bare import 'three' in JSM) -->
+  <!-- three.js via esm.sh -->
   <script type="module">
     import * as THREE from 'https://esm.sh/three@0.159.0';
     import { OrbitControls } from 'https://esm.sh/three@0.159.0/examples/jsm/controls/OrbitControls.js';
@@ -240,7 +239,7 @@
       parentId: null,
       spreadsheetId: null,
       dataset: CONFIG.DEFAULT_DATASET,
-      captions: new Map(), // id -> record
+      captions: new Map(),
       materials: {
         alpha: 1,
         unlit: false,
@@ -253,14 +252,14 @@
       isMobileUI: false,
       imagesInFolder: [],
       chromaPatchedMaterials: new Set(),
-      displayUrlCache: new Map() // fileId -> objectURL
+      displayUrlCache: new Map()
     };
 
     // ====== Utilities ======
-    const $ = sel => document.querySelector(sel);
-    const $$ = sel => Array.from(document.querySelectorAll(sel));
-    const sleep = ms => new Promise(r=>setTimeout(r,ms));
-    const nowIso = () => new Date().toISOString();
+    const $ = function(sel){ return document.querySelector(sel); };
+    const $$ = function(sel){ return Array.prototype.slice.call(document.querySelectorAll(sel)); };
+    const sleep = function(ms){ return new Promise(function(r){ return setTimeout(r,ms); }); };
+    const nowIso = function(){ return new Date().toISOString(); };
 
     function getQueryParam(name){
       const u = new URL(location.href);
@@ -271,14 +270,14 @@
     }
     function copyToClipboard(text){
       if(navigator.clipboard && navigator.clipboard.writeText){
-        navigator.clipboard.writeText(text).catch(()=>{
+        navigator.clipboard.writeText(text).catch(function(){
           const ta=document.createElement('textarea'); ta.value=text; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove();
         });
       }else{
         const ta=document.createElement('textarea'); ta.value=text; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove();
       }
     }
-    function uuid(){return 'xxxxxxxx'.replace(/[x]/g,()=> (Math.random()*16|0).toString(16)) + '-' + Date.now().toString(36)}
+    function uuid(){return 'xxxxxxxx'.replace(/[x]/g,function(){return (Math.random()*16|0).toString(16);}) + '-' + Date.now().toString(36)}
 
     function isMobileGuess(){
       return window.innerWidth < CONFIG.MOBILE_BREAKPOINT || /iPhone|Android.+Mobile/.test(navigator.userAgent);
@@ -291,35 +290,35 @@
     function parseDriveFileId(input){
       if(!input) return null;
       const s = input.trim();
-      if(/^[a-zA-Z0-9_-]{20,}$/.test(s)) return s; // raw id
+      if(/^[a-zA-Z0-9_-]{20,}$/.test(s)) return s;
       try{
         const u = new URL(s);
         const m1 = u.pathname.match(/\/file\/d\/([a-zA-Z0-9_-]{20,})/);
         if(m1) return m1[1];
         const id = u.searchParams.get('id'); if(id) return id;
         const d = u.searchParams.get('driveid'); if(d) return d;
-      }catch(e){/* ignore */}
-      return s; // best effort
+      }catch(e){}
+      return s;
     }
 
     function objectURLFromBlob(blob){return URL.createObjectURL(blob)}
 
     function throttle(fn, ms){
-      let t=0, lastArgs=null; return (...args)=>{ lastArgs=args; const now=Date.now(); if(now-t>ms){ t=now; fn(...lastArgs); } };
+      let t=0, lastArgs=null; return function(){ var args = arguments; lastArgs=args; const now=Date.now(); if(now-t>ms){ t=now; fn.apply(null, lastArgs); } };
     }
 
     // ====== Google API (GIS + gapi) ======
-    let tokenClient=null;
+    var tokenClient=null;
 
-    window.addEventListener('load', async()=>{
+    window.addEventListener('load', async function(){
       while(!(window.gapi && window.google && window.google.accounts)) await sleep(50);
-      await new Promise(res=> gapi.load('client', res));
+      await new Promise(function(res){ gapi.load('client', res); });
       await gapi.client.init({ apiKey: CONFIG.API_KEY, discoveryDocs: CONFIG.DISCOVERY_DOCS });
       tokenClient = google.accounts.oauth2.initTokenClient({
         client_id: CONFIG.CLIENT_ID,
         scope: CONFIG.SCOPES,
         prompt: '',
-        callback: (resp)=>{
+        callback: function(resp){
           if(resp && resp.access_token){
             state.token = resp.access_token; state.isAuthed = true; gapi.client.setToken({access_token: state.token});
             updateAuthBadge();
@@ -340,9 +339,9 @@
 
     function ensureAuthed(){
       if(state.isAuthed) return Promise.resolve(true);
-      return new Promise(resolve=>{
+      return new Promise(function(resolve){
         tokenClient.requestAccessToken({ prompt: 'consent' });
-        const iv = setInterval(()=>{ if(state.isAuthed){ clearInterval(iv); resolve(true);} }, 200);
+        const iv = setInterval(function(){ if(state.isAuthed){ clearInterval(iv); resolve(true);} }, 200);
       });
     }
 
@@ -353,101 +352,10 @@
       el.style.border = '1px solid ' + (state.isAuthed ? '#245b37' : '#5b242a');
     }
 
-    // ====== Drive / Sheets helpers ======
-    async function driveGetFileMeta(fileId){
-      const res = await gapi.client.drive.files.get({ fileId, fields: 'id,name,parents,mimeType,webViewLink' });
-      return res.result;
-    }
-
-    async function driveFindSpreadsheetInParent(parentId){
-      const q = `'${parentId}' in parents and trashed=false and mimeType='application/vnd.google-apps.spreadsheet' and name contains '${CONFIG.SPREADSHEET_NAME_PREFIX}'`;
-      const res = await gapi.client.drive.files.list({ q, fields: 'files(id,name)' , orderBy:'modifiedTime desc', pageSize:10});
-      const files = res.result.files || [];
-      return files[0] || null;
-    }
-
-    async function sheetsCreateAndMove(parentId, title){
-      const createRes = await gapi.client.sheets.spreadsheets.create({ resource: { properties: { title } } });
-      const spreadsheetId = createRes.result.spreadsheetId;
-      await gapi.client.drive.files.update({ fileId: spreadsheetId, addParents: parentId, fields: 'id, parents' });
-      return spreadsheetId;
-    }
-
-    function datasetSheetNames(ds){
-      return { captions: `${ds}_Captions`, materials: `${ds}_Materials` };
-    }
-
-    async function sheetsEnsureDataset(spreadsheetId, ds){
-      const sheets = datasetSheetNames(ds);
-      const captions = sheets.captions; const materials = sheets.materials;
-      const meta = await gapi.client.sheets.spreadsheets.get({ spreadsheetId });
-      const existing = (meta.result.sheets||[]).map(s=>s.properties.title);
-      const requests=[];
-      if(existing.indexOf(captions) === -1) requests.push({ addSheet: { properties: { title: captions } } });
-      if(existing.indexOf(materials) === -1) requests.push({ addSheet: { properties: { title: materials } } });
-      if(requests.length) await gapi.client.sheets.spreadsheets.batchUpdate({ spreadsheetId, resource:{ requests } });
-      await sheetsSetValues(spreadsheetId, captions, 1, 1, [[
-        'id','title','body','pinColor','#hex','imageDriveId','imageName','imageWebContentLink','x','y','z','createdAt','updatedAt','visible'
-      ]]);
-      await sheetsSetValues(spreadsheetId, materials, 1, 1, [[
-        'alpha','unlit','doubleSided','whiteToAlpha.enabled','whiteToAlpha.threshold','blackToAlpha.enabled','blackToAlpha.threshold'
-      ]]);
-      const cur = await gapi.client.sheets.spreadsheets.values.get({ spreadsheetId, range: materials+'!A2:G2' });
-      if(!cur.result.values){
-        await sheetsSetValues(spreadsheetId, materials, 2, 1, [[
-          state.materials.alpha,
-          state.materials.unlit,
-          state.materials.doubleSided,
-          state.materials.whiteToAlpha.enabled,
-          state.materials.whiteToAlpha.threshold,
-          state.materials.blackToAlpha.enabled,
-          state.materials.blackToAlpha.threshold
-        ]]);
-      }
-    }
-
-    async function sheetsSetValues(spreadsheetId, sheet, startRow, startCol, values){
-      const range = sheet + '!' + colName(startCol) + startRow;
-      await gapi.client.sheets.spreadsheets.values.update({
-        spreadsheetId,
-        range,
-        valueInputOption:'RAW',
-        resource:{ values }
-      });
-    }
-
-    function colName(n){
-      let s=''; while(n>0){ let m=(n-1)%26; s=String.fromCharCode(65+m)+s; n=(n-1-m)/26|0; } return s;
-    }
-
-    async function driveListImagesInParent(parentId){
-      const q = `'${parentId}' in parents and trashed=false and (mimeType contains 'image/' or mimeType='image/heic' or mimeType='image/heif')`;
-      const res = await gapi.client.drive.files.list({ q, fields:'files(id,name,webContentLink,mimeType)', pageSize:200, orderBy:'name' });
-      return res.result.files || [];
-    }
-
-    async function driveFetchBlob(fileId){
-      const resp = await fetch('https://www.googleapis.com/drive/v3/files/' + fileId + '?alt=media',{ headers:{ Authorization: 'Bearer ' + state.token } });
-      if(!resp.ok) throw new Error('ダウンロード失敗');
-      return await resp.blob();
-    }
-
-    async function driveUploadImageToParent(parentId, file){
-      const metadata = { name:file.name, parents:[parentId], mimeType: file.type || 'application/octet-stream' };
-      const boundary = '-------314159265358979323846';
-      const delimiter = "\r\n--" + boundary + "\r\n";
-      const closeDelim = "\r\n--" + boundary + "--";
-      const reader = await file.arrayBuffer();
-      const base64Data = btoa(String.fromCharCode.apply(null, Array.from(new Uint8Array(reader))));
-      const body =
-        delimiter + 'Content-Type: application/json; charset=UTF-8\r\n\r\n' + JSON.stringify(metadata) +
-        delimiter + 'Content-Type: ' + metadata.mimeType + '\r\nContent-Transfer-Encoding: base64\r\n\r\n' + base64Data + closeDelim;
-      const res = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart',{
-        method:'POST', headers:{ 'Authorization': 'Bearer ' + state.token, 'Content-Type': 'multipart/related; boundary=' + boundary }, body
-      });
-      if(!res.ok) throw new Error('Upload failed');
-      return await res.json();
-    }
+    // ====== Pins & Captions (HOISTED) ======
+    // Hoist pinLayer/lineSvg before first render() to avoid TDZ errors
+    const pinLayer = document.getElementById('pinLayer');
+    const lineSvg = document.getElementById('lineSvg');
 
     // ====== Three.js Viewer ======
     const renderer = new THREE.WebGLRenderer({ canvas: document.getElementById('three'), antialias:false, alpha:false, powerPreference: 'low-power' });
@@ -493,7 +401,7 @@
       const blob = await driveFetchBlob(fileId);
       const url = objectURLFromBlob(blob);
       const loader = new GLTFLoader();
-      return new Promise((resolve, reject)=>{
+      return new Promise(function(resolve, reject){
         loader.load(url, function(gltf){ resolve(gltf); }, undefined, function(err){ reject(err); });
       });
     }
@@ -593,9 +501,6 @@
     }
 
     // ====== Pins & Captions ======
-    const pinLayer = document.getElementById('pinLayer');
-    const lineSvg = document.getElementById('lineSvg');
-
     const pinFiltersState = CONFIG.PIN_COLORS.reduce(function(acc,c){ acc[c]=true; return acc; },{});
 
     function updatePinFiltersUI(){
@@ -714,7 +619,7 @@
     document.getElementById('saveCaptionBtn').addEventListener('click', function(){
       const id = state.selectedCaptionId; if(!id) return; const rec = state.captions.get(id); if(!rec) return;
       rec.title = document.getElementById('capTitle').value; rec.body = document.getElementById('capBody').value; rec.updatedAt = nowIso();
-      const sel = document.getElementById('imageSelect'); const idx = sel.selectedIndex - 1; // 0 is none
+      const sel = document.getElementById('imageSelect'); const idx = sel.selectedIndex - 1;
       if(idx>=0){ const f = state.imagesInFolder[idx]; rec.imageDriveId=f.id; rec.imageName=f.name; rec.imageWebContentLink = f.webContentLink; } else { rec.imageDriveId=null; rec.imageName=null; rec.imageWebContentLink=null; }
       refreshPinsDOM(); autosaveCaptions();
     });
@@ -782,6 +687,136 @@
         state.materials.blackToAlpha.enabled,
         state.materials.blackToAlpha.threshold
       ]]);
+    }
+
+    // ====== Drive / Sheets helpers ======
+    async function driveGetFileMeta(fileId){
+      const res = await gapi.client.drive.files.get({ fileId, fields: 'id,name,parents,mimeType,webViewLink' });
+      return res.result;
+    }
+
+    async function driveFindSpreadsheetInParent(parentId){
+      const q = '\''+parentId+'\' in parents and trashed=false and mimeType=\'application/vnd.google-apps.spreadsheet\' and name contains \''+CONFIG.SPREADSHEET_NAME_PREFIX+'\'';
+      const res = await gapi.client.drive.files.list({ q: q, fields: 'files(id,name)' , orderBy:'modifiedTime desc', pageSize:10});
+      const files = res.result.files || [];
+      return files[0] || null;
+    }
+
+    async function sheetsCreateAndMove(parentId, title){
+      const createRes = await gapi.client.sheets.spreadsheets.create({ resource: { properties: { title: title } } });
+      const spreadsheetId = createRes.result.spreadsheetId;
+      await gapi.client.drive.files.update({ fileId: spreadsheetId, addParents: parentId, fields: 'id, parents' });
+      return spreadsheetId;
+    }
+
+    function datasetSheetNames(ds){
+      return { captions: ds+'_Captions', materials: ds+'_Materials' };
+    }
+
+    async function sheetsEnsureDataset(spreadsheetId, ds){
+      const sheets = datasetSheetNames(ds);
+      const captions = sheets.captions; const materials = sheets.materials;
+      const meta = await gapi.client.sheets.spreadsheets.get({ spreadsheetId: spreadsheetId });
+      const existing = (meta.result.sheets||[]).map(function(s){return s.properties.title;});
+      const requests=[];
+      if(existing.indexOf(captions) === -1) requests.push({ addSheet: { properties: { title: captions } } });
+      if(existing.indexOf(materials) === -1) requests.push({ addSheet: { properties: { title: materials } } });
+      if(requests.length) await gapi.client.sheets.spreadsheets.batchUpdate({ spreadsheetId: spreadsheetId, resource:{ requests: requests } });
+      await sheetsSetValues(spreadsheetId, captions, 1, 1, [[
+        'id','title','body','pinColor','#hex','imageDriveId','imageName','imageWebContentLink','x','y','z','createdAt','updatedAt','visible'
+      ]]);
+      await sheetsSetValues(spreadsheetId, materials, 1, 1, [[
+        'alpha','unlit','doubleSided','whiteToAlpha.enabled','whiteToAlpha.threshold','blackToAlpha.enabled','blackToAlpha.threshold'
+      ]]);
+      const cur = await gapi.client.sheets.spreadsheets.values.get({ spreadsheetId: spreadsheetId, range: materials+'!A2:G2' });
+      if(!cur.result.values){
+        await sheetsSetValues(spreadsheetId, materials, 2, 1, [[
+          state.materials.alpha,
+          state.materials.unlit,
+          state.materials.doubleSided,
+          state.materials.whiteToAlpha.enabled,
+          state.materials.whiteToAlpha.threshold,
+          state.materials.blackToAlpha.enabled,
+          state.materials.blackToAlpha.threshold
+        ]]);
+      }
+    }
+
+    async function sheetsSetValues(spreadsheetId, sheet, startRow, startCol, values){
+      const range = sheet + '!' + colName(startCol) + startRow;
+      await gapi.client.sheets.spreadsheets.values.update({
+        spreadsheetId: spreadsheetId,
+        range: range,
+        valueInputOption:'RAW',
+        resource:{ values: values }
+      });
+    }
+
+    function colName(n){
+      let s=''; while(n>0){ let m=(n-1)%26; s=String.fromCharCode(65+m)+s; n=(n-1-m)/26|0; } return s;
+    }
+
+    async function driveListImagesInParent(parentId){
+      const q = '\''+parentId+'\' in parents and trashed=false and (mimeType contains \'image/\' or mimeType=\'image/heic\' or mimeType=\'image/heif\')';
+      const res = await gapi.client.drive.files.list({ q: q, fields:'files(id,name,webContentLink,mimeType)', pageSize:200, orderBy:'name' });
+      return res.result.files || [];
+    }
+
+    async function driveFetchBlob(fileId){
+      const resp = await fetch('https://www.googleapis.com/drive/v3/files/' + fileId + '?alt=media',{ headers:{ Authorization: 'Bearer ' + state.token } });
+      if(!resp.ok) throw new Error('ダウンロード失敗');
+      return await resp.blob();
+    }
+
+    async function driveUploadImageToParent(parentId, file){
+      const metadata = { name:file.name, parents:[parentId], mimeType: file.type || 'application/octet-stream' };
+      const boundary = '-------314159265358979323846';
+      const delimiter = "\r\n--" + boundary + "\r\n";
+      const closeDelim = "\r\n--" + boundary + "--";
+      const reader = await file.arrayBuffer();
+      const base64Data = btoa(String.fromCharCode.apply(null, Array.from(new Uint8Array(reader))));
+      const body =
+        delimiter + 'Content-Type: application/json; charset=UTF-8\r\n\r\n' + JSON.stringify(metadata) +
+        delimiter + 'Content-Type: ' + metadata.mimeType + '\r\nContent-Transfer-Encoding: base64\r\n\r\n' + base64Data + closeDelim;
+      const res = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart',{
+        method:'POST', headers:{ 'Authorization': 'Bearer ' + state.token, 'Content-Type': 'multipart/related; boundary=' + boundary }, body: body
+      });
+      if(!res.ok) throw new Error('Upload failed');
+      return await res.json();
+    }
+
+    function rebuildImageSelect(){
+      const sel = document.getElementById('imageSelect'); sel.innerHTML = '<option value="">(画像なし)</option>' + state.imagesInFolder.map(function(f){return '<option value="'+f.id+'">'+escapeHtml(f.name)+( /heic|heif/i.test(f.mimeType)?' (HEIC)':'' )+'</option>'}).join('');
+    }
+
+    async function getDisplayURLForFileId(fileId){
+      if(state.displayUrlCache.has(fileId)) return state.displayUrlCache.get(fileId);
+      const meta = state.imagesInFolder.find(function(f){return f.id===fileId;});
+      const isHeic = meta && /heic|heif/i.test(meta.mimeType||'');
+      const blob = await driveFetchBlob(fileId);
+      if(isHeic && !isSafariLike()){
+        if(typeof window.heic2any !== 'function') throw new Error('heic2any が読み込めません');
+        const out = await window.heic2any({ blob: blob, toType: 'image/png' });
+        const url = objectURLFromBlob(out);
+        state.displayUrlCache.set(fileId, url);
+        return url;
+      } else {
+        const url = objectURLFromBlob(blob);
+        state.displayUrlCache.set(fileId, url);
+        return url;
+      }
+    }
+
+    async function populateSaveSetSelect(selectName){
+      if(!state.spreadsheetId) return;
+      const meta = await gapi.client.sheets.spreadsheets.get({ spreadsheetId: state.spreadsheetId });
+      const titles = (meta.result.sheets||[]).map(function(s){return s.properties.title;});
+      const datasets = new Set();
+      titles.forEach(function(t){ const m=t.match(/(.+)_(Captions|Materials)$/); if(m) datasets.add(m[1]); });
+      const arr = Array.from(datasets);
+      const sel = document.getElementById('saveSetSelect'); sel.innerHTML = arr.map(function(n){return '<option value="'+n+'">'+escapeHtml(n)+'</option>';}).join('');
+      const pick = (selectName && arr.indexOf(selectName)>=0) ? selectName : (arr.indexOf(state.dataset)>=0 ? state.dataset : (arr[0] || CONFIG.DEFAULT_DATASET));
+      sel.value = pick; state.dataset = pick; setQueryParam('dataset', pick);
     }
 
     // ====== UI Wiring ======
@@ -889,40 +924,6 @@
     function toggleMobileUI(force){
       state.isMobileUI = !!force;
       document.body.classList.toggle('mobile', state.isMobileUI);
-    }
-
-    function rebuildImageSelect(){
-      const sel = document.getElementById('imageSelect'); sel.innerHTML = '<option value="">(画像なし)</option>' + state.imagesInFolder.map(function(f){return '<option value="'+f.id+'">'+escapeHtml(f.name)+( /heic|heif/i.test(f.mimeType)?' (HEIC)':'' )+'</option>'}).join('');
-    }
-
-    async function getDisplayURLForFileId(fileId){
-      if(state.displayUrlCache.has(fileId)) return state.displayUrlCache.get(fileId);
-      const meta = state.imagesInFolder.find(function(f){return f.id===fileId;});
-      const isHeic = meta && /heic|heif/i.test(meta.mimeType||'');
-      const blob = await driveFetchBlob(fileId);
-      if(isHeic && !isSafariLike()){
-        if(typeof window.heic2any !== 'function') throw new Error('heic2any が読み込めません');
-        const out = await window.heic2any({ blob: blob, toType: 'image/png' });
-        const url = objectURLFromBlob(out);
-        state.displayUrlCache.set(fileId, url);
-        return url;
-      } else {
-        const url = objectURLFromBlob(blob);
-        state.displayUrlCache.set(fileId, url);
-        return url;
-      }
-    }
-
-    async function populateSaveSetSelect(selectName){
-      if(!state.spreadsheetId) return;
-      const meta = await gapi.client.sheets.spreadsheets.get({ spreadsheetId: state.spreadsheetId });
-      const titles = (meta.result.sheets||[]).map(function(s){return s.properties.title;});
-      const datasets = new Set();
-      titles.forEach(function(t){ const m=t.match(/(.+)_(Captions|Materials)$/); if(m) datasets.add(m[1]); });
-      const arr = Array.from(datasets);
-      const sel = document.getElementById('saveSetSelect'); sel.innerHTML = arr.map(function(n){return '<option value="'+n+'">'+escapeHtml(n)+'</option>';}).join('');
-      const pick = (selectName && arr.indexOf(selectName)>=0) ? selectName : (arr.indexOf(state.dataset)>=0 ? state.dataset : (arr[0] || CONFIG.DEFAULT_DATASET));
-      sel.value = pick; state.dataset = pick; setQueryParam('dataset', pick);
     }
 
   </script>
