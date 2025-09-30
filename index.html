@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>LociMyu Clean Core (v6: Auth+Drive+Sheets)</title>
+  <title>LociMyu v6.2 (Drive-safe Load URL)</title>
   <script type="importmap">
   {
     "imports": {
@@ -42,13 +42,13 @@
   <div id="app">
     <div id="viewer-host"><canvas id="canvas"></canvas></div>
     <div id="side">
-      <h3>Clean Core (Three.js / ImportMap)</h3>
+      <h3>LociMyu v6.2</h3>
       <div id="toolbar">
         <div class="btns">
           <button id="btn-persp" class="btn">Perspective</button>
           <button id="btn-ortho" class="btn">Orthographic</button>
         </div>
-        <input id="glb-url" type="text" placeholder="GLB URL (Drive直リンク可)" />
+        <input id="glb-url" type="text" placeholder="GLB URL / Drive共有URL / fileId" />
         <div class="btns">
           <button id="btn-load-url" class="btn">Load URL</button>
           <label class="btn">Load File <input id="file" type="file" accept=".glb,.gltf,model/gltf-binary" style="display:none"/></label>
@@ -73,6 +73,7 @@
     import { listSiblingImages } from './app/drive_images.js';
     import { createAutosave } from './app/sheets_autosave.js';
     import { findOrCreateSpreadsheetInSameFolder } from './js/drive.js';
+    import { downloadGlbBlob, getName } from './app/drive_glb.js';
 
     const API_KEY = 'AIzaSyCUnTCr5yWUWPdEXST9bKP1LpgawU5rIbI';
     const CLIENT_ID = '595200751510-ncahnf7edci6b9925becn5to49r6cguv.apps.googleusercontent.com';
@@ -82,50 +83,28 @@
       'https://www.googleapis.com/auth/spreadsheets'
     ].join(' ');
 
-    let tokenClient;
-    let gapiInited = false;
-    let gisInited = false;
-
-    function maybeEnable() {
-      const btn = document.getElementById('btn-signin');
-      if (gapiInited && gisInited) btn.disabled = false;
-    }
-
+    let tokenClient; let gapiInited=false; let gisInited=false;
+    function maybeEnable(){ const btn=document.getElementById('btn-signin'); if(gapiInited && gisInited) btn.disabled=false; }
     window.addEventListener('load', () => {
       gapi.load('client', async () => {
-        await gapi.client.init({
-          apiKey: API_KEY,
-          discoveryDocs: [
-            'https://www.googleapis.com/discovery/v1/apis/drive/v3/rest',
-            'https://sheets.googleapis.com/$discovery/rest?version=v4'
-          ],
-        });
-        gapiInited = true;
-        maybeEnable();
+        await gapi.client.init({ apiKey: API_KEY, discoveryDocs: [
+          'https://www.googleapis.com/discovery/v1/apis/drive/v3/rest',
+          'https://sheets.googleapis.com/$discovery/rest?version=v4'
+        ]});
+        gapiInited = true; maybeEnable();
+        tryAutoLoadById(); // in case token already present
       });
-
       tokenClient = google.accounts.oauth2.initTokenClient({
-        client_id: CLIENT_ID,
-        scope: SCOPES,
-        callback: (resp) => {
-          if (resp.error) { console.error(resp); return; }
-          console.log('[auth] token acquired');
-        },
+        client_id: CLIENT_ID, scope: SCOPES, callback: (resp)=>{
+          if(resp.error){console.error(resp); return;}
+          console.log('[auth] token acquired'); tryAutoLoadById();
+        }
       });
-      gisInited = true;
-      maybeEnable();
+      gisInited = true; maybeEnable();
     });
-
-    document.getElementById('btn-signin').addEventListener('click', () => {
-      tokenClient.requestAccessToken({ prompt: 'consent' });
-    });
-    document.getElementById('btn-signout').addEventListener('click', () => {
-      const token = gapi.client.getToken();
-      if (token) {
-        google.accounts.oauth2.revoke(token.access_token);
-        gapi.client.setToken('');
-        console.log('[auth] signed out');
-      }
+    document.getElementById('btn-signin').addEventListener('click', ()=> tokenClient.requestAccessToken({ prompt: 'consent' }));
+    document.getElementById('btn-signout').addEventListener('click', ()=>{
+      const token=gapi.client.getToken(); if(token){ google.accounts.oauth2.revoke(token.access_token); gapi.client.setToken(''); console.log('[auth] signed out'); }
     });
 
     installConflictGuards();
@@ -149,27 +128,52 @@
       const params = new URLSearchParams(location.search);
       const glbId = params.get('id');
       if (glbId && window.gapi?.client){
-        try{
-          const imgs = await listSiblingImages(glbId);
-          if (imgs.length) bus.emit('images:update', imgs);
-        }catch(e){ console.warn('[drive] list images failed', e); }
-        try{
-          createAutosave({ bus, store, findOrCreateSpreadsheetInSameFolder, glbFileId: glbId });
-        }catch(e){ console.warn('[sheets] autosave init failed', e); }
+        try{ const imgs = await listSiblingImages(glbId); if (imgs.length) bus.emit('images:update', imgs); }catch(e){ console.warn('[drive] list images failed', e); }
+        try{ createAutosave({ bus, store, findOrCreateSpreadsheetInSameFolder, glbFileId: glbId }); }catch(e){ console.warn('[sheets] autosave init failed', e); }
       }
     });
     bus.on('model:error', (msg)=> setStatus('error: '+msg));
 
     document.getElementById('btn-persp').addEventListener('click', ()=> viewer.setOrtho(false));
     document.getElementById('btn-ortho').addEventListener('click', ()=> viewer.setOrtho(true));
-    document.getElementById('btn-load-url').addEventListener('click', ()=> {
-      const url = (document.getElementById('glb-url').value||'').trim();
-      if (url) viewer.loadURL(url);
+    document.getElementById('btn-load-url').addEventListener('click', async ()=> {
+      const raw = (document.getElementById('glb-url').value||'').trim();
+      if (!raw) return;
+      const driveMatch = raw.match(/(?:\/d\/|id=)([a-zA-Z0-9_-]{20,})/);
+      const looksId = /^[a-zA-Z0-9_-]{20,}$/.test(raw);
+      const fileId = driveMatch ? driveMatch[1] : (looksId ? raw : null);
+      if (fileId && window.gapi?.client){
+        try{
+          setStatus('downloading from Drive...');
+          const blob = await downloadGlbBlob(fileId);
+          const name = await getName(fileId);
+          viewer.loadBlob(blob, name);
+          return;
+        }catch(e){
+          console.warn('[LoadURL] drive blob failed, fallback to URL', e);
+        }
+      }
+      viewer.loadURL(raw);
     });
     document.getElementById('file').addEventListener('change', (e)=>{
       const f = e.target.files?.[0]; if (f) viewer.loadFile(f);
     });
     document.getElementById('fab').addEventListener('click', ()=> bus.emit('grid:toggle'));
+
+    async function tryAutoLoadById(){
+      const params = new URLSearchParams(location.search);
+      const glbId = params.get('id');
+      if (!glbId || !window.gapi?.client) return;
+      try{
+        setStatus('downloading from Drive...');
+        const blob = await downloadGlbBlob(glbId);
+        const name = await getName(glbId);
+        viewer.loadBlob(blob, name);
+      }catch(e){
+        console.error('[Drive GLB]', e);
+        setStatus('error: failed to download GLB from Drive');
+      }
+    }
   </script>
 </body>
 </html>
