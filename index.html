@@ -4,7 +4,13 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>LociMyu — 3D+Caption Tool</title>
+
+  <!-- 内蔵favicon（404回避） -->
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%231c7ed6'/%3E%3Ctext x='8' y='11' font-size='9' text-anchor='middle' fill='white' font-family='system-ui,Segoe UI,Roboto,Helvetica,Arial'%3EL%3C/text%3E%3C/svg%3E" />
+
   <link rel="stylesheet" href="css/styles.css" />
+
+  <!-- importmap (three) -->
   <script type="importmap">
     {
       "imports": {
@@ -13,6 +19,7 @@
       }
     }
   </script>
+
   <style>
     html, body { overflow-x: hidden; }
     .caption-pane.vertical { display:flex; flex-direction:column; gap:12px; }
@@ -33,6 +40,21 @@
   </style>
 </head>
 <body>
+  <!-- ======= 重要：Authが読む設定を先に定義（エラーの原因はここ） ======= -->
+  <script>
+    window.__LOCIMYU_CONFIG__ = {
+      apiKey: "AIzaSyCUnTCr5yWUWPdEXST9bKP1LpgawU5rIbI",
+      clientId: "595200751510-ncahnf7edci6b9925becn5to49r6cguv.apps.googleusercontent.com",
+      spreadsheetTitleSuffix: "__LociMyu",
+      manualPdfPath: "manual.pdf",
+      readOnlyParam: "readonly"
+    };
+  </script>
+
+  <!-- Google APIs（Auth用に先にロード） -->
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
+  <script src="https://apis.google.com/js/api.js" async defer></script>
+
   <header class="topbar">
     <div class="brand">LociMyu</div>
     <nav class="top-actions">
@@ -153,6 +175,7 @@
     </aside>
   </main>
 
+  <!-- パッチとアプリ本体（設定定義より後に読み込むこと） -->
   <script type="module" src="js/phase1_patch_v2.js"></script>
   <script type="module" src="js/ui_patch_v3.js"></script>
   <script type="module" src="js/main.js"></script>
