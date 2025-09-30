@@ -1,183 +1,70 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="ja">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>LociMyu — 3D+Caption Tool</title>
-
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%231c7ed6'/%3E%3Ctext x='8' y='11' font-size='9' text-anchor='middle' fill='white' font-family='system-ui,Segoe UI,Roboto,Helvetica,Arial'%3EL%3C/text%3E%3C/svg%3E" />
-
-  <link rel="stylesheet" href="css/styles.css" />
-
-  <script type="importmap">
-    {
-      "imports": {
-        "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
-        "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
-      }
-    }
-  </script>
-
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>LociMyu Clean Core</title>
   <style>
-    html, body { overflow-x: hidden; }
-    .caption-pane.vertical { display:flex; flex-direction:column; gap:12px; }
-    .caption-pane.vertical .caption-list { max-height:28vh; overflow:auto; border:1px solid var(--line); border-radius:8px; padding:6px; }
-    .caption-pane.vertical .caption-detail { border:1px solid var(--line); border-radius:8px; padding:10px; }
-    .caption-detail .grid-2 { display:grid; grid-template-columns: 1fr; gap:8px; }
-    .caption-detail select, .caption-detail input[type="file"] { width:100%; max-width:100%; }
-    #viewerPane { position:relative; }
-    #captionOverlay{ position:absolute; right:8px; top:8px; max-width:28vw; background:#111c; color:#fff;
-      border:1px solid #444; border-radius:10px; padding:10px; backdrop-filter:blur(4px); display:none; z-index:5 }
-    #captionOverlay h4{ margin:0 0 6px 0; font-size:14px }
-    #captionOverlay p{ margin:0 0 8px 0; font-size:12px; white-space:pre-wrap }
-    #captionOverlay img{ max-width:100%; max-height:220px; display:block; border-radius:6px }
-    #capThumbRail{ display:grid; grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)); gap:6px; max-height:24vh; overflow:auto; }
-    #capThumbRail .card{ border:1px solid var(--line); border-radius:6px; padding:4px; cursor:pointer; }
-    #capThumbRail .card img{ width:100%; height:64px; object-fit:cover; border-radius:4px; display:block; }
+    html, body { height: 100%; margin: 0; background: #0b0b0b; color: #fff; }
+    #app { position: fixed; inset: 0; display: grid; grid-template-columns: 1fr 320px; }
+    #viewer-host { position: relative; background: #111; }
+    #side { border-left: 1px solid #222; padding: 8px; font: 12px/1.4 system-ui, sans-serif; }
+    .fab { position: fixed; right: 16px; bottom: 16px; padding: 10px 14px; border-radius: 999px; background:#1e1e1e; border:1px solid #333; cursor:pointer; }
+    #grid { position: fixed; right: 16px; bottom: 68px; width: 320px; max-height:50vh; overflow:auto; background:rgba(0,0,0,.6); backdrop-filter: blur(4px); border-radius: 12px; display:none; padding:8px; }
+    #grid .g { display:grid; grid-template-columns: repeat(3, 1fr); gap:6px; }
+    #grid img { width: 100%; aspect-ratio: 1/1; object-fit: cover; border-radius: 6px; }
+    #overlay { position: fixed; left: 16px; bottom: 16px; max-width: 380px; background: rgba(0,0,0,.7); border-radius: 12px; padding: 12px 14px; display:none; }
+    #overlay h3 { margin: 0 0 6px; font-size: 14px; }
+    #overlay img { max-width:100%; display:block; margin-top:8px; border-radius:8px; }
   </style>
 </head>
 <body>
-  <script>
-    window.__LOCIMYU_CONFIG__ = {
-      apiKey: "AIzaSyCUnTCr5yWUWPdEXST9bKP1LpgawU5rIbI",
-      clientId: "595200751510-ncahnf7edci6b9925becn5to49r6cguv.apps.googleusercontent.com",
-      spreadsheetTitleSuffix: "__LociMyu",
-      manualPdfPath: "manual.pdf",
-      readOnlyParam: "readonly"
-    };
+  <div id="app">
+    <div id="viewer-host"><canvas id="canvas"></canvas></div>
+    <div id="side">
+      <h3>Clean Core</h3>
+      <p>単一のストア／イベントバス／アダプタで再構築した検証用コア。</p>
+      <ol>
+        <li>Shift+クリック：ピン追加</li>
+        <li>クリック：ピン選択（選択時のみライン表示）</li>
+        <li>右下FAB→グリッドで画像選択</li>
+      </ol>
+      <div>状態：<code id="status">booting...</code></div>
+    </div>
+  </div>
+  <button class="fab" id="fab">Images</button>
+  <div id="grid"><div style="margin:4px 0 8px; font-weight:600;">Images</div><div class="g"></div></div>
+  <div id="overlay"><h3 id="ov-t"></h3><div id="ov-b"></div><img id="ov-i" /></div>
+
+  <!-- App modules -->
+  <script type="module">
+    import { bus } from './core/bus.js';
+    import { store } from './core/store.js';
+    import { createViewerAdapter } from './viewer/adapter.js';
+    import { mountPins } from './features/pins.js';
+    import { mountOverlay } from './features/overlay.js';
+    import { mountGrid } from './features/imageGrid.js';
+    import { installConflictGuards } from './core/guards.js';
+
+    installConflictGuards();
+
+    const canvas = document.getElementById('canvas');
+    const viewer = createViewerAdapter({ canvas });
+
+    // Feature mounts
+    mountPins({ bus, store, viewer });
+    mountOverlay({ bus, store });
+    mountGrid({ bus, store });
+
+    // Minimal fake image data (replace with Drive listing)
+    const demoImages = Array.from({length:9}).map((_,i)=>({id:String(i+1), name:'img'+(i+1)+'.jpg', thumbnailLink:'https://picsum.photos/seed/'+(i+1)+'/200/200'}));
+    bus.emit('images:update', demoImages);
+
+    // Status
+    bus.on('pin:selected', (id)=> {
+      document.getElementById('status').textContent = 'selected: ' + (id ?? 'none');
+    });
+    document.getElementById('fab').addEventListener('click', ()=> bus.emit('grid:toggle'));
   </script>
-  <script src="https://accounts.google.com/gsi/client" async defer></script>
-  <script src="https://apis.google.com/js/api.js" async defer></script>
-
-  <header class="topbar">
-    <div class="brand">LociMyu</div>
-    <nav class="top-actions">
-      <button id="signinBtn" class="btn primary">Googleにサインイン</button>
-      <button id="signoutBtn" class="btn" disabled>サインアウト</button>
-      <a id="manualLink" class="btn link" href="#" target="_blank">マニュアルPDF</a>
-      <button id="readonlyLinkBtn" class="btn" title="閲覧専用URLをコピー">閲覧専用リンク</button>
-      <button id="selfTestBtn" class="btn">SelfTest</button>
-    </nav>
-  </header>
-
-  <main class="layout">
-    <section id="viewerPane" class="viewer-pane">
-      <div id="viewer" class="viewer"></div>
-      <div id="captionOverlay"></div>
-    </section>
-
-    <aside id="deskPane" class="desk-pane">
-      <div class="block">
-        <label for="modelUrl">モデルURL / fileId</label>
-        <div class="row">
-          <input id="modelUrl" placeholder="共有URL もしくは fileId" />
-          <button id="loadModelBtn" class="btn primary">読み込み</button>
-        </div>
-        <div class="row small">
-          <label for="saveSlot">セーブデータ</label>
-          <select id="saveSlot"></select>
-          <button id="newSaveBtn" class="btn small">新規</button>
-          <button id="dupSaveBtn" class="btn small">コピー</button>
-          <button id="renameSaveBtn" class="btn small">名称変更</button>
-        </div>
-      </div>
-
-      <div class="tabs">
-        <button class="tab-btn active" data-tab="captions">キャプション</button>
-        <button class="tab-btn" data-tab="materials">マテリアル</button>
-        <button class="tab-btn" data-tab="camera">カメラ</button>
-      </div>
-
-      <div class="tab-contents">
-        <section id="tab-captions" class="tab active">
-          <div class="caption-pane vertical">
-            <div class="caption-list" id="captionList"></div>
-            <div class="caption-detail">
-              <div class="row"><label>タイトル</label><input id="capTitle" /></div>
-              <div class="row"><label>本文</label><textarea id="capBody" rows="5"></textarea></div>
-              <div class="row">
-                <label>画像</label>
-                <div class="grid-2">
-                  <select id="capImageSelect"></select>
-                  <input id="capImageLocal" type="file" accept="image/*,.heic,.heif" />
-                </div>
-              </div>
-              <div class="row"><img id="capImagePreview" style="max-width:100%;max-height:160px;border:1px solid var(--line);border-radius:8px;display:none"/></div>
-              <div class="row"><div id="capThumbRail"></div></div>
-              <div class="row">
-                <label>ピン色</label>
-                <select id="capColor">
-                  <option value="red">赤</option><option value="orange">橙</option>
-                  <option value="yellow">黄</option><option value="green">緑</option>
-                  <option value="cyan">水</option><option value="blue">青</option>
-                  <option value="magenta">紫</option><option value="white">白</option>
-                </select>
-              </div>
-              <div class="row">
-                <button id="addPinBtn" class="btn">ピン追加</button>
-                <label for="pinFilter" style="margin-left:8px">ピン表示色</label>
-                <select id="pinFilter">
-                  <option value="all">すべて</option>
-                  <option value="red">赤</option><option value="orange">橙</option>
-                  <option value="yellow">黄</option><option value="green">緑</option>
-                  <option value="cyan">水</option><option value="blue">青</option>
-                  <option value="magenta">紫</option><option value="white">白</option>
-                </select>
-              </div>
-              <div class="row">
-                <button id="capSaveBtn" class="btn primary">キャプションを保存</button>
-                <button id="capDeleteBtn" class="btn danger">削除</button>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        <section id="tab-materials" class="tab">
-          <div class="row">
-            <label>透明度</label>
-            <input id="matOpacity" type="range" min="0" max="1" step="0.01" value="1" />
-            <span id="matOpacityVal">1.00</span>
-          </div>
-          <div class="row"><label><input id="matDoubleSided" type="checkbox" /> 裏面描画</label></div>
-          <div class="row"><label><input id="matUnlit" type="checkbox" /> 光源無視</label></div>
-          <div class="row">
-            <label><input id="matWhiteKey" type="checkbox" /> 白を透明として描画</label>
-            <input id="matWhiteKeyThr" type="range" min="0" max="1" step="0.01" value="0.95" />
-          </div>
-          <div class="row">
-            <label><input id="matBlackKey" type="checkbox" /> 黒を透明として描画</label>
-            <input id="matBlackKeyThr" type="range" min="0" max="1" step="0.01" value="0.05" />
-          </div>
-        </section>
-
-        <section id="tab-camera" class="tab">
-          <div class="grid-3">
-            <button class="btn camPreset" data-v="front">前</button>
-            <button class="btn camPreset" data-v="back">後</button>
-            <button class="btn camPreset" data-v="left">左</button>
-            <button class="btn camPreset" data-v="right">右</button>
-            <button class="btn camPreset" data-v="top">上</button>
-            <button class="btn camPreset" data-v="bottom">下</button>
-          </div>
-          <div class="row"><label><input id="orthoToggle" type="checkbox" /> 平行投影</label></div>
-          <div class="row">
-            <label for="bgColor">背景色</label>
-            <input id="bgColor" type="color" value="#202225" />
-          </div>
-        </section>
-      </div>
-    </aside>
-  </main>
-
-  <script type="module" src="js/phase1_patch_v2.js"></script>
-  <script type="module" src="js/ui.js"></script>
-<script type="module" src="js/gltfloader_guard_v2.js"></script>
-  <script type="module" src="js/viewer_patch_glbguard.js"></script>
-  <script type="module" src="js/main.js"></script>
-<!-- LociMyu Spec Enforcement (v3) -->
-<script src="./phase1/viewer_ortho_fix.js"></script>
-<script src="./phase1/main_pins_overlay_wiring.js"></script>
-<script src="./phase1/image_grid_bootstrap.js"></script>
-<script src="./phase1/spec_enforcer.js"></script>
 </body>
 </html>

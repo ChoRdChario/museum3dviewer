@@ -1,0 +1,7 @@
+export const bus = (()=>{
+  const m = new Map();
+  return {
+    on(ev, fn){ if(!m.has(ev)) m.set(ev, new Set()); m.get(ev).add(fn); return ()=>m.get(ev)?.delete(fn); },
+    emit(ev, data){ m.get(ev)?.forEach(fn=>{ try{ fn(data);}catch(e){ console.warn('[bus]',ev,e);} }); }
+  };
+})();
