@@ -1,5 +1,5 @@
-// drive.js — ES5-safe + getFileId() (static) and instance alias
-// Provides: downloadFile, listImagesInFolder, uploadToFolder, getFileId
+// drive.js — ES5-safe + getFileId/getFileMeta (both static & instance aliases)
+// Provides: getFileId, getFileMeta, downloadFile, listImagesInFolder, uploadToFolder
 export class Drive {
   constructor(gapi){ this.gapi = gapi; }
   static get token(){
@@ -11,7 +11,7 @@ export class Drive {
     if(!input) return "";
     var s = (""+input).trim();
 
-    // Bare ID
+    // Bare ID (no slash, long-ish, not http)
     if(s && !/\//.test(s) && s.length >= 15 && !/^http/i.test(s)) return s;
 
     // /file/d/<ID>/...
@@ -36,6 +36,22 @@ export class Drive {
     }catch(_){}
 
     return s;
+  }
+
+  // ---- Get file metadata (name/mimeType/parents/etc.) ----
+  static async getFileMeta(fileId){
+    var token = Drive.token;
+    if(!token) throw new Error("no token");
+    var fields = "id,name,mimeType,parents,owners(displayName,emailAddress),size,modifiedTime,iconLink,webViewLink";
+    var url = "https://www.googleapis.com/drive/v3/files/" + encodeURIComponent(fileId) +
+              "?fields=" + encodeURIComponent(fields) +
+              "&supportsAllDrives=true";
+    var r = await fetch(url, { headers: { Authorization: "Bearer " + token } });
+    if(!r.ok){
+      var t = ""; try{ t = await r.text(); }catch(_){}
+      throw new Error("get meta failed: " + t);
+    }
+    return await r.json();
   }
 
   // ---- File download as Blob ----
@@ -107,8 +123,9 @@ export class Drive {
   }
 }
 
-// Instance alias for static getFileId (so main.js can call drive.getFileId)
+// ---- Instance aliases for static helpers ----
 Drive.prototype.getFileId = function(input){ return Drive.getFileId(input); };
+Drive.prototype.getFileMeta = function(fileId){ return Drive.getFileMeta(fileId); };
 
 // Keep class on window for code that expects window.drive to exist (class-level)
 window.drive = Drive;
