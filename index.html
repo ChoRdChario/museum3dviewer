@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>LociMyu Clean Core (Three ImportMap v4)</title>
+  <title>LociMyu Clean Core (v5: Drive+Sheets)</title>
   <script type="importmap">
   {
     "imports": {
@@ -63,6 +63,15 @@
     import { mountOverlay } from './features/overlay.js';
     import { mountGrid } from './features/imageGrid.js';
     import { installConflictGuards } from './core/guards.js';
+    import { listSiblingImages } from './app/drive_images.js';
+    import { createAutosave } from './app/sheets_autosave.js';
+    let findOrCreateSpreadsheetInSameFolder = null;
+    try {
+      const mod = await import('./js/drive.js');
+      findOrCreateSpreadsheetInSameFolder = mod.findOrCreateSpreadsheetInSameFolder;
+    } catch(_e) {
+      console.warn('[init] js/drive.js not present; Sheets autosave disabled.');
+    }
 
     installConflictGuards();
     const canvas = document.getElementById('canvas');
@@ -80,7 +89,22 @@
     bus.on('viewer:mode', (m)=> setStatus('mode: '+m));
     bus.on('viewer:resized', ({w,h,mode})=> setStatus(`mode:${mode} ${w}x${h}`));
     bus.on('model:loading', (name)=> setStatus('loading: '+name));
-    bus.on('model:loaded', (name)=> setStatus('loaded: '+name));
+    bus.on('model:loaded', async (_name)=> {
+      setStatus('loaded');
+      const params = new URLSearchParams(location.search);
+      const glbId = params.get('id');
+      if (glbId && window.gapi?.client){
+        try{
+          const imgs = await listSiblingImages(glbId);
+          if (imgs.length) bus.emit('images:update', imgs);
+        }catch(e){ console.warn('[drive] list images failed', e); }
+        if (findOrCreateSpreadsheetInSameFolder){
+          try{
+            createAutosave({ bus, store, findOrCreateSpreadsheetInSameFolder, glbFileId: glbId });
+          }catch(e){ console.warn('[sheets] autosave init failed', e); }
+        }
+      }
+    });
     bus.on('model:error', (msg)=> setStatus('error: '+msg));
 
     document.getElementById('btn-persp').addEventListener('click', ()=> viewer.setOrtho(false));

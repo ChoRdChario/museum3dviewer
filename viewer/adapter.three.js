@@ -113,8 +113,7 @@ export function createViewerAdapter({ canvas, bus }){
       if (child.userData && child.userData.__isModelRoot) scene.remove(child);
     });
     root.userData = root.userData || {};
-    root.userData.__isModelRoot = true
-
+    root.userData.__isModelRoot = true;
     scene.add(root);
     rebuildMeshCache(root);
 
