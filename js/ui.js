@@ -1,4 +1,45 @@
-// ui.js — consolidated + exports used by main.js (setLoading, setStatus)
+// ui.js — consolidated + exports used by main.js (setLoading, setStatus, toast)
+function ensureBadge(id, baseStyle){
+  let el = document.getElementById(id);
+  if(!el){
+    el = document.createElement('div');
+    el.id = id;
+    el.style.cssText = baseStyle;
+    document.body.appendChild(el);
+  }
+  return el;
+}
+
+export function setStatus(text='READY'){
+  const el = ensureBadge('statusBadge', 'position:fixed;left:12px;bottom:12px;background:#111c;color:#fff;border:1px solid #444;border-radius:999px;padding:8px 12px;font-weight:700;box-shadow:0 2px 10px #0006;z-index:9999;');
+  el.textContent = text;
+  el.style.display = 'inline-block';
+}
+
+export function setLoading(on=true, label='Loading...'){
+  const el = ensureBadge('loadingBadge', 'position:fixed;right:12px;bottom:12px;background:#1f4f8f;color:#fff;border:1px solid #295ea8;border-radius:10px;padding:8px 12px;font-weight:600;box-shadow:0 2px 10px #0006;z-index:9999;');
+  el.textContent = on ? label : '';
+  el.style.display = on ? 'inline-block' : 'none';
+}
+
+export function toast(message, type='info', {timeout=2600}={}){
+  const host = ensureBadge('toastHost', 'position:fixed;left:50%;bottom:24px;transform:translateX(-50%);z-index:10000;display:flex;flex-direction:column;gap:8px;align-items:center;pointer-events:none;');
+  const item = document.createElement('div');
+  item.className = 'toast-item';
+  item.style.cssText = 'background:#111c;color:#fff;border:1px solid #444;border-radius:10px;padding:10px 14px;box-shadow:0 4px 18px #0008;opacity:0;transform:translateY(8px);transition:opacity .15s ease, transform .15s ease; pointer-events:auto;';
+  if(type==='success'){ item.style.background = '#0f3'; item.style.color='#021'; item.style.borderColor='#0c4'; }
+  if(type==='error'){ item.style.background = '#c92a2a'; item.style.color='#fff'; item.style.borderColor='#a51111'; }
+  if(type==='warn'){ item.style.background = '#f08c00'; item.style.color='#211'; item.style.borderColor='#b06a00'; }
+  item.textContent = message;
+  host.appendChild(item);
+  requestAnimationFrame(()=>{ item.style.opacity='1'; item.style.transform='translateY(0)'; });
+  setTimeout(()=>{
+    item.style.opacity='0'; item.style.transform='translateY(8px)';
+    setTimeout(()=> item.remove(), 180);
+  }, timeout);
+}
+
+// ===== Tabs =====
 export function setupTabs(){
   const btns = Array.from(document.querySelectorAll('.tab-btn'));
   const tabs = new Map(Array.from(document.querySelectorAll('.tab')).map(el=>{
@@ -24,34 +65,7 @@ export function setupTabs(){
   if(defaultTab) show(defaultTab);
 }
 
-// ====== Status & Loading badges ======
-function ensureBadge(id, baseStyle){
-  let el = document.getElementById(id);
-  if(!el){
-    el = document.createElement('div');
-    el.id = id;
-    el.style.cssText = baseStyle;
-    document.body.appendChild(el);
-  }
-  return el;
-}
-
-export function setStatus(text='READY', color='#51cf66'){
-  const el = ensureBadge('statusBadge', 'position:fixed;left:12px;bottom:12px;background:#111c;color:#fff;border:1px solid #444;border-radius:999px;padding:8px 12px;font-weight:700;box-shadow:0 2px 10px #0006;z-index:9999;');
-  el.textContent = text;
-  el.style.background = '#111c';
-  el.style.color = '#fff';
-  el.style.borderColor = '#444';
-  el.style.display = 'inline-block';
-}
-
-export function setLoading(on=true, label='Loading...'){
-  const el = ensureBadge('loadingBadge', 'position:fixed;right:12px;bottom:12px;background:#1f4f8f;color:#fff;border:1px solid #295ea8;border-radius:10px;padding:8px 12px;font-weight:600;box-shadow:0 2px 10px #0006;z-index:9999;');
-  el.textContent = on ? label : '';
-  el.style.display = on ? 'inline-block' : 'none';
-}
-
-// ====== Caption overlay & thumbnails ======
+// ===== Caption overlay & thumbnails =====
 async function tokenFetchBlobURL(fileId){
   try{
     const token = (window.gapi && gapi.client && gapi.client.getToken && gapi.client.getToken())?.access_token;
@@ -143,11 +157,10 @@ function wireCaptionUI(){
 export function initUI(){
   setupTabs();
   wireCaptionUI();
-  // 初期状態: READY を表示
   setStatus('READY');
   setLoading(false);
 }
 
-// 旧window依存の互換: main.js等が window.__LMY?.setStatus を呼ぶケース
+// 旧window互換
 if(!window.__LMY) window.__LMY = {};
 window.__LMY.setStatus = (t)=> setStatus(t||'READY');
