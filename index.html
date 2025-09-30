@@ -53,7 +53,6 @@
     })();
   </script>
 
-  <!-- ===== 以下は UI 本体（前回版のまま） ===== -->
   <header class="topbar">
     <div class="brand">LociMyu</div>
     <nav class="top-actions">
@@ -65,8 +64,25 @@
   </header>
 
   <main class="layout">
-    <!-- （略: ここは前回提供のUIコードそのまま） -->
+    <section id="viewerPane" class="viewer-pane">
+      <div id="viewer" class="viewer"></div>
+      <div id="loadingOverlay" class="overlay hidden">
+        <div class="spinner"></div>
+        <div class="overlay-text">読み込み中...</div>
+      </div>
+    </section>
+
+    <aside id="deskPane" class="desk-pane">
+      <!-- ここに各種UI（マテリアル・カメラ・キャプション等）が入ります -->
+    </aside>
   </main>
+
+  <footer class="bottombar mobile-only">
+    <button id="mobileHome" class="btn small">ホーム</button>
+    <button id="mobileMaterials" class="btn small">マテ</button>
+    <button id="mobileCamera" class="btn small">カメラ</button>
+    <button id="mobileCaptions" class="btn small">キャプ</button>
+  </footer>
 
   <!-- アプリ設定 -->
   <script>
