@@ -128,7 +128,8 @@ async function onLoadModel(){
     const fileId = await drive.getFileId(input);
     const meta = await drive.getFileMeta(fileId);
     currentModelMeta = meta;
-    const buf = await drive.downloadFile(fileId);
+    const blob = await drive.downloadFile(fileId);
+    const buf = await blob.arrayBuffer();
     await viewer.loadGLB(buf);
     // Spreadsheet in same folder
     const spreadsheet = await drive.findOrCreateSpreadsheetInSameFolder(meta, CONFIG.spreadsheetTitleSuffix);
