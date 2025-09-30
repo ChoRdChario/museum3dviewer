@@ -6,6 +6,18 @@ import { Viewer } from './viewer.js';
 import { setupTabs, setLoading, toast } from './ui.js';
 
 const CONFIG = window.__LOCIMYU_CONFIG__;
+
+async function waitFor(cond, timeoutMs=15000, stepMs=100){
+  const t0 = Date.now();
+  while(Date.now()-t0 < timeoutMs){
+    try{ if(cond()) return true; }catch(_){}
+    await new Promise(r=>setTimeout(r, stepMs));
+  }
+  return false;
+}
+
+function dbg(msg){ try{ window.__LMY?.log(msg); }catch(_){ console.log('[LMY]', msg); } }
+
 const auth = new Auth(CONFIG);
 const drive = new Drive();
 const sheets = new Sheets();
@@ -18,18 +30,27 @@ let addPinMode = false;
 function $(id){ return document.getElementById(id); }
 
 async function init(){
+  dbg('init() start');
+  // Show badge to confirm main.js is running
+  window.__LMY?.showBadge();
+  // Wait for third-party globals
+  const okGapi = await waitFor(()=> !!window.gapi, 15000);
+  dbg('gapi: '+okGapi);
+  const okGoogle = await waitFor(()=> !!(window.google && window.google.accounts), 15000);
+  dbg('google.accounts: '+okGoogle);
+
   setupTabs();
   viewer = new Viewer($('viewer'));
   viewer.animate();
-  $('manualLink').href = CONFIG.manualPdfPath;
+  dbg('DOM wired'); $('manualLink').href = CONFIG.manualPdfPath;
 
-  $('signinBtn').onclick = ()=> { try{ auth.ensureAuth(onAuthed); }catch(err){ console.error('signin failed', err); alert('サインインでエラー: '+err.message);} };
-  $('signoutBtn').onclick = ()=> { auth.signOut(); updateAuthUi(); };
-  await auth.init();
-  auth.createTokenClient(onAuthed);
-  updateAuthUi();
+  $('signinBtn').onclick = ()=> { dbg('click:signin'); try{ auth.ensureAuth(onAuthed); }catch(err){ console.error('signin failed', err); alert('サインインでエラー: '+err.message);} };
+  $('signoutBtn').onclick = ()=> { auth.signOut(); updateAuthUi(); dbg('updateAuthUi done'); };
+  dbg('auth.init()'); await auth.init(); dbg('auth.init() done');
+  dbg('createTokenClient'); auth.createTokenClient(onAuthed);
+  updateAuthUi(); dbg('updateAuthUi done');
 
-  $('loadModelBtn').onclick = (e)=>{ try{ onLoadModel(); }catch(err){ console.error('onLoadModel failed', err); alert('読み込みでエラー: '+err.message); } };
+  $('loadModelBtn').onclick = (e)=>{ dbg('click:loadModel'); try{ onLoadModel(); }catch(err){ console.error('onLoadModel failed', err); alert('読み込みでエラー: '+err.message); } };
   $('addPinBtn').onclick = ()=>{
     addPinMode = !addPinMode;
     $('addPinBtn').classList.toggle('primary', addPinMode);
@@ -87,8 +108,8 @@ function updateAuthUi(){
   $('signoutBtn').disabled = !auth.isAuthed;
 }
 
-async function onAuthed(){
-  updateAuthUi();
+async function onAuthed(){ dbg('onAuthed');
+  updateAuthUi(); dbg('updateAuthUi done');
   toast('サインイン完了');
 }
 
@@ -116,6 +137,7 @@ async function onLoadModel(){
     // list images
     const folderId = (meta.parents && meta.parents[0]) || null;
     await populateImageSelect(folderId);
+  dbg('onLoadModel start');
   }catch(err){
     console.error(err);
     alert('モデルの読み込みに失敗: ' + err.message);
@@ -318,7 +340,7 @@ async function duplicateSlot(){
   await populateSlots();
 }
 
-window.addEventListener('DOMContentLoaded', ()=>{ console.log('LociMyu DOM ready'); init(); });
+window.addEventListener('DOMContentLoaded', ()=>{ console.log('LociMyu DOM ready'); dbg('DOMContentLoaded'); init(); });
 
 
 async function onLocalImagePicked(e){
@@ -373,7 +395,8 @@ async function onImageSelectChanged(){
       const url = URL.createObjectURL(jpegBlob);
       pv.src = url; pv.style.display = 'block';
       toast('HEICをJPEGへ変換しました。元のHEICはそのまま残しています。');
-    }catch(err){
+    dbg('onLoadModel start');
+  }catch(err){
       console.warn('HEIC変換失敗', err);
       alert('HEICの変換に失敗しました。ネットワークやファイル状態を確認してください。');
       pv.style.display='none';

@@ -18,8 +18,32 @@
       }
     }
   </script>
+<style>
+#locimyu-debug{position:fixed;z-index:99999;right:8px;bottom:8px;background:#111c;backdrop-filter:blur(4px);
+color:#fff;border:1px solid #444;border-radius:8px;min-width:220px;max-width:50vw;max-height:35vh;overflow:auto;
+font:12px/1.4 ui-monospace,Menlo,Consolas,monospace;padding:6px 8px}
+#locimyu-badge{position:fixed;z-index:99998;left:8px;bottom:8px;background:#0b5; color:#021;
+border-radius:999px;padding:6px 10px;font:12px/1 ui-sans-serif,system-ui}
+</style>
 </head>
 <body>
+<div id="locimyu-badge" style="display:none">READY</div>
+<div id="locimyu-debug" style="display:none"><div><b>Debug</b></div><div id="locimyu-log"></div></div>
+<script>
+(function(){
+  const box=document.getElementById('locimyu-debug');
+  const logEl=document.getElementById('locimyu-log');
+  const badge=document.getElementById('locimyu-badge');
+  function show(){ box.style.display='block'; }
+  function log(msg){ show(); const d=document.createElement('div'); d.textContent=msg; logEl.appendChild(d); }
+  window.__LMY = {
+    log, showBadge(){ badge.style.display='inline-block'; }, hideBadge(){ badge.style.display='none'; }
+  };
+  window.addEventListener('error', e=>{ log('[window.error] '+(e.message||e.error)); });
+  window.addEventListener('unhandledrejection', e=>{ log('[unhandled] '+(e.reason&&e.reason.message||e.reason)); });
+})();
+</script>
+
   <header class="topbar">
     <div class="brand">LociMyu</div>
     <nav class="top-actions">
