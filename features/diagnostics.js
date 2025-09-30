@@ -66,12 +66,12 @@ export function mountDiagnostics({ bus, store, viewer, listSiblingImages, findOr
 
   async function testDriveList(){
     try{
-      const glbId = (typeof getGlbId === 'function' && getGlbId()) || new URLSearchParams(location.search).get('id');
-      if(!glbId){ setRes('driveList','warn','no ?id provided'); return; }
+      const glbId = (typeof getGlbId==='function' && getGlbId()) || new URLSearchParams(location.search).get('id');
+      if(!glbId){ setRes('driveList','warn','no fileId (use ?id= or Load URL with fileId)'); return; }
       if(!window.gapi?.client){ setRes('driveList','fail','gapi not ready'); return; }
       const list = await listSiblingImages(glbId);
       setRes('driveList','pass', `found ${list.length} images`);
-      if(list.length===0) log('Place jpeg/png/webp/heic in the same Drive folder as the GLB.');
+      if(list.length===0) log('Put jpeg/png/webp/heic next to the GLB in Drive.');
     }catch(e){ setRes('driveList','fail', String(e)); }
   }
 
@@ -86,11 +86,10 @@ export function mountDiagnostics({ bus, store, viewer, listSiblingImages, findOr
 
   async function testSheets(){
     try{
-      const glbId = (typeof getGlbId === 'function' && getGlbId()) || new URLSearchParams(location.search).get('id');
-      if(!glbId){ setRes('sheets','warn','no ?id provided'); return; }
+      const glbId = (typeof getGlbId==='function' && getGlbId()) || new URLSearchParams(location.search).get('id');
+      if(!glbId){ setRes('sheets','warn','no fileId (use ?id= or Load URL with fileId)'); return; }
       if(!window.gapi?.client){ setRes('sheets','fail','gapi not ready'); return; }
       const ssId = await findOrCreateSpreadsheetInSameFolder(glbId);
-      // read header row if exists
       try{
         const res = await gapi.client.sheets.spreadsheets.values.get({ spreadsheetId:ssId, range:'pins!A1:Z1' });
         const header = (res.result.values && res.result.values[0]) || [];
@@ -111,11 +110,9 @@ export function mountDiagnostics({ bus, store, viewer, listSiblingImages, findOr
 
   async function testPins(){
     try{
-      // simulate bus traffic without touching real scene
       let added=false, selectedFired=false;
       const off1 = bus.on('pin:added', ()=>{ added=true; });
       const off2 = bus.on('pin:selected', ()=>{ selectedFired=true; });
-      // Emit fake events
       bus.emit('pin:added', {id:'diag_pin'});
       bus.emit('pin:selected', 'diag_pin');
       off1(); off2();
@@ -125,7 +122,7 @@ export function mountDiagnostics({ bus, store, viewer, listSiblingImages, findOr
   }
 
   async function runAll(){
-    logEl.textContent = ''; // clear
+    logEl.textContent='';
     await testAuth();
     await testDriveList();
     await testHeic();
@@ -134,14 +131,10 @@ export function mountDiagnostics({ bus, store, viewer, listSiblingImages, findOr
     await testPins();
   }
 
-  btnAll.addEventListener('click', runAll);
-  btnLog.addEventListener('click', ()=>{
+  document.getElementById('btn-run-all').addEventListener('click', runAll);
+  document.getElementById('btn-show-log').addEventListener('click', ()=>{
     logEl.style.display = (logEl.style.display==='none'?'block':'none');
   });
-
-  // Mark viewer loaded state
   bus.on('model:loaded', ()=>{ wrap.__viewerLoaded = true; });
-
-  // auto run once after load (delay for gapi init)
   setTimeout(runAll, 800);
 }

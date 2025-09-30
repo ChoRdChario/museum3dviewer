@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>LociMyu v6.2 (Drive-safe Load URL)</title>
+  <title>LociMyu v6.3.2 (Diagnostics + Drive-aware)</title>
   <script type="importmap">
   {
     "imports": {
@@ -42,7 +42,7 @@
   <div id="app">
     <div id="viewer-host"><canvas id="canvas"></canvas></div>
     <div id="side">
-      <h3>LociMyu v6.2</h3>
+      <h3>LociMyu v6.3.2</h3>
       <div id="toolbar">
         <div class="btns">
           <button id="btn-persp" class="btn">Perspective</button>
@@ -76,11 +76,11 @@
     import { findOrCreateSpreadsheetInSameFolder } from './js/drive.js';
     import { downloadGlbBlob, getName } from './app/drive_glb.js';
 
-    // Track currently targeted GLB fileId (from ?id or Load URL)
+    // Track current GLB fileId (from ?id or Load URL)
     let currentGlbId = null;
     const getCurrentGlbId = () => currentGlbId;
 
-
+    // Auth
     const API_KEY = 'AIzaSyCUnTCr5yWUWPdEXST9bKP1LpgawU5rIbI';
     const CLIENT_ID = '595200751510-ncahnf7edci6b9925becn5to49r6cguv.apps.googleusercontent.com';
     const SCOPES = [
@@ -132,7 +132,7 @@
     bus.on('model:loading', (name)=> setStatus('loading: '+name));
     bus.on('model:loaded', async (_name)=> {
       setStatus('loaded');
-      const glbId = (typeof getCurrentGlbId === 'function' && getCurrentGlbId()) || new URLSearchParams(location.search).get('id');
+      const glbId = getCurrentGlbId() || new URLSearchParams(location.search).get('id');
       if (glbId && window.gapi?.client){
         try{ const imgs = await listSiblingImages(glbId); if (imgs.length) bus.emit('images:update', imgs); }catch(e){ console.warn('[drive] list images failed', e); }
         try{ createAutosave({ bus, store, findOrCreateSpreadsheetInSameFolder, glbFileId: glbId }); }catch(e){ console.warn('[sheets] autosave init failed', e); }
@@ -150,8 +150,8 @@
       const fileId = driveMatch ? driveMatch[1] : (looksId ? raw : null);
       if (fileId && window.gapi?.client){
         try{
-          setStatus('downloading from Drive...');
           currentGlbId = fileId;
+          setStatus('downloading from Drive...');
           const blob = await downloadGlbBlob(fileId);
           const name = await getName(fileId);
           viewer.loadBlob(blob, name);
@@ -167,9 +167,12 @@
     });
     document.getElementById('fab').addEventListener('click', ()=> bus.emit('grid:toggle'));
 
-    \1
-      currentGlbId = glbId;
+    async function tryAutoLoadById(){
+      const params = new URLSearchParams(location.search);
+      const glbId = params.get('id');
+      if (!glbId || !window.gapi?.client) return;
       try{
+        currentGlbId = glbId;
         setStatus('downloading from Drive...');
         const blob = await downloadGlbBlob(glbId);
         const name = await getName(glbId);
