@@ -69,6 +69,7 @@
     import { mountPins } from './features/pins.js';
     import { mountOverlay } from './features/overlay.js';
     import { mountGrid } from './features/imageGrid.js';
+    import { mountDiagnostics } from './features/diagnostics.js';
     import { installConflictGuards } from './core/guards.js';
     import { listSiblingImages } from './app/drive_images.js';
     import { createAutosave } from './app/sheets_autosave.js';
@@ -114,6 +115,7 @@
     mountPins({ bus, store, viewer });
     mountOverlay({ bus, store });
     mountGrid({ bus, store });
+    mountDiagnostics({ bus, store, viewer, listSiblingImages, findOrCreateSpreadsheetInSameFolder });
 
     const demoImages = Array.from({length:9}).map((_,i)=>({id:String(i+1), name:'img'+(i+1)+'.jpg', thumbnailLink:'https://picsum.photos/seed/'+(i+1)+'/200/200'}));
     bus.emit('images:update', demoImages);
