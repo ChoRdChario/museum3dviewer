@@ -1,15 +1,11 @@
 export function mountPins({ bus, store, viewer }){
   const pinMap = new Map();
   let idSeq = 0;
-
   function setSelected(id){
     store.set({ selected: id });
     bus.emit('pin:selected', id);
-    for (const [pid, rec] of pinMap){
-      rec.lineVisible = (pid === id);
-    }
+    for (const [pid, rec] of pinMap){ rec.lineVisible = (pid === id); }
   }
-
   const canvas = viewer.canvas;
   canvas.addEventListener('click', (e)=>{
     const hit = viewer.raycastAt(e.clientX, e.clientY);

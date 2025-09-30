@@ -12,7 +12,6 @@ export function mountGrid({ bus, store }){
       btn.addEventListener('click', ()=>{
         const sel = store.state.selected;
         if (!sel) return;
-        // attach to caption
         const pin = store.state.pins.find(p=>p.id===sel);
         if (!pin) return;
         pin.caption.img = file.thumbnailLink;

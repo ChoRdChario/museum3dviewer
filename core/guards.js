@@ -1,5 +1,4 @@
 export function installConflictGuards(){
-  // Prevent multiple resize handlers clobbering each other
   const seen = new WeakSet();
   const origAdd = window.addEventListener;
   window.addEventListener = function(type, listener, opts){

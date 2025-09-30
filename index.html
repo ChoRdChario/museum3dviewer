@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>LociMyu Clean Core (Three)</title>
+  <title>LociMyu Clean Core (Three ESModules)</title>
   <style>
     html, body { height: 100%; margin: 0; background: #0b0b0b; color: #fff; }
     #app { position: fixed; inset: 0; display: grid; grid-template-columns: 1fr 320px; }
@@ -27,7 +27,7 @@
   <div id="app">
     <div id="viewer-host"><canvas id="canvas"></canvas></div>
     <div id="side">
-      <h3>Clean Core (Three.js)</h3>
+      <h3>Clean Core (Three.js / ESModules)</h3>
       <div id="toolbar">
         <div class="btns">
           <button id="btn-persp" class="btn">Perspective</button>
@@ -47,12 +47,6 @@
   <div id="grid"><div style="margin:4px 0 8px; font-weight:600;">Images</div><div class="g"></div></div>
   <div id="overlay"><h3 id="ov-t"></h3><div id="ov-b"></div><img id="ov-i" /></div>
 
-  <!-- Three.js and helpers (global) -->
-  <script src="https://unpkg.com/three@0.158.0/build/three.min.js"></script>
-  <script src="https://unpkg.com/three@0.158.0/examples/js/controls/OrbitControls.js"></script>
-  <script src="https://unpkg.com/three@0.158.0/examples/js/loaders/GLTFLoader.js"></script>
-
-  <!-- App modules -->
   <script type="module">
     import { bus } from './core/bus.js';
     import { store } from './core/store.js';
@@ -66,23 +60,21 @@
     const canvas = document.getElementById('canvas');
     const viewer = createViewerAdapter({ canvas, bus });
 
-    // Feature mounts
     mountPins({ bus, store, viewer });
     mountOverlay({ bus, store });
     mountGrid({ bus, store });
 
-    // Demo images
     const demoImages = Array.from({length:9}).map((_,i)=>({id:String(i+1), name:'img'+(i+1)+'.jpg', thumbnailLink:'https://picsum.photos/seed/'+(i+1)+'/200/200'}));
     bus.emit('images:update', demoImages);
 
-    // Status
     const statusEl = document.getElementById('status');
-    function setStatus(s){ statusEl.textContent = s; }
+    const setStatus = (s)=> statusEl.textContent = s;
     bus.on('viewer:mode', (m)=> setStatus('mode: '+m));
     bus.on('viewer:resized', ({w,h,mode})=> setStatus(`mode:${mode} ${w}x${h}`));
+    bus.on('model:loading', (name)=> setStatus('loading: '+name));
     bus.on('model:loaded', (name)=> setStatus('loaded: '+name));
+    bus.on('model:error', (msg)=> setStatus('error: '+msg));
 
-    // Toolbar
     document.getElementById('btn-persp').addEventListener('click', ()=> viewer.setOrtho(false));
     document.getElementById('btn-ortho').addEventListener('click', ()=> viewer.setOrtho(true));
     document.getElementById('btn-load-url').addEventListener('click', ()=> {
@@ -92,7 +84,6 @@
     document.getElementById('file').addEventListener('change', (e)=>{
       const f = e.target.files?.[0]; if (f) viewer.loadFile(f);
     });
-
     document.getElementById('fab').addEventListener('click', ()=> bus.emit('grid:toggle'));
   </script>
 </body>

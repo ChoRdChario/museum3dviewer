@@ -1,7 +1,8 @@
-import { bus } from '../core/bus.js';
+import * as THREE from 'https://unpkg.com/three@0.158.0/build/three.module.js';
+import { OrbitControls } from 'https://unpkg.com/three@0.158.0/examples/jsm/controls/OrbitControls.js';
+import { GLTFLoader } from 'https://unpkg.com/three@0.158.0/examples/jsm/loaders/GLTFLoader.js';
 
-export function createViewerAdapter({ canvas, bus:evbus }){
-  const THREE = window.THREE;
+export function createViewerAdapter({ canvas, bus }){
   const renderer = new THREE.WebGLRenderer({ canvas, antialias:true, alpha:false });
   renderer.setPixelRatio(Math.min(2, window.devicePixelRatio||1));
   renderer.setSize(canvas.clientWidth||800, canvas.clientHeight||600, false);
@@ -10,18 +11,16 @@ export function createViewerAdapter({ canvas, bus:evbus }){
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x111111);
 
-  // Cameras
   const persp = new THREE.PerspectiveCamera(50, 1, 0.01, 1000);
   persp.position.set(0.8, 0.8, 0.8);
 
   const ortho = new THREE.OrthographicCamera(-1,1,1,-1, 0.01, 1000);
   ortho.position.set(0.8, 0.8, 0.8);
-  ortho.userData.v0 = 1; // base top*zoom
+  ortho.userData.v0 = 1;
   let camera = persp;
 
-  // Controls
-  const controls = new THREE.OrbitControls(persp, renderer.domElement);
-  const controlsOrtho = new THREE.OrbitControls(ortho, renderer.domElement);
+  const controls = new OrbitControls(persp, renderer.domElement);
+  const controlsOrtho = new OrbitControls(ortho, renderer.domElement);
 
   const light = new THREE.DirectionalLight(0xffffff, 1.0);
   light.position.set(1,2,3);
@@ -30,12 +29,9 @@ export function createViewerAdapter({ canvas, bus:evbus }){
 
   const raycaster = new THREE.Raycaster();
   const meshes = [];
-
   function rebuildMeshCache(root){
     meshes.length = 0;
-    (root||scene).traverse(obj=>{
-      if (obj && (obj.isMesh || obj.isSkinnedMesh)) meshes.push(obj);
-    });
+    (root||scene).traverse(obj=>{ if (obj && (obj.isMesh || obj.isSkinnedMesh)) meshes.push(obj); });
   }
 
   function ensureV0(){
@@ -66,21 +62,16 @@ export function createViewerAdapter({ canvas, bus:evbus }){
       camera.right  =  halfV * aspect;
       camera.updateProjectionMatrix();
     }
-    evbus.emit('viewer:resized', {w,h,mode: camera.isOrthographicCamera ? 'ortho':'persp'});
+    bus.emit('viewer:resized', {w,h,mode: camera.isOrthographicCamera ? 'ortho':'persp'});
   }
 
   function setOrtho(on){
     if (on){
-      camera = ortho;
-      controls.enabled = false;
-      controlsOrtho.enabled = true;
+      camera = ortho; controls.enabled = false; controlsOrtho.enabled = true;
     } else {
-      camera = persp;
-      controls.enabled = true;
-      controlsOrtho.enabled = false;
+      camera = persp; controls.enabled = true; controlsOrtho.enabled = false;
     }
-    evbus.emit('viewer:mode', on ? 'ortho' : 'persp');
-    resize();
+    bus.emit('viewer:mode', on ? 'ortho' : 'persp'); resize();
   }
 
   function animate(){
@@ -94,26 +85,32 @@ export function createViewerAdapter({ canvas, bus:evbus }){
   window.addEventListener('resize', resize);
   setTimeout(resize, 0);
 
-  // GLB load helpers
+  const loader = new GLTFLoader();
   function loadURL(url){
-    const loader = new THREE.GLTFLoader();
+    bus.emit('model:loading', url);
     loader.load(url, (gltf)=>{
       addModel(gltf.scene, url.split('/').pop());
-    }, undefined, (err)=> console.error('[GLB]', err));
+    }, (e)=>{
+      // progress is optional; keep silent
+    }, (err)=> {
+      console.error('[GLB]', err);
+      bus.emit('model:error', String(err));
+    });
   }
   function loadFile(file){
     const url = URL.createObjectURL(file);
     loadURL(url);
   }
   function addModel(root, name='model'){
-    // reset old model
+    // remove old
     scene.children.slice().forEach(child=>{
       if (child.userData?.__isModelRoot) scene.remove(child);
     });
-    root.userData.__isModelRoot = true;
+    root.userData.__isModelRoot = true;  // Python capitalization bug; fix below
+  }
+}
     scene.add(root);
     rebuildMeshCache(root);
-    // fit camera
     const box = new THREE.Box3().setFromObject(root);
     const size = box.getSize(new THREE.Vector3()).length();
     const center = box.getCenter(new THREE.Vector3());
@@ -124,7 +121,7 @@ export function createViewerAdapter({ canvas, bus:evbus }){
       cam.updateProjectionMatrix();
     });
     light.position.copy(center.clone().add(new THREE.Vector3(1,2,3).multiplyScalar(size)));
-    evbus.emit('model:loaded', name);
+    bus.emit('model:loaded', name);
     resize();
   }
 
@@ -137,11 +134,5 @@ export function createViewerAdapter({ canvas, bus:evbus }){
     return hits[0] || null;
   }
 
-  return {
-    canvas: renderer.domElement,
-    scene, camera,
-    setOrtho, resize,
-    raycastAt,
-    loadURL, loadFile
-  };
+  return { canvas: renderer.domElement, scene, camera, setOrtho, resize, raycastAt, loadURL, loadFile };
 }
