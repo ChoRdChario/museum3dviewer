@@ -1,10 +1,22 @@
+import * as THREE from 'https://unpkg.com/three@0.158.0/build/three.module.js';
 export function mountPins({ bus, store, viewer }){
   const pinMap = new Map();
   let idSeq = 0;
   function setSelected(id){
     store.set({ selected: id });
     bus.emit('pin:selected', id);
-    for (const [pid, rec] of pinMap){ rec.lineVisible = (pid === id); }
+    for (const [pid, rec] of pinMap){ if (rec.line) rec.line.visible = (pid === id); }
+  }
+  function createPinSprite(){
+    const g = new THREE.SphereGeometry(0.01, 12, 12);
+    const m = new THREE.MeshBasicMaterial({color: 0xff3366});
+    return new THREE.Mesh(g, m);
+  }
+  function createLeaderLine(from){
+    const head = from.clone().add(new THREE.Vector3(0,0.05,0));
+    const geo = new THREE.BufferGeometry().setFromPoints([from.clone(), head]);
+    const mat = new THREE.LineBasicMaterial({color: 0xff3366});
+    const line = new THREE.Line(geo, mat); line.visible=false; return line;
   }
   const canvas = viewer.canvas;
   canvas.addEventListener('click', (e)=>{
@@ -12,9 +24,13 @@ export function mountPins({ bus, store, viewer }){
     if (e.shiftKey || e.altKey){
       if (hit){
         const id = 'pin_'+(++idSeq);
-        const pin = { id, x:hit.point.x, y:hit.point.y, z:hit.point.z, caption:{title:'新規キャプション', body:''} };
+        const pos = hit.point.clone ? hit.point.clone() : new THREE.Vector3(hit.point.x, hit.point.y, hit.point.z);
+        const sprite = createPinSprite(); sprite.position.copy(pos);
+        const line = createLeaderLine(pos);
+        viewer.scene.add(sprite); viewer.scene.add(line);
+        const pin = { id, x:pos.x, y:pos.y, z:pos.z, caption:{title:'新規キャプション', body:''} };
         store.state.pins.push(pin);
-        pinMap.set(id, { lineVisible:true });
+        pinMap.set(id, { sprite, line });
         setSelected(id);
         bus.emit('pin:added', pin);
       }
@@ -22,14 +38,12 @@ export function mountPins({ bus, store, viewer }){
     }
     if (hit){
       let best=null, bestD=Infinity;
-      for (const p of store.state.pins){
-        const dx=p.x-hit.point.x, dy=p.y-hit.point.y, dz=p.z-hit.point.z;
+      for (const [pid, rec] of pinMap){
+        const dx=rec.sprite.position.x-hit.point.x, dy=rec.sprite.position.y-hit.point.y, dz=rec.sprite.position.z-hit.point.z;
         const d=Math.hypot(dx,dy,dz);
-        if (d<bestD){bestD=d;best=p;}
+        if (d<bestD){bestD=d;best=pid;}
       }
-      setSelected(best?.id ?? null);
-    }else{
-      setSelected(null);
-    }
+      setSelected(best ?? null);
+    } else { setSelected(null); }
   }, {capture:true});
 }

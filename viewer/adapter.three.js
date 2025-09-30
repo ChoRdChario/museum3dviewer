@@ -16,7 +16,8 @@ export function createViewerAdapter({ canvas, bus }){
 
   const ortho = new THREE.OrthographicCamera(-1,1,1,-1, 0.01, 1000);
   ortho.position.set(0.8, 0.8, 0.8);
-  ortho.userData.v0 = 1;
+  ortho.userData.v0 = 1; // base for ortho
+
   let camera = persp;
 
   const controls = new OrbitControls(persp, renderer.domElement);
@@ -29,6 +30,7 @@ export function createViewerAdapter({ canvas, bus }){
 
   const raycaster = new THREE.Raycaster();
   const meshes = [];
+
   function rebuildMeshCache(root){
     meshes.length = 0;
     (root||scene).traverse(obj=>{ if (obj && (obj.isMesh || obj.isSkinnedMesh)) meshes.push(obj); });
@@ -67,11 +69,16 @@ export function createViewerAdapter({ canvas, bus }){
 
   function setOrtho(on){
     if (on){
-      camera = ortho; controls.enabled = false; controlsOrtho.enabled = true;
+      camera = ortho;
+      controls.enabled = false;
+      controlsOrtho.enabled = true;
     } else {
-      camera = persp; controls.enabled = true; controlsOrtho.enabled = false;
+      camera = persp;
+      controls.enabled = true;
+      controlsOrtho.enabled = false;
     }
-    bus.emit('viewer:mode', on ? 'ortho' : 'persp'); resize();
+    bus.emit('viewer:mode', on ? 'ortho':'persp');
+    resize();
   }
 
   function animate(){
@@ -89,38 +96,46 @@ export function createViewerAdapter({ canvas, bus }){
   function loadURL(url){
     bus.emit('model:loading', url);
     loader.load(url, (gltf)=>{
-      addModel(gltf.scene, url.split('/').pop());
-    }, (e)=>{
-      // progress is optional; keep silent
-    }, (err)=> {
+      addModel(gltf.scene, url.split('/').pop() || 'model');
+    }, undefined, (err)=>{
       console.error('[GLB]', err);
       bus.emit('model:error', String(err));
     });
   }
+
   function loadFile(file){
     const url = URL.createObjectURL(file);
     loadURL(url);
   }
+
   function addModel(root, name='model'){
-    // remove old
-    scene.children.slice().forEach(child=>{
-      if (child.userData?.__isModelRoot) scene.remove(child);
+    // remove previous model roots
+    [...scene.children].forEach(child=>{
+      if (child.userData && child.userData.__isModelRoot) scene.remove(child);
     });
-    root.userData.__isModelRoot = true;  // Python capitalization bug; fix below
-  }
-}
+    root.userData = root.userData || {};
+    root.userData.__isModelRoot = true;
     scene.add(root);
     rebuildMeshCache(root);
+
+    // fit camera to model
     const box = new THREE.Box3().setFromObject(root);
-    const size = box.getSize(new THREE.Vector3()).length();
+    const sizeVec = box.getSize(new THREE.Vector3());
+    const size = sizeVec.length() || 1;
     const center = box.getCenter(new THREE.Vector3());
-    [camera, persp, ortho].forEach(cam=>{
+
+    [persp, ortho].forEach(cam=>{
       cam.position.copy(center.clone().add(new THREE.Vector3(1,1,1).normalize().multiplyScalar(size*0.8)));
-      cam.near = size/1000; cam.far = size*10;
+      cam.near = Math.max(0.001, size/1000);
+      cam.far = Math.max(10, size*10);
       cam.lookAt(center);
       cam.updateProjectionMatrix();
     });
     light.position.copy(center.clone().add(new THREE.Vector3(1,2,3).multiplyScalar(size)));
+
+    if (camera.isOrthographicCamera){
+      ensureV0();
+    }
     bus.emit('model:loaded', name);
     resize();
   }
@@ -134,5 +149,14 @@ export function createViewerAdapter({ canvas, bus }){
     return hits[0] || null;
   }
 
-  return { canvas: renderer.domElement, scene, camera, setOrtho, resize, raycastAt, loadURL, loadFile };
+  return {
+    canvas: renderer.domElement,
+    scene,
+    get camera(){ return camera; },
+    setOrtho,
+    resize,
+    raycastAt,
+    loadURL,
+    loadFile
+  };
 }
