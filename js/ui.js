@@ -1,4 +1,4 @@
-// ui.js — consolidated + exports used by main.js (setLoading, setStatus, toast, showBadge)
+// ui.js — Phase1e hotfix: HEIC loader, overlay/thumbnail robustness, exports
 function ensureBadge(id, baseStyle){
   let el = document.getElementById(id);
   if(!el){
@@ -15,17 +15,14 @@ export function setStatus(text='READY'){
   el.textContent = text;
   el.style.display = 'inline-block';
 }
-
 export function setLoading(on=true, label='Loading...'){
   const el = ensureBadge('loadingBadge', 'position:fixed;right:12px;bottom:12px;background:#1f4f8f;color:#fff;border:1px solid #295ea8;border-radius:10px;padding:8px 12px;font-weight:600;box-shadow:0 2px 10px #0006;z-index:9999;');
   el.textContent = on ? label : '';
   el.style.display = on ? 'inline-block' : 'none';
 }
-
 export function toast(message, type='info', {timeout=2600}={}){
   const host = ensureBadge('toastHost', 'position:fixed;left:50%;bottom:24px;transform:translateX(-50%);z-index:10000;display:flex;flex-direction:column;gap:8px;align-items:center;pointer-events:none;');
   const item = document.createElement('div');
-  item.className = 'toast-item';
   item.style.cssText = 'background:#111c;color:#fff;border:1px solid #444;border-radius:10px;padding:10px 14px;box-shadow:0 4px 18px #0008;opacity:0;transform:translateY(8px);transition:opacity .15s ease, transform .15s ease; pointer-events:auto;';
   if(type==='success'){ item.style.background = '#0f3'; item.style.color='#021'; item.style.borderColor='#0c4'; }
   if(type==='error'){ item.style.background = '#c92a2a'; item.style.color='#fff'; item.style.borderColor='#a51111'; }
@@ -33,53 +30,55 @@ export function toast(message, type='info', {timeout=2600}={}){
   item.textContent = message;
   host.appendChild(item);
   requestAnimationFrame(()=>{ item.style.opacity='1'; item.style.transform='translateY(0)'; });
-  setTimeout(()=>{
-    item.style.opacity='0'; item.style.transform='translateY(8px)';
-    setTimeout(()=> item.remove(), 180);
-  }, timeout);
+  setTimeout(()=>{ item.style.opacity='0'; item.style.transform='translateY(8px)'; setTimeout(()=> item.remove(), 180); }, timeout);
+}
+export function showBadge(text='READY'){ setStatus(text); return true; }
+
+let heicRequested = false;
+export async function ensureHeicLib(){
+  if (window.heic2any) return true;
+  if (heicRequested) return new Promise(res=>{
+    const t = setInterval(()=>{ if(window.heic2any){ clearInterval(t); res(true); } }, 120);
+  });
+  heicRequested = true;
+  await new Promise((resolve,reject)=>{
+    const s = document.createElement('script');
+    s.src = 'https://cdn.jsdelivr.net/npm/heic2any@0.0.4/dist/heic2any.min.js';
+    s.async = true;
+    s.onload = ()=> resolve();
+    s.onerror = ()=> reject(new Error('heic2any load failed'));
+    document.head.appendChild(s);
+  }).catch(e=>{ console.warn('[ui] heic2any CDN failed', e); return false; });
+  return !!window.heic2any;
 }
 
-// Some codepaths use window.__LMY.showBadge('text'). Provide alias.
-export function showBadge(text='READY'){
-  // Keep it as a thin wrapper to setStatus for consistency
-  setStatus(text);
-  return true;
-}
-
-// ===== Tabs =====
 export function setupTabs(){
   const btns = Array.from(document.querySelectorAll('.tab-btn'));
   const tabs = new Map(Array.from(document.querySelectorAll('.tab')).map(el=>{
     const id = el.id.startsWith('tab-') ? el.id.slice(4) : el.id.replace(/^tab/,'').toLowerCase();
     return [id, el];
   }));
-
   const show = (key)=>{
     btns.forEach(b=> b.classList.toggle('active', b.dataset.tab===key));
     tabs.forEach((el,name)=> el.classList.toggle('active', name===key));
   };
-
   btns.forEach(b=> b.addEventListener('click', ()=> show(b.dataset.tab)));
-
   const byId = (id)=> document.getElementById(id);
   const wire = (id, key)=>{ const el = byId(id); if(el) el.onclick = ()=> show(key); };
   wire('mobileHome',      'home');
   wire('mobileMaterials', 'materials');
   wire('mobileCamera',    'camera');
   wire('mobileCaptions',  'captions');
-
   const defaultTab = tabs.has('home') ? 'home' : (tabs.has('captions') ? 'captions' : Array.from(tabs.keys())[0]);
   if(defaultTab) show(defaultTab);
 }
 
-// ===== Caption overlay & thumbnails =====
+function $(id){ return document.getElementById(id); }
 async function tokenFetchBlobURL(fileId){
   try{
     const token = (window.gapi && gapi.client && gapi.client.getToken && gapi.client.getToken())?.access_token;
     if(!token) throw new Error('no token');
-    const r = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, {
-      headers: { Authorization: `Bearer ${token}` }
-    });
+    const r = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, { headers: { Authorization: `Bearer ${token}` }});
     if(!r.ok) throw new Error('fetch failed');
     const blob = await r.blob();
     return URL.createObjectURL(blob);
@@ -87,10 +86,7 @@ async function tokenFetchBlobURL(fileId){
     return `https://drive.google.com/uc?id=${fileId}`;
   }
 }
-
-function $(id){ return document.getElementById(id); }
-
-async function updateOverlay(){
+export async function updateOverlay(){
   const overlay = $('captionOverlay');
   if(!overlay) return;
   const title = $('capTitle')?.value?.trim();
@@ -105,8 +101,7 @@ async function updateOverlay(){
   overlay.innerHTML = `<h4>${title||''}</h4><p>${body||''}</p>${imgHtml}`;
   overlay.style.display = 'block';
 }
-
-async function buildThumbs(){
+export async function buildThumbs(){
   const rail = $('capThumbRail');
   if(!rail) return;
   rail.innerHTML = '';
@@ -129,7 +124,6 @@ async function buildThumbs(){
     console.warn('[thumb rail] failed', e);
   }
 }
-
 function wireCaptionUI(){
   ['capTitle','capBody','capImageSelect'].forEach(id=>{
     const el = $(id);
@@ -137,38 +131,19 @@ function wireCaptionUI(){
   });
   const list = $('captionList');
   if(list){ list.addEventListener('click', ()=> setTimeout(updateOverlay, 0)); }
-
-  // Guard select onchange recursion for HEIC conversion paths
-  const sel = $('capImageSelect');
-  if(sel && !sel.dataset.lmyGuarded){
-    sel.dataset.lmyGuarded = '1';
-    const orig = sel.onchange;
-    sel.onchange = async function(e){
-      if(sel.dataset.busy === '1'){ return (typeof orig==='function') && orig.call(this, e); }
-      sel.dataset.busy = '1';
-      try{
-        const res = await (typeof orig==='function' ? orig.call(this, e) : undefined);
-        sel.dataset.busy = '0';
-        return res;
-      }catch(err){
-        sel.dataset.busy = '0';
-        throw err;
-      }
-    };
-  }
-
-  document.addEventListener('lmy:model-meta-ready', buildThumbs);
-  setTimeout(()=>{ buildThumbs(); updateOverlay(); }, 0);
+  // fallback polling if model meta event never fired
+  let tries = 0;
+  const t = setInterval(()=>{
+    if(window.currentModelMeta){ clearInterval(t); buildThumbs(); updateOverlay(); }
+    if(++tries>20) clearInterval(t);
+  }, 500);
+  ensureHeicLib();
 }
-
 export function initUI(){
   setupTabs();
   wireCaptionUI();
-  setStatus('READY');
-  setLoading(false);
+  setStatus('READY'); setLoading(false);
 }
-
-// 旧window互換
 if(!window.__LMY) window.__LMY = {};
 window.__LMY.setStatus = (t)=> setStatus(t||'READY');
 window.__LMY.showBadge = (t)=> showBadge(t||'READY');
