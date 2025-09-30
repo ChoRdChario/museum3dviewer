@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>LociMyu Probe</title>
+  <style>
+    body{background:#1f2124;color:#e8e8ea;margin:0;font-family:system-ui,Segoe UI,Roboto,Helvetica,Arial}
+    .badge{position:fixed;left:12px;bottom:12px;background:#51cf66;color:#0b1f12;padding:10px 14px;border-radius:999px;
+      font-weight:700;box-shadow:0 2px 10px #0006}
+    .log{position:fixed;right:12px;bottom:12px;background:#111c;color:#fff;border:1px solid #444;border-radius:8px;
+      font:12px ui-monospace,Menlo,Consolas,monospace;padding:8px 10px;max-width:45vw;max-height:40vh;overflow:auto}
+  </style>
+</head>
+<body>
+  <div id="badge" class="badge" style="display:none">READY</div>
+  <div id="log" class="log" style="display:none"></div>
+  <script>
+    window.addEventListener('error', e=>{ const L=document.getElementById('log'); L.style.display='block'; L.textContent += '\n[error] '+(e.message||e.error); });
+    window.addEventListener('unhandledrejection', e=>{ const L=document.getElementById('log'); L.style.display='block'; L.textContent += '\n[unhandled] '+(e.reason&&e.reason.message||e.reason); });
+  </script>
+  <script type="module" src="js/probe_main.js"></script>
+</body>
+</html>
