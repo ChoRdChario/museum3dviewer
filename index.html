@@ -19,7 +19,7 @@
     }
   </script>
 
-  <!-- デバッグUI -->
+  <!-- デバッグUI（必要なら残す、不要なら削除可） -->
   <style>
     #locimyu-badge{position:fixed;left:8px;bottom:8px;background:#51cf66;color:#0b1f12;padding:6px 10px;border-radius:999px;font:12px/1 ui-sans-serif,system-ui;box-shadow:0 2px 10px #0006;display:none;z-index:99998}
     #locimyu-debug{position:fixed;right:8px;bottom:8px;background:#111c;color:#fff;border:1px solid #444;border-radius:8px;font:12px/1.4 ui-monospace,Menlo,Consolas,monospace;padding:6px 8px;max-width:50vw;max-height:35vh;overflow:auto;display:none;z-index:99999}
@@ -87,69 +87,15 @@
       </div>
 
       <div class="tabs">
-        <button class="tab-btn active" data-tab="home">ホーム</button>
+        <button class="tab-btn active" data-tab="captions">キャプション</button>
         <button class="tab-btn" data-tab="materials">マテリアル</button>
         <button class="tab-btn" data-tab="camera">カメラ</button>
-        <button class="tab-btn" data-tab="captions">キャプション</button>
       </div>
 
       <div class="tab-contents">
-        <!-- ホームタブ -->
-        <section id="tab-home" class="tab active">
-          <div class="grid-2">
-            <button id="addPinBtn" class="btn">ピン追加</button>
-            <div class="row">
-              <label for="pinFilter">ピン表示色</label>
-              <select id="pinFilter">
-                <option value="all">すべて</option>
-                <option value="red">赤</option><option value="orange">橙</option>
-                <option value="yellow">黄</option><option value="green">緑</option>
-                <option value="cyan">水</option><option value="blue">青</option>
-                <option value="magenta">紫</option><option value="white">白</option>
-              </select>
-            </div>
-          </div>
-        </section>
-
-        <!-- マテリアルタブ -->
-        <section id="tab-materials" class="tab">
-          <div class="row">
-            <label>透明度</label>
-            <input id="matOpacity" type="range" min="0" max="1" step="0.01" value="1" />
-            <span id="matOpacityVal">1.00</span>
-          </div>
-          <div class="row"><label><input id="matDoubleSided" type="checkbox" /> 裏面描画</label></div>
-          <div class="row"><label><input id="matUnlit" type="checkbox" /> 光源無視</label></div>
-          <div class="row">
-            <label><input id="matWhiteKey" type="checkbox" /> 白を透明として描画</label>
-            <input id="matWhiteKeyThr" type="range" min="0" max="1" step="0.01" value="0.95" />
-          </div>
-          <div class="row">
-            <label><input id="matBlackKey" type="checkbox" /> 黒を透明として描画</label>
-            <input id="matBlackKeyThr" type="range" min="0" max="1" step="0.01" value="0.05" />
-          </div>
-        </section>
-
-        <!-- カメラタブ -->
-        <section id="tab-camera" class="tab">
-          <div class="grid-3">
-            <button class="btn camPreset" data-v="front">前</button>
-            <button class="btn camPreset" data-v="back">後</button>
-            <button class="btn camPreset" data-v="left">左</button>
-            <button class="btn camPreset" data-v="right">右</button>
-            <button class="btn camPreset" data-v="top">上</button>
-            <button class="btn camPreset" data-v="bottom">下</button>
-          </div>
-          <div class="row"><label><input id="orthoToggle" type="checkbox" /> 平行投影</label></div>
-          <div class="row">
-            <label for="bgColor">背景色</label>
-            <input id="bgColor" type="color" value="#202225" />
-          </div>
-        </section>
-
-        <!-- キャプションタブ -->
-        <section id="tab-captions" class="tab">
-          <div class="caption-pane">
+        <!-- キャプション（ホーム統合、縦並び） -->
+        <section id="tab-captions" class="tab active">
+          <div class="caption-pane vertical">
             <div class="caption-list" id="captionList"></div>
             <div class="caption-detail">
               <div class="row"><label>タイトル</label><input id="capTitle" /></div>
@@ -172,10 +118,57 @@
                 </select>
               </div>
               <div class="row">
+                <button id="addPinBtn" class="btn">ピン追加</button>
+                <label for="pinFilter" style="margin-left:8px">ピン表示色</label>
+                <select id="pinFilter">
+                  <option value="all">すべて</option>
+                  <option value="red">赤</option><option value="orange">橙</option>
+                  <option value="yellow">黄</option><option value="green">緑</option>
+                  <option value="cyan">水</option><option value="blue">青</option>
+                  <option value="magenta">紫</option><option value="white">白</option>
+                </select>
+              </div>
+              <div class="row">
                 <button id="capSaveBtn" class="btn primary">キャプションを保存</button>
                 <button id="capDeleteBtn" class="btn danger">削除</button>
               </div>
             </div>
+          </div>
+        </section>
+
+        <!-- マテリアル -->
+        <section id="tab-materials" class="tab">
+          <div class="row">
+            <label>透明度</label>
+            <input id="matOpacity" type="range" min="0" max="1" step="0.01" value="1" />
+            <span id="matOpacityVal">1.00</span>
+          </div>
+          <div class="row"><label><input id="matDoubleSided" type="checkbox" /> 裏面描画</label></div>
+          <div class="row"><label><input id="matUnlit" type="checkbox" /> 光源無視</label></div>
+          <div class="row">
+            <label><input id="matWhiteKey" type="checkbox" /> 白を透明として描画</label>
+            <input id="matWhiteKeyThr" type="range" min="0" max="1" step="0.01" value="0.95" />
+          </div>
+          <div class="row">
+            <label><input id="matBlackKey" type="checkbox" /> 黒を透明として描画</label>
+            <input id="matBlackKeyThr" type="range" min="0" max="1" step="0.01" value="0.05" />
+          </div>
+        </section>
+
+        <!-- カメラ -->
+        <section id="tab-camera" class="tab">
+          <div class="grid-3">
+            <button class="btn camPreset" data-v="front">前</button>
+            <button class="btn camPreset" data-v="back">後</button>
+            <button class="btn camPreset" data-v="left">左</button>
+            <button class="btn camPreset" data-v="right">右</button>
+            <button class="btn camPreset" data-v="top">上</button>
+            <button class="btn camPreset" data-v="bottom">下</button>
+          </div>
+          <div class="row"><label><input id="orthoToggle" type="checkbox" /> 平行投影</label></div>
+          <div class="row">
+            <label for="bgColor">背景色</label>
+            <input id="bgColor" type="color" value="#202225" />
           </div>
         </section>
       </div>
@@ -205,6 +198,8 @@
   <script src="https://apis.google.com/js/api.js" async defer></script>
   <script src="https://unpkg.com/heic2any@0.0.4/dist/heic2any.min.js"></script>
 
+  <!-- ▼▼ フェーズ1パッチ（統合済み） ▼▼ -->
+  <script type="module" src="js/phase1_patch.js"></script>
   <!-- エントリーポイント -->
   <script type="module" src="js/main.js"></script>
 </body>
