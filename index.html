@@ -174,25 +174,24 @@
 <script type="module" src="js/gltfloader_guard_v2.js"></script>
   <script type="module" src="js/viewer_patch_glbguard.js"></script>
   <script type="module" src="js/main.js"></script>
-<!-- LociMyu Phase1 patches: Ortho fix, Pins/Overlay wiring, Image Grid bootstrap -->
+<!-- LociMyu Phase1 patches (v2) -->
 <script src="./phase1/viewer_ortho_fix.js"></script>
 <script src="./phase1/main_pins_overlay_wiring.js"></script>
 <script src="./phase1/image_grid_bootstrap.js"></script>
 <script>
-  // Try to hook after viewer is ready
   (function(){
     function ready(){
       if (window.viewer && window.LMY && window.LMY.hookOrthoResize){
         try { window.LMY.hookOrthoResize(window.viewer, { keepOriginalResize: true }); } catch(e){ console.warn('[LMY] hookOrthoResize failed', e); }
-        if (window.LMY.installPinsOverlay) { try { window.LMY.installPinsOverlay(window.viewer); } catch(e){ console.warn('[LMY] installPinsOverlay failed', e); } }
       }
+      // 明示イベントで他の初期化と同期できるようにする
+      window.dispatchEvent(new Event('three-ready'));
     }
     if (document.readyState === 'complete' || document.readyState === 'interactive') {
       setTimeout(ready, 0);
     } else {
       window.addEventListener('DOMContentLoaded', ready);
     }
-    // Custom event option for apps that dispatch 'lmy:viewer-ready'
     window.addEventListener('lmy:viewer-ready', ready);
   })();
 </script>
