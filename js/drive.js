@@ -1,97 +1,105 @@
-// drive.js — ES5-safe + getFileId() hotfix
+// drive.js — ES5-safe + getFileId() (static) and instance alias
+// Provides: downloadFile, listImagesInFolder, uploadToFolder, getFileId
 export class Drive {
   constructor(gapi){ this.gapi = gapi; }
   static get token(){
     try { return gapi.client.getToken().access_token; } catch(e){ return null; }
   }
 
-  // ---- NEW: extract fileId from various Drive share URLs or return as-is ----
+  // ---- Extract fileId from various Drive share URLs or return as-is ----
   static getFileId(input){
     if(!input) return "";
     var s = (""+input).trim();
 
-    // If it looks like a bare ID (no slashes, length ~ 20+), return as-is
-    if(!/\//.test(s) && s.length >= 15 && !/^http/i.test(s)) return s;
+    // Bare ID
+    if(s && !/\//.test(s) && s.length >= 15 && !/^http/i.test(s)) return s;
 
-    // Patterns:
-    // 1) https://drive.google.com/file/d/<ID>/view?...
+    // /file/d/<ID>/...
     var m = s.match(/drive\.google\.com\/file\/d\/([a-zA-Z0-9_-]+)/);
     if(m && m[1]) return m[1];
 
-    // 2) https://drive.google.com/open?id=<ID>
+    // ?id=<ID>
     m = s.match(/[?&]id=([a-zA-Z0-9_-]+)/);
     if(m && m[1]) return m[1];
 
-    // 3) https://drive.google.com/uc?id=<ID>
+    // /uc?id=<ID>
     m = s.match(/drive\.google\.com\/uc\?id=([a-zA-Z0-9_-]+)/);
     if(m && m[1]) return m[1];
 
-    // 4) share URLs ending with .../view?resourcekey=...
-    // already covered by (1), otherwise try last path segment heuristic
+    // Fallback: last plausible path segment
     try{
       var url = new URL(s);
-      var segs = url.pathname.split('/').filter(Boolean);
-      // Look for plausible id-looking segment
+      var segs = url.pathname.split('/').filter(function(x){ return !!x; });
       for(var i=segs.length-1;i>=0;i--){
         if(/^[a-zA-Z0-9_-]{15,}$/.test(segs[i])) return segs[i];
       }
     }catch(_){}
 
-    return s; // fallback: return original
+    return s;
   }
 
+  // ---- File download as Blob ----
   static async downloadFile(fileId){
-    const token = Drive.token;
-    const url = "https://www.googleapis.com/drive/v3/files/" + encodeURIComponent(fileId) + "?alt=media";
-    const headers = token ? { Authorization: "Bearer " + token } : {};
-    const r = await fetch(url, { headers });
+    var token = Drive.token;
+    var url = "https://www.googleapis.com/drive/v3/files/" + encodeURIComponent(fileId) + "?alt=media";
+    var headers = token ? { Authorization: "Bearer " + token } : {};
+    var r = await fetch(url, { headers: headers });
     if(!r.ok) throw new Error("download failed");
     return await r.blob();
   }
 
+  // ---- List images in a folder (for thumbnail rail) ----
   static async listImagesInFolder(folderId){
-    const q = encodeURIComponent("'" + folderId + "' in parents and trashed = false and (mimeType contains 'image/')");
-    const fields = encodeURIComponent("files(id,name,mimeType,thumbnailLink),nextPageToken");
-    const token = Drive.token;
-    const url = "https://www.googleapis.com/drive/v3/files?q=" + q +
+    var q = encodeURIComponent("'" + folderId + "' in parents and trashed = false and (mimeType contains 'image/')");
+    var fields = encodeURIComponent("files(id,name,mimeType,thumbnailLink),nextPageToken");
+    var token = Drive.token;
+    var url = "https://www.googleapis.com/drive/v3/files?q=" + q +
       "&fields=" + fields +
       "&pageSize=200&orderBy=name&supportsAllDrives=true&includeItemsFromAllDrives=true";
-    const headers = token ? { Authorization: "Bearer " + token } : {};
-    const r = await fetch(url, { headers });
+    var headers = token ? { Authorization: "Bearer " + token } : {};
+    var r = await fetch(url, { headers: headers });
     if(!r.ok) throw new Error("list images failed");
-    const json = await r.json();
-    const imgs = (json.files||[]).sort(function(a,b){
+    var json = await r.json();
+    var imgs = (json.files||[]).sort(function(a,b){
       function prio(m){ return /heic|heif/i.test(m) ? 2 : 0; }
-      return prio(a.mimeType)-prio(b.mimeType) || a.name.localeCompare(b.name);
+      var d = prio(a.mimeType)-prio(b.mimeType);
+      return d !== 0 ? d : a.name.localeCompare(b.name);
     });
     return imgs;
   }
 
+  // ---- Upload (multipart/related) without base64 strings ----
   // file: Blob or File, name: string, folderId: string
   static async uploadToFolder(folderId, file, name){
-    const token = Drive.token;
+    var token = Drive.token;
     if(!token) throw new Error("no token");
-    const metadata = { name: name, parents: [folderId] };
-    const boundary = "-------lmy" + Math.random().toString(16).slice(2);
+    var metadata = { name: name, parents: [folderId] };
+    var boundary = "-------lmy" + Math.random().toString(16).slice(2);
 
-    const part1 = "--" + boundary + "\r\n" +
-                  "Content-Type: application/json; charset=UTF-8\r\n\r\n" +
-                  JSON.stringify(metadata) + "\r\n";
-    const part2Header = "--" + boundary + "\r\n" +
-                  "Content-Type: " + (file.type || "application/octet-stream") + "\r\n\r\n";
-    const partEnd = "\r\n--" + boundary + "--";
+    var part1 = "--" + boundary + "\r\n" +
+                "Content-Type: application/json; charset=UTF-8\r\n\r\n" +
+                JSON.stringify(metadata) + "\r\n";
+    var part2Header = "--" + boundary + "\r\n" +
+                "Content-Type: " + (file.type || "application/octet-stream") + "\r\n\r\n";
+    var partEnd = "\r\n--" + boundary + "--";
 
-    const body = new Blob([ part1, part2Header, file, partEnd ],
-                          { type: "multipart/related; boundary=" + boundary });
+    function crlf(s){ return s.replace(/\\r\\n/g, "\r\n"); }
 
-    const url = "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&supportsAllDrives=true";
-    const r = await fetch(url, {
+    var body = new Blob([
+      crlf(part1),
+      crlf(part2Header),
+      file,
+      crlf(partEnd)
+    ], { type: "multipart/related; boundary=" + boundary });
+
+    var url = "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&supportsAllDrives=true";
+    var r = await fetch(url, {
       method: "POST",
       headers: { Authorization: "Bearer " + token },
       body: body
     });
     if(!r.ok){
-      let t = "";
+      var t = "";
       try { t = await r.text(); } catch(_) {}
       throw new Error("upload failed: " + t);
     }
@@ -99,4 +107,8 @@ export class Drive {
   }
 }
 
+// Instance alias for static getFileId (so main.js can call drive.getFileId)
+Drive.prototype.getFileId = function(input){ return Drive.getFileId(input); };
+
+// Keep class on window for code that expects window.drive to exist (class-level)
 window.drive = Drive;
