@@ -3,12 +3,12 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>LociMyu Clean Core</title>
+  <title>LociMyu Clean Core (Three)</title>
   <style>
     html, body { height: 100%; margin: 0; background: #0b0b0b; color: #fff; }
     #app { position: fixed; inset: 0; display: grid; grid-template-columns: 1fr 320px; }
     #viewer-host { position: relative; background: #111; }
-    #side { border-left: 1px solid #222; padding: 8px; font: 12px/1.4 system-ui, sans-serif; }
+    #side { border-left: 1px solid #222; padding: 10px; font: 12px/1.4 system-ui, sans-serif; overflow:auto; }
     .fab { position: fixed; right: 16px; bottom: 16px; padding: 10px 14px; border-radius: 999px; background:#1e1e1e; border:1px solid #333; cursor:pointer; }
     #grid { position: fixed; right: 16px; bottom: 68px; width: 320px; max-height:50vh; overflow:auto; background:rgba(0,0,0,.6); backdrop-filter: blur(4px); border-radius: 12px; display:none; padding:8px; }
     #grid .g { display:grid; grid-template-columns: repeat(3, 1fr); gap:6px; }
@@ -16,19 +16,30 @@
     #overlay { position: fixed; left: 16px; bottom: 16px; max-width: 380px; background: rgba(0,0,0,.7); border-radius: 12px; padding: 12px 14px; display:none; }
     #overlay h3 { margin: 0 0 6px; font-size: 14px; }
     #overlay img { max-width:100%; display:block; margin-top:8px; border-radius:8px; }
+    #toolbar { display:flex; gap:6px; align-items:center; flex-wrap:wrap; margin-bottom:8px; }
+    input[type='text']{ width:100%; background:#111; color:#fff; border:1px solid #333; border-radius:8px; padding:6px 8px;}
+    button, .btn{ background:#1e1e1e; color:#fff; border:1px solid #333; border-radius:8px; padding:6px 10px; cursor:pointer; }
+    .btns{ display:flex; gap:6px; }
+    .hint{ color:#aaa; font-size:11px; }
   </style>
 </head>
 <body>
   <div id="app">
     <div id="viewer-host"><canvas id="canvas"></canvas></div>
     <div id="side">
-      <h3>Clean Core</h3>
-      <p>単一のストア／イベントバス／アダプタで再構築した検証用コア。</p>
-      <ol>
-        <li>Shift+クリック：ピン追加</li>
-        <li>クリック：ピン選択（選択時のみライン表示）</li>
-        <li>右下FAB→グリッドで画像選択</li>
-      </ol>
+      <h3>Clean Core (Three.js)</h3>
+      <div id="toolbar">
+        <div class="btns">
+          <button id="btn-persp" class="btn">Perspective</button>
+          <button id="btn-ortho" class="btn">Orthographic</button>
+        </div>
+        <input id="glb-url" type="text" placeholder="GLB URL (Drive直リンク可)" />
+        <div class="btns">
+          <button id="btn-load-url" class="btn">Load URL</button>
+          <label class="btn">Load File <input id="file" type="file" accept=".glb,.gltf,model/gltf-binary" style="display:none"/></label>
+        </div>
+        <div class="hint">Shift/Alt+クリック: ピン追加、クリック: ピン選択（選択時のみライン）</div>
+      </div>
       <div>状態：<code id="status">booting...</code></div>
     </div>
   </div>
@@ -36,34 +47,52 @@
   <div id="grid"><div style="margin:4px 0 8px; font-weight:600;">Images</div><div class="g"></div></div>
   <div id="overlay"><h3 id="ov-t"></h3><div id="ov-b"></div><img id="ov-i" /></div>
 
+  <!-- Three.js and helpers (global) -->
+  <script src="https://unpkg.com/three@0.158.0/build/three.min.js"></script>
+  <script src="https://unpkg.com/three@0.158.0/examples/js/controls/OrbitControls.js"></script>
+  <script src="https://unpkg.com/three@0.158.0/examples/js/loaders/GLTFLoader.js"></script>
+
   <!-- App modules -->
   <script type="module">
     import { bus } from './core/bus.js';
     import { store } from './core/store.js';
-    import { createViewerAdapter } from './viewer/adapter.js';
+    import { createViewerAdapter } from './viewer/adapter.three.js';
     import { mountPins } from './features/pins.js';
     import { mountOverlay } from './features/overlay.js';
     import { mountGrid } from './features/imageGrid.js';
     import { installConflictGuards } from './core/guards.js';
 
     installConflictGuards();
-
     const canvas = document.getElementById('canvas');
-    const viewer = createViewerAdapter({ canvas });
+    const viewer = createViewerAdapter({ canvas, bus });
 
     // Feature mounts
     mountPins({ bus, store, viewer });
     mountOverlay({ bus, store });
     mountGrid({ bus, store });
 
-    // Minimal fake image data (replace with Drive listing)
+    // Demo images
     const demoImages = Array.from({length:9}).map((_,i)=>({id:String(i+1), name:'img'+(i+1)+'.jpg', thumbnailLink:'https://picsum.photos/seed/'+(i+1)+'/200/200'}));
     bus.emit('images:update', demoImages);
 
     // Status
-    bus.on('pin:selected', (id)=> {
-      document.getElementById('status').textContent = 'selected: ' + (id ?? 'none');
+    const statusEl = document.getElementById('status');
+    function setStatus(s){ statusEl.textContent = s; }
+    bus.on('viewer:mode', (m)=> setStatus('mode: '+m));
+    bus.on('viewer:resized', ({w,h,mode})=> setStatus(`mode:${mode} ${w}x${h}`));
+    bus.on('model:loaded', (name)=> setStatus('loaded: '+name));
+
+    // Toolbar
+    document.getElementById('btn-persp').addEventListener('click', ()=> viewer.setOrtho(false));
+    document.getElementById('btn-ortho').addEventListener('click', ()=> viewer.setOrtho(true));
+    document.getElementById('btn-load-url').addEventListener('click', ()=> {
+      const url = (document.getElementById('glb-url').value||'').trim();
+      if (url) viewer.loadURL(url);
     });
+    document.getElementById('file').addEventListener('change', (e)=>{
+      const f = e.target.files?.[0]; if (f) viewer.loadFile(f);
+    });
+
     document.getElementById('fab').addEventListener('click', ()=> bus.emit('grid:toggle'));
   </script>
 </body>
