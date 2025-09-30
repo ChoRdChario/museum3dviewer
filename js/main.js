@@ -1,4 +1,4 @@
-import * as THREE from 'three';
+import * as THREE from 'https://unpkg.com/three@0.160.0/build/three.module.js';
 import { Auth } from './auth.js';
 import { Drive } from './drive.js';
 import { Sheets } from './sheets.js';
@@ -35,14 +35,16 @@ async function init(){
   window.__LMY?.showBadge();
   // Wait for third-party globals
   const okGapi = await waitFor(()=> !!window.gapi, 15000);
-  dbg('gapi: '+okGapi);
+  dbg('gapi: '+okGapi); window.__LMY?.setStatus('gapi', okGapi);
   const okGoogle = await waitFor(()=> !!(window.google && window.google.accounts), 15000);
-  dbg('google.accounts: '+okGoogle);
+  dbg('google.accounts: '+okGoogle); window.__LMY?.setStatus('google', okGoogle);
 
   setupTabs();
   viewer = new Viewer($('viewer'));
   viewer.animate();
   dbg('DOM wired'); $('manualLink').href = CONFIG.manualPdfPath;
+  // self test button
+  $('selfTestBtn').onclick = ()=>{ dbg('click:selftest'); const b = document.getElementById('locimyu-badge'); if(b){ b.textContent = b.textContent==='READY'?'OK!':'READY'; } alert('ボタンハンドラは動いています'); };
 
   $('signinBtn').onclick = ()=> { dbg('click:signin'); try{ auth.ensureAuth(onAuthed); }catch(err){ console.error('signin failed', err); alert('サインインでエラー: '+err.message);} };
   $('signoutBtn').onclick = ()=> { auth.signOut(); updateAuthUi(); dbg('updateAuthUi done'); };
@@ -106,6 +108,7 @@ async function init(){
 function updateAuthUi(){
   $('signinBtn').disabled = auth.isAuthed;
   $('signoutBtn').disabled = !auth.isAuthed;
+  window.__LMY?.setStatus('auth', auth.isAuthed);
 }
 
 async function onAuthed(){ dbg('onAuthed');
