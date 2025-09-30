@@ -40,14 +40,11 @@
         d.textContent=msg;
         logEl.appendChild(d);
       }
-      // ★ setStatus を追加
       function setStatus(msg){
         badge.textContent = msg || "READY";
         badge.style.display='inline-block';
       }
-
       window.__LMY = { showBadge(){ badge.style.display='inline-block'; }, log, setStatus };
-
       window.addEventListener('error', e=>log('[window.error] '+(e.message||e.error)));
       window.addEventListener('unhandledrejection', e=>log('[unhandled] '+(e.reason&&e.reason.message||e.reason)));
     })();
@@ -60,6 +57,7 @@
       <button id="signoutBtn" class="btn" disabled>サインアウト</button>
       <a id="manualLink" class="btn link" href="#" target="_blank">マニュアルPDF</a>
       <button id="readonlyLinkBtn" class="btn" title="閲覧専用URLをコピー">閲覧専用リンク</button>
+      <button id="selfTestBtn" class="btn">SelfTest</button>
     </nav>
   </header>
 
@@ -73,7 +71,114 @@
     </section>
 
     <aside id="deskPane" class="desk-pane">
-      <!-- ここに各種UI（マテリアル・カメラ・キャプション等）が入ります -->
+      <div class="block">
+        <label for="modelUrl">モデルURL / fileId</label>
+        <div class="row">
+          <input id="modelUrl" placeholder="共有URL もしくは fileId" />
+          <button id="loadModelBtn" class="btn primary">読み込み</button>
+        </div>
+        <div class="row small">
+          <label for="saveSlot">セーブデータ</label>
+          <select id="saveSlot"></select>
+          <button id="newSaveBtn" class="btn small">新規</button>
+          <button id="dupSaveBtn" class="btn small">コピー</button>
+          <button id="renameSaveBtn" class="btn small">名称変更</button>
+        </div>
+      </div>
+
+      <div class="tabs">
+        <button class="tab-btn active" data-tab="home">ホーム</button>
+        <button class="tab-btn" data-tab="materials">マテリアル</button>
+        <button class="tab-btn" data-tab="camera">カメラ</button>
+        <button class="tab-btn" data-tab="captions">キャプション</button>
+      </div>
+
+      <div class="tab-contents">
+        <!-- ホームタブ -->
+        <section id="tab-home" class="tab active">
+          <div class="grid-2">
+            <button id="addPinBtn" class="btn">ピン追加</button>
+            <div class="row">
+              <label for="pinFilter">ピン表示色</label>
+              <select id="pinFilter">
+                <option value="all">すべて</option>
+                <option value="red">赤</option><option value="orange">橙</option>
+                <option value="yellow">黄</option><option value="green">緑</option>
+                <option value="cyan">水</option><option value="blue">青</option>
+                <option value="magenta">紫</option><option value="white">白</option>
+              </select>
+            </div>
+          </div>
+        </section>
+
+        <!-- マテリアルタブ -->
+        <section id="tab-materials" class="tab">
+          <div class="row">
+            <label>透明度</label>
+            <input id="matOpacity" type="range" min="0" max="1" step="0.01" value="1" />
+            <span id="matOpacityVal">1.00</span>
+          </div>
+          <div class="row"><label><input id="matDoubleSided" type="checkbox" /> 裏面描画</label></div>
+          <div class="row"><label><input id="matUnlit" type="checkbox" /> 光源無視</label></div>
+          <div class="row">
+            <label><input id="matWhiteKey" type="checkbox" /> 白を透明として描画</label>
+            <input id="matWhiteKeyThr" type="range" min="0" max="1" step="0.01" value="0.95" />
+          </div>
+          <div class="row">
+            <label><input id="matBlackKey" type="checkbox" /> 黒を透明として描画</label>
+            <input id="matBlackKeyThr" type="range" min="0" max="1" step="0.01" value="0.05" />
+          </div>
+        </section>
+
+        <!-- カメラタブ -->
+        <section id="tab-camera" class="tab">
+          <div class="grid-3">
+            <button class="btn camPreset" data-v="front">前</button>
+            <button class="btn camPreset" data-v="back">後</button>
+            <button class="btn camPreset" data-v="left">左</button>
+            <button class="btn camPreset" data-v="right">右</button>
+            <button class="btn camPreset" data-v="top">上</button>
+            <button class="btn camPreset" data-v="bottom">下</button>
+          </div>
+          <div class="row"><label><input id="orthoToggle" type="checkbox" /> 平行投影</label></div>
+          <div class="row">
+            <label for="bgColor">背景色</label>
+            <input id="bgColor" type="color" value="#202225" />
+          </div>
+        </section>
+
+        <!-- キャプションタブ -->
+        <section id="tab-captions" class="tab">
+          <div class="caption-pane">
+            <div class="caption-list" id="captionList"></div>
+            <div class="caption-detail">
+              <div class="row"><label>タイトル</label><input id="capTitle" /></div>
+              <div class="row"><label>本文</label><textarea id="capBody" rows="5"></textarea></div>
+              <div class="row">
+                <label>画像</label>
+                <div class="grid-2">
+                  <select id="capImageSelect"></select>
+                  <input id="capImageLocal" type="file" accept="image/*,.heic,.heif" />
+                </div>
+              </div>
+              <div class="row"><img id="capImagePreview" style="max-width:100%;max-height:160px;border:1px solid var(--line);border-radius:8px;display:none"/></div>
+              <div class="row">
+                <label>ピン色</label>
+                <select id="capColor">
+                  <option value="red">赤</option><option value="orange">橙</option>
+                  <option value="yellow">黄</option><option value="green">緑</option>
+                  <option value="cyan">水</option><option value="blue">青</option>
+                  <option value="magenta">紫</option><option value="white">白</option>
+                </select>
+              </div>
+              <div class="row">
+                <button id="capSaveBtn" class="btn primary">キャプションを保存</button>
+                <button id="capDeleteBtn" class="btn danger">削除</button>
+              </div>
+            </div>
+          </div>
+        </section>
+      </div>
     </aside>
   </main>
 
