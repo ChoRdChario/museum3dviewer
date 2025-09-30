@@ -1,4 +1,4 @@
-// ui.js — consolidated + exports used by main.js (setLoading, setStatus, toast)
+// ui.js — consolidated + exports used by main.js (setLoading, setStatus, toast, showBadge)
 function ensureBadge(id, baseStyle){
   let el = document.getElementById(id);
   if(!el){
@@ -37,6 +37,13 @@ export function toast(message, type='info', {timeout=2600}={}){
     item.style.opacity='0'; item.style.transform='translateY(8px)';
     setTimeout(()=> item.remove(), 180);
   }, timeout);
+}
+
+// Some codepaths use window.__LMY.showBadge('text'). Provide alias.
+export function showBadge(text='READY'){
+  // Keep it as a thin wrapper to setStatus for consistency
+  setStatus(text);
+  return true;
 }
 
 // ===== Tabs =====
@@ -164,3 +171,4 @@ export function initUI(){
 // 旧window互換
 if(!window.__LMY) window.__LMY = {};
 window.__LMY.setStatus = (t)=> setStatus(t||'READY');
+window.__LMY.showBadge = (t)=> showBadge(t||'READY');
