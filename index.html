@@ -174,26 +174,10 @@
 <script type="module" src="js/gltfloader_guard_v2.js"></script>
   <script type="module" src="js/viewer_patch_glbguard.js"></script>
   <script type="module" src="js/main.js"></script>
-<!-- LociMyu Phase1 patches (v2) -->
+<!-- LociMyu Spec Enforcement (v3) -->
 <script src="./phase1/viewer_ortho_fix.js"></script>
 <script src="./phase1/main_pins_overlay_wiring.js"></script>
 <script src="./phase1/image_grid_bootstrap.js"></script>
-<script>
-  (function(){
-    function ready(){
-      if (window.viewer && window.LMY && window.LMY.hookOrthoResize){
-        try { window.LMY.hookOrthoResize(window.viewer, { keepOriginalResize: true }); } catch(e){ console.warn('[LMY] hookOrthoResize failed', e); }
-      }
-      // 明示イベントで他の初期化と同期できるようにする
-      window.dispatchEvent(new Event('three-ready'));
-    }
-    if (document.readyState === 'complete' || document.readyState === 'interactive') {
-      setTimeout(ready, 0);
-    } else {
-      window.addEventListener('DOMContentLoaded', ready);
-    }
-    window.addEventListener('lmy:viewer-ready', ready);
-  })();
-</script>
+<script src="./phase1/spec_enforcer.js"></script>
 </body>
 </html>
