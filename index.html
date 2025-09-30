@@ -76,6 +76,11 @@
     import { findOrCreateSpreadsheetInSameFolder } from './js/drive.js';
     import { downloadGlbBlob, getName } from './app/drive_glb.js';
 
+    // Track currently targeted GLB fileId (from ?id or Load URL)
+    let currentGlbId = null;
+    const getCurrentGlbId = () => currentGlbId;
+
+
     const API_KEY = 'AIzaSyCUnTCr5yWUWPdEXST9bKP1LpgawU5rIbI';
     const CLIENT_ID = '595200751510-ncahnf7edci6b9925becn5to49r6cguv.apps.googleusercontent.com';
     const SCOPES = [
@@ -115,7 +120,7 @@
     mountPins({ bus, store, viewer });
     mountOverlay({ bus, store });
     mountGrid({ bus, store });
-    mountDiagnostics({ bus, store, viewer, listSiblingImages, findOrCreateSpreadsheetInSameFolder });
+    mountDiagnostics({ bus, store, viewer, listSiblingImages, findOrCreateSpreadsheetInSameFolder, getGlbId: getCurrentGlbId });
 
     const demoImages = Array.from({length:9}).map((_,i)=>({id:String(i+1), name:'img'+(i+1)+'.jpg', thumbnailLink:'https://picsum.photos/seed/'+(i+1)+'/200/200'}));
     bus.emit('images:update', demoImages);
@@ -127,8 +132,7 @@
     bus.on('model:loading', (name)=> setStatus('loading: '+name));
     bus.on('model:loaded', async (_name)=> {
       setStatus('loaded');
-      const params = new URLSearchParams(location.search);
-      const glbId = params.get('id');
+      const glbId = (typeof getCurrentGlbId === 'function' && getCurrentGlbId()) || new URLSearchParams(location.search).get('id');
       if (glbId && window.gapi?.client){
         try{ const imgs = await listSiblingImages(glbId); if (imgs.length) bus.emit('images:update', imgs); }catch(e){ console.warn('[drive] list images failed', e); }
         try{ createAutosave({ bus, store, findOrCreateSpreadsheetInSameFolder, glbFileId: glbId }); }catch(e){ console.warn('[sheets] autosave init failed', e); }
@@ -147,6 +151,7 @@
       if (fileId && window.gapi?.client){
         try{
           setStatus('downloading from Drive...');
+          currentGlbId = fileId;
           const blob = await downloadGlbBlob(fileId);
           const name = await getName(fileId);
           viewer.loadBlob(blob, name);
@@ -162,10 +167,8 @@
     });
     document.getElementById('fab').addEventListener('click', ()=> bus.emit('grid:toggle'));
 
-    async function tryAutoLoadById(){
-      const params = new URLSearchParams(location.search);
-      const glbId = params.get('id');
-      if (!glbId || !window.gapi?.client) return;
+    \1
+      currentGlbId = glbId;
       try{
         setStatus('downloading from Drive...');
         const blob = await downloadGlbBlob(glbId);

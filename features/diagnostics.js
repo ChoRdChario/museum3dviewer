@@ -1,4 +1,4 @@
-export function mountDiagnostics({ bus, store, viewer, listSiblingImages, findOrCreateSpreadsheetInSameFolder }){
+export function mountDiagnostics({ bus, store, viewer, listSiblingImages, findOrCreateSpreadsheetInSameFolder, getGlbId }){
   const side = document.getElementById('side');
   const wrap = document.createElement('div');
   wrap.id = 'diag';
@@ -66,8 +66,7 @@ export function mountDiagnostics({ bus, store, viewer, listSiblingImages, findOr
 
   async function testDriveList(){
     try{
-      const params = new URLSearchParams(location.search);
-      const glbId = params.get('id');
+      const glbId = (typeof getGlbId === 'function' && getGlbId()) || new URLSearchParams(location.search).get('id');
       if(!glbId){ setRes('driveList','warn','no ?id provided'); return; }
       if(!window.gapi?.client){ setRes('driveList','fail','gapi not ready'); return; }
       const list = await listSiblingImages(glbId);
@@ -87,8 +86,7 @@ export function mountDiagnostics({ bus, store, viewer, listSiblingImages, findOr
 
   async function testSheets(){
     try{
-      const params = new URLSearchParams(location.search);
-      const glbId = params.get('id');
+      const glbId = (typeof getGlbId === 'function' && getGlbId()) || new URLSearchParams(location.search).get('id');
       if(!glbId){ setRes('sheets','warn','no ?id provided'); return; }
       if(!window.gapi?.client){ setRes('sheets','fail','gapi not ready'); return; }
       const ssId = await findOrCreateSpreadsheetInSameFolder(glbId);
