@@ -1,3 +1,4 @@
+import * as THREE from 'three';
 import { Auth } from './auth.js';
 import { Drive } from './drive.js';
 import { Sheets } from './sheets.js';
@@ -22,13 +23,13 @@ async function init(){
   viewer.animate();
   $('manualLink').href = CONFIG.manualPdfPath;
 
-  $('signinBtn').onclick = ()=> auth.ensureAuth(onAuthed);
+  $('signinBtn').onclick = ()=> { try{ auth.ensureAuth(onAuthed); }catch(err){ console.error('signin failed', err); alert('サインインでエラー: '+err.message);} };
   $('signoutBtn').onclick = ()=> { auth.signOut(); updateAuthUi(); };
   await auth.init();
   auth.createTokenClient(onAuthed);
   updateAuthUi();
 
-  $('loadModelBtn').onclick = onLoadModel;
+  $('loadModelBtn').onclick = (e)=>{ try{ onLoadModel(); }catch(err){ console.error('onLoadModel failed', err); alert('読み込みでエラー: '+err.message); } };
   $('addPinBtn').onclick = ()=>{
     addPinMode = !addPinMode;
     $('addPinBtn').classList.toggle('primary', addPinMode);
@@ -317,7 +318,7 @@ async function duplicateSlot(){
   await populateSlots();
 }
 
-window.addEventListener('DOMContentLoaded', init);
+window.addEventListener('DOMContentLoaded', ()=>{ console.log('LociMyu DOM ready'); init(); });
 
 
 async function onLocalImagePicked(e){
