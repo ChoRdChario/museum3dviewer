@@ -3,7 +3,15 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>LociMyu Clean Core (Three ESModules v3)</title>
+  <title>LociMyu Clean Core (Three ImportMap v4)</title>
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://unpkg.com/three@0.158.0/build/three.module.js",
+      "three/addons/": "https://unpkg.com/three@0.158.0/examples/jsm/"
+    }
+  }
+  </script>
   <style>
     html, body { height: 100%; margin: 0; background: #0b0b0b; color: #fff; }
     #app { position: fixed; inset: 0; display: grid; grid-template-columns: 1fr 320px; }
@@ -27,7 +35,7 @@
   <div id="app">
     <div id="viewer-host"><canvas id="canvas"></canvas></div>
     <div id="side">
-      <h3>Clean Core (Three.js / ESModules)</h3>
+      <h3>Clean Core (Three.js / ImportMap)</h3>
       <div id="toolbar">
         <div class="btns">
           <button id="btn-persp" class="btn">Perspective</button>

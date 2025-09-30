@@ -1,6 +1,6 @@
-import * as THREE from 'https://unpkg.com/three@0.158.0/build/three.module.js';
-import { OrbitControls } from 'https://unpkg.com/three@0.158.0/examples/jsm/controls/OrbitControls.js';
-import { GLTFLoader } from 'https://unpkg.com/three@0.158.0/examples/jsm/loaders/GLTFLoader.js';
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
 export function createViewerAdapter({ canvas, bus }){
   const renderer = new THREE.WebGLRenderer({ canvas, antialias:true, alpha:false });
@@ -16,7 +16,7 @@ export function createViewerAdapter({ canvas, bus }){
 
   const ortho = new THREE.OrthographicCamera(-1,1,1,-1, 0.01, 1000);
   ortho.position.set(0.8, 0.8, 0.8);
-  ortho.userData.v0 = 1; // base for ortho
+  ortho.userData.v0 = 1;
 
   let camera = persp;
 
@@ -109,16 +109,15 @@ export function createViewerAdapter({ canvas, bus }){
   }
 
   function addModel(root, name='model'){
-    // remove previous model roots
     [...scene.children].forEach(child=>{
       if (child.userData && child.userData.__isModelRoot) scene.remove(child);
     });
     root.userData = root.userData || {};
-    root.userData.__isModelRoot = true;
+    root.userData.__isModelRoot = true
+
     scene.add(root);
     rebuildMeshCache(root);
 
-    // fit camera to model
     const box = new THREE.Box3().setFromObject(root);
     const sizeVec = box.getSize(new THREE.Vector3());
     const size = sizeVec.length() || 1;
