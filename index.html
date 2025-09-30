@@ -3,7 +3,8 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>LociMyu v6.3.2 (Diagnostics + Drive-aware)</title>
+  <title>LociMyu v6.3.3 (Diagnostics + Drive-aware)</title>
+  <link rel="icon" href="data:,">
   <script type="importmap">
   {
     "imports": {
@@ -79,6 +80,30 @@
     // Track current GLB fileId (from ?id or Load URL)
     let currentGlbId = null;
     const getCurrentGlbId = () => currentGlbId;
+    // Ensure OAuth token (used on Load URL when given a Drive fileId)
+    async function ensureToken(){
+      const t = gapi?.client?.getToken?.();
+      if (t && t.access_token) return t.access_token;
+      if (!tokenClient) throw new Error('no token client');
+      return await new Promise((resolve, reject)=>{
+        const origCb = tokenClient.callback;
+        tokenClient.callback = (resp)=>{
+          try{
+            if(resp && !resp.error){
+              const tk = gapi?.client?.getToken?.();
+              resolve(tk?.access_token||'');
+            }else{
+              reject(new Error(resp?.error || 'token error'));
+            }
+          }finally{
+            tokenClient.callback = origCb; // restore
+          }
+        };
+        // within user gesture (click), browser should allow
+        tokenClient.requestAccessToken({ prompt: '' });
+      });
+    }
+
 
     // Auth
     const API_KEY = 'AIzaSyCUnTCr5yWUWPdEXST9bKP1LpgawU5rIbI';
@@ -148,7 +173,19 @@
       const driveMatch = raw.match(/(?:\/d\/|id=)([a-zA-Z0-9_-]{20,})/);
       const looksId = /^[a-zA-Z0-9_-]{20,}$/.test(raw);
       const fileId = driveMatch ? driveMatch[1] : (looksId ? raw : null);
-      if (fileId && window.gapi?.client){
+
+      if (fileId){ // treat as Drive file id
+        if (!window.gapi?.client){
+          setStatus('gapi not ready. Please wait or reload.');
+          return;
+        }
+        try{
+          await ensureToken(); // acquire token within this click gesture
+        }catch(e){
+          console.warn('[LoadURL] need sign-in', e);
+          setStatus('Sign in required for Drive file. Click "Sign in" and retry.');
+          return; // DO NOT fall back to URL for fileId (would fetch HTML preview)
+        }
         try{
           currentGlbId = fileId;
           setStatus('downloading from Drive...');
@@ -157,9 +194,13 @@
           viewer.loadBlob(blob, name);
           return;
         }catch(e){
-          console.warn('[LoadURL] drive blob failed, fallback to URL', e);
+          console.error('[LoadURL] drive blob failed after token', e);
+          setStatus('Download failed (Drive). See console.');
+          return;
         }
       }
+
+      // Not a Drive id: allow direct URL path (must be CORS-allowed GLB)
       viewer.loadURL(raw);
     });
     document.getElementById('file').addEventListener('change', (e)=>{
