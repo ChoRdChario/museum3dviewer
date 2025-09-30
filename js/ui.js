@@ -1,4 +1,4 @@
-// ui.js — consolidated (safe tabs + overlay + thumbnails + HEIC guard)
+// ui.js — consolidated + exports used by main.js (setLoading, setStatus)
 export function setupTabs(){
   const btns = Array.from(document.querySelectorAll('.tab-btn'));
   const tabs = new Map(Array.from(document.querySelectorAll('.tab')).map(el=>{
@@ -11,10 +11,8 @@ export function setupTabs(){
     tabs.forEach((el,name)=> el.classList.toggle('active', name===key));
   };
 
-  // top tab buttons
   btns.forEach(b=> b.addEventListener('click', ()=> show(b.dataset.tab)));
 
-  // mobile footer buttons (existence guarded)
   const byId = (id)=> document.getElementById(id);
   const wire = (id, key)=>{ const el = byId(id); if(el) el.onclick = ()=> show(key); };
   wire('mobileHome',      'home');
@@ -22,9 +20,35 @@ export function setupTabs(){
   wire('mobileCamera',    'camera');
   wire('mobileCaptions',  'captions');
 
-  // default tab
   const defaultTab = tabs.has('home') ? 'home' : (tabs.has('captions') ? 'captions' : Array.from(tabs.keys())[0]);
   if(defaultTab) show(defaultTab);
+}
+
+// ====== Status & Loading badges ======
+function ensureBadge(id, baseStyle){
+  let el = document.getElementById(id);
+  if(!el){
+    el = document.createElement('div');
+    el.id = id;
+    el.style.cssText = baseStyle;
+    document.body.appendChild(el);
+  }
+  return el;
+}
+
+export function setStatus(text='READY', color='#51cf66'){
+  const el = ensureBadge('statusBadge', 'position:fixed;left:12px;bottom:12px;background:#111c;color:#fff;border:1px solid #444;border-radius:999px;padding:8px 12px;font-weight:700;box-shadow:0 2px 10px #0006;z-index:9999;');
+  el.textContent = text;
+  el.style.background = '#111c';
+  el.style.color = '#fff';
+  el.style.borderColor = '#444';
+  el.style.display = 'inline-block';
+}
+
+export function setLoading(on=true, label='Loading...'){
+  const el = ensureBadge('loadingBadge', 'position:fixed;right:12px;bottom:12px;background:#1f4f8f;color:#fff;border:1px solid #295ea8;border-radius:10px;padding:8px 12px;font-weight:600;box-shadow:0 2px 10px #0006;z-index:9999;');
+  el.textContent = on ? label : '';
+  el.style.display = on ? 'inline-block' : 'none';
 }
 
 // ====== Caption overlay & thumbnails ======
@@ -39,7 +63,7 @@ async function tokenFetchBlobURL(fileId){
     const blob = await r.blob();
     return URL.createObjectURL(blob);
   }catch(e){
-    return `https://drive.google.com/uc?id=${fileId}`; // public fallback
+    return `https://drive.google.com/uc?id=${fileId}`;
   }
 }
 
@@ -119,4 +143,11 @@ function wireCaptionUI(){
 export function initUI(){
   setupTabs();
   wireCaptionUI();
+  // 初期状態: READY を表示
+  setStatus('READY');
+  setLoading(false);
 }
+
+// 旧window依存の互換: main.js等が window.__LMY?.setStatus を呼ぶケース
+if(!window.__LMY) window.__LMY = {};
+window.__LMY.setStatus = (t)=> setStatus(t||'READY');
