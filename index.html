@@ -4,10 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>LociMyu — 3D+Caption Tool</title>
-
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 16 16%27%3E%3Ccircle cx=%228%22 cy=%228%22 r=%228%22 fill=%22%236ea8fe%22/%3E%3Ctext x=%228%22 y=%2211%22 font-size=%2210%22 text-anchor=%22middle%22 fill=%22%230b1220%22%3EL%3C/text%3E%3C/svg%3E" />
   <link rel="stylesheet" href="css/styles.css" />
-
   <script type="importmap">
     {
       "imports": {
@@ -16,28 +13,19 @@
       }
     }
   </script>
-
   <style>
-    #locimyu-badge{position:fixed;left:8px;bottom:8px;background:#51cf66;color:#0b1f12;padding:6px 10px;border-radius:999px;font:12px/1 ui-sans-serif,system-ui;box-shadow:0 2px 10px #0006;display:none;z-index:99998}
-    #locimyu-debug{position:fixed;right:8px;bottom:8px;background:#111c;color:#fff;border:1px solid #444;border-radius:8px;font:12px/1.4 ui-monospace,Menlo,Consolas,monospace;padding:6px 8px;max-width:50vw;max-height:35vh;overflow:auto;display:none;z-index:99999}
-
-    /* ===== UI fixes: vertical captions & no horizontal scroll ===== */
     html, body { overflow-x: hidden; }
     .caption-pane.vertical { display:flex; flex-direction:column; gap:12px; }
     .caption-pane.vertical .caption-list { max-height:28vh; overflow:auto; border:1px solid var(--line); border-radius:8px; padding:6px; }
     .caption-pane.vertical .caption-detail { border:1px solid var(--line); border-radius:8px; padding:10px; }
-    /* Wrap long controls to avoid horizontal overflow */
     .caption-detail .grid-2 { display:grid; grid-template-columns: 1fr; gap:8px; }
     .caption-detail select, .caption-detail input[type="file"] { width:100%; max-width:100%; }
-
-    /* Viewer overlay for selected caption */
     #viewerPane { position:relative; }
     #captionOverlay{ position:absolute; right:8px; top:8px; max-width:28vw; background:#111c; color:#fff;
       border:1px solid #444; border-radius:10px; padding:10px; backdrop-filter:blur(4px); display:none; z-index:5 }
     #captionOverlay h4{ margin:0 0 6px 0; font-size:14px }
     #captionOverlay p{ margin:0 0 8px 0; font-size:12px; white-space:pre-wrap }
     #captionOverlay img{ max-width:100%; max-height:220px; display:block; border-radius:6px }
-    /* Thumbnail rail */
     #capThumbRail{ display:grid; grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)); gap:6px; max-height:24vh; overflow:auto; }
     #capThumbRail .card{ border:1px solid var(--line); border-radius:6px; padding:4px; cursor:pointer; }
     #capThumbRail .card img{ width:100%; height:64px; object-fit:cover; border-radius:4px; display:block; }
@@ -45,21 +33,6 @@
   </style>
 </head>
 <body>
-  <div id="locimyu-badge">READY</div>
-  <div id="locimyu-debug"><b>Debug</b><div id="locimyu-log"></div></div>
-  <script>
-    (function(){
-      const badge=document.getElementById('locimyu-badge');
-      const box=document.getElementById('locimyu-debug');
-      const logEl=document.getElementById('locimyu-log');
-      function log(msg){ box.style.display='block'; const d=document.createElement('div'); d.textContent=msg; logEl.appendChild(d); }
-      function setStatus(msg){ badge.textContent = msg || "READY"; badge.style.display='inline-block'; }
-      window.__LMY = { showBadge(){ badge.style.display='inline-block'; }, log, setStatus };
-      window.addEventListener('error', e=>log('[window.error] '+(e.message||e.error)));
-      window.addEventListener('unhandledrejection', e=>log('[unhandled] '+(e.reason&&e.reason.message||e.reason)));
-    })();
-  </script>
-
   <header class="topbar">
     <div class="brand">LociMyu</div>
     <nav class="top-actions">
@@ -75,10 +48,6 @@
     <section id="viewerPane" class="viewer-pane">
       <div id="viewer" class="viewer"></div>
       <div id="captionOverlay"></div>
-      <div id="loadingOverlay" class="overlay hidden">
-        <div class="spinner"></div>
-        <div class="overlay-text">読み込み中...</div>
-      </div>
     </section>
 
     <aside id="deskPane" class="desk-pane">
@@ -118,7 +87,7 @@
                 </div>
               </div>
               <div class="row"><img id="capImagePreview" style="max-width:100%;max-height:160px;border:1px solid var(--line);border-radius:8px;display:none"/></div>
-              <div class="row" id="thumbRailRow"><div id="capThumbRail"></div></div>
+              <div class="row"><div id="capThumbRail"></div></div>
               <div class="row">
                 <label>ピン色</label>
                 <select id="capColor">
@@ -184,29 +153,8 @@
     </aside>
   </main>
 
-  <footer class="bottombar mobile-only">
-    <button id="mobileHome" class="btn small">ホーム</button>
-    <button id="mobileMaterials" class="btn small">マテ</button>
-    <button id="mobileCamera" class="btn small">カメラ</button>
-    <button id="mobileCaptions" class="btn small">キャプ</button>
-  </footer>
-
-  <script>
-    window.__LOCIMYU_CONFIG__ = {
-      apiKey: "AIzaSyCUnTCr5yWUWPdEXST9bKP1LpgawU5rIbI",
-      clientId: "595200751510-ncahnf7edci6b9925becn5to49r6cguv.apps.googleusercontent.com",
-      spreadsheetTitleSuffix: "__LociMyu",
-      manualPdfPath: "manual.pdf",
-      readOnlyParam: "readonly"
-    };
-  </script>
-
-  <script src="https://accounts.google.com/gsi/client" async defer></script>
-  <script src="https://apis.google.com/js/api.js" async defer></script>
-  <script src="https://unpkg.com/heic2any@0.0.4/dist/heic2any.min.js"></script>
-
-  <script type="module" src="js/phase1_patch.js"></script>
-  <script type="module" src="js/ui_patch_v2.js"></script>
+  <script type="module" src="js/phase1_patch_v2.js"></script>
+  <script type="module" src="js/ui_patch_v3.js"></script>
   <script type="module" src="js/main.js"></script>
 </body>
 </html>
