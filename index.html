@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>LociMyu v6.3.3 (Diagnostics + Drive-aware)</title>
+  <title>LociMyu v6.4 (Diagnostics + Drive-aware)</title>
   <link rel="icon" href="data:,">
   <script type="importmap">
   {
@@ -74,6 +74,7 @@
     import { installConflictGuards } from './core/guards.js';
     import { listSiblingImages } from './app/drive_images.js';
     import { createAutosave } from './app/sheets_autosave.js';
+    import { loadPinsFromSheet } from './app/sheets_restore.js';
     import { findOrCreateSpreadsheetInSameFolder } from './js/drive.js';
     import { downloadGlbBlob, getName } from './app/drive_glb.js';
 
@@ -161,6 +162,11 @@
       if (glbId && window.gapi?.client){
         try{ const imgs = await listSiblingImages(glbId); if (imgs.length) bus.emit('images:update', imgs); }catch(e){ console.warn('[drive] list images failed', e); }
         try{ createAutosave({ bus, store, findOrCreateSpreadsheetInSameFolder, glbFileId: glbId }); }catch(e){ console.warn('[sheets] autosave init failed', e); }
+        try{
+          const ssId = await findOrCreateSpreadsheetInSameFolder(glbId);
+          const pins = await loadPinsFromSheet(ssId);
+          if (pins && pins.length){ bus.emit('pins:create', pins); }
+        }catch(e){ console.warn('[sheets] restore failed', e); }
       }
     });
     bus.on('model:error', (msg)=> setStatus('error: '+msg));
