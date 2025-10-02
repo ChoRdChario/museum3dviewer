@@ -1,11 +1,11 @@
-// features/materialUI.js (v6.5.4-1)
+// features/materialUI.js (v6.5.5) — white→transparent(uniform), unlit toggle, double-sided toggle, render-order stabilization
 import * as THREE from 'three';
 
 let MAT_KEY_SEQ = 1;
 
 export function mountMaterialUI({ bus, viewer }) {
-  const side = document.getElementById('side');
-  if (!side) return;
+  const sidePane = document.getElementById('side');
+  if (!sidePane) return;
 
   const wrap = document.createElement('div');
   wrap.id = 'material-ui';
@@ -25,15 +25,22 @@ export function mountMaterialUI({ bus, viewer }) {
       </div>
 
       <label>Opacity <input id="mat-o" type="range" min="0" max="1" step="0.01" value="1"></label>
-      <label><input id="mat-unlit" type="checkbox"> Unlit (ignore lights)</label>
+
+      <div style="display:grid;gap:6px;">
+        <label><input id="mat-unlit" type="checkbox"> Unlit (ignore lights)</label>
+        <label><input id="mat-doubleside" type="checkbox"> Double-sided (draw backfaces)</label>
+      </div>
 
       <div>
-        <label><input id="mat-w2a" type="checkbox"> White → Transparent</label>
-        <input id="mat-th" type="range" min="0.85" max="1" step="0.01" value="0.98">
+        <label style="display:flex;align-items:center;gap:8px">
+          <input id="mat-w2a" type="checkbox"> White → Transparent
+        </label>
+        <input id="mat-th" type="range" min="0.85" max="1" step="0.005" value="0.98">
+        <small style="color:#9aa">閾値↑（白に近いほど透過）</small>
       </div>
     </div>
   `;
-  side.appendChild(wrap);
+  sidePane.appendChild(wrap);
 
   const sel = wrap.querySelector('#mat-target');
   const h = wrap.querySelector('#mat-h');
@@ -41,13 +48,15 @@ export function mountMaterialUI({ bus, viewer }) {
   const l = wrap.querySelector('#mat-l');
   const o = wrap.querySelector('#mat-o');
   const unlit = wrap.querySelector('#mat-unlit');
+  const doubleside = wrap.querySelector('#mat-doubleside');
   const w2a = wrap.querySelector('#mat-w2a');
   const th = wrap.querySelector('#mat-th');
 
+  // matKey -> Set(material instances)
   const bucket = new Map();
 
   function ensureMatKey(m) {
-    if (!m.userData) m.userData = {};
+    m.userData ||= {};
     if (!m.userData.__matKey) m.userData.__matKey = `mk_${MAT_KEY_SEQ++}`;
     return m.userData.__matKey;
   }
@@ -66,15 +75,13 @@ export function mountMaterialUI({ bus, viewer }) {
     bucket.clear();
     sel.innerHTML = '';
     const added = new Set();
-
     viewer.scene.traverse(obj => {
       if (!(obj && (obj.isMesh || obj.isSkinnedMesh) && obj.material)) return;
       const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
       mats.forEach(m => {
         if (!m) return;
         const key = ensureMatKey(m);
-        if (!bucket.has(key)) bucket.set(key, new Set());
-        bucket.get(key).add(m);
+        (bucket.get(key) || bucket.set(key, new Set()).get(key)).add(m);
         if (!added.has(key)) {
           added.add(key);
           const opt = document.createElement('option');
@@ -84,10 +91,10 @@ export function mountMaterialUI({ bus, viewer }) {
         }
       });
     });
-
     if (sel.options.length > 0) syncUIFromFirstOf(sel.value);
   }
 
+  // ---- Unlit 切替 ----
   function toUnlit(src) {
     if (src instanceof THREE.MeshBasicMaterial) return src;
     const basic = new THREE.MeshBasicMaterial();
@@ -95,37 +102,63 @@ export function mountMaterialUI({ bus, viewer }) {
     copyCommonProps(src, basic);
     return basic;
   }
+  const fromUnlit = (src) => src?.userData?.__origMat || src;
 
-  function fromUnlit(src) {
-    return src?.userData?.__origMat || src;
+  // ---- White→Transparent: uniform 方式 ----
+  function ensureWhiteUniform(mat, threshold) {
+    mat.userData ||= {};
+    mat.userData.__w2a = true;
+    mat.userData.__whiteUniform = mat.userData.__whiteUniform || { value: threshold };
+    mat.onBeforeCompile = (shader) => {
+      shader.uniforms.uWhiteThreshold = mat.userData.__whiteUniform;
+      const code = `
+        float lum = dot(diffuseColor.rgb, vec3(0.299, 0.587, 0.114));
+        if (lum >= uWhiteThreshold) discard;
+      `;
+      shader.fragmentShader = shader.fragmentShader.replace(
+        '#include <dithering_fragment>',
+        `${code}
+         #include <dithering_fragment>`
+      );
+      mat.userData.__shaderPatched = true;
+    };
+    // 透過描画の安定化
+    mat.transparent = true;
+    mat.depthWrite = false;
+    mat.depthTest = true;
+    mat.alphaTest = 0.0;
+    mat.blending = THREE.NormalBlending;
+    mat.needsUpdate = true;
+  }
+  function disableWhite(mat) {
+    if (!mat?.userData) return;
+    mat.userData.__w2a = false;
+    mat.onBeforeCompile = null;
+    mat.needsUpdate = true;
+    if (!mat.transparent) mat.depthWrite = true;
   }
 
-  function applyWhiteToAlpha(mat, enabled, threshold) {
-    const prev = !!mat.userData.__w2a;
-    if (!enabled && !prev) return;
-    if (enabled) {
-      mat.onBeforeCompile = (shader) => {
-        shader.fragmentShader = shader.fragmentShader.replace(
-          '#include <dithering_fragment>',
-          `
-            if (all(greaterThanEqual(diffuseColor.rgb, vec3(${threshold.toFixed(3)})))) discard;
-            #include <dithering_fragment>
-          `
-        );
-      };
-      mat.userData.__w2a = true;
-    } else {
-      mat.onBeforeCompile = null;
-      mat.userData.__w2a = false;
-    }
+  // ---- side 切替（両面描画） ----
+  function applySide(mat, isDouble) {
+    mat.side = isDouble ? THREE.DoubleSide : THREE.FrontSide;
     mat.needsUpdate = true;
+  }
+
+  // 対象メッシュを最後に描く（透過安定化）
+  function bumpRenderOrderForMatKey(matKey, order = 2) {
+    viewer.scene.traverse(obj => {
+      if (!(obj?.isMesh || obj?.isSkinnedMesh)) return;
+      const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+      if (mats.some(m => m && m.userData && m.userData.__matKey === matKey)) {
+        obj.renderOrder = order;
+      }
+    });
   }
 
   function syncUIFromFirstOf(matKey) {
     const set = bucket.get(matKey);
     if (!set || set.size === 0) return;
     const m = [...set][0];
-
     const c = m.color ? m.color.clone() : new THREE.Color(1,1,1);
     const hsl = {}; c.getHSL(hsl);
     h.value = Math.round(hsl.h * 360);
@@ -134,6 +167,8 @@ export function mountMaterialUI({ bus, viewer }) {
     o.value = (typeof m.opacity === 'number') ? m.opacity : 1;
     unlit.checked = (m instanceof THREE.MeshBasicMaterial) && !!m.userData.__origMat;
     w2a.checked = !!m.userData.__w2a;
+    if (m.userData?.__whiteUniform) th.value = m.userData.__whiteUniform.value.toFixed(3);
+    doubleside.checked = (m.side === THREE.DoubleSide);
   }
 
   function applyAll() {
@@ -146,6 +181,7 @@ export function mountMaterialUI({ bus, viewer }) {
       l: parseFloat(l.value)/100,
       o: parseFloat(o.value),
       un: !!unlit.checked,
+      ds: !!doubleside.checked,
       w:  !!w2a.checked,
       t:  parseFloat(th.value)
     };
@@ -159,18 +195,23 @@ export function mountMaterialUI({ bus, viewer }) {
         if (!m || ensureMatKey(m) !== key) return m;
 
         let target = m;
-        if (want.un) {
-          target = toUnlit(m);
-        } else if (m instanceof THREE.MeshBasicMaterial) {
-          target = fromUnlit(m);
-        }
+        if (want.un) target = toUnlit(m);
+        else if (m instanceof THREE.MeshBasicMaterial) target = fromUnlit(m);
 
         if (target.color?.setHSL) target.color.setHSL(want.h, want.s, want.l);
         if (typeof want.o === 'number' && !Number.isNaN(want.o)) {
-          target.transparent = true;
+          target.transparent = (want.o < 1) || want.w;
           target.opacity = want.o;
         }
-        applyWhiteToAlpha(target, want.w, want.t);
+        // 両面描画
+        applySide(target, want.ds);
+
+        if (want.w) {
+          ensureWhiteUniform(target, want.t);
+          if (target.userData?.__whiteUniform) target.userData.__whiteUniform.value = want.t;
+        } else {
+          disableWhite(target);
+        }
 
         ensureMatKey(target);
         if (target !== m) changed = true;
@@ -180,16 +221,18 @@ export function mountMaterialUI({ bus, viewer }) {
       if (changed) obj.material = Array.isArray(obj.material) ? newMats : newMats[0];
     });
 
-    collectMaterials();
-    sel.value = key;
+    bumpRenderOrderForMatKey(
+      key,
+      (w2a.checked || parseFloat(o.value) < 1) ? 2 : 0
+    );
+
     syncUIFromFirstOf(key);
   }
 
-  [h,s,l,o,unlit,w2a,th].forEach(el => el.addEventListener('input', applyAll));
+  [h,s,l,o,unlit,doubleside,w2a,th].forEach(el => el.addEventListener('input', applyAll));
   sel.addEventListener('change', () => { syncUIFromFirstOf(sel.value); });
 
   bus.on('model:loaded', collectMaterials);
-
   wrap.style.display = 'block';
   collectMaterials();
 }
