@@ -1,4 +1,4 @@
-// features/materialUI.js (v6.5.5-1) — fix: onBeforeCompile null → noop to avoid customProgramCacheKey crash
+// features/materialUI.js (v6.5.5-2) — idempotent shader patch & safe toggles
 import * as THREE from 'three';
 
 let MAT_KEY_SEQ = 1;
@@ -52,6 +52,7 @@ export function mountMaterialUI({ bus, viewer }) {
   const w2a = wrap.querySelector('#mat-w2a');
   const th = wrap.querySelector('#mat-th');
 
+  // matKey -> Set(material instances)
   const bucket = new Map();
 
   function ensureMatKey(m) {
@@ -67,10 +68,11 @@ export function mountMaterialUI({ bus, viewer }) {
     ];
     props.forEach(k => { if (k in from) try { to[k] = from[k]; } catch {} });
     if (from.color && to.color) to.color.copy(from.color);
+    // White→Transparent 継承 / 無効時は noop にして null を避ける
     if (from.userData?.__w2a) {
       ensureWhiteUniform(to, from.userData.__whiteUniform?.value ?? 0.98);
     } else {
-      to.onBeforeCompile = (/*shader*/)=>{}; // null禁止
+      to.onBeforeCompile = ()=>{};
     }
     to.needsUpdate = true;
   }
@@ -98,6 +100,7 @@ export function mountMaterialUI({ bus, viewer }) {
     if (sel.options.length > 0) syncUIFromFirstOf(sel.value);
   }
 
+  // ---- Unlit 切替 ----
   function toUnlit(src) {
     if (src instanceof THREE.MeshBasicMaterial) return src;
     const basic = new THREE.MeshBasicMaterial();
@@ -107,22 +110,42 @@ export function mountMaterialUI({ bus, viewer }) {
   }
   const fromUnlit = (src) => src?.userData?.__origMat || src;
 
+  // === White→Transparent: 安定パッチ（idempotent） ===
+  const LMY_W2A_START = '/*__LMY_W2A_START__*/';
+  const LMY_W2A_END   = '/*__LMY_W2A_END__*/';
+
+  function patchShaderIdempotent(shader, uniformRef) {
+    // 以前の挿入ブロックを除去
+    shader.fragmentShader = shader.fragmentShader
+      .replace(new RegExp(`${LMY_W2A_START}[\s\S]*?${LMY_W2A_END}`,'g'), '');
+    const anchor = '#include <dithering_fragment>';
+    const block = `
+${LMY_W2A_START}
+  float lum = dot(diffuseColor.rgb, vec3(0.299, 0.587, 0.114));
+  if (lum >= uWhiteThreshold) discard;
+${LMY_W2A_END}
+${anchor}`.trim();
+    if (shader.fragmentShader.includes(anchor)) {
+      shader.fragmentShader = shader.fragmentShader.replace(anchor, block);
+    } else {
+      shader.fragmentShader += `
+${LMY_W2A_START}
+  float lum = dot(diffuseColor.rgb, vec3(0.299, 0.587, 0.114));
+  if (lum >= uWhiteThreshold) discard;
+${LMY_W2A_END}
+`;
+    }
+    shader.uniforms.uWhiteThreshold = uniformRef;
+  }
+
   function ensureWhiteUniform(mat, threshold) {
     mat.userData ||= {};
     mat.userData.__w2a = true;
     mat.userData.__whiteUniform = mat.userData.__whiteUniform || { value: threshold };
     mat.onBeforeCompile = (shader) => {
-      shader.uniforms.uWhiteThreshold = mat.userData.__whiteUniform;
-      const code = `
-        float lum = dot(diffuseColor.rgb, vec3(0.299, 0.587, 0.114));
-        if (lum >= uWhiteThreshold) discard;
-      `;
-      shader.fragmentShader = shader.fragmentShader.replace(
-        '#include <dithering_fragment>',
-        `${code}
-         #include <dithering_fragment>`
-      );
+      patchShaderIdempotent(shader, mat.userData.__whiteUniform);
     };
+    // 透過描画の安定化
     mat.transparent = true;
     mat.depthWrite = false;
     mat.depthTest = true;
@@ -130,20 +153,23 @@ export function mountMaterialUI({ bus, viewer }) {
     mat.blending = THREE.NormalBlending;
     mat.needsUpdate = true;
   }
+
   function disableWhite(mat) {
     if (!mat) return;
     mat.userData ||= {};
     mat.userData.__w2a = false;
-    mat.onBeforeCompile = (/*shader*/)=>{}; // ★ no-op
+    mat.onBeforeCompile = ()=>{}; // nullは不可
     mat.needsUpdate = true;
     if (!mat.transparent) mat.depthWrite = true;
   }
 
+  // ---- side 切替（両面描画） ----
   function applySide(mat, isDouble) {
     mat.side = isDouble ? THREE.DoubleSide : THREE.FrontSide;
     mat.needsUpdate = true;
   }
 
+  // 透過材は最後に描画（外皮のチラつき抑制）
   function bumpRenderOrderForMatKey(matKey, order = 2) {
     viewer.scene.traverse(obj => {
       if (!(obj?.isMesh || obj?.isSkinnedMesh)) return;
