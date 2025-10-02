@@ -58,13 +58,13 @@ export function createViewerAdapter({ canvas, bus }){
       camera.left=-halfV*aspect; camera.right=halfV*aspect;
       camera.updateProjectionMatrix();
     }
-    bus.emit('viewer:resized',{w,h,mode:camera.isOrthographicCamera?'ortho':'persp'});
+    bus?.emit?.('viewer:resized',{w,h,mode:camera.isOrthographicCamera?'ortho':'persp'});
   }
 
   function setOrtho(on){
     if(on){ camera=ortho; controls.enabled=false; controlsOrtho.enabled=true; }
     else  { camera=persp; controls.enabled=true;  controlsOrtho.enabled=false; }
-    bus.emit('viewer:mode', on?'ortho':'persp');
+    bus?.emit?.('viewer:mode', on?'ortho':'persp');
     resize();
   }
 
@@ -75,9 +75,9 @@ export function createViewerAdapter({ canvas, bus }){
   const loader=new GLTFLoader();
 
   function loadURL(url){
-    bus.emit('model:loading',url);
+    bus?.emit?.('model:loading',url);
     loader.load(url, gltf=>{ addModel(gltf.scene,url.split('/').pop()||'model'); },
-      undefined, err=>{ console.error('[GLB]',err); bus.emit('model:error',String(err)); });
+      undefined, err=>{ console.error('[GLB]',err); bus?.emit?.('model:error',String(err)); });
   }
   function loadBlob(blob,name='model.glb'){ const url=URL.createObjectURL(blob); loadURL(url); }
   function loadFile(file){ const url=URL.createObjectURL(file); loadURL(url); }
@@ -99,7 +99,7 @@ export function createViewerAdapter({ canvas, bus }){
     });
     light.position.copy(center.clone().add(new THREE.Vector3(1,2,3).multiplyScalar(size)));
     if(camera.isOrthographicCamera) ensureV0();
-    bus.emit('model:loaded',name);
+    bus?.emit?.('model:loaded',name);
     resize();
   }
 

@@ -3,6 +3,7 @@ import { store } from '../core/store.js';
 
 export function mountMaterialUI({ bus }) {
   const side = document.getElementById('side');
+  if (!side) return;
   const wrap = document.createElement('div');
   wrap.id = 'material-ui';
   wrap.style.marginTop = '12px';
@@ -41,17 +42,19 @@ export function mountMaterialUI({ bus }) {
     let mat = mesh.material;
     if (!(mat instanceof THREE.Material)) return;
 
-    // 色
+    // 色（HSL）
     const hh = parseFloat(h.value) / 360;
     const ss = parseFloat(s.value) / 100;
     const ll = parseFloat(l.value) / 100;
-    mat.color.setHSL(hh, ss, ll);
+    if (mat.color && mat.color.setHSL) {
+      mat.color.setHSL(hh, ss, ll);
+    }
 
     // 透明度
     mat.transparent = true;
     mat.opacity = parseFloat(o.value);
 
-    // Unlit
+    // Unlit 切替
     if (unlit.checked && !(mat instanceof THREE.MeshBasicMaterial)) {
       mesh.material = new THREE.MeshBasicMaterial({ color: mat.color, transparent: mat.transparent, opacity: mat.opacity });
       mat = mesh.material;
@@ -60,7 +63,7 @@ export function mountMaterialUI({ bus }) {
       mat = mesh.material;
     }
 
-    // 白→透明化
+    // 白→透明化（閾値）
     if (w2a.checked) {
       const threshold = parseFloat(th.value);
       mat.onBeforeCompile = (shader) => {

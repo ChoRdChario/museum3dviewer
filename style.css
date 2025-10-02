@@ -1,19 +1,19 @@
-#container {
+/* Responsive split layout so the right pane doesn't go off-screen */
+#app, #container {
   display: flex;
   flex-direction: row;
   height: 100vh;
   overflow: hidden;
 }
-
-#viewer {
+#viewer-host, #viewer {
   flex: 1;
-  min-width: 0;
+  min-width: 0; /* allow shrink */
 }
-
 #side {
-  width: 300px;
-  min-width: 200px;
-  max-width: 40%;
+  width: 320px;
+  min-width: 220px;
+  max-width: 40vw;
   overflow-y: auto;
   background: #111;
+  border-left: 1px solid #222;
 }
