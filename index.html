@@ -1,10 +1,28 @@
 <!doctype html>
 <html lang="ja">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>LociMyu v6.4.2 (Restore & HEIC fix)</title>
-  <link rel="icon" href="data:,">
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>LociMyu Clean Boot</title>
+  <link rel="stylesheet" href="./style.css"/>
+</head>
+<body>
+  <div id="app">
+    <div id="viewer-host">
+      <canvas id="canvas"></canvas>
+    </div>
+    <div id="side">
+      <h3 style="margin:8px 0;">LociMyu</h3>
+      <div id="toolbar" style="display:flex;gap:8px;margin-bottom:8px;">
+        <button id="btn-persp">Perspective</button>
+        <button id="btn-ortho">Orthographic</button>
+        <input id="file" type="file" accept=".glb,.gltf" style="margin-left:auto;"/>
+      </div>
+      <div>状態: <code id="status">booting...</code></div>
+      <!-- Material UI はここにマウントされます -->
+    </div>
+  </div>
+
   <script type="importmap">
   {
     "imports": {
@@ -13,198 +31,42 @@
     }
   }
   </script>
-  <script src="https://apis.google.com/js/api.js"></script>
-  <script src="https://accounts.google.com/gsi/client" async defer></script>
-  <style>
-    html, body { height: 100%; margin: 0; background: #0b0b0b; color: #fff; }
-    #app { position: fixed; inset: 0; display: grid; grid-template-columns: 1fr 320px; }
-    #viewer-host { position: relative; background: #111; }
-    #side { border-left: 1px solid #222; padding: 10px; font: 12px/1.4 system-ui, sans-serif; overflow:auto; }
-    .fab { position: fixed; right: 16px; bottom: 16px; padding: 10px 14px; border-radius: 999px; background:#1e1e1e; border:1px solid #333; cursor:pointer; }
-    #grid { position: fixed; right: 16px; bottom: 68px; width: 320px; max-height:50vh; overflow:auto; background:rgba(0,0,0,.6); backdrop-filter: blur(4px); border-radius: 12px; display:none; padding:8px; }
-    #grid .g { display:grid; grid-template-columns: repeat(3, 1fr); gap:6px; }
-    #grid img { width: 100%; aspect-ratio: 1/1; object-fit: cover; border-radius: 6px; }
-    #overlay { position: fixed; left: 16px; bottom: 16px; max-width: 380px; background: rgba(0,0,0,.7); border-radius: 12px; padding: 12px 14px; display:none; }
-    #overlay h3 { margin: 0 0 6px; font-size: 14px; }
-    #overlay img { max-width:100%; display:block; margin-top:8px; border-radius:8px; }
-    #toolbar { display:flex; gap:6px; align-items:center; flex-wrap:wrap; margin-bottom:8px; }
-    input[type='text']{ width:100%; background:#111; color:#fff; border:1px solid #333; border-radius:8px; padding:6px 8px;}
-    button, .btn{ background:#1e1e1e; color:#fff; border:1px solid #333; border-radius:8px; padding:6px 10px; cursor:pointer; }
-    .btns{ display:flex; gap:6px; }
-    .hint{ color:#aaa; font-size:11px; }
-    #auth { position:fixed; top:10px; right:10px; display:flex; gap:8px; z-index:9999; }
-  </style>
-</head>
-<body>
-  <div id="auth">
-    <button id="btn-signin" disabled>Sign in</button>
-    <button id="btn-signout">Sign out</button>
-  </div>
-  <div id="app">
-    <div id="viewer-host"><canvas id="canvas"></canvas></div>
-    <div id="side">
-      <h3>LociMyu v6.4.2</h3>
-      <div id="toolbar">
-        <div class="btns">
-          <button id="btn-persp" class="btn">Perspective</button>
-          <button id="btn-ortho" class="btn">Orthographic</button>
-        </div>
-        <input id="glb-url" type="text" placeholder="GLB URL / Drive共有URL / fileId" />
-        <div class="btns">
-          <button id="btn-load-url" class="btn">Load URL</button>
-          <label class="btn">Load File <input id="file" type="file" accept=".glb,.gltf,model/gltf-binary" style="display:none"/></label>
-        </div>
-        <div class="hint">Shift/Alt+クリック: ピン追加、クリック: ピン選択（選択時のみライン）</div>
-      </div>
-      <div>状態：<code id="status">booting...</code></div>
-    </div>
-  </div>
-  <button class="fab" id="fab">Images</button>
-  <div id="grid"><div style="margin:4px 0 8px; font-weight:600;">Images</div><div class="g"></div></div>
-  <div id="overlay"><h3 id="ov-t"></h3><div id="ov-b"></div><img id="ov-i" /></div>
-
   <script type="module">
+    console.log('[boot] index module loaded');
     import { bus } from './core/bus.js';
     import { store } from './core/store.js';
     import { createViewerAdapter } from './viewer/adapter.three.js';
     import { mountPins } from './features/pins.js';
-    import { mountOverlay } from './features/overlay.js';
-    import { mountGrid } from './features/imageGrid.js';
-    import { mountDiagnostics } from './features/diagnostics.js';
-    import { installConflictGuards } from './core/guards.js';
-    import { listSiblingImages } from './app/drive_images.js';
-    import { createAutosave } from './app/sheets_autosave.js';
-    import { loadPinsFromSheet } from './app/sheets_restore.js';
-    import { findOrCreateSpreadsheetInSameFolder } from './js/drive.js';
-    import { downloadGlbBlob, getName } from './app/drive_glb.js';
+    import { mountMaterialUI } from './features/materialUI.js';
 
-    // Track current GLB fileId
-    let currentGlbId = null;
-    const getCurrentGlbId = () => currentGlbId;
-
-    // Auth
-    const API_KEY = 'AIzaSyCUnTCr5yWUWPdEXST9bKP1LpgawU5rIbI';
-    const CLIENT_ID = '595200751510-ncahnf7edci6b9925becn5to49r6cguv.apps.googleusercontent.com';
-    const SCOPES = [
-      'https://www.googleapis.com/auth/drive.readonly',
-      'https://www.googleapis.com/auth/drive.file',
-      'https://www.googleapis.com/auth/spreadsheets'
-    ].join(' ');
-
-    let tokenClient; let gapiInited=false; let gisInited=false;
-    function maybeEnable(){ const btn=document.getElementById('btn-signin'); if(gapiInited && gisInited) btn.disabled=false; }
-    window.addEventListener('load', () => {
-      gapi.load('client', async () => {
-        await gapi.client.init({ apiKey: API_KEY, discoveryDocs: [
-          'https://www.googleapis.com/discovery/v1/apis/drive/v3/rest',
-          'https://sheets.googleapis.com/$discovery/rest?version=v4'
-        ]});
-        gapiInited = true; maybeEnable();
-        tryAutoLoadById();
-      });
-      tokenClient = google.accounts.oauth2.initTokenClient({
-        client_id: CLIENT_ID, scope: SCOPES, callback: (resp)=>{
-          if(resp.error){console.error(resp); return;}
-          console.log('[auth] token acquired'); tryAutoLoadById();
-        }
-      });
-      gisInited = true; maybeEnable();
-    });
-    document.getElementById('btn-signin').addEventListener('click', ()=> tokenClient.requestAccessToken({ prompt: 'consent' }));
-    document.getElementById('btn-signout').addEventListener('click', ()=>{
-      const token=gapi.client.getToken(); if(token){ google.accounts.oauth2.revoke(token.access_token); gapi.client.setToken(''); console.log('[auth] signed out'); }
-    });
-
-    installConflictGuards();
-    const canvas=document.getElementById('canvas');
-    const viewer=createViewerAdapter({ canvas, bus });
+    const canvas = document.getElementById('canvas');
+    const viewer = createViewerAdapter({ canvas, bus });
+    console.log('[boot] viewer created');
 
     mountPins({ bus, store, viewer });
-    mountOverlay({ bus, store });
-    mountGrid({ bus, store });
-    mountDiagnostics({ bus, store, viewer, listSiblingImages, findOrCreateSpreadsheetInSameFolder, getGlbId: getCurrentGlbId });
+    console.log('[boot] pins mounted');
 
-    const demoImages=Array.from({length:9}).map((_,i)=>({id:String(i+1),name:'img'+(i+1)+'.jpg',thumbnailLink:'https://picsum.photos/seed/'+(i+1)+'/200/200'}));
-    bus.emit('images:update', demoImages);
+    mountMaterialUI({ bus, viewer });
+    console.log('[boot] material UI mounted');
 
-    const statusEl=document.getElementById('status');
-    const setStatus=(s)=> statusEl.textContent=s;
-    bus.on('viewer:mode',(m)=> setStatus('mode: '+m));
-    bus.on('viewer:resized',({w,h,mode})=> setStatus(`mode:${mode} ${w}x${h}`));
-    bus.on('model:loading',(name)=> setStatus('loading: '+name));
-    bus.on('model:loaded', async (_name)=>{
-      setStatus('loaded');
-      const glbId = getCurrentGlbId() || new URLSearchParams(location.search).get('id');
-      if (glbId && window.gapi?.client){
-        try{ const imgs=await listSiblingImages(glbId); if(imgs.length) bus.emit('images:update', imgs); }catch(e){ console.warn('[drive] list images failed', e); }
-        try{ createAutosave({ bus, store, findOrCreateSpreadsheetInSameFolder, glbFileId: glbId }); }catch(e){ console.warn('[sheets] autosave init failed', e); }
-        try{
-          const ssId=await findOrCreateSpreadsheetInSameFolder(glbId);
-          const pins=await loadPinsFromSheet(ssId);
-          if(pins && pins.length){ bus.emit('pins:create', pins); }
-        }catch(e){ console.warn('[sheets] restore failed', e); }
-      }
-    });
-    bus.on('model:error',(msg)=> setStatus('error: '+msg));
-
+    // Buttons
     document.getElementById('btn-persp').addEventListener('click', ()=> viewer.setOrtho(false));
     document.getElementById('btn-ortho').addEventListener('click', ()=> viewer.setOrtho(true));
-
-    async function ensureToken(){
-      const t=gapi?.client?.getToken?.();
-      if(t&&t.access_token) return t.access_token;
-      if(!tokenClient) throw new Error('no token client');
-      return await new Promise((resolve,reject)=>{
-        const prev=tokenClient.callback;
-        tokenClient.callback=(resp)=>{
-          try{
-            if(resp && !resp.error){ const tk=gapi?.client?.getToken?.(); resolve(tk?.access_token||''); }
-            else reject(new Error(resp?.error||'token error'));
-          }finally{ tokenClient.callback=prev; }
-        };
-        tokenClient.requestAccessToken({ prompt:'' });
-      });
-    }
-
-    document.getElementById('btn-load-url').addEventListener('click', async ()=>{
-      const raw=(document.getElementById('glb-url').value||'').trim();
-      if(!raw) return;
-      const driveMatch=raw.match(/(?:\/d\/|id=)([a-zA-Z0-9_-]{20,})/);
-      const looksId=/^[a-zA-Z0-9_-]{20,}$/.test(raw);
-      const fileId=driveMatch?driveMatch[1]:(looksId?raw:null);
-
-      if(fileId){
-        if(!window.gapi?.client){ setStatus('gapi not ready. Please wait or reload.'); return; }
-        try{ await ensureToken(); }catch(e){ setStatus('Sign in required for Drive file. Click "Sign in" and retry.'); return; }
-        try{
-          currentGlbId=fileId;
-          setStatus('downloading from Drive...');
-          const blob=await downloadGlbBlob(fileId);
-          const name=await getName(fileId);
-          viewer.loadBlob(blob,name);
-          return;
-        }catch(e){ console.error('[LoadURL] drive blob failed after token', e); setStatus('Download failed (Drive). See console.'); return; }
-      }
-      viewer.loadURL(raw);
+    document.getElementById('file').addEventListener('change', (e)=>{
+      const f = e.target.files?.[0];
+      if (f) viewer.loadFile(f);
     });
-    document.getElementById('file').addEventListener('change',(e)=>{ const f=e.target.files?.[0]; if(f) viewer.loadFile(f); });
-    document.getElementById('fab').addEventListener('click',()=> bus.emit('grid:toggle'));
 
-    async function tryAutoLoadById(){
-      const params=new URLSearchParams(location.search);
-      const glbId=params.get('id');
-      if(!glbId || !window.gapi?.client) return;
-      try{
-        currentGlbId=glbId;
-        setStatus('downloading from Drive...');
-        const blob=await downloadGlbBlob(glbId);
-        const name=await getName(glbId);
-        viewer.loadBlob(blob,name);
-      }catch(e){
-        console.error('[Drive GLB]', e);
-        setStatus('error: failed to download GLB from Drive');
-      }
-    }
+    // Status
+    const statusEl = document.getElementById('status');
+    const setStatus = (s) => statusEl.textContent = s;
+    bus.on('viewer:mode', (m)=> setStatus('mode: '+m));
+    bus.on('viewer:resized', ({w,h,mode})=> setStatus(`mode:${mode} ${w}x${h}`));
+    bus.on('model:loading', (u)=> setStatus('loading: '+u));
+    bus.on('model:loaded', ()=> setStatus('loaded'));
+    bus.on('model:error', (e)=> setStatus('error:'+e));
+
+    console.log('[boot] ready');
   </script>
 </body>
 </html>

@@ -1,1 +1,8 @@
-export const store = { state:{}, set(o){Object.assign(this.state,o);} };
+export const store = {
+  state: {
+    pins: [],
+    selected: null,
+    images: []
+  },
+  set(patch) { Object.assign(this.state, patch); }
+};
