@@ -1,15 +1,13 @@
-// features/pins.js
+// features/pins.js (v6.5.4-1)
 import * as THREE from 'three';
-import { bus } from '../core/bus.js';
-import { store } from '../core/store.js';
 
-export function mountPins({ bus, store, viewer }){
+export function mountPins({ bus, store, viewer }) {
   if (!store.state.pins) store.set({ pins: [] });
 
   const pinMap = new Map();
   let idSeq = 0;
 
-  function setSelected(id){
+  function setSelected(id) {
     store.set({ selected: id });
     bus.emit('pin:selected', id);
     for (const [pid, rec] of pinMap) {
@@ -17,21 +15,25 @@ export function mountPins({ bus, store, viewer }){
     }
   }
 
-  function addPinAt(pos, caption={}, idOverride=null){
-    const id = idOverride || ('pin_' + (++idSeq));
-    const sprite = new THREE.Mesh(
-      new THREE.SphereGeometry(0.01, 12, 12),
-      new THREE.MeshBasicMaterial({ color: 0xff3366 })
-    );
-    sprite.position.copy(pos);
+  function createPinSprite() {
+    const g = new THREE.SphereGeometry(0.01, 12, 12);
+    const m = new THREE.MeshBasicMaterial({ color: 0xff3366 });
+    return new THREE.Mesh(g, m);
+  }
 
-    const head = pos.clone().add(new THREE.Vector3(0, 0.05, 0));
-    const line = new THREE.Line(
-      new THREE.BufferGeometry().setFromPoints([pos.clone(), head]),
-      new THREE.LineBasicMaterial({ color: 0xff3366 })
-    );
+  function createLeaderLine(from) {
+    const head = from.clone().add(new THREE.Vector3(0, 0.05, 0));
+    const geo = new THREE.BufferGeometry().setFromPoints([from.clone(), head]);
+    const mat = new THREE.LineBasicMaterial({ color: 0xff3366 });
+    const line = new THREE.Line(geo, mat);
     line.visible = false;
+    return line;
+  }
 
+  function addPinAt(pos, caption = {}, idOverride = null) {
+    const id = idOverride || ('pin_' + (++idSeq));
+    const sprite = createPinSprite(); sprite.position.copy(pos);
+    const line = createLeaderLine(pos);
     viewer.scene.add(sprite); viewer.scene.add(line);
 
     const pin = {
@@ -50,10 +52,11 @@ export function mountPins({ bus, store, viewer }){
     return id;
   }
 
-  viewer.canvas.addEventListener('click', (e) => {
+  const canvas = viewer.canvas;
+  canvas.addEventListener('click', (e) => {
     const hit = viewer.raycastAt(e.clientX, e.clientY);
 
-    if (e.shiftKey || e.altKey) { // 追加
+    if (e.shiftKey || e.altKey) {
       if (hit) {
         const p = hit.point.clone ? hit.point.clone() : new THREE.Vector3(hit.point.x, hit.point.y, hit.point.z);
         const id = addPinAt(p, {});
@@ -62,7 +65,7 @@ export function mountPins({ bus, store, viewer }){
       return;
     }
 
-    if (hit) { // 既存ピンに最も近いものを選択
+    if (hit) {
       let best = null, bestD = Infinity;
       for (const [pid, rec] of pinMap) {
         const d = rec.sprite.position.distanceTo(hit.point);
@@ -74,7 +77,6 @@ export function mountPins({ bus, store, viewer }){
     }
   }, { capture: true });
 
-  // 復元
   bus.on('pins:create', (payload) => {
     const list = Array.isArray(payload) ? payload : [payload];
     list.forEach(p => {

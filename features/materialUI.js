@@ -1,9 +1,12 @@
-// features/materialUI.js (v6.5.4 safer)
+// features/materialUI.js (v6.5.4-1)
 import * as THREE from 'three';
+
+let MAT_KEY_SEQ = 1;
 
 export function mountMaterialUI({ bus, viewer }) {
   const side = document.getElementById('side');
   if (!side) return;
+
   const wrap = document.createElement('div');
   wrap.id = 'material-ui';
   wrap.style.marginTop = '12px';
@@ -14,13 +17,16 @@ export function mountMaterialUI({ bus, viewer }) {
         <span style="font-size:12px;color:#aaa;">Target Material</span>
         <select id="mat-target" style="padding:6px;border:1px solid #333;border-radius:8px;background:#111;color:#fff;"></select>
       </label>
+
       <div style="display:grid;gap:6px;">
         <label>Hue <input id="mat-h" type="range" min="0" max="360" value="0"></label>
         <label>Saturation <input id="mat-s" type="range" min="0" max="100" value="100"></label>
         <label>Lightness <input id="mat-l" type="range" min="0" max="100" value="50"></label>
       </div>
+
       <label>Opacity <input id="mat-o" type="range" min="0" max="1" step="0.01" value="1"></label>
       <label><input id="mat-unlit" type="checkbox"> Unlit (ignore lights)</label>
+
       <div>
         <label><input id="mat-w2a" type="checkbox"> White → Transparent</label>
         <input id="mat-th" type="range" min="0.85" max="1" step="0.01" value="0.98">
@@ -38,44 +44,61 @@ export function mountMaterialUI({ bus, viewer }) {
   const w2a = wrap.querySelector('#mat-w2a');
   const th = wrap.querySelector('#mat-th');
 
-  const matMap = new Map();
+  const bucket = new Map();
+
+  function ensureMatKey(m) {
+    if (!m.userData) m.userData = {};
+    if (!m.userData.__matKey) m.userData.__matKey = `mk_${MAT_KEY_SEQ++}`;
+    return m.userData.__matKey;
+  }
 
   function copyCommonProps(from, to) {
-    const props = ['map','alphaMap','aoMap','metalnessMap','roughnessMap','normalMap','emissiveMap',
-                   'envMap','side','transparent','opacity','alphaTest','depthWrite','depthTest','blending','colorWrite'];
+    const props = [
+      'map','alphaMap','aoMap','metalnessMap','roughnessMap','normalMap','emissiveMap',
+      'envMap','side','transparent','opacity','alphaTest','depthWrite','depthTest','blending','colorWrite'
+    ];
     props.forEach(k => { if (k in from) try { to[k] = from[k]; } catch {} });
     if (from.color && to.color) to.color.copy(from.color);
     to.needsUpdate = true;
   }
 
   function collectMaterials() {
-    matMap.clear(); sel.innerHTML = '';
-    const seen = new Set();
+    bucket.clear();
+    sel.innerHTML = '';
+    const added = new Set();
+
     viewer.scene.traverse(obj => {
-      if (obj && (obj.isMesh || obj.isSkinnedMesh) && obj.material) {
-        const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
-        mats.forEach(m => {
-          if (!m || !m.uuid || seen.has(m.uuid)) return;
-          seen.add(m.uuid);
+      if (!(obj && (obj.isMesh || obj.isSkinnedMesh) && obj.material)) return;
+      const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+      mats.forEach(m => {
+        if (!m) return;
+        const key = ensureMatKey(m);
+        if (!bucket.has(key)) bucket.set(key, new Set());
+        bucket.get(key).add(m);
+        if (!added.has(key)) {
+          added.add(key);
           const opt = document.createElement('option');
-          opt.value = m.uuid;
+          opt.value = key;
           opt.textContent = `${m.name || 'Material'} • ${m.type}`;
           sel.appendChild(opt);
-          matMap.set(m.uuid, m);
-        });
-      }
+        }
+      });
     });
-    if (sel.options.length>0) syncSlidersFrom(matMap.get(sel.value));
+
+    if (sel.options.length > 0) syncUIFromFirstOf(sel.value);
   }
 
-  function toUnlit(mat) {
-    if (mat instanceof THREE.MeshBasicMaterial) return mat;
-    const b = new THREE.MeshBasicMaterial();
-    b.userData.__origMat = mat;
-    copyCommonProps(mat,b);
-    return b;
+  function toUnlit(src) {
+    if (src instanceof THREE.MeshBasicMaterial) return src;
+    const basic = new THREE.MeshBasicMaterial();
+    basic.userData = { ...(src.userData||{}), __origMat: src, __matKey: src.userData.__matKey };
+    copyCommonProps(src, basic);
+    return basic;
   }
-  const fromUnlit = (mat) => mat?.userData?.__origMat || mat;
+
+  function fromUnlit(src) {
+    return src?.userData?.__origMat || src;
+  }
 
   function applyWhiteToAlpha(mat, enabled, threshold) {
     const prev = !!mat.userData.__w2a;
@@ -98,54 +121,75 @@ export function mountMaterialUI({ bus, viewer }) {
     mat.needsUpdate = true;
   }
 
-  function syncSlidersFrom(mat) {
-    if (!mat) return;
-    const c = mat.color ? mat.color.clone() : new THREE.Color(1,1,1);
+  function syncUIFromFirstOf(matKey) {
+    const set = bucket.get(matKey);
+    if (!set || set.size === 0) return;
+    const m = [...set][0];
+
+    const c = m.color ? m.color.clone() : new THREE.Color(1,1,1);
     const hsl = {}; c.getHSL(hsl);
-    h.value = Math.round(hsl.h*360);
-    s.value = Math.round(hsl.s*100);
-    l.value = Math.round(hsl.l*100);
-    o.value = (typeof mat.opacity === 'number') ? mat.opacity : 1;
-    unlit.checked = (mat instanceof THREE.MeshBasicMaterial) && !!mat.userData.__origMat;
-    w2a.checked = !!mat.userData.__w2a;
+    h.value = Math.round(hsl.h * 360);
+    s.value = Math.round(hsl.s * 100);
+    l.value = Math.round(hsl.l * 100);
+    o.value = (typeof m.opacity === 'number') ? m.opacity : 1;
+    unlit.checked = (m instanceof THREE.MeshBasicMaterial) && !!m.userData.__origMat;
+    w2a.checked = !!m.userData.__w2a;
   }
 
   function applyAll() {
-    const id = sel.value;
-    if (!id) return;
+    const key = sel.value;
+    if (!key) return;
+
     const want = {
       h: parseFloat(h.value)/360,
       s: parseFloat(s.value)/100,
       l: parseFloat(l.value)/100,
       o: parseFloat(o.value),
       un: !!unlit.checked,
-      w: !!w2a.checked,
-      t: parseFloat(th.value)
+      w:  !!w2a.checked,
+      t:  parseFloat(th.value)
     };
+
     viewer.scene.traverse(obj => {
       if (!(obj && (obj.isMesh || obj.isSkinnedMesh) && obj.material)) return;
       const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
       let changed = false;
+
       const newMats = mats.map(m => {
-        if (!m || m.uuid !== id) return m;
+        if (!m || ensureMatKey(m) !== key) return m;
+
         let target = m;
-        if (want.un) target = toUnlit(m);
-        else if (m instanceof THREE.MeshBasicMaterial) target = fromUnlit(m);
+        if (want.un) {
+          target = toUnlit(m);
+        } else if (m instanceof THREE.MeshBasicMaterial) {
+          target = fromUnlit(m);
+        }
+
         if (target.color?.setHSL) target.color.setHSL(want.h, want.s, want.l);
-        if (typeof want.o==='number' && !Number.isNaN(want.o)) {
-          target.transparent = true; target.opacity = want.o;
+        if (typeof want.o === 'number' && !Number.isNaN(want.o)) {
+          target.transparent = true;
+          target.opacity = want.o;
         }
         applyWhiteToAlpha(target, want.w, want.t);
-        changed = changed || (target !== m);
+
+        ensureMatKey(target);
+        if (target !== m) changed = true;
         return target;
       });
+
       if (changed) obj.material = Array.isArray(obj.material) ? newMats : newMats[0];
     });
+
+    collectMaterials();
+    sel.value = key;
+    syncUIFromFirstOf(key);
   }
 
-  [sel,h,s,l,o,unlit,w2a,th].forEach(el => el.addEventListener('input', applyAll));
-  sel.addEventListener('change', () => { syncSlidersFrom(matMap.get(sel.value)); applyAll(); });
-  bus.on('model:loaded', () => { collectMaterials(); });
+  [h,s,l,o,unlit,w2a,th].forEach(el => el.addEventListener('input', applyAll));
+  sel.addEventListener('change', () => { syncUIFromFirstOf(sel.value); });
+
+  bus.on('model:loaded', collectMaterials);
+
   wrap.style.display = 'block';
   collectMaterials();
 }
