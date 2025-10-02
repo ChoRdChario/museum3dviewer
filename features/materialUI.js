@@ -1,4 +1,4 @@
-// features/materialUI.js (v6.5.5) — white→transparent(uniform), unlit toggle, double-sided toggle, render-order stabilization
+// features/materialUI.js (v6.5.5-1) — fix: onBeforeCompile null → noop to avoid customProgramCacheKey crash
 import * as THREE from 'three';
 
 let MAT_KEY_SEQ = 1;
@@ -52,7 +52,6 @@ export function mountMaterialUI({ bus, viewer }) {
   const w2a = wrap.querySelector('#mat-w2a');
   const th = wrap.querySelector('#mat-th');
 
-  // matKey -> Set(material instances)
   const bucket = new Map();
 
   function ensureMatKey(m) {
@@ -68,6 +67,11 @@ export function mountMaterialUI({ bus, viewer }) {
     ];
     props.forEach(k => { if (k in from) try { to[k] = from[k]; } catch {} });
     if (from.color && to.color) to.color.copy(from.color);
+    if (from.userData?.__w2a) {
+      ensureWhiteUniform(to, from.userData.__whiteUniform?.value ?? 0.98);
+    } else {
+      to.onBeforeCompile = (/*shader*/)=>{}; // null禁止
+    }
     to.needsUpdate = true;
   }
 
@@ -94,7 +98,6 @@ export function mountMaterialUI({ bus, viewer }) {
     if (sel.options.length > 0) syncUIFromFirstOf(sel.value);
   }
 
-  // ---- Unlit 切替 ----
   function toUnlit(src) {
     if (src instanceof THREE.MeshBasicMaterial) return src;
     const basic = new THREE.MeshBasicMaterial();
@@ -104,7 +107,6 @@ export function mountMaterialUI({ bus, viewer }) {
   }
   const fromUnlit = (src) => src?.userData?.__origMat || src;
 
-  // ---- White→Transparent: uniform 方式 ----
   function ensureWhiteUniform(mat, threshold) {
     mat.userData ||= {};
     mat.userData.__w2a = true;
@@ -120,9 +122,7 @@ export function mountMaterialUI({ bus, viewer }) {
         `${code}
          #include <dithering_fragment>`
       );
-      mat.userData.__shaderPatched = true;
     };
-    // 透過描画の安定化
     mat.transparent = true;
     mat.depthWrite = false;
     mat.depthTest = true;
@@ -131,20 +131,19 @@ export function mountMaterialUI({ bus, viewer }) {
     mat.needsUpdate = true;
   }
   function disableWhite(mat) {
-    if (!mat?.userData) return;
+    if (!mat) return;
+    mat.userData ||= {};
     mat.userData.__w2a = false;
-    mat.onBeforeCompile = null;
+    mat.onBeforeCompile = (/*shader*/)=>{}; // ★ no-op
     mat.needsUpdate = true;
     if (!mat.transparent) mat.depthWrite = true;
   }
 
-  // ---- side 切替（両面描画） ----
   function applySide(mat, isDouble) {
     mat.side = isDouble ? THREE.DoubleSide : THREE.FrontSide;
     mat.needsUpdate = true;
   }
 
-  // 対象メッシュを最後に描く（透過安定化）
   function bumpRenderOrderForMatKey(matKey, order = 2) {
     viewer.scene.traverse(obj => {
       if (!(obj?.isMesh || obj?.isSkinnedMesh)) return;
@@ -203,7 +202,6 @@ export function mountMaterialUI({ bus, viewer }) {
           target.transparent = (want.o < 1) || want.w;
           target.opacity = want.o;
         }
-        // 両面描画
         applySide(target, want.ds);
 
         if (want.w) {
@@ -221,11 +219,7 @@ export function mountMaterialUI({ bus, viewer }) {
       if (changed) obj.material = Array.isArray(obj.material) ? newMats : newMats[0];
     });
 
-    bumpRenderOrderForMatKey(
-      key,
-      (w2a.checked || parseFloat(o.value) < 1) ? 2 : 0
-    );
-
+    bumpRenderOrderForMatKey(key, (w2a.checked || parseFloat(o.value) < 1) ? 2 : 0);
     syncUIFromFirstOf(key);
   }
 
