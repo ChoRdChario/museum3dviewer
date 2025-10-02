@@ -1,4 +1,4 @@
-// features/materialUI.js (v6.5.5-4) see chat for details
+// features/materialUI.js (v6.5.5-5) — fixes uWhiteThreshold undeclared (uniform decl), stable toggles
 import * as THREE from 'three';
 
 let MAT_KEY_SEQ = 1;
@@ -99,28 +99,43 @@ export function mountMaterialUI({ bus, viewer }) {
   }
   const fromUnlit = (src) => src?.userData?.__origMat || src;
 
-  const LMY_W2A_START = '/*__LMY_W2A_START__*/';
-  const LMY_W2A_END   = '/*__LMY_W2A_END__*/';
+  // === White→Transparent injection ===
+  const TAG_START = '/*__LMY_W2A_START__*/';
+  const TAG_END   = '/*__LMY_W2A_END__*/';
+  const TAG_UDECL_S = '/*__LMY_UDECL_START__*/';
+  const TAG_UDECL_E = '/*__LMY_UDECL_END__*/';
+
+  function ensureUniformDecl(shader) {
+    if (/uniform\s+float\s+uWhiteThreshold\s*;/.test(shader.fragmentShader)) return;
+    shader.fragmentShader = shader.fragmentShader.replace(new RegExp(`${TAG_UDECL_S}[\s\S]*?${TAG_UDECL_E}`,'g'), '');
+    shader.fragmentShader = shader.fragmentShader.replace(
+      /void\s+main\s*\(/,
+      `${TAG_UDECL_S}\nuniform float uWhiteThreshold;\n${TAG_UDECL_E}\nvoid main(`
+    );
+  }
+
   function patchShaderIdempotent(shader, uniformRef) {
-    shader.fragmentShader = shader.fragmentShader.replace(new RegExp(`${LMY_W2A_START}[\s\S]*?${LMY_W2A_END}`,'g'), '');
+    shader.fragmentShader = shader.fragmentShader.replace(new RegExp(`${TAG_START}[\s\S]*?${TAG_END}`,'g'), '');
+    ensureUniformDecl(shader);
     const anchorAlpha = '#include <alphatest_fragment>';
     const anchorDither = '#include <dithering_fragment>';
     const block = `
-${LMY_W2A_START}
+${TAG_START}
   float lum = dot(diffuseColor.rgb, vec3(0.299, 0.587, 0.114));
   if (lum >= uWhiteThreshold) diffuseColor.a = 0.0;
-${LMY_W2A_END}
+${TAG_END}
 `.trim();
     if (shader.fragmentShader.includes(anchorAlpha)) shader.fragmentShader = shader.fragmentShader.replace(anchorAlpha, `${block}\n${anchorAlpha}`);
     else if (shader.fragmentShader.includes(anchorDither)) shader.fragmentShader = shader.fragmentShader.replace(anchorDither, `${block}\n${anchorDither}`);
     else shader.fragmentShader += `\n${block}\n`;
     shader.uniforms.uWhiteThreshold = uniformRef;
   }
+
   function ensureWhiteUniform(mat, threshold) {
     mat.userData ||= {};
     mat.userData.__w2a = true;
     mat.userData.__whiteUniform = mat.userData.__whiteUniform || { value: threshold };
-    mat.onBeforeCompile = (shader) => patchShaderIdempotent(shader, mat.userData.__whiteUniform);
+    mat.onBeforeCompile = (shader) => { patchShaderIdempotent(shader, mat.userData.__whiteUniform); };
     mat.transparent = true;
     mat.depthWrite = false;
     mat.depthTest = true;
@@ -151,7 +166,7 @@ ${LMY_W2A_END}
     const set = bucket.get(matKey);
     if (!set || set.size === 0) return;
     const m = [...set][0];
-    suppressSync = TrueLike();
+    suppressSync = true;
     try {
       const c = m.color ? m.color.clone() : new THREE.Color(1,1,1);
       const hsl = {}; c.getHSL(hsl);
@@ -168,7 +183,6 @@ ${LMY_W2A_END}
       setTimeout(()=>{ suppressSync = false; }, 0);
     }
   }
-  function TrueLike(){ return true; } // trivial helper to avoid minifier issues
 
   function applyAll() {
     if (suppressSync) return;
