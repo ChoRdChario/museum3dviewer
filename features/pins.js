@@ -72,7 +72,7 @@ export function mountPins({ bus, store, viewer }){
     const list = Array.isArray(payload) ? payload : [payload];
     list.forEach(p=>{
       const pos = new THREE.Vector3(Number(p.x)||0, Number(p.y)||0, Number(p.z)||0);
-      const id = addPinAt(pos, {title:p.title, body:p.body, img:p.imageUrl}, p.id||null);
+      const id = addPinAt(pos, {title:p.title, body:p.body, img:p.imageUrl, imageId:p.imageId}, p.id||null);
       // keep idSeq in sync if ids came from sheet like "pin_12"
       const m = String(id).match(/(\d+)$/); if(m){ idSeq = Math.max(idSeq, parseInt(m[1],10)); }
     });
