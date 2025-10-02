@@ -4,37 +4,47 @@ export function mountOverlay({bus,store}){
   const b=document.getElementById('ov-b');
   const i=document.getElementById('ov-i');
 
+  let revokePrev = null;
+
   async function resolveImageIfNeeded(caption){
     try{
-      const hasBlob = typeof caption.img==='string' && caption.img.startsWith('blob:');
-      const missing = !caption.img || hasBlob;
-      if(missing && caption.imageId && window.gapi?.client){
-        // Re-download from Drive and create a fresh object URL
-        const mod = await import('../app/drive_images.js');
-        const blob = await mod.downloadBlob(caption.imageId);
-        const url = URL.createObjectURL(blob);
-        caption.img = url; // mutate for this session
-        return url;
+      if (caption.img && typeof caption.img==='string' && !caption.img.startsWith('blob:')) return caption.img;
+      if (caption.imageId && window.gapi?.client){
+        const { getFileMeta, downloadBlob, ensureHeic2Any } = await import('../app/drive_images.js');
+        const meta = await getFileMeta(caption.imageId);
+        const blob = await downloadBlob(caption.imageId);
+        let outUrl='';
+        if (/heic|heif/i.test(meta?.mimeType||'')) {
+          try{
+            await ensureHeic2Any();
+            const jpeg = await window.heic2any({ blob, toType:'image/jpeg', quality:0.9 });
+            outUrl = URL.createObjectURL(jpeg);
+          }catch(convErr){
+            console.warn('[overlay] HEIC convert failed, fallback to thumbnail', convErr);
+            outUrl = meta?.thumbnailLink || '';
+          }
+        }else{
+          outUrl = URL.createObjectURL(blob);
+        }
+        if (revokePrev){ try{ URL.revokeObjectURL(revokePrev); }catch(_){} }
+        if (outUrl && outUrl.startsWith('blob:')) revokePrev = outUrl;
+        caption.img = outUrl;
+        caption.imageMime = meta?.mimeType;
+        caption.thumbnailLink = meta?.thumbnailLink || caption.thumbnailLink;
+        return outUrl;
       }
     }catch(e){
-      console.warn('[overlay] resolveImageIfNeeded failed', e);
+      console.warn('[overlay] resolveImageIfNeeded', e);
     }
-    return caption.img || '';
+    return caption.thumbnailLink || caption.img || '';
   }
 
-  function _showSync(c){
-    t.textContent=c.title||'';
-    b.textContent=c.body||'';
-  }
+  function _showSync(c){ t.textContent=c.title||''; b.textContent=c.body||''; }
 
   async function show(c){
     _showSync(c);
     const url = await resolveImageIfNeeded(c);
-    if(url){
-      i.src=url; i.style.display='block';
-    }else{
-      i.style.display='none';
-    }
+    if(url){ i.src=url; i.style.display='block'; } else { i.style.display='none'; }
     el.style.display='block';
   }
   function hide(){ el.style.display='none'; }

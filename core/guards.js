@@ -1,1 +1,11 @@
-export function installConflictGuards(){const seen=new WeakSet();const orig=window.addEventListener;window.addEventListener=function(t,fn,opt){if(t==='resize'&&seen.has(fn))return;if(t==='resize')seen.add(fn);return orig.call(window,t,fn,opt);};}
+export function installConflictGuards(){
+  const seen=new WeakSet();
+  const orig=window.addEventListener;
+  window.addEventListener=function(type,fn,opt){
+    if(type==='resize'){
+      if(seen.has(fn)) return;
+      seen.add(fn);
+    }
+    return orig.call(window,type,fn,opt);
+  };
+}

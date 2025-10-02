@@ -8,7 +8,7 @@ export function mountPins({ bus, store, viewer }){
     store.set({selected:id});
     bus.emit('pin:selected',id);
     for(const[pid,rec]of pinMap){
-      if(rec.line) rec.line.visible = (pid===id);
+      if(rec.line) rec.line.visible=(pid===id);
     }
   }
 
@@ -28,27 +28,24 @@ export function mountPins({ bus, store, viewer }){
   }
 
   function addPinAt(pos, caption={}, idOverride=null){
-    const id = idOverride || ('pin_'+(++idSeq));
-    const sprite=createPinSprite();
-    sprite.position.copy(pos);
+    const id=idOverride||('pin_'+(++idSeq));
+    const sprite=createPinSprite(); sprite.position.copy(pos);
     const line=createLeaderLine(pos);
-    viewer.scene.add(sprite);
-    viewer.scene.add(line);
-    const pin={id,x:pos.x,y:pos.y,z:pos.z,caption:{title:caption.title||'新規キャプション',body:caption.body||'',img:caption.img||''}};
+    viewer.scene.add(sprite); viewer.scene.add(line);
+    const pin={id,x:pos.x,y:pos.y,z:pos.z,caption:{title:caption.title||'新規キャプション',body:caption.body||'',img:caption.img||'',imageId:caption.imageId||'',thumbnailLink:caption.thumbnailLink||''}};
     store.state.pins.push(pin);
     pinMap.set(id,{sprite,line});
-    bus.emit('pin:added', pin);
+    bus.emit('pin:added',pin);
     return id;
   }
 
-  // Mouse interactions
   const canvas=viewer.canvas;
   canvas.addEventListener('click',(e)=>{
     const hit=viewer.raycastAt(e.clientX,e.clientY);
     if(e.shiftKey||e.altKey){
       if(hit){
-        const pos = hit.point.clone ? hit.point.clone() : new THREE.Vector3(hit.point.x,hit.point.y,hit.point.z);
-        const id = addPinAt(pos, {});
+        const p = hit.point.clone ? hit.point.clone() : new THREE.Vector3(hit.point.x,hit.point.y,hit.point.z);
+        const id=addPinAt(p,{});
         setSelected(id);
       }
       return;
@@ -66,15 +63,13 @@ export function mountPins({ bus, store, viewer }){
     }
   }, {capture:true});
 
-  // Programmatic creation from external modules (e.g., Sheets restore)
-  bus.on('pins:create', (payload)=>{
-    // payload can be a single pin or an array
-    const list = Array.isArray(payload) ? payload : [payload];
+  // Programmatic creation (restore)
+  bus.on('pins:create',(payload)=>{
+    const list=Array.isArray(payload)?payload:[payload];
     list.forEach(p=>{
-      const pos = new THREE.Vector3(Number(p.x)||0, Number(p.y)||0, Number(p.z)||0);
-      const id = addPinAt(pos, {title:p.title, body:p.body, img:p.imageUrl, imageId:p.imageId}, p.id||null);
-      // keep idSeq in sync if ids came from sheet like "pin_12"
-      const m = String(id).match(/(\d+)$/); if(m){ idSeq = Math.max(idSeq, parseInt(m[1],10)); }
+      const pos=new THREE.Vector3(Number(p.x)||0,Number(p.y)||0,Number(p.z)||0);
+      const id=addPinAt(pos,{title:p.title,body:p.body,img:p.imageUrl,imageId:p.imageId,thumbnailLink:p.thumbnailLink},p.id||null);
+      const m=String(id).match(/(\d+)$/); if(m){ const n=parseInt(m[1],10); if(n>idSeq) idSeq=n; }
     });
   });
 }

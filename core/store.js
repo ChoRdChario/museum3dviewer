@@ -1,1 +1,5 @@
-export const store={state:{pins:[],selected:null,images:[]},set(p){Object.assign(this.state,p);},get(){return this.state;}};
+export const store={
+  state:{ pins:[], selected:null, images:[] },
+  set(p){ Object.assign(this.state,p); },
+  get(){ return this.state; }
+};
