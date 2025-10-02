@@ -1,7 +1,9 @@
-// features/materialUI.js (v6.5.5-3) — white→transparent injected before <alphatest_fragment> (safer), idempotent & noop onBeforeCompile
+// features/materialUI.js (v6.5.5-4) see chat for details
 import * as THREE from 'three';
 
 let MAT_KEY_SEQ = 1;
+let suppressSync = false;
+const HSL_APPLIED = new Map();
 
 export function mountMaterialUI({ bus, viewer }) {
   const sidePane = document.getElementById('side');
@@ -17,20 +19,16 @@ export function mountMaterialUI({ bus, viewer }) {
         <span style="font-size:12px;color:#aaa;">Target Material</span>
         <select id="mat-target" style="padding:6px;border:1px solid #333;border-radius:8px;background:#111;color:#fff;"></select>
       </label>
-
       <div style="display:grid;gap:6px;">
         <label>Hue <input id="mat-h" type="range" min="0" max="360" value="0"></label>
         <label>Saturation <input id="mat-s" type="range" min="0" max="100" value="100"></label>
         <label>Lightness <input id="mat-l" type="range" min="0" max="100" value="50"></label>
       </div>
-
       <label>Opacity <input id="mat-o" type="range" min="0" max="1" step="0.01" value="1"></label>
-
       <div style="display:grid;gap:6px;">
         <label><input id="mat-unlit" type="checkbox"> Unlit (ignore lights)</label>
         <label><input id="mat-doubleside" type="checkbox"> Double-sided (draw backfaces)</label>
       </div>
-
       <div>
         <label style="display:flex;align-items:center;gap:8px">
           <input id="mat-w2a" type="checkbox"> White → Transparent
@@ -61,17 +59,11 @@ export function mountMaterialUI({ bus, viewer }) {
   }
 
   function copyCommonProps(from, to) {
-    const props = [
-      'map','alphaMap','aoMap','metalnessMap','roughnessMap','normalMap','emissiveMap',
-      'envMap','side','transparent','opacity','alphaTest','depthWrite','depthTest','blending','colorWrite'
-    ];
+    const props = ['map','alphaMap','aoMap','metalnessMap','roughnessMap','normalMap','emissiveMap','envMap','side','transparent','opacity','alphaTest','depthWrite','depthTest','blending','colorWrite'];
     props.forEach(k => { if (k in from) try { to[k] = from[k]; } catch {} });
     if (from.color && to.color) to.color.copy(from.color);
-    if (from.userData?.__w2a) {
-      ensureWhiteUniform(to, from.userData.__whiteUniform?.value ?? 0.98);
-    } else {
-      to.onBeforeCompile = () => {};
-    }
+    if (from.userData?.__w2a) ensureWhiteUniform(to, from.userData.__whiteUniform?.value ?? 0.98);
+    else to.onBeforeCompile = ()=>{};
     to.needsUpdate = true;
   }
 
@@ -109,38 +101,26 @@ export function mountMaterialUI({ bus, viewer }) {
 
   const LMY_W2A_START = '/*__LMY_W2A_START__*/';
   const LMY_W2A_END   = '/*__LMY_W2A_END__*/';
-
   function patchShaderIdempotent(shader, uniformRef) {
-    shader.fragmentShader = shader.fragmentShader
-      .replace(new RegExp(`${LMY_W2A_START}[\s\S]*?${LMY_W2A_END}`,'g'), '');
-
+    shader.fragmentShader = shader.fragmentShader.replace(new RegExp(`${LMY_W2A_START}[\s\S]*?${LMY_W2A_END}`,'g'), '');
     const anchorAlpha = '#include <alphatest_fragment>';
     const anchorDither = '#include <dithering_fragment>';
     const block = `
 ${LMY_W2A_START}
-  // LociMyu white→alpha
   float lum = dot(diffuseColor.rgb, vec3(0.299, 0.587, 0.114));
   if (lum >= uWhiteThreshold) diffuseColor.a = 0.0;
 ${LMY_W2A_END}
 `.trim();
-
-    if (shader.fragmentShader.includes(anchorAlpha)) {
-      shader.fragmentShader = shader.fragmentShader.replace(anchorAlpha, `${block}\n${anchorAlpha}`);
-    } else if (shader.fragmentShader.includes(anchorDither)) {
-      shader.fragmentShader = shader.fragmentShader.replace(anchorDither, `${block}\n${anchorDither}`);
-    } else {
-      shader.fragmentShader += `\n${block}\n`;
-    }
+    if (shader.fragmentShader.includes(anchorAlpha)) shader.fragmentShader = shader.fragmentShader.replace(anchorAlpha, `${block}\n${anchorAlpha}`);
+    else if (shader.fragmentShader.includes(anchorDither)) shader.fragmentShader = shader.fragmentShader.replace(anchorDither, `${block}\n${anchorDither}`);
+    else shader.fragmentShader += `\n${block}\n`;
     shader.uniforms.uWhiteThreshold = uniformRef;
   }
-
   function ensureWhiteUniform(mat, threshold) {
     mat.userData ||= {};
     mat.userData.__w2a = true;
     mat.userData.__whiteUniform = mat.userData.__whiteUniform || { value: threshold };
-    mat.onBeforeCompile = (shader) => {
-      patchShaderIdempotent(shader, mat.userData.__whiteUniform);
-    };
+    mat.onBeforeCompile = (shader) => patchShaderIdempotent(shader, mat.userData.__whiteUniform);
     mat.transparent = true;
     mat.depthWrite = false;
     mat.depthTest = true;
@@ -148,7 +128,6 @@ ${LMY_W2A_END}
     mat.blending = THREE.NormalBlending;
     mat.needsUpdate = true;
   }
-
   function disableWhite(mat) {
     if (!mat) return;
     mat.userData ||= {};
@@ -158,38 +137,41 @@ ${LMY_W2A_END}
     if (!mat.transparent) mat.depthWrite = true;
   }
 
-  function applySide(mat, isDouble) {
-    mat.side = isDouble ? THREE.DoubleSide : THREE.FrontSide;
-    mat.needsUpdate = true;
-  }
-
+  function applySide(mat, isDouble) { mat.side = isDouble ? THREE.DoubleSide : THREE.FrontSide; mat.needsUpdate = true; }
   function bumpRenderOrderForMatKey(matKey, order = 2) {
     viewer.scene.traverse(obj => {
       if (!(obj?.isMesh || obj?.isSkinnedMesh)) return;
       const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
-      if (mats.some(m => m && m.userData && m.userData.__matKey === matKey)) {
-        obj.renderOrder = order;
-      }
+      if (mats.some(m => m && m.userData && m.userData.__matKey === matKey)) obj.renderOrder = order;
     });
   }
 
   function syncUIFromFirstOf(matKey) {
+    if (!matKey) return;
     const set = bucket.get(matKey);
     if (!set || set.size === 0) return;
     const m = [...set][0];
-    const c = m.color ? m.color.clone() : new THREE.Color(1,1,1);
-    const hsl = {}; c.getHSL(hsl);
-    h.value = Math.round(hsl.h * 360);
-    s.value = Math.round(hsl.s * 100);
-    l.value = Math.round(hsl.l * 100);
-    o.value = (typeof m.opacity === 'number') ? m.opacity : 1;
-    unlit.checked = (m instanceof THREE.MeshBasicMaterial) && !!m.userData.__origMat;
-    w2a.checked = !!m.userData.__w2a;
-    if (m.userData?.__whiteUniform) th.value = m.userData.__whiteUniform.value.toFixed(3);
-    doubleside.checked = (m.side === THREE.DoubleSide);
+    suppressSync = TrueLike();
+    try {
+      const c = m.color ? m.color.clone() : new THREE.Color(1,1,1);
+      const hsl = {}; c.getHSL(hsl);
+      h.value = Math.round(hsl.h * 360);
+      s.value = Math.round(hsl.s * 100);
+      l.value = Math.round(hsl.l * 100);
+      o.value = (typeof m.opacity === 'number') ? m.opacity : 1;
+      unlit.checked = (m instanceof THREE.MeshBasicMaterial) && !!m.userData.__origMat;
+      w2a.checked = !!m.userData.__w2a;
+      if (m.userData?.__whiteUniform) th.value = Number(m.userData.__whiteUniform.value).toFixed(3);
+      doubleside.checked = (m.side === THREE.DoubleSide);
+      HSL_APPLIED.set(matKey, { h:+h.value, s:+s.value, l:+l.value });
+    } finally {
+      setTimeout(()=>{ suppressSync = false; }, 0);
+    }
   }
+  function TrueLike(){ return true; } // trivial helper to avoid minifier issues
 
   function applyAll() {
+    if (suppressSync) return;
     const key = sel.value;
     if (!key) return;
 
@@ -204,6 +186,10 @@ ${LMY_W2A_END}
       t:  parseFloat(th.value)
     };
 
+    const lastHSL = HSL_APPLIED.get(key) || null;
+    const willTint = !lastHSL || (lastHSL.h !== +h.value || lastHSL.s !== +s.value || lastHSL.l !== +l.value);
+    if (willTint) HSL_APPLIED.set(key, { h:+h.value, s:+s.value, l:+l.value });
+
     viewer.scene.traverse(obj => {
       if (!(obj && (obj.isMesh || obj.isSkinnedMesh) && obj.material)) return;
       const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
@@ -216,7 +202,8 @@ ${LMY_W2A_END}
         if (want.un) target = toUnlit(m);
         else if (m instanceof THREE.MeshBasicMaterial) target = fromUnlit(m);
 
-        if (target.color?.setHSL) target.color.setHSL(want.h, want.s, want.l);
+        if (willTint && target.color?.setHSL) target.color.setHSL(want.h, want.s, want.l);
+
         if (typeof want.o === 'number' && !Number.isNaN(want.o)) {
           target.transparent = (want.o < 1) || want.w;
           target.opacity = want.o;
@@ -239,7 +226,6 @@ ${LMY_W2A_END}
     });
 
     bumpRenderOrderForMatKey(key, (w2a.checked || parseFloat(o.value) < 1) ? 2 : 0);
-    syncUIFromFirstOf(key);
   }
 
   [h,s,l,o,unlit,doubleside,w2a,th].forEach(el => el.addEventListener('input', applyAll));
