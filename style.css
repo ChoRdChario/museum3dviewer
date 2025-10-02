@@ -1,0 +1,19 @@
+#container {
+  display: flex;
+  flex-direction: row;
+  height: 100vh;
+  overflow: hidden;
+}
+
+#viewer {
+  flex: 1;
+  min-width: 0;
+}
+
+#side {
+  width: 300px;
+  min-width: 200px;
+  max-width: 40%;
+  overflow-y: auto;
+  background: #111;
+}
