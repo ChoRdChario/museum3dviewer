@@ -1,6 +1,6 @@
-// features/auth.js  (v6.6.1)
-// Minimal Google Auth UI + helpers (GIS + GAPI).
-// Uses your provided credentials.
+// features/auth.js  (v6.6.2)
+// Visible Auth UI in two places: floating chip (top-right) + sidebar fallback (#side).
+// GIS + GAPI bootstrap included.
 
 const API_KEY = 'AIzaSyCUnTCr5yWUWPdEXST9bKP1LpgawU5rIbI';
 const CLIENT_ID = '595200751510-ncahnf7edci6b9925becn5to49r6cguv.apps.googleusercontent.com';
@@ -17,6 +17,7 @@ let gisReady = false;
 
 function loadGapiClient() {
   return new Promise((resolve, reject) => {
+    if (!window.gapi?.load) return reject(new Error('gapi not loaded'));
     gapi.load('client', async () => {
       try {
         await gapi.client.init({
@@ -34,27 +35,32 @@ function loadGapiClient() {
 }
 
 function initGis() {
+  if (!window.google?.accounts?.oauth2) return;
   tokenClient = google.accounts.oauth2.initTokenClient({
     client_id: CLIENT_ID,
     scope: SCOPES,
     callback: (response) => {
-      if (response.error) return console.warn('[auth] token error', response);
+      if (response.error) { console.warn('[auth] token error', response); return; }
       console.log('[auth] token acquired');
       document.dispatchEvent(new CustomEvent('auth:signed-in'));
-      renderAuthUi();
+      renderAuthUIs();
     }
   });
   gisReady = true;
 }
 
 export async function ensureLoaded() {
-  if (!gapiReady) await loadGapiClient();
+  if (!gapiReady) await loadGapiClient().catch(e=>{ console.warn('[auth] gapi load failed', e); });
   if (!gisReady) initGis();
 }
 
 export function signIn(prompt = 'consent') {
   if (!tokenClient) initGis();
-  tokenClient.requestAccessToken({ prompt });
+  try {
+    tokenClient?.requestAccessToken({ prompt });
+  } catch (e) {
+    console.warn('[auth] requestAccessToken failed', e);
+  }
 }
 export function signOut() {
   try {
@@ -66,51 +72,106 @@ export function signOut() {
   } catch {}
   console.log('[auth] signed out');
   document.dispatchEvent(new CustomEvent('auth:signed-out'));
-  renderAuthUi();
+  renderAuthUIs();
 }
 export function isSignedIn() {
   try { return !!gapi.client.getToken(); } catch { return false; }
 }
+
 export async function initAuthUI() {
-  renderAuthUi();
+  renderAuthUIs();
 }
 
-function renderAuthUi() {
+// ===== UI Rendering (floating + sidebar fallback) =====
+
+function renderAuthUIs() {
+  renderFloatingChip();
+  renderSidebarChip();
+}
+
+function renderFloatingChip() {
   let bar = document.getElementById('auth-bar');
   if (!bar) {
     bar = document.createElement('div');
     bar.id = 'auth-bar';
     Object.assign(bar.style, {
-      position: 'fixed', top: '12px', right: '12px', zIndex: 9999,
-      display: 'flex', gap: '8px', alignItems: 'center',
-      background: 'rgba(0,0,0,0.5)', padding: '8px 10px', borderRadius: '10px',
-      backdropFilter: 'blur(4px)', color: '#fff', fontFamily: 'system-ui, sans-serif', fontSize: '12px'
+      position: 'fixed',
+      top: '12px',
+      right: '12px',
+      zIndex: 999999,
+      display: 'flex',
+      gap: '8px',
+      alignItems: 'center',
+      background: 'rgba(0,0,0,0.55)',
+      padding: '8px 10px',
+      borderRadius: '10px',
+      backdropFilter: 'blur(4px)',
+      color: '#fff',
+      fontFamily: 'system-ui, sans-serif',
+      fontSize: '12px',
+      boxShadow: '0 6px 18px rgba(0,0,0,0.35)',
+      pointerEvents: 'auto'
     });
     document.body.appendChild(bar);
   }
   bar.innerHTML = '';
+  bar.appendChild(makeStatusSpan());
+  bar.appendChild(makeBtn('Sign in', () => signIn(isSignedIn() ? '' : 'consent'), isSignedIn()));
+  bar.appendChild(makeBtn('Sign out', () => signOut(), !isSignedIn()));
+}
+
+function renderSidebarChip() {
+  const side = document.getElementById('side');
+  if (!side) return;
+  let box = document.getElementById('auth-box-side');
+  if (!box) {
+    box = document.createElement('div');
+    box.id = 'auth-box-side';
+    box.style.margin = '8px 0 12px 0';
+    box.style.display = 'flex';
+    box.style.gap = '6px';
+    box.style.alignItems = 'center';
+    side.prepend(box);
+  }
+  box.innerHTML = '';
+  const label = document.createElement('span');
+  label.textContent = 'Google:';
+  label.style.opacity = '0.8';
+  box.appendChild(label);
+  box.appendChild(makeStatusSpan());
+  box.appendChild(makeBtn('Sign in', () => signIn(isSignedIn() ? '' : 'consent'), isSignedIn()));
+  box.appendChild(makeBtn('Sign out', () => signOut(), !isSignedIn()));
+}
+
+function makeStatusSpan() {
   const status = document.createElement('span');
   status.textContent = isSignedIn() ? 'Signed in' : 'Signed out';
-  status.style.opacity = '0.8';
-
-  const btnIn = document.createElement('button');
-  btnIn.textContent = 'Sign in';
-  styleBtn(btnIn);
-  btnIn.disabled = isSignedIn();
-  btnIn.onclick = () => signIn(isSignedIn() ? '' : 'consent');
-
-  const btnOut = document.createElement('button');
-  btnOut.textContent = 'Sign out';
-  styleBtn(btnOut);
-  btnOut.disabled = !isSignedIn();
-  btnOut.onclick = () => signOut();
-
-  bar.appendChild(status);
-  bar.appendChild(btnIn);
-  bar.appendChild(btnOut);
+  status.style.opacity = '0.85';
+  status.style.minWidth = '72px';
+  return status;
 }
-function styleBtn(b) {
-  Object.assign(b.style, { background: '#1f6feb', color: '#fff', border: 'none', borderRadius: '8px', padding: '6px 10px', cursor: 'pointer' });
-  b.onmouseenter = () => b.style.opacity = '0.9';
-  b.onmouseleave = () => b.style.opacity = '1';
+function makeBtn(text, onClick, disabled) {
+  const b = document.createElement('button');
+  b.textContent = text;
+  Object.assign(b.style, {
+    background: '#1f6feb', color: '#fff', border: 'none', borderRadius: '8px',
+    padding: '6px 10px', cursor: 'pointer'
+  });
+  b.disabled = !!disabled;
+  b.onclick = onClick;
+  return b;
 }
+
+// Debug helpers
+window.__LMY_authDebug = () => {
+  console.log('[authDebug]', {
+    gapi: !!window.gapi, google: !!window.google, oauth2: !!window.google?.accounts?.oauth2,
+    token: (()=>{ try { return !!gapi.client.getToken(); } catch { return false; } })(),
+    bar: !!document.getElementById('auth-bar'), side: !!document.getElementById('auth-box-side')
+  });
+  renderAuthUIs();
+};
+
+window.addEventListener('DOMContentLoaded', () => {
+  renderAuthUIs();
+});
