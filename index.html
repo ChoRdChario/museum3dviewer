@@ -2,215 +2,66 @@
 <html lang="ja">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <title>LociMyu v6.6.2 — Single-file index.html (Auth統合版)</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <title>LociMyu v6.6.3 (PR1)</title>
   <style>
-    :root{
-      --bg:#0b0f14; --fg:#d6e2f0; --muted:#a9b4c2; --border:rgba(255,255,255,.08);
-      --accent:#3aa0ff;
-    }
-    html,body{height:100%;margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif}
-    #app{height:100%;display:grid;grid-template-columns:300px 1fr;grid-template-rows:100%}
-    #side{border-right:1px solid var(--border);padding:12px;overflow:auto;background:#0e131a;color:var(--fg)}
-    #main{position:relative;background:var(--bg);color:var(--fg);display:flex;align-items:center;justify-content:center}
-    h1{font-size:16px;margin:8px 0 4px}
-    .hint{opacity:.85;font-size:13px;line-height:1.6}
-    .row{display:flex;gap:8px;align-items:center;margin:8px 0}
-    .tag{display:inline-flex;gap:6px;align-items:center;padding:0 10px;height:28px;border-radius:14px;border:1px solid var(--border);background:rgba(255,255,255,.03);font-size:12px}
-    .btn{height:28px;padding:0 10px;border-radius:14px;border:1px solid var(--border);background:rgba(255,255,255,.06);color:var(--fg);cursor:pointer}
-    .btn[disabled]{opacity:.5;cursor:not-allowed}
-    /* Spinner */
-    .spinner{width:56px;height:56px;border-radius:50%;border:4px solid rgba(255,255,255,.25);border-top-color:#fff;animation:spin 1s linear infinite;margin:0 auto}
-    @keyframes spin{to{transform:rotate(360deg)}}
-    /* Auth floating chip (rendered by JS; styles duplicated for safety) */
-    #auth-bar{position:fixed;top:12px;right:12px;z-index:999999;display:flex;gap:8px;align-items:center;
-      background:rgba(0,0,0,.45);backdrop-filter:blur(10px);border:1px solid var(--border);border-radius:999px;padding:6px 8px}
-    #auth-bar .stat{font-size:12px;color:var(--muted)}
-    /* Mobile */
-    @media (max-width:768px){
-      #app{grid-template-columns:1fr}
-      #side{position:fixed;inset:0 0 0 auto;width:min(84vw,360px);transform:translateX(100%);transition:transform .3s ease;z-index:30}
-      #side[data-open="1"]{transform:translateX(0)}
-      #main{padding-bottom:72px}
-      .fab{position:fixed;right:16px;bottom:16px;z-index:40}
-      .fab button{height:44px;padding:0 16px;border-radius:22px;border:1px solid var(--border);background:rgba(255,255,255,.06);color:var(--fg)}
-    }
+    body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans JP", sans-serif; margin: 0; }
+    #auth-bar { position: fixed; top: 10px; right: 12px; z-index: 1000; }
+    #side { position: fixed; top: 0; right: 0; width: 320px; height: 100vh; overflow: auto; padding: 12px; box-sizing: border-box; }
+    main { padding: 16px; }
+    .hint { color:#666; font-size: 14px; }
   </style>
 </head>
 <body>
-  <div id="app">
-    <aside id="side" aria-label="Right Panel">
-      <h1>Auth & Project</h1>
-      <div class="row">
-        <span class="tag">状態: <strong id="auth-status">...</strong></span>
-        <button class="btn" id="open-side" onclick="document.getElementById('side').dataset.open='0'">閉じる</button>
-      </div>
-      <div id="auth-box-side"></div>
-      <hr style="border-color:var(--border);opacity:.5">
-      <div class="hint">
-        <p>この index.html は <strong>v6.6.2 Auth UI</strong> を単体統合した <em>そのまま差し替え可能</em> な構成です。</p>
-        <ul>
-          <li>右上にフローティングの認証チップ</li>
-          <li>サイドパネルにフォールバックUI（この欄）</li>
-          <li><code>auth:signed-in</code> / <code>auth:signed-out</code> のイベントを本体へ接続</li>
-        </ul>
-      </div>
-    </aside>
-    <main id="main">
-      <div>
-        <div class="spinner" aria-hidden="true"></div>
-        <p style="margin-top:12px;text-align:center;opacity:.8">Viewer loading placeholder</p>
-      </div>
-      <div class="fab" aria-hidden="true">
-        <button onclick="document.getElementById('side').dataset.open='1'">メニュー</button>
-      </div>
-    </main>
+  <!-- 必須の容器 -->
+  <div id="auth-bar"></div>
+  <div id="side">
+    <div id="auth-box-side"></div>
+    <div class="hint">ここは右ペイン（暫定）。PR2以降で本UIが入ります。</div>
   </div>
+  <main>
+    <h1>LociMyu — PR1 スモーク</h1>
+    <p class="hint">この段階ではサインインUIとローディングUI（スピナー/トースト）の骨組みのみ。</p>
+    <button id="btnTestSpinner">テスト: スピナー2秒</button>
+    <button id="btnTestToast">テスト: トースト</button>
+  </main>
 
-  <!-- ===== LociMyu v6.6.2 Auth (single-file inline module) ===== -->
   <script type="module">
-    // === Config: 公開用の Origin 制限を必ず GCP 側で設定してください ===
-    const API_KEY = 'AIzaSyCUnTCr5yWUWPdEXST9bKP1LpgawU5rIbI';
-    const CLIENT_ID = '595200751510-ncahnf7edci6b9925becn5to49r6cguv.apps.googleusercontent.com';
-    const SCOPES = [
-      'https://www.googleapis.com/auth/drive.readonly',
-      'https://www.googleapis.com/auth/drive.file',
-      'https://www.googleapis.com/auth/spreadsheets'
-    ].join(' ');
+    import { ensureLoaded, initAuthUI, isSignedIn } from './features/auth.js';
+    import { showSpinner, hideSpinner, toast } from './features/loading.js';
+    import { setAuthed, bus } from './features/state.js';
 
-    let tokenClient = null;
-    let gapiReady = false;
-    let gisReady = false;
-
-    // ---- utilities ----
-    const $ = (sel, root=document) => root.querySelector(sel);
-    function loadScript(src){
-      return new Promise((resolve,reject)=>{
-        if ([...document.scripts].some(s=>s.src===src)) return resolve();
-        const s=document.createElement('script');
-        s.src = src; s.async = true; s.onload=()=>resolve(); s.onerror=reject; document.head.appendChild(s);
-      });
-    }
-
-    // ---- bootstrap: GIS + GAPI ----
-    export async function ensureLoaded(){
-      // 1) Load Google Identity Services (OAuth 2.0) & GAPI client
-      await loadScript('https://accounts.google.com/gsi/client'); gisReady = true;
-      await loadScript('https://apis.google.com/js/api.js');
-      await new Promise((res)=>{ gapi.load('client', res); });
-      // 2) Init discovery docs
-      await gapi.client.init({
-        apiKey: API_KEY,
-        discoveryDocs: [
-          'https://www.googleapis.com/discovery/v1/apis/drive/v3/rest',
-          'https://sheets.googleapis.com/$discovery/rest?version=v4'
-        ]
-      });
-      gapiReady = true;
-      // 3) Prepare token client
-      tokenClient = google.accounts.oauth2.initTokenClient({
-        client_id: CLIENT_ID,
-        scope: SCOPES,
-        callback: (resp)=>{
-          if (resp && resp.access_token){
-            // Set token to GAPI and announce
-            gapi.client.setToken({ access_token: resp.access_token });
-            document.dispatchEvent(new CustomEvent('auth:signed-in'));
-            renderAuthUIs();
-          }
-        }
-      });
-    }
-
-    export function isSignedIn(){
-      try{ return !!gapi.client.getToken(); } catch { return false; }
-    }
-    export function requestAccessToken(prompt=true){
-      if (!tokenClient) return console.warn('[auth] tokenClient not ready');
-      tokenClient.requestAccessToken({ prompt: prompt ? 'consent' : '' });
-    }
-    export function signOut(){
-      try{
-        const token = gapi.client.getToken();
-        if (token) {
-          google.accounts.oauth2.revoke(token.access_token);
-          gapi.client.setToken(null);
-        }
-      } catch {}
-      document.dispatchEvent(new CustomEvent('auth:signed-out'));
-      renderAuthUIs();
-    }
-
-    // ---- UI rendering (floating chip + sidebar) ----
-    function makeBtn(label, onClick, disabled=false){
-      const b=document.createElement('button');
-      b.className='btn'; b.textContent=label; b.onclick=onClick; b.disabled=!!disabled; return b;
-    }
-    function renderFloatingChip(){
-      let bar = document.getElementById('auth-bar');
-      if (!bar){
-        bar = document.createElement('div');
-        bar.id = 'auth-bar';
-        document.body.appendChild(bar);
-      }
-      bar.innerHTML='';
-      const stat=document.createElement('span'); stat.className='stat';
-      stat.textContent = isSignedIn() ? 'Signed in' : 'Signed out';
-      bar.appendChild(stat);
-      if (isSignedIn()){
-        bar.appendChild(makeBtn('Sign out', () => signOut(), false));
-      }else{
-        bar.appendChild(makeBtn('Sign in', () => requestAccessToken(true), false));
-      }
-    }
-    function renderSidebarChip(){
-      const box = document.getElementById('auth-box-side');
-      if (!box) return;
-      box.innerHTML='';
-      const head=document.createElement('div'); head.className='row'; head.innerHTML='<span class="tag">Auth</span>';
-      const controls=document.createElement('div'); controls.className='row';
-      const status = document.getElementById('auth-status');
-      status && (status.textContent = isSignedIn() ? 'Signed in' : 'Signed out');
-      if (isSignedIn()){
-        controls.appendChild(makeBtn('Sign out', () => signOut(), false));
-      }else{
-        controls.appendChild(makeBtn('Sign in', () => requestAccessToken(true), false));
-        controls.appendChild(makeBtn('Silent', () => requestAccessToken(false), false));
-      }
-      box.append(head, controls);
-    }
-    function renderAuthUIs(){
-      renderFloatingChip();
-      renderSidebarChip();
-    }
-
-    export async function initAuthUI(){
-      renderAuthUIs();
-      const status = document.getElementById('auth-status');
-      status && (status.textContent = isSignedIn() ? 'Signed in' : 'Signed out');
-    }
-
-    // ---- Wire events to your app ----
-    document.addEventListener('auth:signed-in', () => {
-      console.log('[LociMyu] signed in — initialize Drive/Sheets here');
-      const status = document.getElementById('auth-status');
-      status && (status.textContent = 'Signed in');
-    });
-    document.addEventListener('auth:signed-out', () => {
-      console.log('[LociMyu] signed out — lock editing & clear session');
-      const status = document.getElementById('auth-status');
-      status && (status.textContent = 'Signed out');
-    });
-
-    // ---- Start ----
-    (async function boot(){
-      try{
+    async function boot() {
+      showSpinner('auth');
+      try {
         await ensureLoaded();
-      }catch(e){
-        console.error('[auth] bootstrap failed', e);
+        initAuthUI();
+        // 初期認証状態をstateに反映
+        setAuthed(isSignedIn());
+        toast.info('Auth scripts loaded.');
+      } catch (e) {
+        console.error(e);
+        toast.error('Auth init failed. Check console.');
+      } finally {
+        hideSpinner();
       }
-      await initAuthUI();
-    })();
+
+      // auth.js が CustomEvent を投げる想定ならここで捕捉する設計にしてもOK。
+      // 今は state.js からの通知のみを利用。
+    }
+
+    // Demo buttons
+    document.getElementById('btnTestSpinner').addEventListener('click', async () => {
+      showSpinner('test');
+      setTimeout(hideSpinner, 2000);
+    });
+    document.getElementById('btnTestToast').addEventListener('click', () => {
+      toast.success('保存に成功しました（デモ）');
+    });
+
+    boot();
+    // デバッグ補助を露出
+    window.__LMY = { toast, showSpinner, hideSpinner };
   </script>
 </body>
 </html>
