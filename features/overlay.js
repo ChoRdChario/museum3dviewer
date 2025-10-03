@@ -1,60 +1,56 @@
-export function mountOverlay({bus,store}){
-  const el=document.getElementById('overlay');
-  const t=document.getElementById('ov-t');
-  const b=document.getElementById('ov-b');
-  const i=document.getElementById('ov-i');
-
-  let revokePrev = null;
-
-  async function resolveImageIfNeeded(caption){
-    try{
-      if (caption.img && typeof caption.img==='string' && !caption.img.startsWith('blob:')) return caption.img;
-      if (caption.imageId && window.gapi?.client){
-        const { getFileMeta, downloadBlob, ensureHeic2Any } = await import('../app/drive_images.js');
-        const meta = await getFileMeta(caption.imageId);
-        const blob = await downloadBlob(caption.imageId);
-        let outUrl='';
-        if (/heic|heif/i.test(meta?.mimeType||'')) {
-          try{
-            await ensureHeic2Any();
-            const jpeg = await window.heic2any({ blob, toType:'image/jpeg', quality:0.9 });
-            outUrl = URL.createObjectURL(jpeg);
-          }catch(convErr){
-            console.warn('[overlay] HEIC convert failed, fallback to thumbnail', convErr);
-            outUrl = meta?.thumbnailLink || '';
-          }
-        }else{
-          outUrl = URL.createObjectURL(blob);
-        }
-        if (revokePrev){ try{ URL.revokeObjectURL(revokePrev); }catch(_){} }
-        if (outUrl && outUrl.startsWith('blob:')) revokePrev = outUrl;
-        caption.img = outUrl;
-        caption.imageMime = meta?.mimeType;
-        caption.thumbnailLink = meta?.thumbnailLink || caption.thumbnailLink;
-        return outUrl;
-      }
-    }catch(e){
-      console.warn('[overlay] resolveImageIfNeeded', e);
+// features/overlay.js
+// Minimal caption overlay. Exposes window.__LMY_overlay.{showOverlay,hideOverlay}
+(function(){
+  const ID = 'lmy-overlay';
+  function ensureStyle(){
+    if(document.getElementById(ID+'-css')) return;
+    const css = `
+    #${ID}{
+      position:fixed; right:16px; bottom:16px; width:min(360px, 48vw);
+      max-height:50vh; overflow:auto; z-index:2147482000;
+      background:#111; color:#eee; border-radius:12px; box-shadow:0 6px 30px rgba(0,0,0,.4);
+      border:1px solid rgba(255,255,255,.08); padding:12px; display:none;
+      font-family: system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
     }
-    return caption.thumbnailLink || caption.img || '';
+    #${ID}.open{ display:block; }
+    #${ID} h3{ margin:.2rem 0 .4rem; font-size:16px; line-height:1.3 }
+    #${ID} p{ margin:0 0 .4rem; font-size:13px; opacity:.9 }
+    #${ID} img{ width:100%; height:auto; border-radius:8px; display:block; margin-top:.25rem; background:#000; }
+    #${ID} .small{ font-size:12px; opacity:.7 }
+    `;
+    const s = document.createElement('style'); s.id=ID+'-css'; s.textContent = css; document.head.appendChild(s);
   }
-
-  function _showSync(c){ t.textContent=c.title||''; b.textContent=c.body||''; }
-
-  async function show(c){
-    _showSync(c);
-    const url = await resolveImageIfNeeded(c);
-    if(url){ i.src=url; i.style.display='block'; } else { i.style.display='none'; }
-    el.style.display='block';
+  function ensureBox(){
+    let box = document.getElementById(ID);
+    if(!box){
+      box = document.createElement('div'); box.id = ID;
+      box.innerHTML = `<div class="small" id="${ID}-meta"></div>
+        <h3 id="${ID}-title"></h3>
+        <p id="${ID}-body"></p>
+        <img id="${ID}-img" alt="" />`;
+      document.body.appendChild(box);
+    }
+    return box;
   }
-  function hide(){ el.style.display='none'; }
-
-  bus.on('pin:selected',(id)=>{
-    if(!id){ hide(); return; }
-    const p=store.state.pins.find(p=>p.id===id);
-    if(!p){ hide(); return; }
-    show(p.caption||{});
+  async function showOverlay({ title='', body='', imgUrl=null, meta='' }={}){
+    ensureStyle();
+    const box = ensureBox();
+    box.querySelector('#'+ID+'-title').textContent = title || '';
+    box.querySelector('#'+ID+'-body').textContent = body || '';
+    box.querySelector('#'+ID+'-meta').textContent = meta || '';
+    const img = box.querySelector('#'+ID+'-img');
+    if(imgUrl){ img.src = imgUrl; img.style.display='block'; } else { img.removeAttribute('src'); img.style.display='none'; }
+    box.classList.add('open');
+  }
+  function hideOverlay(){
+    const box = document.getElementById(ID);
+    if(box) box.classList.remove('open');
+  }
+  // Custom event wiring (optional)
+  document.addEventListener('lmy:select-pin', (e)=>{
+    const c = e.detail || {}; showOverlay({ title:c.title, body:c.body, imgUrl:c.imgUrl, meta:c.meta });
   });
-  bus.on('overlay:show', show);
-  bus.on('overlay:hide', hide);
-}
+  document.addEventListener('lmy:deselect-pin', hideOverlay);
+
+  window.__LMY_overlay = { showOverlay, hideOverlay };
+})();
