@@ -1,4 +1,7 @@
-// features/materialUI.js (v6.5.5-5) — fixes uWhiteThreshold undeclared (uniform decl), stable toggles
+// features/materialUI.js (v6.5.5-6)
+// - White→Transparent threshold range widened (0.70–1.00, step 0.001)
+// - Uniform declaration injected idempotently
+// - Stable toggles (no re-entrant UI sync), HSL applies only when sliders changed
 import * as THREE from 'three';
 
 let MAT_KEY_SEQ = 1;
@@ -19,21 +22,26 @@ export function mountMaterialUI({ bus, viewer }) {
         <span style="font-size:12px;color:#aaa;">Target Material</span>
         <select id="mat-target" style="padding:6px;border:1px solid #333;border-radius:8px;background:#111;color:#fff;"></select>
       </label>
+
       <div style="display:grid;gap:6px;">
         <label>Hue <input id="mat-h" type="range" min="0" max="360" value="0"></label>
         <label>Saturation <input id="mat-s" type="range" min="0" max="100" value="100"></label>
         <label>Lightness <input id="mat-l" type="range" min="0" max="100" value="50"></label>
       </div>
+
       <label>Opacity <input id="mat-o" type="range" min="0" max="1" step="0.01" value="1"></label>
+
       <div style="display:grid;gap:6px;">
         <label><input id="mat-unlit" type="checkbox"> Unlit (ignore lights)</label>
         <label><input id="mat-doubleside" type="checkbox"> Double-sided (draw backfaces)</label>
       </div>
+
       <div>
         <label style="display:flex;align-items:center;gap:8px">
           <input id="mat-w2a" type="checkbox"> White → Transparent
         </label>
-        <input id="mat-th" type="range" min="0.85" max="1" step="0.005" value="0.98">
+        <!-- widened range -->
+        <input id="mat-th" type="range" min="0.70" max="1" step="0.001" value="0.98">
         <small style="color:#9aa">閾値↑（白に近いほど透過）</small>
       </div>
     </div>
