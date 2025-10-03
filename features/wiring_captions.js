@@ -1,6 +1,4 @@
-// features/wiring_captions.js
-// Bootstrap captions: Drive sibling images grid, HEIC handling, pins overlay,
-// and Sheets load/save with debounced autosave.
+// features/wiring_captions.js (v1b - no-?id friendly)
 
 import { listSiblingImages, downloadImageBlobIfNeeded } from './drive_images.js';
 import { loadPinsFromSheet, savePinsDiff, ensureSheetContext } from './sheets_io.js';
@@ -8,7 +6,6 @@ import { loadPinsFromSheet, savePinsDiff, ensureSheetContext } from './sheets_io
 const LOG = (...a)=>console.log('[wiring]', ...a);
 const WARN = (...a)=>console.warn('[wiring]', ...a);
 
-// simple toast
 function toast(msg, type='info', ms=1400){
   let box = document.getElementById('lmy-toast');
   if(!box){
@@ -30,62 +27,101 @@ function getParam(name){
   const u = new URL(location.href);
   return u.searchParams.get(name);
 }
+function setParam(name, value){
+  const u = new URL(location.href);
+  if(value==null || value===''){ u.searchParams.delete(name); }
+  else { u.searchParams.set(name, value); }
+  history.replaceState({}, '', u.toString());
+}
 
-// in-memory
 const state = {
   glbId: null,
   folderId: null,
   sheetId: null,
   sheetName: null,
-  pins: [],           // [{id,x,y,z,title,body,imageFileId,imageURL,material,updatedAt}]
+  pins: [],
   selectedPinId: null,
-  saving: false,
 };
 
-// Exposed entry from init_cloud_boot.js
+window.__LMY_startWithFileId = async (glbId)=>{
+  const id = (glbId||'').trim();
+  if(!id){ toast('Enter GLB fileId', 'error'); return; }
+  await bootstrapWithId(id);
+};
+
 export async function startCloudBootstrap(){
-  // Require ?id=<glbFileId> to resolve siblings/sheet
-  state.glbId = getParam('id');
-  if(!state.glbId){
-    WARN('no ?id: skip cloud bootstrap');
-    toast('No ?id: running offline', 'info', 1600);
+  try { if(window.__LMY_renderImageGrid) window.__LMY_renderImageGrid([]); } catch {}
+  ensureManualBox();
+
+  const id = getParam('id');
+  if(!id){
+    WARN('no ?id: waiting for manual start');
+    toast('Cloud: paste GLB fileId to start', 'info', 1600);
     return;
   }
-  // ensure Drive/Sheets context (folder + spreadsheet + sheet name)
-  const ctx = await ensureSheetContext(state.glbId).catch(e=>{WARN('ensureSheetContext failed', e);});
-  if(!ctx){ toast('Drive/Sheets init failed', 'error'); return; }
+  await bootstrapWithId(id);
+}
+
+async function bootstrapWithId(glbFileId){
+  state.glbId = glbFileId;
+  setParam('id', glbFileId);
+
+  let ctx;
+  try{
+    ctx = await ensureSheetContext(state.glbId);
+  }catch(e){
+    WARN('ensureSheetContext failed', e);
+    toast('Drive/Sheets init failed', 'error');
+    return;
+  }
   Object.assign(state, { folderId: ctx.folderId, sheetId: ctx.spreadsheetId, sheetName: ctx.sheetName });
   LOG('ctx', ctx);
   toast('Drive/Sheets ready', 'info', 900);
 
-  // 1) Images grid
   try {
     const images = await listSiblingImages(state.folderId);
     LOG('images', images?.length);
-    // Render via phase2a patch API if present
-    if(window.__LMY_renderImageGrid){
-      window.__LMY_renderImageGrid(images);
-    }
+    if(window.__LMY_renderImageGrid) window.__LMY_renderImageGrid(images);
   } catch(e){ WARN('listSiblingImages failed', e); }
 
-  // 2) Load pins from Sheets
   try{
     state.pins = await loadPinsFromSheet(state.sheetId, state.sheetName);
     LOG('pins loaded', state.pins.length);
-    // optional: tell pins system to render loaded pins
     document.dispatchEvent(new CustomEvent('lmy:pins-loaded', {detail: state.pins}));
-  }catch(e){
-    WARN('load pins failed', e);
-  }
+  }catch(e){ WARN('load pins failed', e); }
 
-  // 3) Wire events
   wireEvents();
 }
 
+function ensureManualBox(){
+  const side = document.getElementById('side');
+  if(!side) return;
+  let box = document.getElementById('lmy-cloud-bootstrap');
+  if(box) return;
+  box = document.createElement('section');
+  box.id = 'lmy-cloud-bootstrap';
+  box.innerHTML = `
+    <h4 style="margin:.75rem 0 .5rem">Cloud</h4>
+    <div style="display:flex;gap:6px;align-items:center">
+      <input id="lmy-fileid" placeholder="GLB fileId" style="flex:1;background:#0f0f10;border:1px solid #222;border-radius:8px;color:#ddd;padding:6px 8px"/>
+      <button id="lmy-fileid-start" style="background:#1f6feb;color:#fff;border:none;border-radius:8px;padding:6px 10px;cursor:pointer">Start</button>
+    </div>
+    <p style="opacity:.6;font-size:12px;margin:.35rem 0 0">id を貼り付けて Start。画像列挙とシート連携を開始します。</p>
+  `;
+  side.appendChild(box);
+  box.querySelector('#lmy-fileid-start').onclick = async ()=>{
+    const id = box.querySelector('#lmy-fileid').value.trim();
+    if(!id){ toast('Enter GLB fileId', 'error'); return; }
+    await bootstrapWithId(id);
+  };
+}
+
+let wired = false;
 function wireEvents(){
-  // image picked from grid
+  if(wired) return; wired = true;
+
   document.addEventListener('lmy:image-picked', async (e)=>{
-    const file = e.detail; // {id,name,thumbnailLink,...}
+    const file = e.detail;
     if(!state.selectedPinId){ toast('Pick a pin first', 'error'); return; }
     try{
       const imgURL = await downloadImageBlobIfNeeded(file.id);
@@ -98,26 +134,22 @@ function wireEvents(){
         scheduleSave();
       }
     }catch(err){
-      WARN('image attach failed', err);
+      console.warn('image attach failed', err);
       toast('Image attach failed', 'error');
     }
   });
 
-  // add pin via Shift+click (phase2a emits lmy:add-pin with canvas coord)
   document.addEventListener('lmy:add-pin', (e)=>{
     const { id, position } = e.detail || {};
-    // id may be provided by app; otherwise make one
     const pinId = id || `pin_${Math.random().toString(36).slice(2,8)}`;
     const pin = { id: pinId, x: position?.x ?? 0, y: position?.y ?? 0, z: position?.z ?? 0,
       title:'', body:'', imageFileId:'', imageURL:'', material:'', updatedAt:new Date().toISOString() };
     state.pins.push(pin);
     state.selectedPinId = pinId;
-    // show overlay minimal
     showOverlayForPin(pin);
     scheduleSave();
   });
 
-  // pick existing pin (phase2a emits lmy:pick-pin)
   document.addEventListener('lmy:pick-pin', (e)=>{
     const { id } = e.detail || {};
     state.selectedPinId = id || null;
@@ -125,7 +157,6 @@ function wireEvents(){
     if(pin) showOverlayForPin(pin); else hideOverlay();
   });
 
-  // simple overlay bindings (app/UI can call these too)
   document.addEventListener('lmy:update-caption', (e)=>{
     const { id, title, body } = e.detail || {};
     const pin = state.pins.find(p=>p.id===id);
@@ -147,7 +178,6 @@ function hideOverlay(){
   if(window.__LMY_overlay?.hideOverlay){ window.__LMY_overlay.hideOverlay(); }
 }
 
-// debounce save
 let saveTimer = null;
 function scheduleSave(){
   clearTimeout(saveTimer);
@@ -155,9 +185,6 @@ function scheduleSave(){
     try{
       await savePinsDiff(state.sheetId, state.sheetName, state.pins);
       toast('Saved', 'info', 800);
-    }catch(e){
-      WARN('save failed', e);
-      toast('Save failed', 'error');
-    }
+    }catch(e){ console.warn('save failed', e); toast('Save failed', 'error'); }
   }, 1200);
 }
