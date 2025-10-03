@@ -1,5 +1,4 @@
-// features/wiring_captions.js (v1b - no-?id friendly)
-
+// features/wiring_captions.js  (v1c: robust fileId extraction + no-parent fallback trigger)
 import { listSiblingImages, downloadImageBlobIfNeeded } from './drive_images.js';
 import { loadPinsFromSheet, savePinsDiff, ensureSheetContext } from './sheets_io.js';
 
@@ -23,6 +22,22 @@ function toast(msg, type='info', ms=1400){
   setTimeout(()=> t.remove(), ms);
 }
 
+// --- NEW: accept full Drive URL or raw id
+export function extractFileId(raw){
+  if(!raw) return null;
+  raw = String(raw).trim();
+  if(/^[a-zA-Z0-9_-]{12,}$/.test(raw)) return raw; // already id
+  try{
+    const u = new URL(raw);
+    const m1 = u.pathname.match(/\/d\/([a-zA-Z0-9_-]{10,})/);
+    if(m1) return m1[1];
+    const idq = u.searchParams.get('id');
+    if(idq) return idq;
+  }catch{}
+  const m2 = raw.match(/([a-zA-Z0-9_-]{10,})/);
+  return m2 ? m2[1] : null;
+}
+
 function getParam(name){
   const u = new URL(location.href);
   return u.searchParams.get(name);
@@ -43,9 +58,9 @@ const state = {
   selectedPinId: null,
 };
 
-window.__LMY_startWithFileId = async (glbId)=>{
-  const id = (glbId||'').trim();
-  if(!id){ toast('Enter GLB fileId', 'error'); return; }
+window.__LMY_startWithFileId = async (input)=>{
+  const id = extractFileId(input);
+  if(!id){ toast('Invalid GLB id/URL', 'error'); return; }
   await bootstrapWithId(id);
 };
 
@@ -53,10 +68,11 @@ export async function startCloudBootstrap(){
   try { if(window.__LMY_renderImageGrid) window.__LMY_renderImageGrid([]); } catch {}
   ensureManualBox();
 
-  const id = getParam('id');
+  const raw = getParam('id');
+  const id = extractFileId(raw);
   if(!id){
-    WARN('no ?id: waiting for manual start');
-    toast('Cloud: paste GLB fileId to start', 'info', 1600);
+    WARN('no ?id (or unparsable): waiting for manual start');
+    toast('Cloud: paste GLB fileId or URL', 'info', 1600);
     return;
   }
   await bootstrapWithId(id);
@@ -103,15 +119,15 @@ function ensureManualBox(){
   box.innerHTML = `
     <h4 style="margin:.75rem 0 .5rem">Cloud</h4>
     <div style="display:flex;gap:6px;align-items:center">
-      <input id="lmy-fileid" placeholder="GLB fileId" style="flex:1;background:#0f0f10;border:1px solid #222;border-radius:8px;color:#ddd;padding:6px 8px"/>
+      <input id="lmy-fileid" placeholder="GLB fileId or Drive URL" style="flex:1;background:#0f0f10;border:1px solid #222;border-radius:8px;color:#ddd;padding:6px 8px"/>
       <button id="lmy-fileid-start" style="background:#1f6feb;color:#fff;border:none;border-radius:8px;padding:6px 10px;cursor:pointer">Start</button>
     </div>
-    <p style="opacity:.6;font-size:12px;margin:.35rem 0 0">id を貼り付けて Start。画像列挙とシート連携を開始します。</p>
+    <p style="opacity:.6;font-size:12px;margin:.35rem 0 0">id または Drive の共有URLを貼って Start。</p>
   `;
   side.appendChild(box);
   box.querySelector('#lmy-fileid-start').onclick = async ()=>{
-    const id = box.querySelector('#lmy-fileid').value.trim();
-    if(!id){ toast('Enter GLB fileId', 'error'); return; }
+    const id = extractFileId(box.querySelector('#lmy-fileid').value);
+    if(!id){ toast('Invalid GLB id/URL', 'error'); return; }
     await bootstrapWithId(id);
   };
 }
