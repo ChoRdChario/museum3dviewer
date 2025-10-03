@@ -27,18 +27,20 @@
 
   <script type="module">
     import { ensureLoaded, initAuthUI, isSignedIn } from './features/auth.js';
+    import { getParam, normalizeFileId } from './features/utils.js';
     import { showSpinner, hideSpinner, toast } from './features/loading.js';
     import { setAuthed } from './features/state.js';
     import { findOrCreateSpreadsheetForFile } from './features/sheets.js';
     import { initPins, addPinAt } from './features/pins.js';
     import { initCaptions } from './features/captions.js';
 
-    function getParam(name){
+    // replaced by utils.getParam
+    function getParam_local(name){
       const m = new URLSearchParams(location.search).get(name);
       return m || '';
     }
 
-    let fileId = getParam('fileId');
+    let fileId = normalizeFileId(getParam('fileId'));
     const fileIdInput = document.getElementById('fileIdInput');
     fileIdInput.value = fileId;
 
@@ -66,7 +68,7 @@
     }
 
     document.getElementById('applyFileId').addEventListener('click', async ()=>{
-      const v = fileIdInput.value.trim();
+      const v = normalizeFileId(fileIdInput.value.trim());
       if (!v){ toast.error('fileId を入力してください'); return; }
       history.replaceState({}, '', '?fileId='+encodeURIComponent(v));
       await setupForFile(v);

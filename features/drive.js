@@ -1,6 +1,7 @@
 
-// features/drive.js  (v6.6.4)
+// features/drive.js  (v6.6.4-fix1)
 import { toast } from './loading.js';
+import { normalizeFileId } from './utils.js';
 
 const DRIVE_FIELDS = 'id,name,mimeType,parents,md5Checksum,modifiedTime,owners,webViewLink,thumbnailLink,iconLink';
 
@@ -17,8 +18,9 @@ function withRetry(fn, tries=3, base=500){
 }
 
 export async function getFile(fileId){
+  const fid = normalizeFileId(fileId);
   return withRetry(async ()=>{
-    const res = await gapi.client.drive.files.get({ fileId, fields: DRIVE_FIELDS, supportsAllDrives: true });
+    const res = await gapi.client.drive.files.get({ fileId: fid, fields: DRIVE_FIELDS, supportsAllDrives: true });
     return res.result;
   });
 }
@@ -29,7 +31,6 @@ export async function getParents(fileId){
 }
 
 export async function listSiblingsImages(fileId){
-  // List images in the same folder as fileId
   const parents = await getParents(fileId);
   if (!parents.length) return [];
   const parent = parents[0];
@@ -54,7 +55,6 @@ export async function findSpreadsheetInSameFolder(fileId, baseNameHint){
   const parents = await getParents(fileId);
   if (!parents.length) return null;
   const parent = parents[0];
-  // candidates by name contains baseNameHint and mimeType spreadsheet
   const q = [
     `'${qEscape(parent)}' in parents`,
     `mimeType='application/vnd.google-apps.spreadsheet'`,
@@ -66,7 +66,7 @@ export async function findSpreadsheetInSameFolder(fileId, baseNameHint){
   const files = res.result.files || [];
   if (!files.length) return null;
   if (baseNameHint){
-    const f = files.find(f => (f.name||'').toLowerCase().includes(baseNameHint.toLowerCase()));
+    const f = files.find(f => (f.name||'').toLowerCase().includes(String(baseNameHint).toLowerCase()));
     if (f) return f;
   }
   return files[0];
