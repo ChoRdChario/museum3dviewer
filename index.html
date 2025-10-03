@@ -1,87 +1,72 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="ja">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-  <title>LociMyu v6.6.4 — PR2 Demo</title>
-  <link rel="icon" href="./assets/favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="./assets/base.css" />
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>LociMyu Clean Boot</title>
+  <link rel="stylesheet" href="./style.css"/>
 </head>
 <body>
-  <div id="auth-bar"></div>
-  <aside id="side" aria-label="Right pane">
-    <h2>LociMyu</h2>
-    <div id="auth-box-side" class="section"></div>
-    <div class="section small">PR2: Drive/Sheets + Pins + Captions（デモ）</div>
-  </aside>
-  <main>
-    <h1>PR2 デモ</h1>
-    <div class="hint">URLに <code>?fileId=XXXXX</code> を付けて開くと、同階層の画像を取得し、シートをfind-or-createします。</div>
-    <div style="display:flex;gap:8px;margin:8px 0;">
-      <input id="fileIdInput" placeholder="GLBのfileId (Google Drive)" style="width:400px;padding:8px;border-radius:10px;border:1px solid rgba(255,255,255,.08);background:#141820;color:#eaf1ff" />
-      <button id="applyFileId">Apply</button>
-      <button id="addPin">ピン追加（擬似）</button>
+  <div id="app">
+    <div id="viewer-host">
+      <canvas id="canvas"></canvas>
     </div>
-    <div class="hint">本番では3Dビュー上のShift+クリックで座標を取得して <code>addPinAt(x,y,z)</code> を呼んでください。</div>
-  </main>
+    <div id="side">
+      <h3 style="margin:8px 0;">LociMyu</h3>
+      <div id="toolbar" style="display:flex;gap:8px;margin-bottom:8px;">
+        <button id="btn-persp">Perspective</button>
+        <button id="btn-ortho">Orthographic</button>
+        <input id="file" type="file" accept=".glb,.gltf" style="margin-left:auto;"/>
+      </div>
+      <div>状態: <code id="status">booting...</code></div>
+      <!-- Material UI はここにマウントされます -->
+    </div>
+  </div>
 
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://unpkg.com/three@0.158.0/build/three.module.js",
+      "three/addons/": "https://unpkg.com/three@0.158.0/examples/jsm/"
+    }
+  }
+  </script>
   <script type="module">
-    import { ensureLoaded, initAuthUI, isSignedIn, ensureAccessToken } from './features/auth.js';
-    import { getParam, normalizeFileId } from './features/utils.js';
-    import { showSpinner, hideSpinner, toast } from './features/loading.js';
-    import { setAuthed } from './features/state.js';
-    import { findOrCreateSpreadsheetForFile } from './features/sheets.js';
-    import { initPins, addPinAt } from './features/pins.js';
-    import { initCaptions } from './features/captions.js';
+    console.log('[boot] index module loaded');
+    import { bus } from './core/bus.js';
+    import { store } from './core/store.js';
+    import { createViewerAdapter } from './viewer/adapter.three.js';
+    import { mountPins } from './features/pins.js';
+    import { mountMaterialUI } from './features/materialUI.js';
 
-    // replaced by utils.getParam
-    function getParam_local(name){
-      const m = new URLSearchParams(location.search).get(name);
-      return m || '';
-    }
+    const canvas = document.getElementById('canvas');
+    const viewer = createViewerAdapter({ canvas, bus });
+    console.log('[boot] viewer created');
 
-    let fileId = normalizeFileId(getParam('fileId'));
-    const fileIdInput = document.getElementById('fileIdInput');
-    fileIdInput.value = fileId;
+    mountPins({ bus, store, viewer });
+    console.log('[boot] pins mounted');
 
-    async function boot(){
-      showSpinner('auth');
-      try{
-        await ensureLoaded(); initAuthUI(); setAuthed(isSignedIn());
-        /* lazy: do not auto-get token on boot */
-        toast.info('Auth ok (no token yet)');
-      }catch(e){ console.error(e); toast.error('Auth failed'); }
-      finally{ hideSpinner(); }
+    mountMaterialUI({ bus, viewer });
+    console.log('[boot] material UI mounted');
 
-      if (fileId) await setupForFile(fileId);
-    }
-
-    async function setupForFile(fid){
-      fileId = fid;
-      showSpinner('setup');
-      try{
-        await ensureAccessToken({interactiveIfNeeded:true});
-        const spreadsheetId = await findOrCreateSpreadsheetForFile(fileId);
-        await initPins(fileId, spreadsheetId);
-        await initCaptions(fileId, spreadsheetId);
-        toast.success('Drive/Sheets 準備完了');
-      }catch(e){ console.error(e); toast.error('Drive/Sheets 初期化に失敗'); }
-      finally{ hideSpinner(); }
-    }
-
-    document.getElementById('applyFileId').addEventListener('click', async ()=>{
-      const v = normalizeFileId(fileIdInput.value.trim());
-      if (!v){ toast.error('fileId を入力してください'); return; }
-      history.replaceState({}, '', '?fileId='+encodeURIComponent(v));
-      await setupForFile(v);
+    // Buttons
+    document.getElementById('btn-persp').addEventListener('click', ()=> viewer.setOrtho(false));
+    document.getElementById('btn-ortho').addEventListener('click', ()=> viewer.setOrtho(true));
+    document.getElementById('file').addEventListener('change', (e)=>{
+      const f = e.target.files?.[0];
+      if (f) viewer.loadFile(f);
     });
 
-    document.getElementById('addPin').addEventListener('click', ()=>{
-      // デモ: ランダム座標でピンを作成
-      addPinAt(Math.random()*2-1, Math.random()*2-1, Math.random()*2-1);
-    });
+    // Status
+    const statusEl = document.getElementById('status');
+    const setStatus = (s) => statusEl.textContent = s;
+    bus.on('viewer:mode', (m)=> setStatus('mode: '+m));
+    bus.on('viewer:resized', ({w,h,mode})=> setStatus(`mode:${mode} ${w}x${h}`));
+    bus.on('model:loading', (u)=> setStatus('loading: '+u));
+    bus.on('model:loaded', ()=> setStatus('loaded'));
+    bus.on('model:error', (e)=> setStatus('error:'+e));
 
-    boot();
+    console.log('[boot] ready');
   </script>
 </body>
 </html>

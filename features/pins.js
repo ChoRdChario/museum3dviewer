@@ -1,90 +1,65 @@
+// features/pins.js (v6.5.4-2 debug)
+import * as THREE from 'three';
 
-// features/pins.js  (v6.6.4)
-import { savePinDebounced, deletePin, readPins } from './sheets.js';
-import { toast } from './loading.js';
-import { bus } from './state.js';
+export function mountPins({ bus, store, viewer }) {
+  if (!store.state.pins) store.set({ pins: [] });
 
-let pins = new Map();
-let spreadsheetId = null;
-let fileId = null;
-let selectedId = null;
+  const pinMap = new Map();
+  let idSeq = 0;
 
-function uid(){ return Math.random().toString(36).slice(2, 10); }
-
-export async function initPins(_fileId, _spreadsheetId){
-  fileId = _fileId; spreadsheetId = _spreadsheetId;
-  const list = await readPins(spreadsheetId);
-  pins = new Map(list.map(p => [p.id, p]));
-  renderPinsList();
-}
-
-export function getSelectedPin(){ return selectedId? pins.get(selectedId) : null; }
-export function getAllPins(){ return Array.from(pins.values()); }
-
-export function addPinAt(x,y,z){
-  const p = { id: uid(), x, y, z, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
-  pins.set(p.id, p);
-  renderPinsList();
-  savePinDebounced(spreadsheetId, p);
-  selectPin(p.id);
-  bus.dispatchEvent(new CustomEvent('pin:added', { detail:p }));
-}
-
-export function selectPin(id){
-  if (!pins.has(id)) return;
-  selectedId = id;
-  highlightSelectionInList();
-  bus.dispatchEvent(new CustomEvent('pin:selected', { detail:{ id } }));
-}
-
-export async function removeSelected(){
-  if (!selectedId) return;
-  const id = selectedId;
-  pins.delete(id);
-  selectedId = null;
-  renderPinsList();
-  await deletePin(spreadsheetId, id);
-  toast.info('ピンを削除しました');
-  bus.dispatchEvent(new CustomEvent('pin:removed', { detail:{ id } }));
-}
-
-// ---- rudimentary UI in the side panel (temporary for PR2 smoke) ----
-function renderPinsList(){
-  const host = document.getElementById('pins-box') || createPinsBox();
-  host.innerHTML = '';
-  for(const p of pins.values()){
-    const row = document.createElement('div');
-    row.style.cssText = 'display:flex;align-items:center;gap:8px;padding:6px 8px;border:1px solid rgba(255,255,255,.06);border-radius:10px;margin-bottom:6px;';
-    const btn = document.createElement('button');
-    btn.textContent = '●';
-    btn.style.cssText = 'width:24px;height:24px;border-radius:50%';
-    btn.onclick = ()=> selectPin(p.id);
-    const label = document.createElement('div');
-    label.textContent = `${p.id}  (x:${p.x.toFixed(2)}, y:${p.y.toFixed(2)}, z:${p.z.toFixed(2)})`;
-    label.style.cssText = 'font-size:12px;color:#9aa4b2';
-    row.appendChild(btn); row.appendChild(label);
-    host.appendChild(row);
+  function setSelected(id) {
+    store.set({ selected: id });
+    bus.emit('pin:selected', id);
+    for (const [pid, rec] of pinMap) if (rec.line) rec.line.visible = (pid === id);
   }
-  highlightSelectionInList();
-}
 
-function highlightSelectionInList(){
-  const host = document.getElementById('pins-box');
-  if (!host) return;
-  Array.from(host.children).forEach((row, i)=>{
-    const id = Array.from(pins.values())[i]?.id;
-    row.style.outline = (id===selectedId) ? '2px solid #6ea8fe' : 'none';
+  function addPinAt(pos, caption = {}, idOverride = null) {
+    const id = idOverride || ('pin_' + (++idSeq));
+    const dot = new THREE.Mesh(
+      new THREE.SphereGeometry(0.01, 12, 12),
+      new THREE.MeshBasicMaterial({ color: 0xff3366 })
+    );
+    dot.position.copy(pos);
+    const head = pos.clone().add(new THREE.Vector3(0, 0.05, 0));
+    const line = new THREE.Line(
+      new THREE.BufferGeometry().setFromPoints([pos.clone(), head]),
+      new THREE.LineBasicMaterial({ color: 0xff3366 })
+    );
+    line.visible = false;
+    viewer.scene.add(dot, line);
+
+    const pin = { id, x:pos.x, y:pos.y, z:pos.z, caption:{ title: caption.title||'新規キャプション', body: caption.body||'', img: caption.img||'', imageId: caption.imageId||'', thumbnailLink: caption.thumbnailLink||'' } };
+    store.state.pins.push(pin);
+    pinMap.set(id, { sprite: dot, line });
+    bus.emit('pin:added', pin);
+    return id;
+  }
+
+  viewer.canvas.addEventListener('click', (e) => {
+    const hit = viewer.raycastAt(e.clientX, e.clientY);
+    if (!hit) { console.debug('[pins] raycast miss'); return; }
+    console.debug('[pins] hit', hit.object?.name || hit.object?.type, hit.point);
+
+    if (e.shiftKey || e.altKey) {
+      const p = hit.point.clone ? hit.point.clone() : new THREE.Vector3(hit.point.x,hit.point.y,hit.point.z);
+      const id = addPinAt(p, {});
+      setSelected(id);
+      return;
+    }
+
+    let best=null, bestD=Infinity;
+    for (const [pid, rec] of pinMap) {
+      const d = rec.sprite.position.distanceTo(hit.point);
+      if (d < bestD) { bestD = d; best = pid; }
+    }
+    setSelected(best ?? null);
+  }, { capture: true });
+
+  bus.on('pins:create', (list) => {
+    (Array.isArray(list) ? list : [list]).forEach(p => {
+      const pos = new THREE.Vector3(Number(p.x)||0, Number(p.y)||0, Number(p.z)||0);
+      const id = addPinAt(pos, { title:p.title, body:p.body, img:p.imageUrl, imageId:p.imageId, thumbnailLink:p.thumbnailLink }, p.id || null);
+      const m = String(id).match(/(\d+)$/); if (m) { const n = parseInt(m[1],10); if (n>idSeq) idSeq=n; }
+    });
   });
-}
-
-function createPinsBox(){
-  const side = document.getElementById('side');
-  const box = document.createElement('div');
-  box.id = 'pins-box';
-  const header = document.createElement('div');
-  header.textContent = 'Pins';
-  header.style.cssText = 'font-weight:700;margin:8px 0';
-  side.appendChild(header);
-  side.appendChild(box);
-  return box;
 }
