@@ -1,10 +1,9 @@
-// features/wiring_captions.js
+// features/wiring_captions.js  (v6.6.1)
 import { getParentFolderId } from './drive_ctx.js';
 import { renderImagesGrid, downloadFileBlob } from './images_siblings.js';
 import { findOrCreateSpreadsheetInSameFolder, loadCaptions, upsertCaption } from './sheets_captions.js';
 
 const state = { folderId:null, sheetId:null, debounceTimer:null, currentPinId:null };
-
 function qsId(){ try{ return new URL(location.href).searchParams.get('id'); }catch{ return null; } }
 function debounce(fn, ms){ return (...a)=>{ clearTimeout(state.debounceTimer); state.debounceTimer=setTimeout(()=>fn(...a), ms); }; }
 
@@ -37,4 +36,4 @@ document.addEventListener('lmy:image-picked', async (e)=>{
 document.addEventListener('lmy:add-pin', (e)=>{ state.currentPinId = null; });
 document.addEventListener('lmy:pick-pin', (e)=>{ const pin=e.detail?.pin||null; state.currentPinId = pin?.pinId||pin?.id||null; });
 
-window.addEventListener('DOMContentLoaded', boot);
+export async function startCloudBootstrap(){ await boot(); }

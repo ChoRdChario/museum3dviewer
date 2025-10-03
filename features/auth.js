@@ -1,6 +1,10 @@
-// features/auth.js
+// features/auth.js  (v6.6.1)
+// Minimal Google Auth UI + helpers (GIS + GAPI).
+// Uses your provided credentials.
+
 const API_KEY = 'AIzaSyCUnTCr5yWUWPdEXST9bKP1LpgawU5rIbI';
 const CLIENT_ID = '595200751510-ncahnf7edci6b9925becn5to49r6cguv.apps.googleusercontent.com';
+
 const SCOPES = [
   'https://www.googleapis.com/auth/drive.readonly',
   'https://www.googleapis.com/auth/drive.file',
@@ -68,7 +72,6 @@ export function isSignedIn() {
   try { return !!gapi.client.getToken(); } catch { return false; }
 }
 export async function initAuthUI() {
-  await ensureLoaded();
   renderAuthUi();
 }
 
@@ -111,9 +114,3 @@ function styleBtn(b) {
   b.onmouseenter = () => b.style.opacity = '0.9';
   b.onmouseleave = () => b.style.opacity = '1';
 }
-
-window.addEventListener('DOMContentLoaded', () => {
-  if (window.gapi && window.google && window.google.accounts && window.google.accounts.oauth2) {
-    initAuthUI();
-  }
-});

@@ -1,4 +1,4 @@
-// features/drive_ctx.js
+// features/drive_ctx.js  (v6.6.1)
 export async function ensureAuth() {
   if (!(window.gapi && window.gapi.client && window.gapi.client.getToken && window.gapi.client.getToken())) {
     throw new Error('no OAuth token');
@@ -21,13 +21,14 @@ export async function listSiblingImages(folderId) {
 }
 export async function downloadFileBlob(fileId) {
   await ensureAuth();
+  // preferred: webContentLink fetch (works with link-shared)
   const meta = await gapi.client.drive.files.get({ fileId, fields: 'id,name,webContentLink' });
   if (meta?.result?.webContentLink) {
     const r = await fetch(meta.result.webContentLink);
     if (!r.ok) throw new Error('blob fetch failed ' + r.status);
     return await r.blob();
   }
-  // Fallback to media
+  // fallback: alt=media (requires proper auth scope)
   const res = await gapi.client.drive.files.get({ fileId, alt: 'media' });
   const body = res.body || res.result || res;
   if (body instanceof Blob) return body;

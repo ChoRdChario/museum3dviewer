@@ -1,4 +1,4 @@
-// features/images_siblings.js
+// features/images_siblings.js  (v6.6.1)
 import { listSiblingImages, downloadFileBlob } from './drive_ctx.js';
 export async function renderImagesGrid(folderId) {
   const images = await listSiblingImages(folderId);

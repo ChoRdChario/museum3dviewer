@@ -1,4 +1,4 @@
-// features/sheets_captions.js
+// features/sheets_captions.js  (v6.6.1)
 import { ensureAuth } from './drive_ctx.js';
 const SHEET_TITLE = 'LociMyu Captions';
 const CAPTIONS_TAB = 'Captions';
@@ -13,9 +13,7 @@ export async function findOrCreateSpreadsheetInSameFolder(folderId) {
     sheets: [ { properties: { title: CAPTIONS_TAB } } ]
   });
   const spreadsheetId = create.result.spreadsheetId;
-  await gapi.client.drive.files.update({
-    fileId: spreadsheetId, addParents: folderId, removeParents: '', fields: 'id,parents'
-  });
+  await gapi.client.drive.files.update({ fileId: spreadsheetId, addParents: folderId, removeParents: '', fields: 'id,parents' });
   await gapi.client.sheets.spreadsheets.values.update({
     spreadsheetId, range: `${CAPTIONS_TAB}!A1:K1`, valueInputOption: 'RAW',
     resource: { values: [[ 'pinId','matKey','x','y','z','title','body','imageId','imageURL','createdAt','updatedAt' ]]}
