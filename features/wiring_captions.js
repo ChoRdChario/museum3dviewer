@@ -1,223 +1,89 @@
-// features/wiring_captions.js  (v1d: also loads GLB from Drive)
-import { listSiblingImages, downloadImageBlobIfNeeded } from './drive_images.js';
-import { loadPinsFromSheet, savePinsDiff, ensureSheetContext } from './sheets_io.js';
-import { downloadGlbBlob } from './drive_glb.js';   // ← existing util（なければ同梱版を使う）
-import './viewer_bridge.js';                        // ← adapter への橋渡し
+// features/wiring_captions.js  (v2 — robust Drive ID, auth-gated, proper blob fetch)
+import { ensureLoaded, isAuthed } from './auth.js';
+import { ensureSheetContext, loadPins } from './sheets_io.js';
+import { listSiblingImages } from './drive_images.js';
 
-const LOG = (...a)=>console.log('[wiring]', ...a);
-const WARN = (...a)=>console.warn('[wiring]', ...a);
+function log(...a){ console.log('[wiring]', ...a); }
+function warn(...a){ console.warn('[wiring]', ...a); }
 
-function toast(msg, type='info', ms=1400){
-  let box = document.getElementById('lmy-toast');
-  if(!box){
-    box = document.createElement('div');
-    box.id = 'lmy-toast';
-    Object.assign(box.style, {position:'fixed', right:'16px', bottom:'16px', zIndex:2147483000,
-      display:'flex', flexDirection:'column', gap:'8px'});
-    document.body.appendChild(box);
-  }
-  const t = document.createElement('div');
-  Object.assign(t.style, {padding:'8px 10px', background: type==='error'?'#b42334':'#1f6feb',
-    color:'#fff', borderRadius:'8px', fontSize:'12px', boxShadow:'0 6px 18px rgba(0,0,0,.35)'});
-  t.textContent = msg;
-  box.appendChild(t);
-  setTimeout(()=> t.remove(), ms);
+// ---- Drive fileId extractor (URL / id / <id> / open?id=... / uc?id=... 全対応) ----
+export function extractDriveId(input){
+  if (!input) return null;
+  let s = String(input).trim();
+  // remove angle brackets & quotes and whitespace
+  s = s.replace(/[<>"'\s]/g, '');
+  // /file/d/<id>/... pattern
+  let m = s.match(/\/file\/d\/([a-zA-Z0-9_-]{10,})/);
+  if (m) return m[1];
+  // ?id=<id> pattern (open, uc 等)
+  m = s.match(/[?&]id=([a-zA-Z0-9_-]{10,})/);
+  if (m) return m[1];
+  // plain id
+  m = s.match(/^([a-zA-Z0-9_-]{10,})$/);
+  if (m) return m[1];
+  return null;
 }
 
-// --- accept full Drive URL or raw id
-export function extractFileId(raw){
-  if(!raw) return null;
-  raw = String(raw).trim();
-  if(/^[a-zA-Z0-9_-]{12,}$/.test(raw)) return raw; // already id
+// ---- GLB download using OAuth Bearer (binary-safe) ----
+async function downloadGlbBlobOAuth(fileId){
+  const tk = gapi.client.getToken()?.access_token;
+  if(!tk) throw new Error('no OAuth token');
+  const url = `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?alt=media`;
+  const res = await fetch(url, { headers: { Authorization: `Bearer ${tk}` } });
+  if(!res.ok){
+    const text = await res.text().catch(()=>'');
+    const err = new Error(`http ${res.status}`);
+    err.responseText = text;
+    throw err;
+  }
+  return await res.blob();
+}
+
+export async function startCloudBootstrap(fileIdRaw){
+  await ensureLoaded();
+  if (!isAuthed()) { warn('not authed'); return; }
+
+  // allow ?id= on URL as fallback when no arg
+  let raw = fileIdRaw || new URLSearchParams(location.search).get('id');
+  const fileId = extractDriveId(raw);
+  if (!fileId){ warn('invalid id input', fileIdRaw); return; }
+
+  // 1) Load GLB -> viewer
   try{
-    const u = new URL(raw);
-    const m1 = u.pathname.match(/\/d\/([a-zA-Z0-9_-]{10,})/);
-    if(m1) return m1[1];
-    const idq = u.searchParams.get('id');
-    if(idq) return idq;
-  }catch{}
-  const m2 = raw.match(/([a-zA-Z0-9_-]{10,})/);
-  return m2 ? m2[1] : null;
-}
-
-function getParam(name){
-  const u = new URL(location.href);
-  return u.searchParams.get(name);
-}
-function setParam(name, value){
-  const u = new URL(location.href);
-  if(value==null || value===''){ u.searchParams.delete(name); }
-  else { u.searchParams.set(name, value); }
-  history.replaceState({}, '', u.toString());
-}
-
-const state = {
-  glbId: null,
-  folderId: null,
-  sheetId: null,
-  sheetName: null,
-  pins: [],
-  selectedPinId: null,
-};
-
-window.__LMY_startWithFileId = async (input)=>{
-  const id = extractFileId(input);
-  if(!id){ toast('Invalid GLB id/URL', 'error'); return; }
-  await bootstrapWithId(id);
-};
-
-export async function startCloudBootstrap(){
-  try { if(window.__LMY_renderImageGrid) window.__LMY_renderImageGrid([]); } catch {}
-  ensureManualBox();
-
-  const raw = getParam('id');
-  const id = extractFileId(raw);
-  if(!id){
-    WARN('no ?id (or unparsable): waiting for manual start');
-    toast('Cloud: paste GLB fileId or URL', 'info', 1600);
-    return;
-  }
-  await bootstrapWithId(id);
-}
-
-async function bootstrapWithId(glbFileId){
-  state.glbId = glbFileId;
-  setParam('id', glbFileId);
-
-  // 0) まずモデルをロード（視覚的フィードバック）
-  try{
-    toast('Loading GLB from Drive...', 'info', 1200);
-    const blob = await downloadGlbBlob(glbFileId);
-    await window.__LMY_loadGlbBlob(blob); // viewer_bridge が吸収
-    LOG('glb loaded');
-  }catch(e){
-    WARN('glb load failed', e);
-    toast('GLB load failed', 'error', 1600);
-    // 失敗しても Cloud 連携は継続
+    const blob = await downloadGlbBlobOAuth(fileId);
+    document.dispatchEvent(new CustomEvent('lmy:load-glb-blob', { detail: { blob } }));
+    log('glb ok');
+  }catch(err){
+    warn('glb load failed', err);
+    return; // GLBが出ないと以降のUIテストが進まないので打ち切り
   }
 
-  // 1) Drive/Sheets context
+  // 2) Ensure ctx (spreadsheet at same folder)
   let ctx;
   try{
-    ctx = await ensureSheetContext(state.glbId);
-  }catch(e){
-    WARN('ensureSheetContext failed', e);
-    toast('Drive/Sheets init failed', 'error');
+    ctx = await ensureSheetContext(fileId);
+    log('ctx', ctx);
+  }catch(err){
+    warn('ensureSheetContext failed', err);
     return;
   }
-  Object.assign(state, { folderId: ctx.folderId, sheetId: ctx.spreadsheetId, sheetName: ctx.sheetName });
-  LOG('ctx', ctx);
-  toast('Drive/Sheets ready', 'info', 900);
 
-  // 2) 画像列挙
-  try {
-    const images = await listSiblingImages(state.folderId);
-    LOG('images', images?.length);
-    if(window.__LMY_renderImageGrid) window.__LMY_renderImageGrid(images);
-  } catch(e){ WARN('listSiblingImages failed', e); }
-
-  // 3) ピン読み込み
+  // 3) Images & pins
   try{
-    state.pins = await loadPinsFromSheet(state.sheetId, state.sheetName);
-    LOG('pins loaded', state.pins.length);
-    document.dispatchEvent(new CustomEvent('lmy:pins-loaded', {detail: state.pins}));
-  }catch(e){ WARN('load pins failed', e); }
-
-  wireEvents();
-}
-
-function ensureManualBox(){
-  const side = document.getElementById('side');
-  if(!side) return;
-  let box = document.getElementById('lmy-cloud-bootstrap');
-  if(box) return;
-  box = document.createElement('section');
-  box.id = 'lmy-cloud-bootstrap';
-  box.innerHTML = `
-    <h4 style="margin:.75rem 0 .5rem">Cloud</h4>
-    <div style="display:flex;gap:6px;align-items:center">
-      <input id="lmy-fileid" placeholder="GLB fileId or Drive URL" style="flex:1;background:#0f0f10;border:1px solid #222;border-radius:8px;color:#ddd;padding:6px 8px"/>
-      <button id="lmy-fileid-start" style="background:#1f6feb;color:#fff;border:none;border-radius:8px;padding:6px 10px;cursor:pointer">Start</button>
-    </div>
-    <p style="opacity:.6;font-size:12px;margin:.35rem 0 0">id または Drive の共有URLを貼って Start。</p>
-  `;
-  side.appendChild(box);
-  box.querySelector('#lmy-fileid-start').onclick = async ()=>{
-    const id = extractFileId(box.querySelector('#lmy-fileid').value);
-    if(!id){ toast('Invalid GLB id/URL', 'error'); return; }
-    await bootstrapWithId(id);
-  };
-}
-
-let wired = false;
-function wireEvents(){
-  if(wired) return; wired = true;
-
-  document.addEventListener('lmy:image-picked', async (e)=>{
-    const file = e.detail;
-    if(!state.selectedPinId){ toast('Pick a pin first', 'error'); return; }
-    try{
-      const imgURL = await downloadImageBlobIfNeeded(file.id);
-      const pin = state.pins.find(p=>p.id===state.selectedPinId);
-      if(pin){
-        pin.imageFileId = file.id;
-        pin.imageURL = imgURL;
-        pin.updatedAt = new Date().toISOString();
-        showOverlayForPin(pin);
-        scheduleSave();
-      }
-    }catch(err){
-      console.warn('image attach failed', err);
-      toast('Image attach failed', 'error');
-    }
-  });
-
-  document.addEventListener('lmy:add-pin', (e)=>{
-    const { id, position } = e.detail || {};
-    const pinId = id || `pin_${Math.random().toString(36).slice(2,8)}`;
-    const pin = { id: pinId, x: position?.x ?? 0, y: position?.y ?? 0, z: position?.z ?? 0,
-      title:'', body:'', imageFileId:'', imageURL:'', material:'', updatedAt:new Date().toISOString() };
-    state.pins.push(pin);
-    state.selectedPinId = pinId;
-    showOverlayForPin(pin);
-    scheduleSave();
-  });
-
-  document.addEventListener('lmy:pick-pin', (e)=>{
-    const { id } = e.detail || {};
-    state.selectedPinId = id || null;
-    const pin = state.pins.find(p=>p.id===state.selectedPinId);
-    if(pin) showOverlayForPin(pin); else hideOverlay();
-  });
-
-  document.addEventListener('lmy:update-caption', (e)=>{
-    const { id, title, body } = e.detail || {};
-    const pin = state.pins.find(p=>p.id===id);
-    if(!pin) return;
-    if(typeof title==='string') pin.title = title;
-    if(typeof body==='string') pin.body = body;
-    pin.updatedAt = new Date().toISOString();
-    showOverlayForPin(pin);
-    scheduleSave();
-  });
-}
-
-function showOverlayForPin(pin){
-  if(window.__LMY_overlay?.showOverlay){
-    window.__LMY_overlay.showOverlay({ title: pin.title||'', body: pin.body||'', imgUrl: pin.imageURL||'' });
+    const images = await listSiblingImages(ctx.folderId);
+    log('images', images.length);
+    const pins = await loadPins(ctx.spreadsheetId);
+    log('pins loaded', pins.length);
+    // broadcast
+    window.__LMY_ctx = ctx;
+    document.dispatchEvent(new CustomEvent('lmy:cloud-ready', { detail: { ctx, images, pins } }));
+  }catch(err){
+    warn('list/load failed', err);
   }
 }
-function hideOverlay(){
-  if(window.__LMY_overlay?.hideOverlay){ window.__LMY_overlay.hideOverlay(); }
-}
 
-let saveTimer = null;
-function scheduleSave(){
-  clearTimeout(saveTimer);
-  saveTimer = setTimeout(async ()=>{
-    try{
-      await savePinsDiff(state.sheetId, state.sheetName, state.pins);
-      toast('Saved', 'info', 800);
-    }catch(e){ console.warn('save failed', e); toast('Save failed', 'error'); }
-  }, 1200);
+// Manual button → call with textbox
+export async function bootstrapWithIdFromInput(){
+  const v = document.getElementById('cloud_glb_id')?.value || '';
+  await startCloudBootstrap(v);
 }
