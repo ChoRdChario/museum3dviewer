@@ -1,7 +1,4 @@
-// features/auth.js  (v2 — ESM互換: ensureLoaded を含む named export を提供)
-// - 既存の init_cloud_boot.js の `import { ensureLoaded } from './auth.js'` に対応
-// - 併せて window.__LMY_auth も残す（後方互換）
-
+// features/auth.js  (v2.1 — ESM互換: ensureLoaded + initAuthUI を named export)
 const API_KEY = 'AIzaSyCUnTCr5yWUWPdEXST9bKP1LpgawU5rIbI';
 const CLIENT_ID = '595200751510-ncahnf7edci6b9925becn5to49r6cguv.apps.googleusercontent.com';
 const SCOPES = [
@@ -91,11 +88,17 @@ export function signOut(){
   renderAuthUi();
 }
 export function isAuthed(){ return !!accessToken; }
-export async function init(){
-  renderAuthUi();
+// 旧 init の別名として initAuthUI を公開（init_cloud_boot.js 互換）
+export async function initAuthUI(){ renderAuthUi(); }
+
+// 後方互換: window.__LMY_auth を残す
+if(!window.__LMY_auth){
+  window.__LMY_auth = { init: initAuthUI, signIn, signOut, isAuthed, ensureLoaded };
 }
 
-if(!window.__LMY_auth){
-  window.__LMY_auth = { init, signIn, signOut, isAuthed, ensureLoaded };
+// DOM 準備後に UI を初期描画
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', () => initAuthUI());
+} else {
+  initAuthUI();
 }
-document.addEventListener('DOMContentLoaded', init);
