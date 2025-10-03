@@ -3,55 +3,78 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-  <title>LociMyu v6.6.3 — Auth & Loading (Dark)</title>
+  <title>LociMyu v6.6.4 — PR2 Demo</title>
   <link rel="icon" href="./assets/favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="./assets/base.css" />
 </head>
 <body>
-  <!-- Auth floating chip container -->
   <div id="auth-bar"></div>
-
-  <!-- Right panel (kept for PR2 UI injection) -->
   <aside id="side" aria-label="Right pane">
     <h2>LociMyu</h2>
     <div id="auth-box-side" class="section"></div>
-    <div class="section small">このペインはPR2以降で本機能UIが入ります。</div>
+    <div class="section small">PR2: Drive/Sheets + Pins + Captions（デモ）</div>
   </aside>
-
   <main>
-    <h1>LociMyu — PR1 スモーク</h1>
-    <p class="hint">この段階ではサインインUIとローディングUI（スピナー/トースト）の骨組みのみ。</p>
-    <div style="display:flex; gap:10px">
-      <button id="btnTestSpinner">テスト: スピナー2秒</button>
-      <button id="btnTestToast">テスト: トースト</button>
+    <h1>PR2 デモ</h1>
+    <div class="hint">URLに <code>?fileId=XXXXX</code> を付けて開くと、同階層の画像を取得し、シートをfind-or-createします。</div>
+    <div style="display:flex;gap:8px;margin:8px 0;">
+      <input id="fileIdInput" placeholder="GLBのfileId (Google Drive)" style="width:400px;padding:8px;border-radius:10px;border:1px solid rgba(255,255,255,.08);background:#141820;color:#eaf1ff" />
+      <button id="applyFileId">Apply</button>
+      <button id="addPin">ピン追加（擬似）</button>
     </div>
+    <div class="hint">本番では3Dビュー上のShift+クリックで座標を取得して <code>addPinAt(x,y,z)</code> を呼んでください。</div>
   </main>
 
   <script type="module">
     import { ensureLoaded, initAuthUI, isSignedIn } from './features/auth.js';
     import { showSpinner, hideSpinner, toast } from './features/loading.js';
     import { setAuthed } from './features/state.js';
+    import { findOrCreateSpreadsheetForFile } from './features/sheets.js';
+    import { initPins, addPinAt } from './features/pins.js';
+    import { initCaptions } from './features/captions.js';
 
-    async function boot() {
-      showSpinner('auth');
-      try {
-        await ensureLoaded();
-        initAuthUI();
-        setAuthed(isSignedIn());
-        toast.info('Auth scripts loaded.');
-      } catch (e) {
-        console.error(e);
-        toast.error('Auth init failed. Check console.');
-      } finally {
-        hideSpinner();
-      }
+    function getParam(name){
+      const m = new URLSearchParams(location.search).get(name);
+      return m || '';
     }
 
-    document.getElementById('btnTestSpinner').addEventListener('click', () => {
-      showSpinner('test'); setTimeout(hideSpinner, 2000);
+    let fileId = getParam('fileId');
+    const fileIdInput = document.getElementById('fileIdInput');
+    fileIdInput.value = fileId;
+
+    async function boot(){
+      showSpinner('auth');
+      try{
+        await ensureLoaded(); initAuthUI(); setAuthed(isSignedIn());
+        toast.info('Auth ok');
+      }catch(e){ console.error(e); toast.error('Auth failed'); }
+      finally{ hideSpinner(); }
+
+      if (fileId) await setupForFile(fileId);
+    }
+
+    async function setupForFile(fid){
+      fileId = fid;
+      showSpinner('setup');
+      try{
+        const spreadsheetId = await findOrCreateSpreadsheetForFile(fileId);
+        await initPins(fileId, spreadsheetId);
+        await initCaptions(fileId, spreadsheetId);
+        toast.success('Drive/Sheets 準備完了');
+      }catch(e){ console.error(e); toast.error('Drive/Sheets 初期化に失敗'); }
+      finally{ hideSpinner(); }
+    }
+
+    document.getElementById('applyFileId').addEventListener('click', async ()=>{
+      const v = fileIdInput.value.trim();
+      if (!v){ toast.error('fileId を入力してください'); return; }
+      history.replaceState({}, '', '?fileId='+encodeURIComponent(v));
+      await setupForFile(v);
     });
-    document.getElementById('btnTestToast').addEventListener('click', () => {
-      toast.success('保存に成功しました（デモ）');
+
+    document.getElementById('addPin').addEventListener('click', ()=>{
+      // デモ: ランダム座標でピンを作成
+      addPinAt(Math.random()*2-1, Math.random()*2-1, Math.random()*2-1);
     });
 
     boot();
