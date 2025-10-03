@@ -3,40 +3,40 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-  <title>LociMyu v6.6.3 (PR1)</title>
-  <style>
-    body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans JP", sans-serif; margin: 0; }
-    #auth-bar { position: fixed; top: 10px; right: 12px; z-index: 1000; }
-    #side { position: fixed; top: 0; right: 0; width: 320px; height: 100vh; overflow: auto; padding: 12px; box-sizing: border-box; }
-    main { padding: 16px; }
-    .hint { color:#666; font-size: 14px; }
-  </style>
+  <title>LociMyu v6.6.3 — Auth & Loading (Dark)</title>
+  <link rel="icon" href="./assets/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="./assets/base.css" />
 </head>
 <body>
-  <!-- 必須の容器 -->
+  <!-- Auth floating chip container -->
   <div id="auth-bar"></div>
-  <div id="side">
-    <div id="auth-box-side"></div>
-    <div class="hint">ここは右ペイン（暫定）。PR2以降で本UIが入ります。</div>
-  </div>
+
+  <!-- Right panel (kept for PR2 UI injection) -->
+  <aside id="side" aria-label="Right pane">
+    <h2>LociMyu</h2>
+    <div id="auth-box-side" class="section"></div>
+    <div class="section small">このペインはPR2以降で本機能UIが入ります。</div>
+  </aside>
+
   <main>
     <h1>LociMyu — PR1 スモーク</h1>
     <p class="hint">この段階ではサインインUIとローディングUI（スピナー/トースト）の骨組みのみ。</p>
-    <button id="btnTestSpinner">テスト: スピナー2秒</button>
-    <button id="btnTestToast">テスト: トースト</button>
+    <div style="display:flex; gap:10px">
+      <button id="btnTestSpinner">テスト: スピナー2秒</button>
+      <button id="btnTestToast">テスト: トースト</button>
+    </div>
   </main>
 
   <script type="module">
     import { ensureLoaded, initAuthUI, isSignedIn } from './features/auth.js';
     import { showSpinner, hideSpinner, toast } from './features/loading.js';
-    import { setAuthed, bus } from './features/state.js';
+    import { setAuthed } from './features/state.js';
 
     async function boot() {
       showSpinner('auth');
       try {
         await ensureLoaded();
         initAuthUI();
-        // 初期認証状態をstateに反映
         setAuthed(isSignedIn());
         toast.info('Auth scripts loaded.');
       } catch (e) {
@@ -45,23 +45,16 @@
       } finally {
         hideSpinner();
       }
-
-      // auth.js が CustomEvent を投げる想定ならここで捕捉する設計にしてもOK。
-      // 今は state.js からの通知のみを利用。
     }
 
-    // Demo buttons
-    document.getElementById('btnTestSpinner').addEventListener('click', async () => {
-      showSpinner('test');
-      setTimeout(hideSpinner, 2000);
+    document.getElementById('btnTestSpinner').addEventListener('click', () => {
+      showSpinner('test'); setTimeout(hideSpinner, 2000);
     });
     document.getElementById('btnTestToast').addEventListener('click', () => {
       toast.success('保存に成功しました（デモ）');
     });
 
     boot();
-    // デバッグ補助を露出
-    window.__LMY = { toast, showSpinner, hideSpinner };
   </script>
 </body>
 </html>
