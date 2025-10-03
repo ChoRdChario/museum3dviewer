@@ -1,4 +1,7 @@
-// features/auth.js  (v1-perm-fix)
+// features/auth.js  (v2 — ESM互換: ensureLoaded を含む named export を提供)
+// - 既存の init_cloud_boot.js の `import { ensureLoaded } from './auth.js'` に対応
+// - 併せて window.__LMY_auth も残す（後方互換）
+
 const API_KEY = 'AIzaSyCUnTCr5yWUWPdEXST9bKP1LpgawU5rIbI';
 const CLIENT_ID = '595200751510-ncahnf7edci6b9925becn5to49r6cguv.apps.googleusercontent.com';
 const SCOPES = [
@@ -71,23 +74,28 @@ function ensureTokenClient(){
   });
 }
 
-async function signIn(){
+// ----- exported API -----
+export async function ensureLoaded(){
   await loadGapi();
   ensureTokenClient();
+}
+export async function signIn(){
+  await ensureLoaded();
   tokenClient.requestAccessToken();
 }
-
-function signOut(){
+export function signOut(){
   if(!accessToken){ return; }
   try{ google.accounts.oauth2.revoke(accessToken); }catch{}
   gapi.client.setToken(null);
   accessToken = null;
   renderAuthUi();
 }
+export function isAuthed(){ return !!accessToken; }
+export async function init(){
+  renderAuthUi();
+}
 
-function isAuthed(){ return !!accessToken; }
-
-async function init(){ renderAuthUi(); }
-
-window.__LMY_auth = { init, signIn, signOut, isAuthed };
+if(!window.__LMY_auth){
+  window.__LMY_auth = { init, signIn, signOut, isAuthed, ensureLoaded };
+}
 document.addEventListener('DOMContentLoaded', init);
