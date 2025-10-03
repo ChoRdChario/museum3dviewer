@@ -1,19 +1,16 @@
 
-// features/auth.js  (v6.6.3-fix2)
-// Adds ensureAccessToken() to guarantee OAuth token before Drive/Sheets calls.
-
+// features/auth.js (v6.6.4-fix3)
 const API_KEY = 'AIzaSyCUnTCr5yWUWPdEXST9bKP1LpgawU5rIbI';
 const CLIENT_ID = '595200751510-ncahnf7edci6b9925becn5to49r6cguv.apps.googleusercontent.com';
-
 const SCOPES = [
   'https://www.googleapis.com/auth/drive.readonly',
   'https://www.googleapis.com/auth/drive.file',
   'https://www.googleapis.com/auth/spreadsheets'
 ].join(' ');
 
-let tokenClient = null;
 let gapiReady = false;
 let gisReady = false;
+let inflightTokenPromise = null;
 
 function log(...a){ console.log('[auth]', ...a); }
 function err(...a){ console.error('[auth]', ...a); }
@@ -28,7 +25,6 @@ function addScript({id, src, async=true, defer=true, nonce}){
     document.head.appendChild(s);
   });
 }
-
 async function loadWithRetry(what, fn, {tries=3, baseDelay=350}={}){
   let last;
   for (let i=0;i<tries;i++){
@@ -42,28 +38,15 @@ async function initGis(){
   if (gisReady) return;
   await addScript({ id:'gsi', src:'https://accounts.google.com/gsi/client' });
   if (!window.google?.accounts?.oauth2) throw new Error('GIS not present');
-  tokenClient = google.accounts.oauth2.initTokenClient({
-    client_id: CLIENT_ID,
-    scope: SCOPES,
-    callback: (tokenResponse)=>{
-      if (tokenResponse?.access_token){
-        gapi?.client?.setToken?.({ access_token: tokenResponse.access_token });
-        document.dispatchEvent(new CustomEvent('auth:change', {detail:{authed:true}}));
-        renderAuthUIs();
-      }
-    }
-  });
   gisReady = true;
 }
-
 async function loadGapiClient(){
   if (gapiReady) return;
   await addScript({ id:'gapi', src:'https://apis.google.com/js/api.js' });
   if (!window.gapi) throw new Error('gapi not present');
   await new Promise((resolve, reject)=>{
-    try{
-      gapi.load('client', { callback: resolve, onerror: ()=>reject(new Error('gapi.load client failed')) });
-    }catch(e){ reject(e); }
+    try{ gapi.load('client', { callback: resolve, onerror: ()=>reject(new Error('gapi.load client failed')) }); }
+    catch(e){ reject(e); }
   });
   await gapi.client.init({ apiKey: API_KEY });
   await Promise.allSettled([
@@ -79,103 +62,66 @@ export async function ensureLoaded(){
   return true;
 }
 
-// NEW: ensure OAuth access token exists (silent if already granted)
+function getAccessTokenInteractive(promptMode){
+  return new Promise((resolve, reject)=>{
+    try{
+      const client = google.accounts.oauth2.initTokenClient({
+        client_id: CLIENT_ID, scope: SCOPES, prompt: promptMode,
+        callback: (tokenResponse)=>{
+          try{
+            const at = tokenResponse?.access_token;
+            if (at){ gapi?.client?.setToken?.({ access_token: at }); resolve(at); }
+            else reject(new Error('no access_token'));
+          }catch(e){ reject(e); }
+        }
+      });
+      client.requestAccessToken();
+    }catch(e){ reject(e); }
+  });
+}
+
 export async function ensureAccessToken({interactiveIfNeeded=true}={}){
   await ensureLoaded();
-  // If we already have a token, try silent refresh to ensure validity.
-  const has = !!(gapi?.client?.getToken?.()?.access_token);
-  try{
-    tokenClient.requestAccessToken({ prompt: '' }); // silent if previously consented
-  }catch(e){ /* ignore */ }
-  // Wait up to ~2 seconds for token to appear
-  for (let i=0;i<10;i++){
-    const tok = gapi?.client?.getToken?.();
-    if (tok?.access_token) return true;
-    await sleep(200);
-  }
-  if (interactiveIfNeeded){
-    // Fallback: interactive prompt
-    tokenClient.requestAccessToken({ prompt: 'consent' });
-    for (let i=0;i<30;i++){
-      const tok = gapi?.client?.getToken?.();
-      if (tok?.access_token) return true;
-      await sleep(200);
-    }
-  }
-  throw new Error('OAuth token unavailable');
+  const tok = gapi?.client?.getToken?.();
+  if (tok?.access_token) return true;
+  if (inflightTokenPromise) { await inflightTokenPromise; return !!(gapi?.client?.getToken?.()?.access_token); }
+  inflightTokenPromise = (async ()=>{
+    try{ await getAccessTokenInteractive(''); }catch(_){}
+    if (gapi?.client?.getToken?.()?.access_token) return true;
+    if (interactiveIfNeeded){ await getAccessTokenInteractive('consent'); }
+    return !!(gapi?.client?.getToken?.()?.access_token);
+  })();
+  const ok = await inflightTokenPromise.finally(()=> inflightTokenPromise=null);
+  if (!ok) throw new Error('OAuth token unavailable');
+  return true;
 }
-
-export function signIn(prompt='consent'){
-  if (!gisReady || !tokenClient) return err('signIn before GIS ready');
-  tokenClient.requestAccessToken({ prompt });
-}
-
+export function signIn(){ ensureAccessToken({interactiveIfNeeded:true}); }
 export function signOut(){
-  try{
-    const tok = gapi?.client?.getToken?.();
-    if (tok?.access_token && window.google?.accounts?.oauth2?.revoke){
-      google.accounts.oauth2.revoke(tok.access_token, ()=>{});
-    }
-  }catch(_){}
+  try{ const tok = gapi?.client?.getToken?.(); if (tok?.access_token){ google?.accounts?.oauth2?.revoke?.(tok.access_token, ()=>{}); } }catch(_){}
   try{ gapi?.client?.setToken?.(null); }catch(_){}
-  document.dispatchEvent(new CustomEvent('auth:change', {detail:{authed:false}}));
-  renderAuthUIs();
 }
-
-export function isSignedIn(){
-  try{ return !!(gapi?.client?.getToken?.()?.access_token); }catch(_){ return false; }
-}
+export function isSignedIn(){ try{ return !!(gapi?.client?.getToken?.()?.access_token); }catch(_){ return false; } }
 
 function makeBtn(text, onClick, disabled=false){
-  const b = document.createElement('button');
-  b.textContent = text;
-  b.style.cssText = 'appearance:none;border:1px solid rgba(255,255,255,.1);background:#1b2330;color:#eaf1ff;padding:6px 10px;border-radius:10px;cursor:pointer;';
-  b.disabled = !!disabled; b.onclick = onClick; return b;
+  const b=document.createElement('button'); b.textContent=text;
+  b.style.cssText='appearance:none;border:1px solid rgba(255,255,255,.1);background:#1b2330;color:#eaf1ff;padding:6px 10px;border-radius:10px;cursor:pointer;';
+  b.disabled=!!disabled; b.onclick=onClick; return b;
 }
-function makeStatusSpan(text){
-  const s = document.createElement('span');
-  s.textContent = text;
-  s.style.cssText = 'font-size:12px;color:#9aa4b2;margin-right:8px';
-  return s;
-}
+function makeStatusSpan(text){ const s=document.createElement('span'); s.textContent=text; s.style.cssText='font-size:12px;color:#9aa4b2;margin-right:8px'; return s; }
 function renderFloatingChip(){
-  let host = document.getElementById('auth-bar');
-  if (!host){ host=document.createElement('div'); host.id='auth-bar'; document.body.appendChild(host); }
-  host.innerHTML='';
-  const box=document.createElement('div');
-  box.className='chip';
+  let host=document.getElementById('auth-bar'); if(!host){ host=document.createElement('div'); host.id='auth-bar'; document.body.appendChild(host); }
+  host.innerHTML=''; const box=document.createElement('div'); box.className='chip';
   box.style.cssText='display:flex;gap:8px;align-items:center;background:#141820;border:1px solid rgba(255,255,255,.08);padding:6px 8px;border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,.35);';
-  const authed=isSignedIn();
-  box.appendChild(makeStatusSpan(authed?'Google: Signed-in':'Google: Signed-out'));
-  box.appendChild(makeBtn('Sign in', ()=>signIn(authed?'':'consent'), authed));
-  box.appendChild(makeBtn('Sign out', ()=>signOut(), !authed));
-  host.appendChild(box);
+  const authed=isSignedIn(); box.appendChild(makeStatusSpan(authed?'Google: Signed-in':'Google: Signed-out'));
+  box.appendChild(makeBtn('Sign in', ()=>signIn(), authed)); box.appendChild(makeBtn('Sign out', ()=>signOut(), !authed)); host.appendChild(box);
 }
 function renderSidebarChip(){
   const side=document.getElementById('side'); if(!side) return;
   let box=document.getElementById('auth-box-side'); if(!box){ box=document.createElement('div'); box.id='auth-box-side'; side.prepend(box); }
   box.innerHTML='';
-  const row=document.createElement('div');
-  row.style.cssText='display:flex;gap:8px;align-items:center;background:#141820;border:1px solid rgba(255,255,255,.08);padding:8px;border-radius:12px;';
-  const authed=isSignedIn();
-  row.appendChild(makeStatusSpan('Google:'));
-  row.appendChild(makeBtn('Sign in', ()=>signIn(authed?'':'consent'), authed));
-  row.appendChild(makeBtn('Sign out', ()=>signOut(), !authed));
-  box.appendChild(row);
+  const row=document.createElement('div'); row.style.cssText='display:flex;gap:8px;align-items:center;background:#141820;border:1px solid rgba(255,255,255,.08);padding:8px;border-radius:12px;';
+  const authed=isSignedIn(); row.appendChild(makeStatusSpan('Google:')); row.appendChild(makeBtn('Sign in', ()=>signIn(), authed)); row.appendChild(makeBtn('Sign out', ()=>signOut(), !authed)); box.appendChild(row);
 }
-
-export async function initAuthUI(){
-  renderAuthUIs();
-  if (document.readyState === 'loading'){
-    document.addEventListener('DOMContentLoaded', renderAuthUIs, { once:true });
-  }
-}
+export async function initAuthUI(){ renderAuthUIs(); if (document.readyState==='loading'){ document.addEventListener('DOMContentLoaded', renderAuthUIs, {once:true}); } }
 function renderAuthUIs(){ renderFloatingChip(); renderSidebarChip(); }
-
-window.__LMY_authDebug = function(){
-  return {
-    gapi: !!window.gapi && !!(gapi.client),
-    gis: !!(window.google && google.accounts && google.accounts.oauth2),
-    hasToken: !!(gapi?.client?.getToken?.()?.access_token)
-  };
-};
+window.__LMY_authDebug = function(){ return { gapi: !!window.gapi && !!(gapi.client), gis: !!(window.google && google.accounts && google.accounts.oauth2), hasToken: !!(gapi?.client?.getToken?.()?.access_token) }; };
