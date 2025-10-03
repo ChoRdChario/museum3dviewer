@@ -48,8 +48,8 @@
       showSpinner('auth');
       try{
         await ensureLoaded(); initAuthUI(); setAuthed(isSignedIn());
-        await ensureAccessToken({interactiveIfNeeded:true});
-        toast.info('Auth ok');
+        /* lazy: do not auto-get token on boot */
+        toast.info('Auth ok (no token yet)');
       }catch(e){ console.error(e); toast.error('Auth failed'); }
       finally{ hideSpinner(); }
 
