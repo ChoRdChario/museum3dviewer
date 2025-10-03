@@ -26,7 +26,7 @@
   </main>
 
   <script type="module">
-    import { ensureLoaded, initAuthUI, isSignedIn } from './features/auth.js';
+    import { ensureLoaded, initAuthUI, isSignedIn, ensureAccessToken } from './features/auth.js';
     import { getParam, normalizeFileId } from './features/utils.js';
     import { showSpinner, hideSpinner, toast } from './features/loading.js';
     import { setAuthed } from './features/state.js';
@@ -48,6 +48,7 @@
       showSpinner('auth');
       try{
         await ensureLoaded(); initAuthUI(); setAuthed(isSignedIn());
+        await ensureAccessToken({interactiveIfNeeded:true});
         toast.info('Auth ok');
       }catch(e){ console.error(e); toast.error('Auth failed'); }
       finally{ hideSpinner(); }
@@ -59,6 +60,7 @@
       fileId = fid;
       showSpinner('setup');
       try{
+        await ensureAccessToken({interactiveIfNeeded:true});
         const spreadsheetId = await findOrCreateSpreadsheetForFile(fileId);
         await initPins(fileId, spreadsheetId);
         await initCaptions(fileId, spreadsheetId);
