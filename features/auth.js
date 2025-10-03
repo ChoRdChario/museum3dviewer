@@ -1,4 +1,4 @@
-// features/auth.js  (v2.1 — ESM互換: ensureLoaded + initAuthUI を named export)
+// features/auth.js  (v2.2 — Sign-inボタンの描画先を強化 & ESM互換Exports維持)
 const API_KEY = 'AIzaSyCUnTCr5yWUWPdEXST9bKP1LpgawU5rIbI';
 const CLIENT_ID = '595200751510-ncahnf7edci6b9925becn5to49r6cguv.apps.googleusercontent.com';
 const SCOPES = [
@@ -14,26 +14,38 @@ let accessToken = null;
 function h(tag, props={}, ...children){
   const el = document.createElement(tag);
   Object.assign(el, props);
-  children.forEach(c=> el.append(c));
+  (children||[]).forEach(c=> el.append(c));
   return el;
 }
 
+function pickMount(){
+  return (
+    document.querySelector('#app-title-right') ||
+    document.querySelector('#app-title') ||
+    document.querySelector('header .title') ||
+    document.querySelector('#topbar') ||
+    document.querySelector('header') ||
+    document.querySelector('#header') ||
+    document.body
+  );
+}
+
 function renderAuthUi(){
-  const slotId = 'auth-slot';
-  let slot = document.getElementById(slotId);
+  let slot = document.getElementById('auth-slot');
   if(!slot){
-    const title = document.querySelector('#app-title-right') || document.body;
-    slot = h('span', { id: slotId, style: 'margin-left:.5rem;vertical-align:middle;display:inline-flex;gap:6px;' });
-    title.append(slot);
+    const mount = pickMount();
+    slot = h('span', { id:'auth-slot' });
+    slot.className = 'auth-slot-fixed';
+    mount.append(slot);
   }
   slot.innerHTML = '';
   if(accessToken){
     slot.append(
-      h('span', { className:'badge', textContent:'Signed in', style:'padding:.15rem .5rem;background:#1f6feb;color:#fff;border-radius:10px;font-size:12px' }),
-      h('button', { textContent:'Sign out', className:'btn', onclick: signOut, style:'margin-left:6px' }),
+      h('span', { className:'badge', textContent:'Signed in' }),
+      h('button', { className:'btn', textContent:'Sign out', onclick: signOut }),
     );
   }else{
-    slot.append(h('button', { textContent:'Sign in', className:'btn', onclick: signIn }));
+    slot.append(h('button', { className:'btn', textContent:'Sign in', onclick: signIn }));
   }
 }
 
@@ -72,33 +84,26 @@ function ensureTokenClient(){
 }
 
 // ----- exported API -----
-export async function ensureLoaded(){
-  await loadGapi();
-  ensureTokenClient();
-}
-export async function signIn(){
-  await ensureLoaded();
-  tokenClient.requestAccessToken();
-}
+export async function ensureLoaded(){ await loadGapi(); ensureTokenClient(); }
+export async function initAuthUI(){ renderAuthUi(); }
+export async function signIn(){ await ensureLoaded(); tokenClient.requestAccessToken(); }
 export function signOut(){
-  if(!accessToken){ return; }
+  if(!accessToken) return;
   try{ google.accounts.oauth2.revoke(accessToken); }catch{}
   gapi.client.setToken(null);
   accessToken = null;
   renderAuthUi();
 }
 export function isAuthed(){ return !!accessToken; }
-// 旧 init の別名として initAuthUI を公開（init_cloud_boot.js 互換）
-export async function initAuthUI(){ renderAuthUi(); }
 
-// 後方互換: window.__LMY_auth を残す
+// Back-compat
 if(!window.__LMY_auth){
   window.__LMY_auth = { init: initAuthUI, signIn, signOut, isAuthed, ensureLoaded };
 }
 
-// DOM 準備後に UI を初期描画
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', () => initAuthUI());
-} else {
+// 初期描画
+if(document.readyState === 'loading'){
+  document.addEventListener('DOMContentLoaded', ()=> initAuthUI());
+}else{
   initAuthUI();
 }
