@@ -1,6 +1,8 @@
-// features/wiring_captions.js  (v1c: robust fileId extraction + no-parent fallback trigger)
+// features/wiring_captions.js  (v1d: also loads GLB from Drive)
 import { listSiblingImages, downloadImageBlobIfNeeded } from './drive_images.js';
 import { loadPinsFromSheet, savePinsDiff, ensureSheetContext } from './sheets_io.js';
+import { downloadGlbBlob } from './drive_glb.js';   // ← existing util（なければ同梱版を使う）
+import './viewer_bridge.js';                        // ← adapter への橋渡し
 
 const LOG = (...a)=>console.log('[wiring]', ...a);
 const WARN = (...a)=>console.warn('[wiring]', ...a);
@@ -22,7 +24,7 @@ function toast(msg, type='info', ms=1400){
   setTimeout(()=> t.remove(), ms);
 }
 
-// --- NEW: accept full Drive URL or raw id
+// --- accept full Drive URL or raw id
 export function extractFileId(raw){
   if(!raw) return null;
   raw = String(raw).trim();
@@ -82,6 +84,19 @@ async function bootstrapWithId(glbFileId){
   state.glbId = glbFileId;
   setParam('id', glbFileId);
 
+  // 0) まずモデルをロード（視覚的フィードバック）
+  try{
+    toast('Loading GLB from Drive...', 'info', 1200);
+    const blob = await downloadGlbBlob(glbFileId);
+    await window.__LMY_loadGlbBlob(blob); // viewer_bridge が吸収
+    LOG('glb loaded');
+  }catch(e){
+    WARN('glb load failed', e);
+    toast('GLB load failed', 'error', 1600);
+    // 失敗しても Cloud 連携は継続
+  }
+
+  // 1) Drive/Sheets context
   let ctx;
   try{
     ctx = await ensureSheetContext(state.glbId);
@@ -94,12 +109,14 @@ async function bootstrapWithId(glbFileId){
   LOG('ctx', ctx);
   toast('Drive/Sheets ready', 'info', 900);
 
+  // 2) 画像列挙
   try {
     const images = await listSiblingImages(state.folderId);
     LOG('images', images?.length);
     if(window.__LMY_renderImageGrid) window.__LMY_renderImageGrid(images);
   } catch(e){ WARN('listSiblingImages failed', e); }
 
+  // 3) ピン読み込み
   try{
     state.pins = await loadPinsFromSheet(state.sheetId, state.sheetName);
     LOG('pins loaded', state.pins.length);
