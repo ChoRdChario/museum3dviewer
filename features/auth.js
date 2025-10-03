@@ -1,91 +1,93 @@
-// museum3dviewer/features/auth.js  (v6.6.6 - inline only)
-// Sign-in UI is rendered ONLY next to the title (slot: #auth-inline).
-// Floating bar & sidebar chip are removed. Exports are unchanged.
-//
-// Required in index.html:
-//   <script src="https://accounts.google.com/gsi/client" async defer></script>
-//   <script src="https://apis.google.com/js/api.js"></script>
-//   <script type="module" src="./features/init_cloud_boot.js"></script>
-
-const API_KEY   = 'AIzaSyCUnTCr5yWUWPdEXST9bKP1LpgawU5rIbI';
+// features/auth.js  (v1-perm-fix)
+const API_KEY = 'AIzaSyCUnTCr5yWUWPdEXST9bKP1LpgawU5rIbI';
 const CLIENT_ID = '595200751510-ncahnf7edci6b9925becn5to49r6cguv.apps.googleusercontent.com';
 const SCOPES = [
-  'https://www.googleapis.com/auth/drive.readonly',
+  'https://www.googleapis.com/auth/drive.metadata.readonly',
   'https://www.googleapis.com/auth/drive.file',
-  'https://www.googleapis.com/auth/spreadsheets'
+  'https://www.googleapis.com/auth/spreadsheets',
 ].join(' ');
 
 let tokenClient = null;
-let gapiReady = false;
-let gisReady  = false;
+let gapiInited = false;
+let accessToken = null;
 
-function loadGapiClient() {
-  return new Promise((resolve, reject) => {
-    if (!window.gapi?.load) return reject(new Error('gapi not loaded'));
-    gapi.load('client', async () => {
-      try {
-        await gapi.client.init({
-          apiKey: API_KEY,
-          discoveryDocs: [
-            'https://www.googleapis.com/discovery/v1/apis/drive/v3/rest',
-            'https://sheets.googleapis.com/$discovery/rest?version=v4'
-          ]
-        });
-        gapiReady = true; resolve();
-      } catch (e) { reject(e); }
-    });
-  });
+function h(tag, props={}, ...children){
+  const el = document.createElement(tag);
+  Object.assign(el, props);
+  children.forEach(c=> el.append(c));
+  return el;
 }
-function initGis() {
-  if (!window.google?.accounts?.oauth2) return;
+
+function renderAuthUi(){
+  const slotId = 'auth-slot';
+  let slot = document.getElementById(slotId);
+  if(!slot){
+    const title = document.querySelector('#app-title-right') || document.body;
+    slot = h('span', { id: slotId, style: 'margin-left:.5rem;vertical-align:middle;display:inline-flex;gap:6px;' });
+    title.append(slot);
+  }
+  slot.innerHTML = '';
+  if(accessToken){
+    slot.append(
+      h('span', { className:'badge', textContent:'Signed in', style:'padding:.15rem .5rem;background:#1f6feb;color:#fff;border-radius:10px;font-size:12px' }),
+      h('button', { textContent:'Sign out', className:'btn', onclick: signOut, style:'margin-left:6px' }),
+    );
+  }else{
+    slot.append(h('button', { textContent:'Sign in', className:'btn', onclick: signIn }));
+  }
+}
+
+async function loadGapi(){
+  if(gapiInited) return;
+  await new Promise((res, rej)=>{
+    const s = document.createElement('script');
+    s.src = 'https://apis.google.com/js/api.js';
+    s.onload = res; s.onerror = rej;
+    document.head.appendChild(s);
+  });
+  await new Promise((res)=> gapi.load('client', res));
+  await gapi.client.init({ apiKey: API_KEY, discoveryDocs: [
+    'https://www.googleapis.com/discovery/v1/apis/drive/v3/rest',
+    'https://sheets.googleapis.com/$discovery/rest?version=v4',
+  ]});
+  gapiInited = true;
+}
+
+function ensureTokenClient(){
+  if(tokenClient) return;
   tokenClient = google.accounts.oauth2.initTokenClient({
-    client_id: CLIENT_ID, scope: SCOPES,
-    callback: (resp) => {
-      if (resp?.error) { console.warn('[auth] token error', resp); return; }
-      console.log('[auth] token acquired');
-      document.dispatchEvent(new CustomEvent('auth:signed-in'));
-      renderInlineChip();
+    client_id: CLIENT_ID,
+    scope: SCOPES,
+    prompt: 'consent',
+    callback: (resp)=>{
+      accessToken = resp.access_token || null;
+      if(accessToken){
+        gapi.client.setToken({ access_token: accessToken });
+        console.log('[auth] token acquired');
+        document.dispatchEvent(new CustomEvent('lmy:authed'));
+      }
+      renderAuthUi();
     }
   });
-  gisReady = true;
 }
 
-export async function ensureLoaded(){
-  try { if (!gapiReady) await loadGapiClient(); } catch(e){ console.warn('[auth] gapi load failed', e?.message||e); }
-  if (!gisReady) initGis();
-}
-export function signIn(prompt='consent'){ if(!tokenClient) initGis(); try{ tokenClient?.requestAccessToken({prompt}); }catch(e){ console.warn('[auth] requestAccessToken failed',e);} }
-export function signOut(){ try{ const t=gapi?.client?.getToken?.(); if(t){ google?.accounts?.oauth2?.revoke?.(t.access_token); gapi.client.setToken(null);} }catch{} console.log('[auth] signed out'); document.dispatchEvent(new CustomEvent('auth:signed-out')); renderInlineChip(); }
-export function isSignedIn(){ try{ return !!gapi?.client?.getToken?.(); }catch{ return false; } }
-export async function initAuthUI(){ renderInlineChip(); }
-
-// ----- Inline chip next to the title -----
-function renderInlineChip(){
-  let slot=document.getElementById('auth-inline');
-  if(!slot){
-    const brand=document.querySelector('#side .brand, #side h3, .brand, h1, h3');
-    if(brand){ slot=document.createElement('span'); slot.id='auth-inline'; slot.style.marginLeft='8px'; brand.appendChild(slot); }
-  }
-  if(!slot) return;
-  slot.innerHTML='';
-  const btn=document.createElement('button');
-  btn.textContent = isSignedIn() ? 'Signed in' : 'Sign in';
-  Object.assign(btn.style,{ background:'#1f6feb', color:'#fff', border:'none', borderRadius:'8px', padding:'4px 8px', fontSize:'12px', cursor:'pointer' });
-  btn.onclick = () => isSignedIn() ? signOut() : signIn('consent');
-  slot.appendChild(btn);
+async function signIn(){
+  await loadGapi();
+  ensureTokenClient();
+  tokenClient.requestAccessToken();
 }
 
-// Debug helper
-window.__LMY_authDebug=()=>{
-  console.log('[authDebug-inlineOnly]',{
-    gapi:!!window.gapi, google:!!window.google, oauth2:!!window.google?.accounts?.oauth2,
-    token:(()=>{try{return !!gapi.client.getToken();}catch{return false;}})(),
-    inline: !!document.getElementById('auth-inline')
-  });
-  renderInlineChip();
-};
+function signOut(){
+  if(!accessToken){ return; }
+  try{ google.accounts.oauth2.revoke(accessToken); }catch{}
+  gapi.client.setToken(null);
+  accessToken = null;
+  renderAuthUi();
+}
 
-// keep chip in sync
-document.addEventListener('auth:signed-in', renderInlineChip);
-document.addEventListener('auth:signed-out', renderInlineChip);
-window.addEventListener('DOMContentLoaded', ()=>{ renderInlineChip(); });
+function isAuthed(){ return !!accessToken; }
+
+async function init(){ renderAuthUi(); }
+
+window.__LMY_auth = { init, signIn, signOut, isAuthed };
+document.addEventListener('DOMContentLoaded', init);
