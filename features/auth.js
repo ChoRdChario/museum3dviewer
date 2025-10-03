@@ -1,4 +1,4 @@
-// features/auth.js  (v2.3 — de-dupe & fixed top-right & ESM exports)
+// features/auth.js  (v2.3.1 — dataset-safe, de-dupe & fixed top-right & ESM exports)
 const API_KEY   = 'AIzaSyCUnTCr5yWUWPdEXST9bKP1LpgawU5rIbI';
 const CLIENT_ID = '595200751510-ncahnf7edci6b9925becn5to49r6cguv.apps.googleusercontent.com';
 const SCOPES = [
@@ -13,7 +13,17 @@ let accessToken = null;
 
 function h(tag, props={}, ...children){
   const el = document.createElement(tag);
+  // special handling
+  const ds   = props.dataset;   delete props.dataset;
+  const sty  = props.style;     delete props.style;
+  const cls  = props.className; delete props.className;
+
+  if (cls) el.className = cls;
+  if (sty) Object.assign(el.style, sty);
+  // assign the rest (will not overwrite dataset/style/className)
   Object.assign(el, props);
+  if (ds) for (const [k,v] of Object.entries(ds)) el.dataset[k] = v;
+
   (children||[]).forEach(c=> el.append(c));
   return el;
 }
