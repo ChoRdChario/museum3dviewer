@@ -15,7 +15,7 @@ export function setupAuth({ chip, onReady, onSignedIn, onSignedOut }){
 
   function refreshChip(){
     chip.className = 'chip ' + (authed?'ok':'warn');
-    chip.textContent = authed ? 'Signed' : 'Sign in';
+    chip.textContent = authed ? 'Signed in' : 'Sign in';
   }
   refreshChip();
 
