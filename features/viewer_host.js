@@ -1,105 +1,120 @@
 // features/viewer_host.js
-// Three + GLTFLoader を動的ロードして、"lmy:load-glb-blob" を受けて描画する最小ホスト
+// Always-on three.js viewer host. Listens for 'lmy:load-glb-blob' and renders.
+const log = (...a)=>console.log('[viewer_host]', ...a);
 
-import * as THREE from 'https://unpkg.com/three@0.160.0/build/three.module.js';
-import { GLTFLoader } from 'https://unpkg.com/three@0.160.0/examples/jsm/loaders/GLTFLoader.js';
-import { OrbitControls } from 'https://unpkg.com/three@0.160.0/examples/jsm/controls/OrbitControls.js';
+let THREE, GLTFLoader, OrbitControls;
+let renderer, scene, camera, controls, loader;
 
-console.log('[viewer_host] boot');
-
-const container = document.getElementById('stage') || document.body;
-
-// renderer
-const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
-renderer.setPixelRatio(window.devicePixelRatio);
-renderer.setSize(container.clientWidth || window.innerWidth, container.clientHeight || window.innerHeight, false);
-renderer.outputColorSpace = THREE.SRGBColorSpace;
-renderer.shadowMap.enabled = false;
-container.appendChild(renderer.domElement);
-
-// scene & camera
-const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x0b0b0b);
-
-const camera = new THREE.PerspectiveCamera(
-  50,
-  (container.clientWidth || window.innerWidth) / (container.clientHeight || window.innerHeight),
-  0.01,
-  1000
-);
-camera.position.set(1.6, 1.0, 2.2);
-
-const controls = new OrbitControls(camera, renderer.domElement);
-controls.enableDamping = true;
-
-const hemi = new THREE.HemisphereLight(0xffffff, 0x444444, 1.0);
-scene.add(hemi);
-const dir = new THREE.DirectionalLight(0xffffff, 1.3);
-dir.position.set(3, 5, 4);
-scene.add(dir);
-
-let currentRoot = null;
-
-function fit(obj) {
-  const box = new THREE.Box3().setFromObject(obj);
-  const size = box.getSize(new THREE.Vector3()).length();
-  const center = box.getCenter(new THREE.Vector3());
-  controls.target.copy(center);
-  camera.near = size / 1000;
-  camera.far = size * 10;
-  camera.updateProjectionMatrix();
-  camera.position.copy(center).add(new THREE.Vector3(size * 0.5, size * 0.3, size * 0.5));
-}
-
-const loader = new GLTFLoader();
-
-async function loadBlob(blob, name = 'model.glb') {
-  try {
-    const url = URL.createObjectURL(blob);
-    console.log('[viewer] loading blob', name, blob.size, 'bytes');
-    loader.load(
-      url,
-      (gltf) => {
-        URL.revokeObjectURL(url);
-        if (currentRoot) scene.remove(currentRoot);
-        currentRoot = gltf.scene || gltf.scenes?.[0];
-        scene.add(currentRoot);
-        fit(currentRoot);
-        console.log('[viewer] model loaded');
-      },
-      undefined,
-      (err) => {
-        URL.revokeObjectURL(url);
-        console.error('[viewer] load failed', err);
-      }
-    );
-  } catch (e) {
-    console.error('[viewer] exception', e);
+function ensureStage() {
+  let stage = document.getElementById('stage');
+  if (!stage) {
+    stage = document.createElement('div');
+    stage.id = 'stage';
+    document.body.appendChild(stage);
   }
+  Object.assign(stage.style, { position:'fixed', inset:'0', zIndex:'0' });
+  return stage;
 }
 
-// イベント橋渡し
-window.addEventListener('lmy:load-glb-blob', (ev) => {
-  const { blob, name } = ev.detail || {};
-  if (!(blob instanceof Blob)) return console.warn('[viewer] bad payload');
-  loadBlob(blob, name);
-});
-console.log('[viewer_host] armed');
+async function boot() {
+  log('boot');
+  const stage = ensureStage();
 
-// 手動デバッグ用フック（任意）
-window.__LMY_LOAD_GLB = loadBlob;
+  // Dynamic ESM imports (adjust paths if your libs are elsewhere)
+  const threeMod = await import('../lib/three.module.js');
+  THREE = threeMod;
+  ({ GLTFLoader } = await import('../lib/GLTFLoader.js'));
+  ({ OrbitControls } = await import('../lib/OrbitControls.js'));
 
-function onResize() {
-  const w = container.clientWidth || window.innerWidth;
-  const h = container.clientHeight || window.innerHeight;
-  renderer.setSize(w, h, false);
-  camera.aspect = w / h;
-  camera.updateProjectionMatrix();
+  renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+  renderer.setPixelRatio(window.devicePixelRatio || 1);
+  renderer.setSize(stage.clientWidth, stage.clientHeight);
+  stage.appendChild(renderer.domElement);
+
+  scene = new THREE.Scene();
+  camera = new THREE.PerspectiveCamera(45, stage.clientWidth / stage.clientHeight, 0.01, 1e6);
+  camera.position.set(2, 2, 2);
+  controls = new OrbitControls(camera, renderer.domElement);
+  controls.enableDamping = true;
+
+  scene.add(new THREE.AmbientLight(0xffffff, 1));
+
+  loader = new GLTFLoader();
+
+  window.addEventListener('resize', () => {
+    const w = stage.clientWidth, h = stage.clientHeight || 1;
+    camera.aspect = w / h;
+    camera.updateProjectionMatrix();
+    renderer.setSize(w, h, false);
+  });
+
+  function tick(){
+    requestAnimationFrame(tick);
+    controls.update();
+    renderer.render(scene, camera);
+  }
+  tick();
+
+  // Bridge: accept GLB blobs and render
+  window.addEventListener('lmy:load-glb-blob', (ev) => {
+    const blob = ev.detail?.blob;
+    const name = ev.detail?.name || 'model.glb';
+    if (!blob) return;
+    log('loading blob…', name, blob.size);
+
+    // Dispose previous
+    scene.traverse(o => {
+      if (o.isMesh) {
+        o.geometry && o.geometry.dispose && o.geometry.dispose();
+        if (Array.isArray(o.material)) {
+          o.material.forEach(m => m && m.dispose && m.dispose());
+        } else if (o.material) {
+          o.material.dispose && o.material.dispose();
+        }
+      }
+    });
+    // Keep only lights
+    for (let i = scene.children.length - 1; i >= 0; i--) {
+      const o = scene.children[i];
+      if (!o.isLight) scene.remove(o);
+    }
+
+    const url = URL.createObjectURL(blob);
+    loader.load(url, (gltf) => {
+      const root = gltf.scene || gltf.scenes?.[0];
+      if (!root) {
+        console.error('[viewer] no scene in glTF');
+        URL.revokeObjectURL(url);
+        return;
+      }
+      scene.add(root);
+
+      // Auto-fit
+      const box = new THREE.Box3().setFromObject(root);
+      const size = new THREE.Vector3();
+      const center = new THREE.Vector3();
+      box.getSize(size);
+      box.getCenter(center);
+
+      const maxDim = Math.max(size.x, size.y, size.z) || 1;
+      const dist = maxDim * 1.8;
+      const dir = new THREE.Vector3(1, 0.6, 1).normalize();
+      camera.position.copy(center.clone().add(dir.multiplyScalar(dist)));
+      camera.near = Math.max(dist/1000, 0.01);
+      camera.far = dist * 10;
+      camera.lookAt(center);
+      camera.updateProjectionMatrix();
+      controls.target.copy(center);
+
+      URL.revokeObjectURL(url);
+      log('model loaded', size);
+    }, undefined, (err) => {
+      console.error('[viewer] load error', err);
+      URL.revokeObjectURL(url);
+    });
+  });
+
+  log('armed');
 }
-window.addEventListener('resize', onResize);
 
-(function animate() {
-  requestAnimationFrame(animate);
-  controls.update();
-  renderer.render(scene, camera);
-})();
+boot().catch(e=>console.error('[viewer_host] boot failed', e));

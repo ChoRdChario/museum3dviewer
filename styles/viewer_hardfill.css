@@ -1,5 +1,4 @@
 /* styles/viewer_hardfill.css */
-/* キャンバスがゼロ高さで見えない事故を防ぐ強制レイアウト */
-html, body { height: 100%; margin: 0; background: #0b0b0b; }
-#stage { position: relative; width: 100%; height: 100%; }
-canvas { position: absolute; inset: 0; display: block; }
+html, body { height: 100%; margin: 0; background: #0f0f0f; }
+#stage { position: fixed; inset: 0; z-index: 0; }
+#stage canvas { width: 100% !important; height: 100% !important; display: block; }
