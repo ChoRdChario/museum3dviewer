@@ -121,6 +121,12 @@ export function setupUI(app){
   el.sat.addEventListener('input', applyHSL);
   el.light.addEventListener('input', applyHSL);
   el.opac.addEventListener('input', applyOpacity);
+  const slWhite = document.getElementById('slWhiteKey');
+  if (slWhite){
+    const applyWhite=()=> app.viewer.setWhiteKey(parseFloat(slWhite.value)/100, getSelIndex());
+    slWhite.addEventListener('input', applyWhite);
+  }
+
   el.unlit.addEventListener('click', ()=>{
     app.state.unlit = !app.state.unlit;
     app.viewer.setUnlit(app.state.unlit, getSelIndex());

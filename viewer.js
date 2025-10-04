@@ -79,6 +79,7 @@ export async function ensureViewer({ mount, spinner }) {
     controls.update();
   }
 
+  
   async function loadGLBFromArrayBuffer(buf) {
     const url = URL.createObjectURL(new Blob([buf]));
     try{
@@ -86,21 +87,35 @@ export async function ensureViewer({ mount, spinner }) {
       const gltf = await loader.loadAsync(url);
       const root = gltf.scene || gltf.scenes?.[0];
       if (!root) throw new Error('GLB has no scene');
-      const mats = [];
-      root.traverse((o)=>{ if (o.isMesh && o.material) mats.push(o.material); });
+
+      // collect unique materials by uuid
+      const map = new Map(); // uuid -> {mat, name}
+      root.traverse((o)=>{
+        if (!o.isMesh) return;
+        const push = (m)=>{
+          if (!m) return;
+          if (!map.has(m.uuid)) map.set(m.uuid, { mat:m, name:(m.name||'mat') });
+        };
+        if (Array.isArray(o.material)) o.material.forEach(push); else push(o.material);
+      });
+      const mats = Array.from(map.values()).map(v=>v.mat);
+
       if (state.current) scene.remove(state.current);
       state.spin = false;
       scene.add(root);
       state.current = root;
       state.materials = mats;
+
       frameToObject(root);
       const matInfos = mats.map((m,i)=>({ index:i, name:(m.name||('mat_'+i)) }));
       window.dispatchEvent(new CustomEvent('lmy:model-loaded', { detail: { materials: matInfos }}));
-      console.log('[viewer] GLB loaded; meshes:', mats.length);
+      console.log('[viewer] GLB loaded; unique materials:', mats.length);
     } finally {
       URL.revokeObjectURL(url);
     }
   }
+
+}
 
   function setHSL(h, s, l, index=null) {
     const arr = (index===null) ? state.materials : [state.materials[index]].filter(Boolean);
@@ -120,18 +135,84 @@ export async function ensureViewer({ mount, spinner }) {
       m.needsUpdate = true;
     }
   }
-  function setUnlit(on, index=null) {
-    const arr = (index===null) ? state.materials : [state.materials[index]].filter(Boolean);
-    for (const m of arr) {
-      m.onBeforeCompile = (shader)=>{};
-      m.needsUpdate = true;
-    }
+  
+  function eachTargetMesh(index, cb){
+    const targets = (index===null) ? new Set(state.materials.map(m=>m.uuid)) 
+                                   : new Set([state.materials[index]?.uuid].filter(Boolean));
+    state.current?.traverse(obj=>{
+      if (!obj.isMesh) return;
+      const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+      const hit = mats.some(m => m && targets.has(m.uuid));
+      if (hit) cb(obj);
+    });
   }
+
+  function setUnlit(on, index=null) {
+    eachTargetMesh(index, (mesh)=>{
+      if (on){
+        if (mesh.userData.__origMaterial) return;
+        const mk = (m)=>{
+          const b = new THREE.MeshBasicMaterial();
+          if (m && m.color) b.color.copy(m.color);
+          b.map = m && m.map || null;
+          b.opacity = (m && m.opacity!=null)? m.opacity : 1;
+          b.transparent = (m && m.transparent) || b.opacity<1;
+          b.side = m && m.side || THREE.FrontSide;
+          b.depthWrite = m && m.depthWrite;
+          b.depthTest = m && m.depthTest;
+          b.alphaMap = m && m.alphaMap || null;
+          b.toneMapped = false;
+          return b;
+        };
+        const orig = mesh.material;
+        mesh.userData.__origMaterial = orig;
+        mesh.material = Array.isArray(orig) ? orig.map(mk) : mk(orig);
+        if (Array.isArray(mesh.material)) mesh.material.forEach(m=> m && (m.needsUpdate=true)); else mesh.material.needsUpdate = true;
+      }else{
+        if (!mesh.userData.__origMaterial) return;
+        mesh.material = mesh.userData.__origMaterial;
+        delete mesh.userData.__origMaterial;
+        if (Array.isArray(mesh.material)) mesh.material.forEach(m=> m && (m.needsUpdate=true)); else mesh.material.needsUpdate = true;
+      }
+    });
+  }
+
+}
   function setDoubleSide(on, index=null) {
     const arr = (index===null) ? state.materials : [state.materials[index]].filter(Boolean);
     for (const m of arr) {
       m.side = on ? THREE.DoubleSide : THREE.FrontSide;
       m.needsUpdate = true;
+    }
+  }
+
+
+  // White→Alpha threshold (0..1). Idempotent shader patch via onBeforeCompile.
+  function setWhiteKey(threshold01, index=null){
+    const patch = (m)=>{
+      if (!m) return;
+      m.userData.__whiteKey = threshold01;
+      m.onBeforeCompile = function(shader){
+        shader.uniforms.uWhiteAlpha = { value: this.userData.__whiteKey ?? 1.0 };
+        shader.fragmentShader = shader.fragmentShader
+          .replace('void main() {', 'uniform float uWhiteAlpha;\nvoid main() {')
+          .replace(/gl_FragColor\s*=\s*vec4\(([^;]+)\);\s*$/m, (s, inner)=>{
+            return `vec4 c = vec4(${inner});
+float w = max(c.r, max(c.g, c.b));
+float cut = smoothstep(uWhiteAlpha, 1.0, w);
+c.a *= (1.0 - cut);
+gl_FragColor = c;`;
+          });
+      };
+      m.needsUpdate = true;
+    };
+    const arr = (index===null) ? state.materials : [state.materials[index]].filter(Boolean);
+    for (const m of arr){
+      if (Array.isArray(m)){
+        m.forEach(mm => patch(mm));
+      }else{
+        patch(m);
+      }
     }
   }
 
@@ -172,7 +253,7 @@ export async function ensureViewer({ mount, spinner }) {
   return {
     THREE, scene, camera, renderer, controls,
     loadGLBFromArrayBuffer,
-    setHSL, setOpacity, setUnlit, setDoubleSide,
+    setHSL, setOpacity, setUnlit, setDoubleSide, setWhiteKey,
     raycastFromClientXY, projectToScreen,
     getMaterials: ()=> state.materials,
     setSpin: (on)=> state.spin = !!on,
