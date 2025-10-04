@@ -1,3 +1,4 @@
+// pins.js — selected pin halo + robust leader line + image cache
 import { ensureSpreadsheetForFile, ensurePinsHeader, listSheetTitles, loadPins, savePins } from './sheets_api.js?v=20251004s3';
 import { downloadImageAsBlob } from './utils_drive_images.js?v=20251004img2';
 
@@ -17,7 +18,16 @@ export function setupPins(app){
   const btnAdd = document.getElementById('btnAddPin');
   const btnClear = document.getElementById('btnClearPins');
   const imgGrid = document.getElementById('imgGrid');
+  const svg = document.getElementById('leader');
   const leaderLine = document.getElementById('leaderLine');
+  // add a halo circle
+  let halo = document.getElementById('leaderHalo');
+  if (!halo){
+    halo = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+    halo.setAttribute('id','leaderHalo'); halo.setAttribute('class','halo');
+    halo.setAttribute('cx','0'); halo.setAttribute('cy','0'); halo.setAttribute('r','8');
+    svg.appendChild(halo);
+  }
   const sheetSelect = document.getElementById('sheetSelect');
   const btnNewSheet = document.getElementById('btnNewSheet');
   const pinFilter = document.getElementById('pinFilter');
@@ -29,6 +39,7 @@ export function setupPins(app){
   let spreadsheetId = null;
   let sheetName = 'Pins';
   let currentColor = PALETTE[0].hex;
+  const imageCache = new Map(); // fileId -> objectURL
 
   // palette wiring
   function setupPalette(){
@@ -37,6 +48,10 @@ export function setupPins(app){
       pinPalette.querySelectorAll('.sw').forEach(x=> x.classList.remove('active'));
       sw.classList.add('active');
       currentColor = sw.dataset.hex;
+      if (selected){
+        leaderLine.setAttribute('stroke', currentColor);
+        halo.style.stroke = currentColor;
+      }
     }));
     // filter options
     pinFilter.innerHTML = '<option value="all">(All)</option>' + PALETTE.map(c=>`<option value="${c.hex}">${c.key}</option>`).join('');
@@ -61,12 +76,36 @@ export function setupPins(app){
 
   function uuid(){ return 'p_' + Math.random().toString(36).slice(2,10) + Math.random().toString(36).slice(2,10); }
 
+  function resolveImageURL(rec){
+    if (!rec?.imageId) return '';
+    // if it's already a URL, return as-is
+    if (/^https?:\/\//i.test(rec.imageId)) return rec.imageId;
+    // else assume Drive fileId: check cache
+    const fid = rec.imageId;
+    if (imageCache.has(fid)) return imageCache.get(fid);
+    // If not cached, start fetch asynchronously; return empty for now
+    (async ()=>{
+      try{
+        const blob = await downloadImageAsBlob(fid);
+        const url = URL.createObjectURL(blob);
+        // store & update overlay if still same selection
+        const prev = imageCache.get(fid);
+        if (prev && prev.startsWith('blob:')) URL.revokeObjectURL(prev);
+        imageCache.set(fid, url);
+        if (selected && selected.imageId === fid){
+          showOverlay({ title:selected.title, body:selected.body, imgUrl:url });
+        }
+      }catch(e){ console.warn('[pins] image resolve failed', e); }
+    })();
+    return '';
+  }
+
   function showOverlay({title, body, imgUrl}){
     overlay.style.display='block';
-    overlay.innerHTML = `<strong>${title??''}</strong><div style="margin-top:.25rem;white-space:pre-wrap">${body??''}</div>${imgUrl?`<img src="${imgUrl}">`:''}`;
+    overlay.innerHTML = `<strong>${title??''}</strong><div style="margin-top:.25rem;white-space:pre-wrap">${body??''}</div>${imgUrl?`<img src="${imgUrl}" onerror="this.style.opacity=.35;this.title='load failed';">`:''}`;
     updateLeaderToOverlay();
   }
-  function hideOverlay(){ overlay.style.display='none'; leaderLine.setAttribute('opacity','0'); }
+  function hideOverlay(){ overlay.style.display='none'; leaderLine.setAttribute('opacity','0'); halo.style.opacity = 0; halo.classList.remove('pulse'); }
 
   function renderCapList(){
     capList.innerHTML = pins.map(p=>`<div class="row" data-id="${p.id}" style="padding:.4rem .5rem;border-bottom:1px solid #262630;cursor:pointer">
@@ -86,8 +125,15 @@ export function setupPins(app){
     if (!rec){ hideOverlay(); return; }
     titleInput.value = rec.title || '';
     bodyInput.value = rec.body || '';
-    rec.obj.material.color.set(rec.color || currentColor);
-    showOverlay({ title: rec.title||'(untitled)', body: rec.body||'', imgUrl: rec.imageId || '' });
+    const color = rec.color || currentColor;
+    rec.obj.material.color.set(color);
+    // leader visual
+    leaderLine.setAttribute('stroke', color);
+    halo.style.stroke = color;
+    halo.classList.add('pulse'); halo.style.opacity = 1;
+    // overlay
+    const url = resolveImageURL(rec);
+    showOverlay({ title: rec.title||'(untitled)', body: rec.body||'', imgUrl: url });
   }
 
   function addPinAtPosition(pos, init={}){
@@ -116,26 +162,36 @@ export function setupPins(app){
   }
   function addPinFromHit(hit){ addPinAtPosition(hit.point, {}); }
 
-  // leader line from pin to overlay
+  // robust projection helper (canvas coords)
+  function projectToCanvas(vec3){
+    const THREE = app.viewer.THREE;
+    const v = new THREE.Vector3(vec3.x, vec3.y, vec3.z);
+    v.project(app.viewer.camera);
+    const el = app.viewer.renderer.domElement;
+    const w = el.clientWidth, h = el.clientHeight;
+    const x = ( v.x *  0.5 + 0.5) * w;
+    const y = (-v.y *  0.5 + 0.5) * h;
+    return { x, y };
+  }
+
+  // leader line from pin to overlay + halo
   function updateLeaderToOverlay(){
-    if (!selected){ leaderLine.setAttribute('opacity','0'); return; }
-    const rectStage = app.viewer.renderer.domElement.getBoundingClientRect();
-    const rectOverlay = overlay.getBoundingClientRect();
-    const ax = rectOverlay.left - rectStage.left + 10;
-    const ay = rectOverlay.top - rectStage.top + rectOverlay.height/2;
-    const p = app.viewer.projectToScreen(selected.obj.position);
+    if (!selected){ leaderLine.setAttribute('opacity','0'); halo.style.opacity=0; return; }
+    const canvasRect = app.viewer.renderer.domElement.getBoundingClientRect();
+    const overlayRect = overlay.getBoundingClientRect();
+    const ax = overlayRect.left - canvasRect.left + 10;
+    const ay = overlayRect.top  - canvasRect.top  + overlayRect.height/2;
+    const p = projectToCanvas(selected.obj.position);
     leaderLine.setAttribute('x1', String(p.x));
     leaderLine.setAttribute('y1', String(p.y));
     leaderLine.setAttribute('x2', String(ax));
     leaderLine.setAttribute('y2', String(ay));
     leaderLine.setAttribute('opacity','1');
+    halo.setAttribute('cx', String(p.x));
+    halo.setAttribute('cy', String(p.y));
   }
   window.addEventListener('resize', updateLeaderToOverlay);
-  // make sure line keeps alive even when scene is static
-  (function lineTick(){
-    updateLeaderToOverlay();
-    requestAnimationFrame(lineTick);
-  })();
+  (function lineTick(){ updateLeaderToOverlay(); requestAnimationFrame(lineTick); })();
 
   // Pin color filter
   function applyFilter(){
@@ -198,15 +254,18 @@ export function setupPins(app){
     }catch(e){ console.error('[pins] save failed', e); }
   }, 600);
 
-  titleInput.addEventListener('input', ()=>{ if (selected){ selected.title = titleInput.value; showOverlay({ title:selected.title, body:selected.body, imgUrl:selected.imageId }); renderCapList(); scheduleSave(); } });
-  bodyInput.addEventListener('input', ()=>{ if (selected){ selected.body = bodyInput.value; showOverlay({ title:selected.title, body:selected.body, imgUrl:selected.imageId }); scheduleSave(); } });
+  titleInput.addEventListener('input', ()=>{ if (selected){ selected.title = titleInput.value; showOverlay({ title:selected.title, body:selected.body, imgUrl: resolveImageURL(selected) }); renderCapList(); scheduleSave(); } });
+  bodyInput.addEventListener('input', ()=>{ if (selected){ selected.body = bodyInput.value; showOverlay({ title:selected.title, body:selected.body, imgUrl: resolveImageURL(selected) }); scheduleSave(); } });
   imgGrid.addEventListener('click', async (e)=>{
     const img = e.target.closest('img'); if (!img || !selected) return;
     const fid = img.dataset.id;
     if (fid){
       try{
-        const blob = await downloadImageAsBlob(fid); // HEIC→JPEG handled internally
+        const blob = await downloadImageAsBlob(fid);
         const url = URL.createObjectURL(blob);
+        const prev = imageCache.get(fid);
+        if (prev && prev.startsWith('blob:')) URL.revokeObjectURL(prev);
+        imageCache.set(fid, url);
         selected.imageId = fid;
         showOverlay({ title:selected.title, body:selected.body, imgUrl:url });
         scheduleSave();
@@ -226,7 +285,6 @@ export function setupPins(app){
 
   btnNewSheet.addEventListener('click', async ()=>{
     try{
-      // Ensure spreadsheet exists if null
       if (!spreadsheetId){
         const glbId = app.state?.currentGLBId;
         if (!glbId) throw new Error('Load a GLB first to locate its folder.');
