@@ -1,190 +1,230 @@
-// three.js viewer
-import * as THREE from 'https://unpkg.com/three@0.157.0/build/three.module.js';
-import { OrbitControls } from 'https://unpkg.com/three@0.157.0/examples/jsm/controls/OrbitControls.js';
-import { GLTFLoader } from 'https://unpkg.com/three@0.157.0/examples/jsm/loaders/GLTFLoader.js';
+// viewer.js — clean minimal viewer with material controls
+// ES module
+import * as THREE from 'https://unpkg.com/three@0.160.1/build/three.module.js';
+import { OrbitControls } from 'https://unpkg.com/three@0.160.1/examples/jsm/controls/OrbitControls.js';
+import { GLTFLoader } from 'https://unpkg.com/three@0.160.1/examples/jsm/loaders/GLTFLoader.js';
 
-function hslToColor(h, s, l){
-  const c = new THREE.Color();
-  c.setHSL(((h%360)+360)%360/360, s, l);
-  return c;
-}
-
-export class Viewer{
-  constructor(host){
-    this.host = host;
-    this.scene = new THREE.Scene();
-    this.bg = new THREE.Color(0x101014);
-    this.scene.background = this.bg;
-    this.renderer = new THREE.WebGLRenderer({antialias:true, alpha:false});
+export class Viewer {
+  constructor(canvas) {
+    this.canvas = canvas;
+    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
     this.renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
-    this.renderer.setSize(host.clientWidth, host.clientHeight);
-    host.appendChild(this.renderer.domElement);
-
-    this.camera = new THREE.PerspectiveCamera(50, host.clientWidth/host.clientHeight, 0.01, 1000);
-    this.camera.position.set(1.8, 1.2, 2.2);
+    this.renderer.setSize(canvas.clientWidth, canvas.clientHeight, false);
+    this.scene = new THREE.Scene();
+    this.camera = new THREE.PerspectiveCamera(60, canvas.clientWidth / canvas.clientHeight, 0.01, 1000);
+    this.camera.position.set(1.5, 1.0, 2.0);
     this.controls = new OrbitControls(this.camera, this.renderer.domElement);
     this.controls.enableDamping = true;
-
     this.clock = new THREE.Clock();
-    this.meshRoot = new THREE.Group();
-    this.scene.add(this.meshRoot);
+    this.model = null;
+    this.materials = [];         // unique materials (THREE.Material)
+    this.targetIndex = -1;       // -1 => (All)
+    this.whiteKey = { enabled: false, threshold: 1.0 };
+    this._boundResize = () => this._onResize();
+    window.addEventListener('resize', this._boundResize);
+    this._start();
+  }
 
-    const light = new THREE.DirectionalLight(0xffffff, 1.2);
-    light.position.set(3, 5, 2);
-    this.scene.add(light);
-    this.scene.add(new THREE.AmbientLight(0xffffff, 0.4));
+  dispose() {
+    window.removeEventListener('resize', this._boundResize);
+  }
 
-    this.materials = []; // unique material list
-    this.matState = new Map(); // material -> saved state
+  _onResize() {
+    const w = this.canvas.clientWidth, h = this.canvas.clientHeight;
+    this.camera.aspect = w / h;
+    this.camera.updateProjectionMatrix();
+    this.renderer.setSize(w, h, false);
+  }
 
-    const onResize = ()=>{
-      const w = host.clientWidth, h = host.clientHeight;
-      this.camera.aspect = w/h; this.camera.updateProjectionMatrix();
-      this.renderer.setSize(w, h);
-    };
-    addEventListener('resize', onResize);
-
-    const animate = ()=>{
-      requestAnimationFrame(animate);
+  _start() {
+    const loop = () => {
       this.controls.update();
       this.renderer.render(this.scene, this.camera);
+      requestAnimationFrame(loop);
     };
-    animate();
+    loop();
   }
 
-  clear(){
-    while(this.meshRoot.children.length) this.meshRoot.remove(this.meshRoot.children.pop());
-    this.materials.length = 0;
-    this.matState.clear();
+  async loadDemo() {
+    // simple cube
+    if (this.model) this._clearModel();
+    const geo = new THREE.BoxGeometry(1, 1, 1);
+    const mat = new THREE.MeshStandardMaterial({ color: 0x345a89, metalness: 0.0, roughness: 0.9 });
+    const mesh = new THREE.Mesh(geo, mat);
+    this.scene.add(new THREE.AmbientLight(0xffffff, 0.8));
+    const dir = new THREE.DirectionalLight(0xffffff, 0.8);
+    dir.position.set(2, 2, 2);
+    this.scene.add(dir);
+    this.scene.add(mesh);
+    this.model = mesh;
+    this.materials = [mat];
+    this.targetIndex = -1;
   }
 
-  async loadGLBFromArrayBuffer(ab){
-    this.clear();
+  async loadGLBFromDrive(fileId) {
+    if (!fileId) throw new Error('empty fileId');
+    const arrayBuffer = await (window.fetchDriveFileAsArrayBuffer
+      ? window.fetchDriveFileAsArrayBuffer(fileId)
+      : Promise.reject(new Error('utils_drive_api.fetchDriveFileAsArrayBuffer missing')));
+    return this.loadGLBFromArrayBuffer(arrayBuffer);
+  }
+
+  async loadGLBFromArrayBuffer(arrayBuffer) {
+    if (this.model) this._clearModel();
     const loader = new GLTFLoader();
-    const gltf = await new Promise((resolve, reject)=>{
-      loader.parse(ab, '', resolve, reject);
+    const gltf = await new Promise((resolve, reject) => {
+      loader.parse(arrayBuffer, '', resolve, reject);
     });
-    this.meshRoot.add(gltf.scene);
-    // unique materials
-    const set = new Set();
-    gltf.scene.traverse(o=>{
-      if (o.isMesh && o.material){
-        const mats = Array.isArray(o.material) ? o.material : [o.material];
-        mats.forEach(m=>set.add(m));
-      }
-    });
-    this.materials = Array.from(set);
+    const root = gltf.scene || gltf.scenes[0];
+    this.scene.add(new THREE.AmbientLight(0xffffff, 0.8));
+    const dir = new THREE.DirectionalLight(0xffffff, 0.8);
+    dir.position.set(2, 2, 2);
+    this.scene.add(dir);
+    this.scene.add(root);
+    this.model = root;
+    this.materials = this._collectUniqueMaterials(root);
+    this.targetIndex = -1;
     console.log('[viewer] GLB loaded; unique materials:', this.materials.length);
-    dispatchEvent(new CustomEvent('lmy:model-loaded'));
   }
 
-  listMaterialLabels(){
-    const arr = [['(All)', -1]];
-    this.materials.forEach((m,i)=>{
-      arr.push([`${i}: ${m.name||'(mat)'}`, i]);
+  _clearModel() {
+    // dispose old lights + meshes
+    const toRemove = [];
+    this.scene.traverse((obj) => {
+      if (obj.isLight || obj === this.model) toRemove.push(obj);
     });
-    return arr;
+    toRemove.forEach(o => this.scene.remove(o));
   }
 
-  /** target: -1 for all or index */
-  applyToTarget(target, fn){
-    if (target === -1){ this.materials.forEach(fn); }
-    else if (this.materials[target]) fn(this.materials[target]);
-  }
-
-  ensureState(mat){
-    if (this.matState.has(mat)) return this.matState.get(mat);
-    const s = {
-      transparent: mat.transparent,
-      side: mat.side,
-      color: mat.color?.clone?.() ?? null,
-      map: mat.map || null,
-      onBeforeCompile: mat.onBeforeCompile || null,
-      depthWrite: mat.depthWrite,
-      depthTest: mat.depthTest,
-      blending: mat.blending,
-      opacity: ('opacity' in mat) ? mat.opacity : 1,
-      userData: JSON.parse(JSON.stringify(mat.userData||{}))
-    };
-    this.matState.set(mat, s);
-    return s;
-  }
-
-  setOpacity(target, v){
-    this.applyToTarget(target, (m)=>{
-      this.ensureState(m);
-      m.transparent = v < 0.999;
-      m.opacity = v;
-      m.needsUpdate = true;
-    });
-  }
-
-  setUnlit(target, on){
-    this.applyToTarget(target, (m)=>{
-      const s = this.ensureState(m);
-      if (on){
-        m.userData._savedLights = { ...s };
-        m.onBeforeCompile = (shader)=>{
-          shader.fragmentShader = shader.fragmentShader.replace(
-            '#include <lights_fragment_begin>',''
-          );
-        };
-        m.lights = false;
-      }else{
-        // restore conservative subset
-        m.onBeforeCompile = s.onBeforeCompile;
-        m.lights = true;
+  _collectUniqueMaterials(root) {
+    const set = new Set();
+    root.traverse((obj) => {
+      if (obj.isMesh && obj.material) {
+        if (Array.isArray(obj.material)) obj.material.forEach(m => set.add(m));
+        else set.add(obj.material);
       }
+    });
+    return Array.from(set);
+  }
+
+  listMaterialLabels() {
+    const labels = this.materials.map((m, i) => `${i}: ${m.name || 'mat'}`);
+    return ['(All)', ...labels];
+  }
+
+  setTargetMaterialIndex(i) {
+    this.targetIndex = (i === undefined || i === null || i < 0) ? -1 : (i | 0);
+  }
+
+  _forEachTargetMaterial(fn) {
+    if (this.targetIndex < 0) {
+      this.materials.forEach(fn);
+    } else {
+      const m = this.materials[this.targetIndex];
+      if (m) fn(m);
+    }
+  }
+
+  setHSL({ h = 0.0, s = 0.0, l = 0.0 } = {}) {
+    this._forEachTargetMaterial((m) => {
+      if (!m.userData.__baseColor) m.userData.__baseColor = (m.color ? m.color.clone() : new THREE.Color(1,1,1));
+      const c = m.userData.__baseColor.clone();
+      c.offsetHSL(h, s, l);
+      if (!m.color) m.color = new THREE.Color();
+      m.color.copy(c);
       m.needsUpdate = true;
     });
   }
 
-  setDoubleSide(target, on){
-    this.applyToTarget(target, m=>{
-      this.ensureState(m);
+  setOpacity(alpha) {
+    this._forEachTargetMaterial((m) => {
+      m.transparent = alpha < 0.999;
+      m.opacity = alpha;
+      m.depthWrite = !m.transparent;
+      m.needsUpdate = true;
+    });
+  }
+
+  setDoubleSide(on) {
+    this._forEachTargetMaterial((m) => {
       m.side = on ? THREE.DoubleSide : THREE.FrontSide;
       m.needsUpdate = true;
     });
   }
 
-  /** White key to alpha (simple brightness key). enable by threshold>0, typical 0.7..1.0 */
-  setWhiteKey(target, threshold){
-    this.applyToTarget(target, m=>{
-      this.ensureState(m);
-      if (!threshold || threshold<=0){
-        // restore
-        m.onBeforeCompile = (this.matState.get(m).onBeforeCompile) || null;
-        m.alphaTest = 0;
-        m.needsUpdate = true;
-        return;
+  setUnlit(on) {
+    this._forEachTargetMaterial((m) => {
+      // idempotent unlit toggle using MeshBasicMaterial
+      if (on && !(m instanceof THREE.MeshBasicMaterial)) {
+        const basic = new THREE.MeshBasicMaterial({});
+        basic.copy(m);
+        basic.map = m.map || null;
+        basic.color = (m.color ? m.color.clone() : new THREE.Color(1,1,1));
+        basic.transparent = m.transparent;
+        basic.opacity = m.opacity;
+        basic.side = m.side;
+        m.userData.__litBackup = m; // keep reference
+        this._swapMaterial(m, basic);
+      } else if (!on && m instanceof THREE.MeshBasicMaterial && m.userData.__litBackup) {
+        const original = m.userData.__litBackup;
+        this._swapMaterial(m, original);
       }
-      m.transparent = true;
-      m.alphaTest = 0.001;
-      m.onBeforeCompile = (shader)=>{
-        shader.fragmentShader = shader.fragmentShader.replace(
-          '#include <dithering_fragment>',
-          '#include <dithering_fragment>\n' +
-          '  float lum = dot(gl_FragColor.rgb, vec3(0.299,0.587,0.114));\n' +
-          f'  if(lum > {threshold:.3f}) gl_FragColor.a = 0.0;\n'
-        );
-      };
-      m.needsUpdate = true;
     });
   }
 
-  setHueSatLight(target, h, s, l){
-    this.applyToTarget(target, m=>{
-      this.ensureState(m);
-      // cheap multiplicative tweak: tint color when no map, else modulate via color
-      if (!m.color) return;
-      const base = hslToColor(h, Math.min(s,2), Math.min(l,2));
-      m.color.copy(base);
-      m.needsUpdate = true;
+  _swapMaterial(oldMat, newMat) {
+    // replace across meshes that reference oldMat
+    this.scene.traverse((obj) => {
+      if (obj.isMesh) {
+        if (Array.isArray(obj.material)) {
+          obj.material = obj.material.map(mm => (mm === oldMat ? newMat : mm));
+        } else if (obj.material === oldMat) {
+          obj.material = newMat;
+        }
+      }
     });
+    // update materials cache
+    const idx = this.materials.indexOf(oldMat);
+    if (idx >= 0) this.materials[idx] = newMat;
   }
 
-  setBackground(isDark){
-    this.bg.set(isDark?0x101014:0xeeeeee);
-    this.scene.background = this.bg;
+  setWhiteKey(enabled, threshold = 0.98) {
+    this.whiteKey.enabled = !!enabled;
+    this.whiteKey.threshold = threshold;
+    this._forEachTargetMaterial((m) => {
+      if (!m.userData.__whiteKeyPatched) {
+        m.onBeforeCompile = (shader) => {
+          shader.uniforms.uWhiteKeyEnabled = { value: this.whiteKey.enabled ? 1 : 0 };
+          shader.uniforms.uWhiteKey = { value: this.whiteKey.threshold };
+          shader.fragmentShader = `
+            uniform int uWhiteKeyEnabled;
+            uniform float uWhiteKey;
+          ` + shader.fragmentShader.replace(
+            'gl_FragColor = vec4( outgoingLight, diffuseColor.a );',
+            `
+            #ifdef OPAQUE
+              gl_FragColor = vec4( outgoingLight, diffuseColor.a );
+            #else
+              vec4 col = vec4( outgoingLight, diffuseColor.a );
+              if (uWhiteKeyEnabled == 1) {
+                float lum = dot(col.rgb, vec3(0.299, 0.587, 0.114));
+                float aCut = step(uWhiteKey, lum);
+                col.a *= (1.0 - aCut);
+              }
+              gl_FragColor = col;
+            #endif
+            `
+          );
+        };
+        m.userData.__whiteKeyPatched = true;
+        m.needsUpdate = true;
+      } else {
+        m.needsUpdate = true;
+      }
+    });
   }
+}
+
+export function createViewer(canvas) {
+  return new Viewer(canvas);
 }
