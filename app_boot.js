@@ -23,7 +23,15 @@ const app = {
   app.auth = setupAuth({
     chip: document.getElementById('authChip'),
     onReady: () => console.log('[auth] ready'),
-    onSignedIn: (user) => console.log('[auth] signed in', user?.getBasicProfile?.()?.getEmail?.?.() || ''),
+    onSignedIn: (user) => {
+      // FIX: optional chaining typo removed
+      try {
+        const email = user?.getBasicProfile?.()?.getEmail?.() ?? '';
+        console.log('[auth] signed in', email);
+      } catch (e) {
+        console.log('[auth] signed in');
+      }
+    },
     onSignedOut: () => console.log('[auth] signed out')
   });
 
