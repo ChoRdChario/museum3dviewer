@@ -29,20 +29,33 @@ export function setupUI(app){
     spinner: document.getElementById('spinner')
   };
 
-  const applyHSL = ()=> app.viewer.setHSL(+el.hue.value, +el.sat.value, +el.light.value);
-  const applyOpacity = ()=> app.viewer.setOpacity(+el.opac.value/100);
+  // inject material selector
+  const matSelect = document.createElement('select');
+  matSelect.id = 'matSelect';
+  matSelect.style.cssText = 'width:100%;padding:.35rem;background:#0f0f13;border:1px solid #333;border-radius:.4rem;color:#ddd;margin:.25rem 0 .5rem;';
+  const matHeader = document.createElement('div');
+  matHeader.textContent = 'Material target';
+  matHeader.className = 'muted';
+  document.querySelector('#secMaterial').prepend(matSelect);
+  document.querySelector('#secMaterial').prepend(matHeader);
+  matSelect.innerHTML = '<option value="-1">(All)</option>';
+
+  // HSL/opacity apply w/ material selection
+  const getSelIndex = ()=> { const i = parseInt(matSelect.value,10); return isNaN(i)||i<0 ? null : i; };
+  const applyHSL = ()=> app.viewer.setHSL(+el.hue.value, +el.sat.value, +el.light.value, getSelIndex());
+  const applyOpacity = ()=> app.viewer.setOpacity(+el.opac.value/100, getSelIndex());
   el.hue.addEventListener('input', applyHSL);
   el.sat.addEventListener('input', applyHSL);
   el.light.addEventListener('input', applyHSL);
   el.opac.addEventListener('input', applyOpacity);
   el.unlit.addEventListener('click', ()=>{
     app.state.unlit = !app.state.unlit;
-    app.viewer.setUnlit(app.state.unlit);
+    app.viewer.setUnlit(app.state.unlit, getSelIndex());
     el.unlit.textContent = 'Unlit: ' + (app.state.unlit?'on':'off');
   });
   el.dbl.addEventListener('click', ()=>{
     app.state.doubleSide = !app.state.doubleSide;
-    app.viewer.setDoubleSide(app.state.doubleSide);
+    app.viewer.setDoubleSide(app.state.doubleSide, getSelIndex());
     el.dbl.textContent = 'DoubleSide: ' + (app.state.doubleSide?'on':'off');
   });
 
@@ -77,4 +90,10 @@ export function setupUI(app){
 
   const imgs = [1,2,3].map(i => ({id:'dummy'+i, name:'image_'+i+'.jpg', thumb:`https://picsum.photos/seed/${i}/256`}));
   el.imgGrid.innerHTML = imgs.map(x=>`<div class="card"><img src="${x.thumb}" alt="${x.name}"></div>`).join('');
+
+  // populate material list on model-loaded
+  window.addEventListener('lmy:model-loaded', (e)=>{
+    const mats = e.detail?.materials || [];
+    matSelect.innerHTML = '<option value="-1">(All)</option>' + mats.map(m=>`<option value="${m.index}">${m.index}: ${m.name}</option>`).join('');
+  });
 }
