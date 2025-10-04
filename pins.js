@@ -1,13 +1,10 @@
 export function setupPins(app){
-  const mount = document.getElementById('stage');
   const overlay = document.getElementById('overlay');
   document.getElementById('btnAddPin').addEventListener('click', ()=>{
     showOverlay({ title:'New Pin', body:'Click on the mesh to place.' });
   });
-
-  window.addEventListener('keydown', (e)=>{
-    if (e.key==='Escape') hideOverlay();
-  });
+  document.getElementById('btnClearPins').addEventListener('click', ()=> hideOverlay());
+  window.addEventListener('keydown', (e)=>{ if (e.key==='Escape') hideOverlay(); });
 
   function showOverlay({title, body, imgUrl}){
     overlay.style.display='block';

@@ -44,7 +44,6 @@ export async function ensureViewer({ mount, spinner }) {
   })();
 
   async function loadGLBFromArrayBuffer(buf) {
-    // revoke previous
     if (state.current && state.current !== box) {
       scene.remove(state.current);
     }
@@ -53,7 +52,6 @@ export async function ensureViewer({ mount, spinner }) {
     const gltf = await loader.loadAsync(url);
     URL.revokeObjectURL(url);
 
-    // pick a root
     const root = gltf.scene || gltf.scenes?.[0];
     if (!root) throw new Error('GLB has no scene');
     scene.add(root);
@@ -81,7 +79,7 @@ export async function ensureViewer({ mount, spinner }) {
   }
   function setUnlit(on) {
     for (const m of state.materials) {
-      m.onBeforeCompile = (shader)=>{}; // idempotent placeholder
+      m.onBeforeCompile = (shader)=>{};
       m.needsUpdate = true;
     }
   }

@@ -1,4 +1,4 @@
-import { fetchDriveFileAsArrayBuffer, normalizeDriveIdFromInput } from './utils_drive_stub.js?v=20251004ui';
+import { fetchDriveFileAsArrayBuffer, normalizeDriveIdFromInput } from './utils_drive_stub.js?v=20251004ui2';
 
 export function setupUI(app){
   const el = {
@@ -19,7 +19,6 @@ export function setupUI(app){
     spinner: document.getElementById('spinner')
   };
 
-  // material sliders
   const applyHSL = ()=> app.viewer.setHSL(+el.hue.value, +el.sat.value, +el.light.value);
   const applyOpacity = ()=> app.viewer.setOpacity(+el.opac.value/100);
   el.hue.addEventListener('input', applyHSL);
@@ -37,16 +36,13 @@ export function setupUI(app){
     el.dbl.textContent = 'DoubleSide: ' + (app.state.doubleSide?'on':'off');
   });
 
-  // perspective/ortho toggle (UI only; actual ortho hookは後段で)
   el.modeChip.addEventListener('click', ()=>{
     if (el.modeChip.textContent==='persp') el.modeChip.textContent='ortho';
     else el.modeChip.textContent='persp';
   });
 
-  // bottom sheet expand on mobile
   el.expandBtn.addEventListener('click', ()=> el.panel.classList.toggle('expanded'));
 
-  // Load GLB
   el.btnLoad.addEventListener('click', async ()=>{
     try{
       el.spinner.textContent = 'loading GLB…';
@@ -61,7 +57,6 @@ export function setupUI(app){
     }
   });
 
-  // Image grid (placeholder 3 thumbnails)
   const imgs = [1,2,3].map(i => ({id:'dummy'+i, name:'image_'+i+'.jpg', thumb:`https://picsum.photos/seed/${i}/256`}));
   el.imgGrid.innerHTML = imgs.map(x=>`<div class="card"><img src="${x.thumb}" alt="${x.name}"></div>`).join('');
 }

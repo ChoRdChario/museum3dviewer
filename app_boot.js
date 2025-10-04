@@ -1,7 +1,7 @@
-import { ensureViewer } from './viewer.js?v=20251004ui';
-import { setupUI } from './ui.js?v=20251004ui';
-import { setupPins } from './pins.js?v=20251004ui';
-import { setupAuth } from './gauth.js?v=20251004ui';
+import { ensureViewer } from './viewer.js?v=20251004ui2';
+import { setupUI } from './ui.js?v=20251004ui2';
+import { setupPins } from './pins.js?v=20251004ui2';
+import { setupAuth } from './gauth.js?v=20251004ui2';
 
 const stage = document.getElementById('stage');
 const spinner = document.getElementById('spinner');
@@ -23,15 +23,7 @@ const app = {
   app.auth = setupAuth({
     chip: document.getElementById('authChip'),
     onReady: () => console.log('[auth] ready'),
-    onSignedIn: (user) => {
-      // FIX: optional chaining typo removed
-      try {
-        const email = user?.getBasicProfile?.()?.getEmail?.() ?? '';
-        console.log('[auth] signed in', email);
-      } catch (e) {
-        console.log('[auth] signed in');
-      }
-    },
+    onSignedIn: () => console.log('[auth] signed in'),
     onSignedOut: () => console.log('[auth] signed out')
   });
 

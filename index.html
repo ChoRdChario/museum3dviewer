@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>LociMyu v6.6 UI Integrated (pre-push)</title>
+  <title>LociMyu v6.6 UI Integrated (GIS pre-push)</title>
   <link rel="icon" href="./favicon.ico">
   <style>
     html,body{height:100%;margin:0;background:#0f0f13;color:#ddd;font:14px/1.4 system-ui,Segoe UI,Roboto,Helvetica,Arial}
@@ -15,7 +15,6 @@
     .chip{padding:.25rem .5rem;border-radius:999px;border:1px solid #444;cursor:pointer}
     .chip.ok{border-color:#2dd4bf;color:#2dd4bf}
     .chip.warn{border-color:#f59e0b;color:#f59e0b}
-    .chip.err{border-color:#ef4444;color:#ef4444}
     section{padding:.75rem .75rem;overflow:auto}
     section h3{margin:.25rem 0 .5rem;font-size:13px;color:#aaa;text-transform:uppercase;letter-spacing:.08em}
     .row{display:flex;align-items:center;gap:.5rem;margin:.25rem 0}
@@ -26,7 +25,6 @@
     .card{background:#1a1a22;border:1px solid #2a2a33;border-radius:.5rem;overflow:hidden}
     .card img{width:100%;display:block;aspect-ratio:1/1;object-fit:cover;background:#0b0b0f}
     .muted{color:#888}
-    /* mobile // bottom sheet */
     @media (max-width:960px){#app{grid-template-columns:1fr}aside#panel{position:fixed;inset:auto 0 0 0;height:48vh;transform:translateY(calc(48vh - 42px));transition:.25s;box-shadow:0 -8px 24px rgba(0,0,0,.35)}
       aside#panel.expanded{transform:translateY(0)}
       header#topbar{justify-content:space-between}}
@@ -42,6 +40,10 @@
     }
   }
   </script>
+
+  <!-- Google APIs + Google Identity Services (GIS) -->
+  <script src="https://apis.google.com/js/api.js" async defer></script>
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
 </head>
 <body>
   <div id="app">
@@ -63,7 +65,7 @@
           <input id="fileIdInput" placeholder="Drive File ID or URL" style="flex:1;padding:.4rem;background:#0f0f13;border:1px solid #333;border-radius:.4rem;color:#ddd">
           <button id="btnLoad" class="btn">GLB</button>
         </div>
-        <div class="col muted" id="loadHint">?id=&lt;fileId&gt; でも指定できます</div>
+        <div class="col muted" id="loadHint">?id=&lt;fileId&gt; または <b>demo</b> でデモモデルをロード</div>
       </section>
       <section id="secMaterial">
         <h3>Material</h3>
@@ -89,8 +91,6 @@
     </aside>
   </div>
 
-  <!-- Google API platform (auth); safe to load even if not used -->
-  <script src="https://apis.google.com/js/api.js" async defer></script>
-  <script type="module" src="./app_boot.js?v=20251004ui"></script>
+  <script type="module" src="./app_boot.js?v=20251004ui2"></script>
 </body>
 </html>
