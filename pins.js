@@ -1,4 +1,4 @@
-// pins.js — selected pin halo + robust leader line + image cache
+// pins.js — leader SVG creation+sizing, stable line+halo, restore-save guard
 import { ensureSpreadsheetForFile, ensurePinsHeader, listSheetTitles, loadPins, savePins } from './sheets_api.js?v=20251004s3';
 import { downloadImageAsBlob } from './utils_drive_images.js?v=20251004img2';
 
@@ -18,21 +18,48 @@ export function setupPins(app){
   const btnAdd = document.getElementById('btnAddPin');
   const btnClear = document.getElementById('btnClearPins');
   const imgGrid = document.getElementById('imgGrid');
-  const svg = document.getElementById('leader');
-  const leaderLine = document.getElementById('leaderLine');
-  // add a halo circle
-  let halo = document.getElementById('leaderHalo');
-  if (!halo){
-    halo = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-    halo.setAttribute('id','leaderHalo'); halo.setAttribute('class','halo');
-    halo.setAttribute('cx','0'); halo.setAttribute('cy','0'); halo.setAttribute('r','8');
-    svg.appendChild(halo);
-  }
   const sheetSelect = document.getElementById('sheetSelect');
   const btnNewSheet = document.getElementById('btnNewSheet');
   const pinFilter = document.getElementById('pinFilter');
   const capList = document.getElementById('capList');
   const pinPalette = document.getElementById('pinPalette');
+
+  // === Ensure leader SVG layer exists and is sized ===
+  const stage = document.getElementById('stage') || app.viewer.renderer.domElement.parentElement;
+  let svg = document.getElementById('leader');
+  if (!svg){
+    svg = document.createElementNS('http://www.w3.org/2000/svg','svg');
+    svg.setAttribute('id','leader');
+    svg.style.position = 'absolute';
+    svg.style.inset = '0';
+    svg.style.pointerEvents = 'none';
+    svg.style.zIndex = '5';
+    stage.appendChild(svg);
+  }
+  let leaderLine = document.getElementById('leaderLine');
+  if (!leaderLine){
+    leaderLine = document.createElementNS('http://www.w3.org/2000/svg','line');
+    leaderLine.setAttribute('id','leaderLine');
+    leaderLine.setAttribute('stroke','#ffcc55');
+    leaderLine.setAttribute('stroke-width','2');
+    leaderLine.setAttribute('opacity','0');
+    svg.appendChild(leaderLine);
+  }
+  let halo = document.getElementById('leaderHalo');
+  if (!halo){
+    halo = document.createElementNS('http://www.w3.org/2000/svg','circle');
+    halo.setAttribute('id','leaderHalo');
+    halo.setAttribute('cx','0'); halo.setAttribute('cy','0'); halo.setAttribute('r','8');
+    halo.style.fill = 'none'; halo.style.stroke = '#ffd166'; halo.style.strokeWidth = '2'; halo.style.opacity = '0';
+    svg.appendChild(halo);
+  }
+  // inject pulse keyframes once
+  if (!document.getElementById('lmy-pulse-style')){
+    const st = document.createElement('style');
+    st.id = 'lmy-pulse-style';
+    st.textContent = '@keyframes lmyPulse {0%{r:8;opacity:.9} 70%{r:18;opacity:0} 100%{r:18;opacity:0}}';
+    document.head.appendChild(st);
+  }
 
   const pins = []; // {id,obj,title,body,imageId,color}
   let selected = null;
@@ -40,10 +67,11 @@ export function setupPins(app){
   let sheetName = 'Pins';
   let currentColor = PALETTE[0].hex;
   const imageCache = new Map(); // fileId -> objectURL
+  let restoring = false; // guard for autosave during restore
 
   // palette wiring
   function setupPalette(){
-    pinPalette.innerHTML = PALETTE.map((c,i)=>`<div class="sw${i===0?' active':''}" data-hex="${c.hex}" title="${c.key}" style="background:${c.hex}"></div>`).join('');
+    pinPalette.innerHTML = PALETTE.map((c,i)=>`<div class="sw${i===0?' active':''}" data-hex="${c.hex}" title="${c.key}" style="background:${c.hex};width:24px;height:24px;border-radius:999px;border:2px solid #0003;cursor:pointer;box-shadow:0 0 0 2px #222"></div>`).join('');
     pinPalette.querySelectorAll('.sw').forEach(sw=> sw.addEventListener('click', ()=>{
       pinPalette.querySelectorAll('.sw').forEach(x=> x.classList.remove('active'));
       sw.classList.add('active');
@@ -78,17 +106,13 @@ export function setupPins(app){
 
   function resolveImageURL(rec){
     if (!rec?.imageId) return '';
-    // if it's already a URL, return as-is
     if (/^https?:\/\//i.test(rec.imageId)) return rec.imageId;
-    // else assume Drive fileId: check cache
     const fid = rec.imageId;
     if (imageCache.has(fid)) return imageCache.get(fid);
-    // If not cached, start fetch asynchronously; return empty for now
     (async ()=>{
       try{
         const blob = await downloadImageAsBlob(fid);
         const url = URL.createObjectURL(blob);
-        // store & update overlay if still same selection
         const prev = imageCache.get(fid);
         if (prev && prev.startsWith('blob:')) URL.revokeObjectURL(prev);
         imageCache.set(fid, url);
@@ -105,7 +129,7 @@ export function setupPins(app){
     overlay.innerHTML = `<strong>${title??''}</strong><div style="margin-top:.25rem;white-space:pre-wrap">${body??''}</div>${imgUrl?`<img src="${imgUrl}" onerror="this.style.opacity=.35;this.title='load failed';">`:''}`;
     updateLeaderToOverlay();
   }
-  function hideOverlay(){ overlay.style.display='none'; leaderLine.setAttribute('opacity','0'); halo.style.opacity = 0; halo.classList.remove('pulse'); }
+  function hideOverlay(){ overlay.style.display='none'; leaderLine.setAttribute('opacity','0'); halo.style.opacity = 0; halo.style.animation = 'none'; }
 
   function renderCapList(){
     capList.innerHTML = pins.map(p=>`<div class="row" data-id="${p.id}" style="padding:.4rem .5rem;border-bottom:1px solid #262630;cursor:pointer">
@@ -130,13 +154,14 @@ export function setupPins(app){
     // leader visual
     leaderLine.setAttribute('stroke', color);
     halo.style.stroke = color;
-    halo.classList.add('pulse'); halo.style.opacity = 1;
+    halo.style.opacity = 1;
+    halo.style.animation = 'lmyPulse 1.2s ease-out infinite';
     // overlay
     const url = resolveImageURL(rec);
     showOverlay({ title: rec.title||'(untitled)', body: rec.body||'', imgUrl: url });
   }
 
-  function addPinAtPosition(pos, init={}){
+  function addPinAtPosition(pos, init={}, opts={}){
     const THREE = app.viewer.THREE;
     const color = init.color || currentColor;
     const pinObj = new THREE.Mesh(
@@ -157,24 +182,25 @@ export function setupPins(app){
     pins.push(rec);
     renderCapList();
     selectPin(rec);
-    scheduleSave();
+    if (!restoring && !opts.skipSave) scheduleSave();
     return rec;
   }
   function addPinFromHit(hit){ addPinAtPosition(hit.point, {}); }
 
-  // robust projection helper (canvas coords)
+  // convert world pos -> canvas pixels; ensure SVG sized to canvas pixels
   function projectToCanvas(vec3){
     const THREE = app.viewer.THREE;
     const v = new THREE.Vector3(vec3.x, vec3.y, vec3.z);
     v.project(app.viewer.camera);
     const el = app.viewer.renderer.domElement;
     const w = el.clientWidth, h = el.clientHeight;
+    if (svg.getAttribute('width') != String(w)) svg.setAttribute('width', String(w));
+    if (svg.getAttribute('height') != String(h)) svg.setAttribute('height', String(h));
     const x = ( v.x *  0.5 + 0.5) * w;
     const y = (-v.y *  0.5 + 0.5) * h;
     return { x, y };
   }
 
-  // leader line from pin to overlay + halo
   function updateLeaderToOverlay(){
     if (!selected){ leaderLine.setAttribute('opacity','0'); halo.style.opacity=0; return; }
     const canvasRect = app.viewer.renderer.domElement.getBoundingClientRect();
@@ -212,7 +238,6 @@ export function setupPins(app){
       return;
     }
     if (!pins.length) return;
-    // nearest pin within 24px
     const rect = app.viewer.renderer.domElement.getBoundingClientRect();
     const mx = e.clientX - rect.left, my = e.clientY - rect.top;
     let best = null, bestD2 = 1e9;
@@ -240,10 +265,9 @@ export function setupPins(app){
     pins.length = 0;
     renderCapList();
     selectPin(null);
-    scheduleSave(true);
+    if (!restoring) scheduleSave(true);
   });
 
-  // overlay edits -> selected pin -> autosave (debounced)
   function debounce(fn, ms){ let t; return (...a)=>{ clearTimeout(t); t=setTimeout(()=>fn(...a), ms); }; }
   const scheduleSave = debounce(async ()=>{
     if (!spreadsheetId) return;
@@ -254,8 +278,8 @@ export function setupPins(app){
     }catch(e){ console.error('[pins] save failed', e); }
   }, 600);
 
-  titleInput.addEventListener('input', ()=>{ if (selected){ selected.title = titleInput.value; showOverlay({ title:selected.title, body:selected.body, imgUrl: resolveImageURL(selected) }); renderCapList(); scheduleSave(); } });
-  bodyInput.addEventListener('input', ()=>{ if (selected){ selected.body = bodyInput.value; showOverlay({ title:selected.title, body:selected.body, imgUrl: resolveImageURL(selected) }); scheduleSave(); } });
+  titleInput.addEventListener('input', ()=>{ if (selected){ selected.title = titleInput.value; showOverlay({ title:selected.title, body:selected.body, imgUrl: resolveImageURL(selected) }); renderCapList(); if (!restoring) scheduleSave(); } });
+  bodyInput.addEventListener('input', ()=>{ if (selected){ selected.body = bodyInput.value; showOverlay({ title:selected.title, body:selected.body, imgUrl: resolveImageURL(selected) }); if (!restoring) scheduleSave(); } });
   imgGrid.addEventListener('click', async (e)=>{
     const img = e.target.closest('img'); if (!img || !selected) return;
     const fid = img.dataset.id;
@@ -268,14 +292,13 @@ export function setupPins(app){
         imageCache.set(fid, url);
         selected.imageId = fid;
         showOverlay({ title:selected.title, body:selected.body, imgUrl:url });
-        scheduleSave();
+        if (!restoring) scheduleSave();
       }catch(err){ console.error('[pins] image fetch failed', err); }
     }else{
-      selected.imageId = img.src; showOverlay({ title:selected.title, body:selected.body, imgUrl: img.src }); scheduleSave();
+      selected.imageId = img.src; showOverlay({ title:selected.title, body:selected.body, imgUrl: img.src }); if (!restoring) scheduleSave();
     }
   });
 
-  // Sheet selection UI
   sheetSelect.addEventListener('change', async ()=>{
     sheetName = sheetSelect.value || 'Pins';
     if (!spreadsheetId) return;
@@ -312,22 +335,24 @@ export function setupPins(app){
   }
 
   async function restorePins(){
-    // clear existing
-    pins.forEach(p=> app.viewer.scene.remove(p.obj));
-    pins.length = 0;
-    renderCapList();
-    selectPin(null);
-    // load
-    const list = await loadPins(spreadsheetId, sheetName);
-    for (const p of list){
-      const pos = new app.viewer.THREE.Vector3(p.x, p.y, p.z);
-      addPinAtPosition(pos, p);
+    restoring = true;
+    try{
+      pins.forEach(p=> app.viewer.scene.remove(p.obj));
+      pins.length = 0;
+      renderCapList();
+      selectPin(null);
+      const list = await loadPins(spreadsheetId, sheetName);
+      for (const p of list){
+        const pos = new app.viewer.THREE.Vector3(p.x, p.y, p.z);
+        addPinAtPosition(pos, p, { skipSave:true });
+      }
+      applyFilter();
+      console.log('[pins] restored', list.length, 'pins from sheet', sheetName);
+    } finally {
+      restoring = false;
     }
-    applyFilter();
-    console.log('[pins] restored', list.length, 'pins from sheet', sheetName);
   }
 
-  // On model loaded: ensure spreadsheet & sheets list then restore
   window.addEventListener('lmy:model-loaded', async ()=>{
     try{
       const glbId = app.state?.currentGLBId;
