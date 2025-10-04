@@ -1,5 +1,3 @@
-/* styles/viewer.css */
-html, body { height:100%; margin:0; background:#0e0e0e; }
-#app { height:100%; display:grid; grid-template-columns:1fr 360px; }
-#viewport { position:relative; }
-#lmy-canvas { width:100%; height:100%; display:block; }
+/* styles/viewer.css (minimal) */
+#stage { position:relative; min-height: 200px; }
+#stage > #lmy-canvas { width:100%; height:100%; display:block; }
