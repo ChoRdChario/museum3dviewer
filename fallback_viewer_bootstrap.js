@@ -1,5 +1,5 @@
-// fallback_viewer_bootstrap.js — CDN-pinned three.js to avoid 404s from local /lib path
-const THREE_URL = 'https://unpkg.com/three@0.157.0/build/three.module.js';
+// fallback_viewer_bootstrap.js — CDN-pinned three.js + OrbitControls; relies on import map for 'three'
+const THREE_URL = 'three'; // resolved by import map
 const ORBIT_URL = 'https://unpkg.com/three@0.157.0/examples/jsm/controls/OrbitControls.js';
 
 export async function ensureDemo({ mount }) {
