@@ -1,4 +1,4 @@
-// pins.js — leader SVG creation+sizing, stable line+halo, restore-save guard
+// pins.js — attachment feedback (fly animation, check badge, save toast, list thumbnail)
 import { ensureSpreadsheetForFile, ensurePinsHeader, listSheetTitles, loadPins, savePins } from './sheets_api.js?v=20251004s3';
 import { downloadImageAsBlob } from './utils_drive_images.js?v=20251004img2';
 
@@ -24,7 +24,7 @@ export function setupPins(app){
   const capList = document.getElementById('capList');
   const pinPalette = document.getElementById('pinPalette');
 
-  // === Ensure leader SVG layer exists and is sized ===
+  // leader svg (created if missing) + halo
   const stage = document.getElementById('stage') || app.viewer.renderer.domElement.parentElement;
   let svg = document.getElementById('leader');
   if (!svg){
@@ -53,11 +53,16 @@ export function setupPins(app){
     halo.style.fill = 'none'; halo.style.stroke = '#ffd166'; halo.style.strokeWidth = '2'; halo.style.opacity = '0';
     svg.appendChild(halo);
   }
-  // inject pulse keyframes once
-  if (!document.getElementById('lmy-pulse-style')){
-    const st = document.createElement('style');
-    st.id = 'lmy-pulse-style';
-    st.textContent = '@keyframes lmyPulse {0%{r:8;opacity:.9} 70%{r:18;opacity:0} 100%{r:18;opacity:0}}';
+  if (!document.getElementById('lmy-style-ui')){
+    const st = document.createElement('style'); st.id='lmy-style-ui';
+    st.textContent = `
+      @keyframes lmyPulse {0%{r:8;opacity:.9} 70%{r:18;opacity:0} 100%{r:18;opacity:0}}
+      .lmy-flash { outline:2px solid #facc15; box-shadow:0 0 0 4px rgba(250,204,21,.15); transition:all .35s }
+      .lmy-check { position:absolute; right:6px; bottom:6px; width:18px; height:18px; border-radius:999px; background:#16a34a; color:white; display:grid; place-items:center; font-size:12px; box-shadow:0 2px 6px rgba(0,0,0,.4) }
+      .lmy-toast { position:absolute; transform:translate(-8px, -8px); right:0; bottom:0; background:rgba(0,0,0,.75); color:#fff; padding:.25rem .5rem; border:1px solid #333; border-radius:.35rem; font-size:12px; opacity:0; transition:opacity .18s, transform .18s }
+      .lmy-toast.show { opacity:1; transform:translate(0,0) }
+      .lmy-fly { position:fixed; z-index:9999; pointer-events:none; border-radius:.35rem; overflow:hidden; box-shadow:0 6px 24px rgba(0,0,0,.35) }
+    `;
     document.head.appendChild(st);
   }
 
@@ -67,9 +72,8 @@ export function setupPins(app){
   let sheetName = 'Pins';
   let currentColor = PALETTE[0].hex;
   const imageCache = new Map(); // fileId -> objectURL
-  let restoring = false; // guard for autosave during restore
+  let restoring = false;
 
-  // palette wiring
   function setupPalette(){
     pinPalette.innerHTML = PALETTE.map((c,i)=>`<div class="sw${i===0?' active':''}" data-hex="${c.hex}" title="${c.key}" style="background:${c.hex};width:24px;height:24px;border-radius:999px;border:2px solid #0003;cursor:pointer;box-shadow:0 0 0 2px #222"></div>`).join('');
     pinPalette.querySelectorAll('.sw').forEach(sw=> sw.addEventListener('click', ()=>{
@@ -81,12 +85,10 @@ export function setupPins(app){
         halo.style.stroke = currentColor;
       }
     }));
-    // filter options
     pinFilter.innerHTML = '<option value="all">(All)</option>' + PALETTE.map(c=>`<option value="${c.hex}">${c.key}</option>`).join('');
   }
   setupPalette();
 
-  // draggable overlay
   (function makeDraggable(){
     let dragging=false, sx=0, sy=0, startLeft=0, startTop=0;
     overlay.style.left='12px'; overlay.style.bottom='12px';
@@ -126,15 +128,31 @@ export function setupPins(app){
 
   function showOverlay({title, body, imgUrl}){
     overlay.style.display='block';
-    overlay.innerHTML = `<strong>${title??''}</strong><div style="margin-top:.25rem;white-space:pre-wrap">${body??''}</div>${imgUrl?`<img src="${imgUrl}" onerror="this.style.opacity=.35;this.title='load failed';">`:''}`;
+    // toast container
+    if (!overlay.querySelector('.lmy-toast')){
+      const t = document.createElement('div'); t.className='lmy-toast'; t.textContent='Saved';
+      overlay.appendChild(t);
+    }
+    overlay.innerHTML = `<div style="position:relative"><strong>${title??''}</strong></div>
+      <div style="margin-top:.25rem;white-space:pre-wrap">${body??''}</div>
+      ${imgUrl?`<img src="${imgUrl}" onerror="this.style.opacity=.35;this.title='load failed';" style="margin-top:.5rem;max-width:100%">`:''}`;
     updateLeaderToOverlay();
+  }
+  function showToast(msg='Saved'){
+    const t = overlay.querySelector('.lmy-toast') || (()=>{ const d=document.createElement('div'); d.className='lmy-toast'; overlay.appendChild(d); return d; })();
+    t.textContent = msg;
+    t.classList.add('show');
+    setTimeout(()=> t.classList.remove('show'), 800);
   }
   function hideOverlay(){ overlay.style.display='none'; leaderLine.setAttribute('opacity','0'); halo.style.opacity = 0; halo.style.animation = 'none'; }
 
   function renderCapList(){
-    capList.innerHTML = pins.map(p=>`<div class="row" data-id="${p.id}" style="padding:.4rem .5rem;border-bottom:1px solid #262630;cursor:pointer">
-      <span style="display:inline-block;width:10px;height:10px;background:${p.color};border-radius:999px;margin-right:.4rem;vertical-align:middle"></span>
-      ${p.title || '(untitled)'}</div>`).join('');
+    capList.innerHTML = pins.map(p=>{
+      const thumb = (/^https?:\/\//i.test(p.imageId) ? p.imageId : (p.imageId && imageCache.get(p.imageId))) || '';
+      const img = thumb ? `<img src="${thumb}" style="width:18px;height:18px;object-fit:cover;border-radius:3px;margin-right:.35rem;vertical-align:middle">` : '';
+      return `<div class="row" data-id="${p.id}" style="padding:.4rem .5rem;border-bottom:1px solid #262630;cursor:pointer">
+        <span style="display:inline-block;width:10px;height:10px;background:${p.color};border-radius:999px;margin-right:.35rem;vertical-align:middle"></span>${img}${p.title || '(untitled)'}</div>`;
+    }).join('');
   }
 
   capList.addEventListener('click', (e)=>{
@@ -151,12 +169,10 @@ export function setupPins(app){
     bodyInput.value = rec.body || '';
     const color = rec.color || currentColor;
     rec.obj.material.color.set(color);
-    // leader visual
     leaderLine.setAttribute('stroke', color);
     halo.style.stroke = color;
     halo.style.opacity = 1;
     halo.style.animation = 'lmyPulse 1.2s ease-out infinite';
-    // overlay
     const url = resolveImageURL(rec);
     showOverlay({ title: rec.title||'(untitled)', body: rec.body||'', imgUrl: url });
   }
@@ -182,12 +198,11 @@ export function setupPins(app){
     pins.push(rec);
     renderCapList();
     selectPin(rec);
-    if (!restoring && !opts.skipSave) scheduleSave();
+    if (!opts.skipSave) scheduleSave();
     return rec;
   }
   function addPinFromHit(hit){ addPinAtPosition(hit.point, {}); }
 
-  // convert world pos -> canvas pixels; ensure SVG sized to canvas pixels
   function projectToCanvas(vec3){
     const THREE = app.viewer.THREE;
     const v = new THREE.Vector3(vec3.x, vec3.y, vec3.z);
@@ -219,7 +234,6 @@ export function setupPins(app){
   window.addEventListener('resize', updateLeaderToOverlay);
   (function lineTick(){ updateLeaderToOverlay(); requestAnimationFrame(lineTick); })();
 
-  // Pin color filter
   function applyFilter(){
     const f = pinFilter.value;
     for (const p of pins){
@@ -230,7 +244,6 @@ export function setupPins(app){
   }
   pinFilter.addEventListener('change', applyFilter);
 
-  // Click handlers
   app.viewer.renderer.domElement.addEventListener('click', (e)=>{
     if (e.shiftKey){
       const hit = app.viewer.raycastFromClientXY(e.clientX, e.clientY);
@@ -265,7 +278,7 @@ export function setupPins(app){
     pins.length = 0;
     renderCapList();
     selectPin(null);
-    if (!restoring) scheduleSave(true);
+    scheduleSave(true);
   });
 
   function debounce(fn, ms){ let t; return (...a)=>{ clearTimeout(t); t=setTimeout(()=>fn(...a), ms); }; }
@@ -274,14 +287,37 @@ export function setupPins(app){
     try{
       const serial = pins.map(p => ({ id:p.id, x:p.obj.position.x, y:p.obj.position.y, z:p.obj.position.z, title:p.title, body:p.body, imageId:p.imageId, color:p.color }));
       await savePins(spreadsheetId, sheetName, serial);
+      showToast('Saved');
       console.log('[pins] saved', serial.length, 'to sheet', sheetName);
     }catch(e){ console.error('[pins] save failed', e); }
   }, 600);
 
-  titleInput.addEventListener('input', ()=>{ if (selected){ selected.title = titleInput.value; showOverlay({ title:selected.title, body:selected.body, imgUrl: resolveImageURL(selected) }); renderCapList(); if (!restoring) scheduleSave(); } });
-  bodyInput.addEventListener('input', ()=>{ if (selected){ selected.body = bodyInput.value; showOverlay({ title:selected.title, body:selected.body, imgUrl: resolveImageURL(selected) }); if (!restoring) scheduleSave(); } });
+  titleInput.addEventListener('input', ()=>{ if (selected){ selected.title = titleInput.value; showOverlay({ title:selected.title, body:selected.body, imgUrl: resolveImageURL(selected) }); renderCapList(); scheduleSave(); } });
+  bodyInput.addEventListener('input', ()=>{ if (selected){ selected.body = bodyInput.value; showOverlay({ title:selected.title, body:selected.body, imgUrl: resolveImageURL(selected) }); scheduleSave(); } });
+
+  // === Image attach feedback ===
   imgGrid.addEventListener('click', async (e)=>{
     const img = e.target.closest('img'); if (!img || !selected) return;
+    // flash border & check badge
+    const card = img.closest('.card'); if (card){ card.classList.add('lmy-flash'); setTimeout(()=> card.classList.remove('lmy-flash'), 350);
+      let chk = card.querySelector('.lmy-check'); if (!chk){ chk = document.createElement('div'); chk.className='lmy-check'; chk.textContent='✓'; card.style.position='relative'; card.appendChild(chk); setTimeout(()=> chk.remove(), 600); }
+    }
+    // fly to overlay
+    try{
+      const rect = img.getBoundingClientRect();
+      const fly = img.cloneNode();
+      fly.className = 'lmy-fly';
+      fly.style.left = rect.left + 'px'; fly.style.top = rect.top + 'px';
+      fly.style.width = rect.width + 'px'; fly.style.height = rect.height + 'px';
+      document.body.appendChild(fly);
+      const ov = overlay.getBoundingClientRect();
+      const scale = Math.min(220 / rect.width, 220 / rect.height, 1.3);
+      fly.animate([
+        { transform:`translate(0,0) scale(1)`, opacity:.95 },
+        { transform:`translate(${ov.left-rect.left+16}px, ${ov.top-rect.top+16}px) scale(${scale})`, opacity:.2 }
+      ], { duration: 420, easing:'cubic-bezier(.22,.61,.36,1)' }).onfinish = ()=> fly.remove();
+    }catch{ /* ignore */ }
+
     const fid = img.dataset.id;
     if (fid){
       try{
@@ -292,10 +328,11 @@ export function setupPins(app){
         imageCache.set(fid, url);
         selected.imageId = fid;
         showOverlay({ title:selected.title, body:selected.body, imgUrl:url });
-        if (!restoring) scheduleSave();
+        renderCapList();
+        scheduleSave();
       }catch(err){ console.error('[pins] image fetch failed', err); }
     }else{
-      selected.imageId = img.src; showOverlay({ title:selected.title, body:selected.body, imgUrl: img.src }); if (!restoring) scheduleSave();
+      selected.imageId = img.src; showOverlay({ title:selected.title, body:selected.body, imgUrl: img.src }); renderCapList(); scheduleSave();
     }
   });
 
@@ -335,22 +372,19 @@ export function setupPins(app){
   }
 
   async function restorePins(){
-    restoring = true;
-    try{
-      pins.forEach(p=> app.viewer.scene.remove(p.obj));
-      pins.length = 0;
-      renderCapList();
-      selectPin(null);
-      const list = await loadPins(spreadsheetId, sheetName);
-      for (const p of list){
-        const pos = new app.viewer.THREE.Vector3(p.x, p.y, p.z);
-        addPinAtPosition(pos, p, { skipSave:true });
-      }
-      applyFilter();
-      console.log('[pins] restored', list.length, 'pins from sheet', sheetName);
-    } finally {
-      restoring = false;
+    // clear existing
+    pins.forEach(p=> app.viewer.scene.remove(p.obj));
+    pins.length = 0;
+    renderCapList();
+    selectPin(null);
+    // load
+    const list = await loadPins(spreadsheetId, sheetName);
+    for (const p of list){
+      const pos = new app.viewer.THREE.Vector3(p.x, p.y, p.z);
+      addPinAtPosition(pos, p, { skipSave:true });
     }
+    applyFilter();
+    console.log('[pins] restored', list.length, 'pins from sheet', sheetName);
   }
 
   window.addEventListener('lmy:model-loaded', async ()=>{
