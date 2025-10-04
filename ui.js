@@ -63,9 +63,9 @@ export function setupUI(app){
   if (!app || !app.viewer) return;
 
   // --- GLB loaders ---
-  const inp = document.getElementById('inpDriveId');
-  const btn = document.getElementById('btnLoadGLB');
-  const btnd = document.getElementById('btnLoadDemo');
+  const inp = (document.getElementById('fileIdInput')||document.getElementById('inpDriveId'));
+  const btn = (document.getElementById('btnLoad')||document.getElementById('btnLoadGLB'));
+  const btnd = (document.getElementById('btnLoadDemo')||document.getElementById('btnDemo'));
   if (btn){
     btn.addEventListener('click', ()=> loadGLBFromDriveId(app, inp?.value||""));
   }
