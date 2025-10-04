@@ -1,6 +1,6 @@
-
-const THREE_URL = 'three';
-const GLTF_URL = 'https://unpkg.com/three@0.157.0/examples/jsm/loaders/GLTFLoader.js';
+// viewer.js - v6.6 patched
+const THREE_URL = 'https://unpkg.com/three@0.157.0/build/three.module.js';
+const GLTF_URL  = 'https://unpkg.com/three@0.157.0/examples/jsm/loaders/GLTFLoader.js';
 const ORBIT_URL = 'https://unpkg.com/three@0.157.0/examples/jsm/controls/OrbitControls.js';
 
 export async function ensureViewer({ mount, spinner }) {
@@ -12,160 +12,243 @@ export async function ensureViewer({ mount, spinner }) {
   renderer.setPixelRatio(devicePixelRatio);
   renderer.setSize(mount.clientWidth, mount.clientHeight);
   renderer.sortObjects = true;
-  renderer.outputColorSpace = THREE.SRGBColorSpace;
   mount.appendChild(renderer.domElement);
 
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x101014);
 
-  const camera = new THREE.PerspectiveCamera(50, (mount.clientWidth||1) / (mount.clientHeight||1), 0.1, 5000);
-  camera.position.set(2.5, 1.4, 3.2);
-
+  const camera = new THREE.PerspectiveCamera(60, mount.clientWidth / Math.max(1,mount.clientHeight), 0.1, 2000);
+  camera.position.set(2.5, 2, 3);
   const controls = new OrbitControls(camera, renderer.domElement);
   controls.enableDamping = true;
 
-  const hemi = new THREE.HemisphereLight(0xffffff, 0x404040, 1.0);
+  const hemi = new THREE.HemisphereLight(0xffffff, 0x222233, 1.0);
   scene.add(hemi);
-  const dir = new THREE.DirectionalLight(0xffffff, 0.6);
-  dir.position.set(2, 3, 4);
-  scene.add(dir);
-
-  // Demo cube while idle
-  const box = new THREE.Mesh(
-    new THREE.BoxGeometry(1,1,1),
-    new THREE.MeshStandardMaterial({ color: 0x304c78, roughness: .9, metalness: .05 })
-  );
-  scene.add(box);
 
   const state = {
-    current: box,
-    // Array<THREE.Material> (unique instances used in the model)
-    materials: [],
-    // live parameters
-    hsl: { h:0, s:0, l:0 },
-    opacity: 1,
-    unlit: false,
-    doubleSide: false,
-    whiteKey: { enabled:false, threshold:0.95 },
+    current: null,
+    materials: [],            // unique THREE.Material[]
+    targetIndex: -1,          // -1 = all
   };
 
-  function onResize() {
-    const w = mount.clientWidth, h = mount.clientHeight || 1;
-    renderer.setSize(w, h);
-    camera.aspect = w / h;
+  function collectUniqueMaterials(root){
+    const arr = [];
+    const seen = new Set();
+    root.traverse((o)=>{
+      if (o.isMesh && o.material){
+        const mats = Array.isArray(o.material) ? o.material : [o.material];
+        for (const m of mats){
+          const key = m.uuid;
+          if (!seen.has(key)){
+            seen.add(key);
+            arr.push(m);
+          }
+          // transparent draw order safety
+          m.depthWrite = !m.transparent;
+        }
+      }
+    });
+    return arr;
+  }
+
+  function applyToTargets(fn){
+    const mats = state.targetIndex < 0 ? state.materials : [state.materials[state.targetIndex]].filter(Boolean);
+    for (const m of mats) fn(m);
+  }
+
+  function animate(){
+    controls.update();
+    renderer.render(scene, camera);
+    requestAnimationFrame(animate);
+  }
+  animate();
+
+  function onResize(){
+    const w = mount.clientWidth, h = Math.max(1, mount.clientHeight);
+    renderer.setSize(w,h);
+    camera.aspect = w/h;
     camera.updateProjectionMatrix();
   }
   new ResizeObserver(onResize).observe(mount);
 
-  (function tick(){
-    if (state.current === box) box.rotation.y += 0.01;
-    controls.update();
-    renderer.render(scene, camera);
-    requestAnimationFrame(tick);
-  })();
+  async function loadGLBFromArrayBuffer(buf){
+    // clear previous
+    if (state.current){
+      scene.remove(state.current);
+      state.current.traverse?.((o)=>{
+        if (o.geometry) o.geometry.dispose();
+      });
+    }
+    const { GLTFLoader } = await import(GLTF_URL);
+    const blob = new Blob([buf], {type:'model/gltf-binary'});
+    const url = URL.createObjectURL(blob);
+    try{
+      const gltf = await new GLTFLoader().loadAsync(url);
+      const root = gltf.scene || gltf.scenes?.[0];
+      if (!root) throw new Error('GLB has no scene');
+      scene.add(root);
+      state.current = root;
+      state.materials = collectUniqueMaterials(root);
+      state.targetIndex = -1;
+    } finally {
+      URL.revokeObjectURL(url);
+    }
+  }
 
-  // --- helpers ---
-  function collectUniqueMaterials(root) {
-    const set = new Set();
-    root.traverse(obj => {
-      if (obj.isMesh && obj.material) {
-        const arr = Array.isArray(obj.material) ? obj.material : [obj.material];
-        for (const m of arr) set.add(m);
-        // fix sorting/alpha oddities
-        obj.renderOrder = 0;
+  // === material helpers ===
+  function ensureBackup(m){
+    if (!m.userData._lmy) m.userData._lmy = {};
+    const u = m.userData._lmy;
+    if (!u.backup){
+      // minimal clone of togglable props
+      u.backup = {
+        type: m.type,
+        color: m.color ? m.color.clone() : null,
+        map: m.map || null,
+        side: m.side,
+        transparent: m.transparent,
+        opacity: m.opacity,
+        toneMapped: m.toneMapped,
+        lights: m.lights ?? true,
+        onBeforeCompile: m.onBeforeCompile || null,
+      };
+    }
+    return u;
+  }
+
+  function setHSL(h, s, l){
+    applyToTargets((m)=>{
+      if (!m.color) return;
+      const c = new THREE.Color();
+      c.setHSL(h/360, s/100, l/100);
+      m.color.copy(c);
+      m.needsUpdate = true;
+    });
+  }
+
+  function setOpacity(p){
+    applyToTargets((m)=>{
+      m.transparent = p < 1.0 || m.userData._lmy?.whiteKeyEnabled;
+      m.opacity = p;
+      m.depthWrite = !m.transparent;
+      m.needsUpdate = true;
+    });
+  }
+
+  function setUnlit(on){
+    applyToTargets((m)=>{
+      const u = ensureBackup(m);
+      if (on){
+        if (m.type !== 'MeshBasicMaterial'){
+          // switch to basic while keeping map/opacity/etc
+          const basic = new THREE.MeshBasicMaterial({
+            map: m.map || null,
+            color: m.color ? m.color.clone() : 0xffffff,
+            transparent: m.transparent,
+            opacity: m.opacity,
+            side: m.side,
+            depthWrite: m.depthWrite,
+            toneMapped: false,
+          });
+          // mark & swap
+          u.swapped = m;
+          u.swappedOriginal = m; // keep reference
+          Object.setPrototypeOf(m, THREE.MeshBasicMaterial.prototype);
+          Object.assign(m, basic);
+          m.needsUpdate = true;
+        }
+      } else {
+        // restore by reapplying backup on the same instance
+        if (u.backup){
+          m.onBeforeCompile = u.backup.onBeforeCompile;
+          m.toneMapped = u.backup.toneMapped;
+          m.lights = u.backup.lights;
+          m.transparent = u.backup.transparent;
+          m.opacity = u.backup.opacity;
+          m.side = u.backup.side;
+          if (u.backup.color && m.color) m.color.copy(u.backup.color);
+          m.map = u.backup.map;
+          // revert prototype if needed
+          if (m.type !== u.backup.type){
+            // reconstruct original Standard material-ish
+            const std = new THREE.MeshStandardMaterial({
+              map: m.map,
+              color: (u.backup.color||new THREE.Color(0xffffff)),
+              transparent: m.transparent,
+              opacity: m.opacity,
+              side: m.side,
+              depthWrite: m.depthWrite,
+            });
+            Object.setPrototypeOf(m, THREE.MeshStandardMaterial.prototype);
+            Object.assign(m, std);
+          }
+          m.needsUpdate = true;
+        }
       }
     });
-    return [...set];
   }
 
-  function applyMaterialFlags(m) {
-    // transparency
-    m.transparent = state.opacity < 1 || m.transparent;
-    m.opacity = state.opacity;
-    // double side
-    m.side = state.doubleSide ? THREE.DoubleSide : THREE.FrontSide;
-    // unlit handling via onBeforeCompile (idempotent)
-    if (!m.userData._patched) {
-      m.onBeforeCompile = (shader) => {
-        // inject HSL + white-key in fragment
-        shader.uniforms.uHsl = { value: new THREE.Vector3(state.hsl.h, state.hsl.s, state.hsl.l) };
-        shader.uniforms.uWhiteEnable = { value: state.whiteKey.enabled ? 1 : 0 };
-        shader.uniforms.uWhiteThresh = { value: state.whiteKey.threshold };
+  function setDoubleSide(on){
+    applyToTargets((m)=>{
+      m.side = on ? THREE.DoubleSide : THREE.FrontSide;
+      m.needsUpdate = true;
+    });
+  }
 
-        shader.fragmentShader = shader.fragmentShader
-          .replace('#include <dithering_fragment>', `#include <dithering_fragment>
-            // --- LociMyu HSL + white-key ---
-            vec3 rgb2hsv(vec3 c){ vec4 K = vec4(0., -1./3., 2./3., -1.); vec4 p = mix(vec4(c.bg, K.wz), vec4(c.gb, K.xy), step(c.b, c.g)); vec4 q = mix(vec4(p.xyw, c.r), vec4(c.r, p.yzx), step(p.x, c.r)); float d = q.x - min(q.w, q.y); float e = 1.0e-10; return vec3(abs(q.z + (q.w - q.y) / (6.*d + e)), d / (q.x + e), q.x); }
-            vec3 hsv2rgb(vec3 c){ vec4 K = vec4(1., 2./3., 1./3., 3.); vec3 p = abs(fract(c.xxx + K.xyz)*6. - K.www); return c.z * mix(K.xxx, clamp(p - K.xxx, 0., 1.), c.y); }
-            vec3 hslAdj(vec3 rgb, vec3 hsl){ vec3 hsv = rgb2hsv(rgb); hsv.x = fract(hsv.x + hsl.x); hsv.y = clamp(hsv.y + hsl.y, 0., 1.); hsv.z = clamp(hsv.z + hsl.z, 0., 1.); return hsv2rgb(hsv); }
-            vec3 c = gl_FragColor.rgb;
-            c = hslAdj(c, uHsl);
-            if (uWhiteEnable==1) {
-              // whiteness key: fade alpha where near white (luminance high)
-              float lum = max(max(c.r, c.g), c.b);
-              float a = smoothstep(uWhiteThresh, 1.0, lum);
-              gl_FragColor.a *= (1.0 - a);
-            }
-            gl_FragColor.rgb = c;
-          `);
-      };
-      m.userData._patched = true;
-    }
+  // --- white key (white -> alpha) ---
+  function installWhiteKeyShader(m){
+    const u = ensureBackup(m);
+    if (u.whiteKeyInstalled) return;
+    u.whiteKeyInstalled = true;
+    m.onBeforeCompile = (shader)=>{
+      shader.uniforms.uWhiteKey = { value: (u.whiteKeyThreshold ?? 0.97) };
+      shader.fragmentShader = shader.fragmentShader.replace(
+        '#include <dithering_fragment>',
+        `#include <dithering_fragment>
+         float w = max(max(gl_FragColor.r, gl_FragColor.g), gl_FragColor.b);
+         if (w >= uWhiteKey) { gl_FragColor.a = 0.0; }
+        `
+      );
+    };
+    m.transparent = true;
+    m.depthWrite = false;
     m.needsUpdate = true;
   }
-
-  async function loadGLBFromArrayBuffer(buf) {
-    if (state.current && state.current !== box) {
-      scene.remove(state.current);
-    }
-    const url = URL.createObjectURL(new Blob([buf]));
-    const loader = new (await import(GLTF_URL)).GLTFLoader();
-    const gltf = await loader.loadAsync(url);
-    URL.revokeObjectURL(url);
-
-    const root = gltf.scene || gltf.scenes?.[0];
-    if (!root) throw new Error('GLB has no scene');
-    scene.add(root);
-    state.current = root;
-    state.materials = collectUniqueMaterials(root);
-    // initialize flags on all
-    for (const m of state.materials) applyMaterialFlags(m);
-
-    console.log('[viewer] GLB loaded; unique materials:', state.materials.length);
+  function setWhiteKeyEnabled(on){
+    applyToTargets((m)=>{
+      const u = ensureBackup(m);
+      u.whiteKeyEnabled = on;
+      if (on) installWhiteKeyShader(m);
+      else {
+        // restore shader
+        m.onBeforeCompile = u.backup?.onBeforeCompile || null;
+        m.needsUpdate = true;
+        // transparency might be controlled by opacity separately
+        if (!m.transparent || (m.transparent && m.opacity>=1.0)){
+          m.depthWrite = true;
+        }
+      }
+    });
   }
-
-  function setHSL(h, s, l) {
-    state.hsl = { h, s, l };
-    for (const m of state.materials) { m.needsUpdate = true; }
-  }
-
-  function setOpacity(v) {
-    state.opacity = v;
-    for (const m of state.materials) { applyMaterialFlags(m); }
-  }
-
-  function setUnlit(on) {
-    state.unlit = on;
-    for (const m of state.materials) {
-      // When unlit, disable env/lighting by switching to MeshBasicMaterial-like flags
-      m.lightMap = null;
-      m.emissive = m.emissive || new THREE.Color(0x000000);
+  function setWhiteKeyThreshold(t){
+    applyToTargets((m)=>{
+      const u = ensureBackup(m);
+      u.whiteKeyThreshold = t;
+      installWhiteKeyShader(m);
       m.needsUpdate = true;
-    }
+    });
   }
 
-  function setDoubleSide(on) {
-    state.doubleSide = on;
-    for (const m of state.materials) { applyMaterialFlags(m); }
+  function setMaterialTarget(index){
+    state.targetIndex = index; // -1 = all
   }
-
-  function setWhiteKeyEnabled(on){ state.whiteKey.enabled = on; for (const m of state.materials) applyMaterialFlags(m); }
-  function setWhiteKeyThreshold(th){ state.whiteKey.threshold = th; for (const m of state.materials) applyMaterialFlags(m); }
 
   return {
     THREE, scene, camera, renderer, controls,
     loadGLBFromArrayBuffer,
+    loadGLB: loadGLBFromArrayBuffer, // alias
+    setMaterialTarget,
     setHSL, setOpacity, setUnlit, setDoubleSide,
-    setWhiteKeyEnabled, setWhiteKeyThreshold
+    setWhiteKeyEnabled, setWhiteKeyThreshold,
   };
 }
