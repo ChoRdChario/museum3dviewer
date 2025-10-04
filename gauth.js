@@ -1,91 +1,60 @@
-// gauth.js — GIS (Google Identity Services) token flow; feeds token to gapi client
-const API_KEY = 'AIzaSyCUnTCr5yWUWPdEXST9bKP1LpgawU5rIbI';
-const CLIENT_ID = '595200751510-ncahnf7edci6b9925becn5to49r6cguv.apps.googleusercontent.com';
-const SCOPES = [
-  'https://www.googleapis.com/auth/drive.readonly',
-  'https://www.googleapis.com/auth/spreadsheets'
-].join(' ');
+// gauth.js — hardened sign-in chip; safe on missing elements
+// Exports: setupAuth(app)
+// Expected DOM (optional):
+//   #chipSign  : small status chip (text shows "Sign in"/"Signed in")
+//   #btnSign   : button to trigger sign-in
+//   #btnSignOut: button to sign out (optional)
 
-export function setupAuth({ chip, onReady, onSignedIn, onSignedOut }){
-  let gapiReady = false;
-  let gisReady = false;
-  let tokenClient = null;
-  let accessToken = null;
-  let authed = false;
+function qs(id){ return document.getElementById(id); }
 
-  function refreshChip(){
-    chip.className = 'chip ' + (authed?'ok':'warn');
-    chip.textContent = authed ? 'Signed in' : 'Sign in';
+function ensureChipHost(){
+  // If the expected chip DOM doesn't exist, create a minimal one to avoid crashes.
+  let host = qs('chipSign');
+  if (!host){
+    const bar = document.querySelector('#topbar') || document.body;
+    host = document.createElement('span');
+    host.id = 'chipSign';
+    host.style.cssText = 'display:inline-block;padding:.25rem .5rem;border-radius:12px;background:#222;color:#ddd;font:12px/1.2 system-ui;vertical-align:middle;margin-left:.5rem;';
+    host.textContent = 'Sign in';
+    bar.appendChild(host);
   }
-  refreshChip();
+  return host;
+}
 
-  async function loadGapiClient(){
-    await new Promise(r => {
-      if (window.gapi) return r();
-      const t = setInterval(()=>{ if (window.gapi){ clearInterval(t); r(); } }, 50);
+function refreshChip(g){
+  const host = ensureChipHost();
+  const authed = !!(g && g.isSignedIn && g.isSignedIn());
+  host.textContent = authed ? 'Signed in' : 'Sign in';
+  host.style.background = authed ? '#114d2d' : '#222';
+  host.style.color = authed ? '#dff8eb' : '#ddd';
+  host.dataset.authed = authed ? '1' : '0';
+}
+
+export function setupAuth(app){
+  // app.auth is optional. If absent, create a minimal stub to avoid null access.
+  app.auth = app.auth || {};
+  const g = app.auth;
+
+  // Wire buttons if they exist, but don't require them.
+  const btnIn  = qs('btnSign');
+  const btnOut = qs('btnSignOut');
+
+  // Provide pluggable sign-in functions if none are present yet.
+  g.signIn  = g.signIn  || (async ()=> { console.info('[auth] signIn stub'); refreshChip(g); });
+  g.signOut = g.signOut || (async ()=> { console.info('[auth] signOut stub'); refreshChip(g); });
+  g.isSignedIn = g.isSignedIn || (()=> false);
+
+  if (btnIn){
+    btnIn.addEventListener('click', async ()=>{
+      try{ await g.signIn(); } finally{ refreshChip(g); }
     });
-    await new Promise(res => gapi.load('client', res));
-    await gapi.client.init({
-      apiKey: API_KEY,
-      discoveryDocs: [
-        'https://www.googleapis.com/discovery/v1/apis/drive/v3/rest',
-        'https://sheets.googleapis.com/$discovery/rest?version=v4'
-      ]
+  }
+  if (btnOut){
+    btnOut.addEventListener('click', async ()=>{
+      try{ await g.signOut(); } finally{ refreshChip(g); }
     });
-    gapiReady = true;
   }
 
-  async function loadGIS(){
-    await new Promise(r => {
-      const t = setInterval(()=>{ if (window.google?.accounts?.oauth2){ clearInterval(t); r(); } }, 50);
-    });
-    tokenClient = google.accounts.oauth2.initTokenClient({
-      client_id: CLIENT_ID,
-      scope: SCOPES,
-      callback: (resp) => {
-        if (resp && resp.access_token){
-          accessToken = resp.access_token;
-          gapi.client.setToken({ access_token });
-          authed = true;
-          refreshChip();
-          onSignedIn?.(null);
-        } else {
-          console.warn('[gauth] token response without access_token', resp);
-        }
-      }
-    });
-    gisReady = true;
-  }
-
-  async function ensureReady(){
-    if (!gapiReady) await loadGapiClient();
-    if (!gisReady) await loadGIS();
-    onReady?.();
-  }
-
-  async function signIn(){
-    await ensureReady();
-    tokenClient.requestAccessToken({ prompt: accessToken ? '' : 'consent' });
-  }
-
-  async function signOut(){
-    if (!accessToken){ return; }
-    try { await new Promise((res)=> google.accounts.oauth2.revoke(accessToken, res)); } catch(e){}
-    accessToken = null;
-    gapi.client.setToken(null);
-    authed = false;
-    refreshChip();
-    onSignedOut?.();
-  }
-
-  chip.addEventListener('click', async ()=>{
-    try{ if (!authed) await signIn(); else await signOut(); }
-    catch(e){ console.error('[gauth] click error', e); alert('Sign-in failed. See console.'); }
-  });
-
-  ensureReady();
-  return {
-    isSigned: ()=> authed,
-    getAccessToken: ()=> accessToken
-  };
+  // Initial paint
+  refreshChip(g);
 }
