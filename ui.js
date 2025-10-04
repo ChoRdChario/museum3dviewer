@@ -1,4 +1,4 @@
-// ui.js — robust wiring & verbose logs (2025-10-05)
+// ui.js — robust wiring & verbose logs (2025-10-05 unified)
 console.log('[ui] module loaded');
 
 function getEl(idA, idB){ return document.getElementById(idA) || (idB?document.getElementById(idB):null); }
@@ -32,10 +32,21 @@ async function ensureViewerShim(){
 }
 async function loadGLBWithViewer(buf){
   const viewer = await ensureViewerReady();
-  if (!viewer) throw new Error('viewer not ready');
   await ensureViewerShim();
-  if (typeof viewer.loadGLB !== 'function') throw new Error('app.viewer.loadGLB not available');
-  return await viewer.loadGLB(buf);
+  if (viewer && typeof viewer.loadGLB === 'function'){
+    console.log('[ui] using app.viewer.loadGLB');
+    return await viewer.loadGLB(buf);
+  }
+  console.warn('[ui] app.viewer missing or loadGLB absent; trying fallback');
+  try{
+    const mod = await import('./viewer_min_loader.js');
+    const v = await mod.loadGLBArrayBufferIntoStage(buf);
+    console.log('[ui] fallback viewer rendered');
+    return v;
+  }catch(e){
+    console.error('[ui] fallback viewer failed', e);
+    throw e;
+  }
 }
 async function normalizeId(raw){
   let id = (raw||"").trim();
@@ -50,14 +61,14 @@ export async function loadGLBFromDriveIdPublic(raw){
   let buf;
   try{
     buf = await driveApiDownload(id);        // 1) Auth path
-    console.log('[ui] Drive API download ok', id);
+    console.log('[ui] Drive API download ok', id, 'size=', buf.byteLength);
   }catch(e){
     console.warn('[ui] Drive API download failed:', e);
     try{
       const res = await fetch(`https://drive.google.com/uc?export=download&id=${encodeURIComponent(id)}`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       buf = await res.arrayBuffer();
-      console.log('[ui] public uc download ok', id);
+      console.log('[ui] public uc download ok', id, 'size=', buf.byteLength);
     }catch(err){
       console.error('[ui] failed to download', err);
       const toast = getEl('toast');
@@ -69,24 +80,18 @@ export async function loadGLBFromDriveIdPublic(raw){
       return;
     }
   }
+  // expose buffer for debugging
+  window.__lmy_lastGLB = buf;
   try{
-    await loadGLBWithViewer(buf);
-    console.log('[ui] model handed to viewer');
-  }catch(e){
-    if (String(e.message||e).includes('viewer not ready')){
-      console.warn('[ui] viewer not ready, will queue');
-      try{ await import('./viewer_ready.js'); }catch(_){}
-      if (window.__viewerReadyPromise){
-        window.__viewerReadyPromise.then(()=> loadGLBWithViewer(buf).then(()=> console.log('[ui] queued model loaded')));
-        const toast = getEl('toast');
-        if (toast){
-          toast.textContent = 'Preparing viewer... will load model automatically.';
-          toast.style.display = 'block';
-          setTimeout(()=> toast.style.display='none', 2000);
-        }
-        return;
-      }
+    await loadGLBWithViewer(buf);            // 2) Show
+    console.log('[ui] model handed to viewer/fallback');
+    const toast = getEl('toast');
+    if (toast){
+      toast.textContent = 'Model loaded';
+      toast.style.display = 'block';
+      setTimeout(()=> toast.style.display='none', 1500);
     }
+  }catch(e){
     console.error('[ui] failed to show model', e);
     const toast = getEl('toast');
     if (toast){
@@ -135,41 +140,10 @@ export function setupUI(app){
   bindRange(getEl('slHue'), _ => window.app?.viewer?.setHSL?.(parseFloat(getEl('slHue')?.value||0), parseFloat(getEl('slSat')?.value||0), parseFloat(getEl('slLight')?.value||50), gi()));
   bindRange(getEl('slSat'), _ => window.app?.viewer?.setHSL?.(parseFloat(getEl('slHue')?.value||0), parseFloat(getEl('slSat')?.value||0), parseFloat(getEl('slLight')?.value||50), gi()));
   bindRange(getEl('slLight'), _ => window.app?.viewer?.setHSL?.(parseFloat(getEl('slHue')?.value||0), parseFloat(getEl('slSat')?.value||0), parseFloat(getEl('slLight')?.value||50), gi()));
-
-  const btnUnlit = getEl('btnUnlit');
-  if (btnUnlit){
-    btnUnlit.addEventListener('click', ()=>{
-      const isOn = btnUnlit.getAttribute('data-on') === '1';
-      const next = !isOn;
-      window.app?.viewer?.setUnlit?.(next, gi());
-      btnUnlit.setAttribute('data-on', next ? '1':'0');
-      btnUnlit.textContent = next ? 'Unlit: on' : 'Unlit: off';
-    });
-  }
-  const btnDS = getEl('btnDoubleSide');
-  if (btnDS){
-    btnDS.addEventListener('click', ()=>{
-      const isOn = btnDS.getAttribute('data-on') === '1';
-      const next = !isOn;
-      window.app?.viewer?.setDoubleSide?.(next, gi());
-      btnDS.setAttribute('data-on', next ? '1':'0');
-      btnDS.textContent = next ? 'DoubleSide: on' : 'DoubleSide: off';
-    });
-  }
-  const slWhite = getEl('slWhiteKey'); const chkWhite = getEl('chkWhiteKey');
-  if (slWhite){
-    const apply = ()=>{
-      const t = Math.max(0, Math.min(1, parseFloat(slWhite.value)/100));
-      window.app?.viewer?.setWhiteKey?.(t, gi());
-      if (chkWhite && !chkWhite.checked){ chkWhite.checked = true; window.app?.viewer?.setWhiteKeyEnabled?.(true, gi()); }
-    };
-    slWhite.addEventListener('input', apply); slWhite.addEventListener('change', apply);
-  }
-  if (chkWhite){ chkWhite.addEventListener('change', ()=> window.app?.viewer?.setWhiteKeyEnabled?.(!!chkWhite.checked, gi())); }
   console.log('[ui] setupUI done');
 }
 
-// Auto-wire even if app is not ready yet
+// Auto-wire with late DOM support
 (function autoboot(){
   const trySetup = ()=>{
     try{
@@ -183,8 +157,6 @@ export function setupUI(app){
   }else{
     trySetup();
   }
-
-  // As a safety, if elements appear later (SPA), watch mutations
   const obs = new MutationObserver(()=>{
     const btn = getEl('btnLoad','btnLoadGLB');
     const inp = getEl('fileIdInput','inpDriveId');
@@ -199,10 +171,3 @@ export function setupUI(app){
   });
   try{ obs.observe(document.documentElement, { childList:true, subtree:true }); }catch(_){}
 })();
-
-// Provide a global helper for inline onclick fallback
-window.loadGLBFromInput = function(){
-  const inp = getEl('fileIdInput','inpDriveId');
-  console.log('[ui] loadGLBFromInput called');
-  return loadGLBFromDriveIdPublic(inp?.value||"");
-};
