@@ -1,33 +1,28 @@
-// viewer_ready.js — provide a promise that resolves when window.app.viewer is ready
+// viewer_ready.js — resolve when a viewer is ready (real or fallback)
 (function(){
-  if (window.__viewerReadyPromise) return;
-  let resolveFn;
-  const p = new Promise(res => { resolveFn = res; });
-  function check(){
-    if (window.app && window.app.viewer){
-      resolveFn(window.app.viewer);
-      return true;
-    }
-    return false;
+  if (window.__viewerReadyPromise) return; // reuse if present
+  let resolveFn; let settled = false;
+  window.__viewerReadyPromise = new Promise((res)=>{ resolveFn = (v)=>{ if(!settled){ settled = true; res(v); } }; });
+
+  function resolveNow(value){
+    resolveFn(value || (window.app && window.app.viewer) || window.__lmy_fallback_viewer || null);
   }
-  function tryResolve(){
-    if (check()){
-      window.removeEventListener('lmy:viewer-ready', tryResolve);
-      window.removeEventListener('lmy:model-loaded', tryResolve);
-      document.removeEventListener('DOMContentLoaded', tryResolve);
-    }
+
+  // 1) If app.viewer already exists
+  if (window.app && window.app.viewer){
+    resolveNow(window.app.viewer);
   }
-  // attach & check
-  window.__viewerReadyPromise = p;
-  // fast path
-  if (!check()){
-    window.addEventListener('lmy:viewer-ready', tryResolve);
-    window.addEventListener('lmy:model-loaded', tryResolve);
-    document.addEventListener('DOMContentLoaded', tryResolve);
-    // also poll briefly as safety (in case no custom events fire)
-    let c = 0;
-    const h = setInterval(()=>{
-      if (check() || (++c>100)) clearInterval(h); // ~10s max
-    }, 100);
-  }
+
+  // 2) Events from real app or fallback
+  window.addEventListener('lmy:viewer-ready', (e)=> resolveNow(e.detail?.viewer || window.app?.viewer || null), { once:true });
+  window.addEventListener('lmy:fallback-viewer-loaded', (e)=> resolveNow(e.detail?.viewer || window.__lmy_fallback_viewer || null), { once:true });
+
+  // 3) MutationObserver: some apps attach viewer later to window.app
+  const mo = new MutationObserver(()=>{
+    if (window.app && window.app.viewer){ resolveNow(window.app.viewer); mo.disconnect(); }
+  });
+  try{ mo.observe(document.documentElement, { childList:true, subtree:true }); }catch(_){}
+
+  // 4) Hard timeout to avoid hanging forever
+  setTimeout(()=>{ resolveNow(null); }, 4000);
 })();

@@ -78,6 +78,7 @@ export async function loadGLBArrayBufferIntoStage(arrayBuffer){
   animate();
 
   console.log('[fallback] rendered');
+  window.__lmy_fallback_viewer = { renderer, scene, camera, controls };
   window.dispatchEvent(new CustomEvent('lmy:fallback-viewer-loaded', { detail: { scene, camera } }));
   return { renderer, scene, camera, controls };
 }

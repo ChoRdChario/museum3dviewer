@@ -1,4 +1,4 @@
-// ui.js — robust wiring & verbose logs (2025-10-05 unified)
+// ui.js — robust wiring with fallback (2025-10-05)
 console.log('[ui] module loaded');
 
 function getEl(idA, idB){ return document.getElementById(idA) || (idB?document.getElementById(idB):null); }
@@ -20,34 +20,6 @@ async function driveApiDownload(id){
   if (!mod?.fetchDriveFileAsArrayBuffer) throw new Error('Drive helper missing');
   return await mod.fetchDriveFileAsArrayBuffer(id);
 }
-async function ensureViewerReady(){
-  try{ await import('./viewer_ready.js'); }catch(_){}
-  if (window.app?.viewer) return window.app.viewer;
-  if (window.__viewerReadyPromise) return await window.__viewerReadyPromise;
-  await new Promise(r=> setTimeout(r, 0));
-  return window.app?.viewer;
-}
-async function ensureViewerShim(){
-  try{ await import('./viewer_api_shim.js'); }catch(_){}
-}
-async function loadGLBWithViewer(buf){
-  const viewer = await ensureViewerReady();
-  await ensureViewerShim();
-  if (viewer && typeof viewer.loadGLB === 'function'){
-    console.log('[ui] using app.viewer.loadGLB');
-    return await viewer.loadGLB(buf);
-  }
-  console.warn('[ui] app.viewer missing or loadGLB absent; trying fallback');
-  try{
-    const mod = await import('./viewer_min_loader.js');
-    const v = await mod.loadGLBArrayBufferIntoStage(buf);
-    console.log('[ui] fallback viewer rendered');
-    return v;
-  }catch(e){
-    console.error('[ui] fallback viewer failed', e);
-    throw e;
-  }
-}
 async function normalizeId(raw){
   let id = (raw||"").trim();
   if (!id) throw new Error("empty file id/url");
@@ -55,12 +27,13 @@ async function normalizeId(raw){
   if (m) id = m[1];
   return id;
 }
+
 export async function loadGLBFromDriveIdPublic(raw){
   console.log('[ui] loadGLBFromDriveIdPublic called');
   const id = await normalizeId(raw);
   let buf;
   try{
-    buf = await driveApiDownload(id);        // 1) Auth path
+    buf = await driveApiDownload(id);
     console.log('[ui] Drive API download ok', id, 'size=', buf.byteLength);
   }catch(e){
     console.warn('[ui] Drive API download failed:', e);
@@ -80,11 +53,27 @@ export async function loadGLBFromDriveIdPublic(raw){
       return;
     }
   }
-  // expose buffer for debugging
   window.__lmy_lastGLB = buf;
+
+  // Prefer real viewer if it already exists; otherwise shim will handle it
   try{
-    await loadGLBWithViewer(buf);            // 2) Show
-    console.log('[ui] model handed to viewer/fallback');
+    // Lazy import fallback so it's ready for shim too
+    await import('./viewer_min_loader.js');
+  }catch(_){}
+  try{
+    // Ensure readiness promise exists so app_boot can show status
+    await import('./viewer_ready.js');
+  }catch(_){}
+
+  try{
+    // Call whatever app.viewer is (real or shim). viewer_api_shim guarantees presence.
+    const viewer = (window.app && window.app.viewer);
+    if (!viewer || typeof viewer.loadGLB !== 'function'){
+      console.warn('[ui] viewer shim not present yet; importing explicitly');
+      await import('./viewer_api_shim.js');
+    }
+    await (window.app.viewer.loadGLB)(buf);
+    console.log('[ui] model handed to viewer/shim');
     const toast = getEl('toast');
     if (toast){
       toast.textContent = 'Model loaded';
@@ -133,13 +122,6 @@ export function setupUI(app){
       window.dispatchEvent(new CustomEvent('lmy:load-demo'));
     });
   }
-
-  // Material wires (guarded)
-  const sel = getEl('selMaterial'); const gi = ()=> parseMatIndex(sel);
-  bindRange(getEl('slOpacity'), v => window.app?.viewer?.setOpacity?.(Math.max(0,Math.min(1,v)), gi()));
-  bindRange(getEl('slHue'), _ => window.app?.viewer?.setHSL?.(parseFloat(getEl('slHue')?.value||0), parseFloat(getEl('slSat')?.value||0), parseFloat(getEl('slLight')?.value||50), gi()));
-  bindRange(getEl('slSat'), _ => window.app?.viewer?.setHSL?.(parseFloat(getEl('slHue')?.value||0), parseFloat(getEl('slSat')?.value||0), parseFloat(getEl('slLight')?.value||50), gi()));
-  bindRange(getEl('slLight'), _ => window.app?.viewer?.setHSL?.(parseFloat(getEl('slHue')?.value||0), parseFloat(getEl('slSat')?.value||0), parseFloat(getEl('slLight')?.value||50), gi()));
   console.log('[ui] setupUI done');
 }
 
