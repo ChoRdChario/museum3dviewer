@@ -1,4 +1,4 @@
-import { fetchDriveFileAsArrayBuffer, normalizeDriveIdFromInput } from './utils_drive_stub.js?v=20251004ui2';
+import { fetchDriveFileAsArrayBuffer, normalizeDriveIdFromInput } from './utils_drive_api.js?v=20251004api';
 
 export function setupUI(app){
   const el = {
@@ -53,7 +53,7 @@ export function setupUI(app){
       el.spinner.remove();
     }catch(err){
       console.error('[ui] failed to load', err);
-      el.spinner.textContent = 'failed to load GLB. See console.';
+      el.spinner.textContent = 'failed to load GLB. ' + (err && err.message ? err.message : 'See console.');
     }
   });
 
