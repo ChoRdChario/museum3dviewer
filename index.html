@@ -2,17 +2,39 @@
 <html lang="ja">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>LociMyu Viewer (pre-push, importmap)</title>
-  <style>
-    html, body { height: 100%; margin: 0; }
-    #stage { position: relative; width: 100%; height: 100%; background: #111; }
-    #spinner { position:absolute; inset:0; display:grid; place-items:center; color:#ddd; font:14px/1.4 system-ui; }
-    pre.err { position:absolute; top:12px; left:12px; color:#f66; }
-  </style>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>LociMyu v6.6 UI Integrated (pre-push)</title>
   <link rel="icon" href="./favicon.ico">
+  <style>
+    html,body{height:100%;margin:0;background:#0f0f13;color:#ddd;font:14px/1.4 system-ui,Segoe UI,Roboto,Helvetica,Arial}
+    #app{display:grid;grid-template-columns:1fr 360px;grid-template-rows:100vh;gap:0}
+    #stage{position:relative;background:#101014}
+    #spinner{position:absolute;inset:0;display:grid;place-items:center;color:#ddd}
+    aside#panel{background:#14141a;border-left:1px solid #222;display:flex;flex-direction:column;min-width:280px}
+    header#topbar{display:flex;align-items:center;gap:.5rem;padding:.5rem .75rem;border-bottom:1px solid #222}
+    .chip{padding:.25rem .5rem;border-radius:999px;border:1px solid #444;cursor:pointer}
+    .chip.ok{border-color:#2dd4bf;color:#2dd4bf}
+    .chip.warn{border-color:#f59e0b;color:#f59e0b}
+    .chip.err{border-color:#ef4444;color:#ef4444}
+    section{padding:.75rem .75rem;overflow:auto}
+    section h3{margin:.25rem 0 .5rem;font-size:13px;color:#aaa;text-transform:uppercase;letter-spacing:.08em}
+    .row{display:flex;align-items:center;gap:.5rem;margin:.25rem 0}
+    .col{display:flex;flex-direction:column;gap:.25rem}
+    input[type="range"]{width:100%}
+    .btn{padding:.4rem .6rem;border:1px solid #444;border-radius:.5rem;background:#1a1a22;color:#ddd;cursor:pointer}
+    .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:.5rem}
+    .card{background:#1a1a22;border:1px solid #2a2a33;border-radius:.5rem;overflow:hidden}
+    .card img{width:100%;display:block;aspect-ratio:1/1;object-fit:cover;background:#0b0b0f}
+    .muted{color:#888}
+    /* mobile // bottom sheet */
+    @media (max-width:960px){#app{grid-template-columns:1fr}aside#panel{position:fixed;inset:auto 0 0 0;height:48vh;transform:translateY(calc(48vh - 42px));transition:.25s;box-shadow:0 -8px 24px rgba(0,0,0,.35)}
+      aside#panel.expanded{transform:translateY(0)}
+      header#topbar{justify-content:space-between}}
+    #overlay{position:absolute;left:12px;bottom:12px;max-width:min(420px,70vw);background:rgba(12,12,16,.84);backdrop-filter:blur(6px);border:1px solid #333;border-radius:.75rem;padding:.75rem;display:none}
+    #overlay img{max-width:100%;border-radius:.5rem;border:1px solid #333;margin-top:.5rem}
+  </style>
 
-  <!-- Import map to resolve bare specifier 'three' used inside JSM files -->
+  <!-- Import map for bare 'three' -->
   <script type="importmap">
   {
     "imports": {
@@ -22,7 +44,53 @@
   </script>
 </head>
 <body>
-  <div id="stage"><div id="spinner">booting…</div></div>
-  <script type="module" src="./probe_viewer_visibility.js?v=20251004b"></script>
+  <div id="app">
+    <div id="stage">
+      <div id="spinner">booting…</div>
+      <div id="overlay"></div>
+    </div>
+    <aside id="panel">
+      <header id="topbar">
+        <strong>LociMyu v6.6</strong>
+        <div style="flex:1"></div>
+        <span id="authChip" class="chip warn">Sign in</span>
+        <span id="modeChip" class="chip">persp</span>
+        <button id="expandBtn" class="btn" title="Toggle panel">▴</button>
+      </header>
+      <section id="secLoad">
+        <h3>Load</h3>
+        <div class="row">
+          <input id="fileIdInput" placeholder="Drive File ID or URL" style="flex:1;padding:.4rem;background:#0f0f13;border:1px solid #333;border-radius:.4rem;color:#ddd">
+          <button id="btnLoad" class="btn">GLB</button>
+        </div>
+        <div class="col muted" id="loadHint">?id=&lt;fileId&gt; でも指定できます</div>
+      </section>
+      <section id="secMaterial">
+        <h3>Material</h3>
+        <div class="row"><label style="width:72px">Hue</label><input id="slHue" type="range" min="0" max="360" value="210"></div>
+        <div class="row"><label style="width:72px">Sat</label><input id="slSat" type="range" min="0" max="100" value="40"></div>
+        <div class="row"><label style="width:72px">Light</label><input id="slLight" type="range" min="0" max="100" value="45"></div>
+        <div class="row"><label style="width:72px">Opacity</label><input id="slOpacity" type="range" min="0" max="100" value="100"></div>
+        <div class="row"><button id="btnUnlit" class="btn">Unlit: off</button><button id="btnDouble" class="btn">DoubleSide: off</button></div>
+        <div class="row"><label style="width:72px">White→α</label><input id="slWhiteKey" type="range" min="70" max="100" value="95"></div>
+      </section>
+      <section id="secPins">
+        <h3>Pins & Caption</h3>
+        <div class="row">
+          <button id="btnAddPin" class="btn" title="Shift+Click in viewportでも追加可">+ Pin</button>
+          <button id="btnClearPins" class="btn">Clear</button>
+        </div>
+        <div class="col">
+          <input id="capTitle" placeholder="Title" style="padding:.4rem;background:#0f0f13;border:1px solid #333;border-radius:.4rem;color:#ddd">
+          <textarea id="capBody" placeholder="Body" rows="3" style="padding:.4rem;background:#0f0f13;border:1px solid #333;border-radius:.4rem;color:#ddd"></textarea>
+          <div class="grid" id="imgGrid"></div>
+        </div>
+      </section>
+    </aside>
+  </div>
+
+  <!-- Google API platform (auth); safe to load even if not used -->
+  <script src="https://apis.google.com/js/api.js" async defer></script>
+  <script type="module" src="./app_boot.js?v=20251004ui"></script>
 </body>
 </html>
