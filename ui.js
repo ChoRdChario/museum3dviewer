@@ -1,20 +1,8 @@
-// ui.js — robust wiring with fallback (2025-10-05)
+// ui.js — delegated click version (2025-10-05)
 console.log('[ui] module loaded');
 
 function getEl(idA, idB){ return document.getElementById(idA) || (idB?document.getElementById(idB):null); }
-function parseMatIndex(sel){
-  if (!sel) return null;
-  const v = sel.value || "";
-  if (v === "(All)" || v === "") return null;
-  const num = parseInt(String(v).split(":")[0], 10);
-  return Number.isFinite(num) ? num : null;
-}
-function bindRange(el, handler){
-  if (!el) return;
-  const fn = ()=>{ try{ handler(parseFloat(el.value)); }catch(e){ console.warn('[ui] bindRange handler error', e); } };
-  el.addEventListener('input', fn);
-  el.addEventListener('change', fn);
-}
+
 async function driveApiDownload(id){
   const mod = await import('./utils_drive_api.js');
   if (!mod?.fetchDriveFileAsArrayBuffer) throw new Error('Drive helper missing');
@@ -55,24 +43,9 @@ export async function loadGLBFromDriveIdPublic(raw){
   }
   window.__lmy_lastGLB = buf;
 
-  // Prefer real viewer if it already exists; otherwise shim will handle it
+  try{ await import('./viewer_api_shim.js'); }catch(_){}
   try{
-    // Lazy import fallback so it's ready for shim too
-    await import('./viewer_min_loader.js');
-  }catch(_){}
-  try{
-    // Ensure readiness promise exists so app_boot can show status
-    await import('./viewer_ready.js');
-  }catch(_){}
-
-  try{
-    // Call whatever app.viewer is (real or shim). viewer_api_shim guarantees presence.
-    const viewer = (window.app && window.app.viewer);
-    if (!viewer || typeof viewer.loadGLB !== 'function'){
-      console.warn('[ui] viewer shim not present yet; importing explicitly');
-      await import('./viewer_api_shim.js');
-    }
-    await (window.app.viewer.loadGLB)(buf);
+    await (window.app?.viewer?.loadGLB)(buf);
     console.log('[ui] model handed to viewer/shim');
     const toast = getEl('toast');
     if (toast){
@@ -82,30 +55,28 @@ export async function loadGLBFromDriveIdPublic(raw){
     }
   }catch(e){
     console.error('[ui] failed to show model', e);
-    const toast = getEl('toast');
-    if (toast){
-      toast.textContent = 'Failed to show model. See console for details.';
-      toast.style.display = 'block';
-      setTimeout(()=> toast.style.display='none', 4000);
-    }
   }
 }
 
-// --- UI wiring ---
+function hookDirect(inp, btn){
+  if (!btn) return;
+  if (btn.__lmy_direct) return;
+  btn.__lmy_direct = true;
+  btn.addEventListener('click', ()=>{
+    console.log('[ui] btnLoad clicked');
+    loadGLBFromDriveIdPublic(inp?.value||"");
+  });
+}
+
 export function setupUI(app){
   console.log('[ui] setupUI start');
   const inp = getEl('fileIdInput','inpDriveId');
   const btn = getEl('btnLoad','btnLoadGLB');
   const demo= getEl('btnDemo','btnLoadDemo');
 
-  if (btn){
-    btn.addEventListener('click', ()=>{
-      console.log('[ui] btnLoad clicked');
-      loadGLBFromDriveIdPublic(inp?.value||"");
-    });
-  } else {
-    console.warn('[ui] btnLoad/btnLoadGLB not found');
-  }
+  // direct wire (first attempt)
+  hookDirect(inp, btn);
+
   if (inp){
     inp.addEventListener('keydown', (e)=>{
       if (e.key==='Enter'){
@@ -125,31 +96,38 @@ export function setupUI(app){
   console.log('[ui] setupUI done');
 }
 
-// Auto-wire with late DOM support
-(function autoboot(){
-  const trySetup = ()=>{
-    try{
-      setupUI(window.app || {});
-    }catch(e){
-      console.warn('[ui] setupUI error (will retry on DOMContentLoaded)', e);
-    }
-  };
-  if (document.readyState === 'loading'){
-    document.addEventListener('DOMContentLoaded', trySetup, { once: true });
-  }else{
-    trySetup();
-  }
-  const obs = new MutationObserver(()=>{
-    const btn = getEl('btnLoad','btnLoadGLB');
+// 2) MutationObserver (late wire)
+(function(){
+  const tryWire = ()=>{
     const inp = getEl('fileIdInput','inpDriveId');
-    if (btn && !btn.__lmy_wired){
-      btn.__lmy_wired = true;
-      btn.addEventListener('click', ()=>{
-        console.log('[ui] btnLoad clicked (late)');
-        loadGLBFromDriveIdPublic(inp?.value||"");
-      });
+    const btn = getEl('btnLoad','btnLoadGLB');
+    hookDirect(inp, btn);
+    if (btn && !btn.__lmy_logged){
+      btn.__lmy_logged = true;
       console.log('[ui] late-wired btnLoad');
     }
-  });
+  };
+  const obs = new MutationObserver(tryWire);
   try{ obs.observe(document.documentElement, { childList:true, subtree:true }); }catch(_){}
+  tryWire();
 })();
+
+// 3) Global delegated click (capture phase) — survives shadow DOM / re-render
+(function(){
+  const handler = (ev)=>{
+    const target = ev.target;
+    const hit = target.closest ? target.closest('#btnLoad, #btnLoadGLB, [data-lmy="load-glb"]') : null;
+    if (!hit) return;
+    const inp = getEl('fileIdInput','inpDriveId');
+    console.log('[ui] delegated click detected');
+    loadGLBFromDriveIdPublic(inp?.value||"");
+  };
+  window.addEventListener('click', handler, true);
+})();
+
+// 4) Console helper
+window.LMY = window.LMY || {};
+window.LMY.loadNow = ()=>{
+  const inp = getEl('fileIdInput','inpDriveId');
+  return loadGLBFromDriveIdPublic(inp?.value||"");
+};
