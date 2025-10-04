@@ -37,29 +37,47 @@ export async function ensureViewer({ mount, spinner }) {
   new ResizeObserver(onResize).observe(mount);
 
   (function tick(){
-    state.current.rotation.y += 0.01;
+    // Keep rotating current root (box or loaded model)
+    if (state.current) state.current.rotation.y += 0.01;
     controls.update();
     renderer.render(scene, camera);
     requestAnimationFrame(tick);
   })();
 
-  async function loadGLBFromArrayBuffer(buf) {
-    if (state.current && state.current !== box) {
-      scene.remove(state.current);
-    }
-    const url = URL.createObjectURL(new Blob([buf]));
-    const loader = new GLTFLoader();
-    const gltf = await loader.loadAsync(url);
-    URL.revokeObjectURL(url);
+  function frameToObject(obj){
+    const box3 = new THREE.Box3().setFromObject(obj);
+    const size = new THREE.Vector3(); box3.getSize(size);
+    const center = new THREE.Vector3(); box3.getCenter(center);
+    const maxDim = Math.max(size.x, size.y, size.z) || 1;
+    const dist = maxDim * 1.6;
+    camera.position.copy(center).add(new THREE.Vector3(dist, dist*0.8, dist));
+    controls.target.copy(center);
+    camera.near = Math.max(0.01, maxDim/1000);
+    camera.far = Math.max(1000, dist*10);
+    camera.updateProjectionMatrix();
+    controls.update();
+  }
 
-    const root = gltf.scene || gltf.scenes?.[0];
-    if (!root) throw new Error('GLB has no scene');
-    scene.add(root);
-    state.current = root;
-    state.materials = [];
-    root.traverse((o)=>{
-      if (o.isMesh && o.material) state.materials.push(o.material);
-    });
+  async function loadGLBFromArrayBuffer(buf) {
+    const url = URL.createObjectURL(new Blob([buf]));
+    try{
+      const loader = new GLTFLoader();
+      const gltf = await loader.loadAsync(url);
+      const root = gltf.scene || gltf.scenes?.[0];
+      if (!root) throw new Error('GLB has no scene');
+      // Prepare materials list
+      const mats = [];
+      root.traverse((o)=>{ if (o.isMesh && o.material) mats.push(o.material); });
+      // Swap into scene
+      if (state.current) scene.remove(state.current);
+      scene.add(root);
+      state.current = root;
+      state.materials = mats;
+      frameToObject(root);
+      console.log('[viewer] GLB loaded; meshes:', mats.length);
+    } finally {
+      URL.revokeObjectURL(url);
+    }
   }
 
   function setHSL(h, s, l) {
