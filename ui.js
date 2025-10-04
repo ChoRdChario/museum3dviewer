@@ -1,4 +1,6 @@
-// ui.js — queue GLB load until viewer is ready (no CORS fallback on "viewer not ready")
+// ui.js — robust wiring & verbose logs (2025-10-05)
+console.log('[ui] module loaded');
+
 function getEl(idA, idB){ return document.getElementById(idA) || (idB?document.getElementById(idB):null); }
 function parseMatIndex(sel){
   if (!sel) return null;
@@ -9,7 +11,7 @@ function parseMatIndex(sel){
 }
 function bindRange(el, handler){
   if (!el) return;
-  const fn = ()=>handler(parseFloat(el.value));
+  const fn = ()=>{ try{ handler(parseFloat(el.value)); }catch(e){ console.warn('[ui] bindRange handler error', e); } };
   el.addEventListener('input', fn);
   el.addEventListener('change', fn);
 }
@@ -22,12 +24,11 @@ async function ensureViewerReady(){
   try{ await import('./viewer_ready.js'); }catch(_){}
   if (window.app?.viewer) return window.app.viewer;
   if (window.__viewerReadyPromise) return await window.__viewerReadyPromise;
-  // last resort: wait a tick
   await new Promise(r=> setTimeout(r, 0));
   return window.app?.viewer;
 }
 async function ensureViewerShim(){
-  try{ await import('./viewer_api_shim.js'); }catch(_){ /* ignore */ }
+  try{ await import('./viewer_api_shim.js'); }catch(_){}
 }
 async function loadGLBWithViewer(buf){
   const viewer = await ensureViewerReady();
@@ -36,22 +37,27 @@ async function loadGLBWithViewer(buf){
   if (typeof viewer.loadGLB !== 'function') throw new Error('app.viewer.loadGLB not available');
   return await viewer.loadGLB(buf);
 }
-async function loadGLBFromDriveId(app, raw){
+async function normalizeId(raw){
   let id = (raw||"").trim();
   if (!id) throw new Error("empty file id/url");
   const m = id.match(/\/d\/([a-zA-Z0-9_-]{10,})/);
   if (m) id = m[1];
-  // Download can start even before viewer is ready
+  return id;
+}
+export async function loadGLBFromDriveIdPublic(raw){
+  console.log('[ui] loadGLBFromDriveIdPublic called');
+  const id = await normalizeId(raw);
   let buf;
   try{
     buf = await driveApiDownload(id);        // 1) Auth path
+    console.log('[ui] Drive API download ok', id);
   }catch(e){
     console.warn('[ui] Drive API download failed:', e);
-    // public fallback remains as last resort, but only if viewer exists later
     try{
       const res = await fetch(`https://drive.google.com/uc?export=download&id=${encodeURIComponent(id)}`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       buf = await res.arrayBuffer();
+      console.log('[ui] public uc download ok', id);
     }catch(err){
       console.error('[ui] failed to download', err);
       const toast = getEl('toast');
@@ -64,24 +70,24 @@ async function loadGLBFromDriveId(app, raw){
     }
   }
   try{
-    await loadGLBWithViewer(buf);            // 2) Load when viewer is ready
+    await loadGLBWithViewer(buf);
+    console.log('[ui] model handed to viewer');
   }catch(e){
     if (String(e.message||e).includes('viewer not ready')){
-      console.warn('[ui] viewer not ready, queuing until ready...');
-      // queue once
+      console.warn('[ui] viewer not ready, will queue');
       try{ await import('./viewer_ready.js'); }catch(_){}
       if (window.__viewerReadyPromise){
-        window.__viewerReadyPromise.then(()=> loadGLBWithViewer(buf));
+        window.__viewerReadyPromise.then(()=> loadGLBWithViewer(buf).then(()=> console.log('[ui] queued model loaded')));
         const toast = getEl('toast');
         if (toast){
           toast.textContent = 'Preparing viewer... will load model automatically.';
           toast.style.display = 'block';
           setTimeout(()=> toast.style.display='none', 2000);
         }
-        return; // DO NOT fallback to public here
+        return;
       }
     }
-    console.error('[ui] failed to load into viewer', e);
+    console.error('[ui] failed to show model', e);
     const toast = getEl('toast');
     if (toast){
       toast.textContent = 'Failed to show model. See console for details.';
@@ -90,13 +96,38 @@ async function loadGLBFromDriveId(app, raw){
     }
   }
 }
+
+// --- UI wiring ---
 export function setupUI(app){
+  console.log('[ui] setupUI start');
   const inp = getEl('fileIdInput','inpDriveId');
   const btn = getEl('btnLoad','btnLoadGLB');
   const demo= getEl('btnDemo','btnLoadDemo');
-  if (btn) btn.addEventListener('click', ()=> loadGLBFromDriveId(app, inp?.value||""));
-  if (inp) inp.addEventListener('keydown', (e)=> (e.key==='Enter') && loadGLBFromDriveId(app, inp.value||""));
-  if (demo) demo.addEventListener('click', ()=> window.dispatchEvent(new CustomEvent('lmy:load-demo')));
+
+  if (btn){
+    btn.addEventListener('click', ()=>{
+      console.log('[ui] btnLoad clicked');
+      loadGLBFromDriveIdPublic(inp?.value||"");
+    });
+  } else {
+    console.warn('[ui] btnLoad/btnLoadGLB not found');
+  }
+  if (inp){
+    inp.addEventListener('keydown', (e)=>{
+      if (e.key==='Enter'){
+        console.log('[ui] Enter pressed');
+        loadGLBFromDriveIdPublic(inp.value||"");
+      }
+    });
+  } else {
+    console.warn('[ui] fileIdInput/inpDriveId not found');
+  }
+  if (demo){
+    demo.addEventListener('click', ()=>{
+      console.log('[ui] demo clicked');
+      window.dispatchEvent(new CustomEvent('lmy:load-demo'));
+    });
+  }
 
   // Material wires (guarded)
   const sel = getEl('selMaterial'); const gi = ()=> parseMatIndex(sel);
@@ -104,6 +135,7 @@ export function setupUI(app){
   bindRange(getEl('slHue'), _ => window.app?.viewer?.setHSL?.(parseFloat(getEl('slHue')?.value||0), parseFloat(getEl('slSat')?.value||0), parseFloat(getEl('slLight')?.value||50), gi()));
   bindRange(getEl('slSat'), _ => window.app?.viewer?.setHSL?.(parseFloat(getEl('slHue')?.value||0), parseFloat(getEl('slSat')?.value||0), parseFloat(getEl('slLight')?.value||50), gi()));
   bindRange(getEl('slLight'), _ => window.app?.viewer?.setHSL?.(parseFloat(getEl('slHue')?.value||0), parseFloat(getEl('slSat')?.value||0), parseFloat(getEl('slLight')?.value||50), gi()));
+
   const btnUnlit = getEl('btnUnlit');
   if (btnUnlit){
     btnUnlit.addEventListener('click', ()=>{
@@ -134,10 +166,43 @@ export function setupUI(app){
     slWhite.addEventListener('input', apply); slWhite.addEventListener('change', apply);
   }
   if (chkWhite){ chkWhite.addEventListener('change', ()=> window.app?.viewer?.setWhiteKeyEnabled?.(!!chkWhite.checked, gi())); }
+  console.log('[ui] setupUI done');
 }
-(function bootstrap(){
-  const trySetup = ()=> (window.app && window.app.viewer) && setupUI(window.app);
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', trySetup); else trySetup();
-  window.addEventListener('lmy:model-loaded', trySetup);
-  window.addEventListener('lmy:viewer-ready', trySetup);
+
+// Auto-wire even if app is not ready yet
+(function autoboot(){
+  const trySetup = ()=>{
+    try{
+      setupUI(window.app || {});
+    }catch(e){
+      console.warn('[ui] setupUI error (will retry on DOMContentLoaded)', e);
+    }
+  };
+  if (document.readyState === 'loading'){
+    document.addEventListener('DOMContentLoaded', trySetup, { once: true });
+  }else{
+    trySetup();
+  }
+
+  // As a safety, if elements appear later (SPA), watch mutations
+  const obs = new MutationObserver(()=>{
+    const btn = getEl('btnLoad','btnLoadGLB');
+    const inp = getEl('fileIdInput','inpDriveId');
+    if (btn && !btn.__lmy_wired){
+      btn.__lmy_wired = true;
+      btn.addEventListener('click', ()=>{
+        console.log('[ui] btnLoad clicked (late)');
+        loadGLBFromDriveIdPublic(inp?.value||"");
+      });
+      console.log('[ui] late-wired btnLoad');
+    }
+  });
+  try{ obs.observe(document.documentElement, { childList:true, subtree:true }); }catch(_){}
 })();
+
+// Provide a global helper for inline onclick fallback
+window.loadGLBFromInput = function(){
+  const inp = getEl('fileIdInput','inpDriveId');
+  console.log('[ui] loadGLBFromInput called');
+  return loadGLBFromDriveIdPublic(inp?.value||"");
+};
