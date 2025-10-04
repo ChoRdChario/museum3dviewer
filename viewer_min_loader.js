@@ -1,4 +1,4 @@
-// viewer_min_loader.js — minimal Three.js fallback into #stage
+// viewer_min_loader.js — minimal Three.js fallback into #stage (CDN-aware lib wrappers)
 import * as THREE from './lib/three.module.js';
 import { GLTFLoader } from './lib/GLTFLoader.js';
 import { OrbitControls } from './lib/OrbitControls.js';
@@ -55,7 +55,7 @@ export async function loadGLBArrayBufferIntoStage(arrayBuffer){
     const center = box.getCenter(new THREE.Vector3());
     controls.target.copy(center);
     camera.position.copy(center).add(new THREE.Vector3(size*0.4, size*0.3, size*0.5));
-    camera.near = size/1000; camera.far = size*10; camera.updateProjectionMatrix();
+    camera.near = Math.max(0.001, size/1000); camera.far = size*10; camera.updateProjectionMatrix();
   }finally{
     URL.revokeObjectURL(url);
   }
