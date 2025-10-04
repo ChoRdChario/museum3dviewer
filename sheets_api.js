@@ -1,4 +1,4 @@
-// sheets_api.js — extended to support sheet selection
+// sheets_api.js — sheet selection & helpers
 function getAccessToken(){
   const tok = (window.gapi && gapi.client.getToken && gapi.client.getToken()) || null;
   const access = tok && tok.access_token;

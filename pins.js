@@ -1,5 +1,14 @@
-import { ensureSpreadsheetForFile, ensurePinsHeader, listSheetTitles, loadPins, savePins } from './sheets_api.js?v=20251004s2';
+import { ensureSpreadsheetForFile, ensurePinsHeader, listSheetTitles, loadPins, savePins } from './sheets_api.js?v=20251004s3';
 import { downloadImageAsBlob } from './utils_drive_images.js?v=20251004img2';
+
+const PALETTE = [
+  { key:'amber', hex:'#ffcc55' },
+  { key:'sky',   hex:'#55ccff' },
+  { key:'lime',  hex:'#a3e635' },
+  { key:'rose',  hex:'#f43f5e' },
+  { key:'violet',hex:'#8b5cf6' },
+  { key:'slate', hex:'#94a3b8' }
+];
 
 export function setupPins(app){
   const overlay = document.getElementById('overlay');
@@ -11,19 +20,33 @@ export function setupPins(app){
   const leaderLine = document.getElementById('leaderLine');
   const sheetSelect = document.getElementById('sheetSelect');
   const btnNewSheet = document.getElementById('btnNewSheet');
-  const pinColor = document.getElementById('pinColor');
   const pinFilter = document.getElementById('pinFilter');
   const capList = document.getElementById('capList');
+  const pinPalette = document.getElementById('pinPalette');
 
   const pins = []; // {id,obj,title,body,imageId,color}
   let selected = null;
   let spreadsheetId = null;
   let sheetName = 'Pins';
+  let currentColor = PALETTE[0].hex;
+
+  // palette wiring
+  function setupPalette(){
+    pinPalette.innerHTML = PALETTE.map((c,i)=>`<div class="sw${i===0?' active':''}" data-hex="${c.hex}" title="${c.key}" style="background:${c.hex}"></div>`).join('');
+    pinPalette.querySelectorAll('.sw').forEach(sw=> sw.addEventListener('click', ()=>{
+      pinPalette.querySelectorAll('.sw').forEach(x=> x.classList.remove('active'));
+      sw.classList.add('active');
+      currentColor = sw.dataset.hex;
+    }));
+    // filter options
+    pinFilter.innerHTML = '<option value="all">(All)</option>' + PALETTE.map(c=>`<option value="${c.hex}">${c.key}</option>`).join('');
+  }
+  setupPalette();
 
   // draggable overlay
   (function makeDraggable(){
     let dragging=false, sx=0, sy=0, startLeft=0, startTop=0;
-    overlay.style.left='12px'; overlay.style.bottom='12px'; // default
+    overlay.style.left='12px'; overlay.style.bottom='12px';
     overlay.addEventListener('mousedown', (e)=>{ dragging=true; sx=e.clientX; sy=e.clientY; const r=overlay.getBoundingClientRect(); startLeft=r.left; startTop=r.top; e.preventDefault(); });
     window.addEventListener('mouseup', ()=> dragging=false);
     window.addEventListener('mousemove', (e)=>{
@@ -63,13 +86,13 @@ export function setupPins(app){
     if (!rec){ hideOverlay(); return; }
     titleInput.value = rec.title || '';
     bodyInput.value = rec.body || '';
-    rec.obj.material.color.set(rec.color || '#ffcc55');
+    rec.obj.material.color.set(rec.color || currentColor);
     showOverlay({ title: rec.title||'(untitled)', body: rec.body||'', imgUrl: rec.imageId || '' });
   }
 
   function addPinAtPosition(pos, init={}){
     const THREE = app.viewer.THREE;
-    const color = init.color || pinColor.value || '#ffcc55';
+    const color = init.color || currentColor;
     const pinObj = new THREE.Mesh(
       new THREE.SphereGeometry(0.01, 8, 8),
       new THREE.MeshBasicMaterial({ color })
@@ -108,7 +131,11 @@ export function setupPins(app){
     leaderLine.setAttribute('opacity','1');
   }
   window.addEventListener('resize', updateLeaderToOverlay);
-  document.addEventListener('mousemove', ()=>{ if (selected && overlay.style.display!=='none') updateLeaderToOverlay(); });
+  // make sure line keeps alive even when scene is static
+  (function lineTick(){
+    updateLeaderToOverlay();
+    requestAnimationFrame(lineTick);
+  })();
 
   // Pin color filter
   function applyFilter(){
@@ -176,9 +203,9 @@ export function setupPins(app){
   imgGrid.addEventListener('click', async (e)=>{
     const img = e.target.closest('img'); if (!img || !selected) return;
     const fid = img.dataset.id;
-    if (fid){ // fetch actual blob (HEIC→JPEG handled)
+    if (fid){
       try{
-        const blob = await downloadImageAsBlob(fid);
+        const blob = await downloadImageAsBlob(fid); // HEIC→JPEG handled internally
         const url = URL.createObjectURL(blob);
         selected.imageId = fid;
         showOverlay({ title:selected.title, body:selected.body, imgUrl:url });
@@ -189,20 +216,34 @@ export function setupPins(app){
     }
   });
 
-  // Sheet selection
+  // Sheet selection UI
   sheetSelect.addEventListener('change', async ()=>{
     sheetName = sheetSelect.value || 'Pins';
+    if (!spreadsheetId) return;
     await ensurePinsHeader(spreadsheetId, sheetName);
     await restorePins();
   });
+
   btnNewSheet.addEventListener('click', async ()=>{
-    const base = prompt('New sheet name?', 'Pins-' + new Date().toISOString().slice(0,10));
-    if (!base) return;
-    sheetName = base;
-    await ensurePinsHeader(spreadsheetId, sheetName);
-    await populateSheetSelect();
-    sheetSelect.value = sheetName;
-    await restorePins();
+    try{
+      // Ensure spreadsheet exists if null
+      if (!spreadsheetId){
+        const glbId = app.state?.currentGLBId;
+        if (!glbId) throw new Error('Load a GLB first to locate its folder.');
+        const res = await ensureSpreadsheetForFile(glbId);
+        spreadsheetId = res.spreadsheetId;
+      }
+      const base = prompt('New sheet name?', 'Pins-' + new Date().toISOString().slice(0,10));
+      if (!base) return;
+      sheetName = base;
+      await ensurePinsHeader(spreadsheetId, sheetName);
+      await populateSheetSelect();
+      sheetSelect.value = sheetName;
+      await restorePins();
+    }catch(e){
+      console.error('[pins] create sheet failed', e);
+      alert('Failed to create sheet: ' + (e?.message || e));
+    }
   });
 
   async function populateSheetSelect(){
@@ -228,8 +269,16 @@ export function setupPins(app){
     console.log('[pins] restored', list.length, 'pins from sheet', sheetName);
   }
 
-  // When a model is loaded, Pins module handles sheet ensure/restore.
+  // On model loaded: ensure spreadsheet & sheets list then restore
   window.addEventListener('lmy:model-loaded', async ()=>{
-    // nothing extra here
+    try{
+      const glbId = app.state?.currentGLBId;
+      if (!glbId){ console.warn('[pins] no current GLB id'); return; }
+      const res = await ensureSpreadsheetForFile(glbId);
+      spreadsheetId = res.spreadsheetId;
+      await ensurePinsHeader(spreadsheetId, sheetName);
+      await populateSheetSelect();
+      await restorePins();
+    }catch(e){ console.error('[pins] init failed', e); }
   });
 }

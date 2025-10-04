@@ -1,5 +1,5 @@
 // utils_drive_images.js — list images in the same folder and HEIC conversion
-import { driveGetFile } from './sheets_api.js?v=20251004s2';
+import { driveGetFile } from './sheets_api.js?v=20251004s3';
 
 export async function driveListImagesInSameFolder(glbFileId){
   const tok = (window.gapi && gapi.client.getToken && gapi.client.getToken()) || null;
