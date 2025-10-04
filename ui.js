@@ -1,11 +1,5 @@
-// ui.js — exports setupUI(app). Safe, idempotent wiring.
-/**
- * Expected DOM:
- *  - select#selMaterial (options like "(All)", "0: name", "1: name"...)
- *  - input[type=range]#slHue/#slSat/#slLight/#slOpacity/#slWhiteKey
- *  - button#btnUnlit, button#btnDoubleSide
- *  - input[type=checkbox]#chkWhiteKey (optional)
- */
+// ui.js — exports setupUI(app) and wires GLB loading controls.
+/* global normalizeDriveIdFromInput, fetchDriveFileAsArrayBuffer */
 function parseMatIndex(sel){
   if (!sel) return null;
   const v = sel.value || sel.options?.[sel.selectedIndex]?.value || "";
@@ -13,14 +7,12 @@ function parseMatIndex(sel){
   const num = parseInt(String(v).split(":")[0], 10);
   return Number.isFinite(num) ? num : null;
 }
-
 function bindRange(el, handler){
   if (!el) return;
   const fn = ()=>handler(parseFloat(el.value));
   el.addEventListener('input', fn);
   el.addEventListener('change', fn);
 }
-
 function ensureMatOptions(app){
   const sel = document.getElementById('selMaterial');
   if (!sel || !app?.viewer?.getMaterials) return;
@@ -36,29 +28,66 @@ function ensureMatOptions(app){
     opt.textContent = opt.value;
     sel.appendChild(opt);
   });
-  // try keep previous selection
   [...sel.options].some((o)=> (o.value===current && (sel.value=current,true)));
 }
 
+async function loadGLBFromDriveId(app, raw){
+  try{
+    const id = (window.normalizeDriveIdFromInput? window.normalizeDriveIdFromInput(raw): raw)||"";
+    if (!id) throw new Error("empty file id/url");
+    // Prefer Drive API util if present
+    if (window.fetchDriveFileAsArrayBuffer){
+      const buf = await window.fetchDriveFileAsArrayBuffer(id);
+      await app.viewer.loadGLB(buf);
+    }else if (app.viewer.loadGLBFromDriveId){
+      await app.viewer.loadGLBFromDriveId(id);
+    }else{
+      // fallback to uc?export=download (may hit CORS for non-public)
+      const res = await fetch(`https://drive.google.com/uc?export=download&id=${encodeURIComponent(id)}`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const buf = await res.arrayBuffer();
+      await app.viewer.loadGLB(buf);
+    }
+  }catch(err){
+    console.error('[ui] failed to load', err);
+    const toast = document.getElementById('toast');
+    if (toast){
+      toast.textContent = `Failed to load GLB: ${err.message||err}`;
+      toast.style.display = 'block';
+      setTimeout(()=> toast.style.display='none', 3000);
+    }
+  }
+}
+
 export function setupUI(app){
-  // guard
   if (!app || !app.viewer) return;
 
-  // refresh material list now & on model load
+  // --- GLB loaders ---
+  const inp = document.getElementById('inpDriveId');
+  const btn = document.getElementById('btnLoadGLB');
+  const btnd = document.getElementById('btnLoadDemo');
+  if (btn){
+    btn.addEventListener('click', ()=> loadGLBFromDriveId(app, inp?.value||""));
+  }
+  if (inp){
+    inp.addEventListener('keydown', (e)=>{
+      if (e.key === 'Enter') loadGLBFromDriveId(app, inp.value||"");
+    });
+  }
+  if (btnd){
+    btnd.addEventListener('click', ()=>{
+      window.dispatchEvent(new CustomEvent('lmy:load-demo'));
+    });
+  }
+
+  // --- Materials UI ---
   ensureMatOptions(app);
   window.addEventListener('lmy:model-loaded', ()=> ensureMatOptions(app));
-
   const getIndex = ()=> parseMatIndex(document.getElementById('selMaterial'));
-
-  // HSL
   bindRange(document.getElementById('slHue'),  v => app.viewer.setHSL?.(v,   parseFloat(document.getElementById('slSat')?.value||0), parseFloat(document.getElementById('slLight')?.value||50), getIndex()));
   bindRange(document.getElementById('slSat'),  _ => app.viewer.setHSL?.(parseFloat(document.getElementById('slHue')?.value||0),  parseFloat(document.getElementById('slSat')?.value||0), parseFloat(document.getElementById('slLight')?.value||50), getIndex()));
   bindRange(document.getElementById('slLight'),_ => app.viewer.setHSL?.(parseFloat(document.getElementById('slHue')?.value||0),  parseFloat(document.getElementById('slSat')?.value||0), parseFloat(document.getElementById('slLight')?.value||50), getIndex()));
-
-  // Opacity
   bindRange(document.getElementById('slOpacity'), v => app.viewer.setOpacity?.(Math.max(0, Math.min(1, v)), getIndex()));
-
-  // Unlit
   const btnUnlit = document.getElementById('btnUnlit');
   if (btnUnlit){
     btnUnlit.addEventListener('click', ()=>{
@@ -69,8 +98,6 @@ export function setupUI(app){
       btnUnlit.textContent = next ? 'Unlit: on' : 'Unlit: off';
     });
   }
-
-  // DoubleSide
   const btnDS = document.getElementById('btnDoubleSide');
   if (btnDS){
     btnDS.addEventListener('click', ()=>{
@@ -81,10 +108,8 @@ export function setupUI(app){
       btnDS.textContent = next ? 'DoubleSide: on' : 'DoubleSide: off';
     });
   }
-
-  // White→α
   const slWhite = document.getElementById('slWhiteKey');
-  const chkWhite = document.getElementById('chkWhiteKey'); // optional
+  const chkWhite = document.getElementById('chkWhiteKey');
   if (slWhite){
     const apply = ()=>{
       const t = Math.max(0, Math.min(1, parseFloat(slWhite.value)/100));
@@ -93,7 +118,6 @@ export function setupUI(app){
         chkWhite.checked = true;
         app.viewer.setWhiteKeyEnabled?.(true, getIndex());
       } else if (!chkWhite){
-        // スライダーが動いた時は有効化
         app.viewer.setWhiteKeyEnabled?.(true, getIndex());
       }
     };
@@ -105,16 +129,13 @@ export function setupUI(app){
   }
 }
 
-// === 最低限のフォールバック（既存HTMLだけで動かす用） ===
-(function bootstrapWhiteSlider(){
+// Auto-wire on ready/model-loaded (idempotent)
+(function bootstrap(){
+  const trySetup = ()=> (window.app && window.app.viewer) && setupUI(window.app);
   if (document.readyState === 'loading'){
-    document.addEventListener('DOMContentLoaded', ()=>{
-      if (window.app && window.app.viewer) setupUI(window.app);
-    });
+    document.addEventListener('DOMContentLoaded', trySetup);
   }else{
-    if (window.app && window.app.viewer) setupUI(window.app);
+    trySetup();
   }
-  window.addEventListener('lmy:model-loaded', ()=>{
-    if (window.app && window.app.viewer) setupUI(window.app);
-  });
+  window.addEventListener('lmy:model-loaded', trySetup);
 })();
