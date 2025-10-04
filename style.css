@@ -1,38 +1,7 @@
 /* LociMyu layout fix (viewer visible) */
-html, body {
-  height: 100%;
-  margin: 0;
-}
-#app {
-  display: flex;
-  flex-direction: row;
-  height: 100vh;
-  overflow: hidden;
-}
-#viewer-host {
-  flex: 1 1 auto;
-  min-width: 0;
-  position: relative;
-  background: #0f0f0f;
-}
-#viewer-host canvas {
-  width: 100% !important;
-  height: 100% !important;
-  display: block;
-}
-#side {
-  width: 300px;
-  min-width: 220px;
-  max-width: 40%;
-  overflow-y: auto;
-  background: #111;
-  color: #eee;
-  padding: 8px;
-  border-left: 1px solid #222;
-}
+html, body { height: 100%; margin: 0; }
+#app { display: flex; height: 100vh; overflow: hidden; }
+#viewer-host { flex: 1 1 auto; min-width: 0; position: relative; background: #0f0f0f; }
+#viewer-host canvas { width: 100% !important; height: 100% !important; display: block; }
+#side { width: 300px; min-width: 220px; max-width: 40%; overflow: auto; background:#111; color:#eee; padding:8px; border-left:1px solid #222;}
 #toolbar { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
-.btns { display:flex; gap:8px; }
-input[type="text"]#glb-url { width: 100%; box-sizing: border-box; padding:6px; background:#181818; color:#eee; border:1px solid #333; border-radius:6px; }
-button, .btn { background:#262626; color:#eee; border:1px solid #333; border-radius:6px; padding:6px 10px; cursor:pointer; }
-button:hover, .btn:hover { background:#2f2f2f; }
-#auth { position: fixed; top: 8px; right: 8px; z-index: 10; display:flex; gap:8px; }
