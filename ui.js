@@ -1,4 +1,4 @@
-// ui.js — GLB loading robust: uses Drive API + viewer shim
+// ui.js — queue GLB load until viewer is ready (no CORS fallback on "viewer not ready")
 function getEl(idA, idB){ return document.getElementById(idA) || (idB?document.getElementById(idB):null); }
 function parseMatIndex(sel){
   if (!sel) return null;
@@ -14,55 +14,83 @@ function bindRange(el, handler){
   el.addEventListener('change', fn);
 }
 async function driveApiDownload(id){
-  // dynamic import so HTML変更不要
   const mod = await import('./utils_drive_api.js');
   if (!mod?.fetchDriveFileAsArrayBuffer) throw new Error('Drive helper missing');
   return await mod.fetchDriveFileAsArrayBuffer(id);
+}
+async function ensureViewerReady(){
+  try{ await import('./viewer_ready.js'); }catch(_){}
+  if (window.app?.viewer) return window.app.viewer;
+  if (window.__viewerReadyPromise) return await window.__viewerReadyPromise;
+  // last resort: wait a tick
+  await new Promise(r=> setTimeout(r, 0));
+  return window.app?.viewer;
 }
 async function ensureViewerShim(){
   try{ await import('./viewer_api_shim.js'); }catch(_){ /* ignore */ }
 }
 async function loadGLBWithViewer(buf){
-  const app = window.app;
-  if (!app || !app.viewer) throw new Error('viewer not ready');
-  // call the shimmed API
-  if (typeof app.viewer.loadGLB !== 'function'){
-    await ensureViewerShim();
-  }
-  if (typeof app.viewer.loadGLB !== 'function'){
-    throw new Error('app.viewer.loadGLB not available');
-  }
-  return await app.viewer.loadGLB(buf);
+  const viewer = await ensureViewerReady();
+  if (!viewer) throw new Error('viewer not ready');
+  await ensureViewerShim();
+  if (typeof viewer.loadGLB !== 'function') throw new Error('app.viewer.loadGLB not available');
+  return await viewer.loadGLB(buf);
 }
 async function loadGLBFromDriveId(app, raw){
   let id = (raw||"").trim();
   if (!id) throw new Error("empty file id/url");
   const m = id.match(/\/d\/([a-zA-Z0-9_-]{10,})/);
   if (m) id = m[1];
+  // Download can start even before viewer is ready
+  let buf;
   try{
-    const buf = await driveApiDownload(id);        // 1) Auth path
-    await loadGLBWithViewer(buf);
-    return;
+    buf = await driveApiDownload(id);        // 1) Auth path
   }catch(e){
-    console.warn('[ui] Drive API path failed, will try public fallback if possible:', e);
+    console.warn('[ui] Drive API download failed:', e);
+    // public fallback remains as last resort, but only if viewer exists later
+    try{
+      const res = await fetch(`https://drive.google.com/uc?export=download&id=${encodeURIComponent(id)}`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      buf = await res.arrayBuffer();
+    }catch(err){
+      console.error('[ui] failed to download', err);
+      const toast = getEl('toast');
+      if (toast){
+        toast.textContent = 'Failed to download GLB. Sign in for Drive access, or make the file public.';
+        toast.style.display = 'block';
+        setTimeout(()=> toast.style.display='none', 4000);
+      }
+      return;
+    }
   }
   try{
-    const res = await fetch(`https://drive.google.com/uc?export=download&id=${encodeURIComponent(id)}`);
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const buf = await res.arrayBuffer();
-    await loadGLBWithViewer(buf);
-  }catch(err){
-    console.error('[ui] failed to load', err);
+    await loadGLBWithViewer(buf);            // 2) Load when viewer is ready
+  }catch(e){
+    if (String(e.message||e).includes('viewer not ready')){
+      console.warn('[ui] viewer not ready, queuing until ready...');
+      // queue once
+      try{ await import('./viewer_ready.js'); }catch(_){}
+      if (window.__viewerReadyPromise){
+        window.__viewerReadyPromise.then(()=> loadGLBWithViewer(buf));
+        const toast = getEl('toast');
+        if (toast){
+          toast.textContent = 'Preparing viewer... will load model automatically.';
+          toast.style.display = 'block';
+          setTimeout(()=> toast.style.display='none', 2000);
+        }
+        return; // DO NOT fallback to public here
+      }
+    }
+    console.error('[ui] failed to load into viewer', e);
     const toast = getEl('toast');
     if (toast){
-      toast.textContent = 'Failed to load GLB. Please sign in (top-right) or make the file public.';
+      toast.textContent = 'Failed to show model. See console for details.';
       toast.style.display = 'block';
       setTimeout(()=> toast.style.display='none', 4000);
     }
   }
 }
 export function setupUI(app){
-  ensureViewerShim();
   const inp = getEl('fileIdInput','inpDriveId');
   const btn = getEl('btnLoad','btnLoadGLB');
   const demo= getEl('btnDemo','btnLoadDemo');
@@ -70,7 +98,7 @@ export function setupUI(app){
   if (inp) inp.addEventListener('keydown', (e)=> (e.key==='Enter') && loadGLBFromDriveId(app, inp.value||""));
   if (demo) demo.addEventListener('click', ()=> window.dispatchEvent(new CustomEvent('lmy:load-demo')));
 
-  // Material wires (guarded stubs on viewer avoid errors)
+  // Material wires (guarded)
   const sel = getEl('selMaterial'); const gi = ()=> parseMatIndex(sel);
   bindRange(getEl('slOpacity'), v => window.app?.viewer?.setOpacity?.(Math.max(0,Math.min(1,v)), gi()));
   bindRange(getEl('slHue'), _ => window.app?.viewer?.setHSL?.(parseFloat(getEl('slHue')?.value||0), parseFloat(getEl('slSat')?.value||0), parseFloat(getEl('slLight')?.value||50), gi()));
