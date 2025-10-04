@@ -1,118 +1,128 @@
-// gauth.js — De-duplicate & wire Sign in/out controls with late-DOM support
-// Public API: setupAuth(app, opts?)
-//  - opts.primarySelectors: candidate selectors in priority order
-//  - opts.createIfMissing: default false (we no longer auto-insert a chip)
 
-function qsa(sel){ return Array.from(document.querySelectorAll(sel)); }
-function uniq(arr){ return Array.from(new Set(arr)); }
+// museum3dviewer/gauth.js
+// Robust SignIn wiring + GIS popup (if available) + UI dedupe + shared token getter.
 
-function pickPrimary(selectors){
-  for (const sel of selectors){
-    const match = qsa(sel).find(el => el && el.offsetParent !== null);
-    if (match) return match;
+function $$(sel){ return Array.from(document.querySelectorAll(sel)); }
+function pick(selectors){
+  for (const s of selectors){
+    const el = $$(s).find(e => e && e.offsetParent !== null);
+    if (el) return el;
   }
-  // if nothing visible, still return first present element
-  for (const sel of selectors){
-    const match = qsa(sel)[0];
-    if (match) return match;
+  for (const s of selectors){
+    const el = $$(s)[0]; if (el) return el;
   }
   return null;
 }
-
-function markButton(el){
-  if (!el) return;
-  if (el.tagName === 'A' || el.tagName === 'DIV' || el.tagName === 'SPAN'){
-    el.setAttribute('role', 'button');
-    el.tabIndex = 0;
-  }
-  // prevent forms from submitting
-  if (el.tagName === 'BUTTON') el.type = 'button';
-  el.style.cursor = 'pointer';
-  // make sure clicks don't get eaten by parent
-  el.addEventListener('click', ev => { ev.stopPropagation(); }, {capture:true});
+function hideDupes(primary, selectors){
+  const all = [...new Set(selectors.flatMap(s => $$(s)))];
+  for(const el of all){ if (el !== primary){ el.style.display = 'none'; el.dataset.authDuplicate='1'; } }
 }
-
-function labelSignIn(el, signed){
+function makeButton(el){
+  if (!el) return;
+  if (!['BUTTON'].includes(el.tagName)) el.setAttribute('role','button');
+  el.tabIndex = 0; el.style.cursor = 'pointer';
+  if (el.tagName === 'BUTTON') el.type = 'button';
+}
+function labelSign(el, signed){
   if (!el) return;
   const t = signed ? 'Signed in' : 'Sign in';
-  // Don't clobber child icons; replace only textContent if it's simple
-  if (el.children.length === 0){ el.textContent = t; }
-  el.dataset.authed = signed ? '1' : '0';
-  el.style.background = signed ? '#114d2d' : '';
-  el.style.color = signed ? '#e8fff3' : '';
+  if (el.children.length === 0) el.textContent = t;
+  el.dataset.authed = signed ? '1':'0';
+  if (signed){ el.classList.add('signed'); } else { el.classList.remove('signed'); }
 }
 
 export function setupAuth(app, opts={}){
   app.auth = app.auth || {};
   const a = app.auth;
+  const selectorsIn  = opts.signinSelectors  || ['#chipSign','#btnSign','[data-role="signin"]','[data-auth="in"]','.signin','.sign-in'];
+  const selectorsOut = opts.signoutSelectors || ['#btnSignOut','[data-role="signout"]','[data-auth="out"]','.signout','.sign-out'];
 
-  // host may provide real handlers; otherwise stubs
-  a.isSignedIn = a.isSignedIn || (() => !!a.__signed);
-  a.signIn  = a.signIn  || (async ()=>{ a.__signed = true; });
-  a.signOut = a.signOut || (async ()=>{ a.__signed = false; });
+  let btnIn  = pick(selectorsIn);
+  let btnOut = pick(selectorsOut);
+  hideDupes(btnIn, selectorsIn);
+  hideDupes(btnOut, selectorsOut);
 
-  const selectors = opts.primarySelectors || [
-    '#chipSign', '#btnSign', '[data-role="signin"]', '[data-auth="in"]', '.signin', '.sign-in'
-  ];
-  const selOut = ['#btnSignOut', '[data-role="signout"]', '[data-auth="out"]', '.signout', '.sign-out'];
+  // ===== GIS POPUP (if available) =====
+  const CLIENT_ID = opts.clientId || '595200751510-ncahnf7edci6b9925becn5to49r6cguv.apps.googleusercontent.com';
+  const SCOPES = opts.scopes || [
+    'https://www.googleapis.com/auth/drive.readonly',
+    'https://www.googleapis.com/auth/drive.file',
+    'https://www.googleapis.com/auth/spreadsheets'
+  ].join(' ');
 
-  let inBtn = pickPrimary(selectors);
-  let outBtn = pickPrimary(selOut);
+  a.__signed = false;
+  a.__token = null;
+  a.isSignedIn = a.isSignedIn || (() => a.__signed);
+  a.getAccessToken = () => a.__token;
 
-  // Hide duplicates to avoid double buttons
-  const dupesIn = uniq(selectors.flatMap(s => qsa(s))).filter(el => el && el !== inBtn);
-  dupesIn.forEach(el => { el.style.display = 'none'; el.dataset.authDuplicate = '1'; });
+  async function signInStub(){ a.__signed = true; a.__token = null; }
+  async function signOutStub(){ a.__signed = false; a.__token = null; }
 
-  // Same for signout
-  const dupesOut = uniq(selOut.flatMap(s => qsa(s))).filter(el => el && el !== outBtn);
-  dupesOut.forEach(el => { el.style.display = 'none'; el.dataset.authDuplicate = '1'; });
-
-  function refresh(){
-    const signed = !!a.isSignedIn();
-    labelSignIn(inBtn, signed);
-    if (outBtn){
-      outBtn.style.display = signed ? '' : 'none';
-    }
-    if (inBtn){
-      inBtn.style.display = ''; // always show primary
+  // prefer host-provided handlers
+  if (!a.signIn || !a.signOut){
+    // try GIS
+    let tokenClient = null;
+    const hasGIS = !!(window.google && google.accounts && google.accounts.oauth2);
+    if (hasGIS){
+      tokenClient = google.accounts.oauth2.initTokenClient({
+        client_id: CLIENT_ID,
+        scope: SCOPES,
+        prompt: '', // will be 'consent' on first interaction
+        callback: (resp)=>{
+          if (resp && resp.access_token){
+            a.__token = resp.access_token;
+            a.__signed = true;
+            refresh();
+          }
+        }
+      });
+      a.signIn = async ()=>{
+        // must be called in user gesture
+        tokenClient.requestAccessToken({prompt: a.__token ? '' : 'consent'});
+      };
+      a.signOut = async ()=>{
+        try{
+          if (a.__token && google.accounts.oauth2.revoke){
+            google.accounts.oauth2.revoke(a.__token, ()=>{});
+          }
+        }catch(_e){}
+        a.__token = null; a.__signed = false;
+      };
+    }else{
+      // fallback stub
+      a.signIn = signInStub;
+      a.signOut = signOutStub;
     }
   }
 
+  function refresh(){
+    labelSign(btnIn, a.isSignedIn());
+    if (btnOut) btnOut.style.display = a.isSignedIn() ? '' : 'none';
+    if (btnIn)  btnIn.style.display  = '';
+  }
+
   function bind(){
-    if (inBtn){
-      markButton(inBtn);
-      inBtn.onclick = async (e)=>{
-        e.preventDefault();
-        try{ await a.signIn(); } finally{ refresh(); }
-      };
+    if (btnIn){
+      makeButton(btnIn);
+      btnIn.onclick = async (e)=>{ e.preventDefault(); await a.signIn(); refresh(); };
     }
-    if (outBtn){
-      markButton(outBtn);
-      outBtn.onclick = async (e)=>{
-        e.preventDefault();
-        try{ await a.signOut(); } finally{ refresh(); }
-      };
+    if (btnOut){
+      makeButton(btnOut);
+      btnOut.onclick = async (e)=>{ e.preventDefault(); await a.signOut(); refresh(); };
     }
   }
 
   bind(); refresh();
 
-  // Observe DOM in case host injects another chip later (e.g., theme switch)
-  const mo = new MutationObserver((_list)=>{
-    const newPrimary = pickPrimary(selectors);
-    if (newPrimary && newPrimary !== inBtn){
-      // move binding to the new one and hide old
-      if (inBtn){ inBtn.style.display = 'none'; inBtn.onclick = null; }
-      inBtn = newPrimary;
+  // Late DOM changes (theme/template rerender)
+  const mo = new MutationObserver(()=>{
+    const next = pick(selectorsIn);
+    if (next && next !== btnIn){
+      if (btnIn) btnIn.onclick = null;
+      btnIn = next;
+      hideDupes(btnIn, selectorsIn);
       bind(); refresh();
     }
-    // Ensure duplicates stay hidden
-    uniq(selectors.flatMap(s => qsa(s))).forEach(el => {
-      if (el !== inBtn){ el.style.display = 'none'; }
-    });
   });
-  mo.observe(document.body, {childList: true, subtree: true});
-
-  // Expose small event for host code if needed
-  a.__refreshUI = refresh;
+  mo.observe(document.body, {childList:true, subtree:true});
 }
