@@ -1,70 +1,118 @@
+// gauth.js — De-duplicate & wire Sign in/out controls with late-DOM support
+// Public API: setupAuth(app, opts?)
+//  - opts.primarySelectors: candidate selectors in priority order
+//  - opts.createIfMissing: default false (we no longer auto-insert a chip)
 
-// gauth.js — unified Sign in chip/button with safe stubs and no-duplicate UI
-// Exports: setupAuth(app)
-function qs(x){ return document.getElementById(x); }
 function qsa(sel){ return Array.from(document.querySelectorAll(sel)); }
+function uniq(arr){ return Array.from(new Set(arr)); }
 
-function ensureChip(){
-  let chip = qs('chipSign');
-  if (!chip){
-    // Reuse existing top-right "Sign in" chip if present; otherwise create one.
-    const topbar = document.querySelector('#topbar,.topbar,.header') || document.body;
-    chip = document.createElement('button');
-    chip.id = 'chipSign';
-    chip.type = 'button';
-    chip.dataset.role = 'signin';
-    chip.style.cssText = 'margin-left:.5rem;padding:.25rem .6rem;border-radius:999px;background:#222;color:#ddd;border:1px solid #444;cursor:pointer;';
-    chip.textContent = 'Sign in';
-    topbar.appendChild(chip);
+function pickPrimary(selectors){
+  for (const sel of selectors){
+    const match = qsa(sel).find(el => el && el.offsetParent !== null);
+    if (match) return match;
   }
-  return chip;
+  // if nothing visible, still return first present element
+  for (const sel of selectors){
+    const match = qsa(sel)[0];
+    if (match) return match;
+  }
+  return null;
 }
 
-function setChipState(authed){
-  const chip = ensureChip();
-  chip.textContent = authed ? 'Signed in' : 'Sign in';
-  chip.style.background = authed ? '#114d2d' : '#222';
-  chip.style.color = authed ? '#e8fff3' : '#ddd';
-  chip.dataset.authed = authed ? '1' : '0';
-}
-
-function pulse(el){
+function markButton(el){
   if (!el) return;
-  el.style.transform = 'scale(0.98)';
-  setTimeout(()=>{ el.style.transform = 'scale(1)'; }, 120);
+  if (el.tagName === 'A' || el.tagName === 'DIV' || el.tagName === 'SPAN'){
+    el.setAttribute('role', 'button');
+    el.tabIndex = 0;
+  }
+  // prevent forms from submitting
+  if (el.tagName === 'BUTTON') el.type = 'button';
+  el.style.cursor = 'pointer';
+  // make sure clicks don't get eaten by parent
+  el.addEventListener('click', ev => { ev.stopPropagation(); }, {capture:true});
 }
 
-export function setupAuth(app){
+function labelSignIn(el, signed){
+  if (!el) return;
+  const t = signed ? 'Signed in' : 'Sign in';
+  // Don't clobber child icons; replace only textContent if it's simple
+  if (el.children.length === 0){ el.textContent = t; }
+  el.dataset.authed = signed ? '1' : '0';
+  el.style.background = signed ? '#114d2d' : '';
+  el.style.color = signed ? '#e8fff3' : '';
+}
+
+export function setupAuth(app, opts={}){
   app.auth = app.auth || {};
   const a = app.auth;
 
-  // allow host app to provide real methods; otherwise use stubs
+  // host may provide real handlers; otherwise stubs
   a.isSignedIn = a.isSignedIn || (() => !!a.__signed);
-  a.signIn = a.signIn || (async ()=>{ a.__signed = true; });
-  a.signOut= a.signOut|| (async ()=>{ a.__signed = false; });
+  a.signIn  = a.signIn  || (async ()=>{ a.__signed = true; });
+  a.signOut = a.signOut || (async ()=>{ a.__signed = false; });
 
-  // unify all buttons with role markers or known IDs
-  const buttonsIn  = qsa('[data-role="signin"], #btnSign, #chipSign').filter(Boolean);
-  const buttonsOut = qsa('[data-role="signout"], #btnSignOut').filter(Boolean);
+  const selectors = opts.primarySelectors || [
+    '#chipSign', '#btnSign', '[data-role="signin"]', '[data-auth="in"]', '.signin', '.sign-in'
+  ];
+  const selOut = ['#btnSignOut', '[data-role="signout"]', '[data-auth="out"]', '.signout', '.sign-out'];
 
-  // dedupe same element if overlapping selectors
-  const inSet  = Array.from(new Set(buttonsIn));
-  const outSet = Array.from(new Set(buttonsOut));
+  let inBtn = pickPrimary(selectors);
+  let outBtn = pickPrimary(selOut);
 
-  function refresh(){ setChipState(a.isSignedIn()); 
-    // sync any secondary button label if it shows text
-    inSet.forEach(btn=>{ if (btn && btn.id!=='chipSign') btn.textContent = a.isSignedIn() ? 'Signed in' : 'Sign in'; });
+  // Hide duplicates to avoid double buttons
+  const dupesIn = uniq(selectors.flatMap(s => qsa(s))).filter(el => el && el !== inBtn);
+  dupesIn.forEach(el => { el.style.display = 'none'; el.dataset.authDuplicate = '1'; });
+
+  // Same for signout
+  const dupesOut = uniq(selOut.flatMap(s => qsa(s))).filter(el => el && el !== outBtn);
+  dupesOut.forEach(el => { el.style.display = 'none'; el.dataset.authDuplicate = '1'; });
+
+  function refresh(){
+    const signed = !!a.isSignedIn();
+    labelSignIn(inBtn, signed);
+    if (outBtn){
+      outBtn.style.display = signed ? '' : 'none';
+    }
+    if (inBtn){
+      inBtn.style.display = ''; // always show primary
+    }
   }
 
-  inSet.forEach(btn=> btn.addEventListener('click', async ()=>{
-    pulse(btn);
-    try{ await a.signIn(); } finally{ refresh(); }
-  }));
-  outSet.forEach(btn=> btn.addEventListener('click', async ()=>{
-    pulse(btn);
-    try{ await a.signOut(); } finally{ refresh(); }
-  }));
+  function bind(){
+    if (inBtn){
+      markButton(inBtn);
+      inBtn.onclick = async (e)=>{
+        e.preventDefault();
+        try{ await a.signIn(); } finally{ refresh(); }
+      };
+    }
+    if (outBtn){
+      markButton(outBtn);
+      outBtn.onclick = async (e)=>{
+        e.preventDefault();
+        try{ await a.signOut(); } finally{ refresh(); }
+      };
+    }
+  }
 
-  // initial paint
-  refresh();
+  bind(); refresh();
+
+  // Observe DOM in case host injects another chip later (e.g., theme switch)
+  const mo = new MutationObserver((_list)=>{
+    const newPrimary = pickPrimary(selectors);
+    if (newPrimary && newPrimary !== inBtn){
+      // move binding to the new one and hide old
+      if (inBtn){ inBtn.style.display = 'none'; inBtn.onclick = null; }
+      inBtn = newPrimary;
+      bind(); refresh();
+    }
+    // Ensure duplicates stay hidden
+    uniq(selectors.flatMap(s => qsa(s))).forEach(el => {
+      if (el !== inBtn){ el.style.display = 'none'; }
+    });
+  });
+  mo.observe(document.body, {childList: true, subtree: true});
+
+  // Expose small event for host code if needed
+  a.__refreshUI = refresh;
 }

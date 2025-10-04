@@ -1,6 +1,5 @@
-
 import { setupAuth } from './gauth.js';
-import { setupUI }   from './ui.js';
+import { setupUI } from './ui.js';
 
 async function boot(){
   try{
@@ -8,13 +7,11 @@ async function boot(){
     console.log('[auth] ready');
     setupAuth(window.app);
 
-    // safe UI setup
     try{ setupUI(window.app); }catch(e){ console.warn('[boot] setupUI deferred', e); }
 
-    // autoload by ?id
     const id = new URLSearchParams(location.search).get('id');
     if (id && window.app?.viewer?.loadGLBFromDriveId){
-      await window.app.viewer.loadGLBFromDriveId(id).catch(err => console.error('[boot] autoload failed', err));
+      await window.app.viewer.loadGLBFromDriveId(id).catch(err=>console.error('[boot] autoload failed', err));
     }
   }catch(err){
     console.error('[boot] failed', err);

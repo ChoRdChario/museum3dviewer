@@ -1,0 +1,2 @@
+/* auth_dupe_guard.css — optional; prevents overlay from swallowing clicks */
+#chipSign, #btnSign, [data-role="signin"]{ pointer-events:auto; z-index: 1000; }
