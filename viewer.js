@@ -1,254 +1,190 @@
-// viewer.js - v6.6 patched
-const THREE_URL = 'https://unpkg.com/three@0.157.0/build/three.module.js';
-const GLTF_URL  = 'https://unpkg.com/three@0.157.0/examples/jsm/loaders/GLTFLoader.js';
-const ORBIT_URL = 'https://unpkg.com/three@0.157.0/examples/jsm/controls/OrbitControls.js';
+// three.js viewer
+import * as THREE from 'https://unpkg.com/three@0.157.0/build/three.module.js';
+import { OrbitControls } from 'https://unpkg.com/three@0.157.0/examples/jsm/controls/OrbitControls.js';
+import { GLTFLoader } from 'https://unpkg.com/three@0.157.0/examples/jsm/loaders/GLTFLoader.js';
 
-export async function ensureViewer({ mount, spinner }) {
-  const THREE = await import(THREE_URL);
-  const { OrbitControls } = await import(ORBIT_URL);
-  const { GLTFLoader } = await import(GLTF_URL);
+function hslToColor(h, s, l){
+  const c = new THREE.Color();
+  c.setHSL(((h%360)+360)%360/360, s, l);
+  return c;
+}
 
-  const renderer = new THREE.WebGLRenderer({ antialias: true, alpha:false });
-  renderer.setPixelRatio(devicePixelRatio);
-  renderer.setSize(mount.clientWidth, mount.clientHeight);
-  renderer.sortObjects = true;
-  mount.appendChild(renderer.domElement);
+export class Viewer{
+  constructor(host){
+    this.host = host;
+    this.scene = new THREE.Scene();
+    this.bg = new THREE.Color(0x101014);
+    this.scene.background = this.bg;
+    this.renderer = new THREE.WebGLRenderer({antialias:true, alpha:false});
+    this.renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+    this.renderer.setSize(host.clientWidth, host.clientHeight);
+    host.appendChild(this.renderer.domElement);
 
-  const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x101014);
+    this.camera = new THREE.PerspectiveCamera(50, host.clientWidth/host.clientHeight, 0.01, 1000);
+    this.camera.position.set(1.8, 1.2, 2.2);
+    this.controls = new OrbitControls(this.camera, this.renderer.domElement);
+    this.controls.enableDamping = true;
 
-  const camera = new THREE.PerspectiveCamera(60, mount.clientWidth / Math.max(1,mount.clientHeight), 0.1, 2000);
-  camera.position.set(2.5, 2, 3);
-  const controls = new OrbitControls(camera, renderer.domElement);
-  controls.enableDamping = true;
+    this.clock = new THREE.Clock();
+    this.meshRoot = new THREE.Group();
+    this.scene.add(this.meshRoot);
 
-  const hemi = new THREE.HemisphereLight(0xffffff, 0x222233, 1.0);
-  scene.add(hemi);
+    const light = new THREE.DirectionalLight(0xffffff, 1.2);
+    light.position.set(3, 5, 2);
+    this.scene.add(light);
+    this.scene.add(new THREE.AmbientLight(0xffffff, 0.4));
 
-  const state = {
-    current: null,
-    materials: [],            // unique THREE.Material[]
-    targetIndex: -1,          // -1 = all
-  };
+    this.materials = []; // unique material list
+    this.matState = new Map(); // material -> saved state
 
-  function collectUniqueMaterials(root){
-    const arr = [];
-    const seen = new Set();
-    root.traverse((o)=>{
+    const onResize = ()=>{
+      const w = host.clientWidth, h = host.clientHeight;
+      this.camera.aspect = w/h; this.camera.updateProjectionMatrix();
+      this.renderer.setSize(w, h);
+    };
+    addEventListener('resize', onResize);
+
+    const animate = ()=>{
+      requestAnimationFrame(animate);
+      this.controls.update();
+      this.renderer.render(this.scene, this.camera);
+    };
+    animate();
+  }
+
+  clear(){
+    while(this.meshRoot.children.length) this.meshRoot.remove(this.meshRoot.children.pop());
+    this.materials.length = 0;
+    this.matState.clear();
+  }
+
+  async loadGLBFromArrayBuffer(ab){
+    this.clear();
+    const loader = new GLTFLoader();
+    const gltf = await new Promise((resolve, reject)=>{
+      loader.parse(ab, '', resolve, reject);
+    });
+    this.meshRoot.add(gltf.scene);
+    // unique materials
+    const set = new Set();
+    gltf.scene.traverse(o=>{
       if (o.isMesh && o.material){
         const mats = Array.isArray(o.material) ? o.material : [o.material];
-        for (const m of mats){
-          const key = m.uuid;
-          if (!seen.has(key)){
-            seen.add(key);
-            arr.push(m);
-          }
-          // transparent draw order safety
-          m.depthWrite = !m.transparent;
-        }
+        mats.forEach(m=>set.add(m));
       }
+    });
+    this.materials = Array.from(set);
+    console.log('[viewer] GLB loaded; unique materials:', this.materials.length);
+    dispatchEvent(new CustomEvent('lmy:model-loaded'));
+  }
+
+  listMaterialLabels(){
+    const arr = [['(All)', -1]];
+    this.materials.forEach((m,i)=>{
+      arr.push([`${i}: ${m.name||'(mat)'}`, i]);
     });
     return arr;
   }
 
-  function applyToTargets(fn){
-    const mats = state.targetIndex < 0 ? state.materials : [state.materials[state.targetIndex]].filter(Boolean);
-    for (const m of mats) fn(m);
+  /** target: -1 for all or index */
+  applyToTarget(target, fn){
+    if (target === -1){ this.materials.forEach(fn); }
+    else if (this.materials[target]) fn(this.materials[target]);
   }
 
-  function animate(){
-    controls.update();
-    renderer.render(scene, camera);
-    requestAnimationFrame(animate);
-  }
-  animate();
-
-  function onResize(){
-    const w = mount.clientWidth, h = Math.max(1, mount.clientHeight);
-    renderer.setSize(w,h);
-    camera.aspect = w/h;
-    camera.updateProjectionMatrix();
-  }
-  new ResizeObserver(onResize).observe(mount);
-
-  async function loadGLBFromArrayBuffer(buf){
-    // clear previous
-    if (state.current){
-      scene.remove(state.current);
-      state.current.traverse?.((o)=>{
-        if (o.geometry) o.geometry.dispose();
-      });
-    }
-    const { GLTFLoader } = await import(GLTF_URL);
-    const blob = new Blob([buf], {type:'model/gltf-binary'});
-    const url = URL.createObjectURL(blob);
-    try{
-      const gltf = await new GLTFLoader().loadAsync(url);
-      const root = gltf.scene || gltf.scenes?.[0];
-      if (!root) throw new Error('GLB has no scene');
-      scene.add(root);
-      state.current = root;
-      state.materials = collectUniqueMaterials(root);
-      state.targetIndex = -1;
-    } finally {
-      URL.revokeObjectURL(url);
-    }
+  ensureState(mat){
+    if (this.matState.has(mat)) return this.matState.get(mat);
+    const s = {
+      transparent: mat.transparent,
+      side: mat.side,
+      color: mat.color?.clone?.() ?? null,
+      map: mat.map || null,
+      onBeforeCompile: mat.onBeforeCompile || null,
+      depthWrite: mat.depthWrite,
+      depthTest: mat.depthTest,
+      blending: mat.blending,
+      opacity: ('opacity' in mat) ? mat.opacity : 1,
+      userData: JSON.parse(JSON.stringify(mat.userData||{}))
+    };
+    this.matState.set(mat, s);
+    return s;
   }
 
-  // === material helpers ===
-  function ensureBackup(m){
-    if (!m.userData._lmy) m.userData._lmy = {};
-    const u = m.userData._lmy;
-    if (!u.backup){
-      // minimal clone of togglable props
-      u.backup = {
-        type: m.type,
-        color: m.color ? m.color.clone() : null,
-        map: m.map || null,
-        side: m.side,
-        transparent: m.transparent,
-        opacity: m.opacity,
-        toneMapped: m.toneMapped,
-        lights: m.lights ?? true,
-        onBeforeCompile: m.onBeforeCompile || null,
-      };
-    }
-    return u;
-  }
-
-  function setHSL(h, s, l){
-    applyToTargets((m)=>{
-      if (!m.color) return;
-      const c = new THREE.Color();
-      c.setHSL(h/360, s/100, l/100);
-      m.color.copy(c);
+  setOpacity(target, v){
+    this.applyToTarget(target, (m)=>{
+      this.ensureState(m);
+      m.transparent = v < 0.999;
+      m.opacity = v;
       m.needsUpdate = true;
     });
   }
 
-  function setOpacity(p){
-    applyToTargets((m)=>{
-      m.transparent = p < 1.0 || m.userData._lmy?.whiteKeyEnabled;
-      m.opacity = p;
-      m.depthWrite = !m.transparent;
-      m.needsUpdate = true;
-    });
-  }
-
-  function setUnlit(on){
-    applyToTargets((m)=>{
-      const u = ensureBackup(m);
+  setUnlit(target, on){
+    this.applyToTarget(target, (m)=>{
+      const s = this.ensureState(m);
       if (on){
-        if (m.type !== 'MeshBasicMaterial'){
-          // switch to basic while keeping map/opacity/etc
-          const basic = new THREE.MeshBasicMaterial({
-            map: m.map || null,
-            color: m.color ? m.color.clone() : 0xffffff,
-            transparent: m.transparent,
-            opacity: m.opacity,
-            side: m.side,
-            depthWrite: m.depthWrite,
-            toneMapped: false,
-          });
-          // mark & swap
-          u.swapped = m;
-          u.swappedOriginal = m; // keep reference
-          Object.setPrototypeOf(m, THREE.MeshBasicMaterial.prototype);
-          Object.assign(m, basic);
-          m.needsUpdate = true;
-        }
-      } else {
-        // restore by reapplying backup on the same instance
-        if (u.backup){
-          m.onBeforeCompile = u.backup.onBeforeCompile;
-          m.toneMapped = u.backup.toneMapped;
-          m.lights = u.backup.lights;
-          m.transparent = u.backup.transparent;
-          m.opacity = u.backup.opacity;
-          m.side = u.backup.side;
-          if (u.backup.color && m.color) m.color.copy(u.backup.color);
-          m.map = u.backup.map;
-          // revert prototype if needed
-          if (m.type !== u.backup.type){
-            // reconstruct original Standard material-ish
-            const std = new THREE.MeshStandardMaterial({
-              map: m.map,
-              color: (u.backup.color||new THREE.Color(0xffffff)),
-              transparent: m.transparent,
-              opacity: m.opacity,
-              side: m.side,
-              depthWrite: m.depthWrite,
-            });
-            Object.setPrototypeOf(m, THREE.MeshStandardMaterial.prototype);
-            Object.assign(m, std);
-          }
-          m.needsUpdate = true;
-        }
+        m.userData._savedLights = { ...s };
+        m.onBeforeCompile = (shader)=>{
+          shader.fragmentShader = shader.fragmentShader.replace(
+            '#include <lights_fragment_begin>',''
+          );
+        };
+        m.lights = false;
+      }else{
+        // restore conservative subset
+        m.onBeforeCompile = s.onBeforeCompile;
+        m.lights = true;
       }
+      m.needsUpdate = true;
     });
   }
 
-  function setDoubleSide(on){
-    applyToTargets((m)=>{
+  setDoubleSide(target, on){
+    this.applyToTarget(target, m=>{
+      this.ensureState(m);
       m.side = on ? THREE.DoubleSide : THREE.FrontSide;
       m.needsUpdate = true;
     });
   }
 
-  // --- white key (white -> alpha) ---
-  function installWhiteKeyShader(m){
-    const u = ensureBackup(m);
-    if (u.whiteKeyInstalled) return;
-    u.whiteKeyInstalled = true;
-    m.onBeforeCompile = (shader)=>{
-      shader.uniforms.uWhiteKey = { value: (u.whiteKeyThreshold ?? 0.97) };
-      shader.fragmentShader = shader.fragmentShader.replace(
-        '#include <dithering_fragment>',
-        `#include <dithering_fragment>
-         float w = max(max(gl_FragColor.r, gl_FragColor.g), gl_FragColor.b);
-         if (w >= uWhiteKey) { gl_FragColor.a = 0.0; }
-        `
-      );
-    };
-    m.transparent = true;
-    m.depthWrite = false;
-    m.needsUpdate = true;
-  }
-  function setWhiteKeyEnabled(on){
-    applyToTargets((m)=>{
-      const u = ensureBackup(m);
-      u.whiteKeyEnabled = on;
-      if (on) installWhiteKeyShader(m);
-      else {
-        // restore shader
-        m.onBeforeCompile = u.backup?.onBeforeCompile || null;
+  /** White key to alpha (simple brightness key). enable by threshold>0, typical 0.7..1.0 */
+  setWhiteKey(target, threshold){
+    this.applyToTarget(target, m=>{
+      this.ensureState(m);
+      if (!threshold || threshold<=0){
+        // restore
+        m.onBeforeCompile = (this.matState.get(m).onBeforeCompile) || null;
+        m.alphaTest = 0;
         m.needsUpdate = true;
-        // transparency might be controlled by opacity separately
-        if (!m.transparent || (m.transparent && m.opacity>=1.0)){
-          m.depthWrite = true;
-        }
+        return;
       }
-    });
-  }
-  function setWhiteKeyThreshold(t){
-    applyToTargets((m)=>{
-      const u = ensureBackup(m);
-      u.whiteKeyThreshold = t;
-      installWhiteKeyShader(m);
+      m.transparent = true;
+      m.alphaTest = 0.001;
+      m.onBeforeCompile = (shader)=>{
+        shader.fragmentShader = shader.fragmentShader.replace(
+          '#include <dithering_fragment>',
+          '#include <dithering_fragment>\n' +
+          '  float lum = dot(gl_FragColor.rgb, vec3(0.299,0.587,0.114));\n' +
+          f'  if(lum > {threshold:.3f}) gl_FragColor.a = 0.0;\n'
+        );
+      };
       m.needsUpdate = true;
     });
   }
 
-  function setMaterialTarget(index){
-    state.targetIndex = index; // -1 = all
+  setHueSatLight(target, h, s, l){
+    this.applyToTarget(target, m=>{
+      this.ensureState(m);
+      // cheap multiplicative tweak: tint color when no map, else modulate via color
+      if (!m.color) return;
+      const base = hslToColor(h, Math.min(s,2), Math.min(l,2));
+      m.color.copy(base);
+      m.needsUpdate = true;
+    });
   }
 
-  return {
-    THREE, scene, camera, renderer, controls,
-    loadGLBFromArrayBuffer,
-    loadGLB: loadGLBFromArrayBuffer, // alias
-    setMaterialTarget,
-    setHSL, setOpacity, setUnlit, setDoubleSide,
-    setWhiteKeyEnabled, setWhiteKeyThreshold,
-  };
+  setBackground(isDark){
+    this.bg.set(isDark?0x101014:0xeeeeee);
+    this.scene.background = this.bg;
+  }
 }

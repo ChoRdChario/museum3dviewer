@@ -1,36 +1,18 @@
-// utils_drive_api.js — Drive API download via OAuth token (CORS-safe)
-//
-// REQUIREMENTS:
-// - User is signed in via GIS; gauth.js set token into gapi.client.
-// - CLIENT_ID origins must include your GitHub Pages origin.
-// - File must be readable by the signed-in user.
-//
-// USAGE: import { fetchDriveFileAsArrayBuffer, normalizeDriveIdFromInput } from './utils_drive_api.js'
-//
-export function normalizeDriveIdFromInput(s){
-  if (!s) throw new Error('empty file id/url');
-  const str = String(s).trim();
-  // Support share URLs
-  // - https://drive.google.com/file/d/<ID>/view?usp=sharing
-  // - https://drive.google.com/open?id=<ID>
-  // - https://drive.google.com/uc?id=<ID>&export=download
-  const m = str.match(/[-\w]{20,}/);
-  return m ? m[0] : str;
+import { getAccessToken } from './gauth.js';
+
+export function normalizeDriveIdFromInput(input){
+  if (!input) return '';
+  const m = String(input).match(/[?&]id=([a-zA-Z0-9_-]+)/) || String(input).match(/\/d\/(.+?)\//);
+  if (m) return m[1];
+  if (/^[a-zA-Z0-9_-]{10,}$/.test(input)) return input;
+  return '';
 }
 
-export async function fetchDriveFileAsArrayBuffer(id){
-  const tok = (window.gapi && gapi.client.getToken && gapi.client.getToken()) || null;
-  const access = tok && tok.access_token;
-  if (!access) throw new Error('Not signed in. Click "Sign in" first.');
-
-  const url = `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(id)}?alt=media`;
-  const res = await fetch(url, {
-    method: 'GET',
-    headers: { 'Authorization': `Bearer ${access}` }
-  });
-  if (!res.ok) {
-    const text = await res.text().catch(()=>'');
-    throw new Error(`Drive download failed ${res.status}: ${text.slice(0,200)}`);
-  }
+export async function fetchDriveFileAsArrayBuffer(fileId){
+  const token = getAccessToken();
+  if (!token) throw new Error('Not signed in');
+  const url = `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`;
+  const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+  if (!res.ok) throw new Error('Drive fetch failed ' + res.status);
   return await res.arrayBuffer();
 }
