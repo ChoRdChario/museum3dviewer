@@ -24,8 +24,12 @@ function ensureCanvas() {
     const stage = document.getElementById('stage') || document.body;
     canvas = document.createElement('canvas');
     canvas.id = 'lmy-canvas';
-    canvas.style.cssText = 'width:100%;height:100%;display:block;';
+    canvas.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;display:block;';
     stage.appendChild(canvas);
+    const hud = document.createElement('div');
+    hud.id='lmy-hud'; hud.style.cssText='position:absolute;left:8px;bottom:8px;padding:4px 8px;background:rgba(0,0,0,.5);color:#fff;font:12px/1.2 system-ui;border-radius:6px;pointer-events:none;z-index:10';
+    hud.textContent='viewer ready';
+    stage.appendChild(hud);
   }
   return canvas;
 }
@@ -98,16 +102,10 @@ async function loadBlob(blob){
       const root = gltf.scene || (gltf.scenes && gltf.scenes[0]);
       if (!root){ reject(new Error('GLTF has no scene')); return; }
       root.userData.isMainModel = true;
-      root.traverse(o=>{
-        if (o.isMesh && o.material){
-          o.material.depthWrite = true;
-          if ('transparent' in o.material) {
-            o.material.transparent = !!(o.material.alphaMap || o.material.opacity < 1.0);
-          }
-        }
-      });
       scene.add(root);
       fitToObject(root);
+      const hud = document.getElementById('lmy-hud'); if (hud) hud.textContent='model loaded';
+      console.log('[viewer] model loaded');
       resolve(gltf);
     }, (err)=> reject(err));
   });
@@ -115,15 +113,5 @@ async function loadBlob(blob){
 
 (function bootstrap(){
   window.__LMY_viewer = { loadBlob, get three(){ return { THREE, scene, camera, renderer, controls }; } };
-  document.addEventListener('lmy:load-glb-blob', async (e)=>{
-    try{
-      const blob = e?.detail?.blob;
-      if (!blob) return;
-      await loadBlob(blob);
-      console.log('[viewer] model loaded');
-    }catch(err){
-      console.warn('[viewer] load failed', err);
-    }
-  }, { passive: true });
   console.log('[viewer_bootstrap] ready');
 })();
