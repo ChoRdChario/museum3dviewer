@@ -15,10 +15,24 @@ export async function ensureViewer({ mount, spinner }) {
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x101014);
 
-  const camera = new THREE.PerspectiveCamera(60, mount.clientWidth / mount.clientHeight, 0.1, 1000);
-  camera.position.set(2.5, 2, 3);
+  // Cameras (persp + ortho)
+  const persp = new THREE.PerspectiveCamera(60, mount.clientWidth / mount.clientHeight, 0.1, 5000);
+  persp.position.set(2.5, 2, 3);
+
+  const frustum = 2.5;
+  const ortho = new THREE.OrthographicCamera(-frustum, frustum, frustum, -frustum, 0.01, 5000);
+  ortho.position.set(2.5, 2, 3);
+
+  let camera = persp;
   const controls = new OrbitControls(camera, renderer.domElement);
   controls.enableDamping = true;
+  function switchCamera(to){
+    const prevTarget = controls.target.clone();
+    camera = (to === 'ortho') ? ortho : persp;
+    controls.object = camera;
+    controls.target.copy(prevTarget);
+    camera.updateProjectionMatrix();
+  }
 
   const hemi = new THREE.HemisphereLight(0xffffff, 0x222233, 1.0);
   scene.add(hemi);
@@ -31,8 +45,14 @@ export async function ensureViewer({ mount, spinner }) {
   function onResize() {
     const w = mount.clientWidth, h = mount.clientHeight || 1;
     renderer.setSize(w, h);
-    camera.aspect = w / h;
-    camera.updateProjectionMatrix();
+    persp.aspect = w / h; persp.updateProjectionMatrix();
+    const aspect = w / h;
+    const height = frustum;
+    ortho.left   = -height * aspect;
+    ortho.right  =  height * aspect;
+    ortho.top    =  height;
+    ortho.bottom = -height;
+    ortho.updateProjectionMatrix();
   }
   new ResizeObserver(onResize).observe(mount);
 
@@ -49,11 +69,13 @@ export async function ensureViewer({ mount, spinner }) {
     const center = new THREE.Vector3(); box3.getCenter(center);
     const maxDim = Math.max(size.x, size.y, size.z) || 1;
     const dist = maxDim * 1.6;
-    camera.position.copy(center).add(new THREE.Vector3(dist, dist*0.8, dist));
+    persp.position.copy(center).add(new THREE.Vector3(dist, dist*0.8, dist));
+    ortho.position.copy(persp.position);
     controls.target.copy(center);
-    camera.near = Math.max(0.01, maxDim/1000);
-    camera.far = Math.max(1000, dist*10);
-    camera.updateProjectionMatrix();
+    persp.near = Math.max(0.01, maxDim/1000);
+    persp.far = Math.max(1000, dist*10);
+    persp.updateProjectionMatrix();
+    onResize();
     controls.update();
   }
 
@@ -64,20 +86,14 @@ export async function ensureViewer({ mount, spinner }) {
       const gltf = await loader.loadAsync(url);
       const root = gltf.scene || gltf.scenes?.[0];
       if (!root) throw new Error('GLB has no scene');
-      // Prepare materials list
       const mats = [];
-      root.traverse((o)=>{ if (o.isMesh && o.material) {
-        mats.push(o.material);
-        if (!o.name) o.name = 'mesh_' + mats.length;
-      }});
-      // Swap into scene (stop cube spin)
+      root.traverse((o)=>{ if (o.isMesh && o.material) mats.push(o.material); });
       if (state.current) scene.remove(state.current);
       state.spin = false;
       scene.add(root);
       state.current = root;
       state.materials = mats;
       frameToObject(root);
-      // notify UI
       const matInfos = mats.map((m,i)=>({ index:i, name:(m.name||('mat_'+i)) }));
       window.dispatchEvent(new CustomEvent('lmy:model-loaded', { detail: { materials: matInfos }}));
       console.log('[viewer] GLB loaded; meshes:', mats.length);
@@ -119,6 +135,21 @@ export async function ensureViewer({ mount, spinner }) {
     }
   }
 
+  function setBackground(hex){ scene.background = new THREE.Color(hex); }
+  function setProjection(mode){ switchCamera(mode==='ortho'?'ortho':'persp'); }
+  function setViewPreset(preset){
+    const t = controls.target.clone();
+    const d = 3;
+    if (preset==='front')   camera.position.set(t.x, t.y, t.z + d);
+    if (preset==='back')    camera.position.set(t.x, t.y, t.z - d);
+    if (preset==='left')    camera.position.set(t.x - d, t.y, t.z);
+    if (preset==='right')   camera.position.set(t.x + d, t.y, t.z);
+    if (preset==='top')     camera.position.set(t.x, t.y + d, t.z);
+    if (preset==='bottom')  camera.position.set(t.x, t.y - d, t.z);
+    if (preset==='iso')     camera.position.set(t.x + d, t.y + d*0.8, t.z + d);
+    camera.updateProjectionMatrix();
+  }
+
   const raycaster = new THREE.Raycaster();
   function raycastFromClientXY(clientX, clientY){
     const rect = renderer.domElement.getBoundingClientRect();
@@ -130,12 +161,21 @@ export async function ensureViewer({ mount, spinner }) {
     return null;
   }
 
+  function projectToScreen(vec3){
+    const v = vec3.clone().project(camera);
+    const rect = renderer.domElement.getBoundingClientRect();
+    const sx = (v.x * 0.5 + 0.5) * rect.width;
+    const sy = (-v.y * 0.5 + 0.5) * rect.height;
+    return { x:sx, y:sy };
+  }
+
   return {
     THREE, scene, camera, renderer, controls,
     loadGLBFromArrayBuffer,
     setHSL, setOpacity, setUnlit, setDoubleSide,
-    raycastFromClientXY,
+    raycastFromClientXY, projectToScreen,
     getMaterials: ()=> state.materials,
-    setSpin: (on)=> state.spin = !!on
+    setSpin: (on)=> state.spin = !!on,
+    setBackground, setProjection, setViewPreset
   };
 }

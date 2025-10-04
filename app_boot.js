@@ -1,6 +1,6 @@
-import { ensureViewer } from './viewer.js?v=20251004ui2';
-import { setupUI } from './ui.js?v=20251004ui2';
-import { setupPins } from './pins.js?v=20251004ui2';
+import { ensureViewer } from './viewer.js?v=20251004tabs';
+import { setupUI } from './ui.js?v=20251004tabs';
+import { setupPins } from './pins.js?v=20251004tabs';
 import { setupAuth } from './gauth.js?v=20251004ui2';
 
 const stage = document.getElementById('stage');
@@ -9,7 +9,6 @@ const spinner = document.getElementById('spinner');
 const app = {
   viewer: null,
   auth: null,
-  modelMat: null,
   state: {
     currentGLBId: null,
     selectedPin: null,
@@ -30,12 +29,11 @@ const app = {
   setupUI(app);
   setupPins(app);
 
-  // auto-load from URL ?id=
+  // auto-load ?id=
   const params = new URLSearchParams(location.search);
   const id = params.get('id');
   if (id) {
     document.getElementById('fileIdInput').value = id;
-    document.getElementById('btnLoad').click();
   } else {
     spinner?.remove();
   }

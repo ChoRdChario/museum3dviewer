@@ -3,45 +3,45 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>LociMyu v6.6 UI Integrated (GIS pre-push)</title>
+  <title>LociMyu v6.6 (Tabs/View/Leader)</title>
   <link rel="icon" href="./favicon.ico">
   <style>
     html,body{height:100%;margin:0;background:#0f0f13;color:#ddd;font:14px/1.4 system-ui,Segoe UI,Roboto,Helvetica,Arial}
-    #app{display:grid;grid-template-columns:1fr 360px;grid-template-rows:100vh;gap:0}
+    #app{display:grid;grid-template-columns:1fr 380px;grid-template-rows:100vh;gap:0}
     #stage{position:relative;background:#101014}
     #spinner{position:absolute;inset:0;display:grid;place-items:center;color:#ddd}
-    aside#panel{background:#14141a;border-left:1px solid #222;display:flex;flex-direction:column;min-width:280px}
+    #overlay{position:absolute;left:12px;bottom:12px;max-width:min(420px,70vw);background:rgba(12,12,16,.84);backdrop-filter:blur(6px);border:1px solid #333;border-radius:.75rem;padding:.75rem;display:none}
+    #overlay img{max-width:100%;border-radius:.5rem;border:1px solid #333;margin-top:.5rem}
+    /* screen-space leader line */
+    #leader{position:absolute;inset:0;pointer-events:none}
+
+    aside#panel{background:#14141a;border-left:1px solid #222;display:flex;flex-direction:column;min-width:300px}
     header#topbar{display:flex;align-items:center;gap:.5rem;padding:.5rem .75rem;border-bottom:1px solid #222}
     .chip{padding:.25rem .5rem;border-radius:999px;border:1px solid #444;cursor:pointer}
     .chip.ok{border-color:#2dd4bf;color:#2dd4bf}
     .chip.warn{border-color:#f59e0b;color:#f59e0b}
-    section{padding:.75rem .75rem;overflow:auto}
-    section h3{margin:.25rem 0 .5rem;font-size:13px;color:#aaa;text-transform:uppercase;letter-spacing:.08em}
+    .btn{padding:.35rem .6rem;border:1px solid #444;border-radius:.5rem;background:#1a1a22;color:#ddd;cursor:pointer}
+    .muted{color:#888}
+
+    /* tabs */
+    #tabs{display:flex;border-bottom:1px solid #222}
+    .tab{flex:1;text-align:center;padding:.5rem;cursor:pointer;border-right:1px solid #222;background:#16161d}
+    .tab.active{background:#1c1c26;font-weight:600}
+    .pane{display:none;padding:.75rem .75rem;overflow:auto}
+    .pane.active{display:block}
     .row{display:flex;align-items:center;gap:.5rem;margin:.25rem 0}
     .col{display:flex;flex-direction:column;gap:.25rem}
     input[type="range"]{width:100%}
-    .btn{padding:.4rem .6rem;border:1px solid #444;border-radius:.5rem;background:#1a1a22;color:#ddd;cursor:pointer}
     .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:.5rem}
     .card{background:#1a1a22;border:1px solid #2a2a33;border-radius:.5rem;overflow:hidden}
     .card img{width:100%;display:block;aspect-ratio:1/1;object-fit:cover;background:#0b0b0f}
-    .muted{color:#888}
-    @media (max-width:960px){#app{grid-template-columns:1fr}aside#panel{position:fixed;inset:auto 0 0 0;height:48vh;transform:translateY(calc(48vh - 42px));transition:.25s;box-shadow:0 -8px 24px rgba(0,0,0,.35)}
-      aside#panel.expanded{transform:translateY(0)}
-      header#topbar{justify-content:space-between}}
-    #overlay{position:absolute;left:12px;bottom:12px;max-width:min(420px,70vw);background:rgba(12,12,16,.84);backdrop-filter:blur(6px);border:1px solid #333;border-radius:.75rem;padding:.75rem;display:none}
-    #overlay img{max-width:100%;border-radius:.5rem;border:1px solid #333;margin-top:.5rem}
+    @media (max-width:960px){#app{grid-template-columns:1fr}aside#panel{position:fixed;inset:auto 0 0 0;height:50vh;transform:translateY(calc(50vh - 42px));transition:.25s;box-shadow:0 -8px 24px rgba(0,0,0,.35)}
+      aside#panel.expanded{transform:translateY(0)}}
   </style>
 
-  <!-- Import map for bare 'three' -->
   <script type="importmap">
-  {
-    "imports": {
-      "three": "https://unpkg.com/three@0.157.0/build/three.module.js"
-    }
-  }
+  { "imports": { "three": "https://unpkg.com/three@0.157.0/build/three.module.js" } }
   </script>
-
-  <!-- Google APIs + Google Identity Services (GIS) -->
   <script src="https://apis.google.com/js/api.js" async defer></script>
   <script src="https://accounts.google.com/gsi/client" async defer></script>
 </head>
@@ -49,6 +49,7 @@
   <div id="app">
     <div id="stage">
       <div id="spinner">booting…</div>
+      <svg id="leader"><line id="leaderLine" x1="0" y1="0" x2="0" y2="0" stroke="#ffcc55" stroke-width="2" opacity="0"/></svg>
       <div id="overlay"></div>
     </div>
     <aside id="panel">
@@ -56,41 +57,67 @@
         <strong>LociMyu v6.6</strong>
         <div style="flex:1"></div>
         <span id="authChip" class="chip warn">Sign in</span>
-        <span id="modeChip" class="chip">persp</span>
         <button id="expandBtn" class="btn" title="Toggle panel">▴</button>
       </header>
-      <section id="secLoad">
-        <h3>Load</h3>
+
+      <div id="tabs">
+        <div class="tab active" data-tab="cap">Caption</div>
+        <div class="tab" data-tab="mat">Material</div>
+        <div class="tab" data-tab="view">View</div>
+      </div>
+
+      <div id="pane-cap" class="pane active">
         <div class="row">
           <input id="fileIdInput" placeholder="Drive File ID or URL" style="flex:1;padding:.4rem;background:#0f0f13;border:1px solid #333;border-radius:.4rem;color:#ddd">
           <button id="btnLoad" class="btn">GLB</button>
         </div>
-        <div class="col muted" id="loadHint">?id=&lt;fileId&gt; または <b>demo</b> でデモモデルをロード</div>
-      </section>
-      <section id="secMaterial">
-        <h3>Material</h3>
+        <div class="col muted">?id=&lt;fileId&gt; または <b>demo</b> でデモモデル</div>
+
+        <h3 class="muted">Pins & Caption</h3>
+        <div class="row"><button id="btnAddPin" class="btn" title="Shift+Click in viewportでも追加可">+ Pin</button><button id="btnClearPins" class="btn">Clear</button></div>
+        <div class="col">
+          <input id="capTitle" placeholder="Title" style="padding:.4rem;background:#0f0f13;border:1px solid #333;border-radius:.4rem;color:#ddd">
+          <textarea id="capBody" placeholder="Body" rows="3" style="padding:.4rem;background:#0f0f13;border:1px solid #333;border-radius:.4rem;color:#ddd"></textarea>
+          <div class="grid" id="imgGrid"></div>
+        </div>
+      </div>
+
+      <div id="pane-mat" class="pane">
+        <div class="muted" style="margin-bottom:.25rem">Material target</div>
+        <select id="matSelect" style="width:100%;padding:.35rem;background:#0f0f13;border:1px solid #333;border-radius:.4rem;color:#ddd;margin:.25rem 0 .5rem;">
+          <option value="-1">(All)</option>
+        </select>
         <div class="row"><label style="width:72px">Hue</label><input id="slHue" type="range" min="0" max="360" value="210"></div>
         <div class="row"><label style="width:72px">Sat</label><input id="slSat" type="range" min="0" max="100" value="40"></div>
         <div class="row"><label style="width:72px">Light</label><input id="slLight" type="range" min="0" max="100" value="45"></div>
         <div class="row"><label style="width:72px">Opacity</label><input id="slOpacity" type="range" min="0" max="100" value="100"></div>
         <div class="row"><button id="btnUnlit" class="btn">Unlit: off</button><button id="btnDouble" class="btn">DoubleSide: off</button></div>
         <div class="row"><label style="width:72px">White→α</label><input id="slWhiteKey" type="range" min="70" max="100" value="95"></div>
-      </section>
-      <section id="secPins">
-        <h3>Pins & Caption</h3>
-        <div class="row">
-          <button id="btnAddPin" class="btn" title="Shift+Click in viewportでも追加可">+ Pin</button>
-          <button id="btnClearPins" class="btn">Clear</button>
+      </div>
+
+      <div id="pane-view" class="pane">
+        <h3 class="muted">Camera Presets</h3>
+        <div class="row" style="flex-wrap:wrap;gap:.4rem">
+          <button class="btn vp" data-vp="iso">Iso</button>
+          <button class="btn vp" data-vp="front">Front</button>
+          <button class="btn vp" data-vp="back">Back</button>
+          <button class="btn vp" data-vp="left">Left</button>
+          <button class="btn vp" data-vp="right">Right</button>
+          <button class="btn vp" data-vp="top">Top</button>
+          <button class="btn vp" data-vp="bottom">Bottom</button>
         </div>
-        <div class="col">
-          <input id="capTitle" placeholder="Title" style="padding:.4rem;background:#0f0f13;border:1px solid #333;border-radius:.4rem;color:#ddd">
-          <textarea id="capBody" placeholder="Body" rows="3" style="padding:.4rem;background:#0f0f13;border:1px solid #333;border-radius:.4rem;color:#ddd"></textarea>
-          <div class="grid" id="imgGrid"></div>
+        <h3 class="muted" style="margin-top:.5rem">Projection</h3>
+        <div class="row"><button id="btnProj" class="btn">Projection: persp</button></div>
+        <h3 class="muted" style="margin-top:.5rem">Background</h3>
+        <div class="row" style="gap:.4rem">
+          <button class="btn bg" data-bg="#101014">Dark</button>
+          <button class="btn bg" data-bg="#2b2b31">Gray</button>
+          <button class="btn bg" data-bg="#f5f5f7" style="color:#111">White</button>
         </div>
-      </section>
+      </div>
     </aside>
   </div>
 
-  <script type="module" src="./app_boot.js?v=20251004ui2"></script>
+  <script type="module" src="./app_boot.js?v=20251004tabs"></script>
 </body>
 </html>
