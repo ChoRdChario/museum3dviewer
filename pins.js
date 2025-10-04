@@ -1,4 +1,4 @@
-// pins.js — per-pin delete (UI buttons + keyboard) + keep previous feedback features
+// pins.js — per-pin delete (fixed JS syntax) + remove 'clear all' button
 import { ensureSpreadsheetForFile, ensurePinsHeader, listSheetTitles, loadPins, savePins } from './sheets_api.js?v=20251004s3';
 import { downloadImageAsBlob } from './utils_drive_images.js?v=20251004img2';
 
@@ -16,13 +16,16 @@ export function setupPins(app){
   const titleInput = document.getElementById('capTitle');
   const bodyInput  = document.getElementById('capBody');
   const btnAdd = document.getElementById('btnAddPin');
-  const btnClear = document.getElementById('btnClearPins');
+  const btnClear = document.getElementById('btnClearPins'); // will remove
   const imgGrid = document.getElementById('imgGrid');
   const sheetSelect = document.getElementById('sheetSelect');
   const btnNewSheet = document.getElementById('btnNewSheet');
   const pinFilter = document.getElementById('pinFilter');
   const capList = document.getElementById('capList');
   const pinPalette = document.getElementById('pinPalette');
+
+  // Remove dangerous "clear all pins" button if present
+  if (btnClear) btnClear.remove();
 
   // leader svg (created if missing) + halo
   const stage = document.getElementById('stage') || app.viewer.renderer.domElement.parentElement;
@@ -96,6 +99,7 @@ export function setupPins(app){
   }
   setupPalette();
 
+  // draggable overlay
   (function makeDraggable(){
     let dragging=false, sx=0, sy=0, startLeft=0, startTop=0;
     overlay.style.left='12px'; overlay.style.bottom='12px';
@@ -179,6 +183,7 @@ export function setupPins(app){
     }).join('');
   }
 
+  // list click (select or delete)
   capList.addEventListener('click', (e)=>{
     const row = e.target.closest('[data-id]'); if (!row) return;
     const id = row.getAttribute('data-id');
@@ -192,6 +197,7 @@ export function setupPins(app){
     selectPin(rec);
   });
 
+  // keyboard delete
   window.addEventListener('keydown', (e)=>{
     if ((e.key === 'Delete' || e.key === 'Backspace') && selected){
       const tag = (document.activeElement && document.activeElement.tagName) || '';
@@ -283,6 +289,7 @@ export function setupPins(app){
   }
   pinFilter.addEventListener('change', applyFilter);
 
+  // click on canvas
   app.viewer.renderer.domElement.addEventListener('click', (e)=>{
     if (e.shiftKey){
       const hit = app.viewer.raycastFromClientXY(e.clientX, e.clientY);
@@ -312,14 +319,6 @@ export function setupPins(app){
     if (hit) addPinFromHit(hit);
   });
 
-  btnClear.addEventListener('click', ()=>{
-    pins.forEach(p=> app.viewer.scene.remove(p.obj));
-    pins.length = 0;
-    renderCapList();
-    selectPin(null);
-    scheduleSave(true);
-  });
-
   function deletePin(rec){
     try{
       const obj = rec.obj;
@@ -332,7 +331,7 @@ export function setupPins(app){
         else { app.viewer.scene.remove(obj); }
       }
       requestAnimationFrame(tick);
-    }catch{ app.viewer.scene.remove(rec.obj); }
+    }catch(e){ app.viewer.scene.remove(rec.obj); }
     const idx = pins.findIndex(p=> p.id===rec.id);
     if (idx>=0) pins.splice(idx,1);
     if (selected && selected.id===rec.id) { selected=null; hideOverlay(); }
@@ -354,10 +353,14 @@ export function setupPins(app){
   titleInput.addEventListener('input', ()=>{ if (selected){ selected.title = titleInput.value; showOverlay({ title:selected.title, body:selected.body, imgUrl: resolveImageURL(selected) }); renderCapList(); scheduleSave(); } });
   bodyInput.addEventListener('input', ()=>{ if (selected){ selected.body = bodyInput.value; showOverlay({ title:selected.title, body:selected.body, imgUrl: resolveImageURL(selected) }); scheduleSave(); } });
 
+  // image attach feedback (flash/check/fly) with correct JS
   imgGrid.addEventListener('click', async (e)=>{
     const img = e.target.closest('img'); if (!img || !selected) return;
-    const card = img.closest('.card'); if (card){ card.classList.add('lmy-flash'); setTimeout(()=> card.classList.remove('lmy-flash'), 350);
-      let chk = card.querySelector('.lmy-check'); if (!chk){ chk = document.createElement('div'); chk.className='lmy-check'; chk.textContent='✓'; card.style.position='relative'; card.appendChild(chk); setTimeout(()=> chk.remove(), 600); }
+    const card = img.closest('.card');
+    if (card){
+      card.classList.add('lmy-flash'); setTimeout(()=> card.classList.remove('lmy-flash'), 350);
+      let chk = card.querySelector('.lmy-check');
+      if (!chk){ chk = document.createElement('div'); chk.className='lmy-check'; chk.textContent='✓'; card.style.position='relative'; card.appendChild(chk); setTimeout(()=> chk.remove(), 600); }
     }
     try{
       const rect = img.getBoundingClientRect();
@@ -372,29 +375,27 @@ export function setupPins(app){
         { transform:`translate(0,0) scale(1)`, opacity:.95 },
         { transform:`translate(${ov.left-rect.left+16}px, ${ov.top-rect.top+16}px) scale(${scale})`, opacity:.2 }
       ], { duration: 420, easing:'cubic-bezier(.22,.61,.36,1)' }).onfinish = ()=> fly.remove();
-    }catch:  # noqa
-      pass
+    }catch(e){ /* ignore */ }
 
     const fid = img.dataset.id;
-    if (fid):
-      try:
-        blob = await downloadImageAsBlob(fid)
-        url = URL.createObjectURL(blob)
-        prev = imageCache.get(fid)
-        if prev and prev.startswith('blob:'):
-          URL.revokeObjectURL(prev)
-        imageCache.set(fid, url)
-        selected.imageId = fid
-        showOverlay({ title:selected.title, body:selected.body, imgUrl:url })
-        renderCapList()
-        scheduleSave()
-      except Exception as err:
-        console.error('[pins] image fetch failed', err)
-    else:
-      selected.imageId = img.src
-      showOverlay({ title:selected.title, body:selected.body, imgUrl: img.src })
-      renderCapList()
-      scheduleSave()
+    if (fid){
+      try{
+        const blob = await downloadImageAsBlob(fid);
+        const url = URL.createObjectURL(blob);
+        const prev = imageCache.get(fid);
+        if (prev && typeof prev === 'string' && prev.startsWith('blob:')) URL.revokeObjectURL(prev);
+        imageCache.set(fid, url);
+        selected.imageId = fid;
+        showOverlay({ title:selected.title, body:selected.body, imgUrl:url });
+        renderCapList();
+        scheduleSave();
+      }catch(err){ console.error('[pins] image fetch failed', err); }
+    }else{
+      selected.imageId = img.src;
+      showOverlay({ title:selected.title, body:selected.body, imgUrl: img.src });
+      renderCapList();
+      scheduleSave();
+    }
   });
 
   async function populateSheetSelect(){
