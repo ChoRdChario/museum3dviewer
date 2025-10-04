@@ -1,57 +1,74 @@
-// features/probe_viewer_visibility.js
+
+/**
+ * probe_viewer_visibility.js (revised)
+ * - Logs host and canvas visibility metrics
+ * - If no canvas is present after 1s, ensures a tiny demo viewer to verify CSS/GL stack
+ * - Uses relative import for three to satisfy browser module resolver
+ */
 (function(){
+  const log = (...args)=>console.log("[probe]", ...args);
+
   function markCanvas() {
-    const cvs = Array.from(document.querySelectorAll('canvas'));
-    cvs.forEach((c,i)=>{
-      c.style.outline = '3px solid #ff0044';
-      c.style.background = c.style.background || '#0f0f0f';
-      const r = c.getBoundingClientRect();
-      console.log(`[probe] canvas#${i} ${Math.round(r.width)}x${Math.round(r.height)} vis=${getComputedStyle(c).visibility} disp=${getComputedStyle(c).display} z=${c.style.zIndex||'-'}`);
-    });
-    if (!cvs.length) console.warn('[probe] no canvas found');
+    const cvs = document.querySelector("canvas");
+    if (!cvs) { log("no canvas found"); return false; }
+    const r = cvs.getBoundingClientRect();
+    const styles = getComputedStyle(cvs);
+    log(`canvas ${Math.round(r.width)}x${Math.round(r.height)} vis=${styles.visibility} disp=${styles.display} pos=${styles.position}`);
+    cvs.dataset.probe = "ok";
+    return true;
   }
-  function markHosts() {
-    ['#viewer-host','#stage','#app','#container'].forEach(sel=>{
-      const el = document.querySelector(sel);
-      if (!el) return;
-      el.style.outline = '2px dashed #44ccff';
-      const r = el.getBoundingClientRect();
-      console.log(`[probe] host ${sel} ${Math.round(r.width)}x${Math.round(r.height)} disp=${getComputedStyle(el).display} pos=${getComputedStyle(el).position} z=${getComputedStyle(el).zIndex}`);
-    });
+
+  function markHost() {
+    const host = document.getElementById("stage") || document.getElementById("viewer-host") || document.body;
+    const r = host.getBoundingClientRect();
+    const styles = getComputedStyle(host);
+    log(`host #${host.id||"body"} ${Math.round(r.width)}x${Math.round(r.height)} disp=${styles.display} pos=${styles.position} z=${styles.zIndex}`);
+    return host;
   }
-  function ensureDemo() {
-    if (window.__LMY_DEMO) return;
-    const existing = document.querySelector('canvas');
-    if (existing) return; // キャンバスがあるなら無理に追加しない
-    const host = document.querySelector('#viewer-host') || (function(){
-      const d=document.createElement('div'); d.id='viewer-host';
-      d.style.cssText='position:fixed;inset:0;z-index:0;background:#0f0f0f';
-      document.body.appendChild(d); return d;
-    })();
-    Promise.all([
-      import('https://unpkg.com/three@0.160.0/build/three.module.js'),
-      import('https://unpkg.com/three@0.160.0/examples/jsm/controls/OrbitControls.js'),
-    ]).then(([THREE, {OrbitControls}])=>{
-      const renderer = new THREE.WebGLRenderer({ antialias:true, alpha:true });
-      renderer.setSize(host.clientWidth||innerWidth, host.clientHeight||innerHeight, false);
-      host.appendChild(renderer.domElement);
+
+  async function ensureDemo(host) {
+    try {
+      if (document.querySelector("canvas")) return; // canvas exists, do nothing
+      // Import three from relative path used in this repo
+      const THREE = await import("../lib/three.module.js").catch(async () => {
+        // fallback one level up if this script is served from /museum3dviewer/features
+        return await import("./../lib/three.module.js");
+      });
+      const canvas = document.createElement("canvas");
+      canvas.id = "probe-demo-canvas";
+      canvas.style.cssText = "position:absolute;inset:0;display:block;";
+      host.appendChild(canvas);
+      const renderer = new THREE.WebGLRenderer({canvas, antialias:true, alpha:true});
+      renderer.setSize(host.clientWidth, host.clientHeight, false);
       const scene = new THREE.Scene();
-      const camera = new THREE.PerspectiveCamera(50,(host.clientWidth||innerWidth)/(host.clientHeight||innerHeight),0.01,1000);
-      camera.position.set(2,1.5,3);
-      const ctl = new OrbitControls(camera, renderer.domElement);
-      scene.add(new THREE.HemisphereLight(0xffffff,0x222222,1));
+      const camera = new THREE.PerspectiveCamera(50, host.clientWidth/host.clientHeight, 0.1, 100);
+      camera.position.set(2,2,3);
       const geo = new THREE.BoxGeometry(1,1,1);
-      const mat = new THREE.MeshStandardMaterial({ color:0x55ccff, roughness:0.6, metalness:0.1 });
-      const mesh = new THREE.Mesh(geo,mat); scene.add(mesh);
-      const grid = new THREE.GridHelper(10,10,0x444444,0x222222); scene.add(grid);
-      function fit(){ const w=host.clientWidth||innerWidth, h=host.clientHeight||innerHeight; renderer.setSize(w,h,false); camera.aspect=w/h; camera.updateProjectionMatrix(); }
-      addEventListener('resize', fit); fit();
-      (function loop(){ requestAnimationFrame(loop); mesh.rotation.y += 0.01; ctl.update(); renderer.render(scene,camera); })();
-      window.__LMY_DEMO = true;
-      console.log('[probe] demo viewer mounted');
-    }).catch(e=>console.warn('[probe] demo mount failed', e));
+      const mat = new THREE.MeshNormalMaterial();
+      const cube = new THREE.Mesh(geo, mat);
+      scene.add(cube);
+      const light = new THREE.DirectionalLight(0xffffff, 1); light.position.set(1,2,3); scene.add(light);
+      function onResize(){
+        const w = host.clientWidth, h = host.clientHeight;
+        renderer.setSize(w,h,false);
+        camera.aspect = w/h; camera.updateProjectionMatrix();
+      }
+      window.addEventListener("resize", onResize);
+      (function animate(){
+        cube.rotation.x += 0.01; cube.rotation.y += 0.015;
+        renderer.render(scene,camera);
+        requestAnimationFrame(animate);
+      })();
+      log("demo mounted");
+    } catch(e) {
+      console.warn("[probe] demo mount failed", e);
+    }
   }
-  window.addEventListener('load', ()=>{
-    setTimeout(()=>{ markHosts(); markCanvas(); ensureDemo(); }, 0);
+
+  window.addEventListener("DOMContentLoaded", () => {
+    const host = markHost();
+    setTimeout(() => {
+      if (!markCanvas()) ensureDemo(host);
+    }, 1000);
   });
 })();

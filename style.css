@@ -1,7 +1,17 @@
-/* LociMyu layout fix (viewer visible) */
-html, body { height: 100%; margin: 0; }
-#app { display: flex; height: 100vh; overflow: hidden; }
-#viewer-host { flex: 1 1 auto; min-width: 0; position: relative; background: #0f0f0f; }
-#viewer-host canvas { width: 100% !important; height: 100% !important; display: block; }
-#side { width: 300px; min-width: 220px; max-width: 40%; overflow: auto; background:#111; color:#eee; padding:8px; border-left:1px solid #222;}
-#toolbar { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+
+/* style.css (reinforced) */
+html, body { height:100%; margin:0; background:#0f0f10; color:#ddd; }
+#stage, #viewer-host {
+  position: relative;
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+  display:block;
+}
+canvas {
+  position:absolute;
+  inset:0;
+  display:block !important;
+  width:100% !important;
+  height:100% !important;
+}

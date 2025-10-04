@@ -1,41 +1,17 @@
+
 <!doctype html>
 <html lang="ja">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-  <title>LociMyu (Auth Patched)</title>
-
-  <!-- ▼ 必須: Google Identity Services / GAPI -->
-  <script src="https://accounts.google.com/gsi/client" async defer></script>
-  <script src="https://apis.google.com/js/api.js"></script>
-
-  <style>
-    html, body { height:100%; margin:0; background:#0f0f10; color:#eee; font-family:system-ui, -apple-system, Segoe UI, Roboto, 'Noto Sans JP', sans-serif; }
-    .page { display:grid; grid-template-columns: 1fr 360px; height:100%; overflow:hidden; }
-    #stage { position:relative; }
-    #side  { background:#101214; border-left:1px solid #222; padding:12px; overflow:auto; }
-    h3.brand { display:flex; align-items:center; gap:8px; margin:6px 0 12px; font-weight:600; }
-    /* auth chips should always be tappable */
-    #auth-bar, #auth-box-side, #auth-inline { pointer-events:auto; }
-  </style>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>LociMyu – probe build</title>
+  <link rel="stylesheet" href="./style.css" />
 </head>
 <body>
-  <div class="page">
-    <main id="stage">
-      <!-- あなたの3Dビューアがここに描画されます（既存のスクリプトはそのままでOK） -->
-    </main>
-    <aside id="side">
-      <h3 class="brand">LociMyu <span id="auth-inline" style="margin-left:8px;"></span></h3>
-      <section>
-        <p style="opacity:.7;font-size:12px;margin-top:0">サインインUIは右上/右ペイン/タイトル横に表示されます。</p>
-      </section>
-    </aside>
-  </div>
+  <div id="stage"></div>
 
-  <!-- ▼ 既存のアプリ初期化スクリプトはこの行より上/下どちらでもOK（削除不要） -->
-
-  <!-- ▼ これ1行でAuth UIが必ず描画され、GIS/GAPI初期化後にDrive/Sheets配線(存在時)を起動します -->
-  <script type="module" src="./features/init_cloud_boot.js"></script>
-  <script src="./features/probe_viewer_visibility.js"></script>
+  <!-- your existing scripts will also run; these two lines are safe to keep during diagnosis -->
+  <script type="module" src="./features/probe_viewer_visibility.js"></script>
+  <script type="module" src="./features/fallback_viewer_bootstrap.js"></script>
 </body>
 </html>
