@@ -1,14 +1,8 @@
-// LociMyu quickfix: use CDN-pinned three.js to avoid 404s from local /lib path
-// Drop this file in place of your current fallback_viewer_bootstrap.js
-// No other changes required.
-//
-// If you later restore local libs, change THREE_URL/ORBIT_URL to relative paths.
-
+// fallback_viewer_bootstrap.js — CDN-pinned three.js to avoid 404s from local /lib path
 const THREE_URL = 'https://unpkg.com/three@0.157.0/build/three.module.js';
 const ORBIT_URL = 'https://unpkg.com/three@0.157.0/examples/jsm/controls/OrbitControls.js';
 
 export async function ensureDemo({ mount }) {
-  // Ensure mount exists
   if (!mount) throw new Error('ensureDemo: mount element not provided');
   let spinner = document.getElementById('spinner');
   if (!spinner) {
@@ -45,7 +39,6 @@ export async function ensureDemo({ mount }) {
     const light = new THREE.HemisphereLight(0xffffff, 0x222233, 1.0);
     scene.add(light);
 
-    // Simple visual
     const geo = new THREE.BoxGeometry(1,1,1);
     const mat = new THREE.MeshStandardMaterial({ color: 0x4da3ff, metalness: 0.2, roughness: 0.4 });
     const mesh = new THREE.Mesh(geo, mat);
