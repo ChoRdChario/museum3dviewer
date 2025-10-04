@@ -1,4 +1,4 @@
-// viewer.js — with WhiteKey (alphaTest cutout) + robust opacity handling
+// viewer.js — unlit toggle fix + WhiteKey enable/disable (cut WHITE using alphaTest)
 const THREE_URL = 'three';
 const GLTF_URL = 'https://unpkg.com/three@0.157.0/examples/jsm/loaders/GLTFLoader.js';
 const ORBIT_URL = 'https://unpkg.com/three@0.157.0/examples/jsm/controls/OrbitControls.js';
@@ -11,7 +11,6 @@ export async function ensureViewer({ mount, spinner }) {
   const renderer = new THREE.WebGLRenderer({ antialias: true, alpha:false });
   renderer.setPixelRatio(devicePixelRatio);
   renderer.setSize(mount.clientWidth, mount.clientHeight);
-  // keep default renderer.sortObjects = true;
   mount.appendChild(renderer.domElement);
 
   const scene = new THREE.Scene();
@@ -23,7 +22,6 @@ export async function ensureViewer({ mount, spinner }) {
   const controls = new OrbitControls(camera, renderer.domElement);
   controls.enableDamping = true;
 
-  // Lights
   const hemi = new THREE.HemisphereLight(0xffffff, 0x222233, 0.9);
   scene.add(hemi);
   const dir = new THREE.DirectionalLight(0xffffff, 0.9);
@@ -32,17 +30,17 @@ export async function ensureViewer({ mount, spinner }) {
 
   const state = {
     current: null,
-    materials: [],  // unique materials
+    materials: [],
     spin: true,
     ortho: null,
-    whiteKey: 1.0,  // 0.70..1.00 expected
+    whiteKeyEnabled: false,
+    whiteKeyThreshold: 1.0, // 0.70..1.00
   };
 
-  const clock = new THREE.Clock();
   (function loop(){
     requestAnimationFrame(loop);
     if (state.current && state.spin) {
-      state.current.rotation.y += 0.15 * clock.getDelta();
+      state.current.rotation.y += 0.015;
     }
     controls.update();
     renderer.render(scene, controls.object || camera);
@@ -53,14 +51,10 @@ export async function ensureViewer({ mount, spinner }) {
     renderer.setSize(w, h);
     if (state.ortho) {
       const fr = 0.8;
-      state.ortho.left = -fr * w/h;
-      state.ortho.right = fr * w/h;
-      state.ortho.top = fr;
-      state.ortho.bottom = -fr;
+      state.ortho.left = -fr*w/h; state.ortho.right = fr*w/h; state.ortho.top = fr; state.ortho.bottom = -fr;
       state.ortho.updateProjectionMatrix();
     } else {
-      camera.aspect = w/h;
-      camera.updateProjectionMatrix();
+      camera.aspect = w/h; camera.updateProjectionMatrix();
     }
   });
 
@@ -68,12 +62,10 @@ export async function ensureViewer({ mount, spinner }) {
     const box = new THREE.Box3().setFromObject(obj);
     const size = new THREE.Vector3(); box.getSize(size);
     const center = new THREE.Vector3(); box.getCenter(center);
-    const maxDim = Math.max(size.x, size.y, size.z) || 1;
-    const dist = maxDim * 1.8;
-    camera.position.copy(center).add(new THREE.Vector3(dist, dist*0.6, dist));
-    camera.near = dist/1000; camera.far = dist*10; camera.updateProjectionMatrix();
-    controls.target.copy(center);
-    controls.update();
+    const d = Math.max(size.x, size.y, size.z) * 1.8 || 1.0;
+    camera.position.copy(center).add(new THREE.Vector3(d, d*0.6, d));
+    camera.near = d/1000; camera.far = d*10; camera.updateProjectionMatrix();
+    controls.target.copy(center); controls.update();
   }
 
   async function loadGLBFromArrayBuffer(buf) {
@@ -87,7 +79,6 @@ export async function ensureViewer({ mount, spinner }) {
       if (state.current) scene.remove(state.current);
       state.spin = false; scene.add(root); state.current = root;
 
-      // gather unique materials
       const uniq = new Map();
       root.traverse(o=>{
         if (!o.isMesh) return;
@@ -96,8 +87,8 @@ export async function ensureViewer({ mount, spinner }) {
       });
       state.materials = Array.from(uniq.values());
 
-      // apply current whiteKey to all mats (idempotent)
-      applyWhiteKeyToMaterials(state.whiteKey, null);
+      // re-apply white-key if enabled
+      if (state.whiteKeyEnabled) applyWhiteKeyToMaterials(state.whiteKeyThreshold, null);
 
       frameToObject(root);
       const matInfos = state.materials.map((m,i)=>({ index:i, name:(m.name||`mat.${i}`) }));
@@ -121,27 +112,19 @@ export async function ensureViewer({ mount, spinner }) {
   }
 
   function setHSL(h, s, l, index){
+    const h01=h/360, s01=Math.max(0,Math.min(1,s/100)), l01=Math.max(0,Math.min(1,l/100));
     forEachTarget(index, (mesh, mats)=>{
-      mats.forEach(m=>{
-        if (!m || !m.color) return;
-        const h01 = (h/360);
-        const s01 = Math.max(0, Math.min(1, s/100));
-        const l01 = Math.max(0, Math.min(1, l/100));
-        m.color.setHSL(h01, s01, l01);
-        m.needsUpdate = true;
-      });
+      mats.forEach(m=>{ if(m && m.color){ m.color.setHSL(h01,s01,l01); m.needsUpdate=true; } });
     });
   }
 
   function setOpacity(val, index){
-    // val: 0..1
     forEachTarget(index, (mesh, mats)=>{
       mats.forEach(m=>{
         if (!m) return;
         m.opacity = val;
         const translucent = val < 0.999;
         m.transparent = translucent;
-        // 深度書き込みを切ると描画順の破綻が減る（完全解ではないが実務上一番安定）
         m.depthWrite = !translucent;
         m.depthTest = true;
         m.needsUpdate = true;
@@ -151,77 +134,94 @@ export async function ensureViewer({ mount, spinner }) {
 
   function setDoubleSide(on, index){
     forEachTarget(index, (mesh, mats)=>{
-      mats.forEach(m=>{ if (!m) return; m.side = on ? THREE.DoubleSide : THREE.FrontSide; m.needsUpdate = true; });
+      mats.forEach(m=>{ if (m){ m.side = on ? THREE.DoubleSide : THREE.FrontSide; m.needsUpdate = true; } });
     });
   }
 
-  function setUnlit(on, index){
-    forEachTarget(index, (mesh)=>{
-      if (on){
-        if (mesh.userData.__origMaterial) return;
-        const mk = (m)=>{
-          const b = new THREE.MeshBasicMaterial();
-          if (m && m.color) b.color.copy(m.color);
-          b.map = m && m.map || null;
-          b.opacity = (m && m.opacity!=null)? m.opacity : 1;
-          b.transparent = (m && m.transparent) || b.opacity<1;
-          b.side = m && m.side || THREE.FrontSide;
-          b.depthWrite = m && m.depthWrite;
-          b.depthTest = m && m.depthTest;
-          b.alphaMap = m && m.alphaMap || null;
-          b.toneMapped = false;
-          return b;
-        };
-        const orig = mesh.material;
-        mesh.userData.__origMaterial = orig;
-        mesh.material = Array.isArray(orig) ? orig.map(mk) : mk(orig);
-        if (Array.isArray(mesh.material)) mesh.material.forEach(m=> m && (m.needsUpdate=true)); else mesh.material.needsUpdate = true;
-      } else {
-        if (!mesh.userData.__origMaterial) return;
-        mesh.material = mesh.userData.__origMaterial;
-        delete mesh.userData.__origMaterial;
-        if (Array.isArray(mesh.material)) mesh.material.forEach(m=> m && (m.needsUpdate=true)); else mesh.material.needsUpdate = true;
-      }
-    });
-  }
-
-  // --- White Key (alphaTest cutout) ---
+  // ---- White Key helpers ----
   function patchWhiteKey(material, threshold){
-    // 過去の onBeforeCompile を潰さず、冪等に差す
+    // 画像テクスチャが無い単色材は対象外（消えないように）
+    if (!material || !material.map) return;
     material.userData.__whiteKeyThreshold = threshold;
     material.onBeforeCompile = function(shader){
       shader.uniforms.uWhiteCut = { value: this.userData.__whiteKeyThreshold ?? 1.0 };
-      // 近似白だけ捨てる。黒〜中間色は完全に残す（黒が透けない）
       shader.fragmentShader = shader.fragmentShader
         .replace('void main() {', 'uniform float uWhiteCut;\nvoid main() {')
         .replace(/gl_FragColor\s*=\s*vec4\(([^;]+)\);\s*$/m, (all, inner)=>{
           return `vec4 c = vec4(${inner});
-float w = max(c.r, max(c.g, c.b));
-if (w >= uWhiteCut) { discard; }
+float lum = dot(c.rgb, vec3(0.2126, 0.7152, 0.0722));
+if (lum >= uWhiteCut) { discard; } // cut WHITE only
 gl_FragColor = c;`;
         });
     };
-    // alphaTestは discard の際にのみ必要ではないが、古い環境に配慮し入れておく
     material.alphaTest = Math.max(0.0001, threshold - 0.001);
-    // cutout はブレンド不要 → 透明扱いにしない
     material.transparent = false;
     material.depthWrite = true;
     material.needsUpdate = true;
   }
-
+  function unpatchWhiteKey(material){
+    if (!material) return;
+    material.onBeforeCompile = null;
+    material.alphaTest = 0.0;
+    material.needsUpdate = true;
+  }
   function applyWhiteKeyToMaterials(threshold, index){
     const mats = (index==null) ? state.materials : [state.materials[index]].filter(Boolean);
-    mats.forEach(m=>{ if (m) patchWhiteKey(m, threshold); });
+    mats.forEach(m=> patchWhiteKey(m, threshold));
+  }
+  function clearWhiteKeyFromMaterials(index){
+    const mats = (index==null) ? state.materials : [state.materials[index]].filter(Boolean);
+    mats.forEach(m=> unpatchWhiteKey(m));
+  }
+  function setWhiteKey(threshold, index){
+    state.whiteKeyThreshold = threshold;
+    if (state.whiteKeyEnabled) applyWhiteKeyToMaterials(threshold, index);
+  }
+  function setWhiteKeyEnabled(on, index=null){
+    state.whiteKeyEnabled = !!on;
+    if (on) applyWhiteKeyToMaterials(state.whiteKeyThreshold, index);
+    else clearWhiteKeyFromMaterials(index);
   }
 
-  function setWhiteKey(threshold, index){
-    // threshold: 0.7 .. 1.0 を想定
-    state.whiteKey = threshold;
-    applyWhiteKeyToMaterials(threshold, index);
+  // ---- Unlit (robust toggle) ----
+  function cloneAsBasic(m){
+    const b = new THREE.MeshBasicMaterial();
+    if (m && m.color) b.color.copy(m.color);
+    b.map = m && m.map || null;
+    b.opacity = (m && m.opacity!=null)? m.opacity : 1;
+    b.transparent = (m && m.transparent) || b.opacity<1;
+    b.side = m && m.side || THREE.FrontSide;
+    b.depthWrite = m && m.depthWrite;
+    b.depthTest = m && m.depthTest;
+    b.alphaMap = m && m.alphaMap || null;
+    b.toneMapped = false;
+    // white keyも有効なら適用（テクスチャがある場合のみ）
+    if (state.whiteKeyEnabled) patchWhiteKey(b, state.whiteKeyThreshold);
+    return b;
+  }
+  function setUnlit(on, index){
+    if (on){
+      forEachTarget(index, (mesh)=>{
+        if (mesh.userData.__origMaterial) return;
+        const orig = mesh.material;
+        mesh.userData.__origMaterial = orig;
+        mesh.material = Array.isArray(orig) ? orig.map(cloneAsBasic) : cloneAsBasic(orig);
+        if (Array.isArray(mesh.material)) mesh.material.forEach(m=> m && (m.needsUpdate=true)); else mesh.material.needsUpdate = true;
+      });
+    } else {
+      // OFF時は index に関係なく「差し替え済みのメッシュ全部」を元に戻す（複数回切替に強い）
+      state.current?.traverse(obj=>{
+        if (!obj.isMesh) return;
+        if (obj.userData.__origMaterial){
+          obj.material = obj.userData.__origMaterial;
+          delete obj.userData.__origMaterial;
+          if (Array.isArray(obj.material)) obj.material.forEach(m=> m && (m.needsUpdate=true)); else obj.material.needsUpdate = true;
+        }
+      });
+    }
   }
 
   function setBackground(hex){ scene.background = new THREE.Color(hex); }
-
   function setProjection(mode){
     if (mode === 'ortho'){
       if (!state.ortho){
@@ -237,7 +237,6 @@ gl_FragColor = c;`;
     }
     controls.update();
   }
-
   function setViewPreset(vp){
     const target = controls.target.clone();
     const r = 1.2;
@@ -247,10 +246,8 @@ gl_FragColor = c;`;
     else if (vp==='right') camera.position.set(target.x + r, target.y, target.z);
     else if (vp==='front') camera.position.set(target.x, target.y, target.z + r);
     else if (vp==='back') camera.position.set(target.x, target.y, target.z - r);
-    camera.lookAt(target);
-    controls.update();
+    camera.lookAt(target); controls.update();
   }
-
   function raycastFromClientXY(clientX, clientY){
     if (!state.current) return null;
     const rect = renderer.domElement.getBoundingClientRect();
@@ -258,13 +255,12 @@ gl_FragColor = c;`;
     const y = -( (clientY - rect.top) / rect.height ) * 2 + 1;
     const mouse = new THREE.Vector2(x, y);
     const raycaster = new THREE.Raycaster();
-    raycaster.setFromCamera(mouse, controls.object);
+    raycaster.setFromCamera(mouse, controls.object || camera);
     const hits = raycaster.intersectObject(state.current, true);
     return hits && hits[0] || null;
   }
-
   function projectToScreen(vec3){
-    const v = vec3.clone().project(controls.object);
+    const v = vec3.clone().project(controls.object || camera);
     const rect = renderer.domElement.getBoundingClientRect();
     return { x:(v.x*0.5+0.5)*rect.width, y:(-v.y*0.5+0.5)*rect.height };
   }
@@ -273,7 +269,7 @@ gl_FragColor = c;`;
     THREE, scene, camera, renderer, controls,
     loadGLBFromArrayBuffer,
     setHSL, setOpacity, setUnlit, setDoubleSide,
-    setWhiteKey,
+    setWhiteKey, setWhiteKeyEnabled,
     raycastFromClientXY, projectToScreen,
     getMaterials: ()=> state.materials,
     setSpin: (on)=> state.spin = !!on,

@@ -121,12 +121,6 @@ export function setupUI(app){
   el.sat.addEventListener('input', applyHSL);
   el.light.addEventListener('input', applyHSL);
   el.opac.addEventListener('input', applyOpacity);
-  const slWhite = document.getElementById('slWhiteKey');
-  if (slWhite){
-    const applyWhite=()=> app.viewer.setWhiteKey(parseFloat(slWhite.value)/100, getSelIndex());
-    slWhite.addEventListener('input', applyWhite);
-  }
-
   el.unlit.addEventListener('click', ()=>{
     app.state.unlit = !app.state.unlit;
     app.viewer.setUnlit(app.state.unlit, getSelIndex());
@@ -151,3 +145,23 @@ export function setupUI(app){
     el.btnProj.textContent = 'Projection: ' + next;
   });
 }
+
+
+
+// White→α wiring (optional checkbox + slider)
+(function(){
+  const chk = document.getElementById('chkWhiteKey');
+  const sl = document.getElementById('slWhiteKey');
+  const getIndex = (typeof getSelIndex === 'function') ? getSelIndex : (()=>null);
+  if (chk){
+    chk.addEventListener('change', ()=> app.viewer.setWhiteKeyEnabled(chk.checked, getIndex()));
+  }
+  if (sl){
+    const apply = ()=>{
+      const t = Math.max(0.0, Math.min(1.0, parseFloat(sl.value)/100)); // 0..1
+      app.viewer.setWhiteKey(t, getIndex());
+      if (chk && !chk.checked){ chk.checked = true; app.viewer.setWhiteKeyEnabled(true, getIndex()); }
+    };
+    sl.addEventListener('input', apply);
+  }
+})();
