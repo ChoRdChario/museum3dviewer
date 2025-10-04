@@ -1,4 +1,4 @@
-// pins.js — attachment feedback (fly animation, check badge, save toast, list thumbnail)
+// pins.js — per-pin delete (UI buttons + keyboard) + keep previous feedback features
 import { ensureSpreadsheetForFile, ensurePinsHeader, listSheetTitles, loadPins, savePins } from './sheets_api.js?v=20251004s3';
 import { downloadImageAsBlob } from './utils_drive_images.js?v=20251004img2';
 
@@ -62,6 +62,14 @@ export function setupPins(app){
       .lmy-toast { position:absolute; transform:translate(-8px, -8px); right:0; bottom:0; background:rgba(0,0,0,.75); color:#fff; padding:.25rem .5rem; border:1px solid #333; border-radius:.35rem; font-size:12px; opacity:0; transition:opacity .18s, transform .18s }
       .lmy-toast.show { opacity:1; transform:translate(0,0) }
       .lmy-fly { position:fixed; z-index:9999; pointer-events:none; border-radius:.35rem; overflow:hidden; box-shadow:0 6px 24px rgba(0,0,0,.35) }
+      .lmy-row { display:flex; align-items:center; justify-content:space-between; gap:.5rem; }
+      .lmy-row .l { display:flex; align-items:center; gap:.35rem; min-width:0 }
+      .lmy-row .r button { opacity:.75; background:#111; border:1px solid #333; color:#ddd; border-radius:.35rem; padding:.15rem .35rem; font-size:12px; }
+      .lmy-row .r button:hover { opacity:1; background:#1a1a1a }
+      .lmy-row img.thumb { width:18px; height:18px; object-fit:cover; border-radius:3px }
+      .lmy-overlay-actions { position:absolute; right:8px; top:6px; display:flex; gap:6px }
+      .lmy-icon-btn { background:#111; border:1px solid #333; color:#ddd; border-radius:.35rem; width:22px; height:22px; display:grid; place-items:center; font-size:12px; opacity:.85 }
+      .lmy-icon-btn:hover { opacity:1; background:#1a1a1a }
     `;
     document.head.appendChild(st);
   }
@@ -72,7 +80,6 @@ export function setupPins(app){
   let sheetName = 'Pins';
   let currentColor = PALETTE[0].hex;
   const imageCache = new Map(); // fileId -> objectURL
-  let restoring = false;
 
   function setupPalette(){
     pinPalette.innerHTML = PALETTE.map((c,i)=>`<div class="sw${i===0?' active':''}" data-hex="${c.hex}" title="${c.key}" style="background:${c.hex};width:24px;height:24px;border-radius:999px;border:2px solid #0003;cursor:pointer;box-shadow:0 0 0 2px #222"></div>`).join('');
@@ -128,18 +135,27 @@ export function setupPins(app){
 
   function showOverlay({title, body, imgUrl}){
     overlay.style.display='block';
-    // toast container
-    if (!overlay.querySelector('.lmy-toast')){
-      const t = document.createElement('div'); t.className='lmy-toast'; t.textContent='Saved';
-      overlay.appendChild(t);
+    const header = document.createElement('div');
+    header.style.position='relative';
+    header.innerHTML = `<strong>${title??''}</strong>`;
+    const actions = document.createElement('div'); actions.className='lmy-overlay-actions';
+    const delBtn = document.createElement('button'); delBtn.className='lmy-icon-btn'; delBtn.title='Delete pin (⌫/Del)'; delBtn.textContent='🗑';
+    delBtn.addEventListener('click', ()=>{ if (selected) deletePin(selected); });
+    actions.appendChild(delBtn);
+    header.appendChild(actions);
+    overlay.innerHTML = '';
+    overlay.appendChild(header);
+    const bodyDiv = document.createElement('div'); bodyDiv.style.marginTop='.25rem'; bodyDiv.style.whiteSpace='pre-wrap'; bodyDiv.textContent = body??'';
+    overlay.appendChild(bodyDiv);
+    if (imgUrl){
+      const im = new Image(); im.src = imgUrl; im.style.marginTop='.5rem'; im.style.maxWidth='100%'; im.onerror = ()=>{ im.style.opacity=.35; im.title='load failed'; };
+      overlay.appendChild(im);
     }
-    overlay.innerHTML = `<div style="position:relative"><strong>${title??''}</strong></div>
-      <div style="margin-top:.25rem;white-space:pre-wrap">${body??''}</div>
-      ${imgUrl?`<img src="${imgUrl}" onerror="this.style.opacity=.35;this.title='load failed';" style="margin-top:.5rem;max-width:100%">`:''}`;
     updateLeaderToOverlay();
   }
   function showToast(msg='Saved'){
-    const t = overlay.querySelector('.lmy-toast') || (()=>{ const d=document.createElement('div'); d.className='lmy-toast'; overlay.appendChild(d); return d; })();
+    let t = overlay.querySelector('.lmy-toast');
+    if (!t){ t=document.createElement('div'); t.className='lmy-toast'; overlay.appendChild(t); }
     t.textContent = msg;
     t.classList.add('show');
     setTimeout(()=> t.classList.remove('show'), 800);
@@ -149,17 +165,40 @@ export function setupPins(app){
   function renderCapList(){
     capList.innerHTML = pins.map(p=>{
       const thumb = (/^https?:\/\//i.test(p.imageId) ? p.imageId : (p.imageId && imageCache.get(p.imageId))) || '';
-      const img = thumb ? `<img src="${thumb}" style="width:18px;height:18px;object-fit:cover;border-radius:3px;margin-right:.35rem;vertical-align:middle">` : '';
-      return `<div class="row" data-id="${p.id}" style="padding:.4rem .5rem;border-bottom:1px solid #262630;cursor:pointer">
-        <span style="display:inline-block;width:10px;height:10px;background:${p.color};border-radius:999px;margin-right:.35rem;vertical-align:middle"></span>${img}${p.title || '(untitled)'}</div>`;
+      const img = thumb ? `<img class="thumb" src="${thumb}">` : '';
+      return `<div class="row lmy-row" data-id="${p.id}" style="padding:.4rem .5rem;border-bottom:1px solid #262630;cursor:pointer">
+        <div class="l">
+          <span style="display:inline-block;width:10px;height:10px;background:${p.color};border-radius:999px"></span>
+          ${img}
+          <span class="title" style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${p.title || '(untitled)'}</span>
+        </div>
+        <div class="r">
+          <button class="btn-del" title="Delete">🗑</button>
+        </div>
+      </div>`;
     }).join('');
   }
 
   capList.addEventListener('click', (e)=>{
-    const item = e.target.closest('[data-id]'); if (!item) return;
-    const id = item.getAttribute('data-id');
+    const row = e.target.closest('[data-id]'); if (!row) return;
+    const id = row.getAttribute('data-id');
     const rec = pins.find(p=> p.id===id);
-    if (rec) selectPin(rec);
+    if (!rec) return;
+    if (e.target.closest('.btn-del')){
+      deletePin(rec);
+      e.stopPropagation();
+      return;
+    }
+    selectPin(rec);
+  });
+
+  window.addEventListener('keydown', (e)=>{
+    if ((e.key === 'Delete' || e.key === 'Backspace') && selected){
+      const tag = (document.activeElement && document.activeElement.tagName) || '';
+      if (['INPUT','TEXTAREA'].includes(tag)) return;
+      e.preventDefault();
+      deletePin(selected);
+    }
   });
 
   function selectPin(rec){
@@ -261,7 +300,7 @@ export function setupPins(app){
       const sx = (proj.x * 0.5 + 0.5) * rect.width;
       const sy = (-proj.y * 0.5 + 0.5) * rect.height;
       const d2 = (sx-mx)*(sx-mx)+(sy-my)*(sy-my);
-      if (d2 < bestD2) { bestD2 = d2; best = p; }
+      if (d2 < bestD2) { best = p; bestD2 = d2; }
     }
     if (Math.sqrt(bestD2) < 24) selectPin(best);
   });
@@ -281,6 +320,26 @@ export function setupPins(app){
     scheduleSave(true);
   });
 
+  function deletePin(rec){
+    try{
+      const obj = rec.obj;
+      const t0 = performance.now();
+      function tick(){
+        const dt = (performance.now()-t0)/180;
+        const s = Math.max(0, 1 - dt);
+        obj.scale.setScalar(s);
+        if (s>0){ requestAnimationFrame(tick); }
+        else { app.viewer.scene.remove(obj); }
+      }
+      requestAnimationFrame(tick);
+    }catch{ app.viewer.scene.remove(rec.obj); }
+    const idx = pins.findIndex(p=> p.id===rec.id);
+    if (idx>=0) pins.splice(idx,1);
+    if (selected && selected.id===rec.id) { selected=null; hideOverlay(); }
+    renderCapList();
+    scheduleSave();
+  }
+
   function debounce(fn, ms){ let t; return (...a)=>{ clearTimeout(t); t=setTimeout(()=>fn(...a), ms); }; }
   const scheduleSave = debounce(async ()=>{
     if (!spreadsheetId) return;
@@ -290,19 +349,16 @@ export function setupPins(app){
       showToast('Saved');
       console.log('[pins] saved', serial.length, 'to sheet', sheetName);
     }catch(e){ console.error('[pins] save failed', e); }
-  }, 600);
+  }, 400);
 
   titleInput.addEventListener('input', ()=>{ if (selected){ selected.title = titleInput.value; showOverlay({ title:selected.title, body:selected.body, imgUrl: resolveImageURL(selected) }); renderCapList(); scheduleSave(); } });
   bodyInput.addEventListener('input', ()=>{ if (selected){ selected.body = bodyInput.value; showOverlay({ title:selected.title, body:selected.body, imgUrl: resolveImageURL(selected) }); scheduleSave(); } });
 
-  // === Image attach feedback ===
   imgGrid.addEventListener('click', async (e)=>{
     const img = e.target.closest('img'); if (!img || !selected) return;
-    // flash border & check badge
     const card = img.closest('.card'); if (card){ card.classList.add('lmy-flash'); setTimeout(()=> card.classList.remove('lmy-flash'), 350);
       let chk = card.querySelector('.lmy-check'); if (!chk){ chk = document.createElement('div'); chk.className='lmy-check'; chk.textContent='✓'; card.style.position='relative'; card.appendChild(chk); setTimeout(()=> chk.remove(), 600); }
     }
-    // fly to overlay
     try{
       const rect = img.getBoundingClientRect();
       const fly = img.cloneNode();
@@ -316,25 +372,51 @@ export function setupPins(app){
         { transform:`translate(0,0) scale(1)`, opacity:.95 },
         { transform:`translate(${ov.left-rect.left+16}px, ${ov.top-rect.top+16}px) scale(${scale})`, opacity:.2 }
       ], { duration: 420, easing:'cubic-bezier(.22,.61,.36,1)' }).onfinish = ()=> fly.remove();
-    }catch{ /* ignore */ }
+    }catch:  # noqa
+      pass
 
     const fid = img.dataset.id;
-    if (fid){
-      try{
-        const blob = await downloadImageAsBlob(fid);
-        const url = URL.createObjectURL(blob);
-        const prev = imageCache.get(fid);
-        if (prev && prev.startsWith('blob:')) URL.revokeObjectURL(prev);
-        imageCache.set(fid, url);
-        selected.imageId = fid;
-        showOverlay({ title:selected.title, body:selected.body, imgUrl:url });
-        renderCapList();
-        scheduleSave();
-      }catch(err){ console.error('[pins] image fetch failed', err); }
-    }else{
-      selected.imageId = img.src; showOverlay({ title:selected.title, body:selected.body, imgUrl: img.src }); renderCapList(); scheduleSave();
-    }
+    if (fid):
+      try:
+        blob = await downloadImageAsBlob(fid)
+        url = URL.createObjectURL(blob)
+        prev = imageCache.get(fid)
+        if prev and prev.startswith('blob:'):
+          URL.revokeObjectURL(prev)
+        imageCache.set(fid, url)
+        selected.imageId = fid
+        showOverlay({ title:selected.title, body:selected.body, imgUrl:url })
+        renderCapList()
+        scheduleSave()
+      except Exception as err:
+        console.error('[pins] image fetch failed', err)
+    else:
+      selected.imageId = img.src
+      showOverlay({ title:selected.title, body:selected.body, imgUrl: img.src })
+      renderCapList()
+      scheduleSave()
   });
+
+  async function populateSheetSelect(){
+    const titles = await listSheetTitles(spreadsheetId);
+    sheetSelect.innerHTML = titles.map(t=>`<option value="${t}">${t}</option>`).join('');
+    if (!titles.includes(sheetName)) sheetName = titles[0] || 'Pins';
+    sheetSelect.value = sheetName;
+  }
+
+  async function restorePins(){
+    pins.forEach(p=> app.viewer.scene.remove(p.obj));
+    pins.length = 0;
+    renderCapList();
+    selectPin(null);
+    const list = await loadPins(spreadsheetId, sheetName);
+    for (const p of list){
+      const pos = new app.viewer.THREE.Vector3(p.x, p.y, p.z);
+      addPinAtPosition(pos, p, { skipSave:true });
+    }
+    applyFilter();
+    console.log('[pins] restored', list.length, 'pins from sheet', sheetName);
+  }
 
   sheetSelect.addEventListener('change', async ()=>{
     sheetName = sheetSelect.value || 'Pins';
@@ -364,33 +446,9 @@ export function setupPins(app){
     }
   });
 
-  async function populateSheetSelect(){
-    const titles = await listSheetTitles(spreadsheetId);
-    sheetSelect.innerHTML = titles.map(t=>`<option value="${t}">${t}</option>`).join('');
-    if (!titles.includes(sheetName)) sheetName = titles[0] || 'Pins';
-    sheetSelect.value = sheetName;
-  }
-
-  async function restorePins(){
-    // clear existing
-    pins.forEach(p=> app.viewer.scene.remove(p.obj));
-    pins.length = 0;
-    renderCapList();
-    selectPin(null);
-    // load
-    const list = await loadPins(spreadsheetId, sheetName);
-    for (const p of list){
-      const pos = new app.viewer.THREE.Vector3(p.x, p.y, p.z);
-      addPinAtPosition(pos, p, { skipSave:true });
-    }
-    applyFilter();
-    console.log('[pins] restored', list.length, 'pins from sheet', sheetName);
-  }
-
   window.addEventListener('lmy:model-loaded', async ()=>{
     try{
       const glbId = app.state?.currentGLBId;
-      if (!glbId){ console.warn('[pins] no current GLB id'); return; }
       const res = await ensureSpreadsheetForFile(glbId);
       spreadsheetId = res.spreadsheetId;
       await ensurePinsHeader(spreadsheetId, sheetName);
