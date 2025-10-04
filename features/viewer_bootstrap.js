@@ -1,9 +1,4 @@
 // features/viewer_bootstrap.js
-// Self-contained viewer bootstrap that does NOT depend on local three libs.
-// - Creates/uses <canvas id="lmy-canvas"> inside #stage
-// - Implements __LMY_viewer.loadBlob(blob) using GLTFLoader
-// - Listens to 'lmy:load-glb-blob' dispatched by wiring_captions.js
-
 const THREE_URL = 'https://esm.sh/three@0.160.0';
 const ORBIT_URL = 'https://esm.sh/three@0.160.0/examples/jsm/controls/OrbitControls.js';
 const GLTF_URL  = 'https://esm.sh/three@0.160.0/examples/jsm/loaders/GLTFLoader.js';
@@ -75,17 +70,19 @@ function fitToObject(obj){
 async function initViewer(){
   await ensureThree();
   const canvas = ensureCanvas();
-  scene = new THREE.Scene();
-  camera = new THREE.PerspectiveCamera(60, canvas.clientWidth/canvas.clientHeight || 1, 0.01, 10000);
-  camera.position.set(0,1,3);
-  renderer = new THREE.WebGLRenderer({ canvas, antialias:true, alpha:true });
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio||1, 2));
-  renderer.setSize(canvas.clientWidth||1, canvas.clientHeight||1, false);
-  controls = new OrbitControls(camera, canvas);
-  controls.enableDamping = true; controls.dampingFactor = 0.08;
-  window.addEventListener('resize', onResize, { passive:true });
-  onResize();
-  if (rafId==null) animate();
+  if (!scene){
+    scene = new THREE.Scene();
+    camera = new THREE.PerspectiveCamera(60, canvas.clientWidth/canvas.clientHeight || 1, 0.01, 10000);
+    camera.position.set(0,1,3);
+    renderer = new THREE.WebGLRenderer({ canvas, antialias:true, alpha:true });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio||1, 2));
+    renderer.setSize(canvas.clientWidth||1, canvas.clientHeight||1, false);
+    controls = new OrbitControls(camera, canvas);
+    controls.enableDamping = true; controls.dampingFactor = 0.08;
+    window.addEventListener('resize', onResize, { passive:true });
+    onResize();
+    if (rafId==null) animate();
+  }
 }
 
 async function loadBlob(blob){
@@ -94,7 +91,6 @@ async function loadBlob(blob){
   const loader = new GLTFLoader();
   return await new Promise((resolve, reject)=>{
     loader.parse(ab, '', (gltf)=>{
-      // clear previous model
       for (let i = scene.children.length - 1; i >= 0; i--) {
         const c = scene.children[i];
         if (c?.userData?.isMainModel) scene.remove(c);
@@ -118,30 +114,7 @@ async function loadBlob(blob){
 }
 
 (function bootstrap(){
-  // expose a stable viewer API for the rest of the app
-  window.__LMY_viewer = {
-    loadBlob,
-    async setOrthographic(){
-      await initViewer();
-      if (camera.isOrthographicCamera) return;
-      const { position, near, far } = camera;
-      const aspect = (renderer.domElement.clientWidth/renderer.domElement.clientHeight) || 1;
-      const fr=1.5;
-      const cam = new THREE.OrthographicCamera(-fr*aspect, fr*aspect, fr, -fr, 0.01, 10000);
-      cam.position.copy(position); cam.near=near; cam.far=far;
-      controls.object = cam; camera = cam; onResize();
-    },
-    async setPerspective(){
-      await initViewer();
-      if (camera.isPerspectiveCamera) return;
-      const { position, near, far } = camera;
-      const cam = new THREE.PerspectiveCamera(60, 1, 0.01, 10000);
-      cam.position.copy(position); cam.near=near; cam.far=far;
-      controls.object = cam; camera = cam; onResize();
-    },
-    get three(){ return { THREE, scene, camera, renderer, controls }; }
-  };
-  // listen for app event
+  window.__LMY_viewer = { loadBlob, get three(){ return { THREE, scene, camera, renderer, controls }; } };
   document.addEventListener('lmy:load-glb-blob', async (e)=>{
     try{
       const blob = e?.detail?.blob;
