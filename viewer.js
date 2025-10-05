@@ -1,7 +1,7 @@
-// viewer.js  (ESM, CDN imports)
-import * as THREE from 'https://unpkg.com/three@0.160.1/build/three.module.js';
-import { OrbitControls } from 'https://unpkg.com/three@0.160.1/examples/jsm/controls/OrbitControls.js';
-import { GLTFLoader } from 'https://unpkg.com/three@0.160.1/examples/jsm/loaders/GLTFLoader.js';
+// viewer.js  (ESM, bare specifiers — works with import map)
+import * as THREE from 'three';
+import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+import { GLTFLoader }   from 'three/examples/jsm/loaders/GLTFLoader.js';
 
 function ensureArray(x){return Array.isArray(x)?x:[x];}
 function forEachMaterial(root,fn){
