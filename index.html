@@ -1,32 +1,142 @@
 <!doctype html>
 <html lang="ja">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>LociMyu viewer (import map 完全版)</title>
-
-  <!-- Import Map は最初の module より「前」。ここが肝心 -->
-  <script type="importmap">
-  {
-    "imports": {
-      "three": "https://unpkg.com/three@0.160.1/build/three.module.js",
-      "three/examples/jsm/": "https://unpkg.com/three@0.160.1/examples/jsm/"
-    }
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>LociMyu v6.6</title>
+<!-- Import Map (Plan A) -->
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+    "three/examples/jsm/controls/OrbitControls.js": "https://unpkg.com/three@0.160.0/examples/jsm/controls/OrbitControls.js",
+    "three/examples/jsm/loaders/GLTFLoader.js": "https://unpkg.com/three@0.160.0/examples/jsm/loaders/GLTFLoader.js"
   }
-  </script>
-
-  <style>
-    html,body { height:100%; margin:0; background:#0f1115; color:#e6e6e6; font:14px/1.5 -apple-system, system-ui, Segoe UI, Roboto, sans-serif; }
-    #stage { position:relative; width:100%; height:100vh; }
-    .tip { position:absolute; top:8px; left:12px; background:#1a1f2a; padding:6px 10px; border-radius:8px; opacity:0.9; }
-  </style>
+}
+</script>
+<link rel="stylesheet" href="./style.css">
 </head>
 <body>
-  <div id="stage">
-    <div class="tip">Import Map 方式。three は unpkg から解決されます。</div>
-  </div>
+<div id="toast">Import Map 方式。three は unpkg から解決されます。</div>
 
-  <!-- ここから module 読み込み開始 -->
-  <script type="module" src="./probe_viewer_visibility.js"></script>
+<div id="stage"></div>
+
+<aside id="panel">
+  <header class="topbar">
+    <strong>LociMyu v6.6</strong>
+    <div class="auth">
+      <button id="btnSign" class="chip">Sign in</button>
+    </div>
+  </header>
+
+  <nav class="tabs" role="tablist" aria-label="right-pane">
+    <button class="tab active" data-tab="caption">Caption</button>
+    <button class="tab" data-tab="material">Material</button>
+    <button class="tab" data-tab="view">View</button>
+  </nav>
+
+  <section id="tab-caption" class="tabpage active">
+    <div class="field">
+      <label>Drive File ID or URL</label>
+      <div class="row">
+        <input id="inpGlb" placeholder="Drive File ID or URL" />
+        <button id="btnLoad" class="chip">GLB</button>
+      </div>
+      <div class="hint">?id=&lt;fileId&gt; または <a id="btnDemo" href="#" role="button">demo</a></div>
+    </div>
+
+    <div class="field">
+      <label>Save data</label>
+      <div class="row">
+        <select id="selSheet"></select>
+        <button id="btnNewSheet" class="chip">+</button>
+      </div>
+    </div>
+
+    <div class="field">
+      <label>Pin color</label>
+      <div id="pinColors" class="pin-colors"></div>
+      <div class="row">
+        <span>Filter</span>
+        <select id="selPinFilter">
+          <option value="all">(All)</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="field">
+      <label>Caption list</label>
+      <ul id="captionList" class="list"></ul>
+    </div>
+
+    <div class="field">
+      <label>Title / Body</label>
+      <input id="capTitle" placeholder="Title" />
+      <textarea id="capBody" placeholder="Body"></textarea>
+    </div>
+
+    <div class="row gap">
+      <button id="btnAddPin" class="chip">+ Pin</button>
+      <button id="btnClearPin" class="chip">Clear</button>
+      <button id="btnRefreshImgs" class="chip">Refresh images</button>
+    </div>
+
+    <div id="imageGrid" class="grid"></div>
+  </section>
+
+  <section id="tab-material" class="tabpage">
+    <div class="field">
+      <label>Material target</label>
+      <select id="selMatTarget"></select>
+    </div>
+    <div class="sliders">
+      <div class="slider"><span>Hue</span><input id="slHue" type="range" min="0" max="1" step="0.001" /></div>
+      <div class="slider"><span>Sat</span><input id="slSat" type="range" min="0" max="1" step="0.001" /></div>
+      <div class="slider"><span>Light</span><input id="slLight" type="range" min="0" max="1" step="0.001" /></div>
+      <div class="slider"><span>Opacity</span><input id="slOpacity" type="range" min="0" max="1" step="0.001" value="1" /></div>
+      <div class="row gap">
+        <button id="btnUnlit" class="chip">Unlit: off</button>
+        <button id="btnDoubleSide" class="chip">DoubleSide: off</button>
+      </div>
+      <div class="slider"><span>White→α</span><input id="slWhiteKey" type="range" min="0.7" max="1.0" step="0.001" value="1" /></div>
+      <div class="row gap">
+        <label><input type="checkbox" id="chkWhiteAlphaEnable" /> enable White→α</label>
+      </div>
+    </div>
+  </section>
+
+  <section id="tab-view" class="tabpage">
+    <div class="field">
+      <label>Camera</label>
+      <div class="row gap">
+        <button class="chip" id="btnFront">Front</button>
+        <button class="chip" id="btnTop">Top</button>
+        <button class="chip" id="btnIso">ISO</button>
+      </div>
+    </div>
+    <div class="field">
+      <label>Projection</label>
+      <div class="row gap">
+        <button class="chip" id="btnPersp">persp</button>
+        <button class="chip" id="btnOrtho">ortho</button>
+      </div>
+    </div>
+    <div class="field">
+      <label>Background</label>
+      <input id="inpBg" type="color" value="#0d0f14" />
+    </div>
+  </section>
+</aside>
+
+<!-- Overlay card anchored by selected pin -->
+<div id="overlay" class="overlay hidden">
+  <div class="overlay-title" id="overlayTitle"></div>
+  <img id="overlayImg" alt="" />
+  <div class="overlay-body" id="overlayBody"></div>
+</div>
+<canvas id="leader" class="leader"></canvas>
+
+<script type="module" src="./app_boot.js"></script>
+<script type="module" src="./probe_viewer_visibility.js"></script>
 </body>
 </html>

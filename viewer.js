@@ -1,44 +1,74 @@
-// viewer.js (ESM) — three は Import Map で解決
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
-import { GLTFLoader }   from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 
-export async function createDemoScene(canvas){
-  const renderer=new THREE.WebGLRenderer({canvas,antialias:true});
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio||1,2));
-  renderer.setSize(canvas.clientWidth,canvas.clientHeight,false);
-  renderer.outputColorSpace = THREE.SRGBColorSpace;
+export class ViewerApp{
+  constructor(stageEl, leaderCanvas){
+    this.stageEl = stageEl;
+    this.leader = leaderCanvas;
+    this.clock = new THREE.Clock();
+    this.scene = new THREE.Scene();
+    this.scene.background = new THREE.Color('#0d0f14');
+    this.camera = new THREE.PerspectiveCamera(50, 1, 0.1, 2000);
+    this.camera.position.set(4,3,6);
+    this.renderer = new THREE.WebGLRenderer({antialias:true});
+    this.renderer.setPixelRatio(devicePixelRatio);
+    stageEl.appendChild(this.renderer.domElement);
 
-  const scene=new THREE.Scene(); scene.background=new THREE.Color(0x111216);
-  const camera=new THREE.PerspectiveCamera(60,1,0.01,100); camera.position.set(1.5,1.2,1.6);
+    this.controls = new OrbitControls(this.camera, this.renderer.domElement);
 
-  const controls=new OrbitControls(camera,renderer.domElement); controls.enableDamping=true;
-  scene.add(new THREE.AmbientLight(0xffffff,0.8), new THREE.DirectionalLight(0xffffff,0.6));
+    this.demoCube();
 
-  const mesh=new THREE.Mesh(new THREE.BoxGeometry(0.6,0.6,0.6), new THREE.MeshStandardMaterial({color:0x3e6bd6, metalness:0.1, roughness:0.9}));
-  scene.add(mesh);
+    window.addEventListener('resize', ()=>this.resize());
+    this.resize();
+    this.ready = this.loop();
+  }
 
-  function resize(){ const w=canvas.clientWidth,h=canvas.clientHeight; if(w===0||h===0) return; renderer.setSize(w,h,false); camera.aspect=w/h; camera.updateProjectionMatrix(); }
-  window.addEventListener('resize',resize); resize();
+  demoCube(){
+    const g = new THREE.BoxGeometry(1,1,1);
+    const m = new THREE.MeshStandardMaterial({color:0x1e2b47, metalness:0.1, roughness:0.9, transparent:true, opacity:1});
+    const mesh = new THREE.Mesh(g,m);
+    this.scene.add(mesh);
+    this.cube = mesh;
 
-  (function tick(){ requestAnimationFrame(tick); mesh.rotation.y+=0.01; controls.update(); renderer.render(scene,camera); })();
-}
+    const dir = new THREE.DirectionalLight(0xffffff, 1.2);
+    dir.position.set(2,3,4);
+    this.scene.add(dir, new THREE.AmbientLight(0xffffff,0.2));
+  }
 
-export async function loadGLBFromArrayBuffer(canvas, arrayBuffer){
-  const renderer=new THREE.WebGLRenderer({canvas,antialias:true});
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio||1,2));
-  renderer.setSize(canvas.clientWidth,canvas.clientHeight,false);
-  renderer.outputColorSpace = THREE.SRGBColorSpace;
-  const scene=new THREE.Scene(); scene.background=new THREE.Color(0x111216);
-  const camera=new THREE.PerspectiveCamera(60,1,0.01,100); camera.position.set(1.5,1.2,1.6);
-  const controls=new OrbitControls(camera,renderer.domElement); controls.enableDamping=true;
-  scene.add(new THREE.AmbientLight(0xffffff,0.8), new THREE.DirectionalLight(0xffffff,0.6));
+  resize(){
+    const w = this.stageEl.clientWidth;
+    const h = this.stageEl.clientHeight;
+    this.camera.aspect = w/h;
+    this.camera.updateProjectionMatrix();
+    this.renderer.setSize(w,h,false);
+    this.leader.width = w; this.leader.height = h;
+  }
 
-  const loader=new GLTFLoader();
-  const gltf = await loader.parseAsync(arrayBuffer, '');
-  scene.add(gltf.scene || gltf.scenes?.[0]);
+  async loop(){
+    const render = ()=>{
+      const t = this.clock.getElapsedTime();
+      if(this.cube) { this.cube.rotation.y = t*0.5; }
+      this.controls.update();
+      this.renderer.render(this.scene, this.camera);
+      requestAnimationFrame(render);
+    };
+    render();
+  }
 
-  function resize(){ const w=canvas.clientWidth,h=canvas.clientHeight; if(w===0||h===0) return; renderer.setSize(w,h,false); camera.aspect=w/h; camera.updateProjectionMatrix(); }
-  window.addEventListener('resize',resize); resize();
-  (function tick(){ requestAnimationFrame(tick); controls.update(); renderer.render(scene,camera); })();
+  setBackground(hex){
+    this.scene.background = new THREE.Color(hex);
+  }
+
+  async loadGLBFromURL(url){
+    const loader = new GLTFLoader();
+    return new Promise((res,rej)=>{
+      loader.load(url, (gltf)=>{
+        if(this.model) this.scene.remove(this.model);
+        this.model = gltf.scene;
+        this.scene.add(this.model);
+        res(gltf);
+      }, undefined, rej);
+    });
+  }
 }

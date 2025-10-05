@@ -1,25 +1,17 @@
 import { setupAuth } from './gauth.js';
+import { ViewerApp } from './viewer.js';
 import { setupUI } from './ui.js';
 
-(async function boot(){
-  console.log('[boot] start');
-  const app = {
-    state:{},
-  };
-  window.app = app;
+console.log('[auth] ready');
 
-  // Auth
-  await setupAuth({
-    clientId: '595200751510-ncahnf7edci6b9925becn5to49r6cguv.apps.googleusercontent.com',
-    apiKey: 'AIzaSyCUnTCr5yWUWPdEXST9bKP1LpgawU5rIbI',
-    scopes: [
-      'https://www.googleapis.com/auth/drive.readonly',
-      'https://www.googleapis.com/auth/spreadsheets'
-    ]
-  });
+const app = {};
+window.app = app;
 
-  await setupUI(app);
-  const bootmsg = document.getElementById('bootmsg');
-  if (bootmsg) bootmsg.textContent = '';
-  console.log('[boot] ready');
-})();
+async function boot(){
+  app.viewer = new ViewerApp(document.getElementById('stage'), document.getElementById('leader'));
+  await app.viewer.ready;
+
+  setupAuth();
+  setupUI(app);
+}
+boot().catch(e=>console.error(e));

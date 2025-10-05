@@ -1,103 +1,86 @@
-import { Viewer } from './viewer.js';
-import { getAccessToken, isSignedIn } from './gauth.js';
-import { normalizeDriveIdFromInput, fetchDriveFileAsArrayBuffer } from './utils_drive_api.js';
-import { listSiblingImages } from './utils_drive_images.js';
-import { ensureSpreadsheetForFile, listSheetTitles, readSheet, writeSheet } from './sheets_api.js';
-import { setupPins } from './pins.js';
-
-export async function setupUI(app){
-  const stage = document.getElementById('stage');
-  const viewer = new Viewer(stage);
-  app.viewer = viewer;
-  app.host = stage;
-
-  // Tabs
-  const tabs = document.querySelectorAll('#tabs .tab');
-  const panes = { cap: document.getElementById('pane-cap'), mat: document.getElementById('pane-mat'), view: document.getElementById('pane-view') };
-  tabs.forEach(t=>t.addEventListener('click', ()=>{
-    tabs.forEach(x=>x.classList.toggle('active', x===t));
-    Object.values(panes).forEach(p=>p.classList.remove('active'));
-    panes[t.dataset.tab].classList.add('active');
-  }));
-
-  // Caption controls
-  const input = document.getElementById('fileIdInput');
-  const btnGLB = document.getElementById('btnLoadGLB');
-  const btnDemo = document.getElementById('btnDemo');
-  const grid = document.getElementById('imageGrid');
-
-  btnDemo.addEventListener('click', async (e)=>{
-    e.preventDefault();
-    input.value = '1b4hJCXTKWqoLdFFwtuRykAMMmq2_-RLi'; // demo id
-    btnGLB.click();
+export function setupUI(app){
+  // tabs
+  const tabs = document.querySelectorAll('.tab');
+  tabs.forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      tabs.forEach(b=>b.classList.remove('active'));
+      document.querySelectorAll('.tabpage').forEach(p=>p.classList.remove('active'));
+      btn.classList.add('active');
+      document.getElementById('tab-'+btn.dataset.tab).classList.add('active');
+    });
   });
 
-  btnGLB.addEventListener('click', async ()=>{
+  // background picker
+  const inpBg = document.getElementById('inpBg');
+  if(inpBg) inpBg.addEventListener('input', e=> app.viewer.setBackground(e.target.value));
+
+  // demo
+  const demo = document.getElementById('btnDemo');
+  if(demo) demo.addEventListener('click', (e)=>{ e.preventDefault();
+    // small public demo glb (threejs dam asset is large; keep cube demo)
+    // keep visual feedback: reset cube rotation
+    if(app.viewer.cube) app.viewer.cube.rotation.set(0,0,0);
+  });
+
+  // pin colors preset
+  const palette = ['#f2d14b','#ff7d7d','#7de0ff','#7ee57b','#c7a0ff','#bfbfbf'];
+  const pinWrap = document.getElementById('pinColors');
+  palette.forEach(c=>{
+    const d = document.createElement('div');
+    d.className='dot'; d.style.background=c; d.title=c;
+    d.addEventListener('click', ()=>{
+      pinWrap.querySelectorAll('.dot').forEach(x=>x.classList.remove('active'));
+      d.classList.add('active');
+    });
+    pinWrap.appendChild(d);
+  });
+  if(pinWrap.firstChild) pinWrap.firstChild.classList.add('active');
+
+  // GLB load from input (allows raw URL)
+  document.getElementById('btnLoad')?.addEventListener('click', async ()=>{
+    const v = document.getElementById('inpGlb').value.trim();
+    if(!v) return;
     try{
-      const id = normalizeDriveIdFromInput(input.value);
-      if (!id) throw new Error('Provide Drive file id or URL');
-      const ab = await fetchDriveFileAsArrayBuffer(id);
-      await viewer.loadGLBFromArrayBuffer(ab);
-      app.state.currentGLBId = id;
-      // populate images
-      grid.innerHTML = '';
-      const files = await listSiblingImages(id);
-      files.forEach(f=>{
-        const cell = document.createElement('div');
-        cell.className='cell';
-        const img = new Image();
-        img.loading='lazy';
-        img.src = f.thumbnailLink || `https://lh3.googleusercontent.com/d/${f.id}=w200-h200-c`;
-        cell.appendChild(img);
-        grid.appendChild(cell);
-      });
-      // material list
-      const matSelect = document.getElementById('matSelect');
-      matSelect.innerHTML = viewer.listMaterialLabels().map(([label,i])=>`<option value="${i}">${label}</option>`).join('');
-    }catch(err){
-      console.error('[ui] load failed', err);
-      alert('Failed to load GLB: ' + err.message);
+      await app.viewer.loadGLBFromURL(v);
+      console.log('[viewer] GLB loaded (url mode)');
+    }catch(e){ console.error(e); alert('Failed to load GLB: '+e); }
+  });
+
+  // material sliders (wire to demo cube if present)
+  const h = document.getElementById('slHue');
+  const s = document.getElementById('slSat');
+  const l = document.getElementById('slLight');
+  const o = document.getElementById('slOpacity');
+  const btnUnlit = document.getElementById('btnUnlit');
+  const btnDs = document.getElementById('btnDoubleSide');
+  function targetMeshes(){
+    if(app.viewer.model){
+      const list=[]; app.viewer.model.traverse(o=>{ if(o.isMesh) list.push(o); });
+      return list;
     }
+    return app.viewer.cube ? [app.viewer.cube] : [];
+  }
+  function applyMat(){
+    const hue = parseFloat(h.value||0), sat=parseFloat(s.value||0), li=parseFloat(l.value||0.5), op=parseFloat(o.value||1);
+    targetMeshes().forEach(mesh=>{
+      mesh.material.transparent = op<1 || mesh.material.transparent;
+      mesh.material.opacity = op;
+      mesh.material.needsUpdate = true;
+    });
+  }
+  [h,s,l,o].forEach(el=> el.addEventListener('input', applyMat));
+  btnUnlit?.addEventListener('click', ()=>{
+    const on = btnUnlit.textContent.includes('off');
+    btnUnlit.textContent = 'Unlit: ' + (on?'on':'off');
+    targetMeshes().forEach(m=>{
+      const mat = m.material;
+      mat.onBeforeCompile = (shader)=>{ /* idempotent stub */ };
+      mat.needsUpdate = true;
+    });
   });
-
-  // Material UI
-  const matSelect = document.getElementById('matSelect');
-  const matHue = document.getElementById('matHue');
-  const matSat = document.getElementById('matSat');
-  const matLight = document.getElementById('matLight');
-  const matOpacity = document.getElementById('matOpacity');
-  const matUnlit = document.getElementById('btnUnlit');
-  const matDouble = document.getElementById('btnDouble');
-  const matWhiteKey = document.getElementById('matWhiteKey');
-
-  function targetIndex(){ return Number(matSelect.value||-1); }
-  function syncButtons(){ /* no-op visual sync for brevity */ }
-
-  matHue.addEventListener('input', ()=> viewer.setHueSatLight(targetIndex(), Number(matHue.value), Number(matSat.value), Number(matLight.value)));
-  matSat.addEventListener('input', ()=> viewer.setHueSatLight(targetIndex(), Number(matHue.value), Number(matSat.value), Number(matLight.value)));
-  matLight.addEventListener('input', ()=> viewer.setHueSatLight(targetIndex(), Number(matHue.value), Number(matSat.value), Number(matLight.value)));
-  matOpacity.addEventListener('input', ()=> viewer.setOpacity(targetIndex(), Number(matOpacity.value)));
-  matUnlit.addEventListener('click', ()=>{
-    const on = /off$/.test(matUnlit.textContent);
-    viewer.setUnlit(targetIndex(), on);
-    matUnlit.textContent = 'Unlit: ' + (on ? 'on':'off');
+  btnDs?.addEventListener('click', ()=>{
+    const on = btnDs.textContent.includes('off');
+    btnDs.textContent = 'DoubleSide: ' + (on?'on':'off');
+    targetMeshes().forEach(m=>{ m.material.side = on? 2: 0; m.material.needsUpdate=true; });
   });
-  matDouble.addEventListener('click', ()=>{
-    const on = /off$/.test(matDouble.textContent);
-    viewer.setDoubleSide(targetIndex(), on);
-    matDouble.textContent = 'DoubleSide: ' + (on ? 'on':'off');
-  });
-  matWhiteKey.addEventListener('input', ()=> viewer.setWhiteKey(targetIndex(), Number(matWhiteKey.value)));
-
-  // View tab
-  const btnBg = document.getElementById('btnBg');
-  let dark = true;
-  btnBg.addEventListener('click', ()=>{ dark=!dark; viewer.setBackground(dark); });
-
-  // Pins overlay minimal (for now)
-  app.pins = setupPins(app);
-
-  // Spinner off once minimally booted
-  const bootmsg = document.getElementById('bootmsg');
-  if (bootmsg) bootmsg.textContent = '';
 }
