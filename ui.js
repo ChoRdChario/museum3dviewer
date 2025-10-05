@@ -1,64 +1,60 @@
-import { ensureDriveApi } from './utils_drive_api.js';
+// ui.js - v6.6 patched
+import { fetchDriveFileAsArrayBuffer, normalizeDriveIdFromInput } from './utils_drive_api.js';
 
 export function setupUI(app){
-  const v = app.viewer;
-  const auth = app.auth;
-  const drive = ensureDriveApi(()=>auth.getAccessToken && auth.getAccessToken());
+  const $ = (id)=>document.getElementById(id);
+  const el = {
+    fileId: $('fileIdInput'),
+    btnLoad: $('btnLoad'),
+    slHue: $('slHue'), slSat: $('slSat'), slLight: $('slLight'),
+    slOpacity: $('slOpacity'),
+    btnUnlit: $('btnUnlit'),
+    btnDouble: $('btnDouble'),
+    slWhiteKey: $('slWhiteKey'),
+    chkWhiteKey: $('chkWhiteKey'),
+    matSelect: $('matSelect'),
+  };
 
-  // --- Tabs ---
-  const tabs = Array.from(document.querySelectorAll('[data-tab]'));
-  tabs.forEach(tab => tab.addEventListener('click', ()=>{
-    const t = tab.dataset.tab;
-    document.querySelectorAll('.pane').forEach(p => p.classList.toggle('hidden', p.id !== `pane-${t}`));
-    tabs.forEach(x=>x.classList.toggle('active', x===tab));
-  }));
+  // material target
+  el.matSelect?.addEventListener('change', ()=>{
+    app.viewer.setMaterialTarget(parseInt(el.matSelect.value,10));
+  });
 
-  // --- Material controls ---
-  const slHue = document.getElementById('slHue');
-  const slSat = document.getElementById('slSat');
-  const slLight = document.getElementById('slLight');
-  const slOpacity = document.getElementById('slOpacity');
-  const cbUnlit = document.getElementById('cbUnlit');
-  const cbDouble = document.getElementById('cbDouble');
+  function applyHSL(){ app.viewer.setHSL(+el.slHue.value, +el.slSat.value, +el.slLight.value); }
+  function applyOpacity(){ app.viewer.setOpacity(+el.slOpacity.value/100); }
+  el.slHue?.addEventListener('input', applyHSL);
+  el.slSat?.addEventListener('input', applyHSL);
+  el.slLight?.addEventListener('input', applyHSL);
+  el.slOpacity?.addEventListener('input', applyOpacity);
 
-  function applyMaterial(){
-    v.setHue(+slHue.value/100);
-    v.setSat(+slSat.value/100);
-    v.setLight(+slLight.value/100);
-    v.setOpacity(+slOpacity.value/100);
-    v.setUnlit(cbUnlit.checked);
-    v.setDoubleSide(cbDouble.checked);
-  }
-  [slHue,slSat,slLight,slOpacity,cbUnlit,cbDouble].forEach(el => el && el.addEventListener('input', applyMaterial));
-  applyMaterial();
+  el.btnUnlit?.addEventListener('click', ()=>{
+    const on = el.btnUnlit.dataset.on === '1' ? 0 : 1;
+    el.btnUnlit.dataset.on = String(on);
+    el.btnUnlit.textContent = 'Unlit: ' + (on?'on':'off');
+    app.viewer.setUnlit(!!on);
+  });
+  el.btnDouble?.addEventListener('click', ()=>{
+    const on = el.btnDouble.dataset.on === '1' ? 0 : 1;
+    el.btnDouble.dataset.on = String(on);
+    el.btnDouble.textContent = 'DoubleSide: ' + (on?'on':'off');
+    app.viewer.setDoubleSide(!!on);
+  });
 
-  // --- GLB loading ---
-  const tbGLB = document.getElementById('tbGLB');
-  const btnLoad = document.getElementById('btnLoadGLB');
-  const aDemo = document.getElementById('lnkDemo');
+  el.chkWhiteKey?.addEventListener('change', ()=>{
+    app.viewer.setWhiteKeyEnabled(el.chkWhiteKey.checked);
+  });
+  el.slWhiteKey?.addEventListener('input', ()=>{
+    app.viewer.setWhiteKeyThreshold(+el.slWhiteKey.value/100);
+  });
 
-  function parseDriveId(input){
-    if(!input) return '';
-    // matches id= or /d/{id}/ style
-    const m = input.match(/(?:id=|\/d\/)([\w-]{20,})/);
-    return m ? m[1] : input.trim();
-  }
-
-  async function loadFromDrive(){
-    const id = parseDriveId(tbGLB.value);
-    if(!id){ alert('Enter Drive file ID or URL'); return; }
-    const buf = await drive.fetchFileAsArrayBuffer(id);
-    await v.loadGLBFromArrayBuffer(buf);
-  }
-  btnLoad?.addEventListener('click', e=>{ e.preventDefault(); loadFromDrive().catch(err=>{ console.error('[ui] GLB load failed', err); alert('Failed to load GLB. See console.'); }); });
-
-  // local demo (CDN-hosted sample)
-  aDemo?.addEventListener('click', async (e)=>{
-    e.preventDefault();
+  el.btnLoad?.addEventListener('click', async ()=>{
     try{
-      const resp = await fetch('https://unpkg.com/@loaders.gl/gltf@4.2.0/dist/test/data/Duck.glb');
-      const buf = await resp.arrayBuffer();
-      await v.loadGLBFromArrayBuffer(buf);
-    }catch(err){ console.error('[ui] demo failed', err); alert('Demo load failed.'); }
+      const id = normalizeDriveIdFromInput(el.fileId.value);
+      const buf = await fetchDriveFileAsArrayBuffer(id);
+      await app.viewer.loadGLB(buf);
+    }catch(err){
+      console.error('[ui] failed to load', err);
+      alert('Failed to load GLB: '+(err?.message||err));
+    }
   });
 }

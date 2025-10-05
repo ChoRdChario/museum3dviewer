@@ -1,6 +1,0 @@
-{
-  "imports": {
-    "three": "https://unpkg.com/three@0.160.1/build/three.module.js",
-    "three/examples/jsm/": "https://unpkg.com/three@0.160.1/examples/jsm/"
-  }
-}

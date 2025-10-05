@@ -1,29 +1,41 @@
-// app_boot.js — bootstrap
+
+// museum3dviewer/app_boot.js
 import { setupAuth } from './gauth.js';
-import { setupUI }   from './ui.js';
-import { ensureViewer } from './viewer.js';
-import { setupPins } from './pins.js';
+import { setupUI } from './ui.js';
 
-window.app = {};
-async function boot(){
-  console.log('[boot] start');
-  // mount viewer immediately
-  const viewer = ensureViewer({ stage: document.getElementById('stage') });
-  window.app.viewer = viewer;
-
-  // auth
-  const chip = document.getElementById('authChip');
-  const auth = setupAuth({
-    chip,
-    onReady(){ console.log('[auth] ready'); },
-    onSignedIn(){ chip.textContent = 'Sign out'; },
-    onSignedOut(){ chip.textContent = 'Sign in'; }
-  });
-  window.app.auth = auth;
-
-  // UI and pins
-  setupPins(window.app);
-  setupUI(window.app);
-  console.log('[boot] ready');
+function clearBootOverlay(){
+  // Hide common "booting" overlays if present
+  const ids = ['bootOverlay','booting','bootStatus'];
+  ids.forEach(id => { const el = document.getElementById(id); if (el) el.style.display='none'; });
+  // also hide literal text nodes in a dedicated container
+  const msg = document.querySelector('[data-boot]'); if (msg) msg.style.display='none';
 }
-boot().catch(e=>{ console.error('Boot failed', e); const b=document.getElementById('bootMsg'); if(b) b.textContent='Boot failed. See console.'; });
+
+async function boot(){
+  try{
+    window.app = window.app || {};
+    console.log('[auth] ready');
+
+    setupAuth(window.app, { /* can override clientId/scopes here if needed */ });
+
+    try{ setupUI(window.app); }catch(e){ console.warn('[boot] setupUI deferred', e); }
+
+    clearBootOverlay();
+
+    const id = new URLSearchParams(location.search).get('id');
+    if (id && window.app?.viewer?.loadGLBFromDriveId){
+      try{ await window.app.viewer.loadGLBFromDriveId(id); }catch(e){ console.error('[boot] autoload failed', e); }
+    }
+  }catch(err){
+    console.error('[boot] failed', err);
+    clearBootOverlay();
+    const el = document.getElementById('bootError');
+    if (el){ el.textContent = 'Boot failed. See console logs.'; el.style.display = 'block'; }
+  }
+}
+
+if (document.readyState === 'loading'){
+  document.addEventListener('DOMContentLoaded', boot);
+}else{
+  boot();
+}
