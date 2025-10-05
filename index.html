@@ -1,142 +1,81 @@
 <!doctype html>
 <html lang="ja">
 <head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>LociMyu v6.6</title>
-<!-- Import Map (Plan A) -->
-<script type="importmap">
-{
-  "imports": {
-    "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
-    "three/examples/jsm/controls/OrbitControls.js": "https://unpkg.com/three@0.160.0/examples/jsm/controls/OrbitControls.js",
-    "three/examples/jsm/loaders/GLTFLoader.js": "https://unpkg.com/three@0.160.0/examples/jsm/loaders/GLTFLoader.js"
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>LociMyu v6.6</title>
+  <style>
+    html, body { margin:0; height:100%; background:#0c0d11; color:#e6e6e6; font-family: ui-sans-serif, system-ui, -apple-system; }
+    #stage { position:absolute; inset:0 320px 0 0; }
+    #panel { position:absolute; top:0; right:0; width:320px; bottom:0; background:#121319; border-left:1px solid #1e2230; overflow:auto; padding:14px; }
+    h1 { font-size:14px; font-weight:600; margin:10px 0; }
+    label { display:block; font-size:12px; opacity:.7; margin:10px 0 6px; }
+    input, select, textarea, button { width:100%; padding:8px 10px; background:#0f1118; color:#e6e6e6; border:1px solid #22273a; border-radius:8px; }
+    button { cursor:pointer; }
+    .row { display:flex; gap:8px; align-items:center; }
+    .row > * { flex:1 }
+    .chip { padding:6px 10px; border-radius:999px; background:#1b2030; display:inline-flex; gap:8px; align-items:center; font-size:12px; }
+    .chip button { width:auto; border:none; background:#2a3350; padding:6px 10px; border-radius:999px; }
+    #toast { position:fixed; left:8px; top:8px; padding:6px 10px; font-size:12px; background:#1b2030; border:1px solid #2a3350; border-radius:999px; opacity:.9 }
+    .tabs { display:flex; gap:6px; margin-bottom:8px; }
+    .tabs button { width:auto; background:#141725; border:1px solid #22273a; }
+    .tabs button.active { background:#233; }
+    .section { display:none; }
+    .section.active { display:block; }
+    #boot { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; pointer-events:none; color:#9aa2b2; }
+  </style>
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+      "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+    }
   }
-}
-</script>
-<link rel="stylesheet" href="./style.css">
+  </script>
 </head>
 <body>
-<div id="toast">Import Map 方式。three は unpkg から解決されます。</div>
-
-<div id="stage"></div>
-
-<aside id="panel">
-  <header class="topbar">
-    <strong>LociMyu v6.6</strong>
-    <div class="auth">
-      <button id="btnSign" class="chip">Sign in</button>
+  <div id="toast">Import Map 方式。three は unpkg から解決されます。</div>
+  <div id="stage"></div>
+  <div id="panel">
+    <div class="row" style="justify-content:space-between">
+      <h1 style="margin:0">LociMyu v6.6</h1>
+      <div class="chip" id="signin-chip"><span id="signin-label">Signed out</span><button id="signin-btn">Sign in</button></div>
     </div>
-  </header>
-
-  <nav class="tabs" role="tablist" aria-label="right-pane">
-    <button class="tab active" data-tab="caption">Caption</button>
-    <button class="tab" data-tab="material">Material</button>
-    <button class="tab" data-tab="view">View</button>
-  </nav>
-
-  <section id="tab-caption" class="tabpage active">
-    <div class="field">
+    <div class="tabs">
+      <button id="tab-caption" class="active">Caption</button>
+      <button id="tab-material">Material</button>
+      <button id="tab-view">View</button>
+    </div>
+    <div id="sec-caption" class="section active">
       <label>Drive File ID or URL</label>
       <div class="row">
-        <input id="inpGlb" placeholder="Drive File ID or URL" />
-        <button id="btnLoad" class="chip">GLB</button>
+        <input id="drive-input" placeholder="https://drive.google.com/file/d/... または fileId" />
+        <button id="btn-load-glb" style="width:auto">GLB</button>
       </div>
-      <div class="hint">?id=&lt;fileId&gt; または <a id="btnDemo" href="#" role="button">demo</a></div>
+      <div style="height:8px"></div>
+      <button id="demo-btn" style="width:auto">demo</button>
     </div>
-
-    <div class="field">
-      <label>Save data</label>
-      <div class="row">
-        <select id="selSheet"></select>
-        <button id="btnNewSheet" class="chip">+</button>
-      </div>
-    </div>
-
-    <div class="field">
-      <label>Pin color</label>
-      <div id="pinColors" class="pin-colors"></div>
-      <div class="row">
-        <span>Filter</span>
-        <select id="selPinFilter">
-          <option value="all">(All)</option>
-        </select>
-      </div>
-    </div>
-
-    <div class="field">
-      <label>Caption list</label>
-      <ul id="captionList" class="list"></ul>
-    </div>
-
-    <div class="field">
-      <label>Title / Body</label>
-      <input id="capTitle" placeholder="Title" />
-      <textarea id="capBody" placeholder="Body"></textarea>
-    </div>
-
-    <div class="row gap">
-      <button id="btnAddPin" class="chip">+ Pin</button>
-      <button id="btnClearPin" class="chip">Clear</button>
-      <button id="btnRefreshImgs" class="chip">Refresh images</button>
-    </div>
-
-    <div id="imageGrid" class="grid"></div>
-  </section>
-
-  <section id="tab-material" class="tabpage">
-    <div class="field">
+    <div id="sec-material" class="section">
       <label>Material target</label>
-      <select id="selMatTarget"></select>
-    </div>
-    <div class="sliders">
-      <div class="slider"><span>Hue</span><input id="slHue" type="range" min="0" max="1" step="0.001" /></div>
-      <div class="slider"><span>Sat</span><input id="slSat" type="range" min="0" max="1" step="0.001" /></div>
-      <div class="slider"><span>Light</span><input id="slLight" type="range" min="0" max="1" step="0.001" /></div>
-      <div class="slider"><span>Opacity</span><input id="slOpacity" type="range" min="0" max="1" step="0.001" value="1" /></div>
-      <div class="row gap">
-        <button id="btnUnlit" class="chip">Unlit: off</button>
-        <button id="btnDoubleSide" class="chip">DoubleSide: off</button>
-      </div>
-      <div class="slider"><span>White→α</span><input id="slWhiteKey" type="range" min="0.7" max="1.0" step="0.001" value="1" /></div>
-      <div class="row gap">
-        <label><input type="checkbox" id="chkWhiteAlphaEnable" /> enable White→α</label>
+      <select id="mat-target"></select>
+      <label style="margin-top:12px">Opacity</label>
+      <input type="range" id="mat-opacity" min="0" max="1" step="0.01" value="1" />
+      <div class="row" style="margin-top:8px">
+        <button id="mat-unlit" style="width:auto">Unlit: off</button>
+        <button id="mat-doubleside" style="width:auto">DoubleSide: off</button>
       </div>
     </div>
-  </section>
-
-  <section id="tab-view" class="tabpage">
-    <div class="field">
-      <label>Camera</label>
-      <div class="row gap">
-        <button class="chip" id="btnFront">Front</button>
-        <button class="chip" id="btnTop">Top</button>
-        <button class="chip" id="btnIso">ISO</button>
-      </div>
-    </div>
-    <div class="field">
-      <label>Projection</label>
-      <div class="row gap">
-        <button class="chip" id="btnPersp">persp</button>
-        <button class="chip" id="btnOrtho">ortho</button>
-      </div>
-    </div>
-    <div class="field">
+    <div id="sec-view" class="section">
       <label>Background</label>
-      <input id="inpBg" type="color" value="#0d0f14" />
+      <input type="color" id="bg" value="#0c0d11" />
     </div>
-  </section>
-</aside>
+  </div>
+  <div id="boot">booting...</div>
 
-<!-- Overlay card anchored by selected pin -->
-<div id="overlay" class="overlay hidden">
-  <div class="overlay-title" id="overlayTitle"></div>
-  <img id="overlayImg" alt="" />
-  <div class="overlay-body" id="overlayBody"></div>
-</div>
-<canvas id="leader" class="leader"></canvas>
-
-<script type="module" src="./app_boot.js"></script>
-<script type="module" src="./probe_viewer_visibility.js"></script>
+  <script type="module" src="./viewer.js"></script>
+  <script type="module" src="./gauth.js"></script>
+  <script type="module" src="./ui.js"></script>
+  <script type="module" src="./app_boot.js"></script>
+  <script src="./probe_viewer_visibility.js"></script>
 </body>
 </html>

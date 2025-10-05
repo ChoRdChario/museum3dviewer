@@ -1,86 +1,96 @@
-export function setupUI(app){
-  // tabs
-  const tabs = document.querySelectorAll('.tab');
-  tabs.forEach(btn=>{
-    btn.addEventListener('click', ()=>{
-      tabs.forEach(b=>b.classList.remove('active'));
-      document.querySelectorAll('.tabpage').forEach(p=>p.classList.remove('active'));
-      btn.classList.add('active');
-      document.getElementById('tab-'+btn.dataset.tab).classList.add('active');
-    });
-  });
+import { ViewerApp } from './viewer.js';
 
-  // background picker
-  const inpBg = document.getElementById('inpBg');
-  if(inpBg) inpBg.addEventListener('input', e=> app.viewer.setBackground(e.target.value));
+// --- App singletons
+const app = { viewer:null };
 
-  // demo
-  const demo = document.getElementById('btnDemo');
-  if(demo) demo.addEventListener('click', (e)=>{ e.preventDefault();
-    // small public demo glb (threejs dam asset is large; keep cube demo)
-    // keep visual feedback: reset cube rotation
-    if(app.viewer.cube) app.viewer.cube.rotation.set(0,0,0);
-  });
-
-  // pin colors preset
-  const palette = ['#f2d14b','#ff7d7d','#7de0ff','#7ee57b','#c7a0ff','#bfbfbf'];
-  const pinWrap = document.getElementById('pinColors');
-  palette.forEach(c=>{
-    const d = document.createElement('div');
-    d.className='dot'; d.style.background=c; d.title=c;
-    d.addEventListener('click', ()=>{
-      pinWrap.querySelectorAll('.dot').forEach(x=>x.classList.remove('active'));
-      d.classList.add('active');
-    });
-    pinWrap.appendChild(d);
-  });
-  if(pinWrap.firstChild) pinWrap.firstChild.classList.add('active');
-
-  // GLB load from input (allows raw URL)
-  document.getElementById('btnLoad')?.addEventListener('click', async ()=>{
-    const v = document.getElementById('inpGlb').value.trim();
-    if(!v) return;
-    try{
-      await app.viewer.loadGLBFromURL(v);
-      console.log('[viewer] GLB loaded (url mode)');
-    }catch(e){ console.error(e); alert('Failed to load GLB: '+e); }
-  });
-
-  // material sliders (wire to demo cube if present)
-  const h = document.getElementById('slHue');
-  const s = document.getElementById('slSat');
-  const l = document.getElementById('slLight');
-  const o = document.getElementById('slOpacity');
-  const btnUnlit = document.getElementById('btnUnlit');
-  const btnDs = document.getElementById('btnDoubleSide');
-  function targetMeshes(){
-    if(app.viewer.model){
-      const list=[]; app.viewer.model.traverse(o=>{ if(o.isMesh) list.push(o); });
-      return list;
-    }
-    return app.viewer.cube ? [app.viewer.cube] : [];
+// Tabs
+function setupTabs(){
+  const tabs = [
+    {btn:'tab-caption', sec:'sec-caption'},
+    {btn:'tab-material', sec:'sec-material'},
+    {btn:'tab-view', sec:'sec-view'},
+  ];
+  for(const t of tabs){
+    document.getElementById(t.btn).onclick = ()=>{
+      for(const s of tabs){
+        document.getElementById(s.btn).classList.toggle('active', s.btn===t.btn);
+        document.getElementById(s.sec).classList.toggle('active', s.btn===t.btn);
+      }
+    };
   }
-  function applyMat(){
-    const hue = parseFloat(h.value||0), sat=parseFloat(s.value||0), li=parseFloat(l.value||0.5), op=parseFloat(o.value||1);
-    targetMeshes().forEach(mesh=>{
-      mesh.material.transparent = op<1 || mesh.material.transparent;
-      mesh.material.opacity = op;
-      mesh.material.needsUpdate = true;
-    });
-  }
-  [h,s,l,o].forEach(el=> el.addEventListener('input', applyMat));
-  btnUnlit?.addEventListener('click', ()=>{
-    const on = btnUnlit.textContent.includes('off');
-    btnUnlit.textContent = 'Unlit: ' + (on?'on':'off');
-    targetMeshes().forEach(m=>{
-      const mat = m.material;
-      mat.onBeforeCompile = (shader)=>{ /* idempotent stub */ };
-      mat.needsUpdate = true;
-    });
-  });
-  btnDs?.addEventListener('click', ()=>{
-    const on = btnDs.textContent.includes('off');
-    btnDs.textContent = 'DoubleSide: ' + (on?'on':'off');
-    targetMeshes().forEach(m=>{ m.material.side = on? 2: 0; m.material.needsUpdate=true; });
-  });
 }
+
+// Normalize Drive url or id to downloadable url
+function normalizeDriveUrl(input){
+  const s = (input||'').trim();
+  if(!s) return null;
+  // direct id
+  if(/^[0-9A-Za-z_-]{20,}$/.test(s)) return `https://drive.google.com/uc?export=download&id=${s}`;
+  // file url
+  const m = s.match(/drive\.google\.com\/file\/d\/([0-9A-Za-z_-]+)/);
+  if(m) return `https://drive.google.com/uc?export=download&id=${m[1]}`;
+  return s; // fallback
+}
+
+// Guard: reject HTML responses
+async function fetchArrayBufferGuard(url){
+  const res = await fetch(url, {mode:'cors'});
+  const ct = res.headers.get('content-type')||'';
+  if(!res.ok) throw new Error(`HTTP ${res.status}`);
+  if(ct.includes('text/html')) throw new Error('Got HTML not GLB/GLTF (Drive preview?)');
+  return await res.arrayBuffer();
+}
+
+export function setupUI(){
+  // viewer
+  app.viewer = new ViewerApp(document.getElementById('stage'));
+
+  // caption tab
+  document.getElementById('demo-btn').onclick = ()=>{
+    // nothing: demo cube already shown
+  };
+  const input = document.getElementById('drive-input');
+  document.getElementById('btn-load-glb').onclick = async ()=>{
+    try{
+      const url = normalizeDriveUrl(input.value);
+      if(!url) return;
+      const ab = await fetchArrayBufferGuard(url);
+      await app.viewer.loadGLBFromArrayBuffer(ab);
+    }catch(err){
+      console.error('[ui] load glb failed', err);
+      alert('Failed to load GLB: ' + err.message);
+    }
+  };
+
+  // material tab (simple demo controls, apply to all visible meshes when available)
+  const op = document.getElementById('mat-opacity');
+  const unlitBtn = document.getElementById('mat-unlit');
+  const dsBtn = document.getElementById('mat-doubleside');
+
+  function eachMaterials(fn){
+    if(!app.viewer?.gltfRoot) return;
+    app.viewer.gltfRoot.traverse(o=>{
+      const m = o.material;
+      if(m){ fn(m,o); m.needsUpdate = true; }
+    });
+  }
+  op.oninput = ()=> eachMaterials(m=>{ m.transparent = true; m.opacity = parseFloat(op.value); });
+  let unlit=false;
+  unlitBtn.onclick = ()=>{
+    unlit = !unlit;
+    unlitBtn.textContent = 'Unlit: ' + (unlit?'on':'off');
+    eachMaterials(m=>{ m.lights = !unlit; m.needsUpdate = true; });
+  };
+  let ds=false;
+  dsBtn.onclick = ()=>{
+    ds = !ds; dsBtn.textContent = 'DoubleSide: ' + (ds?'on':'off');
+    eachMaterials(m=>{ m.side = ds ? 2 : 0; });
+  };
+
+  // view tab
+  const bg = document.getElementById('bg');
+  bg.oninput = ()=> app.viewer.setBackground(bg.value);
+}
+
+// expose for boot
+window.__LMY_setupUI = setupUI;
