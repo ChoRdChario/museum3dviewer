@@ -3,84 +3,94 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>LociMyu v6.6</title>
+  <title>LociMyu v6.6 UI Integrated (GIS pre-push)</title>
+  <link rel="icon" href="./favicon.ico">
   <style>
-    :root { --bg:#0e0f13; --panel:#151720; --fg:#e6e7ea; --muted:#a8adba; --accent:#3b82f6; }
-    html,body { height:100%; background:var(--bg); color:var(--fg); margin:0; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Noto Sans, sans-serif; }
-    #wrap { display:grid; grid-template-columns: 1fr 360px; height:100%; }
-    #stageWrap { position:relative; }
-    canvas { display:block; width:100%; height:100%; }
-    #boot { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; pointer-events:none; color:#b8c0cc; font-size:14px;}
-    #side { background:var(--panel); border-left:1px solid #1f2330; padding:12px; overflow:auto; }
-    .row { display:flex; gap:8px; align-items:center; margin:8px 0; }
-    .btn { background:#222737; color:#cfd6e6; border:1px solid #2b3144; padding:6px 10px; border-radius:6px; cursor:pointer; }
-    .btn:hover { background:#283049 }
-    input[type=text] { width:100%; background:#0f121a; color:#e6e7ea; border:1px solid #2b3144; padding:8px; border-radius:6px; }
-    .hint { font-size:12px; color:var(--muted); }
-    .tabs { display:flex; gap:8px; margin-bottom:8px; }
-    .tab { background:#1a1f2e; padding:6px 10px; border-radius:6px; cursor:pointer; }
-    .tab.active { background:#26304a; }
-    .sec { display:none; }
-    .sec.active { display:block; }
-    .chip { border-radius:999px; padding:4px 10px; border:1px solid #2b3144; background:#202533; cursor:pointer; }
-    .right-top { position:sticky; top:0; display:flex; justify-content:space-between; align-items:center; background:var(--panel); z-index:2; padding-bottom:8px; }
+    html,body{height:100%;margin:0;background:#0f0f13;color:#ddd;font:14px/1.4 system-ui,Segoe UI,Roboto,Helvetica,Arial}
+    #app{display:grid;grid-template-columns:1fr 360px;grid-template-rows:100vh;gap:0}
+    #stage{position:relative;background:#101014}
+    #spinner{position:absolute;inset:0;display:grid;place-items:center;color:#ddd}
+    aside#panel{background:#14141a;border-left:1px solid #222;display:flex;flex-direction:column;min-width:280px}
+    header#topbar{display:flex;align-items:center;gap:.5rem;padding:.5rem .75rem;border-bottom:1px solid #222}
+    .chip{padding:.25rem .5rem;border-radius:999px;border:1px solid #444;cursor:pointer}
+    .chip.ok{border-color:#2dd4bf;color:#2dd4bf}
+    .chip.warn{border-color:#f59e0b;color:#f59e0b}
+    section{padding:.75rem .75rem;overflow:auto}
+    section h3{margin:.25rem 0 .5rem;font-size:13px;color:#aaa;text-transform:uppercase;letter-spacing:.08em}
+    .row{display:flex;align-items:center;gap:.5rem;margin:.25rem 0}
+    .col{display:flex;flex-direction:column;gap:.25rem}
+    input[type="range"]{width:100%}
+    .btn{padding:.4rem .6rem;border:1px solid #444;border-radius:.5rem;background:#1a1a22;color:#ddd;cursor:pointer}
+    .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:.5rem}
+    .card{background:#1a1a22;border:1px solid #2a2a33;border-radius:.5rem;overflow:hidden}
+    .card img{width:100%;display:block;aspect-ratio:1/1;object-fit:cover;background:#0b0b0f}
+    .muted{color:#888}
+    @media (max-width:960px){#app{grid-template-columns:1fr}aside#panel{position:fixed;inset:auto 0 0 0;height:48vh;transform:translateY(calc(48vh - 42px));transition:.25s;box-shadow:0 -8px 24px rgba(0,0,0,.35)}
+      aside#panel.expanded{transform:translateY(0)}
+      header#topbar{justify-content:space-between}}
+    #overlay{position:absolute;left:12px;bottom:12px;max-width:min(420px,70vw);background:rgba(12,12,16,.84);backdrop-filter:blur(6px);border:1px solid #333;border-radius:.75rem;padding:.75rem;display:none}
+    #overlay img{max-width:100%;border-radius:.5rem;border:1px solid #333;margin-top:.5rem}
   </style>
 
-  <!-- Import map (A案): three を unpkg から解決 -->
+  <!-- Import map for bare 'three' -->
   <script type="importmap">
   {
     "imports": {
-      "three": "https://unpkg.com/three@0.160.1/build/three.module.js",
-      "three/examples/jsm/": "https://unpkg.com/three@0.160.1/examples/jsm/"
+      "three": "https://unpkg.com/three@0.157.0/build/three.module.js"
     }
   }
   </script>
+
+  <!-- Google APIs + Google Identity Services (GIS) -->
+  <script src="https://apis.google.com/js/api.js" async defer></script>
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
 </head>
 <body>
-  <div id="wrap">
-    <div id="stageWrap">
-      <canvas id="stage"></canvas>
-      <div id="boot">booting...</div>
+  <div id="app">
+    <div id="stage">
+      <div id="spinner">booting…</div>
+      <div id="overlay"></div>
     </div>
-    <aside id="side">
-      <div class="right-top">
-        <div>LociMyu v6.6</div>
-        <button id="authChip" class="chip">Sign in</button>
-      </div>
-      <div class="tabs">
-        <div class="tab active" data-tab="caption">Caption</div>
-        <div class="tab" data-tab="material">Material</div>
-        <div class="tab" data-tab="view">View</div>
-      </div>
-
-      <section id="sec-caption" class="sec active">
-        <div class="row"><input id="driveInput" type="text" placeholder="Drive File ID or URL" /></div>
-        <div class="row"><button id="btnGlb" class="btn">GLB</button><a class="hint" href="#" id="demoLink">demo</a></div>
-        <hr style="border-color:#242938">
-        <div class="hint">* Import Map 方式。three は unpkg から解決されます。</div>
-      </section>
-
-      <section id="sec-material" class="sec">
+    <aside id="panel">
+      <header id="topbar">
+        <strong>LociMyu v6.6</strong>
+        <div style="flex:1"></div>
+        <span id="authChip" class="chip warn">Sign in</span>
+        <span id="modeChip" class="chip">persp</span>
+        <button id="expandBtn" class="btn" title="Toggle panel">▴</button>
+      </header>
+      <section id="secLoad">
+        <h3>Load</h3>
         <div class="row">
-          <label style="width:110px;">Opacity</label>
-          <input id="matOpacity" type="range" min="0" max="1" step="0.01" value="1"/>
+          <input id="fileIdInput" placeholder="Drive File ID or URL" style="flex:1;padding:.4rem;background:#0f0f13;border:1px solid #333;border-radius:.4rem;color:#ddd">
+          <button id="btnLoad" class="btn">GLB</button>
         </div>
-        <div class="row">
-          <button id="matUnlit" class="btn">Unlit: off</button>
-          <button id="matDouble" class="btn">DoubleSide: off</button>
-        </div>
+        <div class="col muted" id="loadHint">?id=&lt;fileId&gt; または <b>demo</b> でデモモデルをロード</div>
       </section>
-
-      <section id="sec-view" class="sec">
+      <section id="secMaterial">
+        <h3>Material</h3>
+        <div class="row"><label style="width:72px">Hue</label><input id="slHue" type="range" min="0" max="360" value="210"></div>
+        <div class="row"><label style="width:72px">Sat</label><input id="slSat" type="range" min="0" max="100" value="40"></div>
+        <div class="row"><label style="width:72px">Light</label><input id="slLight" type="range" min="0" max="100" value="45"></div>
+        <div class="row"><label style="width:72px">Opacity</label><input id="slOpacity" type="range" min="0" max="100" value="100"></div>
+        <div class="row"><button id="btnUnlit" class="btn">Unlit: off</button><button id="btnDouble" class="btn">DoubleSide: off</button></div>
+        <div class="row"><label style="width:72px">White→α</label><input id="slWhiteKey" type="range" min="70" max="100" value="95"></div>
+      </section>
+      <section id="secPins">
+        <h3>Pins & Caption</h3>
         <div class="row">
-          <button id="bgDark" class="btn">Dark</button>
-          <button id="bgLight" class="btn">Light</button>
+          <button id="btnAddPin" class="btn" title="Shift+Click in viewportでも追加可">+ Pin</button>
+          <button id="btnClearPins" class="btn">Clear</button>
+        </div>
+        <div class="col">
+          <input id="capTitle" placeholder="Title" style="padding:.4rem;background:#0f0f13;border:1px solid #333;border-radius:.4rem;color:#ddd">
+          <textarea id="capBody" placeholder="Body" rows="3" style="padding:.4rem;background:#0f0f13;border:1px solid #333;border-radius:.4rem;color:#ddd"></textarea>
+          <div class="grid" id="imgGrid"></div>
         </div>
       </section>
     </aside>
   </div>
 
-  <script type="module" src="./app_boot.js"></script>
-  <script src="./probe_viewer_visibility.js"></script>
+  \1\3</script>
 </body>
 </html>

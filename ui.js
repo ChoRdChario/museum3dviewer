@@ -1,72 +1,64 @@
-import { ViewerApp } from './viewer.js'
+import { ensureDriveApi } from './utils_drive_api.js';
 
-function normalizeDriveUrl(input){
-  if (!input) throw new Error('empty file id/url')
-  const idMatch = input.match(/[A-Za-z0-9_-]{25,}/)
-  const id = idMatch ? idMatch[0] : input.trim()
-  return `https://drive.google.com/uc?export=download&id=${id}`
-}
+export function setupUI(app){
+  const v = app.viewer;
+  const auth = app.auth;
+  const drive = ensureDriveApi(()=>auth.getAccessToken && auth.getAccessToken());
 
-async function fetchDriveAsArrayBuffer(url){
-  const res = await fetch(url)
-  const ct = (res.headers.get('content-type') || '').toLowerCase()
-  if (!res.ok) throw new Error(`HTTP ${res.status}`)
-  if (ct.includes('text/html')) throw new Error('Drive preview HTML detected. Use a direct download or set file sharing.')
-  return await res.arrayBuffer()
-}
+  // --- Tabs ---
+  const tabs = Array.from(document.querySelectorAll('[data-tab]'));
+  tabs.forEach(tab => tab.addEventListener('click', ()=>{
+    const t = tab.dataset.tab;
+    document.querySelectorAll('.pane').forEach(p => p.classList.toggle('hidden', p.id !== `pane-${t}`));
+    tabs.forEach(x=>x.classList.toggle('active', x===tab));
+  }));
 
-export async function setupUI(){
-  // Tabs
-  const tabs = document.querySelectorAll('.tab')
-  const secs = { caption: document.getElementById('sec-caption'),
-                 material: document.getElementById('sec-material'),
-                 view: document.getElementById('sec-view') }
-  tabs.forEach(t=> t.addEventListener('click', ()=>{
-    tabs.forEach(x=>x.classList.remove('active'))
-    t.classList.add('active')
-    Object.values(secs).forEach(s=>s.classList.remove('active'))
-    secs[t.dataset.tab].classList.add('active')
-  }))
+  // --- Material controls ---
+  const slHue = document.getElementById('slHue');
+  const slSat = document.getElementById('slSat');
+  const slLight = document.getElementById('slLight');
+  const slOpacity = document.getElementById('slOpacity');
+  const cbUnlit = document.getElementById('cbUnlit');
+  const cbDouble = document.getElementById('cbDouble');
 
-  // Viewer
-  const viewer = new ViewerApp('stage')
-  window.app = { viewer }
+  function applyMaterial(){
+    v.setHue(+slHue.value/100);
+    v.setSat(+slSat.value/100);
+    v.setLight(+slLight.value/100);
+    v.setOpacity(+slOpacity.value/100);
+    v.setUnlit(cbUnlit.checked);
+    v.setDoubleSide(cbDouble.checked);
+  }
+  [slHue,slSat,slLight,slOpacity,cbUnlit,cbDouble].forEach(el => el && el.addEventListener('input', applyMaterial));
+  applyMaterial();
 
-  // GLB
-  const btn = document.getElementById('btnGlb')
-  const input = document.getElementById('driveInput')
-  const demo = document.getElementById('demoLink')
-  btn?.addEventListener('click', async ()=>{
+  // --- GLB loading ---
+  const tbGLB = document.getElementById('tbGLB');
+  const btnLoad = document.getElementById('btnLoadGLB');
+  const aDemo = document.getElementById('lnkDemo');
+
+  function parseDriveId(input){
+    if(!input) return '';
+    // matches id= or /d/{id}/ style
+    const m = input.match(/(?:id=|\/d\/)([\w-]{20,})/);
+    return m ? m[1] : input.trim();
+  }
+
+  async function loadFromDrive(){
+    const id = parseDriveId(tbGLB.value);
+    if(!id){ alert('Enter Drive file ID or URL'); return; }
+    const buf = await drive.fetchFileAsArrayBuffer(id);
+    await v.loadGLBFromArrayBuffer(buf);
+  }
+  btnLoad?.addEventListener('click', e=>{ e.preventDefault(); loadFromDrive().catch(err=>{ console.error('[ui] GLB load failed', err); alert('Failed to load GLB. See console.'); }); });
+
+  // local demo (CDN-hosted sample)
+  aDemo?.addEventListener('click', async (e)=>{
+    e.preventDefault();
     try{
-      const url = normalizeDriveUrl(input.value)
-      const buf = await fetchDriveAsArrayBuffer(url)
-      await viewer.loadGLBArrayBuffer(buf)
-    }catch(err){
-      console.error(err)
-      alert(err.message || String(err))
-    }
-  })
-  demo?.addEventListener('click', async (e)=>{
-    e.preventDefault()
-    // Small embedded demo GLB (base64) — just to verify loader path. A 1-triangle glb.
-    alert('デモGLBは Drive 直リンクを使えない環境での動作確認用ダミーです。実運用では Drive のファイルID/URLを入力してください。')
-  })
-
-  // Material
-  const op = document.getElementById('matOpacity')
-  const unlit = document.getElementById('matUnlit')
-  const dbl = document.getElementById('matDouble')
-  op?.addEventListener('input', ()=> viewer.setOpacity(parseFloat(op.value)))
-  let unlitOn = false
-  unlit?.addEventListener('click', ()=>{
-    unlitOn = !unlitOn; viewer.setUnlit(unlitOn); unlit.textContent = `Unlit: ${unlitOn?'on':'off'}`
-  })
-  let dblOn = false
-  dbl?.addEventListener('click', ()=>{
-    dblOn = !dblOn; viewer.setDoubleSide(dblOn); dbl.textContent = `DoubleSide: ${dblOn?'on':'off'}`
-  })
-
-  // View
-  document.getElementById('bgDark')?.addEventListener('click', ()=> document.body.style.background='#0e0f13')
-  document.getElementById('bgLight')?.addEventListener('click', ()=> document.body.style.background='#eaeef5')
+      const resp = await fetch('https://unpkg.com/@loaders.gl/gltf@4.2.0/dist/test/data/Duck.glb');
+      const buf = await resp.arrayBuffer();
+      await v.loadGLBFromArrayBuffer(buf);
+    }catch(err){ console.error('[ui] demo failed', err); alert('Demo load failed.'); }
+  });
 }
