@@ -1,254 +1,199 @@
-// viewer.js - v6.6 patched
-const THREE_URL = 'https://unpkg.com/three@0.157.0/build/three.module.js';
-const GLTF_URL  = 'https://unpkg.com/three@0.157.0/examples/jsm/loaders/GLTFLoader.js';
-const ORBIT_URL = 'https://unpkg.com/three@0.157.0/examples/jsm/controls/OrbitControls.js';
+// three.js viewer & material helpers
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
-export async function ensureViewer({ mount, spinner }) {
-  const THREE = await import(THREE_URL);
-  const { OrbitControls } = await import(ORBIT_URL);
-  const { GLTFLoader } = await import(GLTF_URL);
-
-  const renderer = new THREE.WebGLRenderer({ antialias: true, alpha:false });
-  renderer.setPixelRatio(devicePixelRatio);
-  renderer.setSize(mount.clientWidth, mount.clientHeight);
-  renderer.sortObjects = true;
-  mount.appendChild(renderer.domElement);
+export async function ensureViewer(app){
+  const container = document.getElementById('stage');
+  const canvas = document.createElement('canvas');
+  canvas.className = 'webgl';
+  container.appendChild(canvas);
 
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x101014);
+  scene.background = new THREE.Color(0x0f0f13);
+  const camera = new THREE.PerspectiveCamera(45, container.clientWidth/container.clientHeight, 0.01, 1000);
+  camera.position.set(2.6, 1.2, 3.0);
 
-  const camera = new THREE.PerspectiveCamera(60, mount.clientWidth / Math.max(1,mount.clientHeight), 0.1, 2000);
-  camera.position.set(2.5, 2, 3);
-  const controls = new OrbitControls(camera, renderer.domElement);
+  const renderer = new THREE.WebGLRenderer({ canvas, antialias:true, alpha:false });
+  renderer.setSize(container.clientWidth, container.clientHeight);
+  renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
+
+  const controls = new OrbitControls(camera, canvas);
   controls.enableDamping = true;
 
-  const hemi = new THREE.HemisphereLight(0xffffff, 0x222233, 1.0);
+  const hemi = new THREE.HemisphereLight(0xffffff, 0x202030, 1.0);
   scene.add(hemi);
+  const dir = new THREE.DirectionalLight(0xffffff, 1.2);
+  dir.position.set(3,4,5);
+  scene.add(dir);
 
-  const state = {
-    current: null,
-    materials: [],            // unique THREE.Material[]
-    targetIndex: -1,          // -1 = all
-  };
+  const grid = new THREE.GridHelper(10, 10, 0x444, 0x222);
+  grid.visible = false;
+  scene.add(grid);
 
-  function collectUniqueMaterials(root){
+  let raf;
+  let firstFrame = false;
+  function animate(){
+    raf = requestAnimationFrame(animate);
+    controls.update();
+    renderer.render(scene, camera);
+    if (!firstFrame){ firstFrame = true; readyCbs.forEach(f=>f()); readyCbs.length=0; }
+  }
+  animate();
+
+  window.addEventListener('resize', ()=>{
+    const w = container.clientWidth, h = container.clientHeight;
+    renderer.setSize(w,h);
+    camera.aspect = w/h;
+    camera.updateProjectionMatrix();
+  });
+
+  // model & materials
+  let root = null;
+  let uniqueMaterials = []; // [{mat, name, original:{...}}]
+  const loader = new GLTFLoader();
+
+  async function loadDemo(){
+    // permissive CORS sample
+    const url = 'https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Models/master/2.0/DamagedHelmet/glTF-Binary/DamagedHelmet.glb';
+    const gltf = await loader.loadAsync(url);
+    setModel(gltf.scene);
+  }
+
+  async function loadFromDriveIdOrUrl(input){
+    // best-effort parser (id or URL)。Drive直DLはCORS制限があるため、CORS許可URLのみ成功します。
+    const m = String(input||'').match(/[\w-]{20,}/);
+    if(!m) throw new Error('empty or invalid file id/url');
+    const id = m[0];
+    const url = `https://drive.google.com/uc?export=download&id=${id}`;
+    const gltf = await loader.loadAsync(url); // CORS失敗時は例外
+    setModel(gltf.scene);
+  }
+
+  function gatherUniqueMaterials(obj3d){
     const arr = [];
     const seen = new Set();
-    root.traverse((o)=>{
-      if (o.isMesh && o.material){
+    obj3d.traverse(o=>{
+      if(o.isMesh){
         const mats = Array.isArray(o.material) ? o.material : [o.material];
-        for (const m of mats){
-          const key = m.uuid;
-          if (!seen.has(key)){
-            seen.add(key);
-            arr.push(m);
+        for(const m of mats){
+          if(m && !seen.has(m.uuid)){
+            seen.add(m.uuid);
+            arr.push({ mat:m, name: m.name || '(mat)', original: snapshotMaterial(m) });
           }
-          // transparent draw order safety
-          m.depthWrite = !m.transparent;
         }
       }
     });
     return arr;
   }
 
-  function applyToTargets(fn){
-    const mats = state.targetIndex < 0 ? state.materials : [state.materials[state.targetIndex]].filter(Boolean);
-    for (const m of mats) fn(m);
-  }
-
-  function animate(){
-    controls.update();
-    renderer.render(scene, camera);
-    requestAnimationFrame(animate);
-  }
-  animate();
-
-  function onResize(){
-    const w = mount.clientWidth, h = Math.max(1, mount.clientHeight);
-    renderer.setSize(w,h);
-    camera.aspect = w/h;
-    camera.updateProjectionMatrix();
-  }
-  new ResizeObserver(onResize).observe(mount);
-
-  async function loadGLBFromArrayBuffer(buf){
-    // clear previous
-    if (state.current){
-      scene.remove(state.current);
-      state.current.traverse?.((o)=>{
-        if (o.geometry) o.geometry.dispose();
-      });
-    }
-    const { GLTFLoader } = await import(GLTF_URL);
-    const blob = new Blob([buf], {type:'model/gltf-binary'});
-    const url = URL.createObjectURL(blob);
-    try{
-      const gltf = await new GLTFLoader().loadAsync(url);
-      const root = gltf.scene || gltf.scenes?.[0];
-      if (!root) throw new Error('GLB has no scene');
-      scene.add(root);
-      state.current = root;
-      state.materials = collectUniqueMaterials(root);
-      state.targetIndex = -1;
-    } finally {
-      URL.revokeObjectURL(url);
-    }
-  }
-
-  // === material helpers ===
-  function ensureBackup(m){
-    if (!m.userData._lmy) m.userData._lmy = {};
-    const u = m.userData._lmy;
-    if (!u.backup){
-      // minimal clone of togglable props
-      u.backup = {
-        type: m.type,
-        color: m.color ? m.color.clone() : null,
-        map: m.map || null,
-        side: m.side,
-        transparent: m.transparent,
-        opacity: m.opacity,
-        toneMapped: m.toneMapped,
-        lights: m.lights ?? true,
-        onBeforeCompile: m.onBeforeCompile || null,
-      };
-    }
-    return u;
-  }
-
-  function setHSL(h, s, l){
-    applyToTargets((m)=>{
-      if (!m.color) return;
-      const c = new THREE.Color();
-      c.setHSL(h/360, s/100, l/100);
-      m.color.copy(c);
-      m.needsUpdate = true;
-    });
-  }
-
-  function setOpacity(p){
-    applyToTargets((m)=>{
-      m.transparent = p < 1.0 || m.userData._lmy?.whiteKeyEnabled;
-      m.opacity = p;
-      m.depthWrite = !m.transparent;
-      m.needsUpdate = true;
-    });
-  }
-
-  function setUnlit(on){
-    applyToTargets((m)=>{
-      const u = ensureBackup(m);
-      if (on){
-        if (m.type !== 'MeshBasicMaterial'){
-          // switch to basic while keeping map/opacity/etc
-          const basic = new THREE.MeshBasicMaterial({
-            map: m.map || null,
-            color: m.color ? m.color.clone() : 0xffffff,
-            transparent: m.transparent,
-            opacity: m.opacity,
-            side: m.side,
-            depthWrite: m.depthWrite,
-            toneMapped: false,
-          });
-          // mark & swap
-          u.swapped = m;
-          u.swappedOriginal = m; // keep reference
-          Object.setPrototypeOf(m, THREE.MeshBasicMaterial.prototype);
-          Object.assign(m, basic);
-          m.needsUpdate = true;
-        }
-      } else {
-        // restore by reapplying backup on the same instance
-        if (u.backup){
-          m.onBeforeCompile = u.backup.onBeforeCompile;
-          m.toneMapped = u.backup.toneMapped;
-          m.lights = u.backup.lights;
-          m.transparent = u.backup.transparent;
-          m.opacity = u.backup.opacity;
-          m.side = u.backup.side;
-          if (u.backup.color && m.color) m.color.copy(u.backup.color);
-          m.map = u.backup.map;
-          // revert prototype if needed
-          if (m.type !== u.backup.type){
-            // reconstruct original Standard material-ish
-            const std = new THREE.MeshStandardMaterial({
-              map: m.map,
-              color: (u.backup.color||new THREE.Color(0xffffff)),
-              transparent: m.transparent,
-              opacity: m.opacity,
-              side: m.side,
-              depthWrite: m.depthWrite,
-            });
-            Object.setPrototypeOf(m, THREE.MeshStandardMaterial.prototype);
-            Object.assign(m, std);
-          }
-          m.needsUpdate = true;
-        }
-      }
-    });
-  }
-
-  function setDoubleSide(on){
-    applyToTargets((m)=>{
-      m.side = on ? THREE.DoubleSide : THREE.FrontSide;
-      m.needsUpdate = true;
-    });
-  }
-
-  // --- white key (white -> alpha) ---
-  function installWhiteKeyShader(m){
-    const u = ensureBackup(m);
-    if (u.whiteKeyInstalled) return;
-    u.whiteKeyInstalled = true;
-    m.onBeforeCompile = (shader)=>{
-      shader.uniforms.uWhiteKey = { value: (u.whiteKeyThreshold ?? 0.97) };
-      shader.fragmentShader = shader.fragmentShader.replace(
-        '#include <dithering_fragment>',
-        `#include <dithering_fragment>
-         float w = max(max(gl_FragColor.r, gl_FragColor.g), gl_FragColor.b);
-         if (w >= uWhiteKey) { gl_FragColor.a = 0.0; }
-        `
-      );
+  function snapshotMaterial(m){
+    return {
+      transparent: m.transparent,
+      opacity: m.opacity,
+      side: m.side,
+      color: m.color ? m.color.clone() : null,
+      emissive: m.emissive ? m.emissive.clone() : null,
+      map: m.map || null
     };
-    m.transparent = true;
-    m.depthWrite = false;
+  }
+
+  function restoreMaterial(m, snap){
+    m.transparent = snap.transparent;
+    m.opacity = snap.opacity;
+    m.side = snap.side;
+    if(snap.color && m.color) m.color.copy(snap.color);
+    if(snap.emissive && m.emissive) m.emissive.copy(snap.emissive);
     m.needsUpdate = true;
   }
-  function setWhiteKeyEnabled(on){
-    applyToTargets((m)=>{
-      const u = ensureBackup(m);
-      u.whiteKeyEnabled = on;
-      if (on) installWhiteKeyShader(m);
-      else {
-        // restore shader
-        m.onBeforeCompile = u.backup?.onBeforeCompile || null;
-        m.needsUpdate = true;
-        // transparency might be controlled by opacity separately
-        if (!m.transparent || (m.transparent && m.opacity>=1.0)){
-          m.depthWrite = true;
+
+  function setModel(obj){
+    if(root){ scene.remove(root); root.traverse(o=>o.geometry&&o.geometry.dispose()); }
+    root = obj;
+    scene.add(root);
+    // frame
+    const bbox = new THREE.Box3().setFromObject(root);
+    const size = bbox.getSize(new THREE.Vector3()).length();
+    const center = bbox.getCenter(new THREE.Vector3());
+    controls.target.copy(center);
+    camera.position.copy(center).add(new THREE.Vector3(1,0.5,1).normalize().multiplyScalar(size*0.8));
+    camera.near = size/1000; camera.far = size*10; camera.updateProjectionMatrix();
+    // mats
+    uniqueMaterials = gatherUniqueMaterials(root);
+    app.events?.dispatchEvent(new CustomEvent('viewer:materials',{detail:{list:uniqueMaterials}}));
+  }
+
+  // --- public API ---
+  const api = {
+    async loadDemo(){ await loadDemo(); },
+    async loadByInput(v){ await loadFromDriveIdOrUrl(v); },
+    getMaterials(){ return uniqueMaterials; },
+    setHSLOpacity({target, h, s, l, opacity}){
+      const targets = (target<0) ? uniqueMaterials : [uniqueMaterials[target]].filter(Boolean);
+      for(const t of targets){
+        const m = t.mat;
+        if(m.color){
+          const col = t.original.color.clone();
+          col.offsetHSL(h-0.5, s-1.0, l-1.0);
+          m.color.copy(col);
         }
+        m.opacity = opacity;
+        m.transparent = opacity < 0.999;
+        m.depthWrite = m.opacity >= 0.999;
+        m.needsUpdate = true;
       }
-    });
-  }
-  function setWhiteKeyThreshold(t){
-    applyToTargets((m)=>{
-      const u = ensureBackup(m);
-      u.whiteKeyThreshold = t;
-      installWhiteKeyShader(m);
-      m.needsUpdate = true;
-    });
-  }
-
-  function setMaterialTarget(index){
-    state.targetIndex = index; // -1 = all
-  }
-
-  return {
-    THREE, scene, camera, renderer, controls,
-    loadGLBFromArrayBuffer,
-    loadGLB: loadGLBFromArrayBuffer, // alias
-    setMaterialTarget,
-    setHSL, setOpacity, setUnlit, setDoubleSide,
-    setWhiteKeyEnabled, setWhiteKeyThreshold,
+    },
+    toggleUnlit(target){
+      const targets = (target<0) ? uniqueMaterials : [uniqueMaterials[target]].filter(Boolean);
+      for(const t of targets){
+        const m = t.mat;
+        const isUnlit = !!m.userData.__unlit;
+        if(isUnlit){
+          // restore
+          restoreMaterial(m, t.original);
+          delete m.userData.__unlit;
+        }else{
+          // approximate unlit: bake color, remove shading
+          if(m.color){
+            const c = (t.original.color || m.color).clone();
+            m.color.copy(c);
+          }
+          m.emissive && m.emissive.setRGB(0,0,0);
+          m.roughness !== undefined && (m.roughness = 1);
+          m.metalness !== undefined && (m.metalness = 0);
+          m.userData.__unlit = 1;
+        }
+        m.needsUpdate = true;
+      }
+    },
+    setDoubleSide(target, on){
+      const targets = (target<0) ? uniqueMaterials : [uniqueMaterials[target]].filter(Boolean);
+      for(const t of targets){ t.mat.side = on ? THREE.DoubleSide : THREE.FrontSide; t.mat.needsUpdate = true; }
+    },
+    setWhiteKey(target, thr){
+      // simple white-to-alpha keying: modify opacity based on fragment luminance via material.onBeforeCompile
+      const targets = (target<0) ? uniqueMaterials : [uniqueMaterials[target]].filter(Boolean);
+      for(const t of targets){
+        const m = t.mat;
+        m.userData.__whiteKey = thr;
+        m.onBeforeCompile = (shader)=>{
+          shader.uniforms.uWhiteThr = { value: thr };
+          shader.fragmentShader = shader.fragmentShader.replace(
+            'void main() {',
+            'uniform float uWhiteThr;\nvoid main(){'
+          ).replace(
+            '#include <opaque_fragment>',
+            '#include <opaque_fragment>\n  float lum = dot(gl_FragColor.rgb, vec3(0.299,0.587,0.114));\n  if(lum>=uWhiteThr){ gl_FragColor.a = 0.0; }'
+          );
+        };
+        m.transparent = true;
+        m.needsUpdate = true;
+      }
+    },
+    onceReady(cb){ readyCbs.push(cb); }
   };
+  const readyCbs = [];
+
+  // expose on app
+  return api;
 }

@@ -1,60 +1,71 @@
-// ui.js - v6.6 patched
-import { fetchDriveFileAsArrayBuffer, normalizeDriveIdFromInput } from './utils_drive_api.js';
-
+// wire UI to viewer
 export function setupUI(app){
-  const $ = (id)=>document.getElementById(id);
-  const el = {
-    fileId: $('fileIdInput'),
-    btnLoad: $('btnLoad'),
-    slHue: $('slHue'), slSat: $('slSat'), slLight: $('slLight'),
-    slOpacity: $('slOpacity'),
-    btnUnlit: $('btnUnlit'),
-    btnDouble: $('btnDouble'),
-    slWhiteKey: $('slWhiteKey'),
-    chkWhiteKey: $('chkWhiteKey'),
-    matSelect: $('matSelect'),
-  };
+  const $ = (sel)=>document.querySelector(sel);
+  const on = (el, ev, fn)=>el&&el.addEventListener(ev, fn);
 
-  // material target
-  el.matSelect?.addEventListener('change', ()=>{
-    app.viewer.setMaterialTarget(parseInt(el.matSelect.value,10));
+  // Tabs
+  document.querySelectorAll('#tabs .tab').forEach(tab=>{
+    tab.addEventListener('click', ()=>{
+      document.querySelectorAll('#tabs .tab').forEach(t=>t.classList.remove('active'));
+      document.querySelectorAll('.pane').forEach(p=>p.classList.remove('active'));
+      tab.classList.add('active');
+      document.getElementById('pane-'+tab.dataset.tab).classList.add('active');
+    });
   });
 
-  function applyHSL(){ app.viewer.setHSL(+el.slHue.value, +el.slSat.value, +el.slLight.value); }
-  function applyOpacity(){ app.viewer.setOpacity(+el.slOpacity.value/100); }
-  el.slHue?.addEventListener('input', applyHSL);
-  el.slSat?.addEventListener('input', applyHSL);
-  el.slLight?.addEventListener('input', applyHSL);
-  el.slOpacity?.addEventListener('input', applyOpacity);
+  // Load demo
+  on($('#demoLink'), 'click', async (e)=>{ e.preventDefault(); await app.viewer.loadDemo(); });
 
-  el.btnUnlit?.addEventListener('click', ()=>{
-    const on = el.btnUnlit.dataset.on === '1' ? 0 : 1;
-    el.btnUnlit.dataset.on = String(on);
-    el.btnUnlit.textContent = 'Unlit: ' + (on?'on':'off');
-    app.viewer.setUnlit(!!on);
-  });
-  el.btnDouble?.addEventListener('click', ()=>{
-    const on = el.btnDouble.dataset.on === '1' ? 0 : 1;
-    el.btnDouble.dataset.on = String(on);
-    el.btnDouble.textContent = 'DoubleSide: ' + (on?'on':'off');
-    app.viewer.setDoubleSide(!!on);
-  });
-
-  el.chkWhiteKey?.addEventListener('change', ()=>{
-    app.viewer.setWhiteKeyEnabled(el.chkWhiteKey.checked);
-  });
-  el.slWhiteKey?.addEventListener('input', ()=>{
-    app.viewer.setWhiteKeyThreshold(+el.slWhiteKey.value/100);
-  });
-
-  el.btnLoad?.addEventListener('click', async ()=>{
+  // Load from input
+  on($('#loadGlbBtn'), 'click', async ()=>{
+    const v = $('#fileIdInput').value.trim();
+    if(!v){ alert('Enter Drive ID or URL'); return; }
     try{
-      const id = normalizeDriveIdFromInput(el.fileId.value);
-      const buf = await fetchDriveFileAsArrayBuffer(id);
-      await app.viewer.loadGLB(buf);
+      await app.viewer.loadByInput(v);
     }catch(err){
-      console.error('[ui] failed to load', err);
-      alert('Failed to load GLB: '+(err?.message||err));
+      console.error(err);
+      alert('GLBの読み込みに失敗しました（CORSの可能性があります）\n' + err.message);
     }
+  });
+
+  // Material panel
+  const matSel = $('#matTarget');
+  const hue = $('#matHue'), sat=$('#matSat'), lig=$('#matLight'), op=$('#matOpacity'), white=$('#matWhite');
+  const unlitBtn = $('#matUnlit'), dsBtn=$('#matDoubleSide');
+  function applyMat(){
+    const idx = parseInt(matSel.value,10);
+    app.viewer.setHSLOpacity({target:idx, h:parseFloat(hue.value||0), s:parseFloat(sat.value||1), l:parseFloat(lig.value||1), opacity:parseFloat(op.value||1)});
+  }
+  [hue,sat,lig,op].forEach(inp=>on(inp,'input',applyMat));
+  on(unlitBtn,'click',()=>{
+    const idx = parseInt(matSel.value,10);
+    app.viewer.toggleUnlit(idx);
+    unlitBtn.textContent = 'Unlit: toggled';
+    setTimeout(()=>unlitBtn.textContent='Unlit',600);
+  });
+  on(dsBtn,'click',()=>{
+    const idx = parseInt(matSel.value,10);
+    const onNow = dsBtn.dataset.on==='1';
+    app.viewer.setDoubleSide(idx, !onNow);
+    dsBtn.dataset.on = onNow?'0':'1';
+    dsBtn.textContent = 'DoubleSide: ' + (onNow?'off':'on');
+  });
+  on(white,'input',()=>{
+    const idx = parseInt(matSel.value,10);
+    app.viewer.setWhiteKey(idx, parseFloat(white.value||1));
+  });
+
+  // Populate materials when model loaded
+  app.events.addEventListener('viewer:materials', (e)=>{
+    const list = e.detail.list || [];
+    matSel.innerHTML = '<option value="-1">(All)</option>' + list.map((t,i)=>`<option value="${i}">${i}: ${t.name}</option>`).join('');
+  });
+
+  // Caption dummy pin (UI only – the full pins system is separate)
+  on($('#addPin'),'click',()=>{
+    const ov = document.getElementById('overlay');
+    ov.style.display = 'block';
+    document.getElementById('ov-title').textContent = ($('#capTitle').value||'(untitled)');
+    document.getElementById('ov-body').textContent = ($('#capBody').value||'');
   });
 }
