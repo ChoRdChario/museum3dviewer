@@ -3,139 +3,30 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>LociMyu v6.6</title>
-  <link rel="icon" href="./favicon.ico">
-  <style>
-    :root{
-      --bg:#0f0f13; --panel:#14141a; --muted:#888; --border:#222; --chip:#1f2430; --brand:#f5a524;
+  <title>LociMyu viewer (import map 完全版)</title>
+
+  <!-- Import Map は最初の module より「前」。ここが肝心 -->
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://unpkg.com/three@0.160.1/build/three.module.js",
+      "three/examples/jsm/": "https://unpkg.com/three@0.160.1/examples/jsm/"
     }
-    html,body{height:100%;margin:0;background:var(--bg);color:#ddd;font:14px/1.4 system-ui,Segoe UI,Roboto,Helvetica,Arial}
-    #app{display:grid;grid-template-columns:1fr 380px;grid-template-rows:100vh;gap:0}
-    #stage{position:relative;background:#101014}
-    #spinner{position:absolute;inset:0;display:grid;place-items:center;color:#ddd;pointer-events:none}
-    #overlay{position:absolute;left:12px;bottom:12px;max-width:360px;background:#0f0f13c0;border:1px solid #333;border-radius:.75rem;padding:.75rem;display:none;cursor:move}
-    #overlay img{max-width:100%;border-radius:.5rem;border:1px solid #333;margin-top:.5rem}
-    #leader{position:absolute;inset:0;pointer-events:none}
-    aside#panel{background:var(--panel);border-left:1px solid var(--border);display:flex;flex-direction:column;min-width:300px}
-    header#topbar{display:flex;gap:.5rem;align-items:center;border-bottom:1px solid var(--border);padding:.5rem .75rem}
-    header #title{font-weight:600}
-    .chip{border:1px solid var(--border);background:#131722;border-radius:999px;padding:.25rem .6rem;cursor:pointer;user-select:none}
-    .chip.warn{background:#2a1d11;border-color:#402e12;color:#f3c38a}
-    .btn{border:1px solid var(--border);background:#1b1e26;border-radius:.5rem;padding:.35rem .6rem;color:#ddd;cursor:pointer}
-    #tabs{display:flex;border-bottom:1px solid var(--border)}
-    #tabs .tab{flex:1;text-align:center;padding:.45rem 0;cursor:pointer;border-right:1px solid var(--border);background:#151821}
-    #tabs .tab.active{background:#1b1f2a}
-    .pane{display:none;padding:.75rem}
-    .pane.active{display:block}
-    .row{display:flex;gap:.5rem;align-items:center;margin:.35rem 0}
-    input,select,textarea{background:#0f0f13;border:1px solid var(--border);color:#ddd;border-radius:.4rem;padding:.4rem}
-    textarea{min-height:80px;width:100%;resize:vertical}
-    .list{border:1px solid var(--border);border-radius:.5rem;overflow:auto;max-height:220px}
-    .list .item{display:flex;align-items:center;gap:.5rem;padding:.4rem .5rem;border-bottom:1px solid #1c1f28;cursor:pointer}
-    .list .item:last-child{border-bottom:0}
-    .color-row{display:flex;gap:.4rem}
-    .swatch{width:22px;height:22px;border-radius:999px;border:1px solid #333;cursor:pointer}
-    .grid{display:grid;grid-template-columns:repeat(3, 1fr);gap:.4rem;max-height:420px;overflow:auto}
-    .grid .cell{border:1px solid #222;border-radius:.4rem;aspect-ratio:1/1;display:grid;place-items:center;background:#0f0f13;overflow:hidden}
-    .grid img{width:100%;height:100%;object-fit:cover;display:block}
-    #bootmsg{position:absolute;left:12px;bottom:12px;color:#9aa}
+  }
+  </script>
+
+  <style>
+    html,body { height:100%; margin:0; background:#0f1115; color:#e6e6e6; font:14px/1.5 -apple-system, system-ui, Segoe UI, Roboto, sans-serif; }
+    #stage { position:relative; width:100%; height:100vh; }
+    .tip { position:absolute; top:8px; left:12px; background:#1a1f2a; padding:6px 10px; border-radius:8px; opacity:0.9; }
   </style>
-  <!-- Google Identity Services + gapi (async) -->
-  <script src="https://accounts.google.com/gsi/client" async defer></script>
-  <script src="https://apis.google.com/js/api.js" async defer></script>
 </head>
 <body>
-  <div id="app">
-    <div id="stage">
-      <canvas id="leader"></canvas>
-      <div id="overlay">
-        <div id="overlay-title" style="font-weight:600;margin-bottom:.25rem">(untitled)</div>
-        <div id="overlay-body" style="white-space:pre-wrap;color:#bbb"></div>
-        <img id="overlay-img" alt="" />
-      </div>
-      <div id="spinner"><div id="bootmsg">booting...</div></div>
-    </div>
-
-    <aside id="panel">
-      <header id="topbar">
-        <div id="title">LociMyu v6.6</div>
-        <div style="flex:1"></div>
-        <span id="authChip" class="chip warn" title="Sign in with Google">Sign in</span>
-      </header>
-
-      <div id="tabs">
-        <div class="tab active" data-tab="cap">Caption</div>
-        <div class="tab" data-tab="mat">Material</div>
-        <div class="tab" data-tab="view">View</div>
-      </div>
-
-      <!-- Caption -->
-      <div id="pane-cap" class="pane active">
-        <div class="row">
-          <input id="fileIdInput" placeholder="Drive File ID or URL" style="flex:1" />
-          <button id="btnLoadGLB" class="btn">GLB</button>
-        </div>
-        <div class="row"><a id="btnDemo" class="btn" href="#" title="Load demo model">demo</a><span style="color:#777">でデモモデルをロード</span></div>
-
-        <div class="row">
-          <label style="width:90px">Save data</label>
-          <select id="saveSheet" style="flex:1"></select>
-          <button id="btnNewSheet" class="btn">+</button>
-        </div>
-
-        <div class="row">
-          <label style="width:90px">Pin color</label>
-          <div class="color-row" id="pinColors"></div>
-          <label style="margin-left:.5rem">Filter</label>
-          <select id="pinFilter">
-            <option value="all">(All)</option>
-          </select>
-        </div>
-
-        <div class="list" id="captionList" style="margin-top:.5rem"></div>
-
-        <div class="row" style="margin-top:.6rem"><label style="width:90px">Title / Body</label></div>
-        <input id="capTitle" placeholder="Title" />
-        <textarea id="capBody" placeholder="Body"></textarea>
-
-        <div class="row" style="margin-top:.6rem;justify-content:space-between">
-          <button id="btnAddPin" class="btn">+ Pin</button>
-          <button id="btnClearPin" class="btn">Clear</button>
-          <button id="btnRefreshImgs" class="btn">Refresh images</button>
-        </div>
-
-        <div class="grid" id="imageGrid" style="margin-top:.5rem"></div>
-      </div>
-
-      <!-- Material -->
-      <div id="pane-mat" class="pane">
-        <div class="row">
-          <label style="width:110px">Material target</label>
-          <select id="matSelect" style="flex:1"></select>
-        </div>
-        <div class="row"><label style="width:110px">Hue</label><input type="range" id="matHue" min="-180" max="180" value="0" style="flex:1"></div>
-        <div class="row"><label style="width:110px">Sat</label><input type="range" id="matSat" min="0" max="2" step="0.01" value="1" style="flex:1"></div>
-        <div class="row"><label style="width:110px">Light</label><input type="range" id="matLight" min="0" max="2" step="0.01" value="1" style="flex:1"></div>
-        <div class="row"><label style="width:110px">Opacity</label><input type="range" id="matOpacity" min="0" max="1" step="0.01" value="1" style="flex:1"></div>
-        <div class="row">
-          <button id="btnUnlit" class="btn">Unlit: off</button>
-          <button id="btnDouble" class="btn">DoubleSide: off</button>
-        </div>
-        <div class="row"><label style="width:110px">White→α</label><input type="range" id="matWhiteKey" min="0.7" max="1.0" step="0.005" value="0.98" style="flex:1"></div>
-      </div>
-
-      <!-- View -->
-      <div id="pane-view" class="pane">
-        <div class="row">
-          <button id="btnViewFront" class="btn">Front</button>
-          <button id="btnViewTop" class="btn">Top</button>
-          <button id="btnToggleProj" class="btn">persp</button>
-          <button id="btnBg" class="btn">BG</button>
-        </div>
-      </div>
-    </aside>
+  <div id="stage">
+    <div class="tip">Import Map 方式。three は unpkg から解決されます。</div>
   </div>
 
-  <script type="module" src="./app_boot.js"></script>
+  <!-- ここから module 読み込み開始 -->
+  <script type="module" src="./probe_viewer_visibility.js"></script>
 </body>
 </html>

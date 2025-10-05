@@ -1,11 +1,11 @@
-// fallback_viewer_bootstrap.js  (ESM, bare specifiers — works with import map)
+// fallback_viewer_bootstrap.js (ESM) — Import Map で three 解決
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 
 const host = document.getElementById('stage') || document.body;
 
 export async function ensureDemo(){
-  if(document.querySelector('canvas')) return;
+  if(document.querySelector('#stage canvas')) return;
   const canvas=document.createElement('canvas'); canvas.style.width='100%'; canvas.style.height='100%'; host.appendChild(canvas);
   const renderer=new THREE.WebGLRenderer({canvas,antialias:true}); renderer.setPixelRatio(Math.min(window.devicePixelRatio||1,2)); renderer.setSize(canvas.clientWidth,canvas.clientHeight,false);
   const scene=new THREE.Scene(); scene.background=new THREE.Color(0x111216);

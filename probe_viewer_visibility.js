@@ -1,4 +1,4 @@
-// probe_viewer_visibility.js  (ESM)
+// probe_viewer_visibility.js (ESM)
 import { ensureDemo } from './fallback_viewer_bootstrap.js';
 (async ()=>{
   try{
