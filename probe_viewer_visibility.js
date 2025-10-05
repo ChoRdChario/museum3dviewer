@@ -1,1 +1,1 @@
-console.log('[probe] start');
+console.log('[probe] start')

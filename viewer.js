@@ -1,57 +1,99 @@
-import * as THREE from 'three';
-import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import * as THREE from 'three'
+import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 
 export class ViewerApp {
-  constructor(host){
-    this.host = host;
-    this.scene = new THREE.Scene();
-    this.camera = new THREE.PerspectiveCamera(60, 1, 0.1, 1000);
-    this.camera.position.set(2.5,2.2,2.8);
-    this.renderer = new THREE.WebGLRenderer({antialias:true, alpha:false});
-    this.renderer.setPixelRatio(devicePixelRatio);
-    host.appendChild(this.renderer.domElement);
-    this.controls = new OrbitControls(this.camera, this.renderer.domElement);
-    this.controls.enableDamping = true;
-    this.loader = new GLTFLoader();
+  constructor(canvasId='stage'){
+    const canvas = document.getElementById(canvasId)
+    if (!canvas) throw new Error('canvas not found')
+    this.canvas = canvas
+    this.renderer = new THREE.WebGLRenderer({ canvas, antialias:true, alpha:true })
+    this.renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1))
+    this.scene = new THREE.Scene()
+    this.camera = new THREE.PerspectiveCamera(50, 1, 0.1, 2000)
+    this.camera.position.set(2.4, 1.8, 2.4)
+    this.controls = new OrbitControls(this.camera, this.canvas)
+    this.controls.enableDamping = true
+    this.clock = new THREE.Clock()
+    this._raf = 0
+    this._animate = this._animate.bind(this)
+    this._onResize = this._onResize.bind(this)
+    window.addEventListener('resize', this._onResize)
+    this._onResize()
+    this._start()
+    this._addDemoCube()
+  }
 
-    // demo cube
-    const geo = new THREE.BoxGeometry(1,1,1);
-    const mat = new THREE.MeshStandardMaterial({color:0x20304a, roughness:.9, metalness:.0});
-    this.demoMesh = new THREE.Mesh(geo,mat);
-    this.scene.add(this.demoMesh);
-    const amb = new THREE.AmbientLight(0xffffff, .8);
-    const dir = new THREE.DirectionalLight(0xffffff,.6);
-    dir.position.set(2,3,4);
-    this.scene.add(amb,dir);
+  _start(){
+    cancelAnimationFrame(this._raf)
+    this._raf = requestAnimationFrame(this._animate)
+  }
+  _animate(){
+    this.controls.update()
+    this.renderer.render(this.scene, this.camera)
+    this._raf = requestAnimationFrame(this._animate)
+  }
+  _onResize(){
+    const w = this.canvas.clientWidth || this.canvas.parentElement.clientWidth || 800
+    const h = this.canvas.clientHeight || this.canvas.parentElement.clientHeight || 600
+    this.camera.aspect = w / h
+    this.camera.updateProjectionMatrix()
+    this.renderer.setSize(w, h, false)
+  }
+  _addDemoCube(){
+    const g = new THREE.BoxGeometry(1,1,1)
+    const m = new THREE.MeshStandardMaterial({ color:0x1d2a44, roughness:0.8, metalness:0.1 })
+    const mesh = new THREE.Mesh(g,m)
+    this.scene.add(mesh)
+    const amb = new THREE.AmbientLight(0xffffff, 0.9); this.scene.add(amb)
+    const dir = new THREE.DirectionalLight(0xffffff, 0.8); dir.position.set(5,5,5); this.scene.add(dir)
+  }
 
-    window.addEventListener('resize', ()=>this.resize());
-    this.resize();
-    this.animate();
+  // === Material helpers ===
+  setOpacity(value=1){
+    this.scene.traverse(o=>{
+      if (o.isMesh && o.material){
+        const mats = Array.isArray(o.material) ? o.material : [o.material]
+        mats.forEach(mat=>{ mat.transparent = value < 1; mat.opacity = value; mat.needsUpdate = true })
+      }
+    })
   }
-  resize(){
-    const w = this.host.clientWidth || window.innerWidth-320;
-    const h = window.innerHeight;
-    this.camera.aspect = w/h; this.camera.updateProjectionMatrix();
-    this.renderer.setSize(w,h,false);
+  setUnlit(on=false){
+    this.scene.traverse(o=>{
+      if (o.isMesh && o.material){
+        const mats = Array.isArray(o.material) ? o.material : [o.material]
+        mats.forEach(mat=>{
+          mat.lights = !on
+          mat.needsUpdate = true
+        })
+      }
+    })
   }
-  setBackground(hex){
-    this.renderer.setClearColor(new THREE.Color(hex));
+  setDoubleSide(on=false){
+    this.scene.traverse(o=>{
+      if (o.isMesh && o.material){
+        const mats = Array.isArray(o.material) ? o.material : [o.material]
+        mats.forEach(mat=>{ mat.side = on ? THREE.DoubleSide : THREE.FrontSide; mat.needsUpdate = true })
+      }
+    })
   }
-  async loadGLBFromArrayBuffer(ab){
-    // remove demo
-    if(this.demoMesh){ this.scene.remove(this.demoMesh); this.demoMesh = null; }
-    // dispose previous gltf if any
-    if(this.gltfRoot){ this.scene.remove(this.gltfRoot); this.gltfRoot.traverse(o=>{ if(o.material?.map) o.material.map.dispose(); if(o.material) o.material.dispose?.(); if(o.geometry) o.geometry.dispose?.(); }); this.gltfRoot = null; }
-    return new Promise((resolve,reject)=>{
-      this.loader.parse(ab, '', (gltf)=>{
-        this.gltfRoot = gltf.scene;
-        this.scene.add(this.gltfRoot);
-        this.controls.target.set(0,0,0);
-        this.camera.position.set(2.5,2.2,2.8);
-        resolve();
-      }, (err)=>reject(err));
-    });
+
+  // === GLB ===
+  async loadGLBArrayBuffer(buf){
+    const loader = new GLTFLoader()
+    return await new Promise((resolve, reject)=>{
+      loader.parse(buf, '', (gltf)=>{
+        const root = gltf.scene || gltf.scenes?.[0]
+        if (root){
+          // clear previous imported scene nodes (keep lights/cube)
+          // remove meshes tagged as imported first
+          const prev = this.scene.getObjectByName('__imported_root__')
+          if (prev) this.scene.remove(prev)
+          root.name='__imported_root__'
+          this.scene.add(root)
+        }
+        resolve(gltf)
+      }, (err)=> reject(err))
+    })
   }
 }
-

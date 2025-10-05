@@ -5,76 +5,81 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>LociMyu v6.6</title>
   <style>
-    html, body { margin:0; height:100%; background:#0c0d11; color:#e6e6e6; font-family: ui-sans-serif, system-ui, -apple-system; }
-    #stage { position:absolute; inset:0 320px 0 0; }
-    #panel { position:absolute; top:0; right:0; width:320px; bottom:0; background:#121319; border-left:1px solid #1e2230; overflow:auto; padding:14px; }
-    h1 { font-size:14px; font-weight:600; margin:10px 0; }
-    label { display:block; font-size:12px; opacity:.7; margin:10px 0 6px; }
-    input, select, textarea, button { width:100%; padding:8px 10px; background:#0f1118; color:#e6e6e6; border:1px solid #22273a; border-radius:8px; }
-    button { cursor:pointer; }
-    .row { display:flex; gap:8px; align-items:center; }
-    .row > * { flex:1 }
-    .chip { padding:6px 10px; border-radius:999px; background:#1b2030; display:inline-flex; gap:8px; align-items:center; font-size:12px; }
-    .chip button { width:auto; border:none; background:#2a3350; padding:6px 10px; border-radius:999px; }
-    #toast { position:fixed; left:8px; top:8px; padding:6px 10px; font-size:12px; background:#1b2030; border:1px solid #2a3350; border-radius:999px; opacity:.9 }
-    .tabs { display:flex; gap:6px; margin-bottom:8px; }
-    .tabs button { width:auto; background:#141725; border:1px solid #22273a; }
-    .tabs button.active { background:#233; }
-    .section { display:none; }
-    .section.active { display:block; }
-    #boot { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; pointer-events:none; color:#9aa2b2; }
+    :root { --bg:#0e0f13; --panel:#151720; --fg:#e6e7ea; --muted:#a8adba; --accent:#3b82f6; }
+    html,body { height:100%; background:var(--bg); color:var(--fg); margin:0; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Noto Sans, sans-serif; }
+    #wrap { display:grid; grid-template-columns: 1fr 360px; height:100%; }
+    #stageWrap { position:relative; }
+    canvas { display:block; width:100%; height:100%; }
+    #boot { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; pointer-events:none; color:#b8c0cc; font-size:14px;}
+    #side { background:var(--panel); border-left:1px solid #1f2330; padding:12px; overflow:auto; }
+    .row { display:flex; gap:8px; align-items:center; margin:8px 0; }
+    .btn { background:#222737; color:#cfd6e6; border:1px solid #2b3144; padding:6px 10px; border-radius:6px; cursor:pointer; }
+    .btn:hover { background:#283049 }
+    input[type=text] { width:100%; background:#0f121a; color:#e6e7ea; border:1px solid #2b3144; padding:8px; border-radius:6px; }
+    .hint { font-size:12px; color:var(--muted); }
+    .tabs { display:flex; gap:8px; margin-bottom:8px; }
+    .tab { background:#1a1f2e; padding:6px 10px; border-radius:6px; cursor:pointer; }
+    .tab.active { background:#26304a; }
+    .sec { display:none; }
+    .sec.active { display:block; }
+    .chip { border-radius:999px; padding:4px 10px; border:1px solid #2b3144; background:#202533; cursor:pointer; }
+    .right-top { position:sticky; top:0; display:flex; justify-content:space-between; align-items:center; background:var(--panel); z-index:2; padding-bottom:8px; }
   </style>
+
+  <!-- Import map (A案): three を unpkg から解決 -->
   <script type="importmap">
   {
     "imports": {
-      "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
-      "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+      "three": "https://unpkg.com/three@0.160.1/build/three.module.js",
+      "three/examples/jsm/": "https://unpkg.com/three@0.160.1/examples/jsm/"
     }
   }
   </script>
 </head>
 <body>
-  <div id="toast">Import Map 方式。three は unpkg から解決されます。</div>
-  <div id="stage"></div>
-  <div id="panel">
-    <div class="row" style="justify-content:space-between">
-      <h1 style="margin:0">LociMyu v6.6</h1>
-      <div class="chip" id="signin-chip"><span id="signin-label">Signed out</span><button id="signin-btn">Sign in</button></div>
+  <div id="wrap">
+    <div id="stageWrap">
+      <canvas id="stage"></canvas>
+      <div id="boot">booting...</div>
     </div>
-    <div class="tabs">
-      <button id="tab-caption" class="active">Caption</button>
-      <button id="tab-material">Material</button>
-      <button id="tab-view">View</button>
-    </div>
-    <div id="sec-caption" class="section active">
-      <label>Drive File ID or URL</label>
-      <div class="row">
-        <input id="drive-input" placeholder="https://drive.google.com/file/d/... または fileId" />
-        <button id="btn-load-glb" style="width:auto">GLB</button>
+    <aside id="side">
+      <div class="right-top">
+        <div>LociMyu v6.6</div>
+        <button id="authChip" class="chip">Sign in</button>
       </div>
-      <div style="height:8px"></div>
-      <button id="demo-btn" style="width:auto">demo</button>
-    </div>
-    <div id="sec-material" class="section">
-      <label>Material target</label>
-      <select id="mat-target"></select>
-      <label style="margin-top:12px">Opacity</label>
-      <input type="range" id="mat-opacity" min="0" max="1" step="0.01" value="1" />
-      <div class="row" style="margin-top:8px">
-        <button id="mat-unlit" style="width:auto">Unlit: off</button>
-        <button id="mat-doubleside" style="width:auto">DoubleSide: off</button>
+      <div class="tabs">
+        <div class="tab active" data-tab="caption">Caption</div>
+        <div class="tab" data-tab="material">Material</div>
+        <div class="tab" data-tab="view">View</div>
       </div>
-    </div>
-    <div id="sec-view" class="section">
-      <label>Background</label>
-      <input type="color" id="bg" value="#0c0d11" />
-    </div>
-  </div>
-  <div id="boot">booting...</div>
 
-  <script type="module" src="./viewer.js"></script>
-  <script type="module" src="./gauth.js"></script>
-  <script type="module" src="./ui.js"></script>
+      <section id="sec-caption" class="sec active">
+        <div class="row"><input id="driveInput" type="text" placeholder="Drive File ID or URL" /></div>
+        <div class="row"><button id="btnGlb" class="btn">GLB</button><a class="hint" href="#" id="demoLink">demo</a></div>
+        <hr style="border-color:#242938">
+        <div class="hint">* Import Map 方式。three は unpkg から解決されます。</div>
+      </section>
+
+      <section id="sec-material" class="sec">
+        <div class="row">
+          <label style="width:110px;">Opacity</label>
+          <input id="matOpacity" type="range" min="0" max="1" step="0.01" value="1"/>
+        </div>
+        <div class="row">
+          <button id="matUnlit" class="btn">Unlit: off</button>
+          <button id="matDouble" class="btn">DoubleSide: off</button>
+        </div>
+      </section>
+
+      <section id="sec-view" class="sec">
+        <div class="row">
+          <button id="bgDark" class="btn">Dark</button>
+          <button id="bgLight" class="btn">Light</button>
+        </div>
+      </section>
+    </aside>
+  </div>
+
   <script type="module" src="./app_boot.js"></script>
   <script src="./probe_viewer_visibility.js"></script>
 </body>
