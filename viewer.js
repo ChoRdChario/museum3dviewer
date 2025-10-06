@@ -32,7 +32,6 @@ async function ensureThree() {
     'https://cdn.jsdelivr.net/npm/three@0.160.1/build/three.module.js',
   ];
 
-  let lastErr;
   for (const url of candidates) {
     try {
       const mod = await import(url);
@@ -41,7 +40,6 @@ async function ensureThree() {
       console.log('[viewer] three ok via', url);
       return THREE;
     } catch (e) {
-      lastErr = e;
       console.warn('[viewer] three candidate failed:', url, e?.message || e);
     }
   }
@@ -184,10 +182,11 @@ async function fetchDriveArrayBuffer(fileId) {
     headers: { Authorization: `Bearer ${token}` },
   });
   if (!res.ok) {
-    const txt = await res.text().catch(lambda: '');  # safe
-    raise Exception(f"Drive fetch {res.status}: {txt[:200]}")
+    let txt = '';
+    try { txt = await res.text(); } catch(e) {}
+    throw new Error(`Drive fetch ${res.status}: ${txt.slice(0,200)}`);
   }
-  return await res.arrayBuffer()
+  return await res.arrayBuffer();
 }
 
 //
@@ -215,7 +214,7 @@ function attachToScene(gltf) {
   ctx.scene.add(gltf.scene);
 
   // バウンディングでカメラ調整
-  const { Box3, Vector3, MathUtils } = THREE;
+  const { Box3, Vector3 } = THREE;
   const box = new Box3().setFromObject(gltf.scene);
   const size = new Vector3();
   const center = new Vector3();
