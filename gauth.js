@@ -1,50 +1,84 @@
+// gauth.js — GIS + gapi-less token flow (Drive readonly)
+// Exports: setupAuth(app)
+// Creates window.app.auth with { isSignedIn(), getAccessToken(), signIn() }
 
-const API_KEY = 'AIzaSyCUnTCr5yWUWPdEXST9bKP1LpgawU5rIbI';
-const CLIENT_ID = '595200751510-ncahnf7edci6b9925becn5to49r6cguv.apps.googleusercontent.com';
-const SCOPES = ['https://www.googleapis.com/auth/drive.readonly','https://www.googleapis.com/auth/spreadsheets'].join(' ');
+export async function setupAuth(app) {
+  if (!app) window.app = (window.app || {}), app = window.app;
 
-export function setupAuth({ chip, onReady, onSignedIn, onSignedOut }){
-  let gapiReady=false, gisReady=false, tokenClient=null, accessToken=null, authed=false;
-
-  function refreshChip(){
-    chip.textContent = authed ? 'Signed in' : 'Sign in';
+  // Wait DOM
+  if (document.readyState === 'loading') {
+    await new Promise(res => document.addEventListener('DOMContentLoaded', res, { once: true }));
   }
 
-  async function loadGapiClient(){
-    await new Promise(r => { const t=setInterval(()=>{ if (window.gapi?.load){ clearInterval(t); r(); } }, 50); });
-    await new Promise(r => {
-      gapi.load('client', async ()=>{
-        await gapi.client.init({ apiKey: API_KEY, discoveryDocs: [
-          'https://www.googleapis.com/discovery/v1/apis/drive/v3/rest',
-          'https://sheets.googleapis.com/$discovery/rest?version=v4'
-        ]});
-        gapiReady=true; onReady?.();
-      });
-    });
+  // Find or inject button
+  let btn = document.querySelector('[data-auth-btn], #auth-btn');
+  if (!btn) {
+    btn = document.createElement('button');
+    btn.id = 'auth-btn';
+    btn.textContent = 'Sign in';
+    btn.style.position = 'fixed';
+    btn.style.left = '8px';
+    btn.style.bottom = '8px';
+    btn.style.zIndex = '10000';
+    document.body.appendChild(btn);
   }
 
-  async function loadGIS(){
-    await new Promise(r => { const t=setInterval(()=>{ if (window.google?.accounts?.oauth2){ clearInterval(t); r(); } }, 50); });
-    tokenClient = google.accounts.oauth2.initTokenClient({
-      client_id: CLIENT_ID,
-      scope: SCOPES,
-      callback: (resp)=>{
-        if (resp?.access_token){
-          accessToken = resp.access_token;
-          gapi.client.setToken({ access_token });
-          authed = true; refreshChip(); onSignedIn?.();
-        }
+  // Ensure GIS is available
+  if (!(window.google && google.accounts && google.accounts.oauth2)) {
+    console.warn('[auth] GIS not detected — did you include the GIS script tag?');
+    // still provide a stub auth so the app doesn't crash
+    app.auth = {
+      isSignedIn: () => false,
+      getAccessToken: () => null,
+      async signIn() { alert('Google Identity Services が読み込まれていません'); }
+    };
+    return app.auth;
+  }
+
+  const scope = 'https://www.googleapis.com/auth/drive.readonly';
+  let accessToken = null;
+  let expiresAt = 0;
+
+  const tokenClient = google.accounts.oauth2.initTokenClient({
+    client_id: (window.GOOGLE_CLIENT_ID || '').trim(),
+    scope,
+    prompt: '',
+    callback: (resp) => {
+      accessToken = resp.access_token || null;
+      const now = Date.now();
+      const expiresInMs = (resp.expires_in ? Number(resp.expires_in) : 0) * 1000;
+      expiresAt = expiresInMs ? (now + expiresInMs - 60_000) : 0; // refresh 60s early
+      if (accessToken) {
+        btn.textContent = 'Signed in';
+        btn.disabled = false;
       }
-    });
-    gisReady=true;
+    }
+  });
+
+  function valid() {
+    return !!accessToken && (expiresAt === 0 || Date.now() < expiresAt);
   }
 
-  async function ensureReady(){ if (!gapiReady) await loadGapiClient(); if (!gisReady) await loadGIS(); }
-  async function signIn(){ await ensureReady(); tokenClient.requestAccessToken({ prompt: 'consent' }); }
-  async function signOut(){ gapi.client.setToken(null); authed=false; refreshChip(); onSignedOut?.(); }
+  app.auth = {
+    isSignedIn: () => valid(),
+    getAccessToken: () => (valid() ? accessToken : null),
+    async signIn() {
+      return new Promise((resolve) => {
+        tokenClient.requestAccessToken({ prompt: accessToken ? '' : 'consent' });
+        const t = setInterval(() => {
+          if (valid()) { clearInterval(t); resolve(accessToken); }
+        }, 100);
+        setTimeout(() => { clearInterval(t); resolve(accessToken); }, 10_000);
+      });
+    }
+  };
 
-  chip.addEventListener('click', async ()=>{ try { if (!authed) await signIn(); else await signOut(); } catch(e){ console.error(e); } });
+  btn.addEventListener('click', async () => {
+    btn.disabled = true;
+    try { await app.auth.signIn(); }
+    finally { btn.disabled = false; }
+  });
 
-  ensureReady();
-  return { isSigned: ()=>authed, getAccessToken: ()=>accessToken };
+  console.log('[auth] ready');
+  return app.auth;
 }
