@@ -74,11 +74,11 @@ async function ensureThree(){
   if (window.THREE) { THREE_ref = window.THREE; return THREE_ref; }
   // Try ESM dynamic import if import map defines "three"
   try {
-    const mod = await import('three');
+    const mod = await import('./lib/three/build/three.module.js');
     THREE_ref = mod;
     // GLTFLoader
     try {
-      const loaders = await import('three/examples/jsm/loaders/GLTFLoader.js');
+      const loaders = await import('./lib/three/examples/jsm/loaders/GLTFLoader.js');
       THREE_ref.GLTFLoader = loaders.GLTFLoader;
     } catch(e){ /* external loader may be provided elsewhere */ }
     return THREE_ref;
@@ -142,7 +142,7 @@ async function parseGLB(ab){
   let GLTFLoader = THREE.GLTFLoader;
   if (!GLTFLoader){
     // try dynamic import again (environment dependent)
-    const loaders = await import('three/examples/jsm/loaders/GLTFLoader.js');
+    const loaders = await import('./lib/three/examples/jsm/loaders/GLTFLoader.js');
     GLTFLoader = loaders.GLTFLoader;
   }
   return await new Promise((resolve, reject)=>{
@@ -153,6 +153,19 @@ async function parseGLB(ab){
 
 // Attach gltf to current scene (naive)
 function attachToScene(ctx, gltf){
+  // collect unique materials and dispatch to UI
+  try{
+    const mats = new Set();
+    gltf.scene.traverse(o=>{
+      if (o.isMesh && o.material){
+        if (Array.isArray(o.material)) o.material.forEach(m=>m&&m.name!=null&&mats.add(m));
+        else mats.add(o.material);
+      }
+    });
+    const list = Array.from(mats).map(m=>({ name: m.name||'(mat)', uuid: m.uuid }));
+    (window.app && window.app.events) && window.app.events.dispatchEvent(new CustomEvent('viewer:materials', {detail:{list}}));
+  }catch(e){ console.warn('[viewer] mats event failed', e); }
+
   // Remove previous root if exists
   if (ctx._root){ ctx.scene.remove(ctx._root); }
   const root = gltf.scene || gltf.scenes?.[0];
@@ -165,6 +178,7 @@ export async function ensureViewer(){
   log('ready');
 
   const ctx = await bootstrapRenderer();
+  const events = new EventTarget();
   const api = {
     // legacy hook; executes immediately if already ready
     onceReady(cb){ if (isReady) cb(); else readyListeners.push(cb); },
@@ -201,9 +215,10 @@ export async function ensureViewer(){
       attachToScene(ctx, gltf);
     }
   };
-  // Expose on app.viewer
+  // Expose on app.viewer and app.events
   window.app = window.app || {};
   window.app.viewer = api;
+  window.app.events = window.app.events || events;
 
   // Ready
   emitReady();
