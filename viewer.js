@@ -1,4 +1,4 @@
-/* viewer.js — fix: explicit three.js imports so THREE is defined */
+/* viewer.js — ESM版 + onceReady 互換API追加 */
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
@@ -12,9 +12,14 @@ let canvasEl;
 let materials = [];
 let rootObject3D = null;
 
+// ---- Ready APIs ----
 export function onReady(cb) {
   if (_ready) cb();
   else _readyCbs.push(cb);
+}
+export function onceReady(cb) {
+  if (_ready) { try { cb(); } catch (e) { console.error(e); } return; }
+  _readyCbs.push(() => { try { cb(); } catch (e) { console.error(e); } });
 }
 function notifyReadyOnce() {
   if (_ready) return;
@@ -24,6 +29,7 @@ function notifyReadyOnce() {
   }
 }
 
+// ---- Utils ----
 function collectUniqueMaterials(root) {
   const set = new Set();
   root?.traverse?.((obj) => {
@@ -44,6 +50,7 @@ function applyToTarget(targetIndex, fn) {
   }
 }
 
+// ---- Material APIs ----
 export function getMaterials() {
   return materials.map((m, i) => `${i}: ${m.name || '(unnamed)'}`);
 }
@@ -96,6 +103,7 @@ export function setUnlit(on, targetIndex = -1) {
   });
 }
 
+// 白→α（有効/無効, しきい値）
 export function setWhiteKey(enabled, threshold = 0.95, targetIndex = -1) {
   const t = Math.max(0, Math.min(1, Number(threshold)));
   applyToTarget(targetIndex, (m) => {
@@ -105,6 +113,7 @@ export function setWhiteKey(enabled, threshold = 0.95, targetIndex = -1) {
           shader.fragmentShader = shader.fragmentShader.replace(
             /}\s*$/m,
             `
+            // --- LociMyu white->alpha ---
             float lmy_luma = dot(gl_FragColor.rgb, vec3(0.2126, 0.7152, 0.0722));
             if (lmy_luma > ${t.toFixed(4)}) {
               gl_FragColor.a *= max(0.0, 1.0 - (lmy_luma - ${t.toFixed(4)}) / max(0.0001, 1.0 - ${t.toFixed(4)}));
@@ -131,6 +140,7 @@ export function setWhiteKey(enabled, threshold = 0.95, targetIndex = -1) {
   });
 }
 
+// ---- Boot / Viewer ----
 function animate() {
   requestAnimationFrame(animate);
   if (!renderer || !scene || !camera) return;
@@ -197,6 +207,7 @@ export function ensureViewer(app) {
   const api = {
     renderer, scene, camera, controls,
     onReady,
+    onceReady,
     getMaterials,
     setOpacity,
     setDoubleSide,
