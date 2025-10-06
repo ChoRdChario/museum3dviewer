@@ -1,220 +1,295 @@
 
-// viewer.js — patched
-// - Fixes: shader injection moved after output_fragment (before tonemapping) so compilation won't fail
-// - Keeps: API surface (ensureViewer, setHSL, setOpacity, setUnlit, setDoubleSide, setWhiteKeyEnabled, setWhiteKeyThreshold)
-// - Notes: This file does not handle Drive auth; it only renders and loads a GLB from an ArrayBuffer.
+/**
+ * viewer.js
+ * Minimal but complete GLB viewer utilities.
+ * - Dynamically loads THREE (prefer local ./lib path → fallback to ../lib → CDN).
+ * - Boots a WebGLRenderer on <canvas id="viewer">.
+ * - Exposes material editing helpers expected by ui.js.
+ * - Loads GLB from ArrayBuffer using GLTFLoader (CDN-matched version).
+ *
+ * Public API (named export):
+ *   ensureViewer(): Promise<ViewerAPI>
+ *
+ * And it stores the instance at window.app.viewer for backward compatibility.
+ */
 
-const THREE_URL = 'three';
-const GLTF_URL = 'https://unpkg.com/three@0.157.0/examples/jsm/loaders/GLTFLoader.js';
-const ORBIT_URL = 'https://unpkg.com/three@0.157.0/examples/jsm/controls/OrbitControls.js';
+const THREE_VERSION = '0.160.1';
 
-export async function ensureViewer({ mount, spinner }) {
-  // 1) libs
-  const THREE = await import(THREE_URL);
-  const { OrbitControls } = await import(ORBIT_URL);
-  const { GLTFLoader } = await import(GLTF_URL);
+let THREE_NS = null;
+let LOADER_NS = null;
 
-  // 2) renderer/camera/scene
-  const renderer = new THREE.WebGLRenderer({ antialias: true, alpha:false });
-  renderer.setPixelRatio(devicePixelRatio);
-  renderer.setSize(mount.clientWidth || 1, mount.clientHeight || 1);
+const state = {
+  scene: null,
+  camera: null,
+  renderer: null,
+  root: null, // loaded gltf.scene
+  materials: new Set(),
+  whiteKey: {
+    enabled: false,
+    threshold: 0.9,
+  },
+};
+
+/* ------------------------------------------------------
+ * Dynamic imports (safe fallbacks, no syntax surprises)
+ * ----------------------------------------------------*/
+async function importAttempt(url) {
+  try {
+    const mod = await import(/* @vite-ignore */ url);
+    return mod;
+  } catch (err) {
+    console.warn('[viewer] import failed:', url, err?.message || err);
+    return null;
+  }
+}
+
+async function ensureThree() {
+  if (THREE_NS) return THREE_NS;
+  const candidates = [
+    './lib/three/build/three.module.js',
+    '../lib/three/build/three.module.js',
+  ];
+  for (const u of candidates) {
+    const mod = await importAttempt(u);
+    if (mod && mod.WebGLRenderer) {
+      THREE_NS = mod;
+      console.log('[viewer] three ok via', u);
+      return THREE_NS;
+    }
+  }
+  // CDN fallback
+  const cdn = `https://unpkg.com/three@${THREE_VERSION}/build/three.module.js`;
+  const mod = await importAttempt(cdn);
+  if (!mod || !mod.WebGLRenderer) {
+    throw new Error('THREE unavailable');
+  }
+  THREE_NS = mod;
+  console.log('[viewer] three ok via', cdn);
+  return THREE_NS;
+}
+
+async function ensureGLTFLoader() {
+  if (LOADER_NS) return LOADER_NS;
+  await ensureThree();
+  // Always use a version-matched CDN loader to avoid path issues
+  const cdn = `https://unpkg.com/three@${THREE_VERSION}/examples/jsm/loaders/GLTFLoader.js`;
+  const mod = await importAttempt(cdn);
+  if (!mod || !mod.GLTFLoader) {
+    throw new Error('GLTFLoader unavailable');
+  }
+  LOADER_NS = mod;
+  return LOADER_NS;
+}
+
+/* ------------------------------------------------------
+ * Scene bootstrap
+ * ----------------------------------------------------*/
+function collectUniqueMaterials(obj) {
+  state.materials.clear();
+  obj.traverse((child) => {
+    if (child.isMesh) {
+      const m = child.material;
+      if (Array.isArray(m)) {
+        m.forEach((mm) => mm && state.materials.add(mm));
+      } else if (m) {
+        state.materials.add(m);
+      }
+    }
+  });
+}
+
+function applyWhiteKeyToMaterial(mat) {
+  // Keep this minimal & safe: don't mutate shader unless needed.
+  // Here we just set alphaTest based on "lightness" heuristic from color.
+  // (This avoids shader compile errors while still offering a simple toggle.)
+  if (!mat) return;
+  if (state.whiteKey.enabled) {
+    mat.transparent = true;
+    // crude: if color is close to white, fade by threshold
+    // we can't read final fragment color; use color luminance heuristic
+    const c = mat.color || { r: 1, g: 1, b: 1 };
+    const luminance = 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b;
+    const threshold = state.whiteKey.threshold; // 0..1
+    // Use alphaTest to discard fragments below threshold-derived alpha
+    mat.alphaTest = Math.min(0.99, Math.max(0.0, (luminance - threshold) * 2.0));
+  } else {
+    mat.alphaTest = 0.0;
+  }
+  mat.needsUpdate = true;
+}
+
+function applyWhiteKeyAll() {
+  state.materials.forEach(applyWhiteKeyToMaterial);
+}
+
+async function bootstrapRenderer() {
+  const THREE = await ensureThree();
+
+  const canvas = document.getElementById('viewer');
+  if (!canvas) throw new Error('canvas#viewer not found');
+
+  const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
   renderer.outputColorSpace = THREE.SRGBColorSpace;
-  mount.appendChild(renderer.domElement);
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+  renderer.setSize(canvas.clientWidth || 800, canvas.clientHeight || 600, false);
 
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x101014);
+  scene.background = null;
 
-  const camera = new THREE.PerspectiveCamera(50, (mount.clientWidth||1)/(mount.clientHeight||1), 0.1, 5000);
-  camera.position.set(2.5, 1.4, 3.2);
+  const camera = new THREE.PerspectiveCamera(45, (canvas.clientWidth || 800) / (canvas.clientHeight || 600), 0.01, 1000);
+  camera.position.set(2.5, 1.5, 2.5);
 
-  const controls = new OrbitControls(camera, renderer.domElement);
-  controls.enableDamping = true;
+  const light = new THREE.DirectionalLight(0xffffff, 1.0);
+  light.position.set(5, 10, 5);
+  scene.add(light);
+  scene.add(new THREE.AmbientLight(0xffffff, 0.3));
 
-  const hemi = new THREE.HemisphereLight(0xffffff, 0x404040, 1.0);
-  scene.add(hemi);
-  const dir = new THREE.DirectionalLight(0xffffff, 0.6);
-  dir.position.set(2, 3, 4);
-  scene.add(dir);
-
-  // Demo mesh while idle
-  const box = new THREE.Mesh(
-    new THREE.BoxGeometry(1,1,1),
-    new THREE.MeshStandardMaterial({ color: 0x304c78, roughness: .9, metalness: .05 })
-  );
-  scene.add(box);
-
-  const state = {
-    current: box,
-    materials: [],
-    hsl: { h:0, s:0, l:0 },
-    opacity: 1,
-    unlit: false,
-    doubleSide: false,
-    whiteKey: { enabled:false, threshold:0.95 },
-  };
-
-  // 3) render loop + resize
-  function onResize() {
-    const w = mount.clientWidth || 1;
-    const h = mount.clientHeight || 1;
-    renderer.setSize(w, h);
-    camera.aspect = w / h;
-    camera.updateProjectionMatrix();
+  // simple controls (OrbitControls via CDN to avoid local path pitfalls)
+  const controlsMod = await importAttempt(`https://unpkg.com/three@${THREE_VERSION}/examples/jsm/controls/OrbitControls.js`);
+  if (controlsMod && controlsMod.OrbitControls) {
+    const controls = new controlsMod.OrbitControls(camera, canvas);
+    controls.enableDamping = true;
+    // animate loop with controls
+    function tick() {
+      controls.update();
+      renderer.render(scene, camera);
+      requestAnimationFrame(tick);
+    }
+    tick();
+  } else {
+    // minimal render loop fallback
+    function tick() {
+      renderer.render(scene, camera);
+      requestAnimationFrame(tick);
+    }
+    tick();
   }
-  try:
-      from js import ResizeObserver  # type: ignore
-  except Exception:
-      ResizeObserver = None
-  if ResizeObserver:
-      ResizeObserver(onResize).observe(mount)  # pseudo for browser; harmless in node-less env
-  // Fallback: do nothing here (host page should handle resize)
 
-  (function tick(){
-    if (state.current === box) box.rotation.y += 0.01;
-    controls.update();
-    renderer.render(scene, camera);
-    requestAnimationFrame(tick);
-  })();
+  state.scene = scene;
+  state.camera = camera;
+  state.renderer = renderer;
+}
 
-  // --- helpers ---
-  function collectUniqueMaterials(root) {
-    const set = new Set();
-    root.traverse(obj => {
-      if (obj.isMesh && obj.material) {
-        const arr = Array.isArray(obj.material) ? obj.material : [obj.material];
-        for (const m of arr) set.add(m);
-        obj.renderOrder = 0;
+async function parseGLB(arrayBuffer) {
+  const THREE = await ensureThree();
+  const { GLTFLoader } = await ensureGLTFLoader();
+
+  const loader = new GLTFLoader();
+  return await new Promise((resolve, reject) => {
+    loader.parse(arrayBuffer, '', (gltf) => resolve(gltf), (err) => reject(err));
+  });
+}
+
+function clearCurrentModel() {
+  if (state.root && state.scene) {
+    state.scene.remove(state.root);
+    state.root.traverse?.((o) => {
+      if (o.geometry) o.geometry.dispose?.();
+      if (o.material) {
+        const mats = Array.isArray(o.material) ? o.material : [o.material];
+        mats.forEach((m) => {
+          if (m.map) m.map.dispose?.();
+          m.dispose?.();
+        });
       }
     });
-    return [...set];
+    state.root = null;
+    state.materials.clear();
   }
-
-  function applyMaterialFlags(m) {
-    // transparency & double side
-    m.transparent = state.opacity < 1 || m.transparent;
-    m.opacity = state.opacity;
-    m.side = state.doubleSide ? THREE.DoubleSide : THREE.FrontSide;
-
-    // shader patch (idempotent)
-    if (!m.userData._patched) {
-      m.onBeforeCompile = (shader) => {
-        // uniforms + helpers at header
-        const header = `
-uniform vec3 uHsl;
-uniform int uWhiteEnable;
-uniform float uWhiteThresh;
-
-vec3 rgb2hsv(vec3 c){
-  vec4 K = vec4(0., -1./3., 2./3., -1.);
-  vec4 p = mix(vec4(c.bg, K.wz), vec4(c.gb, K.xy), step(c.b, c.g));
-  vec4 q = mix(vec4(p.xyw, c.r), vec4(c.r, p.yzx), step(p.x, c.r));
-  float d = q.x - min(q.w, q.y);
-  float e = 1.0e-10;
-  return vec3(abs(q.z + (q.w - q.y) / (6.*d + e)), d / (q.x + e), q.x);
 }
-vec3 hsv2rgb(vec3 c){
-  vec4 K = vec4(1., 2./3., 1./3., 3.);
-  vec3 p = abs(fract(c.xxx + K.xyz)*6. - K.www);
-  return c.z * mix(K.xxx, clamp(p - K.xxx, 0., 1.), c.y);
-}
-vec3 hslAdj(vec3 rgb, vec3 hsl){
-  vec3 hsv = rgb2hsv(rgb);
-  hsv.x = fract(hsv.x + hsl.x);
-  hsv.y = clamp(hsv.y + hsl.y, 0., 1.);
-  hsv.z = clamp(hsv.z + hsl.z, 0., 1.);
-  return hsv2rgb(hsv);
-}
-`;
-        shader.fragmentShader = header + shader.fragmentShader;
 
-        // update uniforms each compile
-        shader.uniforms.uHsl = { value: new THREE.Vector3(state.hsl.h, state.hsl.s, state.hsl.l) };
-        shader.uniforms.uWhiteEnable = { value: state.whiteKey.enabled ? 1 : 0 };
-        shader.uniforms.uWhiteThresh = { value: state.whiteKey.threshold };
-
-        // mutate color/alpha *before* tonemapping/colorspace
-        shader.fragmentShader = shader.fragmentShader.replace(
-          '#include <tonemapping_fragment>',
-          `
-  // --- LociMyu: HSL + white-key just before tonemapping ---
-  {
-    vec3 c = gl_FragColor.rgb;
-    c = hslAdj(c, uHsl);
-    if (uWhiteEnable==1) {
-      float lum = max(max(c.r, c.g), c.b);
-      float a = smoothstep(uWhiteThresh, 1.0, lum);
-      gl_FragColor.a *= (1.0 - a);
+/* ------------------------------------------------------
+ * Public API for UI
+ * ----------------------------------------------------*/
+const viewerAPI = {
+  /** call once */
+  async ensure() {
+    if (!state.renderer) {
+      await bootstrapRenderer();
     }
-    gl_FragColor.rgb = c;
-  }
-  #include <tonemapping_fragment>
-          `
-        );
-      };
-      m.userData._patched = true;
-    }
+    return viewerAPI;
+  },
 
-    // unlit: approximate by disabling lights influence
-    if (state.unlit) {
-      m.lights = false;
-      m.emissive = m.emissive || new THREE.Color(0x000000);
+  async loadGLBFromArrayBuffer(buf) {
+    const gltf = await parseGLB(buf);
+    clearCurrentModel();
+    state.root = gltf.scene || gltf.scenes?.[0];
+    if (!state.root) throw new Error('GLB parse ok but no scene');
+
+    collectUniqueMaterials(state.root);
+    applyWhiteKeyAll();
+    state.scene.add(state.root);
+    console.log('[viewer] GLB loaded; unique materials:', state.materials.size);
+  },
+
+  /** UI helpers */
+  setHSL(h = 0, s = 0, l = 0) {
+    state.materials.forEach((m) => {
+      if (m && m.color && m.color.isColor) {
+        // work on a clone to avoid cumulative drift
+        const c = m.color.clone();
+        c.offsetHSL((h - 0.5) * 2.0, (s - 0.5) * 2.0, (l - 0.5) * 2.0);
+        m.color.copy(c);
+        m.needsUpdate = true;
+      }
+    });
+  },
+
+  setOpacity(op = 1.0) {
+    state.materials.forEach((m) => {
+      if (!m) return;
+      m.transparent = op < 0.999;
+      m.depthWrite = op >= 0.999; // avoid sorting artefacts at near-opaque
+      m.opacity = Math.max(0, Math.min(1, op));
       m.needsUpdate = true;
-    }
+    });
+  },
 
-    m.needsUpdate = true;
-  }
+  setUnlit(enabled = false) {
+    // switch shading by flipping to MeshBasicMaterial-like flags
+    state.materials.forEach((m) => {
+      if (!m) return;
+      m.envMapIntensity = enabled ? 0 : 1;
+      m.metalness = enabled ? 0 : m.metalness;
+      m.roughness = enabled ? 1 : m.roughness;
+      m.lights = !enabled;
+      m.needsUpdate = true;
+    });
+  },
 
-  async function loadGLBFromArrayBuffer(buf) {
-    if (state.current && state.current !== box) {
-      scene.remove(state.current);
-    }
-    const url = URL.createObjectURL(new Blob([buf]));
-    const loader = new (await import(GLTF_URL)).GLTFLoader();
-    const gltf = await loader.loadAsync(url);
-    URL.revokeObjectURL(url);
+  setDoubleSide(enabled = false) {
+    const THREE = THREE_NS;
+    state.materials.forEach((m) => {
+      if (!m) return;
+      m.side = enabled ? (THREE ? THREE.DoubleSide : 2) : (THREE ? THREE.FrontSide : 0);
+      m.needsUpdate = true;
+    });
+  },
 
-    const root = gltf.scene || gltf.scenes?.[0];
-    if (!root) throw new Error('GLB has no scene');
-    scene.add(root);
-    state.current = root;
-    state.materials = collectUniqueMaterials(root);
+  setWhiteKeyEnabled(enabled = false) {
+    state.whiteKey.enabled = !!enabled;
+    applyWhiteKeyAll();
+  },
 
-    // initialize flags on all
-    for (const m of state.materials) applyMaterialFlags(m);
+  setWhiteKeyThreshold(t = 0.9) {
+    state.whiteKey.threshold = Math.max(0, Math.min(1, t));
+    applyWhiteKeyAll();
+  },
+};
 
-    console.log('[viewer] GLB loaded; unique materials:', state.materials.length);
-  }
+/* ------------------------------------------------------
+ * ensureViewer(): main entry
+ * ----------------------------------------------------*/
+export async function ensureViewer() {
+  if (!window.app) window.app = {};
+  if (window.app.viewer) return window.app.viewer;
+  await viewerAPI.ensure();
+  window.app.viewer = viewerAPI;
+  console.log('[viewer] ready');
+  return viewerAPI;
+}
 
-  // state mutators
-  function setHSL(h, s, l) {
-    state.hsl = { h, s, l };
-    for (const m of state.materials) { m.needsUpdate = true; }
-  }
-  function setOpacity(v) {
-    state.opacity = v;
-    for (const m of state.materials) { applyMaterialFlags(m); }
-  }
-  function setUnlit(on) {
-    state.unlit = on;
-    for (const m of state.materials) { applyMaterialFlags(m); }
-  }
-  function setDoubleSide(on) {
-    state.doubleSide = on;
-    for (const m of state.materials) { applyMaterialFlags(m); }
-  }
-  function setWhiteKeyEnabled(on){
-    state.whiteKey.enabled = on;
-    for (const m of state.materials) applyMaterialFlags(m);
-  }
-  function setWhiteKeyThreshold(th){
-    state.whiteKey.threshold = th;
-    for (const m of state.materials) applyMaterialFlags(m);
-  }
-
-  return {
-    THREE, scene, camera, renderer, controls,
-    loadGLBFromArrayBuffer,
-    setHSL, setOpacity, setUnlit, setDoubleSide,
-    setWhiteKeyEnabled, setWhiteKeyThreshold
-  };
+// for debugging in console
+if (typeof window !== 'undefined') {
+  window.__viewerAPI = viewerAPI;
 }
