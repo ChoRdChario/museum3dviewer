@@ -46,6 +46,8 @@
   <script src="https://accounts.google.com/gsi/client" async defer></script>
 </head>
 <body>
+  <div id="modeChip" class="chip">Material</div>
+
   <div id="app">
     <div id="stage">
       <div id="spinner">booting…</div>
@@ -112,7 +114,9 @@
         <div class="row"><label style="width:72px">Light</label><input id="slLight" type="range" min="0" max="100" value="45"></div>
         <div class="row"><label style="width:72px">Opacity</label><input id="slOpacity" type="range" min="0" max="100" value="100"></div>
         <div class="row"><button id="btnUnlit" class="btn">Unlit: off</button><button id="btnDouble" class="btn">DoubleSide: off</button></div>
-        <div class="row"><label style="width:72px">White→α</label><input id="slWhiteKey" type="range" min="70" max="100" value="95"></div>
+        <div class="row"><label style="width:72px">White→α</label><input id="slWhiteKey" type="range" min="70" max="100" value="95">
+  <label style="margin-left:8px"><input type="checkbox" id="chkWhiteEnable"> 白キー有効</label>
+</div>
       </div>
 
       <div id="pane-view" class="pane">
