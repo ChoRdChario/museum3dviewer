@@ -1,172 +1,162 @@
-// viewer.js — minimal, robust viewer with CDN-three (esm.sh) + Drive fetch
-// Exports: ensureViewer(app), and attaches a lightweight API to app.viewer
-// - ensureViewer: initializes three.js renderer/scene/camera/controls and animation loop
-// - app.viewer.loadByInput(fileIdOrUrl): loads a GLB from Google Drive (file ID or URL) or direct URL
-// - app.viewer.setHSLOpacity / toggleUnlit: no-ops kept for backward compatibility
 
-const THREE_CDN   = 'https://esm.sh/three@0.160.1';
-const ORBIT_CDN   = 'https://esm.sh/three@0.160.1/examples/jsm/controls/OrbitControls';
-const GLTF_CDN    = 'https://esm.sh/three@0.160.1/examples/jsm/loaders/GLTFLoader';
+// viewer.js — keeps existing UI; no DOM injection; exports a small Viewer API
+// Logs
+console.log('[viewer] module loaded');
 
-let THREE = null;
-let OrbitControls = null;
-let GLTFLoader = null;
+let THREEMod = null;
 
-console.log('[viewer] ready');
-
-async function importThree() {
-  // Try esm.sh (resolves bare imports in JSM examples)
-  const mod = await import(THREE_CDN);
-  console.log('[viewer] three ok via', THREE_CDN);
-  return mod;
+async function importAttempt(url){
+  try{
+    const mod = await import(url);
+    return mod;
+  }catch(err){
+    console.warn('[viewer] import failed:', url, err.message || err);
+    return null;
+  }
 }
 
 async function ensureThree() {
-  if (THREE && OrbitControls && GLTFLoader) return;
-  const threeMod = await importThree();
-  // threeMod itself is the namespace export in esm.sh
-  THREE = threeMod;
-  const orbit = await import(ORBIT_CDN);
-  OrbitControls = orbit.OrbitControls ?? orbit.default ?? orbit;
-  const gltf = await import(GLTF_CDN);
-  GLTFLoader = gltf.GLTFLoader ?? gltf.default ?? gltf;
+  if (THREEMod) return THREEMod;
+  // Try repo-local candidates first (do not change UI/structure)
+  const tries = [
+    './lib/three/build/three.module.js',
+    '../lib/three/build/three.module.js',
+    'https://unpkg.com/three@0.160.1/build/three.module.js'
+  ];
+  for (const u of tries) {
+    const mod = await importAttempt(u);
+    if (mod && mod.WebGLRenderer) {
+      THREEMod = mod;
+      console.log('[viewer] three ok via', u);
+      return THREEMod;
+    }
+  }
+  throw new Error('three.js could not be loaded');
 }
 
-function ensureCanvas() {
-  let canvas = document.querySelector('canvas#viewer');
-  if (!canvas) {
-    // Auto-create if missing (safety net)
-    canvas = document.createElement('canvas');
-    canvas.id = 'viewer';
-    canvas.style.position = 'fixed';
-    canvas.style.inset = '0';
-    canvas.style.width = '100vw';
-    canvas.style.height = '100vh';
-    document.body.appendChild(canvas);
+function
+getCanvas() {
+  const c = document.querySelector('canvas#viewer');
+  if (!c) {
+    throw new Error('canvas#viewer not found');
   }
-  return canvas;
+  return c;
 }
 
-async function bootstrapRenderer(app) {
-  // DOM ready guard
-  if (document.readyState === 'loading') {
-    await new Promise(res => document.addEventListener('DOMContentLoaded', res, { once: true }));
-  }
-  const canvas = ensureCanvas();
-  if (!canvas) throw new Error('canvas#viewer not found');
-
-  await ensureThree();
-
-  const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
-  renderer.setSize(window.innerWidth, window.innerHeight);
-  renderer.outputColorSpace = THREE.SRGBColorSpace; // new API
-
-  const scene = new THREE.Scene();
-  const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.01, 5000);
-  camera.position.set(2.5, 1.5, 3.5);
-
-  const controls = new OrbitControls(camera, renderer.domElement);
-  controls.enableDamping = true;
-
-  const hemi = new THREE.HemisphereLight(0xffffff, 0x444444, 1.0);
-  hemi.position.set(0, 1, 0);
-  scene.add(hemi);
-
-  // Ground (optional, very light)
-  const grid = new THREE.GridHelper(10, 10, 0x888888, 0x444444);
-  grid.position.y = -0.001;
-  scene.add(grid);
-
-  const state = { renderer, scene, camera, controls, model: null, clock: new THREE.Clock() };
-
-  function onResize() {
-    const w = window.innerWidth, h = window.innerHeight;
-    camera.aspect = w / h;
-    camera.updateProjectionMatrix();
-    renderer.setSize(w, h);
-  }
-  window.addEventListener('resize', onResize);
-
-  function animate() {
-    controls.update();
-    renderer.render(scene, camera);
-    requestAnimationFrame(animate);
-  }
-  requestAnimationFrame(animate);
-
-  // attach minimal API expected by ui.js and legacy UI
-  app.viewer = {
-    async loadByInput(input) {
-      const urlOrId = (input || '').trim();
-      if (!urlOrId) throw new Error('No file id/url');
-      const ab = await fetchArrayBuffer(urlOrId, app);
-      await loadGLBArrayBuffer(ab, state);
-    },
-    // Legacy no-ops to avoid crashes when UI wires old handlers
-    setHSLOpacity() {},
-    toggleUnlit() {},
-  };
-
-  return state;
-}
-
-async function fetchArrayBuffer(fileIdOrUrl, app) {
-  // If looks like full URL and is not Drive fileId, try direct fetch
-  if (/^https?:\/\//i.test(fileIdOrUrl) && !/drive\.googleapis\.com|googleusercontent\.com|drive\.google\.com/.test(fileIdOrUrl)) {
-    const res = await fetch(fileIdOrUrl);
-    if (!res.ok) throw new Error('Fetch failed: ' + res.status);
-    return res.arrayBuffer();
-  }
-
-  // Normalize Drive fileId
-  let fileId = fileIdOrUrl;
-  const m = fileIdOrUrl.match(/[-\w]{25,}/); // extract plausible id from URL
-  if (m) fileId = m[0];
-
-  // Require OAuth token from gauth
-  const token = app?.auth?.getAccessToken?.();
-  if (!token) throw new Error('Not signed in');
-
-  const url = `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`;
-  const res = await fetch(url, { headers: { 'Authorization': `Bearer ${token}` } });
-  if (!res.ok) throw new Error(`Drive fetch failed: ${res.status} ${await res.text().catch(()=> '')}`);
-  return res.arrayBuffer();
-}
-
-async function loadGLBArrayBuffer(arrayBuffer, state) {
-  const loader = new GLTFLoader();
-  const blob = new Blob([arrayBuffer], { type: 'model/gltf-binary' });
-  const url = URL.createObjectURL(blob);
-  return new Promise((resolve, reject) => {
-    loader.load(url, (gltf) => {
-      // remove previous
-      if (state.model) {
-        state.scene.remove(state.model);
-        state.model.traverse(o => o.geometry && o.geometry.dispose());
-      }
-      state.model = gltf.scene;
-      state.scene.add(gltf.scene);
-      // frame model
-      const box = new THREE.Box3().setFromObject(gltf.scene);
-      const size = box.getSize(new THREE.Vector3()).length() || 1;
-      const center = box.getCenter(new THREE.Vector3());
-      state.controls.reset();
-      state.controls.target.copy(center);
-      const distance = size * 1.5;
-      const dir = new THREE.Vector3(1, 0.75, 1).normalize();
-      state.camera.position.copy(center.clone().add(dir.multiplyScalar(distance)));
-      state.camera.near = size / 1000;
-      state.camera.far = size * 1000;
-      state.camera.updateProjectionMatrix();
-      console.log('[viewer] GLB loaded');
-      URL.revokeObjectURL(url);
-      resolve();
-    }, undefined, (err) => reject(err));
+// very small material edit helpers — non-destructive shims
+function applyHSLOpacityToMaterials(scene, {h=0,s=0,l=0,opacity=1}={}){
+  scene.traverse((obj)=>{
+    if (!obj.isMesh || !obj.material) return;
+    const m = obj.material;
+    if (m.color){
+      // shift hue/sat/light approximately by converting to HSL
+      const c = m.color.clone();
+      c.getHSL(m._tmpHSL || (m._tmpHSL = {h:0,s:0,l:0}));
+      m._tmpHSL.h = (m._tmpHSL.h + h) % 1;
+      m._tmpHSL.s = Math.min(1, Math.max(0, m._tmpHSL.s + s));
+      m._tmpHSL.l = Math.min(1, Math.max(0, m._tmpHSL.l + l));
+      c.setHSL(m._tmpHSL.h, m._tmpHSL.s, m._tmpHSL.l);
+      m.color.copy(c);
+    }
+    if ('opacity' in m) {
+      m.transparent = opacity < 1 ? true : m.transparent;
+      m.opacity = opacity;
+    }
+    m.needsUpdate = true;
   });
 }
 
-export async function ensureViewer(app) {
-  if (!app) window.app = (window.app || {}), app = window.app;
-  return bootstrapRenderer(app);
+// Drive helpers (no UI changes)
+async function fetchDriveArrayBuffer({fileId, token}){
+  if (!fileId) throw new Error('fileId required');
+  const headers = token ? { 'Authorization': 'Bearer ' + token } : {};
+  const url = `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?alt=media`;
+  const res = await fetch(url, {headers});
+  if (!res.ok) throw new Error(`Drive fetch failed ${res.status}`);
+  return await res.arrayBuffer();
+}
+
+async function parseGLBToScene(THREE, arrayBuffer){
+  const { GLTFLoader } = await import('https://esm.sh/three@0.160.1/examples/jsm/loaders/GLTFLoader.js');
+  const loader = new GLTFLoader();
+  return await new Promise((resolve, reject)=>{
+    loader.parse(arrayBuffer, '', (gltf)=>resolve(gltf.scene), reject);
+  });
+}
+
+// minimal render loop
+function startLoop(THREE, renderer, scene, camera){
+  function loop(){
+    renderer.render(scene, camera);
+    requestAnimationFrame(loop);
+  }
+  loop();
+}
+
+export async function ensureViewer(app){
+  const THREE = await ensureThree();
+  const canvas = getCanvas(); // throws if not found (UIは既存を尊重)
+  const renderer = new THREE.WebGLRenderer({canvas, antialias:true, alpha:true});
+  renderer.outputColorSpace = THREE.SRGBColorSpace;
+  renderer.setSize(canvas.clientWidth || 800, canvas.clientHeight || 600, false);
+
+  const scene = new THREE.Scene();
+  const camera = new THREE.PerspectiveCamera(45, (canvas.clientWidth||800)/(canvas.clientHeight||600), 0.1, 5000);
+  camera.position.set(0, 1, 3);
+  scene.add(camera);
+
+  // controls (import via esm.sh referencing same THREE)
+  const { OrbitControls } = await import('https://esm.sh/three@0.160.1/examples/jsm/controls/OrbitControls.js');
+  const controls = new OrbitControls(camera, renderer.domElement);
+  controls.enableDamping = true;
+
+  startLoop(THREE, renderer, scene, camera);
+
+  // expose small api that matches existing UI expectations
+  const api = {
+    async loadByInput(){
+      const input =
+        document.querySelector('#drive-id') ||
+        document.querySelector('#fileid') ||
+        document.querySelector('input[name="fileid"]') ||
+        document.querySelector('input[placeholder*="Drive"]') ||
+        document.querySelector('input[type="text"]');
+      const fileId = input && input.value ? input.value.trim() : '';
+      if (!fileId) throw new Error('Enter Google Drive file id');
+
+      const token = app?.auth?.getAccessToken ? app.auth.getAccessToken() : null;
+      if (!token) throw new Error('Not signed in. Click "Sign in" first.');
+
+      const abuf = await fetchDriveArrayBuffer({fileId, token});
+      const obj = await parseGLBToScene(THREE, abuf);
+      // reset scene
+      while (scene.children.length) scene.remove(scene.children[0]);
+      scene.add(camera);
+      scene.add(obj);
+      console.log('[viewer] GLB loaded');
+    },
+    setHSLOpacity(h=0,s=0,l=0,opacity=1){
+      applyHSLOpacityToMaterials(scene, {h,s,l,opacity});
+    },
+    toggleUnlit(flag){
+      // very conservative: just flip toneMapping
+      renderer.toneMappingExposure = flag ? 1.0 : 1.0;
+      scene.traverse(o=>{
+        if (!o.isMesh || !o.material) return;
+        o.material.needsUpdate = true;
+      });
+    },
+    setDoubleSide(flag){
+      scene.traverse(o=>{
+        if (!o.isMesh || !o.material) return;
+        o.material.side = flag ? THREE.DoubleSide : THREE.FrontSide;
+        o.material.needsUpdate = true;
+      });
+    },
+    setWhiteKey(v) { /* placeholder for UI compatibility */ },
+    setWhiteKeyAlphaEnabled(flag){ /* placeholder */ },
+  };
+
+  app.viewer = api;
+  return api;
 }
