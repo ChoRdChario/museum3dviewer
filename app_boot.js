@@ -1,46 +1,29 @@
-// app_boot.js — boot + UIブリッジ（最小差分）
-import { ensureViewer } from './viewer.js';
-import { setupAuth } from './gauth.js';
-
 console.log('[boot] ready');
+import { setupAuth } from './gauth.js';
+import { setupUI } from './ui.js';
+import { ensureViewer } from './viewer.js';
 
-async function boot() {
-  const app = window.app || (window.app = {});
-
+async function boot(){
   console.log('[boot] call setupAuth');
-  await setupAuth(app);
+  await setupAuth?.();
   console.log('[boot] setupAuth resolved');
 
-  const viewer = ensureViewer(app);
-
-  // UI 初期化（ui.js が存在する場合のみ）
-  try {
-    const mod = await import('./ui.js');
-    if (mod && typeof mod.setupUI === 'function') {
-      mod.setupUI(app);
-      console.log('[boot] setupUI(module) done');
-    } else if (typeof window.setupUI === 'function') {
-      window.setupUI(app);
-      console.log('[boot] setupUI(window) done');
-    } else {
-      console.warn('[boot] setupUI not found — operations UI may be inert');
-    }
-  } catch (e) {
+  // viewer初期化
+  await ensureViewer();
+  // UI配線（存在しない要素は無視される）
+  try{
+    await setupUI(window.app);
+    console.log('[boot] setupUI(module) done');
+  }catch(e){
     console.warn('[boot] ui.js not found or failed to load', e);
   }
 
-  // ビューア準備完了通知（既存 onceReady があれば利用）
-  if (viewer && typeof viewer.onceReady === 'function') {
-    viewer.onceReady(() => {
-      console.log('[boot] viewer ready');
-      document.dispatchEvent(new CustomEvent('lmy:viewer-ready', { detail: { app } }));
-    });
+  // onceReadyフックがあれば呼ぶ
+  if (window.app?.viewer?.onceReady) {
+    await window.app.viewer.onceReady();
+    console.log('[boot] viewer ready');
   } else {
     console.log('[boot] viewer ready (no onceReady hook)');
-    document.dispatchEvent(new CustomEvent('lmy:viewer-ready', { detail: { app } }));
   }
-
-  // ブート完了の合図（UIがこれにバインドしていれば動く）
-  document.dispatchEvent(new CustomEvent('lmy:boot-ready', { detail: { app } }));
 }
-boot().catch(err => console.error('[boot] fatal', err));
+boot();

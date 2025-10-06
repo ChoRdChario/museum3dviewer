@@ -2,99 +2,51 @@
 <html lang="ja">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>LociMyu v6.6</title>
-  <link rel="icon" href="./favicon.ico">
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Museum 3D Viewer</title>
   <style>
-    :root { --bg:#0f0f13; --panel:#14141a; --ink:#ddd; --muted:#9aa; --accent:#3478f6; }
-    * { box-sizing: border-box; }
-    html,body { height:100%; margin:0; background:var(--bg); color:var(--ink); font:14px/1.5 system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; }
-    #app { display:grid; grid-template-columns: 1fr 380px; grid-template-rows: 100vh; }
-    #stage { position:relative; overflow:hidden; background:#101014; }
-    #spinner { position:absolute; inset:0; display:grid; place-items:center; color:var(--muted); pointer-events:none; }
-    canvas.webgl { display:block; width:100%; height:100%; }
-    #leader { position:absolute; inset:0; pointer-events:none; }
-    #overlay { position:absolute; left:16px; bottom:16px; width:min(360px, 40vw); display:none; background:#15161a; border:1px solid #2a2b34; border-radius:12px; padding:12px; box-shadow:0 8px 30px rgba(0,0,0,.45); }
-    #overlay h4 { margin:0 0 6px; font-weight:600; }
-    #overlay img { width:100%; height:auto; border-radius:8px; border:1px solid #2a2b34; margin-top:6px; }
-    aside#panel { background:var(--panel); border-left:1px solid #222; display:flex; flex-direction:column; min-width:320px; }
-    header#topbar { display:flex; align-items:center; gap:8px; padding:10px 12px; border-bottom:1px solid #222; }
-    .chip { border:1px solid #333; border-radius:999px; padding:6px 10px; font-weight:600; }
-    .chip.warn { background:#1d2330; color:#ffd38a; border-color:#5c4a22; cursor:pointer; }
-    .chip.ok { background:#122a18; color:#9be49b; border-color:#204a2a; }
-    button.btn { background:#1c1f2b; color:var(--ink); border:1px solid #333; border-radius:8px; padding:6px 10px; cursor:pointer; }
-    #tabs { display:flex; gap:6px; padding:8px 10px; border-bottom:1px solid #222; }
-    .tab { padding:6px 10px; border-radius:8px; cursor:pointer; color:var(--muted); }
-    .tab.active { background:#1b1c22; color:var(--ink); }
-    .pane { display:none; padding:10px; overflow:auto; }
-    .pane.active { display:block; }
-    .row { display:flex; gap:8px; align-items:center; margin:8px 0; }
-    input[type=text], select, textarea { background:#0f0f13; color:var(--ink); border:1px solid #333; border-radius:8px; padding:8px; }
-    textarea { width:100%; min-height:86px; }
+    html,body{height:100%;margin:0}
+    #app{display:grid;grid-template-rows:auto 1fr; height:100%;}
+    header{padding:.5rem 1rem; display:flex; gap:.5rem; align-items:center; flex-wrap:wrap; border-bottom:1px solid #ddd;}
+    main{position:relative}
+    #viewer{position:absolute; inset:0; width:100%; height:100%; display:block;}
+    .ctrl{display:flex; gap:.5rem; align-items:center; flex-wrap:wrap;}
+    .ctrl label{font:12px/1.2 system-ui, sans-serif;}
+    .ctrl input[type="range"]{width:120px;}
+    .spacer{flex:1}
   </style>
-  <!-- Import map so bare 'three' specifiers work everywhere -->
-  <script type="importmap">
-  {
-    "imports": {
-      "three": "https://unpkg.com/three@0.157.0/build/three.module.js",
-      "three/addons/": "https://unpkg.com/three@0.157.0/examples/jsm/"
-    }
-  }
-  </script>
 </head>
 <body>
   <div id="app">
-    <section id="stage">
-      <div id="spinner">booting...</div>
-      <svg id="leader"></svg>
-      <div id="overlay">
-        <h4 id="ov-title"></h4>
-        <div id="ov-body" style="white-space:pre-wrap"></div>
-        <img id="ov-img" alt="" />
+    <header>
+      <div class="ctrl">
+        <input id="url-input" type="text" placeholder="GLB/GLTF/URL" size="40" />
+        <input id="file-input" type="file" accept=".glb,.gltf,.zip,.vrm,model/*" />
+        <button id="load-btn">Load</button>
+        <button id="unlit-btn">Unlit</button>
       </div>
-    </section>
-
-    <aside id="panel">
-      <header id="topbar">
-        <strong>LociMyu v6.6</strong>
-        <div style="flex:1"></div>
-        <span id="authChip" class="chip warn" title="Googleにサインイン">Sign in</span>
-      </header>
-
-      <div id="tabs">
-        <div class="tab active" data-tab="cap">Caption</div>
-        <div class="tab" data-tab="mat">Material</div>
-        <div class="tab" data-tab="view">View</div>
+      <div class="spacer"></div>
+      <div class="ctrl">
+        <label>Hue <input id="hue" type="range" min="0" max="1" step="0.001" value="0"></label>
+        <label>Sat <input id="sat" type="range" min="0" max="1" step="0.001" value="0"></label>
+        <label>Light <input id="light" type="range" min="0" max="1" step="0.001" value="0"></label>
+        <label>Opacity <input id="opacity" type="range" min="0" max="1" step="0.001" value="1"></label>
       </div>
-
-      <div id="pane-cap" class="pane active">
-        <div class="row">
-          <input id="fileIdInput" type="text" placeholder="Drive File ID or URL" style="flex:1" />
-          <button id="loadGlbBtn" class="btn">GLB</button>
-        </div>
-        <div class="row"><a id="demoLink" href="#" class="btn">でデモモデル</a></div>
-        <hr style="border-color:#222">
-        <div class="row"><label style="width:80px">Title</label><input id="capTitle" type="text" style="flex:1"></div>
-        <div class="row"><label style="width:80px">Body</label><textarea id="capBody"></textarea></div>
-        <div class="row"><button id="addPin" class="btn">+ Pin</button></div>
-      </div>
-
-      <div id="pane-mat" class="pane">
-        <div class="row"><label style="width:120px">Material target</label><select id="matTarget" style="flex:1"><option value="-1">(All)</option></select></div>
-        <div class="row"><label style="width:120px">Hue</label><input id="matHue" type="range" min="0" max="1" step="0.001" style="flex:1"></div>
-        <div class="row"><label style="width:120px">Sat</label><input id="matSat" type="range" min="0" max="2" step="0.001" style="flex:1"></div>
-        <div class="row"><label style="width:120px">Light</label><input id="matLight" type="range" min="0" max="2" step="0.001" style="flex:1"></div>
-        <div class="row"><label style="width:120px">Opacity</label><input id="matOpacity" type="range" min="0" max="1" step="0.001" style="flex:1"></div>
-        <div class="row"><button id="matUnlit" class="btn">Unlit: off</button><button id="matDoubleSide" class="btn">DoubleSide: off</button></div>
-        <div class="row"><label style="width:120px">White→α</label><input id="matWhite" type="range" min="0.7" max="1.0" step="0.001" style="flex:1"></div>
-      </div>
-
-      <div id="pane-view" class="pane">
-        <div class="row"><button id="viewReset" class="btn">Reset view</button></div>
-      </div>
-    </aside>
+      <div class="spacer"></div>
+      <button id="auth-btn" data-auth-btn>Sign in</button>
+    </header>
+    <main>
+      <!-- ★ 必須: viewer.js が取得します -->
+      <canvas id="viewer"></canvas>
+    </main>
   </div>
 
+  <!-- 3rd-partyのthree直読み<script>は置かない。viewer.jsが動的importします -->
+
+  <!-- アプリのモジュール -->
+  <script type="module" src="./gauth.js"></script>
+  <script type="module" src="./ui.js"></script>
+  <script type="module" src="./viewer.js"></script>
   <script type="module" src="./app_boot.js"></script>
 </body>
 </html>
