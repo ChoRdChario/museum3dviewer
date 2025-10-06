@@ -1,4 +1,4 @@
-// app_boot.js — boot after libs ready and auth wiring
+// app_boot.js — boot order & extra logs
 import { ensureViewer } from './viewer.js';
 import { setupAuth } from './gauth.js';
 
@@ -6,10 +6,13 @@ console.log('[boot] ready');
 
 async function boot() {
   const app = window.app || (window.app = {});
-  await setupAuth(app);           // waits GIS/gapi and wires button
+  console.log('[boot] call setupAuth');
+  await setupAuth(app);
+  console.log('[boot] setupAuth resolved');
+
   const viewer = ensureViewer(app);
   viewer.onceReady(() => {
     console.log('[boot] viewer ready');
   });
 }
-boot().catch(err => console.error(err));
+boot().catch(err => console.error('[boot] fatal', err));

@@ -1,8 +1,4 @@
-// gauth.js — GIS token flow with guaranteed user-gesture popup and post-auth verification
-// Requires in index.html:
-// <script src="https://accounts.google.com/gsi/client" async defer></script>
-// <script src="https://apis.google.com/js/api.js" async defer></script>
-
+// gauth.js — robust wiring + diagnostics (no new files; minimal invasive)
 const CONFIG = {
   CLIENT_ID: '595200751510-ncahnf7edci6b9925becn5to49r6cguv.apps.googleusercontent.com',
   API_KEY: 'AIzaSyCUnTCr5yWUWPdEXST9bKP1LpgawU5rIbI',
@@ -22,36 +18,56 @@ let accessToken = null;
 let gapiInited = false;
 let gisReady = false;
 
-function getEls() {
-  return {
-    chip: document.getElementById('auth-chip'),
-    btn: document.getElementById('auth-btn'),
-  };
+function qsAllButtons() {
+  // 探索範囲を広げる（ID/クラス/データ属性）
+  const sel = [
+    '#auth-btn',
+    '[data-auth-btn]',
+    '[data-role="auth-btn"]',
+    '.auth-btn',
+    '#signin', '.signin',
+    'button[name="signin"]',
+    'button[data-auth]'
+  ].join(',');
+  const list = Array.from(document.querySelectorAll(sel)).filter(el => el instanceof HTMLButtonElement);
+  return list;
+}
+function getChip() {
+  return document.getElementById('auth-chip') || document.querySelector('.auth-chip,[data-auth-chip]');
 }
 
-function refreshUI(state) {
-  const { chip, btn } = getEls();
+function refreshUI(signed) {
+  const chip = getChip();
+  const btns = qsAllButtons();
   if (chip) {
-    chip.className = state ? 'chip signed' : 'chip';
-    chip.textContent = state ? 'Signed in' : 'Signed out';
+    chip.className = signed ? 'chip signed' : 'chip';
+    chip.textContent = signed ? 'Signed in' : 'Signed out';
   }
-  if (btn) {
+  btns.forEach(btn => {
     btn.disabled = false;
-    btn.textContent = state ? 'Sign out' : 'Sign in';
-  }
+    btn.textContent = signed ? 'Sign out' : (btn.dataset.labelSignin || 'Sign in');
+  });
 }
 
-function waitForGapi() {
-  return new Promise((resolve) => {
-    const tick = () => (window.gapi && gapi.load) ? resolve() : setTimeout(tick, 30);
+function waitForGapi(timeoutMs=10000) {
+  return new Promise((resolve, reject) => {
+    const t0 = performance.now();
+    const tick = () => {
+      if (window.gapi && gapi.load) return resolve();
+      if (performance.now() - t0 > timeoutMs) return reject(new Error('gapi not loaded'));
+      setTimeout(tick, 60);
+    };
     tick();
   });
 }
-function waitForGIS() {
-  return new Promise((resolve) => {
-    const ok = (window.google && google.accounts && google.accounts.oauth2);
-    if (ok) return resolve();
-    const tick = () => (window.google && google.accounts && google.accounts.oauth2) ? resolve() : setTimeout(tick, 30);
+function waitForGIS(timeoutMs=10000) {
+  return new Promise((resolve, reject) => {
+    const t0 = performance.now();
+    const tick = () => {
+      if (window.google && google.accounts && google.accounts.oauth2) return resolve();
+      if (performance.now() - t0 > timeoutMs) return reject(new Error('GIS not loaded'));
+      setTimeout(tick, 60);
+    };
     tick();
   });
 }
@@ -64,6 +80,7 @@ async function initGapiClient() {
     discoveryDocs: CONFIG.DISCOVERY_DOCS,
   });
   gapiInited = true;
+  console.log('[auth] gapi ready');
 }
 
 async function initGIS() {
@@ -71,56 +88,53 @@ async function initGIS() {
   tokenClient = google.accounts.oauth2.initTokenClient({
     client_id: CONFIG.CLIENT_ID,
     scope: CONFIG.SCOPES,
-    callback: () => {}, // will be set just-in-time before request
+    callback: () => {}, // set at click
   });
   gisReady = true;
+  console.log('[auth] GIS ready');
 }
 
 async function verifyTokenWorks() {
-  // Drive About を読めれば正しく認可済み
   const resp = await gapi.client.drive.about.get({ fields: 'user(emailAddress,displayName)' });
   return resp?.result?.user;
 }
 
 async function doSignOut() {
   if (!accessToken) { refreshUI(false); return; }
-  try {
-    await new Promise((resolve) => google.accounts.oauth2.revoke(accessToken, resolve));
-  } catch (e) {
-    console.warn('[auth] revoke error', e);
-  } finally {
-    accessToken = null;
-    gapi.client.setToken(null);
-    refreshUI(false);
-  }
+  try { await new Promise(res => google.accounts.oauth2.revoke(accessToken, res)); }
+  catch(e) { console.warn('[auth] revoke error', e); }
+  accessToken = null;
+  gapi.client.setToken(null);
+  refreshUI(false);
+  console.log('[auth] signed out');
 }
 
-export async function setupAuth(app) {
-  const { btn } = getEls();
-  refreshUI(false);
-
-  await Promise.all([ waitForGapi(), waitForGIS() ]);
-  await initGapiClient();
-  await initGIS();
-
-  if (btn) {
-    btn.onclick = null;
+// クリックにワイヤリング
+function wireButtons() {
+  const btns = qsAllButtons();
+  if (!btns.length) {
+    console.warn('[auth] no auth button found — add id="auth-btn" or data-auth-btn to a <button>.');
+    return;
+  }
+  btns.forEach(btn => {
+    const clone = btn.cloneNode(true);
+    btn.replaceWith(clone);
+  });
+  const fresh = qsAllButtons();
+  fresh.forEach(btn => {
     btn.addEventListener('click', () => {
-      if (accessToken) {
-        doSignOut();
-        return;
-      }
-      // --- Critical: call requestAccessToken IN the click event (no await before) ---
+      console.log('[auth] button click');
+      if (accessToken) { doSignOut(); return; }
+
       btn.disabled = true;
       btn.textContent = 'Opening popup...';
 
       tokenClient.callback = async (resp) => {
         try {
+          console.log('[auth] callback:', resp && Object.keys(resp).join(','));
           if (resp && resp.access_token) {
             accessToken = resp.access_token;
             gapi.client.setToken({ access_token: accessToken });
-
-            // Verify by calling Drive
             try {
               const user = await verifyTokenWorks();
               console.log('[auth] verified as', user);
@@ -130,31 +144,53 @@ export async function setupAuth(app) {
               accessToken = null;
               gapi.client.setToken(null);
               refreshUI(false);
-              alert('Google authorization failed. Check OAuth origins & consent screen.');
+              alert('Authorization failed. Check OAuth origins/consent.');
             }
           } else {
             refreshUI(false);
           }
         } finally {
-          // ensure button recovers
-          const { btn: b } = getEls();
-          if (b && !accessToken) { b.disabled = false; b.textContent = 'Sign in'; }
+          if (!accessToken) { btn.disabled = false; btn.textContent = btn.dataset.labelSignin || 'Sign in'; }
         }
       };
 
       try {
-        // Force visible UX (account chooser + consent if needed)
         tokenClient.requestAccessToken({ prompt: 'select_account consent' });
+        console.log('[auth] popup requested');
       } catch (e) {
         console.error('[auth] requestAccessToken error', e);
         btn.disabled = false;
-        btn.textContent = 'Sign in';
+        btn.textContent = btn.dataset.labelSignin || 'Sign in';
       }
     }, { once: false });
+  });
+  console.log(`[auth] wired ${fresh.length} button(s)`);
+}
+
+export async function setupAuth(app) {
+  refreshUI(false);
+
+  try {
+    await waitForGapi();
+    console.log('[auth] gapi script detected');
+  } catch (e) {
+    console.error('[auth] gapi load timeout', e);
   }
+  try {
+    await waitForGIS();
+    console.log('[auth] GIS script detected');
+  } catch (e) {
+    console.error('[auth] GIS load timeout', e);
+  }
+
+  await initGapiClient();
+  await initGIS();
+
+  wireButtons();
 
   app.auth = {
     isSignedIn: () => !!accessToken,
     getAccessToken: () => accessToken,
+    _debug: () => ({ accessToken, gapiInited, gisReady })
   };
 }
