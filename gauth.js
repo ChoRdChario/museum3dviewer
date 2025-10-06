@@ -1,4 +1,4 @@
-// gauth.js — self-loading GIS/gapi + robust popup wiring + auto button injection
+// gauth.js — self-loading + popup wiring + イベント通知（最小差分）
 const CONFIG = {
   CLIENT_ID: '595200751510-ncahnf7edci6b9925becn5to49r6cguv.apps.googleusercontent.com',
   API_KEY: 'AIzaSyCUnTCr5yWUWPdEXST9bKP1LpgawU5rIbI',
@@ -98,7 +98,6 @@ function authChip() {
 function ensureAuthWidgets() {
   let btns = authButtons();
   if (btns.length) return btns;
-  // auto inject minimal UI (非破壊・単独レイヤ)
   const styleId = 'auth-auto-style';
   if (!document.getElementById(styleId)) {
     const st = document.createElement('style');
@@ -155,15 +154,14 @@ async function doSignOut() {
   gapi.client.setToken(null);
   refreshUI(false);
   console.log('[auth] signed out');
+  document.dispatchEvent(new CustomEvent('lmy:auth-signed-out'));
 }
 
 function wireButtons() {
   let btns = authButtons();
   if (!btns.length) btns = ensureAuthWidgets();
-  // remove old listeners
   btns.forEach(btn => {
     const clone = btn.cloneNode(true);
-    // preserve id/class/dataset/text
     clone.id = btn.id;
     clone.className = btn.className;
     clone.dataset.labelSignin = btn.dataset.labelSignin || '';
@@ -189,6 +187,7 @@ function wireButtons() {
               const user = await verifyTokenWorks();
               console.log('[auth] verified as', user);
               refreshUI(true);
+              document.dispatchEvent(new CustomEvent('lmy:auth-signed-in', { detail: { accessToken, user } }));
             } catch (e) {
               console.error('[auth] verify failed', e);
               accessToken = null;
@@ -220,18 +219,10 @@ function wireButtons() {
 export async function setupAuth(app) {
   refreshUI(false);
 
-  try {
-    await ensureScript(CONFIG.GIS_SRC);
-    console.log('[auth] GIS script tag ok');
-  } catch(e) {
-    console.error('[auth] failed to insert GIS script', e);
-  }
-  try {
-    await ensureScript(CONFIG.GAPI_SRC);
-    console.log('[auth] gapi script tag ok');
-  } catch(e) {
-    console.error('[auth] failed to insert gapi script', e);
-  }
+  try { await ensureScript(CONFIG.GIS_SRC); console.log('[auth] GIS script tag ok'); }
+  catch(e) { console.error('[auth] failed to insert GIS script', e); }
+  try { await ensureScript(CONFIG.GAPI_SRC); console.log('[auth] gapi script tag ok'); }
+  catch(e) { console.error('[auth] failed to insert gapi script', e); }
 
   try { await waitForGIS(); console.log('[auth] GIS script detected'); }
   catch (e) { console.error('[auth] GIS load timeout', e); }
