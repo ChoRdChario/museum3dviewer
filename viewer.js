@@ -1,199 +1,211 @@
-// three.js viewer & material helpers
-import * as THREE from 'three';
-import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+// viewer.js — drop-in replacement
+// TDZエラー解消（readyCbs参照順）、描画ループ安定化、Material操作API維持
 
-export async function ensureViewer(app){
-  const container = document.getElementById('stage');
-  const canvas = document.createElement('canvas');
-  canvas.className = 'webgl';
-  container.appendChild(canvas);
+let _ready = false;
+const _readyCbs = [];
 
-  const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x0f0f13);
-  const camera = new THREE.PerspectiveCamera(45, container.clientWidth/container.clientHeight, 0.01, 1000);
-  camera.position.set(2.6, 1.2, 3.0);
+let renderer, scene, camera, controls;
+let clock;
 
-  const renderer = new THREE.WebGLRenderer({ canvas, antialias:true, alpha:false });
-  renderer.setSize(container.clientWidth, container.clientHeight);
-  renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
+let canvasEl;
+let materials = [];
+let rootObject3D = null;
 
-  const controls = new OrbitControls(camera, canvas);
-  controls.enableDamping = true;
-
-  const hemi = new THREE.HemisphereLight(0xffffff, 0x202030, 1.0);
-  scene.add(hemi);
-  const dir = new THREE.DirectionalLight(0xffffff, 1.2);
-  dir.position.set(3,4,5);
-  scene.add(dir);
-
-  const grid = new THREE.GridHelper(10, 10, 0x444, 0x222);
-  grid.visible = false;
-  scene.add(grid);
-
-  let raf;
-  let firstFrame = false;
-  function animate(){
-    raf = requestAnimationFrame(animate);
-    controls.update();
-    renderer.render(scene, camera);
-    if (!firstFrame){ firstFrame = true; readyCbs.forEach(f=>f()); readyCbs.length=0; }
+export function onReady(cb) {
+  if (_ready) cb();
+  else _readyCbs.push(cb);
+}
+function notifyReadyOnce() {
+  if (_ready) return;
+  _ready = true;
+  while (_readyCbs.length) {
+    try { _readyCbs.shift()?.(); } catch (e) { console.error(e); }
   }
-  animate();
+}
 
-  window.addEventListener('resize', ()=>{
-    const w = container.clientWidth, h = container.clientHeight;
-    renderer.setSize(w,h);
-    camera.aspect = w/h;
-    camera.updateProjectionMatrix();
+function collectUniqueMaterials(root) {
+  const set = new Set();
+  root?.traverse?.((obj) => {
+    if (obj.isMesh && obj.material) {
+      if (Array.isArray(obj.material)) obj.material.forEach(m => set.add(m));
+      else set.add(obj.material);
+    }
   });
+  materials = Array.from(set);
+}
 
-  // model & materials
-  let root = null;
-  let uniqueMaterials = []; // [{mat, name, original:{...}}]
-  const loader = new GLTFLoader();
-
-  async function loadDemo(){
-    // permissive CORS sample
-    const url = 'https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Models/master/2.0/DamagedHelmet/glTF-Binary/DamagedHelmet.glb';
-    const gltf = await loader.loadAsync(url);
-    setModel(gltf.scene);
+function applyToTarget(targetIndex, fn) {
+  if (!materials || materials.length === 0) return;
+  if (targetIndex == null || targetIndex === -1) {
+    materials.forEach((m, i) => fn(m, i));
+  } else if (materials[targetIndex]) {
+    fn(materials[targetIndex], targetIndex);
   }
+}
 
-  async function loadFromDriveIdOrUrl(input){
-    // best-effort parser (id or URL)。Drive直DLはCORS制限があるため、CORS許可URLのみ成功します。
-    const m = String(input||'').match(/[\w-]{20,}/);
-    if(!m) throw new Error('empty or invalid file id/url');
-    const id = m[0];
-    const url = `https://drive.google.com/uc?export=download&id=${id}`;
-    const gltf = await loader.loadAsync(url); // CORS失敗時は例外
-    setModel(gltf.scene);
-  }
+export function getMaterials() {
+  return materials.map((m, i) => `${i}: ${m.name || '(unnamed)'}`);
+}
 
-  function gatherUniqueMaterials(obj3d){
-    const arr = [];
-    const seen = new Set();
-    obj3d.traverse(o=>{
-      if(o.isMesh){
-        const mats = Array.isArray(o.material) ? o.material : [o.material];
-        for(const m of mats){
-          if(m && !seen.has(m.uuid)){
-            seen.add(m.uuid);
-            arr.push({ mat:m, name: m.name || '(mat)', original: snapshotMaterial(m) });
-          }
-        }
-      }
-    });
-    return arr;
-  }
-
-  function snapshotMaterial(m){
-    return {
-      transparent: m.transparent,
-      opacity: m.opacity,
-      side: m.side,
-      color: m.color ? m.color.clone() : null,
-      emissive: m.emissive ? m.emissive.clone() : null,
-      map: m.map || null
-    };
-  }
-
-  function restoreMaterial(m, snap){
-    m.transparent = snap.transparent;
-    m.opacity = snap.opacity;
-    m.side = snap.side;
-    if(snap.color && m.color) m.color.copy(snap.color);
-    if(snap.emissive && m.emissive) m.emissive.copy(snap.emissive);
+export function setOpacity(value, targetIndex = -1) {
+  const v = Math.max(0, Math.min(1, Number(value)));
+  applyToTarget(targetIndex, (m) => {
+    m.userData.__forceTransparent ??= false;
+    m.transparent = v < 1 || m.userData.__forceTransparent;
+    m.opacity = v;
+    if (m.transparent) {
+      m.depthWrite = false;
+      m.alphaTest = 0.0;
+    } else {
+      m.depthWrite = true;
+    }
     m.needsUpdate = true;
-  }
+  });
+}
 
-  function setModel(obj){
-    if(root){ scene.remove(root); root.traverse(o=>o.geometry&&o.geometry.dispose()); }
-    root = obj;
-    scene.add(root);
-    // frame
-    const bbox = new THREE.Box3().setFromObject(root);
-    const size = bbox.getSize(new THREE.Vector3()).length();
-    const center = bbox.getCenter(new THREE.Vector3());
-    controls.target.copy(center);
-    camera.position.copy(center).add(new THREE.Vector3(1,0.5,1).normalize().multiplyScalar(size*0.8));
-    camera.near = size/1000; camera.far = size*10; camera.updateProjectionMatrix();
-    // mats
-    uniqueMaterials = gatherUniqueMaterials(root);
-    app.events?.dispatchEvent(new CustomEvent('viewer:materials',{detail:{list:uniqueMaterials}}));
-  }
+export function setDoubleSide(on, targetIndex = -1) {
+  applyToTarget(targetIndex, (m) => {
+    m.side = on ? THREE.DoubleSide : THREE.FrontSide;
+    m.needsUpdate = true;
+  });
+}
 
-  // --- public API ---
-  const api = {
-    async loadDemo(){ await loadDemo(); },
-    async loadByInput(v){ await loadFromDriveIdOrUrl(v); },
-    getMaterials(){ return uniqueMaterials; },
-    setHSLOpacity({target, h, s, l, opacity}){
-      const targets = (target<0) ? uniqueMaterials : [uniqueMaterials[target]].filter(Boolean);
-      for(const t of targets){
-        const m = t.mat;
-        if(m.color){
-          const col = t.original.color.clone();
-          col.offsetHSL(h-0.5, s-1.0, l-1.0);
-          m.color.copy(col);
-        }
-        m.opacity = opacity;
-        m.transparent = opacity < 0.999;
-        m.depthWrite = m.opacity >= 0.999;
-        m.needsUpdate = true;
+export function setUnlit(on, targetIndex = -1) {
+  applyToTarget(targetIndex, (m) => {
+    if (on) {
+      if (!m.userData.__origLights) {
+        m.userData.__origLights = {
+          lights: m.lights === undefined ? true : m.lights,
+          envMap: m.envMap ?? null
+        };
       }
-    },
-    toggleUnlit(target){
-      const targets = (target<0) ? uniqueMaterials : [uniqueMaterials[target]].filter(Boolean);
-      for(const t of targets){
-        const m = t.mat;
-        const isUnlit = !!m.userData.__unlit;
-        if(isUnlit){
-          // restore
-          restoreMaterial(m, t.original);
-          delete m.userData.__unlit;
-        }else{
-          // approximate unlit: bake color, remove shading
-          if(m.color){
-            const c = (t.original.color || m.color).clone();
-            m.color.copy(c);
-          }
-          m.emissive && m.emissive.setRGB(0,0,0);
-          m.roughness !== undefined && (m.roughness = 1);
-          m.metalness !== undefined && (m.metalness = 0);
-          m.userData.__unlit = 1;
+      m.lights = false;
+      if ('emissiveIntensity' in m) m.emissiveIntensity = 1.0;
+    } else {
+      if (m.userData.__origLights) {
+        m.lights = m.userData.__origLights.lights;
+        if (m.userData.__origLights.envMap !== null) {
+          m.envMap = m.userData.__origLights.envMap;
         }
-        m.needsUpdate = true;
+      } else {
+        m.lights = true;
       }
-    },
-    setDoubleSide(target, on){
-      const targets = (target<0) ? uniqueMaterials : [uniqueMaterials[target]].filter(Boolean);
-      for(const t of targets){ t.mat.side = on ? THREE.DoubleSide : THREE.FrontSide; t.mat.needsUpdate = true; }
-    },
-    setWhiteKey(target, thr){
-      // simple white-to-alpha keying: modify opacity based on fragment luminance via material.onBeforeCompile
-      const targets = (target<0) ? uniqueMaterials : [uniqueMaterials[target]].filter(Boolean);
-      for(const t of targets){
-        const m = t.mat;
-        m.userData.__whiteKey = thr;
-        m.onBeforeCompile = (shader)=>{
-          shader.uniforms.uWhiteThr = { value: thr };
+    }
+    m.needsUpdate = true;
+  });
+}
+
+export function setWhiteKey(enabled, threshold = 0.95, targetIndex = -1) {
+  const t = Math.max(0, Math.min(1, Number(threshold)));
+  applyToTarget(targetIndex, (m) => {
+    if (enabled) {
+      if (!m.userData.__whiteKeyPatched) {
+        m.onBeforeCompile = (shader) => {
           shader.fragmentShader = shader.fragmentShader.replace(
-            'void main() {',
-            'uniform float uWhiteThr;\nvoid main(){'
-          ).replace(
-            '#include <opaque_fragment>',
-            '#include <opaque_fragment>\n  float lum = dot(gl_FragColor.rgb, vec3(0.299,0.587,0.114));\n  if(lum>=uWhiteThr){ gl_FragColor.a = 0.0; }'
+            /}\s*$/m,
+            `
+            float lmy_luma = dot(gl_FragColor.rgb, vec3(0.2126, 0.7152, 0.0722));
+            if (lmy_luma > ${t.toFixed(4)}) {
+              gl_FragColor.a *= max(0.0, 1.0 - (lmy_luma - ${t.toFixed(4)}) / max(0.0001, 1.0 - ${t.toFixed(4)}));
+            }
+            if (gl_FragColor.a < 0.01) discard;
+            }
+            `
           );
         };
-        m.transparent = true;
-        m.needsUpdate = true;
+        m.userData.__whiteKeyPatched = true;
       }
-    },
-    onceReady(cb){ readyCbs.push(cb); }
-  };
-  const readyCbs = [];
+      m.transparent = true;
+      m.userData.__forceTransparent = true;
+      m.depthWrite = false;
+      m.needsUpdate = true;
+    } else {
+      m.userData.__forceTransparent = false;
+      if (m.opacity >= 1.0) {
+        m.transparent = false;
+        m.depthWrite = true;
+      }
+      m.needsUpdate = true;
+    }
+  });
+}
 
-  // expose on app
+function animate() {
+  requestAnimationFrame(animate);
+  if (!renderer || !scene || !camera) return;
+  controls?.update?.();
+  renderer.render(scene, camera);
+}
+
+function handleResize() {
+  if (!renderer || !camera || !canvasEl) return;
+  const w = canvasEl.clientWidth || window.innerWidth;
+  const h = canvasEl.clientHeight || window.innerHeight;
+  renderer.setSize(w, h, false);
+  if (camera.isPerspectiveCamera) {
+    camera.aspect = w / h;
+  }
+  camera.updateProjectionMatrix();
+}
+
+export function setRoot(root) {
+  rootObject3D = root;
+  collectUniqueMaterials(rootObject3D);
+  if (rootObject3D && scene && !scene.children.includes(rootObject3D)) {
+    scene.add(rootObject3D);
+  }
+  console.log('[viewer] GLB loaded; unique materials:', materials.length);
+}
+
+export function ensureViewer(app) {
+  if (app.viewer) return app.viewer;
+
+  canvasEl = document.getElementById('stage') || document.querySelector('#stage canvas') || undefined;
+
+  renderer = new THREE.WebGLRenderer({
+    antialias: true,
+    alpha: true,
+    canvas: canvasEl instanceof HTMLCanvasElement ? canvasEl : undefined
+  });
+  const w = canvasEl?.clientWidth || window.innerWidth;
+  const h = canvasEl?.clientHeight || window.innerHeight;
+  renderer.setSize(w, h, false);
+  renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
+
+  scene = new THREE.Scene();
+  camera = new THREE.PerspectiveCamera(45, w / h, 0.1, 5000);
+  camera.position.set(0, 1, 3);
+  scene.add(camera);
+
+  const hemi = new THREE.HemisphereLight(0xffffff, 0x444444, 0.6);
+  hemi.position.set(0, 1, 0);
+  scene.add(hemi);
+  const dir = new THREE.DirectionalLight(0xffffff, 0.6);
+  dir.position.set(3, 5, 2);
+  scene.add(dir);
+
+  if (THREE.OrbitControls) {
+    controls = new THREE.OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+  }
+
+  clock = new THREE.Clock();
+
+  window.addEventListener('resize', handleResize);
+  animate();
+  notifyReadyOnce();
+
+  const api = {
+    renderer, scene, camera, controls,
+    onReady,
+    getMaterials,
+    setOpacity,
+    setDoubleSide,
+    setUnlit,
+    setWhiteKey,
+    setRoot,
+  };
+
+  app.viewer = api;
   return api;
 }
