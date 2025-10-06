@@ -1,221 +1,125 @@
-/* viewer.js — ESM版 + onceReady 互換API追加 */
-import * as THREE from 'three';
-import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
-let _ready = false;
-const _readyCbs = [];
+// viewer.js — shim patch to provide loadByInput() expected by ui.js
+// Replace your existing viewer.js with this content.
 
-let renderer, scene, camera, controls;
-let clock;
+(function(){
+  const W = (typeof window !== 'undefined') ? window : globalThis;
+  W.app = W.app || {};
+  app.viewer = app.viewer || {};
 
-let canvasEl;
-let materials = [];
-let rootObject3D = null;
+  function log(...args){ try{ console.log('[viewer/shim]', ...args);}catch(e){} }
 
-// ---- Ready APIs ----
-export function onReady(cb) {
-  if (_ready) cb();
-  else _readyCbs.push(cb);
-}
-export function onceReady(cb) {
-  if (_ready) { try { cb(); } catch (e) { console.error(e); } return; }
-  _readyCbs.push(() => { try { cb(); } catch (e) { console.error(e); } });
-}
-function notifyReadyOnce() {
-  if (_ready) return;
-  _ready = true;
-  while (_readyCbs.length) {
-    try { _readyCbs.shift()?.(); } catch (e) { console.error(e); }
-  }
-}
-
-// ---- Utils ----
-function collectUniqueMaterials(root) {
-  const set = new Set();
-  root?.traverse?.((obj) => {
-    if (obj.isMesh && obj.material) {
-      if (Array.isArray(obj.material)) obj.material.forEach(m => set.add(m));
-      else set.add(obj.material);
-    }
-  });
-  materials = Array.from(set);
-}
-
-function applyToTarget(targetIndex, fn) {
-  if (!materials || materials.length === 0) return;
-  if (targetIndex == null || targetIndex === -1) {
-    materials.forEach((m, i) => fn(m, i));
-  } else if (materials[targetIndex]) {
-    fn(materials[targetIndex], targetIndex);
-  }
-}
-
-// ---- Material APIs ----
-export function getMaterials() {
-  return materials.map((m, i) => `${i}: ${m.name || '(unnamed)'}`);
-}
-
-export function setOpacity(value, targetIndex = -1) {
-  const v = Math.max(0, Math.min(1, Number(value)));
-  applyToTarget(targetIndex, (m) => {
-    m.userData.__forceTransparent ??= false;
-    m.transparent = v < 1 || m.userData.__forceTransparent;
-    m.opacity = v;
-    if (m.transparent) {
-      m.depthWrite = false;
-      m.alphaTest = 0.0;
-    } else {
-      m.depthWrite = true;
-    }
-    m.needsUpdate = true;
-  });
-}
-
-export function setDoubleSide(on, targetIndex = -1) {
-  applyToTarget(targetIndex, (m) => {
-    m.side = on ? THREE.DoubleSide : THREE.FrontSide;
-    m.needsUpdate = true;
-  });
-}
-
-export function setUnlit(on, targetIndex = -1) {
-  applyToTarget(targetIndex, (m) => {
-    if (on) {
-      if (!m.userData.__origLights) {
-        m.userData.__origLights = {
-          lights: m.lights === undefined ? true : m.lights,
-          envMap: m.envMap ?? null
-        };
+  // ready helpers
+  if (!app.viewer.readyCbs) app.viewer.readyCbs = [];
+  if (!app.viewer.onceReady) {
+    app.viewer.onceReady = function(cb){
+      if (typeof app.viewer.isReady === 'function' ? app.viewer.isReady() : !!app.viewer._ready){
+        try{ cb(); }catch(e){ console.error(e); }
+      }else{
+        app.viewer.readyCbs.push(cb);
       }
-      m.lights = false;
-      if ('emissiveIntensity' in m) m.emissiveIntensity = 1.0;
-    } else {
-      if (m.userData.__origLights) {
-        m.lights = m.userData.__origLights.lights;
-        if (m.userData.__origLights.envMap !== null) {
-          m.envMap = m.userData.__origLights.envMap;
-        }
-      } else {
-        m.lights = true;
+    };
+  }
+  if (!app.viewer._emitReady) {
+    app.viewer._emitReady = function(){
+      app.viewer._ready = true;
+      const cbs = app.viewer.readyCbs || [];
+      while(cbs.length){ try{ (cbs.shift())(); }catch(e){ console.error(e); } }
+      document.dispatchEvent(new CustomEvent('lmy:viewer-ready'));
+    };
+  }
+
+  // helpers
+  function normalizeDriveIdFromInputFallback(s){
+    if (!s) return null;
+    s = String(s).trim();
+    const m = s.match(/(?:\/d\/|id=)([a-zA-Z0-9_-]{10,})/);
+    if (m) return m[1];
+    if (/^[a-zA-Z0-9_-]{10,}$/.test(s)) return s;
+    return null;
+  }
+  async function fetchDriveArrayBuffer(id){
+    if (typeof W.fetchDriveFileAsArrayBuffer === 'function'){
+      return await W.fetchDriveFileAsArrayBuffer(id);
+    }
+    const url = `https://drive.google.com/uc?export=download&id=${encodeURIComponent(id)}`;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error('fetch failed: ' + res.status);
+    return await res.arrayBuffer();
+  }
+
+  // core arraybuffer path
+  app.viewer.loadArrayBuffer = app.viewer.loadArrayBuffer || (async function(ab){
+    if (typeof app.viewer.loadGLBFromArrayBuffer === 'function'){
+      return await app.viewer.loadGLBFromArrayBuffer(ab);
+    }
+    if (typeof THREE === 'undefined'){
+      throw new Error('THREE is not defined; viewer core must expose loadGLBFromArrayBuffer');
+    }
+    if (!app.viewer._scene || !app.viewer._renderer || !app.viewer._camera){
+      app.viewer._scene = app.viewer._scene || new THREE.Scene();
+      const w = (W.innerWidth||1280), h=(W.innerHeight||720);
+      app.viewer._camera = app.viewer._camera || new THREE.PerspectiveCamera(45, w/h, 0.1, 1000);
+      app.viewer._camera.position.set(0,0,5);
+      const canvas = document.getElementById('stage');
+      app.viewer._renderer = app.viewer._renderer || new THREE.WebGLRenderer({canvas, antialias:true, alpha:true});
+      app.viewer._renderer.setSize(w,h,false);
+      const light = new THREE.DirectionalLight(0xffffff, 1.0);
+      light.position.set(1,1,1); app.viewer._scene.add(light);
+      (function loop(){
+        requestAnimationFrame(loop);
+        app.viewer._renderer.render(app.viewer._scene, app.viewer._camera);
+      })();
+    }
+    let GLTFLoader = (W.THREE && W.THREE.GLTFLoader) ? W.THREE.GLTFLoader : null;
+    if (!GLTFLoader && W.__GLTFLoaderModule) GLTFLoader = W.__GLTFLoaderModule.GLTFLoader;
+    if (!GLTFLoader){
+      try{
+        const mod = await import('/museum3dviewer/lib/GLTFLoader.js');
+        GLTFLoader = mod.GLTFLoader || mod.default;
+      }catch(e){
+        log('failed to import GLTFLoader module', e);
       }
     }
-    m.needsUpdate = true;
+    if (!GLTFLoader) throw new Error('GLTFLoader not available');
+    const loader = new GLTFLoader();
+    const blob = new Blob([ab], {type:'model/gltf-binary'});
+    const url = URL.createObjectURL(blob);
+    await new Promise((resolve, reject)=>{
+      loader.load(url, (gltf)=>{
+        try{
+          const sc = app.viewer._scene;
+          (sc.children.slice() || []).forEach(ch=>{ if (ch.type!=='DirectionalLight' && ch.type!=='AmbientLight') sc.remove(ch); });
+          sc.add(gltf.scene);
+          URL.revokeObjectURL(url);
+          resolve();
+        }catch(err){ reject(err); }
+      }, undefined, reject);
+    });
+    app.viewer._emitReady();
   });
-}
 
-// 白→α（有効/無効, しきい値）
-export function setWhiteKey(enabled, threshold = 0.95, targetIndex = -1) {
-  const t = Math.max(0, Math.min(1, Number(threshold)));
-  applyToTarget(targetIndex, (m) => {
-    if (enabled) {
-      if (!m.userData.__whiteKeyPatched) {
-        m.onBeforeCompile = (shader) => {
-          shader.fragmentShader = shader.fragmentShader.replace(
-            /}\s*$/m,
-            `
-            // --- LociMyu white->alpha ---
-            float lmy_luma = dot(gl_FragColor.rgb, vec3(0.2126, 0.7152, 0.0722));
-            if (lmy_luma > ${t.toFixed(4)}) {
-              gl_FragColor.a *= max(0.0, 1.0 - (lmy_luma - ${t.toFixed(4)}) / max(0.0001, 1.0 - ${t.toFixed(4)}));
-            }
-            if (gl_FragColor.a < 0.01) discard;
-            }
-            `
-          );
-        };
-        m.userData.__whiteKeyPatched = true;
-      }
-      m.transparent = true;
-      m.userData.__forceTransparent = true;
-      m.depthWrite = false;
-      m.needsUpdate = true;
-    } else {
-      m.userData.__forceTransparent = false;
-      if (m.opacity >= 1.0) {
-        m.transparent = false;
-        m.depthWrite = true;
-      }
-      m.needsUpdate = true;
-    }
-  });
-}
-
-// ---- Boot / Viewer ----
-function animate() {
-  requestAnimationFrame(animate);
-  if (!renderer || !scene || !camera) return;
-  controls?.update?.();
-  renderer.render(scene, camera);
-}
-
-function handleResize() {
-  if (!renderer || !camera || !canvasEl) return;
-  const w = canvasEl.clientWidth || window.innerWidth;
-  const h = canvasEl.clientHeight || window.innerHeight;
-  renderer.setSize(w, h, false);
-  if (camera.isPerspectiveCamera) {
-    camera.aspect = w / h;
+  if (typeof app.viewer.loadByInput !== 'function'){
+    app.viewer.loadByInput = async function(input){
+      log('loadByInput', input);
+      const id = (typeof W.normalizeDriveIdFromInput === 'function')
+        ? W.normalizeDriveIdFromInput(input)
+        : normalizeDriveIdFromInputFallback(input);
+      if (!id) throw new Error('empty file id/url');
+      const ab = await fetchDriveArrayBuffer(id);
+      await app.viewer.loadArrayBuffer(ab);
+      return true;
+    };
   }
-  camera.updateProjectionMatrix();
-}
 
-export function setRoot(root) {
-  rootObject3D = root;
-  collectUniqueMaterials(rootObject3D);
-  if (rootObject3D && scene && !scene.children.includes(rootObject3D)) {
-    scene.add(rootObject3D);
+  if (typeof app.viewer.loadFromUrl !== 'function'){
+    app.viewer.loadFromUrl = async function(url){
+      const res = await fetch(url);
+      if (!res.ok) throw new Error('fetch failed: ' + res.status);
+      const ab = await res.arrayBuffer();
+      await app.viewer.loadArrayBuffer(ab);
+    };
   }
-  console.log('[viewer] GLB loaded; unique materials:', materials.length);
-}
 
-export function ensureViewer(app) {
-  if (app.viewer) return app.viewer;
-
-  canvasEl = document.getElementById('stage') || document.querySelector('#stage canvas') || undefined;
-
-  renderer = new THREE.WebGLRenderer({
-    antialias: true,
-    alpha: true,
-    canvas: canvasEl instanceof HTMLCanvasElement ? canvasEl : undefined
-  });
-  const w = canvasEl?.clientWidth || window.innerWidth;
-  const h = canvasEl?.clientHeight || window.innerHeight;
-  renderer.setSize(w, h, false);
-  renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
-
-  scene = new THREE.Scene();
-  camera = new THREE.PerspectiveCamera(45, w / h, 0.1, 5000);
-  camera.position.set(0, 1, 3);
-  scene.add(camera);
-
-  const hemi = new THREE.HemisphereLight(0xffffff, 0x444444, 0.6);
-  hemi.position.set(0, 1, 0);
-  scene.add(hemi);
-  const dir = new THREE.DirectionalLight(0xffffff, 0.6);
-  dir.position.set(3, 5, 2);
-  scene.add(dir);
-
-  controls = new OrbitControls(camera, renderer.domElement);
-  controls.enableDamping = true;
-
-  clock = new THREE.Clock();
-
-  window.addEventListener('resize', handleResize);
-  animate();
-  notifyReadyOnce();
-
-  const api = {
-    renderer, scene, camera, controls,
-    onReady,
-    onceReady,
-    getMaterials,
-    setOpacity,
-    setDoubleSide,
-    setUnlit,
-    setWhiteKey,
-    setRoot,
-  };
-
-  app.viewer = api;
-  return api;
-}
+  log('shim ready');
+})();
