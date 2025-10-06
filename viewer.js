@@ -1,5 +1,6 @@
-// viewer.js — drop-in replacement
-// TDZエラー解消（readyCbs参照順）、描画ループ安定化、Material操作API維持
+/* viewer.js — fix: explicit three.js imports so THREE is defined */
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
 let _ready = false;
 const _readyCbs = [];
@@ -184,10 +185,8 @@ export function ensureViewer(app) {
   dir.position.set(3, 5, 2);
   scene.add(dir);
 
-  if (THREE.OrbitControls) {
-    controls = new THREE.OrbitControls(camera, renderer.domElement);
-    controls.enableDamping = true;
-  }
+  controls = new OrbitControls(camera, renderer.domElement);
+  controls.enableDamping = true;
 
   clock = new THREE.Clock();
 
