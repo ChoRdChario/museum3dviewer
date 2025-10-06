@@ -1,21 +1,20 @@
-import { setupAuth } from './gauth.js';
+// app_boot.js — minimal boot wiring using onceReady + auth button
 import { ensureViewer } from './viewer.js';
-import { setupUI } from './ui.js';
+import { setupAuth } from './gauth.js';
 
 console.log('[boot] ready');
 
-async function boot(){
-  const app = { events: new EventTarget() };
-  // viewer
-  app.viewer = await ensureViewer(app);
-  // auth
-  app.auth = setupAuth(app);
-  // ui
-  setupUI(app);
-  // hide spinner when first frame rendered
-  app.viewer.onceReady(()=>{
-    const sp = document.getElementById('spinner');
-    if(sp) sp.style.display = 'none';
+async function boot() {
+  const app = window.app || (window.app = {});
+
+  // Auth UI & clients
+  await setupAuth(app); // waits gapi init and wires the button safely
+
+  // Viewer
+  const viewer = ensureViewer(app);
+  viewer.onceReady(() => {
+    // any post-ready hooks if needed
   });
 }
-boot();
+
+boot().catch(err => console.error(err));
