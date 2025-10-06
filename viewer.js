@@ -1,10 +1,13 @@
-// viewer.js — LociMyu bootstrap (safe path + events)
-// 2025-10-06 b: use window.THREE first / outputColorSpace
+// viewer.js — LociMyu bootstrap (THREE singleton strict)
+// 2025-10-06
 
 console.log('[viewer] ready');
 
 let THREE = null;
-let THREE_BASE = null;   // examples/jsm/ のベース URL を決定
+let THREE_BASE = null;
+const THREE_CDN = 'https://unpkg.com/three@0.160.1/build/three.module.js';
+const THREE_EX_BASE = 'https://unpkg.com/three@0.160.1/examples/jsm/';
+
 let ctx = {
   host: null,
   renderer: null,
@@ -13,53 +16,44 @@ let ctx = {
   controls: null,
   mixer: null,
   clock: null,
-  current: null,     // 現在のgltf
+  current: null,
   animId: null,
   isRunning: false,
 };
 
-//
 // ────────────────────────────────────────────────────────────────────────────
-// three の読込（window.THREE → 相対 → 相対(1つ上) → CDN）
+// THREE singleton
 // ────────────────────────────────────────────────────────────────────────────
 async function ensureThree() {
-  if (THREE) return THREE;
-
-  // まず既存グローバル（script タグ読み込み等）を優先
-  if (window.THREE) {
-    THREE = window.THREE;
-    THREE_BASE = 'https://unpkg.com/three@0.160.1/examples/jsm/';
-    console.log('[viewer] three via window.THREE (global)');
+  // Reuse a global promise so EVERY importer shares the same instance
+  if (window.__THREE_PROMISE) {
+    const mod = await window.__THREE_PROMISE;
+    THREE = mod; THREE_BASE = THREE_EX_BASE;
     return THREE;
   }
 
-  const candidates = [
-    './lib/three/build/three.module.js',
-    '../lib/three/build/three.module.js',
-    'https://unpkg.com/three@0.160.1/build/three.module.js',
-    'https://cdn.jsdelivr.net/npm/three@0.160.1/build/three.module.js',
-  ];
-
-  for (const url of candidates) {
-    try {
-      const mod = await import(url);
-      THREE = mod;
-      // expose once to prevent multiple instances later
-      if (!window.THREE) window.THREE = THREE;
-      THREE_BASE = url.replace(/build\/three\.module\.js$/, 'examples/jsm/');
-      console.log('[viewer] three ok via', url);
-      return THREE;
-    } catch (e) {
-      console.warn('[viewer] three candidate failed:', url, e?.message || e);
-    }
+  // If global THREE is already there (e.g., another script tag), reuse and normalize
+  if (window.THREE && !window.__THREE_PROMISE) {
+    window.__THREE_PROMISE = Promise.resolve(window.THREE);
+    const mod = await window.__THREE_PROMISE;
+    THREE = mod; THREE_BASE = THREE_EX_BASE;
+    return THREE;
   }
 
-  throw new Error('THREE unavailable');
+  // First caller sets the promise (single import URL only to avoid duplicates)
+  window.__THREE_PROMISE = import(THREE_CDN).then((mod) => {
+    if (!window.THREE) window.THREE = mod;
+    return mod;
+  });
+
+  const mod = await window.__THREE_PROMISE;
+  THREE = mod; THREE_BASE = THREE_EX_BASE;
+  console.log('[viewer] three ok via', THREE_CDN);
+  return THREE;
 }
 
-//
 // ────────────────────────────────────────────────────────────────────────────
-// ステージ（#stage）とレンダラの初期化
+// stage / renderer
 // ────────────────────────────────────────────────────────────────────────────
 function ensureStage() {
   if (ctx.host) return ctx.host;
@@ -75,15 +69,11 @@ async function bootstrapRenderer() {
   if (ctx.renderer) return;
 
   const host = ensureStage();
-
-  const { WebGLRenderer, Scene, PerspectiveCamera, SRGBColorSpace, ACESFilmicToneMapping } = THREE;
+  const { WebGLRenderer, Scene, PerspectiveCamera, AmbientLight, DirectionalLight, Clock, MathUtils } = THREE;
 
   const renderer = new WebGLRenderer({ antialias: true, alpha: true });
-  // Three r160+: outputEncoding → outputColorSpace
-  if ('outputColorSpace' in renderer) {
-    renderer.outputColorSpace = SRGBColorSpace;
-  }
-  renderer.toneMapping = ACESFilmicToneMapping;
+  // modern color space
+  renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
   renderer.setSize(host.clientWidth, host.clientHeight, false);
   host.innerHTML = '';
@@ -92,24 +82,20 @@ async function bootstrapRenderer() {
   const scene = new Scene();
   scene.background = null;
 
-  const camera = new PerspectiveCamera(50, host.clientWidth / host.clientHeight, 0.01, 1000);
+  const camera = new PerspectiveCamera(50, Math.max(host.clientWidth / Math.max(host.clientHeight,1), 0.0001), 0.01, 1000);
   camera.position.set(0, 1.2, 2.4);
 
-  // OrbitControls
-  const { OrbitControls } = await import(`${THREE_BASE}controls/OrbitControls.js`);
+  const { OrbitControls } = await import(`${THREE_EX_BASE}controls/OrbitControls.js`);
   const controls = new OrbitControls(camera, renderer.domElement);
   controls.enableDamping = true;
   controls.target.set(0, 0.6, 0);
 
-  // ライト
-  const { AmbientLight, DirectionalLight } = THREE;
   scene.add(new AmbientLight(0xffffff, 0.7));
   const dir = new DirectionalLight(0xffffff, 0.8);
   dir.position.set(1, 2, 3);
   scene.add(dir);
 
-  // ループ
-  ctx.clock = new THREE.Clock();
+  ctx.clock = new Clock();
   ctx.renderer = renderer;
   ctx.scene = scene;
   ctx.camera = camera;
@@ -138,12 +124,10 @@ async function bootstrapRenderer() {
   }
 }
 
-//
 // ────────────────────────────────────────────────────────────────────────────
-// Drive 読み込み（必ず Google API 経由に統一）
+// Drive helpers
 // ────────────────────────────────────────────────────────────────────────────
 function resolveAccessToken() {
-  // gapi → app.auth 順
   try {
     if (window.gapi?.client?.getToken) {
       const tok = window.gapi.client.getToken();
@@ -156,26 +140,17 @@ function resolveAccessToken() {
       if (t) return t;
     }
   } catch (_) {}
-
   return null;
 }
 
 function normalizeDriveIdFromInput(input) {
   if (!input) return null;
   const s = String(input).trim();
-
-  // 1) そのままIDとみなせる（英数/ _ - ）
   if (/^[a-zA-Z0-9_\-]+$/.test(s)) return s;
-
-  // 2) common patterns
   let m;
-  m = s.match(/[?&]id=([a-zA-Z0-9_\-]+)/);
-  if (m) return m[1];
-  m = s.match(/\/file\/d\/([a-zA-Z0-9_\-]+)\//);
-  if (m) return m[1];
-  m = s.match(/\/d\/([a-zA-Z0-9_\-]+)\//);
-  if (m) return m[1];
-
+  if ((m = s.match(/[?&]id=([a-zA-Z0-9_\-]+)/))) return m[1];
+  if ((m = s.match(/\/file\/d\/([a-zA-Z0-9_\-]+)\//))) return m[1];
+  if ((m = s.match(/\/d\/([a-zA-Z0-9_\-]+)\//))) return m[1];
   return null;
 }
 
@@ -183,58 +158,44 @@ async function fetchDriveArrayBuffer(fileId) {
   const token = resolveAccessToken();
   if (!token) throw new Error('No OAuth token (not signed in)');
   const url = `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`;
-  const res = await fetch(url, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
+  const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
   if (!res.ok) {
-    let txt = '';
-    try { txt = await res.text(); } catch(e) {}
-    throw new Error(`Drive fetch ${res.status}: ${txt.slice(0,200)}`);
+    let txt = ''; try { txt = await res.text(); } catch(e) {}
+    throw new Error(`Drive fetch ${res.status}: ${txt.slice(0, 200)}`);
   }
   return await res.arrayBuffer();
 }
 
-//
 // ────────────────────────────────────────────────────────────────────────────
-// GLB パース＆シーンにアタッチ
+// GLB attach
 // ────────────────────────────────────────────────────────────────────────────
 async function parseGLB(arrayBuffer) {
   await ensureThree();
-  const { GLTFLoader } = await import(`${THREE_BASE}loaders/GLTFLoader.js`);
+  const { GLTFLoader } = await import(`${THREE_EX_BASE}loaders/GLTFLoader.js`);
   const loader = new GLTFLoader();
-
   return await new Promise((resolve, reject) => {
     loader.parse(arrayBuffer, '', (gltf) => resolve(gltf), (err) => reject(err || new Error('GLB parse error')));
   });
 }
 
 function attachToScene(gltf) {
-  // 既存を消去
-  if (ctx.current?.scene) {
-    ctx.scene.remove(ctx.current.scene);
-  }
+  if (ctx.current?.scene) ctx.scene.remove(ctx.current.scene);
   ctx.current = gltf;
-
-  // オブジェクト
   ctx.scene.add(gltf.scene);
 
-  // バウンディングでカメラ調整
   const { Box3, Vector3 } = THREE;
   const box = new Box3().setFromObject(gltf.scene);
-  const size = new Vector3();
-  const center = new Vector3();
-  box.getSize(size);
-  box.getCenter(center);
+  const size = new Vector3(); const center = new Vector3();
+  box.getSize(size); box.getCenter(center);
 
   const radius = Math.max(size.x, size.y, size.z) * 0.6 || 1.0;
   const dist = radius / Math.sin((Math.PI / 180) * ctx.camera.fov * 0.5);
   ctx.controls.target.copy(center);
   ctx.camera.position.copy(new Vector3(center.x, center.y, center.z + dist * 1.2));
   ctx.camera.near = Math.max(radius / 1000, 0.01);
-  ctx.camera.far = Math.max(dist * 10, 1000);
+  ctx.camera.far  = Math.max(dist * 10, 1000);
   ctx.camera.updateProjectionMatrix();
 
-  // materials をユニーク化してイベント送出
   try {
     const mats = new Set();
     gltf.scene.traverse((o) => {
@@ -243,45 +204,26 @@ function attachToScene(gltf) {
         else mats.add(o.material);
       }
     });
-    const list = Array.from(mats).map((m) => ({
-      name: m.name || '(material)',
-      uuid: m.uuid,
-    }));
+    const list = Array.from(mats).map((m) => ({ name: m.name || '(material)', uuid: m.uuid }));
     window.app?.events?.dispatchEvent(new CustomEvent('viewer:materials', { detail: { list } }));
   } catch (e) {
     console.warn('[viewer] mats event failed', e);
   }
 }
 
-//
 // ────────────────────────────────────────────────────────────────────────────
-// 公開 API
+// Public API
 // ────────────────────────────────────────────────────────────────────────────
 async function loadByInput(text) {
   await bootstrapRenderer();
-
   const id = normalizeDriveIdFromInput(text);
   if (!id) throw new Error('empty or invalid file id/url');
-
   const buf = await fetchDriveArrayBuffer(id);
   const gltf = await parseGLB(buf);
   attachToScene(gltf);
-
-  console.log('[viewer] GLB loaded; unique materials:',
-    (function count() {
-      const s = new Set();
-      gltf.scene.traverse((o) => {
-        if (o.isMesh && o.material) {
-          if (Array.isArray(o.material)) o.material.forEach((m) => m && s.add(m));
-          else s.add(o.material);
-        }
-      });
-      return s.size;
-    })()
-  );
+  console.log('[viewer] GLB loaded');
 }
 
-// 将来のマテリアル編集API（ui.js から呼ばれても落ちないNO-OPを保持）
 function setWhiteKey(enabled, threshold01) {
   console.warn('[viewer] setWhiteKey not implemented yet', { enabled, threshold01 });
 }
@@ -290,66 +232,41 @@ function setOpacity(uuid, value01) {
     if (!ctx.current) return;
     const v = THREE.MathUtils.clamp(value01 ?? 1, 0, 1);
     ctx.current.scene.traverse((o) => {
-      if (o.isMesh) {
-        const mats = Array.isArray(o.material) ? o.material : [o.material];
-        mats.forEach((m) => {
-          if (!m || (uuid && m.uuid !== uuid)) return;
-          m.transparent = v < 1;
-          m.opacity = v;
-          m.depthWrite = v >= 1;
-          m.needsUpdate = true;
-        });
-      }
+      if (!o.isMesh) return;
+      const mats = Array.isArray(o.material) ? o.material : [o.material];
+      mats.forEach((m) => {
+        if (!m || (uuid && m.uuid !== uuid)) return;
+        m.transparent = v < 1;
+        m.opacity = v;
+        m.depthWrite = v >= 1;
+        m.needsUpdate = true;
+      });
     });
-  } catch (e) {
-    console.warn('[viewer] setOpacity failed', e);
-  }
+  } catch (e) { console.warn('[viewer] setOpacity failed', e); }
 }
 function setUnlit(uuid, enabled) {
   try {
     if (!ctx.current) return;
     ctx.current.scene.traverse((o) => {
-      if (o.isMesh) {
-        const mats = Array.isArray(o.material) ? o.material : [o.material];
-        mats.forEach((m) => {
-          if (!m || (uuid && m.uuid !== uuid)) return;
-          if (!m.userData.__origOnBeforeCompile) {
-            m.userData.__origOnBeforeCompile = m.onBeforeCompile;
-          }
-          m.onBeforeCompile = enabled
-            ? (shader) => {
-                if (!shader) return;
-                shader.fragmentShader = shader.fragmentShader.replace(
-                  '#include <lights_fragment_begin>',
-                  '/* unlit */'
-                );
-              }
-            : m.userData.__origOnBeforeCompile || (s=>s);
-          m.needsUpdate = true;
-        });
-      }
+      if (!o.isMesh) return;
+      const mats = Array.isArray(o.material) ? o.material : [o.material];
+      mats.forEach((m) => {
+        if (!m || (uuid && m.uuid !== uuid)) return;
+        if (!m.userData.__origOnBeforeCompile) m.userData.__origOnBeforeCompile = m.onBeforeCompile;
+        m.onBeforeCompile = enabled
+          ? (shader) => { if (shader) shader.fragmentShader = shader.fragmentShader.replace('#include <lights_fragment_begin>', '/* unlit */'); }
+          : m.userData.__origOnBeforeCompile || (s=>s);
+        m.needsUpdate = true;
+      });
     });
-  } catch (e) {
-    console.warn('[viewer] setUnlit failed', e);
-  }
+  } catch (e) { console.warn('[viewer] setUnlit failed', e); }
 }
 
-// app へ公開
 const events = new EventTarget();
 window.app = window.app || {};
 window.app.events = window.app.events || events;
-window.app.viewer = {
-  loadByInput,
-  setWhiteKey,
-  setOpacity,
-  setUnlit,
-};
+window.app.viewer = { loadByInput, setWhiteKey, setOpacity, setUnlit };
 
-// 追加：app_boot.js から import される初期化API
-async function ensureViewer() {
-  await bootstrapRenderer();
-  return window.app?.viewer;
-}
+async function ensureViewer() { await bootstrapRenderer(); return window.app?.viewer; }
 
-// export
 export { ensureViewer, loadByInput };
