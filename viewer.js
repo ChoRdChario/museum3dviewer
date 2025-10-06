@@ -1,5 +1,5 @@
 // viewer.js — LociMyu bootstrap (safe path + events)
-// 2025-10-06
+// 2025-10-06 b: use window.THREE first / outputColorSpace
 
 console.log('[viewer] ready');
 
@@ -20,10 +20,18 @@ let ctx = {
 
 //
 // ────────────────────────────────────────────────────────────────────────────
-// three の読込（相対 → 相対(1つ上) → CDN → window.THREE）
+// three の読込（window.THREE → 相対 → 相対(1つ上) → CDN）
 // ────────────────────────────────────────────────────────────────────────────
 async function ensureThree() {
   if (THREE) return THREE;
+
+  // まず既存グローバル（script タグ読み込み等）を優先
+  if (window.THREE) {
+    THREE = window.THREE;
+    THREE_BASE = 'https://unpkg.com/three@0.160.1/examples/jsm/';
+    console.log('[viewer] three via window.THREE (global)');
+    return THREE;
+  }
 
   const candidates = [
     './lib/three/build/three.module.js',
@@ -36,20 +44,14 @@ async function ensureThree() {
     try {
       const mod = await import(url);
       THREE = mod;
+      // expose once to prevent multiple instances later
+      if (!window.THREE) window.THREE = THREE;
       THREE_BASE = url.replace(/build\/three\.module\.js$/, 'examples/jsm/');
       console.log('[viewer] three ok via', url);
       return THREE;
     } catch (e) {
       console.warn('[viewer] three candidate failed:', url, e?.message || e);
     }
-  }
-
-  if (window.THREE) {
-    THREE = window.THREE;
-    // examples は CDN を既定に
-    THREE_BASE = 'https://unpkg.com/three@0.160.1/examples/jsm/';
-    console.log('[viewer] three via window.THREE (global)');
-    return THREE;
   }
 
   throw new Error('THREE unavailable');
@@ -74,10 +76,13 @@ async function bootstrapRenderer() {
 
   const host = ensureStage();
 
-  const { WebGLRenderer, Scene, PerspectiveCamera, sRGBEncoding, ACESFilmicToneMapping } = THREE;
+  const { WebGLRenderer, Scene, PerspectiveCamera, SRGBColorSpace, ACESFilmicToneMapping } = THREE;
 
   const renderer = new WebGLRenderer({ antialias: true, alpha: true });
-  renderer.outputEncoding = sRGBEncoding;
+  // Three r160+: outputEncoding → outputColorSpace
+  if ('outputColorSpace' in renderer) {
+    renderer.outputColorSpace = SRGBColorSpace;
+  }
   renderer.toneMapping = ACESFilmicToneMapping;
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
   renderer.setSize(host.clientWidth, host.clientHeight, false);
