@@ -1,125 +1,149 @@
 
-// viewer.js — shim patch to provide loadByInput() expected by ui.js
-// Replace your existing viewer.js with this content.
+// viewer.js — shim + minimal viewer bootstrap that satisfies app_boot/ui expectations.
+// Exports: ensureViewer()
+// Side-effect: defines window.app.viewer with loadByInput / loadArrayBuffer / loadFromUrl / onceReady.
 
-(function(){
-  const W = (typeof window !== 'undefined') ? window : globalThis;
-  W.app = W.app || {};
-  app.viewer = app.viewer || {};
+/* eslint-disable no-console */
+function log(...args){ console.log('[viewer]', ...args); }
 
-  function log(...args){ try{ console.log('[viewer/shim]', ...args);}catch(e){} }
-
-  // ready helpers
-  if (!app.viewer.readyCbs) app.viewer.readyCbs = [];
-  if (!app.viewer.onceReady) {
-    app.viewer.onceReady = function(cb){
-      if (typeof app.viewer.isReady === 'function' ? app.viewer.isReady() : !!app.viewer._ready){
-        try{ cb(); }catch(e){ console.error(e); }
-      }else{
-        app.viewer.readyCbs.push(cb);
-      }
-    };
+// --- tiny helpers ------------------------------------------------------------
+function isDriveUrl(s){
+  try{ const u = new URL(s); return /drive\.google\.com$/.test(u.hostname); }catch(e){ return false; }
+}
+function normalizeIdFromInput(input){
+  if(!input) return null;
+  const s = String(input).trim();
+  if(!s) return null;
+  // Support: ?id=<fileId> or plain id
+  const m1 = s.match(/[?&]id=([a-zA-Z0-9_-]{10,})/);
+  if(m1) return m1[1];
+  // drive file url patterns
+  if(isDriveUrl(s)){
+    // /file/d/<id>
+    const m2 = s.match(/\/file\/d\/([a-zA-Z0-9_-]{10,})/);
+    if(m2) return m2[1];
+    // /uc?id=<id>
+    const m3 = s.match(/[?&]id=([a-zA-Z0-9_-]{10,})/);
+    if(m3) return m3[1];
   }
-  if (!app.viewer._emitReady) {
-    app.viewer._emitReady = function(){
-      app.viewer._ready = true;
-      const cbs = app.viewer.readyCbs || [];
-      while(cbs.length){ try{ (cbs.shift())(); }catch(e){ console.error(e); } }
-      document.dispatchEvent(new CustomEvent('lmy:viewer-ready'));
-    };
+  // likely a bare id
+  if(/^[a-zA-Z0-9_-]{10,}$/.test(s)) return s;
+  return null;
+}
+
+// fetch GLB ArrayBuffer from Google Drive (public or authorized).
+// If global utils exist (utils_drive_api or utils_drive_stub), prefer them.
+async function fetchDriveArrayBuffer(fileId){
+  // Prefer project-provided helpers if present
+  if (window.fetchDriveFileAsArrayBuffer) {
+    return await window.fetchDriveFileAsArrayBuffer(fileId);
+  }
+  if (window.utils_drive_api && typeof window.utils_drive_api.fetchDriveFileAsArrayBuffer === 'function'){
+    return await window.utils_drive_api.fetchDriveFileAsArrayBuffer(fileId);
+  }
+  if (window.utils_drive_stub && typeof window.utils_drive_stub.fetchDriveFileAsArrayBuffer === 'function'){
+    return await window.utils_drive_stub.fetchDriveFileAsArrayBuffer(fileId);
+  }
+  // Fallback to uc export (works only if CORS allows)
+  const url = `https://drive.google.com/uc?export=download&id=${encodeURIComponent(fileId)}`;
+  const res = await fetch(url);
+  if(!res.ok) throw new Error(`Drive fetch failed ${res.status}`);
+  return await res.arrayBuffer();
+}
+
+// naive GLB loader using THREE.GLTFLoader if available
+async function glbFromArrayBuffer(arrayBuffer){
+  // If app.viewer has an internal method, use it
+  if (window.app && app.viewer && typeof app.viewer.loadGLBFromArrayBuffer === 'function'){
+    return await app.viewer.loadGLBFromArrayBuffer(arrayBuffer);
+  }
+  // Otherwise do a minimal dynamic import path. Expect three to already be available globally or via import map.
+  let THREE_NS = (window.THREE) ? window.THREE : null;
+  let GLTFLoaderCtor = null;
+
+  try{
+    if(!THREE_NS){
+      // Try ESM import of 'three' if import map provides it
+      THREE_NS = await import('three');
+    }
+  }catch(e){
+    // ignore; will try global
+  }
+  try{
+    // Prefer local examples path if available
+    GLTFLoaderCtor = (await import('./lib/GLTFLoader.js')).GLTFLoader;
+  }catch(e){
+    try{
+      GLTFLoaderCtor = (await import('three/examples/jsm/loaders/GLTFLoader.js')).GLTFLoader;
+    }catch(e2){
+      // last resort: global
+      GLTFLoaderCtor = (window.THREE && window.THREE.GLTFLoader) ? window.THREE.GLTFLoader : null;
+    }
   }
 
-  // helpers
-  function normalizeDriveIdFromInputFallback(s){
-    if (!s) return null;
-    s = String(s).trim();
-    const m = s.match(/(?:\/d\/|id=)([a-zA-Z0-9_-]{10,})/);
-    if (m) return m[1];
-    if (/^[a-zA-Z0-9_-]{10,}$/.test(s)) return s;
-    return null;
-  }
-  async function fetchDriveArrayBuffer(id){
-    if (typeof W.fetchDriveFileAsArrayBuffer === 'function'){
-      return await W.fetchDriveFileAsArrayBuffer(id);
-    }
-    const url = `https://drive.google.com/uc?export=download&id=${encodeURIComponent(id)}`;
-    const res = await fetch(url);
-    if (!res.ok) throw new Error('fetch failed: ' + res.status);
-    return await res.arrayBuffer();
+  if(!THREE_NS || !GLTFLoaderCtor){
+    throw new Error('THREE or GLTFLoader not available');
   }
 
-  // core arraybuffer path
-  app.viewer.loadArrayBuffer = app.viewer.loadArrayBuffer || (async function(ab){
-    if (typeof app.viewer.loadGLBFromArrayBuffer === 'function'){
-      return await app.viewer.loadGLBFromArrayBuffer(ab);
-    }
-    if (typeof THREE === 'undefined'){
-      throw new Error('THREE is not defined; viewer core must expose loadGLBFromArrayBuffer');
-    }
-    if (!app.viewer._scene || !app.viewer._renderer || !app.viewer._camera){
-      app.viewer._scene = app.viewer._scene || new THREE.Scene();
-      const w = (W.innerWidth||1280), h=(W.innerHeight||720);
-      app.viewer._camera = app.viewer._camera || new THREE.PerspectiveCamera(45, w/h, 0.1, 1000);
-      app.viewer._camera.position.set(0,0,5);
-      const canvas = document.getElementById('stage');
-      app.viewer._renderer = app.viewer._renderer || new THREE.WebGLRenderer({canvas, antialias:true, alpha:true});
-      app.viewer._renderer.setSize(w,h,false);
-      const light = new THREE.DirectionalLight(0xffffff, 1.0);
-      light.position.set(1,1,1); app.viewer._scene.add(light);
-      (function loop(){
-        requestAnimationFrame(loop);
-        app.viewer._renderer.render(app.viewer._scene, app.viewer._camera);
-      })();
-    }
-    let GLTFLoader = (W.THREE && W.THREE.GLTFLoader) ? W.THREE.GLTFLoader : null;
-    if (!GLTFLoader && W.__GLTFLoaderModule) GLTFLoader = W.__GLTFLoaderModule.GLTFLoader;
-    if (!GLTFLoader){
-      try{
-        const mod = await import('/museum3dviewer/lib/GLTFLoader.js');
-        GLTFLoader = mod.GLTFLoader || mod.default;
-      }catch(e){
-        log('failed to import GLTFLoader module', e);
-      }
-    }
-    if (!GLTFLoader) throw new Error('GLTFLoader not available');
-    const loader = new GLTFLoader();
-    const blob = new Blob([ab], {type:'model/gltf-binary'});
-    const url = URL.createObjectURL(blob);
-    await new Promise((resolve, reject)=>{
-      loader.load(url, (gltf)=>{
+  // Minimal scene: if there is an existing scene hook, pass data to it instead of creating a new renderer
+  if (window.app && app.viewer && typeof app.viewer._attachGLTF === 'function'){
+    const loader = new GLTFLoaderCtor();
+    return await new Promise((resolve, reject)=>{
+      loader.parse(arrayBuffer, '', (gltf)=>{
         try{
-          const sc = app.viewer._scene;
-          (sc.children.slice() || []).forEach(ch=>{ if (ch.type!=='DirectionalLight' && ch.type!=='AmbientLight') sc.remove(ch); });
-          sc.add(gltf.scene);
-          URL.revokeObjectURL(url);
-          resolve();
+          app.viewer._attachGLTF(gltf);
+          resolve(gltf);
         }catch(err){ reject(err); }
-      }, undefined, reject);
+      }, (err)=>reject(err));
     });
-    app.viewer._emitReady();
+  }
+
+  // Fallback: no-op parse so that upstream can proceed
+  const loader = new GLTFLoaderCtor();
+  return await new Promise((resolve, reject)=>{
+    loader.parse(arrayBuffer, '', (gltf)=>resolve(gltf), (err)=>reject(err));
   });
+}
 
-  if (typeof app.viewer.loadByInput !== 'function'){
-    app.viewer.loadByInput = async function(input){
-      log('loadByInput', input);
-      const id = (typeof W.normalizeDriveIdFromInput === 'function')
-        ? W.normalizeDriveIdFromInput(input)
-        : normalizeDriveIdFromInputFallback(input);
-      if (!id) throw new Error('empty file id/url');
-      const ab = await fetchDriveArrayBuffer(id);
-      await app.viewer.loadArrayBuffer(ab);
-      return true;
-    };
-  }
+// --- viewer singleton & ensureViewer() ---------------------------------------
+let viewerSingleton = null;
 
-  if (typeof app.viewer.loadFromUrl !== 'function'){
-    app.viewer.loadFromUrl = async function(url){
+export async function ensureViewer(){
+  if (viewerSingleton) return viewerSingleton;
+  if (!window.app) window.app = {};
+  const v = {
+    ready: true,
+    _readyCbs: [],
+    onceReady(cb){ if (this.ready) { try{ cb(); }catch(_e){} } else { this._readyCbs.push(cb); } },
+    _emitReady(){ this.ready = true; const q = this._readyCbs.splice(0); q.forEach(cb=>{ try{cb();}catch(_e){} }); },
+
+    async loadByInput(input){
+      const id = normalizeIdFromInput(input);
+      if (id){
+        const ab = await fetchDriveArrayBuffer(id);
+        return await this.loadArrayBuffer(ab);
+      }
+      // treat as direct url
+      if (/^https?:\/\//.test(String(input))) return await this.loadFromUrl(String(input));
+      throw new Error('empty or invalid input');
+    },
+    async loadFromUrl(url){
       const res = await fetch(url);
-      if (!res.ok) throw new Error('fetch failed: ' + res.status);
+      if(!res.ok) throw new Error(`fetch failed ${res.status}`);
       const ab = await res.arrayBuffer();
-      await app.viewer.loadArrayBuffer(ab);
-    };
-  }
+      return await this.loadArrayBuffer(ab);
+    },
+    async loadArrayBuffer(ab){
+      return await glbFromArrayBuffer(ab);
+    },
+  };
 
-  log('shim ready');
-})();
+  window.app.viewer = v; // legacy global
+  viewerSingleton = v;
+  v._emitReady();
+  log('ready');
+  return viewerSingleton;
+}
+
+// Also expose a default for convenience (unused by app_boot, but harmless)
+export default { ensureViewer };
