@@ -1,4 +1,6 @@
-// gauth.js — robust wiring + diagnostics (no new files; minimal invasive)
+// gauth.js — self-loading GIS/gapi + robust popup wiring (no新規ファイル).
+// このファイルだけで gsi/client と api.js のロードまで面倒を見ます。
+
 const CONFIG = {
   CLIENT_ID: '595200751510-ncahnf7edci6b9925becn5to49r6cguv.apps.googleusercontent.com',
   API_KEY: 'AIzaSyCUnTCr5yWUWPdEXST9bKP1LpgawU5rIbI',
@@ -11,6 +13,8 @@ const CONFIG = {
     'https://www.googleapis.com/discovery/v1/apis/drive/v3/rest',
     'https://sheets.googleapis.com/$discovery/rest?version=v4',
   ],
+  GIS_SRC: 'https://accounts.google.com/gsi/client',
+  GAPI_SRC: 'https://apis.google.com/js/api.js',
 };
 
 let tokenClient = null;
@@ -18,38 +22,22 @@ let accessToken = null;
 let gapiInited = false;
 let gisReady = false;
 
-function qsAllButtons() {
-  // 探索範囲を広げる（ID/クラス/データ属性）
-  const sel = [
-    '#auth-btn',
-    '[data-auth-btn]',
-    '[data-role="auth-btn"]',
-    '.auth-btn',
-    '#signin', '.signin',
-    'button[name="signin"]',
-    'button[data-auth]'
-  ].join(',');
-  const list = Array.from(document.querySelectorAll(sel)).filter(el => el instanceof HTMLButtonElement);
-  return list;
-}
-function getChip() {
-  return document.getElementById('auth-chip') || document.querySelector('.auth-chip,[data-auth-chip]');
-}
-
-function refreshUI(signed) {
-  const chip = getChip();
-  const btns = qsAllButtons();
-  if (chip) {
-    chip.className = signed ? 'chip signed' : 'chip';
-    chip.textContent = signed ? 'Signed in' : 'Signed out';
-  }
-  btns.forEach(btn => {
-    btn.disabled = false;
-    btn.textContent = signed ? 'Sign out' : (btn.dataset.labelSignin || 'Sign in');
+function ensureScript(src, attrs = {}) {
+  return new Promise((resolve, reject) => {
+    // 既に読み込み済みなら即resolve
+    if ([...document.scripts].some(s => s.src === src)) return resolve();
+    const s = document.createElement('script');
+    s.src = src;
+    s.async = true;
+    s.defer = true;
+    Object.entries(attrs).forEach(([k,v]) => s.setAttribute(k, v));
+    s.onload = () => resolve();
+    s.onerror = (e) => reject(new Error('script load failed: ' + src));
+    document.head.appendChild(s);
   });
 }
 
-function waitForGapi(timeoutMs=10000) {
+function waitForGapi(timeoutMs=12000) {
   return new Promise((resolve, reject) => {
     const t0 = performance.now();
     const tick = () => {
@@ -60,7 +48,7 @@ function waitForGapi(timeoutMs=10000) {
     tick();
   });
 }
-function waitForGIS(timeoutMs=10000) {
+function waitForGIS(timeoutMs=12000) {
   return new Promise((resolve, reject) => {
     const t0 = performance.now();
     const tick = () => {
@@ -94,6 +82,35 @@ async function initGIS() {
   console.log('[auth] GIS ready');
 }
 
+function authButtons() {
+  const sel = [
+    '#auth-btn',
+    '[data-auth-btn]',
+    '[data-role="auth-btn"]',
+    '.auth-btn',
+    '#signin', '.signin',
+    'button[name="signin"]',
+    'button[data-auth]'
+  ].join(',');
+  return Array.from(document.querySelectorAll(sel)).filter(el => el instanceof HTMLButtonElement);
+}
+function authChip() {
+  return document.getElementById('auth-chip') || document.querySelector('.auth-chip,[data-auth-chip]');
+}
+
+function refreshUI(signed) {
+  const chip = authChip();
+  const btns = authButtons();
+  if (chip) {
+    chip.className = signed ? 'chip signed' : 'chip';
+    chip.textContent = signed ? 'Signed in' : 'Signed out';
+  }
+  btns.forEach(btn => {
+    btn.disabled = false;
+    btn.textContent = signed ? 'Sign out' : (btn.dataset.labelSignin || 'Sign in');
+  });
+}
+
 async function verifyTokenWorks() {
   const resp = await gapi.client.drive.about.get({ fields: 'user(emailAddress,displayName)' });
   return resp?.result?.user;
@@ -109,9 +126,8 @@ async function doSignOut() {
   console.log('[auth] signed out');
 }
 
-// クリックにワイヤリング
 function wireButtons() {
-  const btns = qsAllButtons();
+  const btns = authButtons();
   if (!btns.length) {
     console.warn('[auth] no auth button found — add id="auth-btn" or data-auth-btn to a <button>.');
     return;
@@ -120,7 +136,7 @@ function wireButtons() {
     const clone = btn.cloneNode(true);
     btn.replaceWith(clone);
   });
-  const fresh = qsAllButtons();
+  const fresh = authButtons();
   fresh.forEach(btn => {
     btn.addEventListener('click', () => {
       console.log('[auth] button click');
@@ -170,27 +186,44 @@ function wireButtons() {
 export async function setupAuth(app) {
   refreshUI(false);
 
+  // 1) 必要スクリプトが無ければ自力で挿入
   try {
-    await waitForGapi();
-    console.log('[auth] gapi script detected');
-  } catch (e) {
-    console.error('[auth] gapi load timeout', e);
+    await ensureScript(CONFIG.GIS_SRC);
+    console.log('[auth] GIS script tag ok');
+  } catch(e) {
+    console.error('[auth] failed to insert GIS script', e);
   }
+  try {
+    await ensureScript(CONFIG.GAPI_SRC);
+    console.log('[auth] gapi script tag ok');
+  } catch(e) {
+    console.error('[auth] failed to insert gapi script', e);
+  }
+
+  // 2) 読み込み完了を待つ
   try {
     await waitForGIS();
     console.log('[auth] GIS script detected');
   } catch (e) {
     console.error('[auth] GIS load timeout', e);
   }
+  try {
+    await waitForGapi();
+    console.log('[auth] gapi script detected');
+  } catch (e) {
+    console.error('[auth] gapi load timeout', e);
+  }
 
+  // 3) クライアント初期化
   await initGapiClient();
   await initGIS();
 
+  // 4) ボタン配線
   wireButtons();
 
+  // 5) appへ公開
   app.auth = {
     isSignedIn: () => !!accessToken,
     getAccessToken: () => accessToken,
-    _debug: () => ({ accessToken, gapiInited, gisReady })
   };
 }
