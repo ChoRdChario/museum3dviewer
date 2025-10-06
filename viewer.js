@@ -1,272 +1,449 @@
-// viewer.js — LociMyu bootstrap (THREE singleton strict)
-// 2025-10-06
+// viewer.js — compat + singleton three loader + GLB + material/caption utilities
+// Logs
+console.log("[viewer] ready");
 
-console.log('[viewer] ready');
+// ------------------------------
+// THREE loader (singleton)
+// ------------------------------
+const THREE_VERSION = "0.160.1";
+const THREE_CDN = `https://unpkg.com/three@${THREE_VERSION}/build/three.module.js`;
+const EXAMPLES_BASE = `https://unpkg.com/three@${THREE_VERSION}/examples/jsm`;
 
-let THREE = null;
-let THREE_BASE = null;
-const THREE_CDN = 'https://unpkg.com/three@0.160.1/build/three.module.js';
-const THREE_EX_BASE = 'https://unpkg.com/three@0.160.1/examples/jsm/';
-
-let ctx = {
-  host: null,
-  renderer: null,
-  scene: null,
-  camera: null,
-  controls: null,
-  mixer: null,
-  clock: null,
-  current: null,
-  animId: null,
-  isRunning: false,
-};
-
-// ────────────────────────────────────────────────────────────────────────────
-// THREE singleton
-// ────────────────────────────────────────────────────────────────────────────
-async function ensureThree() {
-  // Reuse a global promise so EVERY importer shares the same instance
-  if (window.__THREE_PROMISE) {
-    const mod = await window.__THREE_PROMISE;
-    THREE = mod; THREE_BASE = THREE_EX_BASE;
-    return THREE;
-  }
-
-  // If global THREE is already there (e.g., another script tag), reuse and normalize
-  if (window.THREE && !window.__THREE_PROMISE) {
-    window.__THREE_PROMISE = Promise.resolve(window.THREE);
-    const mod = await window.__THREE_PROMISE;
-    THREE = mod; THREE_BASE = THREE_EX_BASE;
-    return THREE;
-  }
-
-  // First caller sets the promise (single import URL only to avoid duplicates)
-  window.__THREE_PROMISE = import(THREE_CDN).then((mod) => {
-    if (!window.THREE) window.THREE = mod;
-    return mod;
-  });
-
-  const mod = await window.__THREE_PROMISE;
-  THREE = mod; THREE_BASE = THREE_EX_BASE;
-  console.log('[viewer] three ok via', THREE_CDN);
-  return THREE;
+function importAttempt(url) {
+  return import(url);
 }
 
-// ────────────────────────────────────────────────────────────────────────────
-// stage / renderer
-// ────────────────────────────────────────────────────────────────────────────
-function ensureStage() {
-  if (ctx.host) return ctx.host;
-  const host = document.getElementById('stage');
-  if (!host) throw new Error('No #stage element');
-  host.style.position = 'relative';
-  ctx.host = host;
-  return host;
+/** Ensure THREE (single instance). Returns { THREE } */
+async function ensureThree() {
+  if (!window.__THREE_PROMISE) {
+    // try local first, then fallback to CDN
+    window.__THREE_PROMISE = (async () => {
+      const candidates = [
+        "./lib/three/build/three.module.js",
+        "../lib/three/build/three.module.js",
+        THREE_CDN,
+      ];
+      let mod = null;
+      for (const url of candidates) {
+        try {
+          mod = await importAttempt(url);
+          console.log("[viewer] three ok via", url);
+          break;
+        } catch (err) {
+          console.log("[viewer] three candidate failed:", url, err?.message || err);
+        }
+      }
+      if (!mod) throw new Error("THREE unavailable");
+      const THREE = mod.default ? mod.default : mod;
+      // expose to window (some older code might rely on global)
+      window.THREE = window.THREE || THREE;
+      return { THREE };
+    })();
+  }
+  return window.__THREE_PROMISE;
+}
+
+/** Load examples module with the same version */
+async function ensureExamples(modulePath /* e.g. '/loaders/GLTFLoader.js' */) {
+  // Always pair with the singleton THREE above
+  const url = `${EXAMPLES_BASE}${modulePath}`;
+  return import(url);
+}
+
+// ------------------------------
+// Renderer/Scene bootstrap
+// ------------------------------
+let renderer, scene, camera, controls;
+let clock;
+let canvasEl;
+let mixers = [];
+
+// materials / meshes bookkeeping for per-material ops
+const materialCache = new Map(); // key: material.uuid -> { originalLitMat: THREE.Material|null, isUnlit:boolean }
+let activeMaterialIndex = null; // selected index if UI provides
+
+// caption layer
+let captionDiv = null;
+
+function ensureCaptionLayer() {
+  if (!captionDiv) {
+    captionDiv = document.getElementById("viewer-caption");
+    if (!captionDiv) {
+      captionDiv = document.createElement("div");
+      captionDiv.id = "viewer-caption";
+      Object.assign(captionDiv.style, {
+        position: "absolute",
+        left: "0",
+        bottom: "0",
+        right: "0",
+        padding: "8px 12px",
+        fontFamily: "system-ui, sans-serif",
+        fontSize: "14px",
+        color: "#fff",
+        background: "rgba(0,0,0,0.4)",
+        pointerEvents: "none",
+        display: "none",
+      });
+      // try to append into a container that holds the canvas
+      const host = document.getElementById("viewer-host") || document.body;
+      host.appendChild(captionDiv);
+    }
+  }
+  return captionDiv;
+}
+
+// Utility: get all unique materials from the scene in stable order
+function collectMaterials(root) {
+  const mats = [];
+  const set = new Set();
+  root.traverse((obj) => {
+    if (obj.isMesh && obj.material) {
+      const arr = Array.isArray(obj.material) ? obj.material : [obj.material];
+      for (const m of arr) {
+        if (m && !set.has(m.uuid)) {
+          set.add(m.uuid);
+          mats.push(m);
+        }
+      }
+    }
+  });
+  return mats;
 }
 
 async function bootstrapRenderer() {
-  await ensureThree();
-  if (ctx.renderer) return;
-
-  const host = ensureStage();
-  const { WebGLRenderer, Scene, PerspectiveCamera, AmbientLight, DirectionalLight, Clock, MathUtils } = THREE;
-
-  const renderer = new WebGLRenderer({ antialias: true, alpha: true });
-  // modern color space
-  renderer.outputColorSpace = THREE.SRGBColorSpace;
+  const { THREE } = await ensureThree();
+  // renderer
+  canvasEl = document.querySelector("canvas#viewer") || document.querySelector("canvas");
+  if (!canvasEl) {
+    // auto-inject canvas
+    canvasEl = document.createElement("canvas");
+    canvasEl.id = "viewer";
+    const host = document.getElementById("viewer-host") || document.body;
+    host.appendChild(canvasEl);
+  }
+  renderer = new THREE.WebGLRenderer({ canvas: canvasEl, antialias: true, alpha: true });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
-  renderer.setSize(host.clientWidth, host.clientHeight, false);
-  host.innerHTML = '';
-  host.appendChild(renderer.domElement);
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.outputColorSpace = THREE.SRGBColorSpace;
 
-  const scene = new Scene();
+  scene = new THREE.Scene();
   scene.background = null;
 
-  const camera = new PerspectiveCamera(50, Math.max(host.clientWidth / Math.max(host.clientHeight,1), 0.0001), 0.01, 1000);
-  camera.position.set(0, 1.2, 2.4);
+  camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 5000);
+  camera.position.set(2.5, 1.6, 3.5);
 
-  const { OrbitControls } = await import(`${THREE_EX_BASE}controls/OrbitControls.js`);
-  const controls = new OrbitControls(camera, renderer.domElement);
+  const { OrbitControls } = await ensureExamples("/controls/OrbitControls.js");
+  controls = new OrbitControls(camera, renderer.domElement);
   controls.enableDamping = true;
-  controls.target.set(0, 0.6, 0);
 
-  scene.add(new AmbientLight(0xffffff, 0.7));
-  const dir = new DirectionalLight(0xffffff, 0.8);
-  dir.position.set(1, 2, 3);
+  const hemi = new THREE.HemisphereLight(0xffffff, 0x444444, 1.0);
+  hemi.position.set(0, 1, 0);
+  scene.add(hemi);
+
+  const dir = new THREE.DirectionalLight(0xffffff, 1.2);
+  dir.position.set(3, 5, 2);
+  dir.castShadow = false;
   scene.add(dir);
 
-  ctx.clock = new Clock();
-  ctx.renderer = renderer;
-  ctx.scene = scene;
-  ctx.camera = camera;
-  ctx.controls = controls;
+  clock = new THREE.Clock();
 
-  const onResize = () => {
-    const w = host.clientWidth || host.offsetWidth || window.innerWidth;
-    const h = host.clientHeight || host.offsetHeight || window.innerHeight;
-    renderer.setSize(w, h, false);
-    camera.aspect = Math.max(w / Math.max(h, 1), 0.0001);
-    camera.updateProjectionMatrix();
-  };
-  window.addEventListener('resize', onResize);
-  onResize();
-
-  const animate = () => {
-    ctx.animId = requestAnimationFrame(animate);
-    const dt = ctx.clock.getDelta();
-    if (ctx.mixer) ctx.mixer.update(dt);
-    ctx.controls.update();
-    renderer.render(ctx.scene, ctx.camera);
-  };
-  if (!ctx.isRunning) {
-    ctx.isRunning = true;
-    animate();
-  }
+  window.addEventListener("resize", onWindowResize);
+  animate();
 }
 
-// ────────────────────────────────────────────────────────────────────────────
-// Drive helpers
-// ────────────────────────────────────────────────────────────────────────────
-function resolveAccessToken() {
-  try {
-    if (window.gapi?.client?.getToken) {
-      const tok = window.gapi.client.getToken();
-      if (tok?.access_token) return tok.access_token;
-    }
-  } catch (_) {}
-  try {
-    if (window.app?.auth?.getAccessToken) {
-      const t = window.app.auth.getAccessToken();
-      if (t) return t;
-    }
-  } catch (_) {}
-  return null;
+function onWindowResize() {
+  if (!renderer || !camera) return;
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
 }
 
-function normalizeDriveIdFromInput(input) {
-  if (!input) return null;
-  const s = String(input).trim();
-  if (/^[a-zA-Z0-9_\-]+$/.test(s)) return s;
-  let m;
-  if ((m = s.match(/[?&]id=([a-zA-Z0-9_\-]+)/))) return m[1];
-  if ((m = s.match(/\/file\/d\/([a-zA-Z0-9_\-]+)\//))) return m[1];
-  if ((m = s.match(/\/d\/([a-zA-Z0-9_\-]+)\//))) return m[1];
-  return null;
+function animate() {
+  requestAnimationFrame(animate);
+  const dt = clock ? clock.getDelta() : 0.016;
+  for (const m of mixers) m.update(dt);
+  if (controls) controls.update();
+  if (renderer && scene && camera) renderer.render(scene, camera);
 }
 
-async function fetchDriveArrayBuffer(fileId) {
-  const token = resolveAccessToken();
-  if (!token) throw new Error('No OAuth token (not signed in)');
-  const url = `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`;
-  const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
-  if (!res.ok) {
-    let txt = ''; try { txt = await res.text(); } catch(e) {}
-    throw new Error(`Drive fetch ${res.status}: ${txt.slice(0, 200)}`);
-  }
+// ------------------------------
+// GLB loading (via Drive or URL)
+// ------------------------------
+async function fetchDriveArrayBuffer(fileId, oauthToken) {
+  if (!oauthToken) throw new Error("No OAuth token (not signed in)");
+  const url = `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?alt=media`;
+  const res = await fetch(url, {
+    headers: { Authorization: `Bearer ${oauthToken}` },
+  });
+  if (!res.ok) throw new Error(`Drive fetch failed: ${res.status}`);
   return await res.arrayBuffer();
 }
 
-// ────────────────────────────────────────────────────────────────────────────
-// GLB attach
-// ────────────────────────────────────────────────────────────────────────────
 async function parseGLB(arrayBuffer) {
-  await ensureThree();
-  const { GLTFLoader } = await import(`${THREE_EX_BASE}loaders/GLTFLoader.js`);
+  const { THREE } = await ensureThree();
+  const { GLTFLoader } = await ensureExamples("/loaders/GLTFLoader.js");
   const loader = new GLTFLoader();
+  // use KTX2/DRACO only if available in the same CDN (skip to keep small)
   return await new Promise((resolve, reject) => {
-    loader.parse(arrayBuffer, '', (gltf) => resolve(gltf), (err) => reject(err || new Error('GLB parse error')));
+    loader.parse(arrayBuffer, "", (gltf) => resolve(gltf), (err) => reject(err));
   });
 }
 
-function attachToScene(gltf) {
-  if (ctx.current?.scene) ctx.scene.remove(ctx.current.scene);
-  ctx.current = gltf;
-  ctx.scene.add(gltf.scene);
+async function loadByInput(input) {
+  // input could be:
+  // - fileId string for Drive
+  // - { driveId, token } object
+  // - direct URL string (CORS-enabled)
+  let arrayBuffer = null;
+  if (!input) throw new Error("No input");
+  if (typeof input === "object" && input.driveId) {
+    arrayBuffer = await fetchDriveArrayBuffer(input.driveId, input.token);
+  } else if (typeof input === "string" && input.startsWith("drive:")) {
+    const [_, id, token] = input.split(":"); // "drive:<id>:<token>"
+    arrayBuffer = await fetchDriveArrayBuffer(id, token);
+  } else if (typeof input === "string") {
+    const res = await fetch(input);
+    if (!res.ok) throw new Error(`URL fetch failed: ${res.status}`);
+    arrayBuffer = await res.arrayBuffer();
+  } else {
+    throw new Error("Unsupported input");
+  }
 
-  const { Box3, Vector3 } = THREE;
-  const box = new Box3().setFromObject(gltf.scene);
-  const size = new Vector3(); const center = new Vector3();
-  box.getSize(size); box.getCenter(center);
+  const gltf = await parseGLB(arrayBuffer);
+  mountGLTF(gltf);
+  console.log("[viewer] GLB loaded");
+  return gltf;
+}
 
-  const radius = Math.max(size.x, size.y, size.z) * 0.6 || 1.0;
-  const dist = radius / Math.sin((Math.PI / 180) * ctx.camera.fov * 0.5);
-  ctx.controls.target.copy(center);
-  ctx.camera.position.copy(new Vector3(center.x, center.y, center.z + dist * 1.2));
-  ctx.camera.near = Math.max(radius / 1000, 0.01);
-  ctx.camera.far  = Math.max(dist * 10, 1000);
-  ctx.camera.updateProjectionMatrix();
+function clearScene() {
+  if (!scene) return;
+  // dispose previous
+  while (scene.children.length) scene.remove(scene.children[0]);
+  mixers.length = 0;
+}
 
-  try {
-    const mats = new Set();
-    gltf.scene.traverse((o) => {
-      if (o.isMesh && o.material) {
-        if (Array.isArray(o.material)) o.material.forEach((m) => m && mats.add(m));
-        else mats.add(o.material);
-      }
-    });
-    const list = Array.from(mats).map((m) => ({ name: m.name || '(material)', uuid: m.uuid }));
-    window.app?.events?.dispatchEvent(new CustomEvent('viewer:materials', { detail: { list } }));
-  } catch (e) {
-    console.warn('[viewer] mats event failed', e);
+function mountGLTF(gltf) {
+  const { THREE } = window;
+  clearScene();
+  // lights again (removed by clear)
+  const hemi = new THREE.HemisphereLight(0xffffff, 0x444444, 1.0);
+  hemi.position.set(0, 1, 0);
+  scene.add(hemi);
+  const dir = new THREE.DirectionalLight(0xffffff, 1.2);
+  dir.position.set(3, 5, 2);
+  scene.add(dir);
+
+  const root = gltf.scene || gltf.scenes?.[0];
+  scene.add(root);
+
+  // animations
+  if (gltf.animations && gltf.animations.length) {
+    const mixer = new THREE.AnimationMixer(root);
+    mixers.push(mixer);
+    for (const clip of gltf.animations) {
+      const action = mixer.clipAction(clip);
+      action.play();
+    }
+  }
+
+  // reset material cache
+  materialCache.clear();
+  const mats = collectMaterials(root);
+  mats.forEach((m) => {
+    materialCache.set(m.uuid, { originalLitMat: null, isUnlit: false });
+  });
+
+  // frame the object
+  frameObject(root);
+}
+
+function frameObject(obj) {
+  const { THREE } = window;
+  const box = new THREE.Box3().setFromObject(obj);
+  const size = new THREE.Vector3();
+  const center = new THREE.Vector3();
+  box.getSize(size);
+  box.getCenter(center);
+
+  const maxDim = Math.max(size.x, size.y, size.z);
+  const fitHeightDistance = maxDim / (2 * Math.atan((Math.PI * camera.fov) / 360));
+  const fitWidthDistance = fitHeightDistance / camera.aspect;
+  const distance = Math.max(fitHeightDistance, fitWidthDistance);
+
+  const dir = controls ? controls.target.clone().sub(camera.position).normalize() : new THREE.Vector3(0, 0, -1);
+  const newPos = center.clone().add(dir.multiplyScalar(-distance * 1.2));
+  camera.position.copy(newPos);
+  camera.near = distance / 100;
+  camera.far = distance * 100;
+  camera.updateProjectionMatrix();
+
+  if (controls) {
+    controls.target.copy(center);
+    controls.update();
   }
 }
 
-// ────────────────────────────────────────────────────────────────────────────
-// Public API
-// ────────────────────────────────────────────────────────────────────────────
-async function loadByInput(text) {
-  await bootstrapRenderer();
-  const id = normalizeDriveIdFromInput(text);
-  if (!id) throw new Error('empty or invalid file id/url');
-  const buf = await fetchDriveArrayBuffer(id);
-  const gltf = await parseGLB(buf);
-  attachToScene(gltf);
-  console.log('[viewer] GLB loaded');
+// ------------------------------
+// Material helpers (compat shims)
+// ------------------------------
+
+function getTargetMaterials(matIndex = null) {
+  const mats = collectMaterials(scene);
+  if (matIndex == null || matIndex < 0 || matIndex >= mats.length) return mats;
+  return [mats[matIndex]];
 }
 
-function setWhiteKey(enabled, threshold01) {
-  console.warn('[viewer] setWhiteKey not implemented yet', { enabled, threshold01 });
-}
-function setOpacity(uuid, value01) {
-  try {
-    if (!ctx.current) return;
-    const v = THREE.MathUtils.clamp(value01 ?? 1, 0, 1);
-    ctx.current.scene.traverse((o) => {
-      if (!o.isMesh) return;
-      const mats = Array.isArray(o.material) ? o.material : [o.material];
-      mats.forEach((m) => {
-        if (!m || (uuid && m.uuid !== uuid)) return;
-        m.transparent = v < 1;
-        m.opacity = v;
-        m.depthWrite = v >= 1;
-        m.needsUpdate = true;
-      });
-    });
-  } catch (e) { console.warn('[viewer] setOpacity failed', e); }
-}
-function setUnlit(uuid, enabled) {
-  try {
-    if (!ctx.current) return;
-    ctx.current.scene.traverse((o) => {
-      if (!o.isMesh) return;
-      const mats = Array.isArray(o.material) ? o.material : [o.material];
-      mats.forEach((m) => {
-        if (!m || (uuid && m.uuid !== uuid)) return;
-        if (!m.userData.__origOnBeforeCompile) m.userData.__origOnBeforeCompile = m.onBeforeCompile;
-        m.onBeforeCompile = enabled
-          ? (shader) => { if (shader) shader.fragmentShader = shader.fragmentShader.replace('#include <lights_fragment_begin>', '/* unlit */'); }
-          : m.userData.__origOnBeforeCompile || (s=>s);
-        m.needsUpdate = true;
-      });
-    });
-  } catch (e) { console.warn('[viewer] setUnlit failed', e); }
+function setOpacity(opacity, matIndex = null) {
+  const mats = getTargetMaterials(matIndex ?? activeMaterialIndex);
+  mats.forEach((m) => {
+    m.transparent = opacity < 1 || m.transparent;
+    m.opacity = Math.max(0, Math.min(1, Number(opacity)));
+    m.needsUpdate = true;
+  });
 }
 
-const events = new EventTarget();
+// Older UI calls this name:
+function setHSLOpacity(a, b) {
+  // flexible signature:
+  // setHSLOpacity(opacity)
+  // setHSLOpacity(index, opacity)
+  // setHSLOpacity({ index, opacity })
+  let idx = null;
+  let opacity = null;
+  if (typeof a === "number" && typeof b === "number") {
+    idx = a; opacity = b;
+  } else if (typeof a === "object" && a) {
+    idx = a.index ?? a.materialIndex ?? null;
+    opacity = a.opacity ?? a.o ?? null;
+  } else if (typeof a === "number") {
+    opacity = a;
+  }
+  if (opacity == null) return;
+  setOpacity(opacity, idx);
+}
+
+function setActiveMaterialIndex(idx) {
+  activeMaterialIndex = (typeof idx === "number" && isFinite(idx)) ? (idx|0) : null;
+}
+
+// unlit on/off for a target material(s)
+async function setUnlit(enabled, matIndex = null) {
+  const { THREE } = await ensureThree();
+  const mats = getTargetMaterials(matIndex ?? activeMaterialIndex);
+  mats.forEach((m) => {
+    const rec = materialCache.get(m.uuid) || { originalLitMat: null, isUnlit: false };
+    if (enabled) {
+      if (!rec.isUnlit) {
+        rec.originalLitMat = m;
+        const basic = new THREE.MeshBasicMaterial({
+          map: m.map || null,
+          color: m.color ? m.color.clone() : 0xffffff,
+          transparent: m.transparent,
+          opacity: m.opacity,
+          side: m.side,
+          depthWrite: m.depthWrite,
+          depthTest: m.depthTest,
+          alphaTest: m.alphaTest || 0,
+        });
+        replaceMaterial(m, basic);
+        rec.isUnlit = true;
+      }
+    } else {
+      if (rec.isUnlit && rec.originalLitMat) {
+        replaceMaterial(m, rec.originalLitMat);
+        rec.isUnlit = false;
+      }
+    }
+    materialCache.set((rec.isUnlit ? (m.uuid || Math.random()) : (rec.originalLitMat?.uuid || m.uuid)), rec);
+  });
+}
+
+// helper to replace a material on all meshes referencing it
+function replaceMaterial(oldMat, newMat) {
+  scene.traverse((obj) => {
+    if (obj.isMesh && obj.material) {
+      if (Array.isArray(obj.material)) {
+        obj.material = obj.material.map((mm) => (mm === oldMat ? newMat : mm));
+      } else if (obj.material === oldMat) {
+        obj.material = newMat;
+      }
+    }
+  });
+}
+
+// shim: toggleUnlit()
+function toggleUnlit(matIndex = null) {
+  const mats = getTargetMaterials(matIndex ?? activeMaterialIndex);
+  if (!mats.length) return;
+  const m = mats[0];
+  const rec = materialCache.get(m.uuid);
+  const isCurrentlyUnlit = rec?.isUnlit === true;
+  setUnlit(!isCurrentlyUnlit, matIndex);
+}
+
+// white key (best-effort; simple alphaTest approach)
+function setWhiteKey(threshold = 1.0, matIndex = null) {
+  const mats = getTargetMaterials(matIndex ?? activeMaterialIndex);
+  mats.forEach((m) => {
+    // simplest: raise alphaTest to punch-through near-white fragments if map has alpha baked.
+    // Without custom shader, we can't chroma-key white in RGB; this is a no-op unless alpha present.
+    m.alphaTest = Math.max(0, Math.min(1, Number(threshold)));
+    m.needsUpdate = true;
+  });
+}
+
+// caption helpers (non-breaking)
+function setCaptionText(text) {
+  const div = ensureCaptionLayer();
+  div.textContent = text == null ? "" : String(text);
+}
+function setCaptionVisible(visible) {
+  const div = ensureCaptionLayer();
+  div.style.display = visible ? "block" : "none";
+}
+function setCaptionStyle(style = {}) {
+  const div = ensureCaptionLayer();
+  if (!style) return;
+  if (style.color) div.style.color = style.color;
+  if (typeof style.bgAlpha === "number") {
+    const a = Math.max(0, Math.min(1, style.bgAlpha));
+    div.style.background = `rgba(0,0,0,${a})`;
+  }
+}
+
+// ------------------------------
+// Public surface
+// ------------------------------
+export async function ensureViewer() {
+  if (!renderer) await bootstrapRenderer();
+  return {
+    renderer, scene, camera, controls,
+  };
+}
+
+// Back-compat global API consumed by ui.js
 window.app = window.app || {};
-window.app.events = window.app.events || events;
-window.app.viewer = { loadByInput, setWhiteKey, setOpacity, setUnlit };
+window.app.viewer = {
+  // loading
+  loadByInput,
 
-async function ensureViewer() { await bootstrapRenderer(); return window.app?.viewer; }
+  // material selection
+  setActiveMaterialIndex,
 
-export { ensureViewer, loadByInput };
+  // opacity (compat)
+  setOpacity,
+  setHSLOpacity, // shim name used by ui.js
+
+  // unlit
+  setUnlit,        // explicit on/off
+  toggleUnlit,     // shim name used by ui.js
+
+  // earlier white-key slider hook (best-effort)
+  setWhiteKey,
+
+  // captions
+  setCaptionText,
+  setCaptionVisible,
+  setCaptionStyle,
+};
+
