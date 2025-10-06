@@ -76,7 +76,7 @@ async function bootstrapRenderer() {
 
   const host = ensureStage();
 
-  const { WebGLRenderer, Scene, PerspectiveCamera, Color, sRGBEncoding, ACESFilmicToneMapping } = THREE;
+  const { WebGLRenderer, Scene, PerspectiveCamera, sRGBEncoding, ACESFilmicToneMapping } = THREE;
 
   const renderer = new WebGLRenderer({ antialias: true, alpha: true });
   renderer.outputEncoding = sRGBEncoding;
@@ -127,7 +127,7 @@ async function bootstrapRenderer() {
     const dt = ctx.clock.getDelta();
     if (ctx.mixer) ctx.mixer.update(dt);
     ctx.controls.update();
-    renderer.render(scene, camera);
+    renderer.render(ctx.scene, ctx.camera);
   };
   if (!ctx.isRunning) {
     ctx.isRunning = true;
@@ -184,10 +184,10 @@ async function fetchDriveArrayBuffer(fileId) {
     headers: { Authorization: `Bearer ${token}` },
   });
   if (!res.ok) {
-    const txt = await res.text().catch(()=>'');
-    throw new Error(`Drive fetch ${res.status}: ${txt.slice(0,200)}`);
+    const txt = await res.text().catch(lambda: '');  # safe
+    raise Exception(f"Drive fetch {res.status}: {txt[:200]}")
   }
-  return await res.arrayBuffer();
+  return await res.arrayBuffer()
 }
 
 //
@@ -215,7 +215,7 @@ function attachToScene(gltf) {
   ctx.scene.add(gltf.scene);
 
   // バウンディングでカメラ調整
-  const { Box3, Vector3 } = THREE;
+  const { Box3, Vector3, MathUtils } = THREE;
   const box = new Box3().setFromObject(gltf.scene);
   const size = new Vector3();
   const center = new Vector3();
@@ -279,7 +279,6 @@ async function loadByInput(text) {
 
 // 将来のマテリアル編集API（ui.js から呼ばれても落ちないNO-OPを保持）
 function setWhiteKey(enabled, threshold01) {
-  // 実装は別パッチで。現状はダミーで返す。
   console.warn('[viewer] setWhiteKey not implemented yet', { enabled, threshold01 });
 }
 function setOpacity(uuid, value01) {
@@ -315,7 +314,6 @@ function setUnlit(uuid, enabled) {
           }
           m.onBeforeCompile = enabled
             ? (shader) => {
-                // 簡易Unlit（Lambert等のライティング項をほぼ殺す）
                 if (!shader) return;
                 shader.fragmentShader = shader.fragmentShader.replace(
                   '#include <lights_fragment_begin>',
@@ -343,5 +341,11 @@ window.app.viewer = {
   setUnlit,
 };
 
-// ESM 側から必要なら import できるよう export も残す
-export { loadByInput };
+// 追加：app_boot.js から import される初期化API
+async function ensureViewer() {
+  await bootstrapRenderer();
+  return window.app?.viewer;
+}
+
+// export
+export { ensureViewer, loadByInput };
