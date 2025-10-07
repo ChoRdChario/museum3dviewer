@@ -281,147 +281,23 @@ if (!selected){ leaderLine.setAttribute('opacity','0'); halo.style.opacity=0; re
   (function lineTick(){ updateLeaderToOverlay(); requestAnimationFrame(lineTick); })();
 
   function applyFilter(){
-    const f = pinFilter.value;
-    for (const p of pins){
-      const vis = (f==='all') || (p.color.toLowerCase() === f.toLowerCase());
-      p.obj.visible = vis;
-      if (selected && selected.id===p.id && !vis) { selected = null; hideOverlay(); try{ leaderLine && leaderLine.setAttribute('opacity','0'); halo && (halo.style.opacity=0); }catch(e){} }
+  const active = getActivePinFilter(); // null -> all
+  for (const p of pinsArr){
+    const color = p.colorKey || p.color || p.tag || p.c || p.col || p.k;
+    let vis = true;
+    if (active instanceof Set){
+      vis = active.has(String(color||'').toLowerCase());
+    }
+    if (p.rowEl){ p.rowEl.style.display = vis ? '' : 'none'; }
+    if (p.mesh){ p.mesh.visible = !!vis; }
+    if (selected && selected.id===p.id && !vis){
+      selected = null;
+      try{ hideOverlay(); }catch(e){}
+      try{ leaderLine && leaderLine.setAttribute('opacity','0'); halo && (halo.style.opacity=0);}catch(e){}
     }
   }
-  pinFilter.addEventListener('change', applyFilter);
-
-// ===== Runtime-injected Custom Select for pinFilter (robust) =====
-(function(){
-  function setup(){
-    const sel = document.getElementById('pinFilter');
-    if (!sel) return false;
-    if (document.getElementById('pinFilterTrigger')) return true; // already installed
-
-    // Hide native select (retain for value + change event wiring)
-    sel.style.position = 'absolute';
-    sel.style.left = '-9999px';
-
-    // Build wrapper right after select
-    const wrap = document.createElement('div');
-    wrap.className = 'filter-select';
-    wrap.id = 'pinFilterCustom';
-
-    const trigger = document.createElement('button');
-    trigger.id = 'pinFilterTrigger';
-    trigger.className = 'fs-trigger';
-    trigger.setAttribute('aria-haspopup','listbox');
-    trigger.setAttribute('aria-expanded','false');
-    trigger.setAttribute('aria-controls','pinFilterMenu');
-    trigger.innerHTML = '<span class="fs-swatch" aria-hidden="true"></span><span class="fs-label">(All)</span>';
-    wrap.appendChild(trigger);
-
-    const menu = document.createElement('div');
-    menu.id = 'pinFilterMenu';
-    menu.className = 'fs-menu';
-    menu.setAttribute('role','listbox');
-    menu.setAttribute('tabindex','-1');
-    menu.hidden = true;
-    wrap.appendChild(menu);
-
-    sel.parentNode.insertBefore(wrap, sel.nextSibling);
-
-    const COLORS = [
-      {key:'all',    name:'(All)',  hex:'#9ca3af'},
-      {key:'amber',  name:'amber',  hex:'#fbbf24'},
-      {key:'sky',    name:'sky',    hex:'#60a5fa'},
-      {key:'lime',   name:'lime',   hex:'#84cc16'},
-      {key:'rose',   name:'rose',   hex:'#f43f5e'},
-      {key:'violet', name:'violet', hex:'#8b5cf6'},
-      {key:'slate',  name:'slate',  hex:'#94a3b8'}
-    ];
-    const byKey = Object.fromEntries(COLORS.map(c=>[c.key,c]));
-
-    function renderMenu(){
-      menu.innerHTML = '';
-      COLORS.forEach(c=>{
-        const opt = document.createElement('div');
-        opt.className = 'fs-option';
-        opt.setAttribute('role','option');
-        opt.dataset.key = c.key;
-        opt.tabIndex = -1;
-        const dot = document.createElement('span'); dot.className='dot'; dot.style.background=c.hex;
-        const label = document.createElement('span'); label.textContent = c.name;
-        opt.appendChild(dot); opt.appendChild(label);
-        opt.addEventListener('click', ()=>{ setValue(c.key); close(true); });
-        menu.appendChild(opt);
-      });
-    }
-    function setValue(key){
-      const k = (key||'all').toLowerCase();
-      sel.value = (k==='all' ? 'all' : k);
-      sel.dispatchEvent(new Event('change', {bubbles:true}));
-      const c = byKey[k] || byKey['all'];
-      const sw = trigger.querySelector('.fs-swatch');
-      const lb = trigger.querySelector('.fs-label');
-      if (sw) sw.style.background = c.hex;
-      if (lb) lb.textContent = c.name;
-      menu.querySelectorAll('.fs-option').forEach(el=>{
-        el.setAttribute('aria-selected', el.dataset.key === k);
-      });
-    }
-    function open(){
-      menu.hidden = false;
-      trigger.setAttribute('aria-expanded','true');
-      const k = (sel.value||'all').toLowerCase();
-      const cur = menu.querySelector(`.fs-option[data-key="${k}"]`) || menu.querySelector('.fs-option');
-      cur && cur.focus();
-      document.addEventListener('mousedown', onDocDown, true);
-      document.addEventListener('keydown', onKey);
-    }
-    function close(focusTrigger){
-      menu.hidden = true;
-      trigger.setAttribute('aria-expanded','false');
-      document.removeEventListener('mousedown', onDocDown, true);
-      document.removeEventListener('keydown', onKey);
-      if (focusTrigger) trigger.focus();
-    }
-    function onDocDown(e){
-      if (!wrap.contains(e.target)) close(false);
-    }
-    function onKey(e){
-      const items = [...menu.querySelectorAll('.fs-option')];
-      const idx = items.indexOf(document.activeElement);
-      if (e.key==='Escape'){ close(true); return; }
-      if (e.key==='Enter' || e.key===' '){
-        const k = document.activeElement?.dataset?.key;
-        if (k){ setValue(k); close(true); }
-        e.preventDefault(); return;
-      }
-      if (e.key==='ArrowDown'){ items[Math.min(idx+1, items.length-1)]?.focus(); e.preventDefault(); }
-      if (e.key==='ArrowUp'){ items[Math.max(idx-1, 0)]?.focus(); e.preventDefault(); }
-    }
-
-    trigger.addEventListener('click', ()=>{ menu.hidden ? open() : close(true); });
-
-    sel.addEventListener('change', ()=>{
-      const key = String(sel.value||'all').toLowerCase();
-      const c = byKey[key] || byKey['all'];
-      const sw = trigger.querySelector('.fs-swatch');
-      const lb = trigger.querySelector('.fs-label');
-      if (sw) sw.style.background = c.hex;
-      if (lb) lb.textContent = c.name;
-      menu.querySelectorAll('.fs-option').forEach(el=>{
-        el.setAttribute('aria-selected', el.dataset.key === key);
-      });
-    });
-
-    renderMenu();
-    setValue((sel.value||'all').toLowerCase());
-    return true;
-  }
-
-  // Run after DOM is ready; also poll shortly in case UI builds late
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', ()=>{ if (!setup()) setTimeout(setup, 50); });
-  } else {
-    if (!setup()) setTimeout(setup, 50);
-  }
-})();
+}
+)();
 // ===== end custom pinFilter select =====
 
 
@@ -640,4 +516,35 @@ try{
   wrap.addEventListener('click', (e)=>{
     if (e.target === wrap) { trigger.click(); }
   }, true);
+})();
+
+// ---- multi-color filter helpers ----
+function getActivePinFilter(){
+  const row = document.getElementById('pinFilterToggles');
+  if (!row) {
+    const sel = document.getElementById('pinFilter');
+    const v = sel ? String(sel.value||'all').toLowerCase() : 'all';
+    if (v==='all') return null;
+    return new Set([v]);
+  }
+  const boxes = row.querySelectorAll('.pt-item');
+  const active = [];
+  boxes.forEach(lbl => {
+    const key = lbl.getAttribute('data-key');
+    const box = lbl.querySelector('.pt-box');
+    if (box && box.checked) active.push(key);
+  });
+  if (active.length===0 || active.length===6) return null;
+  return new Set(active);
+}
+
+// pinFilterToggles wiring
+(function(){
+  const row = document.getElementById('pinFilterToggles');
+  if (!row) return;
+  row.addEventListener('change', function(e){
+    if (e.target && e.target.classList && e.target.classList.contains('pt-box')){
+      try{ applyFilter(); }catch(err){ console.warn('[pins] applyFilter failed', err); }
+    }
+  });
 })();
