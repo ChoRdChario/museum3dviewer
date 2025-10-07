@@ -1,7 +1,7 @@
 // sheets_api.js — sheet selection & helpers
 function getAccessToken(){
-  const tok = (window.gapi && gapi.client.getToken && gapi.client.getToken()) || null;
-  const access = tok && tok.access_token;
+  const t = (window.gapi && window.gapi.client && window.gapi.client.getToken && window.gapi.client.getToken()) || null;
+  const access = (t && t.access_token) || window.ACCESS_TOKEN || (window.gapi && window.gapi.auth && window.gapi.auth.getToken && window.gapi.auth.getToken().access_token);
   if (!access) throw new Error('Not signed in (no access token)');
   return access;
 }

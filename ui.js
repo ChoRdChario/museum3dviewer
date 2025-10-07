@@ -52,7 +52,10 @@ export function setupUI(app){
       const id = normalizeDriveIdFromInput(el.fileId.value);
       const buf = await fetchDriveFileAsArrayBuffer(id);
       await app.viewer.loadGLB(buf);
-    }catch(err){
+      app.state = app.state || {};
+      app.state.currentGLBId = id;
+      window.dispatchEvent(new CustomEvent('lmy:model-loaded', { detail: { glbId: id } }));
+    } catch(err){
       console.error('[ui] failed to load', err);
       alert('Failed to load GLB: '+(err?.message||err));
     }
