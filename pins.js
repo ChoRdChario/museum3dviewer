@@ -1,5 +1,6 @@
 // pins.js — A+B UI 完了版（旧UI廃止）
 import { ensureSpreadsheetForFile, ensurePinsHeader, listSheetTitles, loadPins, savePins } from './sheets_api.js?v=20251004s3';
+import { driveListImagesInSameFolder } from './utils_drive_images.js';
 
 const PALETTE = [
   { key:'sky',   hex:'#55ccff' },
@@ -15,8 +16,7 @@ export function setupPins(app){
   const overlay = document.getElementById('overlay');
   const titleInput = document.getElementById('capTitle');
   const bodyInput  = document.getElementById('capBody');
-  const btnAdd     = document.getElementById('btnAddPin');
-  const imgGrid    = document.getElementById('imgGrid');
+    const imgGrid    = document.getElementById('imgGrid');
   const sheetSelect= document.getElementById('sheetSelect');
   const btnNewSheet= document.getElementById('btnNewSheet');
   const capList    = document.getElementById('capList');
@@ -176,22 +176,66 @@ export function setupPins(app){
     if (rec) selectPin(rec);
   }, {passive:true});
 
-  // shift+click で追加（+Pinボタンは今は残す）
+  // shift+click で追加
   app.viewer.renderer.domElement.addEventListener('click', (e)=>{
     if (!e.shiftKey) return;
     const hit = app.viewer.raycastFromClientXY(e.clientX, e.clientY);
     if (hit) addPinAtPosition(hit.point);
   });
 
+  /*__PIN_SELECT_CLICK__*/
+  app.viewer.renderer.domElement.addEventListener('click', (e)=>{
+    if (e.shiftKey) return; // handled above
+    const hit = app.viewer.raycastFromClientXY(e.clientX, e.clientY);
+    if (!hit) return;
+    // Try to match intersection object to a pin's mesh
+    let obj = hit.object;
+    let found = null;
+    for (const p of pins){ if (p.obj === obj) { found = p; break; } }
+    if (!found && obj){ // walk up a few parents just in case
+      let cur = obj.parent; let depth=0;
+      while(cur && depth++<3 && !found){ for(const p of pins){ if (p.obj===cur){ found=p; break; } } cur = cur.parent; }
+    }
+    if (found) selectPin(found);
+  });
+
   titleInput.addEventListener('input', ()=>{ if (selected){ selected.title=titleInput.value; renderCapList(); scheduleSave(); } });
   bodyInput .addEventListener('input', ()=>{ if (selected){ selected.body =bodyInput.value ; scheduleSave(); } });
-  btnAdd?.addEventListener('click', ()=>{
-    const rect = app.viewer.renderer.domElement.getBoundingClientRect();
     const hit = app.viewer.raycastFromClientXY(rect.left+rect.width/2, rect.top+rect.height/2);
     if (hit) addPinAtPosition(hit.point);
   });
 
-  // sheet
+  
+  // === Drive images in same folder ===
+  async function refreshImages(){
+    const glbId = app.state?.currentGLBId;
+    if (!glbId) { imgGrid.innerHTML = '<div class="muted">Load a GLB to list images.</div>'; return; }
+    try{
+      imgGrid.innerHTML = '<div class="muted">Loading images...</div>';
+      const files = await driveListImagesInSameFolder(glbId);
+      if (!files.length){ imgGrid.innerHTML = '<div class="muted">No images in this folder.</div>'; return; }
+      imgGrid.innerHTML = files.map(f => `
+        <button class="imgbtn" data-id="${f.id}" title="${f.name}">
+          <img src="${f.thumbnailLink || ''}" alt="${f.name}"/>
+        </button>
+      `).join('');
+    }catch(e){
+      console.error('[pins] list images failed', e);
+      imgGrid.innerHTML = '<div class="muted">Failed to list images.</div>';
+    }
+  }
+  document.getElementById('btnRefreshImages')?.addEventListener('click', refreshImages);
+  window.addEventListener('lmy:model-loaded', refreshImages);
+  imgGrid.addEventListener('click', (ev)=>{
+    const id = ev.target.closest('[data-id]')?.dataset?.id;
+    if (!id || !selected) return;
+    selected.imageId = id;
+    scheduleSave();
+    // brief flash on selection
+    ev.target.closest('.imgbtn')?.classList.add('sel');
+    setTimeout(()=>ev.target.closest('.imgbtn')?.classList.remove('sel'), 300);
+  });
+// sheet
   async function populateSheetSelect(){
     const titles = await listSheetTitles(spreadsheetId);
     sheetSelect.innerHTML = titles.map(t=>`<option value="${t}">${t}</option>`).join('');
