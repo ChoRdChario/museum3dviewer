@@ -10,6 +10,18 @@ const PALETTE = [
   { key:'violet',hex:'#8b5cf6' },
   { key:'slate', hex:'#94a3b8' }
 ];
+// Map hex->key for filtering
+const PALETTE_BY_HEX = (()=>{
+  const m = Object.create(null);
+  for (const c of PALETTE){ m[String(c.hex).toLowerCase()] = c.key; }
+  return m;
+})();
+function hexToKey(hex){
+  if (!hex) return null;
+  const h = String(hex).toLowerCase();
+  return PALETTE_BY_HEX[h] || null;
+}
+
 
 export function setupPins(app){
   const overlay = document.getElementById('overlay');
@@ -282,23 +294,22 @@ if (!selected){ leaderLine.setAttribute('opacity','0'); halo.style.opacity=0; re
 
   function applyFilter(){
   const active = getActivePinFilter(); // null -> all
-  for (const p of pinsArr){
-    const color = p.colorKey || p.color || p.tag || p.c || p.col || p.k;
+  for (const p of pins){
+    const key = p.colorKey || hexToKey(p.color) || null;
     let vis = true;
     if (active instanceof Set){
-      vis = active.has(String(color||'').toLowerCase());
+      vis = key ? active.has(key) : true;
     }
     if (p.rowEl){ p.rowEl.style.display = vis ? '' : 'none'; }
-    if (p.mesh){ p.mesh.visible = !!vis; }
+    if (p.obj){ p.obj.visible = !!vis; }
     if (selected && selected.id===p.id && !vis){
       selected = null;
       try{ hideOverlay(); }catch(e){}
-      try{ leaderLine && leaderLine.setAttribute('opacity','0'); halo && (halo.style.opacity=0);}catch(e){}
+      try{ leaderLine && leaderLine.setAttribute('opacity','0'); }catch(e){}
     }
   }
 }
-)();
-// ===== end custom pinFilter select =====
+
 
 
 
@@ -547,4 +558,43 @@ function getActivePinFilter(){
       try{ applyFilter(); }catch(err){ console.warn('[pins] applyFilter failed', err); }
     }
   });
+})();
+
+
+// ---- ensure checkbox filter toggles beside pinPalette ----
+(function(){
+  function ensureToggles(){
+    const palette = document.getElementById('pinPalette');
+    if (!palette) return;
+    if (document.getElementById('pinFilterToggles')) return;
+    const wrap = document.createElement('div');
+    wrap.id = 'pinFilterToggles';
+    wrap.className = 'pin-toggle-row';
+    wrap.setAttribute('aria-label','Pin visibility');
+    const colors = ['amber','sky','lime','rose','violet','slate'];
+    const hexMap = { amber:'#fbbf24', sky:'#60a5fa', lime:'#84cc16', rose:'#f43f5e', violet:'#8b5cf6', slate:'#94a3b8' };
+    colors.forEach(key=>{
+      const label = document.createElement('label');
+      label.className = 'pt-item';
+      label.setAttribute('data-key', key);
+      const box = document.createElement('input');
+      box.type = 'checkbox'; box.className = 'pt-box'; box.checked = true;
+      const dot = document.createElement('span');
+      dot.className = 'pt-dot'; dot.style.background = hexMap[key] || '#9ca3af';
+      label.appendChild(box); label.appendChild(dot);
+      wrap.appendChild(label);
+    });
+    palette.parentNode.insertBefore(wrap, palette.nextSibling);
+    // wire
+    wrap.addEventListener('change', function(e){
+      if (e.target && e.target.classList && e.target.classList.contains('pt-box')){
+        try{ applyFilter(); }catch(err){ console.warn('[pins] applyFilter failed', err); }
+      }
+    });
+  }
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', ensureToggles);
+  } else {
+    ensureToggles();
+  }
 })();
