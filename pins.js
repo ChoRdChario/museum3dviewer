@@ -262,7 +262,8 @@ export function setupPins(app){
   }
 
   function updateLeaderToOverlay(){
-    if (!selected){ leaderLine.setAttribute('opacity','0'); halo.style.opacity=0; return; }
+    if (!selected || (overlay && overlay.style && overlay.style.display==='none')){ try{ leaderLine.setAttribute('opacity','0'); halo.style.opacity=0; }catch(e){} return; }
+
     const canvasRect = app.viewer.renderer.domElement.getBoundingClientRect();
     const overlayRect = overlay.getBoundingClientRect();
     const ax = overlayRect.left - canvasRect.left + 10;
@@ -280,12 +281,19 @@ export function setupPins(app){
   (function lineTick(){ updateLeaderToOverlay(); requestAnimationFrame(lineTick); })();
 
   function applyFilter(){
+
     const f = pinFilter.value;
     for (const p of pins){
       const vis = (f==='all') || (p.color.toLowerCase() === f.toLowerCase());
       p.obj.visible = vis;
       if (selected && selected.id===p.id && !vis) { selected = null; hideOverlay(); }
-    }
+  // ensure selection & guide fully cleared if hidden by filter
+  if (!selected){
+    try{ leaderLine && leaderLine.setAttribute('opacity','0'); }catch(e){}
+    try{ if (typeof hideOverlay==='function') hideOverlay(); }catch(e){}
+  }
+}
+
   }
   pinFilter.addEventListener('change', applyFilter);
 
