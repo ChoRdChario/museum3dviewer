@@ -1,4 +1,3 @@
-\
 // ui.js — patched (adds tab wiring + model-loaded dispatch) — 2025-10-07
 export function setupUI(app){
   const inputId = document.getElementById('fileIdInput');
