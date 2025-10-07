@@ -284,30 +284,23 @@ export function setupPins(app){
     for (const p of pins){
       const vis = (f==='all') || (p.color.toLowerCase() === f.toLowerCase());
       p.obj.visible = vis;
-      if (selected && selected.id===p.id && !vis) hideOverlay();
+      if (selected && selected.id===p.id && !vis) { selected = null; hideOverlay(); try{ leaderLine && leaderLine.setAttribute('opacity','0'); halo && (halo.style.opacity=0); }catch(e){} }
     }
   }
   pinFilter.addEventListener('change', applyFilter);
 
-// --- patch: render pinFilter <select> with colored squares in options ---
+// --- patch: render pinFilter <select> with colored squares (all options) ---
 (function(){
   const sel = document.getElementById('pinFilter');
   if (!sel) return;
-  const COLOR_HEX = {
-    'all':'#bbb', 'amber':'#fbbf24', 'sky':'#60a5fa', 'lime':'#84cc16',
-    'rose':'#f43f5e', 'violet':'#8b5cf6', 'slate':'#94a3b8'
-  };
+  const COLOR_HEX = { 'all':'#bbb', 'amber':'#fbbf24', 'sky':'#60a5fa', 'lime':'#84cc16', 'rose':'#f43f5e', 'violet':'#8b5cf6', 'slate':'#94a3b8' };
   for (const opt of sel.options){
-    const key = String(opt.value || '').toLowerCase();
-    const hex = COLOR_HEX[key];
-    if (hex){
-      opt.textContent = '■';
-      opt.style.color = hex;
-      opt.title = key;
-    } else if (/^\(all\)$/i.test(opt.textContent) || key==='(all)' || key==='all'){
-      opt.textContent = '(All)';
-      opt.style.color = '';
-    }
+    const raw = String(opt.value||opt.textContent||'');
+    const key = raw.replace(/[()]/g,'').toLowerCase();
+    const hex = COLOR_HEX[key] || COLOR_HEX['all'];
+    opt.textContent = '■';
+    opt.style.color = hex;
+    opt.title = key === 'all' ? '(All)' : key;
   }
 })();
 
