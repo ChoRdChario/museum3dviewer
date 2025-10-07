@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>LociMyu — Stabilized Dev Build</title>
+  <title>LociMyu — Stabilized Dev Build (v2)</title>
   <meta http-equiv="Cross-Origin-Opener-Policy" content="same-origin-allow-popups">
   <style>
     :root{--bg:#0e0f12;--fg:#e7e9ee;--muted:#9aa1ad;--panel:#17181d;--accent:#ffd166}
@@ -28,6 +28,17 @@
     .fine{font-size:12px;color:#93a0b8}
     .list{padding:8px; background:#10131a;border:1px solid #21273a;border-radius:10px;min-height:80px}
   </style>
+
+  <!-- Import map to resolve bare 'three' and 'three/addons/*' from CDN -->
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://unpkg.com/three@0.160.1/build/three.module.js",
+      "three/addons/": "https://unpkg.com/three@0.160.1/examples/jsm/"
+    }
+  }
+  </script>
+
   <script src="https://accounts.google.com/gsi/client" async defer></script>
   <script src="https://apis.google.com/js/api.js" async defer></script>
 </head>

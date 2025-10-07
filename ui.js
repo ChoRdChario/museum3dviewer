@@ -59,7 +59,7 @@ document.getElementById('btnLoad').addEventListener('click', async ()=>{
 });
 
 // Material sliders
-function hook(id, cb){
+function hook(id){
   const el = document.getElementById(id);
   el.addEventListener('input', ()=>{
     const h = parseFloat(document.getElementById('matHue').value);

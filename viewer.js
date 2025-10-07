@@ -1,26 +1,11 @@
-// viewer.js — stable imports (no bare 'three')
+// viewer.js — ESM with import map
 console.log('[viewer] module loaded');
 
-let THREE = null;
-let GLTFLoader = null;
-let OrbitControls = null;
-
-async function loadThree(){
-  if (THREE) return THREE;
-  const base = 'https://unpkg.com/three@0.160.1';
-  const [core, gltf, orbit] = await Promise.all([
-    import(base + '/build/three.module.js'),
-    import(base + '/examples/jsm/loaders/GLTFLoader.js'),
-    import(base + '/examples/jsm/controls/OrbitControls.js'),
-  ]);
-  THREE = core;
-  GLTFLoader = gltf.GLTFLoader;
-  OrbitControls = orbit.OrbitControls;
-  return THREE;
-}
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
 export async function createViewer(canvas){
-  await loadThree();
   const renderer = new THREE.WebGLRenderer({canvas, antialias:true, alpha:false});
   renderer.setPixelRatio(Math.min(2, window.devicePixelRatio||1));
   renderer.setSize(canvas.clientWidth, canvas.clientHeight, false);
@@ -50,7 +35,6 @@ export async function createViewer(canvas){
   animate();
 
   async function loadGLBFromArrayBuffer(ab){
-    await loadThree();
     const loader = new GLTFLoader();
     const gltf = await loader.parseAsync(ab, '');
     if (model) scene.remove(model);
@@ -96,7 +80,7 @@ export async function createViewer(canvas){
   }
 
   return {
-    get THREE(){ return THREE; },
+    THREE,
     scene, camera, renderer, controls,
     loadGLBFromArrayBuffer,
     applyMaterialDelta,
