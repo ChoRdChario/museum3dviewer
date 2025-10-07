@@ -1,46 +1,103 @@
-
 <!doctype html>
 <html lang="ja">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Museum 3D Viewer (patched minimal)</title>
-    <!-- 必要であれば client id をここで埋める -->
-    <!-- <script>window.GOOGLE_CLIENT_ID = 'YOUR_CLIENT_ID.apps.googleusercontent.com';</script> -->
-    <style>
-      html, body { margin:0; height:100%; background:#111; color:#eee; }
-      #wrap { position:relative; height:100%; }
-      canvas#viewer { width:100%; height:100%; display:block; }
-      .panel {
-        position: fixed; left: 8px; bottom: 48px; background: rgba(0,0,0,.5);
-        padding: 8px; border-radius: 6px; display:flex; gap:6px; align-items:center;
-      }
-      input, button { font: inherit; }
-    </style>
-    <script defer type="module">
-      import { setupAuth } from './gauth.js';
-      import { ensureViewer } from './viewer.js';
-      import { setupUI } from './ui.js';
-      console.log('[boot] ready');
-      (async () => {
-        console.log('[boot] call setupAuth');
-        await setupAuth();
-        console.log('[boot] setupAuth resolved');
-        await ensureViewer();
-        console.log('[boot] viewer ready');
-        setupUI();
-      })();
-    </script>
-    <!-- Google Identity Services (必要なら HTML 側で読み込む) -->
-    <!-- <script src="https://accounts.google.com/gsi/client" async defer></script> -->
-  </head>
-  <body>
-    <div id="wrap">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>LociMyu — Stabilized Dev Build</title>
+  <meta http-equiv="Cross-Origin-Opener-Policy" content="same-origin-allow-popups">
+  <style>
+    :root{--bg:#0e0f12;--fg:#e7e9ee;--muted:#9aa1ad;--panel:#17181d;--accent:#ffd166}
+    *{box-sizing:border-box} html,body{height:100%;margin:0;background:var(--bg);color:var(--fg);font:14px/1.6 system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,"Noto Sans JP",sans-serif}
+    #layout{display:grid;grid-template-columns:1fr 360px;grid-template-rows:100%;height:100%}
+    #viewerWrap{position:relative;background:#0a0b0e}
+    canvas#viewer{position:absolute;inset:0;width:100%;height:100%;display:block;background:#000}
+    #panel{background:var(--panel);border-left:1px solid #1f2330;display:flex;flex-direction:column;min-width:320px}
+    .topbar{display:flex;align-items:center;gap:8px;justify-content:space-between;padding:8px 10px;border-bottom:1px solid #1f2330}
+    .tabs{display:flex;gap:6px}
+    .tab{padding:6px 10px;border-radius:8px;background:#1d212e;color:#d7dbe7;cursor:pointer;font-size:12px;border:1px solid #24293a}
+    .tab.active{background:#24293a;color:#fff}
+    .section{padding:10px;border-bottom:1px solid #1f2330}
+    .kv{display:grid;grid-template-columns:88px 1fr;gap:8px;align-items:center}
+    label{color:var(--muted);font-size:12px}
+    input[type=text]{width:100%;padding:6px 8px;border-radius:8px;border:1px solid #2a3144;background:#0e111a;color:#e8ecf5}
+    button{padding:6px 10px;border-radius:8px;border:1px solid #2a3144;background:#20263a;color:#e8ecf5;cursor:pointer}
+    button.primary{background:#2a4170;border-color:#2a4170}
+    .row{display:flex;gap:8px;align-items:center}
+    .hidden{display:none}
+    .group{display:flex;flex-direction:column;gap:6px}
+    .fine{font-size:12px;color:#93a0b8}
+    .list{padding:8px; background:#10131a;border:1px solid #21273a;border-radius:10px;min-height:80px}
+  </style>
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
+  <script src="https://apis.google.com/js/api.js" async defer></script>
+</head>
+<body>
+  <div id="layout">
+    <div id="viewerWrap">
       <canvas id="viewer"></canvas>
-      <div class="panel">
-        <input id="drive-id" placeholder="Google Drive file ID (GLB)" size="36" />
-        <button id="btn-load">Load GLB</button>
-      </div>
     </div>
-  </body>
+    <aside id="panel">
+      <div class="topbar">
+        <div class="row">
+          <button id="auth-btn" class="primary">Sign in</button>
+          <span id="auth-status" class="fine">Signed out</span>
+        </div>
+        <div class="row">
+          <input id="fileId" type="text" placeholder="GLB fileId (Google Drive)" style="width:200px">
+          <button id="btnLoad">Load</button>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="tabs">
+          <div class="tab active" data-tab="captions">Captions</div>
+          <div class="tab" data-tab="materials">Materials</div>
+          <div class="tab" data-tab="views">Views</div>
+        </div>
+      </div>
+
+      <section class="section" id="panel-captions">
+        <div class="group">
+          <div class="row">
+            <button id="btnAddPin">+ Add Pin</button>
+            <button id="btnSave">Save</button>
+          </div>
+          <div id="capList" class="list"></div>
+        </div>
+      </section>
+
+      <section class="section hidden" id="panel-materials">
+        <div class="group">
+          <div class="row">
+            <label>Hue</label><input id="matHue" type="range" min="-180" max="180" value="0">
+          </div>
+          <div class="row">
+            <label>Sat</label><input id="matSat" type="range" min="-100" max="100" value="0">
+          </div>
+          <div class="row">
+            <label>Light</label><input id="matLight" type="range" min="-100" max="100" value="0">
+          </div>
+          <div class="row">
+            <label>Opacity</label><input id="matOpacity" type="range" min="0" max="1" step="0.01" value="1">
+          </div>
+        </div>
+      </section>
+
+      <section class="section hidden" id="panel-views">
+        <div class="group">
+          <div class="row">
+            <button id="btnSnap">Snapshot</button>
+            <button id="btnReset">Reset</button>
+          </div>
+          <div id="viewList" class="list"></div>
+        </div>
+      </section>
+    </aside>
+  </div>
+
+  <script type="module" src="./gauth.js"></script>
+  <script type="module" src="./viewer.js"></script>
+  <script type="module" src="./ui.js"></script>
+  <script type="module" src="./app_boot.js"></script>
+</body>
 </html>

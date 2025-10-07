@@ -1,77 +1,41 @@
-
-// gauth.js — ボタンnull安全 + 簡易GISラッパ
+// gauth.js — lightweight OAuth via Google Identity Services
 console.log('[auth] module loaded');
 
-export async function setupAuth() {
-  // DOMReady 待ち
-  if (document.readyState === 'loading') {
-    await new Promise(res => document.addEventListener('DOMContentLoaded', res, { once: true }));
-  }
+let ACCESS_TOKEN = null;
 
-  function ensureButton() {
-    let btn = document.querySelector('[data-auth-btn], #auth-btn');
-    if (!btn) {
-      btn = document.createElement('button');
-      btn.id = 'auth-btn';
-      btn.textContent = 'Sign in';
-      btn.style.position = 'fixed';
-      btn.style.left = '8px';
-      btn.style.bottom = '8px';
-      document.body.appendChild(btn);
-      console.log('[auth] auto-injected auth button');
-    }
-    return btn;
-  }
-
-  const state = {
-    accessToken: null,
-    expiresAt: 0,
-  };
-
-  globalThis.app = globalThis.app || {};
-  app.auth = {
-    isSignedIn() {
-      return !!state.accessToken && Date.now() < state.expiresAt;
-    },
-    getAccessToken() {
-      return this.isSignedIn() ? state.accessToken : null;
-    }
-  };
-
-  const btn = ensureButton();
-  btn.addEventListener('click', async () => {
-    console.log('[auth] button click');
-    // Google Identity Services が存在する場合のみ実行
-    const gis = globalThis.google && google.accounts && google.accounts.oauth2;
-    if (!gis) {
-      alert('Google Identity Services が読み込まれていません。');
-      return;
-    }
-    // client_id は HTML 側でグローバル変数として定義されている前提（従来通り）
-    const clientId = globalThis.GOOGLE_CLIENT_ID || (globalThis.app && app.googleClientId);
-    const scope = 'https://www.googleapis.com/auth/drive.readonly';
-    if (!clientId) {
-      alert('GOOGLE_CLIENT_ID が設定されていません。');
-      return;
-    }
-    const tokenClient = gis.initTokenClient({
-      client_id: clientId,
-      scope,
-      prompt: 'consent',
-      callback: (resp) => {
-        if (resp && resp.access_token) {
-          state.accessToken = resp.access_token;
-          const expiresIn = (resp.expires_in || 3600) * 1000;
-          state.expiresAt = Date.now() + expiresIn - 5000;
-          btn.textContent = 'Signed in';
-          console.log('[auth] token acquired');
-        } else {
-          console.warn('[auth] token response missing access_token', resp);
-        }
-      }
-    });
-    tokenClient.requestAccessToken();
-  });
-
-  console.log('[auth] ready');
+function ensureLoaded(){
+  const hasGis = !!(window.google && google.accounts && google.accounts.oauth2);
+  const hasGapi = !!window.gapi;
+  return hasGis && hasGapi;
 }
+
+// Initialize gapi if needed
+function initGapi(){
+  return new Promise((resolve)=>{
+    if (window.gapi && gapi.client) return resolve();
+    const tick = ()=>{
+      if (window.gapi && gapi.client){ resolve(); }
+      else requestAnimationFrame(tick);
+    };
+    tick();
+  });
+}
+
+export async function signIn({clientId, scopes}){
+  await initGapi();
+  if (!ensureLoaded()) throw new Error('Google libraries not ready');
+  return new Promise((resolve, reject)=>{
+    google.accounts.oauth2.initTokenClient({
+      client_id: clientId,
+      scope: scopes.join(' '),
+      callback: (resp)=>{
+        if (resp.error){ reject(resp); return; }
+        ACCESS_TOKEN = resp.access_token;
+        resolve(ACCESS_TOKEN);
+      },
+    }).requestAccessToken();
+  });
+}
+
+export function getAccessToken(){ return ACCESS_TOKEN; }
+export function isSignedIn(){ return !!ACCESS_TOKEN; }
