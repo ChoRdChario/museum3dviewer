@@ -262,8 +262,7 @@ export function setupPins(app){
   }
 
   function updateLeaderToOverlay(){
-    if (!selected || (overlay && overlay.style && overlay.style.display==='none')){ try{ leaderLine.setAttribute('opacity','0'); halo.style.opacity=0; }catch(e){} return; }
-
+    if (!selected){ leaderLine.setAttribute('opacity','0'); halo.style.opacity=0; return; }
     const canvasRect = app.viewer.renderer.domElement.getBoundingClientRect();
     const overlayRect = overlay.getBoundingClientRect();
     const ax = overlayRect.left - canvasRect.left + 10;
@@ -281,57 +280,35 @@ export function setupPins(app){
   (function lineTick(){ updateLeaderToOverlay(); requestAnimationFrame(lineTick); })();
 
   function applyFilter(){
-
     const f = pinFilter.value;
     for (const p of pins){
       const vis = (f==='all') || (p.color.toLowerCase() === f.toLowerCase());
       p.obj.visible = vis;
-      if (selected && selected.id===p.id && !vis) { selected = null; hideOverlay(); }
-  // ensure selection & guide fully cleared if hidden by filter
-  if (!selected){
-    try{ leaderLine && leaderLine.setAttribute('opacity','0'); }catch(e){}
-    try{ if (typeof hideOverlay==='function') hideOverlay(); }catch(e){}
-  }
-}
-
+      if (selected && selected.id===p.id && !vis) hideOverlay();
+    }
   }
   pinFilter.addEventListener('change', applyFilter);
 
-// -- color chips for pin filter (matches PALETTE keys)
-const FILTER_COLORS = [
-  {key:'all',    hex:'#bbb',     title:'All'},
-  {key:'amber',  hex:'#ffcc55',  title:'amber'},
-  {key:'sky',    hex:'#55ccff',  title:'sky'},
-  {key:'lime',   hex:'#a3e635',  title:'lime'},
-  {key:'rose',   hex:'#f43f5e',  title:'rose'},
-  {key:'violet', hex:'#8b5cf6',  title:'violet'},
-  {key:'slate',  hex:'#94a3b8',  title:'slate'},
-];
-
-(function setupFilterChips(){
-  const row = document.getElementById('pinFilterChips');
+// --- patch: render pinFilter <select> with colored squares in options ---
+(function(){
   const sel = document.getElementById('pinFilter');
-  if (!row) return;
-  row.innerHTML = '';
-  FILTER_COLORS.forEach(c=>{
-    const b = document.createElement('button');
-    b.className = 'chip'; b.dataset.key = c.key; b.title = c.title;
-    b.style.background = c.hex;
-    b.addEventListener('click', ()=>{
-      sel && (sel.value = (c.key==='all' ? 'all' : c.key));
-      applyFilter();
-      row._highlight && row._highlight();
-    });
-    row.appendChild(b);
-  });
-  row._highlight = function(){
-    const cur = (sel && sel.value) || 'all';
-    const k = String(cur).toLowerCase();
-    [...row.children].forEach(el=>{
-      el.classList.toggle('active', el.dataset.key === (k==='all'?'all':k));
-    });
+  if (!sel) return;
+  const COLOR_HEX = {
+    'all':'#bbb', 'amber':'#fbbf24', 'sky':'#60a5fa', 'lime':'#84cc16',
+    'rose':'#f43f5e', 'violet':'#8b5cf6', 'slate':'#94a3b8'
   };
-  row._highlight();
+  for (const opt of sel.options){
+    const key = String(opt.value || '').toLowerCase();
+    const hex = COLOR_HEX[key];
+    if (hex){
+      opt.textContent = '■';
+      opt.style.color = hex;
+      opt.title = key;
+    } else if (/^\(all\)$/i.test(opt.textContent) || key==='(all)' || key==='all'){
+      opt.textContent = '(All)';
+      opt.style.color = '';
+    }
+  }
 })();
 
 
@@ -358,7 +335,7 @@ const FILTER_COLORS = [
     if (Math.sqrt(bestD2) < 24) selectPin(best);
   });
 
-  btnAdd && btnAdd.addEventListener('click', ()=>{
+  btnAdd.addEventListener('click', ()=>{
     const rect = app.viewer.renderer.domElement.getBoundingClientRect();
     const cx = rect.left + rect.width/2, cy = rect.top + rect.height/2;
     const hit = app.viewer.raycastFromClientXY(cx, cy);
