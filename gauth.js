@@ -1,10 +1,5 @@
 \
-// gauth.js - GIS token flow + duplicate button unify (2025-10-07)
-// - Keeps only ONE visible Sign in button (topbar/header preferred).
-// - Wires to Google Identity Services OAuth2 token flow.
-// - After token acquisition, loads gapi client and marks signed-in.
-//
-// Replace CLIENT_ID/API_KEY below with your values (or inject via global).
+// gauth.js - ES Module (GIS token flow + duplicate button unify) - 2025-10-07
 
 const CFG = {
   CLIENT_ID: window.CLIENT_ID || "595200751510-ncahnf7edci6b9925becn5to49r6cguv.apps.googleusercontent.com",
@@ -40,7 +35,6 @@ function findAuthChips(){
 
   let candidates = uniq([...bySelectors, ...textMatches]).filter(isVisible);
 
-  // Prefer elements in topbar/header
   const prefer = candidates.find(el => el.closest('.topbar, header'));
   if (prefer) candidates = uniq([prefer, ...candidates]);
   return candidates;
@@ -49,7 +43,7 @@ function findAuthChips(){
 async function loadGapiIfNeeded(){
   if (window.gapi?.client) return;
   await new Promise((resolve, reject) => {
-    if (!window.gapi?.load) return reject(new Error('[gauth] gapi not loaded. Make sure <script src="https://apis.google.com/js/api.js"></script> is included.'));
+    if (!window.gapi?.load) return reject(new Error('[gauth] gapi not loaded. Include <script src="https://apis.google.com/js/api.js"></script>'));
     window.gapi.load('client', { callback: resolve, onerror: () => reject(new Error('[gauth] gapi.load failed')) });
   });
   await window.gapi.client.init({
@@ -60,19 +54,15 @@ async function loadGapiIfNeeded(){
 
 function ensureGIS(){
   const gis = window.google?.accounts?.oauth2;
-  if (!gis) throw new Error('[gauth] Google Identity Services not loaded. Include https://accounts.google.com/gsi/client');
+  if (!gis) throw new Error('[gauth] Google Identity Services not loaded. Include <script src="https://accounts.google.com/gsi/client" async defer></script>');
   return gis;
 }
 
 export function setupAuth({ chip, onReady, onSignedIn, onSignedOut } = {}) {
-  // Collect & unify chips
   const chips = uniq([chip, ...findAuthChips()]).filter(Boolean);
   if (!chips.length) throw new Error('[gauth] no auth chip/button found');
   const primary = chips[0];
-  // Hide/remove duplicates (keep primary only)
-  chips.slice(1).forEach(el => {
-    try { el.style.display = 'none'; } catch {}
-  });
+  chips.slice(1).forEach(el => { try { el.style.display = 'none'; } catch {} });
 
   const state = { signedIn: false, tokenClient: null };
 
@@ -103,10 +93,7 @@ export function setupAuth({ chip, onReady, onSignedIn, onSignedOut } = {}) {
           client_id: CFG.CLIENT_ID,
           scope: CFG.SCOPES,
           callback: async (resp) => {
-            if (resp.error) {
-              console.error('[gauth] token error', resp);
-              return;
-            }
+            if (resp.error) { console.error('[gauth] token error', resp); return; }
             try {
               await loadGapiIfNeeded();
               if (window.gapi?.client?.setToken) {
@@ -135,7 +122,7 @@ export function setupAuth({ chip, onReady, onSignedIn, onSignedOut } = {}) {
   primary.removeEventListener('click', onChipClick);
   primary.addEventListener('click', onChipClick);
 
-  // Expose a global for compatibility with previous wiring
+  // Expose a global for compatibility (optional)
   window.beginGoogleSignIn = beginGoogleSignIn;
 
   refresh();

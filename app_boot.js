@@ -1,4 +1,4 @@
-// app_boot.js - unchanged from previous patch (2025-10-07)
+// app_boot.js - module (2025-10-07)
 import { ensureViewer } from './viewer.js';
 import { setupUI } from './ui.js';
 import { setupPins } from './pins.js';
