@@ -1,63 +1,46 @@
-// ui.js - v6.6 patched
-import { fetchDriveFileAsArrayBuffer, normalizeDriveIdFromInput } from './utils_drive_api.js';
-
+\
+// ui.js — patched (adds tab wiring + model-loaded dispatch) — 2025-10-07
 export function setupUI(app){
-  const $ = (id)=>document.getElementById(id);
-  const el = {
-    fileId: $('fileIdInput'),
-    btnLoad: $('btnLoad'),
-    slHue: $('slHue'), slSat: $('slSat'), slLight: $('slLight'),
-    slOpacity: $('slOpacity'),
-    btnUnlit: $('btnUnlit'),
-    btnDouble: $('btnDouble'),
-    slWhiteKey: $('slWhiteKey'),
-    chkWhiteKey: $('chkWhiteKey'),
-    matSelect: $('matSelect'),
-  };
+  const inputId = document.getElementById('fileIdInput');
+  const btnLoad = document.getElementById('btnLoad');
+  const spinner = document.getElementById('spinner');
 
-  // material target
-  el.matSelect?.addEventListener('change', ()=>{
-    app.viewer.setMaterialTarget(parseInt(el.matSelect.value,10));
-  });
+  // Tabs
+  (function setupTabs(){
+    const tabs  = Array.from(document.querySelectorAll('.tab[data-tab]'));
+    const panes = Array.from(document.querySelectorAll('.pane'));
+    function activate(name){
+      tabs.forEach(t => t.classList.toggle('active', t.dataset.tab === name));
+      panes.forEach(p => p.classList.toggle('active', p.id === 'pane-' + name));
+    }
+    tabs.forEach(t => t.addEventListener('click', () => activate(t.dataset.tab)));
+    const current = (tabs.find(t=>t.classList.contains('active'))?.dataset.tab) || (tabs[0]?.dataset.tab) || 'cap';
+    activate(current);
+  })();
 
-  function applyHSL(){ app.viewer.setHSL(+el.slHue.value, +el.slSat.value, +el.slLight.value); }
-  function applyOpacity(){ app.viewer.setOpacity(+el.slOpacity.value/100); }
-  el.slHue?.addEventListener('input', applyHSL);
-  el.slSat?.addEventListener('input', applyHSL);
-  el.slLight?.addEventListener('input', applyHSL);
-  el.slOpacity?.addEventListener('input', applyOpacity);
+  async function loadFromInput(){
+    const raw = (inputId?.value || '').trim();
+    if (!raw) return;
+    const id = (typeof normalizeDriveIdFromInput === 'function' ? (normalizeDriveIdFromInput(raw) || raw) : raw);
+    spinner && (spinner.textContent = 'loading model...');
 
-  el.btnUnlit?.addEventListener('click', ()=>{
-    const on = el.btnUnlit.dataset.on === '1' ? 0 : 1;
-    el.btnUnlit.dataset.on = String(on);
-    el.btnUnlit.textContent = 'Unlit: ' + (on?'on':'off');
-    app.viewer.setUnlit(!!on);
-  });
-  el.btnDouble?.addEventListener('click', ()=>{
-    const on = el.btnDouble.dataset.on === '1' ? 0 : 1;
-    el.btnDouble.dataset.on = String(on);
-    el.btnDouble.textContent = 'DoubleSide: ' + (on?'on':'off');
-    app.viewer.setDoubleSide(!!on);
-  });
-
-  el.chkWhiteKey?.addEventListener('change', ()=>{
-    app.viewer.setWhiteKeyEnabled(el.chkWhiteKey.checked);
-  });
-  el.slWhiteKey?.addEventListener('input', ()=>{
-    app.viewer.setWhiteKeyThreshold(+el.slWhiteKey.value/100);
-  });
-
-  el.btnLoad?.addEventListener('click', async ()=>{
     try{
-      const id = normalizeDriveIdFromInput(el.fileId.value);
       const buf = await fetchDriveFileAsArrayBuffer(id);
+      if (!app.viewer || !app.viewer.loadGLB) throw new Error('viewer.loadGLB not available');
       await app.viewer.loadGLB(buf);
       app.state = app.state || {};
       app.state.currentGLBId = id;
       window.dispatchEvent(new CustomEvent('lmy:model-loaded', { detail: { glbId: id } }));
-    } catch(err){
-      console.error('[ui] failed to load', err);
-      alert('Failed to load GLB: '+(err?.message||err));
+    }catch(e){
+      console.error('[ui] failed to load', e);
+      alert('Failed to load GLB: ' + (e?.message || e));
+    }finally{
+      spinner && spinner.remove?.();
     }
-  });
+  }
+
+  btnLoad?.addEventListener('click', loadFromInput);
+  inputId?.addEventListener('keydown', (ev)=>{ if(ev.key==='Enter') loadFromInput(); });
+
+  window.__ui = { loadFromInput };
 }
