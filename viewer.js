@@ -1,31 +1,60 @@
-// viewer.js — ESM via esm.sh (no import map required)
-console.log('[viewer] module loaded');
+// viewer.js - v6.6 patched
+const THREE_URL = 'https://unpkg.com/three@0.157.0/build/three.module.js';
+const GLTF_URL  = 'https://unpkg.com/three@0.157.0/examples/jsm/loaders/GLTFLoader.js';
+const ORBIT_URL = 'https://unpkg.com/three@0.157.0/examples/jsm/controls/OrbitControls.js';
 
-import * as THREE from 'https://esm.sh/three@0.160.1';
-import { GLTFLoader } from 'https://esm.sh/three@0.160.1/examples/jsm/loaders/GLTFLoader.js';
-import { OrbitControls } from 'https://esm.sh/three@0.160.1/examples/jsm/controls/OrbitControls.js';
+export async function ensureViewer({ mount, spinner }) {
+  const THREE = await import(THREE_URL);
+  const { OrbitControls } = await import(ORBIT_URL);
+  const { GLTFLoader } = await import(GLTF_URL);
 
-export async function createViewer(canvas){
-  const renderer = new THREE.WebGLRenderer({canvas, antialias:true, alpha:false});
-  renderer.setPixelRatio(Math.min(2, window.devicePixelRatio||1));
-  renderer.setSize(canvas.clientWidth, canvas.clientHeight, false);
+  const renderer = new THREE.WebGLRenderer({ antialias: true, alpha:false });
+  renderer.setPixelRatio(devicePixelRatio);
+  renderer.setSize(mount.clientWidth, mount.clientHeight);
+  renderer.sortObjects = true;
+  mount.appendChild(renderer.domElement);
+
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x000000);
-  const camera = new THREE.PerspectiveCamera(50, canvas.clientWidth/canvas.clientHeight, 0.01, 2000);
-  camera.position.set(1.6, 0.8, 2.2);
-  const controls = new OrbitControls(camera, canvas);
+  scene.background = new THREE.Color(0x101014);
+
+  const camera = new THREE.PerspectiveCamera(60, mount.clientWidth / Math.max(1,mount.clientHeight), 0.1, 2000);
+  camera.position.set(2.5, 2, 3);
+  const controls = new OrbitControls(camera, renderer.domElement);
   controls.enableDamping = true;
-  scene.add(new THREE.AmbientLight(0xffffff, 0.6));
-  const dir = new THREE.DirectionalLight(0xffffff, 0.8); dir.position.set(2,3,1); scene.add(dir);
 
-  let model = null;
+  const hemi = new THREE.HemisphereLight(0xffffff, 0x222233, 1.0);
+  scene.add(hemi);
 
-  function resize(){
-    const w = canvas.clientWidth, h = canvas.clientHeight;
-    renderer.setSize(w, h, false);
-    camera.aspect = w/h; camera.updateProjectionMatrix();
+  const state = {
+    current: null,
+    materials: [],            // unique THREE.Material[]
+    targetIndex: -1,          // -1 = all
+  };
+
+  function collectUniqueMaterials(root){
+    const arr = [];
+    const seen = new Set();
+    root.traverse((o)=>{
+      if (o.isMesh && o.material){
+        const mats = Array.isArray(o.material) ? o.material : [o.material];
+        for (const m of mats){
+          const key = m.uuid;
+          if (!seen.has(key)){
+            seen.add(key);
+            arr.push(m);
+          }
+          // transparent draw order safety
+          m.depthWrite = !m.transparent;
+        }
+      }
+    });
+    return arr;
   }
-  new ResizeObserver(resize).observe(canvas);
+
+  function applyToTargets(fn){
+    const mats = state.targetIndex < 0 ? state.materials : [state.materials[state.targetIndex]].filter(Boolean);
+    for (const m of mats) fn(m);
+  }
 
   function animate(){
     controls.update();
@@ -34,64 +63,192 @@ export async function createViewer(canvas){
   }
   animate();
 
-  async function loadGLBFromArrayBuffer(ab){
-    const loader = new GLTFLoader();
-    const gltf = await loader.parseAsync(ab, '');
-    if (model) scene.remove(model);
-    model = gltf.scene;
-    scene.add(model);
-    fitCameraToObject(camera, controls, model, 1.2);
-    return model;
+  function onResize(){
+    const w = mount.clientWidth, h = Math.max(1, mount.clientHeight);
+    renderer.setSize(w,h);
+    camera.aspect = w/h;
+    camera.updateProjectionMatrix();
+  }
+  new ResizeObserver(onResize).observe(mount);
+
+  async function loadGLBFromArrayBuffer(buf){
+    // clear previous
+    if (state.current){
+      scene.remove(state.current);
+      state.current.traverse?.((o)=>{
+        if (o.geometry) o.geometry.dispose();
+      });
+    }
+    const { GLTFLoader } = await import(GLTF_URL);
+    const blob = new Blob([buf], {type:'model/gltf-binary'});
+    const url = URL.createObjectURL(blob);
+    try{
+      const gltf = await new GLTFLoader().loadAsync(url);
+      const root = gltf.scene || gltf.scenes?.[0];
+      if (!root) throw new Error('GLB has no scene');
+      scene.add(root);
+      state.current = root;
+      state.materials = collectUniqueMaterials(root);
+      state.targetIndex = -1;
+    } finally {
+      URL.revokeObjectURL(url);
+    }
   }
 
-  function fitCameraToObject(cam, ctrls, object, offset=1.25){
-    const box = new THREE.Box3().setFromObject(object);
-    const size = box.getSize(new THREE.Vector3()).length();
-    const center = box.getCenter(new THREE.Vector3());
-    const halfSizeToFitOnScreen = size * 0.5;
-    const fov = cam.fov * (Math.PI / 180);
-    const distance = halfSizeToFitOnScreen / Math.tan(fov/2) * offset;
-    const dir = new THREE.Vector3(0,0,1);
-    cam.position.copy(center).add(dir.multiplyScalar(distance));
-    cam.near = size/1000; cam.far = size*10; cam.updateProjectionMatrix();
-    ctrls.target.copy(center); ctrls.update();
+  // === material helpers ===
+  function ensureBackup(m){
+    if (!m.userData._lmy) m.userData._lmy = {};
+    const u = m.userData._lmy;
+    if (!u.backup){
+      // minimal clone of togglable props
+      u.backup = {
+        type: m.type,
+        color: m.color ? m.color.clone() : null,
+        map: m.map || null,
+        side: m.side,
+        transparent: m.transparent,
+        opacity: m.opacity,
+        toneMapped: m.toneMapped,
+        lights: m.lights ?? true,
+        onBeforeCompile: m.onBeforeCompile || null,
+      };
+    }
+    return u;
   }
 
-  function applyMaterialDelta({h=0,s=0,l=0,opacity=1}){
-    if (!model) return;
-    model.traverse((obj)=>{
-      const m = obj.material;
-      if (!m) return;
-      if (m.color){
-        const c = m.color.clone();
-        const hsl = {}; c.getHSL(hsl);
-        hsl.h = (hsl.h + (h/360)) % 1; if (hsl.h<0) hsl.h+=1;
-        hsl.s = Math.min(1, Math.max(0, hsl.s + (s/100)));
-        hsl.l = Math.min(1, Math.max(0, hsl.l + (l/100)));
-        c.setHSL(hsl.h,hsl.s,hsl.l);
-        m.color.copy(c);
-      }
-      if ('opacity' in m){
-        m.transparent = opacity < 1 ? true : m.transparent;
-        m.opacity = opacity;
-      }
+  function setHSL(h, s, l){
+    applyToTargets((m)=>{
+      if (!m.color) return;
+      const c = new THREE.Color();
+      c.setHSL(h/360, s/100, l/100);
+      m.color.copy(c);
       m.needsUpdate = true;
     });
   }
 
-  return {
-    THREE,
-    scene, camera, renderer, controls,
-    loadGLBFromArrayBuffer,
-    applyMaterialDelta,
-  };
-}
+  function setOpacity(p){
+    applyToTargets((m)=>{
+      m.transparent = p < 1.0 || m.userData._lmy?.whiteKeyEnabled;
+      m.opacity = p;
+      m.depthWrite = !m.transparent;
+      m.needsUpdate = true;
+    });
+  }
 
-// Google Drive helper (download GLB by fileId + token)
-export async function fetchDriveArrayBuffer(fileId, accessToken){
-  if (!fileId) throw new Error('fileId required');
-  const url = `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?alt=media`;
-  const res = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` }});
-  if (!res.ok) throw new Error('Drive download failed: ' + res.status);
-  return await res.arrayBuffer();
+  function setUnlit(on){
+    applyToTargets((m)=>{
+      const u = ensureBackup(m);
+      if (on){
+        if (m.type !== 'MeshBasicMaterial'){
+          // switch to basic while keeping map/opacity/etc
+          const basic = new THREE.MeshBasicMaterial({
+            map: m.map || null,
+            color: m.color ? m.color.clone() : 0xffffff,
+            transparent: m.transparent,
+            opacity: m.opacity,
+            side: m.side,
+            depthWrite: m.depthWrite,
+            toneMapped: false,
+          });
+          // mark & swap
+          u.swapped = m;
+          u.swappedOriginal = m; // keep reference
+          Object.setPrototypeOf(m, THREE.MeshBasicMaterial.prototype);
+          Object.assign(m, basic);
+          m.needsUpdate = true;
+        }
+      } else {
+        // restore by reapplying backup on the same instance
+        if (u.backup){
+          m.onBeforeCompile = u.backup.onBeforeCompile;
+          m.toneMapped = u.backup.toneMapped;
+          m.lights = u.backup.lights;
+          m.transparent = u.backup.transparent;
+          m.opacity = u.backup.opacity;
+          m.side = u.backup.side;
+          if (u.backup.color && m.color) m.color.copy(u.backup.color);
+          m.map = u.backup.map;
+          // revert prototype if needed
+          if (m.type !== u.backup.type){
+            // reconstruct original Standard material-ish
+            const std = new THREE.MeshStandardMaterial({
+              map: m.map,
+              color: (u.backup.color||new THREE.Color(0xffffff)),
+              transparent: m.transparent,
+              opacity: m.opacity,
+              side: m.side,
+              depthWrite: m.depthWrite,
+            });
+            Object.setPrototypeOf(m, THREE.MeshStandardMaterial.prototype);
+            Object.assign(m, std);
+          }
+          m.needsUpdate = true;
+        }
+      }
+    });
+  }
+
+  function setDoubleSide(on){
+    applyToTargets((m)=>{
+      m.side = on ? THREE.DoubleSide : THREE.FrontSide;
+      m.needsUpdate = true;
+    });
+  }
+
+  // --- white key (white -> alpha) ---
+  function installWhiteKeyShader(m){
+    const u = ensureBackup(m);
+    if (u.whiteKeyInstalled) return;
+    u.whiteKeyInstalled = true;
+    m.onBeforeCompile = (shader)=>{
+      shader.uniforms.uWhiteKey = { value: (u.whiteKeyThreshold ?? 0.97) };
+      shader.fragmentShader = shader.fragmentShader.replace(
+        '#include <dithering_fragment>',
+        `#include <dithering_fragment>
+         float w = max(max(gl_FragColor.r, gl_FragColor.g), gl_FragColor.b);
+         if (w >= uWhiteKey) { gl_FragColor.a = 0.0; }
+        `
+      );
+    };
+    m.transparent = true;
+    m.depthWrite = false;
+    m.needsUpdate = true;
+  }
+  function setWhiteKeyEnabled(on){
+    applyToTargets((m)=>{
+      const u = ensureBackup(m);
+      u.whiteKeyEnabled = on;
+      if (on) installWhiteKeyShader(m);
+      else {
+        // restore shader
+        m.onBeforeCompile = u.backup?.onBeforeCompile || null;
+        m.needsUpdate = true;
+        // transparency might be controlled by opacity separately
+        if (!m.transparent || (m.transparent && m.opacity>=1.0)){
+          m.depthWrite = true;
+        }
+      }
+    });
+  }
+  function setWhiteKeyThreshold(t){
+    applyToTargets((m)=>{
+      const u = ensureBackup(m);
+      u.whiteKeyThreshold = t;
+      installWhiteKeyShader(m);
+      m.needsUpdate = true;
+    });
+  }
+
+  function setMaterialTarget(index){
+    state.targetIndex = index; // -1 = all
+  }
+
+  return {
+    THREE, scene, camera, renderer, controls,
+    loadGLBFromArrayBuffer,
+    loadGLB: loadGLBFromArrayBuffer, // alias
+    setMaterialTarget,
+    setHSL, setOpacity, setUnlit, setDoubleSide,
+    setWhiteKeyEnabled, setWhiteKeyThreshold,
+  };
 }

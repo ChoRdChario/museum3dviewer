@@ -1,62 +1,91 @@
-// gauth.js — GIS-only token flow (no gapi.client dependency)
-console.log('[auth] module loaded');
+// gauth.js — GIS (Google Identity Services) token flow; feeds token to gapi client
+const API_KEY = 'AIzaSyCUnTCr5yWUWPdEXST9bKP1LpgawU5rIbI';
+const CLIENT_ID = '595200751510-ncahnf7edci6b9925becn5to49r6cguv.apps.googleusercontent.com';
+const SCOPES = [
+  'https://www.googleapis.com/auth/drive.readonly',
+  'https://www.googleapis.com/auth/spreadsheets'
+].join(' ');
 
-let ACCESS_TOKEN = null;
+export function setupAuth({ chip, onReady, onSignedIn, onSignedOut }){
+  let gapiReady = false;
+  let gisReady = false;
+  let tokenClient = null;
+  let accessToken = null;
+  let authed = false;
 
-// Expose sign-in callable without touching UI layout.
-export async function signIn({clientId, scopes}){
-  await waitForGIS();
-  return new Promise((resolve, reject)=>{
-    try{
-      const client = google.accounts.oauth2.initTokenClient({
-        client_id: clientId,
-        scope: scopes.join(' '),
-        callback: (resp)=>{
-          if (resp && resp.access_token){
-            ACCESS_TOKEN = resp.access_token;
-            resolve(ACCESS_TOKEN);
-          }else{
-            reject(resp || new Error('No access_token in response'));
-          }
+  function refreshChip(){
+    chip.className = 'chip ' + (authed?'ok':'warn');
+    chip.textContent = authed ? 'Signed in' : 'Sign in';
+  }
+  refreshChip();
+
+  async function loadGapiClient(){
+    await new Promise(r => {
+      if (window.gapi) return r();
+      const t = setInterval(()=>{ if (window.gapi){ clearInterval(t); r(); } }, 50);
+    });
+    await new Promise(res => gapi.load('client', res));
+    await gapi.client.init({
+      apiKey: API_KEY,
+      discoveryDocs: [
+        'https://www.googleapis.com/discovery/v1/apis/drive/v3/rest',
+        'https://sheets.googleapis.com/$discovery/rest?version=v4'
+      ]
+    });
+    gapiReady = true;
+  }
+
+  async function loadGIS(){
+    await new Promise(r => {
+      const t = setInterval(()=>{ if (window.google?.accounts?.oauth2){ clearInterval(t); r(); } }, 50);
+    });
+    tokenClient = google.accounts.oauth2.initTokenClient({
+      client_id: CLIENT_ID,
+      scope: SCOPES,
+      callback: (resp) => {
+        if (resp && resp.access_token){
+          accessToken = resp.access_token;
+          gapi.client.setToken({ access_token });
+          authed = true;
+          refreshChip();
+          onSignedIn?.(null);
+        } else {
+          console.warn('[gauth] token response without access_token', resp);
         }
-      });
-      client.requestAccessToken();
-    }catch(err){
-      reject(err);
-    }
+      }
+    });
+    gisReady = true;
+  }
+
+  async function ensureReady(){
+    if (!gapiReady) await loadGapiClient();
+    if (!gisReady) await loadGIS();
+    onReady?.();
+  }
+
+  async function signIn(){
+    await ensureReady();
+    tokenClient.requestAccessToken({ prompt: accessToken ? '' : 'consent' });
+  }
+
+  async function signOut(){
+    if (!accessToken){ return; }
+    try { await new Promise((res)=> google.accounts.oauth2.revoke(accessToken, res)); } catch(e){}
+    accessToken = null;
+    gapi.client.setToken(null);
+    authed = false;
+    refreshChip();
+    onSignedOut?.();
+  }
+
+  chip.addEventListener('click', async ()=>{
+    try{ if (!authed) await signIn(); else await signOut(); }
+    catch(e){ console.error('[gauth] click error', e); alert('Sign-in failed. See console.'); }
   });
+
+  ensureReady();
+  return {
+    isSigned: ()=> authed,
+    getAccessToken: ()=> accessToken
+  };
 }
-
-export function getAccessToken(){ return ACCESS_TOKEN; }
-export function isSignedIn(){ return !!ACCESS_TOKEN; }
-
-function waitForGIS(){
-  return new Promise((resolve)=>{
-    const ready = ()=> (window.google && google.accounts && google.accounts.oauth2);
-    if (ready()) return resolve();
-    const t = setInterval(()=>{
-      if (ready()){ clearInterval(t); resolve(); }
-    }, 50);
-  });
-}
-
-// Optional: helper to bind common buttons without changing HTML.
-export function autoBindSigninButton(opts){
-  const cands = [
-    '#auth-btn','#btnSignIn','#btnSignin','#btnLogin',
-    '[data-action="signin"]','[data-role="signin"]',
-    'button.signin','button.login'
-  ];
-  const el = cands.map(sel=>document.querySelector(sel)).find(Boolean);
-  if (!el) return;
-  const { clientId, scopes, onChange } = opts;
-  el.addEventListener('click', async ()=>{
-    try{ await signIn({clientId, scopes}); onChange && onChange(true); }
-    catch(e){ console.error('[auth] sign-in failed', e); onChange && onChange(false); }
-  }, { once:false });
-}
-
-// Global hook if HTML already has onclick handlers.
-window.locimyuSignIn = async function(clientId, scopes){
-  try{ await signIn({clientId, scopes}); return true; }catch(e){ console.error(e); return false; }
-};

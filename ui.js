@@ -1,51 +1,60 @@
-// ui.js — keep layout; add captions wiring
-import { getAccessToken, signIn, autoBindSigninButton } from './gauth.js';
-import { createViewer, fetchDriveArrayBuffer } from './viewer.js';
-import { wireCaptions } from './ui.captions.patch.js';
+// ui.js - v6.6 patched
+import { fetchDriveFileAsArrayBuffer, normalizeDriveIdFromInput } from './utils_drive_api.js';
 
-console.log('[ui] module loaded');
+export function setupUI(app){
+  const $ = (id)=>document.getElementById(id);
+  const el = {
+    fileId: $('fileIdInput'),
+    btnLoad: $('btnLoad'),
+    slHue: $('slHue'), slSat: $('slSat'), slLight: $('slLight'),
+    slOpacity: $('slOpacity'),
+    btnUnlit: $('btnUnlit'),
+    btnDouble: $('btnDouble'),
+    slWhiteKey: $('slWhiteKey'),
+    chkWhiteKey: $('chkWhiteKey'),
+    matSelect: $('matSelect'),
+  };
 
-const canvas = document.getElementById('viewer') || document.querySelector('canvas#viewer') || document.querySelector('canvas');
-let viewer = null;
-(async ()=>{
-  if (canvas){
-    viewer = await createViewer(canvas);
-    // Wire captions tab on top of existing UI
-    wireCaptions(viewer);
-  }
-})();
+  // material target
+  el.matSelect?.addEventListener('change', ()=>{
+    app.viewer.setMaterialTarget(parseInt(el.matSelect.value,10));
+  });
 
-// Auth
-const CLIENT_ID = '595200751510-ncahnf7edci6b9925becn5to49r6cguv.apps.googleusercontent.com';
-const SCOPES = ['https://www.googleapis.com/auth/drive.readonly'];
+  function applyHSL(){ app.viewer.setHSL(+el.slHue.value, +el.slSat.value, +el.slLight.value); }
+  function applyOpacity(){ app.viewer.setOpacity(+el.slOpacity.value/100); }
+  el.slHue?.addEventListener('input', applyHSL);
+  el.slSat?.addEventListener('input', applyHSL);
+  el.slLight?.addEventListener('input', applyHSL);
+  el.slOpacity?.addEventListener('input', applyOpacity);
 
-function setAuthStatus(ok){
-  const statusEls = ['#auth-status','.auth-status','[data-role="auth-status"]'].map(s=>document.querySelector(s)).filter(Boolean);
-  statusEls.forEach(el=> el.textContent = ok ? 'Signed in' : 'Signed out');
-}
-autoBindSigninButton({
-  clientId: CLIENT_ID,
-  scopes: SCOPES,
-  onChange: (ok)=> setAuthStatus(ok)
-});
+  el.btnUnlit?.addEventListener('click', ()=>{
+    const on = el.btnUnlit.dataset.on === '1' ? 0 : 1;
+    el.btnUnlit.dataset.on = String(on);
+    el.btnUnlit.textContent = 'Unlit: ' + (on?'on':'off');
+    app.viewer.setUnlit(!!on);
+  });
+  el.btnDouble?.addEventListener('click', ()=>{
+    const on = el.btnDouble.dataset.on === '1' ? 0 : 1;
+    el.btnDouble.dataset.on = String(on);
+    el.btnDouble.textContent = 'DoubleSide: ' + (on?'on':'off');
+    app.viewer.setDoubleSide(!!on);
+  });
 
-// Loader wiring
-const fileIdInput = document.querySelector('#fileId, input[name="fileId"], input[data-role="fileId"]');
-const btnLoad = document.querySelector('#btnLoad, button[data-role="load"], button.load');
+  el.chkWhiteKey?.addEventListener('change', ()=>{
+    app.viewer.setWhiteKeyEnabled(el.chkWhiteKey.checked);
+  });
+  el.slWhiteKey?.addEventListener('input', ()=>{
+    app.viewer.setWhiteKeyThreshold(+el.slWhiteKey.value/100);
+  });
 
-if (btnLoad && fileIdInput){
-  btnLoad.addEventListener('click', async ()=>{
-    if (!viewer){ alert('viewer not ready'); return; }
-    const token = getAccessToken();
-    if (!token){ alert('Sign in first'); return; }
-    const fileId = fileIdInput.value.trim();
-    if (!fileId){ alert('fileId is empty'); return; }
+  el.btnLoad?.addEventListener('click', async ()=>{
     try{
-      const ab = await fetchDriveArrayBuffer(fileId, token);
-      await viewer.loadGLBFromArrayBuffer(ab);
+      const id = normalizeDriveIdFromInput(el.fileId.value);
+      const buf = await fetchDriveFileAsArrayBuffer(id);
+      await app.viewer.loadGLB(buf);
     }catch(err){
-      console.error(err);
-      alert('Load failed: ' + err.message);
+      console.error('[ui] failed to load', err);
+      alert('Failed to load GLB: '+(err?.message||err));
     }
   });
 }
