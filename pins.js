@@ -284,10 +284,48 @@ export function setupPins(app){
     for (const p of pins){
       const vis = (f==='all') || (p.color.toLowerCase() === f.toLowerCase());
       p.obj.visible = vis;
-      if (selected && selected.id===p.id && !vis) hideOverlay();
+      if (selected && selected.id===p.id && !vis) { selected = null; hideOverlay(); }
     }
   }
   pinFilter.addEventListener('change', applyFilter);
+
+// -- color chips for pin filter (matches PALETTE keys)
+const FILTER_COLORS = [
+  {key:'all',    hex:'#bbb',     title:'All'},
+  {key:'amber',  hex:'#ffcc55',  title:'amber'},
+  {key:'sky',    hex:'#55ccff',  title:'sky'},
+  {key:'lime',   hex:'#a3e635',  title:'lime'},
+  {key:'rose',   hex:'#f43f5e',  title:'rose'},
+  {key:'violet', hex:'#8b5cf6',  title:'violet'},
+  {key:'slate',  hex:'#94a3b8',  title:'slate'},
+];
+
+(function setupFilterChips(){
+  const row = document.getElementById('pinFilterChips');
+  const sel = document.getElementById('pinFilter');
+  if (!row) return;
+  row.innerHTML = '';
+  FILTER_COLORS.forEach(c=>{
+    const b = document.createElement('button');
+    b.className = 'chip'; b.dataset.key = c.key; b.title = c.title;
+    b.style.background = c.hex;
+    b.addEventListener('click', ()=>{
+      sel && (sel.value = (c.key==='all' ? 'all' : c.key));
+      applyFilter();
+      row._highlight && row._highlight();
+    });
+    row.appendChild(b);
+  });
+  row._highlight = function(){
+    const cur = (sel && sel.value) || 'all';
+    const k = String(cur).toLowerCase();
+    [...row.children].forEach(el=>{
+      el.classList.toggle('active', el.dataset.key === (k==='all'?'all':k));
+    });
+  };
+  row._highlight();
+})();
+
 
   // click on canvas
   app.viewer.renderer.domElement.addEventListener('click', (e)=>{
@@ -312,7 +350,7 @@ export function setupPins(app){
     if (Math.sqrt(bestD2) < 24) selectPin(best);
   });
 
-  btnAdd.addEventListener('click', ()=>{
+  btnAdd && btnAdd.addEventListener('click', ()=>{
     const rect = app.viewer.renderer.domElement.getBoundingClientRect();
     const cx = rect.left + rect.width/2, cy = rect.top + rect.height/2;
     const hit = app.viewer.raycastFromClientXY(cx, cy);
