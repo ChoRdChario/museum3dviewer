@@ -1,4 +1,4 @@
-\
+
 // gauth.module.js - ES Module (GIS token flow + duplicate button unify) - 2025-10-07
 
 const CFG = {
