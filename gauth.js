@@ -1,7 +1,23 @@
-// gauth.js - patched (2025-10-07)
-// Auto-detect the visible "Sign in" chip/button (prefer top-right) and unify click wiring.
-// If your real GIS/GAPI sign-in function exists on window (beginGoogleSignIn / handleSignIn / signIn),
-// this will call it; otherwise, it dispatches a 'auth:click' CustomEvent you can listen to.
+\
+// gauth.js - GIS token flow + duplicate button unify (2025-10-07)
+// - Keeps only ONE visible Sign in button (topbar/header preferred).
+// - Wires to Google Identity Services OAuth2 token flow.
+// - After token acquisition, loads gapi client and marks signed-in.
+//
+// Replace CLIENT_ID/API_KEY below with your values (or inject via global).
+
+const CFG = {
+  CLIENT_ID: window.CLIENT_ID || "595200751510-ncahnf7edci6b9925becn5to49r6cguv.apps.googleusercontent.com",
+  API_KEY: window.API_KEY || "AIzaSyCUnTCr5yWUWPdEXST9bKP1LpgawU5rIbI",
+  SCOPES: [
+    "https://www.googleapis.com/auth/drive.readonly",
+    "https://www.googleapis.com/auth/spreadsheets"
+  ].join(" "),
+  DISCOVERY_DOCS: [
+    "https://www.googleapis.com/discovery/v1/apis/drive/v3/rest",
+    "https://sheets.googleapis.com/$discovery/rest?version=v4"
+  ]
+};
 
 function uniq(arr){ return Array.from(new Set(arr.filter(Boolean))); }
 function isVisible(el){ return !!(el && el.offsetParent !== null); }
@@ -19,94 +35,116 @@ function findAuthChips(){
     'header button'
   ].flatMap(sel => Array.from(document.querySelectorAll(sel)));
 
-  // Also try a text-based fallback inside top bar/header
   const textMatches = Array.from(document.querySelectorAll('header *, .topbar *'))
     .filter(el => /sign\s*in/i.test(el.textContent || ''));
 
-  // Merge and keep only visible interactive-ish elements
   let candidates = uniq([...bySelectors, ...textMatches]).filter(isVisible);
 
   // Prefer elements in topbar/header
   const prefer = candidates.find(el => el.closest('.topbar, header'));
-  if (prefer) {
-    // Keep prefer first
-    candidates = uniq([prefer, ...candidates]);
-  }
+  if (prefer) candidates = uniq([prefer, ...candidates]);
   return candidates;
 }
 
-export function setupAuth({ chip, onReady, onSignedIn, onSignedOut } = {}) {
-  // Collect chips: explicit > auto-detected
-  const chips = uniq([chip, ...findAuthChips()]).filter(Boolean);
-  if (!chips.length) throw new Error('[gauth] no auth chip/button found (try giving it id=\"authChip\").');
+async function loadGapiIfNeeded(){
+  if (window.gapi?.client) return;
+  await new Promise((resolve, reject) => {
+    if (!window.gapi?.load) return reject(new Error('[gauth] gapi not loaded. Make sure <script src="https://apis.google.com/js/api.js"></script> is included.'));
+    window.gapi.load('client', { callback: resolve, onerror: () => reject(new Error('[gauth] gapi.load failed')) });
+  });
+  await window.gapi.client.init({
+    apiKey: CFG.API_KEY,
+    discoveryDocs: CFG.DISCOVERY_DOCS
+  });
+}
 
-  // Primary chip is the first one (usually the top-right orange button)
+function ensureGIS(){
+  const gis = window.google?.accounts?.oauth2;
+  if (!gis) throw new Error('[gauth] Google Identity Services not loaded. Include https://accounts.google.com/gsi/client');
+  return gis;
+}
+
+export function setupAuth({ chip, onReady, onSignedIn, onSignedOut } = {}) {
+  // Collect & unify chips
+  const chips = uniq([chip, ...findAuthChips()]).filter(Boolean);
+  if (!chips.length) throw new Error('[gauth] no auth chip/button found');
   const primary = chips[0];
-  const state = { signedIn: false };
+  // Hide/remove duplicates (keep primary only)
+  chips.slice(1).forEach(el => {
+    try { el.style.display = 'none'; } catch {}
+  });
+
+  const state = { signedIn: false, tokenClient: null };
 
   function paint(el){
     if (!el) return;
-    const isButton = el.tagName === 'BUTTON' || el.getAttribute('role') === 'button';
     const wantText = state.signedIn ? 'Signed in' : 'Sign in';
-    // Class & text harmonization (non-destructive)
     try { el.classList.toggle('ok', state.signedIn); } catch {}
     try { el.classList.toggle('warn', !state.signedIn); } catch {}
     if ((el.textContent || '').trim().toLowerCase() !== wantText.toLowerCase()){
-      if (!el.hasAttribute('data-auth-text-lock')) el.textContent = wantText;
+      el.textContent = wantText;
     }
-    if (isButton && !el.type) el.type = 'button';
     el.setAttribute('aria-pressed', state.signedIn ? 'true' : 'false');
+    if (el.tagName === 'BUTTON' && !el.type) el.type = 'button';
+  }
+  function refresh(){ paint(primary); }
+
+  function setSignedIn(v){
+    state.signedIn = !!v;
+    refresh();
+    if (state.signedIn) onSignedIn?.(); else onSignedOut?.();
   }
 
-  function refreshAll(){ chips.forEach(paint); }
-
-  async function triggerSignIn(){
-    // Call your real sign-in function if present
-    const fn = (window.beginGoogleSignIn || window.handleSignIn || window.signIn);
-    if (typeof fn === 'function'){
-      try {
-        const ret = fn();
-        if (ret && typeof ret.then === 'function') await ret;
-        // state change should be driven by your auth callback;
-        // as a visual cue we can optimistically flip, but better to wait:
-        // setSignedIn(true);
-      } catch (err){
-        console.error('[gauth] sign-in failed', err);
+  async function beginGoogleSignIn(){
+    try {
+      const gis = ensureGIS();
+      if (!state.tokenClient){
+        state.tokenClient = gis.initTokenClient({
+          client_id: CFG.CLIENT_ID,
+          scope: CFG.SCOPES,
+          callback: async (resp) => {
+            if (resp.error) {
+              console.error('[gauth] token error', resp);
+              return;
+            }
+            try {
+              await loadGapiIfNeeded();
+              if (window.gapi?.client?.setToken) {
+                window.gapi.client.setToken({ access_token: resp.access_token });
+              }
+              setSignedIn(true);
+              console.log('[gauth] signed in (token acquired)');
+            } catch (e) {
+              console.error('[gauth] post-token init failed', e);
+            }
+          }
+        });
       }
-    } else {
-      // Fallback: emit an event; your auth module can listen for it
-      document.dispatchEvent(new CustomEvent('auth:click', { bubbles: true }));
-      console.warn('[gauth] no sign-in function found; dispatched CustomEvent \'auth:click\'');
+      const haveToken = !!(window.gapi?.client?.getToken?.()?.access_token);
+      state.tokenClient.requestAccessToken({ prompt: haveToken ? '' : 'consent' });
+    } catch (e) {
+      console.error('[gauth] sign-in start failed', e);
     }
   }
 
   function onChipClick(ev){
     ev.preventDefault();
-    triggerSignIn();
+    beginGoogleSignIn();
   }
 
-  // Wire all chips, prefer the primary location
-  chips.forEach(el => {
-    el.removeEventListener('click', onChipClick);
-    el.addEventListener('click', onChipClick);
-    el.setAttribute('data-auth-chip', ''); // mark
-  });
+  primary.removeEventListener('click', onChipClick);
+  primary.addEventListener('click', onChipClick);
 
-  function setSignedIn(v){
-    state.signedIn = !!v;
-    refreshAll();
-    if (state.signedIn) onSignedIn?.(); else onSignedOut?.();
-  }
+  // Expose a global for compatibility with previous wiring
+  window.beginGoogleSignIn = beginGoogleSignIn;
 
-  // Initial paint
-  refreshAll();
+  refresh();
   onReady?.();
 
   return {
     isSignedIn(){ return !!state.signedIn; },
     setSignedIn,
-    refresh: refreshAll,
-    elements: chips,
-    primary
+    refresh,
+    element: primary
   };
 }
