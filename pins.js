@@ -208,7 +208,6 @@ export function setupPins(app){
   });
 
   function selectPin(rec){
-  removeGuideLine();
     selected = rec || null;
     if (!rec){ hideOverlay(); return; }
     titleInput.value = rec.title || '';
@@ -286,9 +285,7 @@ export function setupPins(app){
       const vis = (f==='all') || (p.color.toLowerCase() === f.toLowerCase());
       p.obj.visible = vis;
       if (selected && selected.id===p.id && !vis) hideOverlay();
-    
-  if (selectedPin && typeof isPinVisible==='function' && !isPinVisible(selectedPin)) { deselectPin(); }
-}
+    }
   }
   pinFilter.addEventListener('change', applyFilter);
 
@@ -463,47 +460,20 @@ export function setupPins(app){
 }
 
 
-function deselectPin(){
-  selectedPin = null;
-  removeGuideLine();
-}
-
-
-// patch: color chips for filter
-const FILTER_COLORS = [
-  {key:'all',    hex:'#bbb',    title:'All'},
-  {key:'yellow', hex:'#facc15', title:'yellow'},
-  {key:'sky',    hex:'#60a5fa', title:'sky'},
-  {key:'lime',   hex:'#84cc16', title:'lime'},
-  {key:'orange', hex:'#f59e0b', title:'orange'},
-  {key:'purple', hex:'#a78bfa', title:'purple'},
-  {key:'pink',   hex:'#f472b6', title:'pink'},
-  {key:'gray',   hex:'#9ca3af', title:'gray'},
-];
-function setupFilterChips(){
-  const row = document.getElementById('pinFilterChips');
-  if (!row) return;
-  row.innerHTML = '';
-  FILTER_COLORS.forEach(c=>{
-    const b = document.createElement('button');
-    b.className = 'chip';
-    b.dataset.key = c.key;
-    b.title = c.title;
-    b.style.background = c.hex;
-    b.addEventListener('click', ()=>{
-      if (typeof applyFilter==='function'){
-        applyFilter(c.key==='all' ? 'All' : c.key);
-      }
-      row._highlight?.();
-    });
-    row.appendChild(b);
-  });
-  row._highlight = function(){
-    const k = (state?.filter || 'All').toLowerCase();
-    [...row.children].forEach(el=>{
-      el.classList.toggle('active', el.dataset.key === (k==='all'?'all':k));
-    });
-  };
-  row._highlight();
-}
-try{ setupFilterChips(); }catch(e){ console.warn('[pins] setupFilterChips failed', e); }
+try{
+  (function(){
+    const row = document.getElementById('pinFilterChips');
+    if (!row) return;
+    row._highlight = function(){
+      const sel = document.getElementById('pinFilter');
+      const cur = (typeof state !== 'undefined' && state && state.filter)
+               || (sel && sel.value)
+               || 'All';
+      const k = String(cur).toLowerCase();
+      [...row.children].forEach(el=>{
+        el.classList.toggle('active', el.dataset.key === (k==='all'?'all':k));
+      });
+    };
+    row._highlight();
+  })();
+}catch(e){ console.warn('[pins] chips highlight fix failed', e); }
