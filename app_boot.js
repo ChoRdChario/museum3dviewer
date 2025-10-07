@@ -1,5 +1,5 @@
 // app_boot.js - patched (2025-10-07)
-// Pass the auth chip to setupAuth and keep its return value.
+// Let gauth.js auto-detect the visible Sign in chip/button and unify handlers.
 
 import { ensureViewer } from './viewer.js';
 import { setupUI } from './ui.js';
@@ -35,13 +35,12 @@ const app = {
     console.error('[boot] setupPins failed', e);
   }
 
-  // IMPORTANT: Provide chip element so click handler can attach
+  // IMPORTANT: do not pass chip; gauth will auto-detect and unify
   try {
     app.auth = setupAuth({
-      chip: document.getElementById('authChip'),
-      onReady(){ /* optional hook */ },
-      onSignedIn(){ /* optional hook */ },
-      onSignedOut(){ /* optional hook */ },
+      onReady(){ /* optional */ },
+      onSignedIn(){ /* optional */ },
+      onSignedOut(){ /* optional */ },
     });
   } catch (e) {
     console.error('[boot] setupAuth failed', e);
