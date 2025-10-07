@@ -243,6 +243,31 @@ export async function ensureViewer({ mount, spinner }) {
     state.targetIndex = index; // -1 = all
   }
 
+  // === Picking: provide raycastFromClientXY used by pins.js ===
+  // returns THREE.Intersection or null
+  const _raycaster = new THREE.Raycaster();
+  function raycastFromClientXY(evOrX, yOpt){
+    const canvas = renderer?.domElement;
+    if (!canvas || !camera) return null;
+
+    // allow (event) or (x, y)
+    let x, y;
+    if (typeof evOrX === 'number') { x = evOrX; y = yOpt; }
+    else { x = evOrX?.clientX; y = evOrX?.clientY; }
+    if (typeof x !== 'number' || typeof y !== 'number') return null;
+
+    const r = canvas.getBoundingClientRect();
+    const ndcX = ((x - r.left) / r.width) * 2 - 1;
+    const ndcY = -((y - r.top)  / r.height) * 2 + 1;
+
+    _raycaster.setFromCamera({ x: ndcX, y: ndcY }, camera);
+
+    // pick from the model root if loaded、未ロード時は scene 全体
+    const root = state.current || scene;
+    const hits = _raycaster.intersectObjects(root.children, true);
+    return (hits && hits.length) ? hits[0] : null;
+  }
+
   return {
     THREE, scene, camera, renderer, controls,
     loadGLBFromArrayBuffer,
@@ -250,5 +275,6 @@ export async function ensureViewer({ mount, spinner }) {
     setMaterialTarget,
     setHSL, setOpacity, setUnlit, setDoubleSide,
     setWhiteKeyEnabled, setWhiteKeyThreshold,
+    raycastFromClientXY, // ← 追加
   };
 }
