@@ -1,4 +1,3 @@
-\
 // utils_drive_api.js - ES Module (2025-10-07)
 // Provides: normalizeDriveIdFromInput, fetchDriveFileAsArrayBuffer, fetchDriveFileMetadata, getAccessToken
 
