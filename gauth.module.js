@@ -1,4 +1,3 @@
-\
 // gauth.module.js - token bridge + GIS flow (2025-10-07)
 const CFG = {
   CLIENT_ID: window.CLIENT_ID || "595200751510-ncahnf7edci6b9925becn5to49r6cguv.apps.googleusercontent.com",
