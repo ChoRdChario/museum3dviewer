@@ -1,4 +1,6 @@
-// ui.js — patched (adds tab wiring + model-loaded dispatch) — 2025-10-07
+// ui.js — import-fix + tab wiring + model-loaded dispatch — 2025-10-07
+import { fetchDriveFileAsArrayBuffer, normalizeDriveIdFromInput } from './utils_drive_api.js';
+
 export function setupUI(app){
   const inputId = document.getElementById('fileIdInput');
   const btnLoad = document.getElementById('btnLoad');
@@ -17,11 +19,11 @@ export function setupUI(app){
     activate(current);
   })();
 
-  async function loadFromInput(){
+  async function loadFromInput(ev){
     const raw = (inputId?.value || '').trim();
     if (!raw) return;
-    const id = (typeof normalizeDriveIdFromInput === 'function' ? (normalizeDriveIdFromInput(raw) || raw) : raw);
-    spinner && (spinner.textContent = 'loading model...');
+    const id = normalizeDriveIdFromInput(raw) || raw;
+    if (spinner) spinner.textContent = 'loading model...';
 
     try{
       const buf = await fetchDriveFileAsArrayBuffer(id);
@@ -39,7 +41,7 @@ export function setupUI(app){
   }
 
   btnLoad?.addEventListener('click', loadFromInput);
-  inputId?.addEventListener('keydown', (ev)=>{ if(ev.key==='Enter') loadFromInput(); });
+  inputId?.addEventListener('keydown', (ev)=>{ if(ev.key==='Enter') loadFromInput(ev); });
 
   window.__ui = { loadFromInput };
 }
