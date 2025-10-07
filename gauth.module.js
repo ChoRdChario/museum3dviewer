@@ -1,6 +1,5 @@
-
-// gauth.module.js - ES Module (GIS token flow + duplicate button unify) - 2025-10-07
-
+\
+// gauth.module.js - token bridge + GIS flow (2025-10-07)
 const CFG = {
   CLIENT_ID: window.CLIENT_ID || "595200751510-ncahnf7edci6b9925becn5to49r6cguv.apps.googleusercontent.com",
   API_KEY: window.API_KEY || "AIzaSyCUnTCr5yWUWPdEXST9bKP1LpgawU5rIbI",
@@ -19,22 +18,12 @@ function isVisible(el){ return !!(el && el.offsetParent !== null); }
 
 function findAuthChips(){
   const bySelectors = [
-    '#authChip',
-    '[data-auth="chip"]',
-    '#topSignInBtn',
-    'button.signin',
-    '.auth-chip',
-    '.topbar .chip',
-    '.topbar button',
-    'header .chip',
-    'header button'
+    '#authChip','[data-auth=\"chip\"]','#topSignInBtn','button.signin','.auth-chip',
+    '.topbar .chip','.topbar button','header .chip','header button'
   ].flatMap(sel => Array.from(document.querySelectorAll(sel)));
-
   const textMatches = Array.from(document.querySelectorAll('header *, .topbar *'))
     .filter(el => /sign\s*in/i.test(el.textContent || ''));
-
   let candidates = uniq([...bySelectors, ...textMatches]).filter(isVisible);
-
   const prefer = candidates.find(el => el.closest('.topbar, header'));
   if (prefer) candidates = uniq([prefer, ...candidates]);
   return candidates;
@@ -46,10 +35,7 @@ async function loadGapiIfNeeded(){
     if (!window.gapi?.load) return reject(new Error('[gauth] gapi not loaded. Include <script src=\"https://apis.google.com/js/api.js\"></script>'));
     window.gapi.load('client', { callback: resolve, onerror: () => reject(new Error('[gauth] gapi.load failed')) });
   });
-  await window.gapi.client.init({
-    apiKey: CFG.API_KEY,
-    discoveryDocs: CFG.DISCOVERY_DOCS
-  });
+  await window.gapi.client.init({ apiKey: CFG.API_KEY, discoveryDocs: CFG.DISCOVERY_DOCS });
 }
 
 function ensureGIS(){
@@ -69,12 +55,12 @@ export function setupAuth({ chip, onReady, onSignedIn, onSignedOut } = {}) {
   function paint(el){
     if (!el) return;
     const wantText = state.signedIn ? 'Signed in' : 'Sign in';
-    try { el.classList.toggle('ok', state.signedIn); } catch {}
-    try { el.classList.toggle('warn', !state.signedIn); } catch {}
+    el.classList.toggle?.('ok', state.signedIn);
+    el.classList.toggle?.('warn', !state.signedIn);
     if ((el.textContent || '').trim().toLowerCase() !== wantText.toLowerCase()){
       el.textContent = wantText;
     }
-    el.setAttribute('aria-pressed', state.signedIn ? 'true' : 'false');
+    el.setAttribute?.('aria-pressed', state.signedIn ? 'true' : 'false');
     if (el.tagName === 'BUTTON' && !el.type) el.type = 'button';
   }
   function refresh(){ paint(primary); }
@@ -95,6 +81,11 @@ export function setupAuth({ chip, onReady, onSignedIn, onSignedOut } = {}) {
           callback: async (resp) => {
             if (resp.error) { console.error('[gauth] token error', resp); return; }
             try {
+              // 1) Remember token for modules that don't use gapi directly
+              window.ACCESS_TOKEN = resp.access_token;
+              document.dispatchEvent(new CustomEvent('auth:token', { detail: { access_token: resp.access_token }}));
+
+              // 2) Init gapi client and propagate token (if your utils use gapi.client.getToken)
               await loadGapiIfNeeded();
               if (window.gapi?.client?.setToken) {
                 window.gapi.client.setToken({ access_token: resp.access_token });
@@ -122,8 +113,11 @@ export function setupAuth({ chip, onReady, onSignedIn, onSignedOut } = {}) {
   primary.removeEventListener('click', onChipClick);
   primary.addEventListener('click', onChipClick);
 
-  // Optional: expose global for compatibility
+  // Optional global for backward compatibility
   window.beginGoogleSignIn = beginGoogleSignIn;
+  window.getAccessToken = function(){
+    return window.gapi?.client?.getToken?.()?.access_token || window.ACCESS_TOKEN || null;
+  };
 
   refresh();
   onReady?.();
