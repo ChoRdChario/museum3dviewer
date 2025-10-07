@@ -606,3 +606,13 @@ try{
     row._highlight();
   })();
 }catch(e){ console.warn('[pins] chips highlight fix failed', e); }
+
+// extra: robust open handler (capture on wrapper)
+(function(){
+  const wrap = document.getElementById('pinFilterCustom');
+  const trigger = document.getElementById('pinFilterTrigger');
+  if (!wrap || !trigger) return;
+  wrap.addEventListener('click', (e)=>{
+    if (e.target === wrap) { trigger.click(); }
+  }, true);
+})();

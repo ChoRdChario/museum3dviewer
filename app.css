@@ -18,3 +18,8 @@ select#pinFilter { font-size: 14px; }
 .fs-option{ display:flex; align-items:center; gap:.6rem; padding:.35rem .5rem; border-radius:.3rem; cursor:pointer; color:#e5e7eb; }
 .fs-option .dot{ width:12px; height:12px; border-radius:50%; border:1px solid rgba(0,0,0,.35); display:inline-block; }
 .fs-option[aria-selected="true"], .fs-option:hover{ background:rgba(255,255,255,.08); }
+
+#pinFilterChips{display:none!important;}
+
+.fs-trigger::after{ content:'▾'; font-size:.9rem; margin-left:.25rem; opacity:.8; }
+.filter-select{ margin-left:.5rem; vertical-align:middle; }
