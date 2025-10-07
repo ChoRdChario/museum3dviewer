@@ -97,9 +97,12 @@ export function setupPins(app){
   const imageCache = new Map(); // fileId -> objectURL
 
   function setupPalette(){
-    pinPalette.innerHTML = PALETTE.map((c,i)=>`<div class="sw${i===0?' active':''}" data-hex="${c.hex}" title="${c.key}" style="background:${c.hex};width:24px;height:24px;border-radius:999px;border:2px solid #0003;cursor:pointer;box-shadow:0 0 0 2px #222"></div>`).join('');
-    pinPalette.querySelectorAll('.sw').forEach(sw=> sw.addEventListener('click', ()=>{
-      pinPalette.querySelectorAll('.sw').forEach(x=> x.classList.remove('active'));
+  const pinPaletteEl = document.getElementById('pinPalette');
+  const pinFilterEl = document.getElementById('pinFilter');
+  if (!pinPaletteEl){ console.warn('[pins] pinPalette missing'); return; }
+    pinPaletteEl.innerHTML = PALETTE.map((c,i)=>`<div class="sw${i===0?' active':''}" data-hex="${c.hex}" title="${c.key}" style="background:${c.hex};width:24px;height:24px;border-radius:999px;border:2px solid #0003;cursor:pointer;box-shadow:0 0 0 2px #222"></div>`).join('');
+    pinPaletteEl.querySelectorAll('.sw').forEach(sw=> sw.addEventListener('click', ()=>{
+      pinPaletteEl.querySelectorAll('.sw').forEach(x=> x.classList.remove('active'));
       sw.classList.add('active');
       currentColor = sw.dataset.hex;
       if (selected){
@@ -107,7 +110,7 @@ export function setupPins(app){
         halo.style.stroke = currentColor;
       }
     }));
-    pinFilter.innerHTML = '<option value="all">(All)</option>' + PALETTE.map(c=>`<option value="${c.hex}">${c.key}</option>`).join('');
+    pinFilterEl.innerHTML = '<option value="all">(All)</option>' + PALETTE.map(c=>`<option value="${c.hex}">${c.key}</option>`).join('');
   }
   setupPalette();
 
