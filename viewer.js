@@ -1,9 +1,9 @@
-// viewer.js — ESM with import map
+// viewer.js — ESM via esm.sh (no import map required)
 console.log('[viewer] module loaded');
 
-import * as THREE from 'three';
-import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import * as THREE from 'https://esm.sh/three@0.160.1';
+import { GLTFLoader } from 'https://esm.sh/three@0.160.1/examples/jsm/loaders/GLTFLoader.js';
+import { OrbitControls } from 'https://esm.sh/three@0.160.1/examples/jsm/controls/OrbitControls.js';
 
 export async function createViewer(canvas){
   const renderer = new THREE.WebGLRenderer({canvas, antialias:true, alpha:false});
