@@ -1,39 +1,32 @@
 
-// ui.js — binds existing controls without changing UI structure
-export function setupUI(app){
-  const pick = (...sels)=>sels.map(s=>document.querySelector(s)).find(el=>el);
+// ui.js — 最小のUI配線、安全ガード付き
+export function setupUI(mod) {
+  document.addEventListener('DOMContentLoaded', () => {
+    const input = document.querySelector('[data-drive-id]') || document.getElementById('drive-id') || document.getElementById('gdrive-id');
+    const btn   = document.querySelector('[data-btn-load]') || document.getElementById('btn-load') || document.getElementById('btnLoad');
 
-  // Load button
-  const btnLoad = pick('#btnLoad', '#btn-glb', 'button[data-load]', 'button#load-glb');
-  if (btnLoad) {
-    btnLoad.addEventListener('click', async ()=>{
-      try{
-        await app.viewer.loadByInput();
-      }catch(err){
-        alert('[ui] failed to load ' + (err?.message||err));
-        console.error(err);
+    if (!input || !btn) {
+      console.warn('[ui] input/button not found; skip wiring');
+      return;
+    }
+
+    btn.addEventListener('click', async () => {
+      try {
+        if (!(globalThis.app && app.auth && typeof app.auth.isSignedIn === 'function' && app.auth.isSignedIn())) {
+          alert('サインインしてから読み込んでください。');
+          return;
+        }
+        const v = input.value.trim();
+        if (!v) {
+          alert('Google Drive の fileId または共有URL を入力してください。');
+          return;
+        }
+        await app.viewer.loadByInput(v);
+      } catch (e) {
+        console.error(e);
+        alert('GLBの読み込みに失敗しました（詳細はコンソール）');
       }
     });
-  }
-
-  // HSL/Opacity sliders (optional, binds if present)
-  const hue = pick('#hue', 'input[name="hue"]');
-  const sat = pick('#sat', 'input[name="sat"]');
-  const lig = pick('#light', '#lig', 'input[name="light"]');
-  const op  = pick('#opacity', 'input[name="opacity"]');
-  const apply = ()=>{
-    if (!app.viewer || !app.viewer.setHSLOpacity) return;
-    const h = hue ? Number(hue.value)/360 : 0;
-    const s = sat ? (Number(sat.value)-50)/100 : 0;
-    const l = lig ? (Number(lig.value)-50)/100 : 0;
-    const o = op  ? Number(op.value)/100 : 1;
-    app.viewer.setHSLOpacity(h,s,l,o);
-  };
-  [hue,sat,lig,op].forEach(el=> el && el.addEventListener('input', apply));
-
-  // Unlit / DoubleSide if the buttons exist
-  const btnUnlit = pick('#btnUnlit','button[data-unlit]');
-  btnUnlit && btnUnlit.addEventListener('click', ()=> app.viewer?.toggleUnlit?.(true));
-  const btnDouble = pick('#btnDouble','button[data-doubleside]');
-  btnDouble && btnDouble.addEventListener('click', ()=> app.viewer?.setDoubleSide?.(true));
+    console.log('[ui] wired');
+  }, { once: true });
 }

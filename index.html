@@ -1,107 +1,46 @@
+
 <!doctype html>
 <html lang="ja">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>LociMyu v6.6 (revert)</title>
-  <style>
-    :root{--bg:#0e0f12;--fg:#e7e9ee;--muted:#9aa1ad;--panel:#17181d;--accent:#ffd166;}
-    html,body{height:100%;margin:0;background:var(--bg);color:var(--fg);font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,"Noto Sans JP",sans-serif;}
-    #layout{display:grid;grid-template-columns:1fr 360px;grid-template-rows:100%;height:100%;}
-    #viewerWrap{position:relative;background:#0a0b0e;}
-    canvas#viewer{position:absolute;inset:0;width:100%;height:100%;display:block;background:#000;}
-    #panel{background:var(--panel);border-left:1px solid #1f2330;display:flex;flex-direction:column;min-width:320px}
-    .topbar{display:flex;align-items:center;justify-content:space-between;padding:8px 10px;border-bottom:1px solid #1f2330;}
-    .tabs{display:flex;gap:8px}
-    .tab{padding:6px 10px;border-radius:8px;background:#1d212e;color:#d7dbe7;cursor:pointer;font-size:12px}
-    .tab.active{background:#2b3143;color:#fff}
-    .auth{display:flex;gap:8px;align-items:center}
-    .auth button{padding:6px 10px;border-radius:8px;border:1px solid #31384e;background:#1e2435;color:#fff;cursor:pointer}
-    .sec{padding:12px 12px 8px;border-bottom:1px solid #1f2330}
-    .sec h3{margin:0 0 8px 0;font-size:13px;color:#cfd5e6}
-    .row{display:flex;gap:8px;align-items:center;margin:6px 0}
-    .row input[type="text"]{flex:1;min-width:0;padding:6px 8px;border-radius:8px;border:1px solid #2a2f3f;background:#12151f;color:#eee}
-    .row button{padding:6px 10px;border-radius:8px;border:1px solid #31384e;background:#1e2435;color:#fff;cursor:pointer}
-    .note{color:var(--muted);font-size:12px}
-    /* simple lists */
-    #pinList{flex:1;overflow:auto;padding:8px}
-    .pinItem{padding:8px;border-radius:8px;background:#141823;border:1px solid #1f2330;margin-bottom:8px}
-  </style>
-</head>
-<body>
-  <div id="layout">
-    <div id="viewerWrap">
-      <!-- IMPORTANT: canvas id must be #viewer for viewer.js -->
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Museum 3D Viewer (patched minimal)</title>
+    <!-- 必要であれば client id をここで埋める -->
+    <!-- <script>window.GOOGLE_CLIENT_ID = 'YOUR_CLIENT_ID.apps.googleusercontent.com';</script> -->
+    <style>
+      html, body { margin:0; height:100%; background:#111; color:#eee; }
+      #wrap { position:relative; height:100%; }
+      canvas#viewer { width:100%; height:100%; display:block; }
+      .panel {
+        position: fixed; left: 8px; bottom: 48px; background: rgba(0,0,0,.5);
+        padding: 8px; border-radius: 6px; display:flex; gap:6px; align-items:center;
+      }
+      input, button { font: inherit; }
+    </style>
+    <script defer type="module">
+      import { setupAuth } from './gauth.js';
+      import { ensureViewer } from './viewer.js';
+      import { setupUI } from './ui.js';
+      console.log('[boot] ready');
+      (async () => {
+        console.log('[boot] call setupAuth');
+        await setupAuth();
+        console.log('[boot] setupAuth resolved');
+        await ensureViewer();
+        console.log('[boot] viewer ready');
+        setupUI();
+      })();
+    </script>
+    <!-- Google Identity Services (必要なら HTML 側で読み込む) -->
+    <!-- <script src="https://accounts.google.com/gsi/client" async defer></script> -->
+  </head>
+  <body>
+    <div id="wrap">
       <canvas id="viewer"></canvas>
-    </div>
-    <aside id="panel">
-      <div class="topbar">
-        <div class="tabs">
-          <div class="tab active" data-tab="caption">Caption</div>
-          <div class="tab" data-tab="material">Material</div>
-          <div class="tab" data-tab="view">View</div>
-        </div>
-        <div class="auth">
-          <!-- gauth.js wires by id or data-auth-btn -->
-          <button id="auth-btn" data-auth-btn>Sign in</button>
-        </div>
+      <div class="panel">
+        <input id="drive-id" placeholder="Google Drive file ID (GLB)" size="36" />
+        <button id="btn-load">Load GLB</button>
       </div>
-
-      <!-- Caption section -->
-      <section class="sec" id="sec-caption">
-        <h3>GLB</h3>
-        <div class="row">
-          <input id="driveId" type="text" placeholder="Google Drive file ID (GLB)" />
-          <button id="btnLoad">Load GLB</button>
-        </div>
-        <div class="note">サインイン後、GLBのDriveファイルIDを入力して読み込みます。</div>
-      </section>
-
-      <section class="sec">
-        <h3>Title / Body</h3>
-        <div class="row"><input id="pinTitle" type="text" placeholder="Title" /></div>
-        <div class="row"><input id="pinBody" type="text" placeholder="Body" /></div>
-        <div class="row">
-          <button id="btnAddPin">+ Pin</button>
-          <button id="btnClearPins">Clear</button>
-          <button id="btnRefreshImgs">Refresh images</button>
-        </div>
-      </section>
-
-      <div id="pinList"></div>
-
-      <!-- Material (collapsed UI placeholders with IDs used by ui.js) -->
-      <section class="sec" id="sec-material" style="display:none">
-        <h3>Material</h3>
-        <div class="row"><input id="hue" type="range" min="0" max="1" step="0.001"><span class="note">Hue</span></div>
-        <div class="row"><input id="sat" type="range" min="0" max="1" step="0.001"><span class="note">Sat</span></div>
-        <div class="row"><input id="light" type="range" min="0" max="1" step="0.001"><span class="note">Light</span></div>
-        <div class="row"><input id="opacity" type="range" min="0" max="1" step="0.001"><span class="note">Opacity</span></div>
-        <div class="row">
-          <button id="btnUnlit">Unlit</button>
-          <button id="btnDoubleSide">DoubleSide</button>
-        </div>
-        <div class="row">
-          <input id="white2alpha" type="range" min="0" max="1" step="0.001">
-          <span class="note">White→α</span>
-        </div>
-      </section>
-
-      <section class="sec" id="sec-view" style="display:none">
-        <h3>View</h3>
-        <div class="row">
-          <button id="btnFit">Fit</button>
-          <button id="btnReset">Reset</button>
-        </div>
-      </section>
-
-    </aside>
-  </div>
-
-  <!-- scripts: order matters -->
-  <script type="module" src="./gauth.js?v=20251004tabs"></script>
-  <script type="module" src="./viewer.js?v=20251005"></script>
-  <script type="module" src="./ui.js?v=20251005"></script>
-  <script type="module" src="./app_boot.js?v=20251004tabs"></script>
-</body>
+    </div>
+  </body>
 </html>

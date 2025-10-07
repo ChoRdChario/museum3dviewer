@@ -1,162 +1,175 @@
 
-// viewer.js — keeps existing UI; no DOM injection; exports a small Viewer API
-// Logs
+// viewer.js — patched, CDN統一 + DOMReadyガード + 安全なエクスポート
+// 依存: three, OrbitControls, GLTFLoader（すべて esm.sh から動的 import）
+
 console.log('[viewer] module loaded');
 
-let THREEMod = null;
+const THREE_ESM = 'https://esm.sh/three@0.160.1';
+const ORBIT_ESM = 'https://esm.sh/three@0.160.1/examples/jsm/controls/OrbitControls';
+const GLTF_ESM  = 'https://esm.sh/three@0.160.1/examples/jsm/loaders/GLTFLoader';
 
-async function importAttempt(url){
-  try{
-    const mod = await import(url);
-    return mod;
-  }catch(err){
-    console.warn('[viewer] import failed:', url, err.message || err);
-    return null;
+async function dynamicImport(url) {
+  try {
+    return await import(url);
+  } catch (e) {
+    console.warn('[viewer] import failed:', url, e && e.message);
+    throw e;
   }
 }
 
 async function ensureThree() {
-  if (THREEMod) return THREEMod;
-  // Try repo-local candidates first (do not change UI/structure)
-  const tries = [
+  // ローカル候補 → 見つからなければ esm.sh（最終）
+  const candidates = [
     './lib/three/build/three.module.js',
     '../lib/three/build/three.module.js',
-    'https://unpkg.com/three@0.160.1/build/three.module.js'
+    THREE_ESM,
   ];
-  for (const u of tries) {
-    const mod = await importAttempt(u);
-    if (mod && mod.WebGLRenderer) {
-      THREEMod = mod;
-      console.log('[viewer] three ok via', u);
-      return THREEMod;
+  for (const url of candidates) {
+    try {
+      const mod = await import(url);
+      console.log('[viewer] three ok via', url);
+      return mod;
+    } catch (e) {
+      console.warn('[viewer] three candidate failed:', url, e && e.message);
+      continue;
     }
   }
-  throw new Error('three.js could not be loaded');
+  throw new Error('three import failed for all candidates');
 }
 
-function
-getCanvas() {
-  const c = document.querySelector('canvas#viewer');
-  if (!c) {
-    throw new Error('canvas#viewer not found');
-  }
-  return c;
+async function ensureOrbit() {
+  return await dynamicImport(ORBIT_ESM);
 }
 
-// very small material edit helpers — non-destructive shims
-function applyHSLOpacityToMaterials(scene, {h=0,s=0,l=0,opacity=1}={}){
-  scene.traverse((obj)=>{
-    if (!obj.isMesh || !obj.material) return;
-    const m = obj.material;
-    if (m.color){
-      // shift hue/sat/light approximately by converting to HSL
-      const c = m.color.clone();
-      c.getHSL(m._tmpHSL || (m._tmpHSL = {h:0,s:0,l:0}));
-      m._tmpHSL.h = (m._tmpHSL.h + h) % 1;
-      m._tmpHSL.s = Math.min(1, Math.max(0, m._tmpHSL.s + s));
-      m._tmpHSL.l = Math.min(1, Math.max(0, m._tmpHSL.l + l));
-      c.setHSL(m._tmpHSL.h, m._tmpHSL.s, m._tmpHSL.l);
-      m.color.copy(c);
-    }
-    if ('opacity' in m) {
-      m.transparent = opacity < 1 ? true : m.transparent;
-      m.opacity = opacity;
-    }
-    m.needsUpdate = true;
-  });
+async function ensureGLTF() {
+  return await dynamicImport(GLTF_ESM);
 }
 
-// Drive helpers (no UI changes)
-async function fetchDriveArrayBuffer({fileId, token}){
+function extractDriveFileId(input) {
+  if (!input) return null;
+  const idParam = /[?&]id=([a-zA-Z0-9_-]{10,})/.exec(input);
+  if (idParam) return idParam[1];
+  const share = /\/d\/([a-zA-Z0-9_-]{10,})/.exec(input);
+  if (share) return share[1];
+  // 裸の fileId 想定
+  if (/^[a-zA-Z0-9_-]{10,}$/.test(input)) return input;
+  return null;
+}
+
+async function arrayBufferFromDrive(fileId) {
   if (!fileId) throw new Error('fileId required');
-  const headers = token ? { 'Authorization': 'Bearer ' + token } : {};
-  const url = `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?alt=media`;
-  const res = await fetch(url, {headers});
-  if (!res.ok) throw new Error(`Drive fetch failed ${res.status}`);
+  const token = (globalThis.app && app.auth && typeof app.auth.getAccessToken === 'function')
+    ? app.auth.getAccessToken()
+    : null;
+  if (!token) {
+    throw new Error('Not signed in. Click "Sign in" first.');
+  }
+  const url = `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`;
+  const res = await fetch(url, {
+    headers: { 'Authorization': `Bearer ${token}` }
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(()=>'');
+    throw new Error(`Drive fetch failed ${res.status} ${res.statusText} ${text}`);
+  }
   return await res.arrayBuffer();
 }
 
-async function parseGLBToScene(THREE, arrayBuffer){
-  const { GLTFLoader } = await import('https://esm.sh/three@0.160.1/examples/jsm/loaders/GLTFLoader.js');
-  const loader = new GLTFLoader();
-  return await new Promise((resolve, reject)=>{
-    loader.parse(arrayBuffer, '', (gltf)=>resolve(gltf.scene), reject);
-  });
-}
-
-// minimal render loop
-function startLoop(THREE, renderer, scene, camera){
-  function loop(){
-    renderer.render(scene, camera);
-    requestAnimationFrame(loop);
+async function bootstrapRenderer() {
+  if (document.readyState === 'loading') {
+    await new Promise(res => document.addEventListener('DOMContentLoaded', res, { once: true }));
   }
-  loop();
-}
+  const canvas = document.querySelector('canvas#viewer') || document.getElementById('viewer');
+  if (!canvas) throw new Error('canvas#viewer not found');
 
-export async function ensureViewer(app){
   const THREE = await ensureThree();
-  const canvas = getCanvas(); // throws if not found (UIは既存を尊重)
-  const renderer = new THREE.WebGLRenderer({canvas, antialias:true, alpha:true});
-  renderer.outputColorSpace = THREE.SRGBColorSpace;
-  renderer.setSize(canvas.clientWidth || 800, canvas.clientHeight || 600, false);
+  const { OrbitControls } = await ensureOrbit();
+
+  const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
+  renderer.setPixelRatio(globalThis.devicePixelRatio || 1);
+  const resize = () => {
+    const w = canvas.clientWidth || canvas.parentElement?.clientWidth || window.innerWidth;
+    const h = canvas.clientHeight || canvas.parentElement?.clientHeight || window.innerHeight;
+    renderer.setSize(w, h, false);
+    camera.aspect = w / h;
+    camera.updateProjectionMatrix();
+  };
 
   const scene = new THREE.Scene();
-  const camera = new THREE.PerspectiveCamera(45, (canvas.clientWidth||800)/(canvas.clientHeight||600), 0.1, 5000);
-  camera.position.set(0, 1, 3);
-  scene.add(camera);
-
-  // controls (import via esm.sh referencing same THREE)
-  const { OrbitControls } = await import('https://esm.sh/three@0.160.1/examples/jsm/controls/OrbitControls.js');
+  const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 1000);
+  camera.position.set(3, 2, 6);
   const controls = new OrbitControls(camera, renderer.domElement);
   controls.enableDamping = true;
 
-  startLoop(THREE, renderer, scene, camera);
+  // light
+  const light = new THREE.HemisphereLight(0xffffff, 0x444444, 1.0);
+  scene.add(light);
 
-  // expose small api that matches existing UI expectations
-  const api = {
-    async loadByInput(){
-      const input =
-        document.querySelector('#drive-id') ||
-        document.querySelector('#fileid') ||
-        document.querySelector('input[name="fileid"]') ||
-        document.querySelector('input[placeholder*="Drive"]') ||
-        document.querySelector('input[type="text"]');
-      const fileId = input && input.value ? input.value.trim() : '';
-      if (!fileId) throw new Error('Enter Google Drive file id');
+  // simple grid/floor (optional)
+  try {
+    const grid = new THREE.GridHelper(10, 10);
+    scene.add(grid);
+  } catch {}
 
-      const token = app?.auth?.getAccessToken ? app.auth.getAccessToken() : null;
-      if (!token) throw new Error('Not signed in. Click "Sign in" first.');
+  let currentRoot = null;
 
-      const abuf = await fetchDriveArrayBuffer({fileId, token});
-      const obj = await parseGLBToScene(THREE, abuf);
-      // reset scene
-      while (scene.children.length) scene.remove(scene.children[0]);
-      scene.add(camera);
-      scene.add(obj);
-      console.log('[viewer] GLB loaded');
-    },
-    setHSLOpacity(h=0,s=0,l=0,opacity=1){
-      applyHSLOpacityToMaterials(scene, {h,s,l,opacity});
-    },
-    toggleUnlit(flag){
-      // very conservative: just flip toneMapping
-      renderer.toneMappingExposure = flag ? 1.0 : 1.0;
-      scene.traverse(o=>{
-        if (!o.isMesh || !o.material) return;
-        o.material.needsUpdate = true;
+  function animate() {
+    controls.update();
+    renderer.render(scene, camera);
+    requestAnimationFrame(animate);
+  }
+  resize();
+  window.addEventListener('resize', resize);
+  requestAnimationFrame(animate);
+
+  async function loadByInput(input) {
+    const fileId = extractDriveFileId(input);
+    if (!fileId) throw new Error('入力は Google Drive の fileId か共有URL（?id=... or /d/...）にしてください。');
+    const buffer = await arrayBufferFromDrive(fileId);
+    await loadArrayBuffer(buffer);
+  }
+
+  async function loadArrayBuffer(buffer) {
+    const THREE = await ensureThree();
+    const { GLTFLoader } = await ensureGLTF();
+    const loader = new GLTFLoader();
+
+    const gltf = await new Promise((resolve, reject) => {
+      loader.parse(buffer, '', resolve, reject);
+    });
+
+    if (currentRoot) {
+      scene.remove(currentRoot);
+      currentRoot.traverse(obj => {
+        if (obj.geometry) obj.geometry.dispose?.();
+        if (obj.material) {
+          if (Array.isArray(obj.material)) obj.material.forEach(m => m.dispose?.());
+          else obj.material.dispose?.();
+        }
       });
-    },
-    setDoubleSide(flag){
-      scene.traverse(o=>{
-        if (!o.isMesh || !o.material) return;
-        o.material.side = flag ? THREE.DoubleSide : THREE.FrontSide;
-        o.material.needsUpdate = true;
-      });
-    },
-    setWhiteKey(v) { /* placeholder for UI compatibility */ },
-    setWhiteKeyAlphaEnabled(flag){ /* placeholder */ },
+      currentRoot = null;
+    }
+    currentRoot = gltf.scene || gltf.scenes?.[0];
+    if (!currentRoot) throw new Error('GLB has no scene');
+    scene.add(currentRoot);
+
+    // 自動で全体が入るようにカメラ調整
+    new THREE.Box3().setFromObject(currentRoot).getCenter(controls.target);
+    controls.update();
+    console.log('[viewer] GLB loaded');
+  }
+
+  return {
+    renderer, scene, camera, controls,
+    loadByInput, loadArrayBuffer,
   };
-
-  app.viewer = api;
-  return api;
 }
+
+export async function ensureViewer() {
+  const viewer = await bootstrapRenderer();
+  globalThis.app = globalThis.app || {};
+  app.viewer = viewer;
+  return viewer;
+}
+
+console.log('[viewer] ready');
