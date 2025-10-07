@@ -112,7 +112,7 @@ export function setupPins(app){
     }));
     pinFilterEl.innerHTML = '<option value="all">(All)</option>' + PALETTE.map(c=>`<option value="${c.hex}">${c.key}</option>`).join('');
   }
-  setupPalette();
+  if (document.readyState==='loading'){document.addEventListener('DOMContentLoaded', setupPalette);}else{setupPalette();}
 
   // draggable overlay
   (function makeDraggable(){
