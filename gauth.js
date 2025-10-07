@@ -1,32 +1,33 @@
-// gauth.js - patched guard for missing chip (2025-10-07)
-
-// This file assumes your existing auth logic (GIS/GAPI) is elsewhere.
-// We only add a defensive default parameter and a clear error if the chip is missing.
+// gauth.js - patched (2025-10-07)
+// Defensive default for chip and clear error if missing.
+// NOTE: Replace placeholders with your real GIS/GAPI sign-in flow.
 
 export function setupAuth({ chip = document.getElementById('authChip'), onReady, onSignedIn, onSignedOut } = {}) {
+  if (!chip) throw new Error('[gauth] auth chip element not found (id="authChip").');
+
   const state = { signedIn: false };
 
   function refreshChip() {
-    if (!chip) throw new Error('[gauth] auth chip element not found (id="authChip").');
-    // Keep your original class names/texts if they differ:
     chip.className = state.signedIn ? 'chip ok' : 'chip warn';
     chip.textContent = state.signedIn ? 'Signed in' : 'Sign in';
   }
 
-  // If you already attach event listeners elsewhere, you can remove this.
-  // This is a harmless fallback that only updates UI; replace with your real sign-in handler.
-  chip?.addEventListener('click', () => {
-    // noop placeholder; your real sign-in flow should run here
-    // Example: beginGoogleSignIn().then(() => { state.signedIn = true; refreshChip(); onSignedIn?.(); });
+  // Hook up a click handler (replace with your actual sign-in trigger)
+  chip.addEventListener('click', () => {
+    // Example stub:
+    // beginGoogleSignIn()
+    //   .then(() => { state.signedIn = true; refreshChip(); onSignedIn?.(); })
+    //   .catch(err => console.error('[auth] sign-in failed', err));
   });
 
   // Initial paint
   refreshChip();
   onReady?.();
 
+  // Public API (if needed elsewhere)
   return {
     refreshChip,
-    setSignedIn(v) { state.signedIn = !!v; refreshChip(); },
+    setSignedIn(v) { state.signedIn = !!v; refreshChip(); v ? onSignedIn?.() : onSignedOut?.(); },
     isSignedIn() { return !!state.signedIn; }
   };
 }

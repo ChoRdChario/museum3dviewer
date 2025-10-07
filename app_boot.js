@@ -1,5 +1,5 @@
 // app_boot.js - patched (2025-10-07)
-// NOTE: Pass authChip DOM to setupAuth and keep return value on app.auth.
+// Pass the auth chip to setupAuth and keep its return value.
 
 import { ensureViewer } from './viewer.js';
 import { setupUI } from './ui.js';
@@ -35,6 +35,7 @@ const app = {
     console.error('[boot] setupPins failed', e);
   }
 
+  // IMPORTANT: Provide chip element so click handler can attach
   try {
     app.auth = setupAuth({
       chip: document.getElementById('authChip'),
@@ -46,7 +47,7 @@ const app = {
     console.error('[boot] setupAuth failed', e);
   }
 
-  // optional: auto-load by URL param
+  // Optional: auto-load by URL param
   try {
     const params = new URLSearchParams(location.search);
     const id = params.get('id');
