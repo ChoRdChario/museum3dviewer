@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>LociMyu v6.6</title>
+  <link rel="icon" href="./favicon.ico">
+  <link rel="stylesheet" href="./app.css">
+  <script type="importmap">
+  { "imports": { "three": "https://unpkg.com/three@0.157.0/build/three.module.js" } }
+  </script>
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
+  <script src="https://apis.google.com/js/api.js"></script>
+  <script type="module" src="./app_boot.js?v=20251004tabs"></script>
+</head>
+<body>
+  <div id="app">
+    <div id="stage">
+      <div id="spinner">booting…</div>
+      <svg id="leader"><line id="leaderLine" x1="0" y1="0" x2="0" y2="0" stroke="#ffcc55" stroke-width="2" opacity="0"/></svg>
+      <div id="overlay" class="overlay" style="display:none"></div>
+    </div>
+
+    <aside id="panel">
+      <header id="topbar">
+        <strong>LociMyu v6.6</strong>
+        <div class="spacer"></div>
+        <button id="authChip" class="btn" type="button">Sign in</button>
+      </header>
+
+      <div id="tabs">
+        <div class="tab active" data-tab="cap">Caption</div>
+        <div class="tab" data-tab="mat">Material</div>
+        <div class="tab" data-tab="view">View</div>
+      </div>
+
+      <section id="pane-cap" class="pane active">
+        <div class="row">
+          <input id="fileIdInput" class="input" placeholder="Drive File ID or URL">
+          <button id="btnLoad" class="btn">GLB</button>
+        </div>
+        <div class="help muted">?id=&lt;fileId&gt; または <b>demo</b> でデモモデル</div>
+
+        <div class="row">
+          <label class="muted w">Save data</label>
+          <select id="sheetSelect" class="select"></select>
+          <button id="btnNewSheet" class="btn" title="Create new sheet">+</button>
+        </div>
+
+        <!-- === Pin color row (A+B 完了版) === -->
+        <div class="row pin-row">
+          <label class="muted w">Pin color</label>
+          <div class="pin-controls">
+            <div id="pinPalette" class="palette"></div>
+            <div id="pinFilterToggles" class="ftoggles" aria-label="Pin visibility"></div>
+          </div>
+        </div>
+
+        <div class="caplist-block">
+          <div class="muted">Caption list</div>
+          <div id="capList" class="caplist"></div>
+        </div>
+
+        <h3 class="muted">Title / Body</h3>
+        <input id="capTitle" class="input" placeholder="Title">
+        <textarea id="capBody" class="textarea" placeholder="Body" rows="3"></textarea>
+        <div class="row">
+          <button id="btnAddPin" class="btn">+ Pin</button>
+          <button id="btnRefreshImages" class="btn">Refresh images</button>
+        </div>
+        <div id="imgGrid" class="grid"></div>
+      </section>
+
+      <section id="pane-mat" class="pane">
+        <!-- 既存 Material UI（未変更） -->
+      </section>
+
+      <section id="pane-view" class="pane">
+        <!-- 既存 View UI（未変更） -->
+      </section>
+    </aside>
+  </div>
+</body>
+</html>
