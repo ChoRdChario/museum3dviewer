@@ -2,94 +2,31 @@
 <html lang="ja">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>GLB Caption Tool</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>GLB Caption Tool (OrbitControls fix)</title>
   <link rel="icon" href="data:," />
-
-  <!-- Pin to a pre-r150 Three.js build (global namespace) + non-module OrbitControls -->
-  <script src="https://unpkg.com/three@0.149.0/build/three.min.js"></script>
-  <script src="https://unpkg.com/three@0.149.0/examples/js/controls/OrbitControls.js"></script>
-
   <style>
-    html, body { height: 100%; margin: 0; background:#0f1115; color:#cbd5e1; font-family: system-ui, -apple-system, Segoe UI, Roboto, 'Helvetica Neue', Arial, 'Noto Sans', 'Apple Color Emoji', 'Segoe UI Emoji';}
-    #app { display:flex; height:100%; }
-    #viewport { flex:1; outline:none; display:block; }
-    #ui { width:360px; border-left:1px solid #1f2937; padding:16px; box-sizing:border-box; }
-    button { background:#1d4ed8; color:white; border:0; padding:6px 10px; border-radius:6px; }
-    .tabs { display:flex; gap:8px; margin-bottom:12px; }
-    .tabs button { background:#111827; border:1px solid #374151; }
-    .tabs button.active { background:#1f2937; }
-    .row { margin-bottom:10px; }
-    input, select, textarea { width:100%; background:#0b1220; color:#e5e7eb; border:1px solid #1f2937; padding:6px 8px; border-radius:6px; box-sizing:border-box; }
-    textarea { height:120px; resize:vertical; }
+    html,body{height:100%;margin:0;background:#0f1115;color:#cbd5e1;font:14px/1.4 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;}
+    #app{display:flex;height:100%;}
+    #stage{flex:1;position:relative;background:#0b0d11;}
+    #ui{width:360px;border-left:1px solid #1f2937;padding:12px;box-sizing:border-box;}
+    #gl{width:100%;height:100%;display:block}
   </style>
+  <!-- Three.js r149 (global build) -->
+  <script src="https://unpkg.com/three@0.149.0/build/three.min.js"></script>
+  <!-- OrbitControls (global, non-module) -->
+  <script src="https://unpkg.com/three@0.149.0/examples/js/controls/OrbitControls.js"></script>
 </head>
 <body>
   <div id="app">
-    <canvas id="viewport"></canvas>
+    <div id="stage"><canvas id="gl"></canvas></div>
     <aside id="ui">
-      <div class="tabs">
-        <button data-tab="captions" class="active">Captions</button>
-        <button data-tab="materials">Materials</button>
-        <button data-tab="views">Views</button>
-      </div>
-
-      <section id="tab-captions">
-        <div class="row">
-          <input id="driveInput" placeholder="Drive: GLB file ID or URL" />
-        </div>
-        <div class="row">
-          <button id="loadGlbBtn">Load GLB</button>
-          <button id="refreshBtn">Refresh images</button>
-        </div>
-        <div class="row">
-          <label>Pin color</label>
-          <div id="pinColors" style="display:flex;gap:8px;">
-            <button class="pin" data-color="#60a5fa" style="width:20px;height:20px;border-radius:50%;background:#60a5fa;"></button>
-            <button class="pin" data-color="#22c55e" style="width:20px;height:20px;border-radius:50%;background:#22c55e;"></button>
-            <button class="pin" data-color="#f59e0b" style="width:20px;height:20px;border-radius:50%;background:#f59e0b;"></button>
-            <button class="pin" data-color="#a855f7" style="width:20px;height:20px;border-radius:50%;background:#a855f7;"></button>
-            <button class="pin" data-color="#ef4444" style="width:20px;height:20px;border-radius:50%;background:#ef4444;"></button>
-          </div>
-        </div>
-        <div class="row">
-          <select id="filter">
-            <option value="all">(All)</option>
-          </select>
-        </div>
-        <div class="row">
-          <textarea id="captionList" placeholder="Caption list"></textarea>
-        </div>
-        <div class="row">
-          <input id="title" placeholder="Title" />
-        </div>
-        <div class="row">
-          <textarea id="body" placeholder="Body"></textarea>
-        </div>
-        <div class="row" style="display:flex;gap:8px;">
-          <button id="addPinBtn">+ Pin</button>
-          <button id="clearBtn" style="background:#374151;">Clear</button>
-        </div>
-      </section>
-
-      <section id="tab-materials" style="display:none;">(materials here)</section>
-      <section id="tab-views" style="display:none;">(views here)</section>
+      <h3 style="margin-top:0">Debug</h3>
+      <div id="debug"></div>
     </aside>
   </div>
 
-  <script type="module" src="./viewer.js"></script>
-  <script type="module">
-    const tabs = document.querySelectorAll('.tabs button');
-    const sections = {
-      captions: document.getElementById('tab-captions'),
-      materials: document.getElementById('tab-materials'),
-      views: document.getElementById('tab-views'),
-    };
-    tabs.forEach(btn => btn.addEventListener('click', () => {
-      tabs.forEach(b => b.classList.toggle('active', b===btn));
-      Object.values(sections).forEach(el => el.style.display='none');
-      sections[btn.dataset.tab].style.display = 'block';
-    }));
-  </script>
+  <!-- Viewer (classic script; relies on global THREE + THREE.OrbitControls) -->
+  <script src="./viewer.js"></script>
 </body>
 </html>
