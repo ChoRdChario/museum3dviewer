@@ -1,111 +1,80 @@
-// Boot orchestrator — keeps responsibilities small and defensive.
-import { ensureViewer } from './viewer.js';
-import { setupPins } from './pins.js';
+// app_boot.js
+// Wires up tabs, color pickers, and GLB load using Viewer API.
 
-async function boot() {
-  try {
-    console.debug('[auth] ready');
+(function(){
+  function $(q){ return document.querySelector(q); }
+  function $all(q){ return Array.from(document.querySelectorAll(q)); }
 
-    // 1) Ensure 3D viewer mounts (before wiring pins)
-    const viewer = ensureViewer({
-      canvas: document.getElementById('viewer'),
-      host: document.getElementById('viewer-host'),
+  function initTabs(){
+    const tabs = $all('.tab');
+    const panels = $all('.panel-section');
+    tabs.forEach(btn=>{
+      btn.addEventListener('click', ()=>{
+        tabs.forEach(b=>b.classList.remove('active'));
+        btn.classList.add('active');
+        const id = btn.dataset.tab;
+        panels.forEach(p=>p.classList.toggle('active', p.dataset.panel===id));
+      });
     });
-
-    // 2) Wire tabs (simple, accessible)
-    setupTabs();
-
-    // 3) Wire auth via existing gauth.module.js (bridged on window)
-    await setupAuth();
-
-    // 4) Pins UI (palette, filters, list, interactions)
-    setupPins({ viewer });
-
-  } catch (err) {
-    console.error('[boot] failed', err);
   }
-}
 
-function setupTabs() {
-  const tabs = [
-    { tab: '#tab-captions', panel: '#panel-captions' },
-    { tab: '#tab-materials', panel: '#panel-materials' },
-    { tab: '#tab-views', panel: '#panel-views' },
-  ];
-  for (const { tab, panel } of tabs) {
-    const tabEl = document.querySelector(tab);
-    const panelEl = document.querySelector(panel);
-    tabEl?.addEventListener('click', () => {
-      for (const t of tabs) {
-        const te = document.querySelector(t.tab);
-        const pe = document.querySelector(t.panel);
-        te?.setAttribute('aria-selected', String(t.tab === tab));
-        pe?.setAttribute('aria-hidden', String(t.panel !== panel));
+  function initColors(){
+    const dots = $all('#pinColors .dot');
+    dots.forEach(d=>{
+      d.addEventListener('click', ()=>{
+        dots.forEach(x=>x.classList.remove('active'));
+        d.classList.add('active');
+        const color = d.dataset.color;
+        window.Viewer?.setPinColor(color);
+      });
+    });
+    if(dots[0]) dots[0].click();
+  }
+
+  function initLoadGlb(){
+    const input = $('#glbInput');
+    const btn = $('#btnLoadGlb');
+    btn.addEventListener('click', async ()=>{
+      const v = input.value.trim();
+      if(!v) return;
+      try{
+        await window.Viewer.ensureViewer();
+        const url = convertToDirectUrl(v);
+        await window.Viewer.loadGLB(url);
+      }catch(err){
+        console.error('[glb] load failed', err);
+        alert('GLB load failed. See console for details.');
       }
     });
   }
-}
 
-async function setupAuth() {
-  const gauth = window.__gauth;
-  const chip = document.querySelector('[data-auth-chip], #auth-chip');
-  const btn  = document.querySelector('[data-auth-button], #auth-btn');
-  const status = document.querySelector('[data-auth-status], #auth-status');
-
-  if (!gauth || !chip || !btn) {
-    throw new Error('[gauth] bridge/elements not available');
-  }
-
-  chip.setAttribute('aria-busy', 'true');
-
-  // Try to initialize using whatever API gauth exposes (defensive)
-  let api = {};
-  if (typeof gauth.setupAuth === 'function') {
-    api = await gauth.setupAuth({ chipEl: chip, buttonEl: btn, statusEl: status }).catch(() => ({}));
-  }
-  // Fallbacks
-  if (!api.signIn && typeof gauth.signIn === 'function') api.signIn = gauth.signIn;
-  if (!api.signOut && typeof gauth.signOut === 'function') api.signOut = gauth.signOut;
-  if (!api.isSignedIn && typeof gauth.isSignedIn === 'function') api.isSignedIn = gauth.isSignedIn;
-  if (!api.getAccessToken && typeof gauth.getAccessToken === 'function') api.getAccessToken = gauth.getAccessToken;
-  if (typeof gauth.onAuthStateChanged === 'function') {
-    gauth.onAuthStateChanged((signedIn) => {
-      chip.setAttribute('aria-busy', 'false');
-      status && (status.textContent = signedIn ? 'サインイン済み' : '未サインイン');
-      for (const id of ['btn-load-glb', 'btn-refresh-images', 'btn-open-drive']) {
-        const el = document.getElementById(id);
-        if (el) el.disabled = !signedIn;
+  function convertToDirectUrl(s){
+    // Accepts raw URL or Google Drive fileId/URL
+    // https://drive.google.com/file/d/<id>/view?usp=sharing
+    try{
+      const u = new URL(s);
+      if(u.hostname.includes('drive.google.com')){
+        const m = u.pathname.match(/\/d\/([^/]+)/);
+        const id = m? m[1] : u.searchParams.get('id');
+        if(id) return `https://drive.google.com/uc?export=download&id=${id}`;
       }
-      console.debug('[auth] state', signedIn);
-    });
-  } else {
-    // Polling fallback
-    const apply = async () => {
-      const signedIn = api.isSignedIn ? await api.isSignedIn() : false;
-      chip.setAttribute('aria-busy', 'false');
-      status && (status.textContent = signedIn ? 'サインイン済み' : '未サインイン');
-      for (const id of ['btn-load-glb', 'btn-refresh-images', 'btn-open-drive']) {
-        const el = document.getElementById(id);
-        if (el) el.disabled = !signedIn;
-      }
-    };
-    await apply();
-    setInterval(apply, 2000);
-  }
-
-  // Button behavior (toggle)
-  btn.addEventListener('click', async () => {
-    try {
-      chip.setAttribute('aria-busy', 'true');
-      const signedIn = api.isSignedIn ? await api.isSignedIn() : false;
-      if (signedIn && api.signOut) await api.signOut();
-      else if (!signedIn && api.signIn) await api.signIn();
-    } catch (e) {
-      console.warn('[auth] click failed', e);
-    } finally {
-      chip.setAttribute('aria-busy', 'false');
+      return s;
+    }catch(_){
+      // Not a URL => treat as Drive fileId
+      return `https://drive.google.com/uc?export=download&id=${encodeURIComponent(s)}`;
     }
-  });
-}
+  }
 
-boot();
+  function boot(){
+    try{
+      initTabs();
+      initColors();
+      initLoadGlb();
+      window.Viewer.ensureViewer();
+    }catch(err){
+      console.error('[boot] failed', err);
+    }
+  }
+
+  document.addEventListener('DOMContentLoaded', boot);
+})();
