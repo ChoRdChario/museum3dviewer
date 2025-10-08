@@ -1,101 +1,95 @@
-<!DOCTYPE html>
-<html lang="en">
+<!doctype html>
+<html lang="ja">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>GLB Caption Tool</title>
-  <link rel="stylesheet" href="./app.css" />
-  <!-- favicon intentionally omitted to avoid 404 -->
+  <link rel="icon" href="data:," />
+
+  <!-- Pin to a pre-r150 Three.js build (global namespace) + non-module OrbitControls -->
+  <script src="https://unpkg.com/three@0.149.0/build/three.min.js"></script>
+  <script src="https://unpkg.com/three@0.149.0/examples/js/controls/OrbitControls.js"></script>
+
+  <style>
+    html, body { height: 100%; margin: 0; background:#0f1115; color:#cbd5e1; font-family: system-ui, -apple-system, Segoe UI, Roboto, 'Helvetica Neue', Arial, 'Noto Sans', 'Apple Color Emoji', 'Segoe UI Emoji';}
+    #app { display:flex; height:100%; }
+    #viewport { flex:1; outline:none; display:block; }
+    #ui { width:360px; border-left:1px solid #1f2937; padding:16px; box-sizing:border-box; }
+    button { background:#1d4ed8; color:white; border:0; padding:6px 10px; border-radius:6px; }
+    .tabs { display:flex; gap:8px; margin-bottom:12px; }
+    .tabs button { background:#111827; border:1px solid #374151; }
+    .tabs button.active { background:#1f2937; }
+    .row { margin-bottom:10px; }
+    input, select, textarea { width:100%; background:#0b1220; color:#e5e7eb; border:1px solid #1f2937; padding:6px 8px; border-radius:6px; box-sizing:border-box; }
+    textarea { height:120px; resize:vertical; }
+  </style>
 </head>
 <body>
-  <header class="topbar">
-    <h1>GLB Caption Tool</h1>
-    <nav class="tabs" id="tabs">
-      <button class="tab active" data-tab="captions" id="tab-captions">Captions</button>
-      <button class="tab" data-tab="materials" id="tab-materials">Materials</button>
-      <button class="tab" data-tab="views" id="tab-views">Views</button>
-      <button class="signin" id="btnSign">Sign in</button>
-    </nav>
-  </header>
+  <div id="app">
+    <canvas id="viewport"></canvas>
+    <aside id="ui">
+      <div class="tabs">
+        <button data-tab="captions" class="active">Captions</button>
+        <button data-tab="materials">Materials</button>
+        <button data-tab="views">Views</button>
+      </div>
 
-  <main class="appwrap">
-    <section class="viewer" id="viewer-host">
-      <canvas id="viewer-canvas"></canvas>
-      <div id="viewer-status" class="status">ready</div>
-    </section>
-
-    <aside class="panel">
-      <div class="panel-section active" data-panel="captions">
-        <label class="lbl">Drive: GLB file ID or URL</label>
-        <div class="row gap">
-          <input id="glbInput" class="input flex" placeholder="https://drive.google.com/... or fileId" />
-          <button id="btnDrive" class="btn subtle" title="Google Drive picker (later)">Drive...</button>
+      <section id="tab-captions">
+        <div class="row">
+          <input id="driveInput" placeholder="Drive: GLB file ID or URL" />
         </div>
-        <div class="row gap mt">
-          <button id="btnLoadGlb" class="btn">Load GLB</button>
-          <button id="btnRefreshImages" class="btn subtle">Refresh Images</button>
+        <div class="row">
+          <button id="loadGlbBtn">Load GLB</button>
+          <button id="refreshBtn">Refresh images</button>
         </div>
-
-        <div class="mt">
-          <label class="lbl">Save data</label>
-          <select id="saveTarget" class="select">
-            <option value="pins" selected>Pins</option>
-          </select>
-        </div>
-
-        <div class="mt">
-          <label class="lbl">Pin</label>
-          <div class="colorrow" id="pinColors">
-            <button class="dot" data-color="#60a5fa" style="--c:#60a5fa;"></button>
-            <button class="dot" data-color="#22c55e" style="--c:#22c55e;"></button>
-            <button class="dot" data-color="#f59e0b" style="--c:#f59e0b;"></button>
-            <button class="dot" data-color="#a855f7" style="--c:#a855f7;"></button>
-            <button class="dot" data-color="#ef4444" style="--c:#ef4444;"></button>
-            <button class="dot" data-color="#9ca3af" style="--c:#9ca3af;"></button>
+        <div class="row">
+          <label>Pin color</label>
+          <div id="pinColors" style="display:flex;gap:8px;">
+            <button class="pin" data-color="#60a5fa" style="width:20px;height:20px;border-radius:50%;background:#60a5fa;"></button>
+            <button class="pin" data-color="#22c55e" style="width:20px;height:20px;border-radius:50%;background:#22c55e;"></button>
+            <button class="pin" data-color="#f59e0b" style="width:20px;height:20px;border-radius:50%;background:#f59e0b;"></button>
+            <button class="pin" data-color="#a855f7" style="width:20px;height:20px;border-radius:50%;background:#a855f7;"></button>
+            <button class="pin" data-color="#ef4444" style="width:20px;height:20px;border-radius:50%;background:#ef4444;"></button>
           </div>
         </div>
-
-        <div class="mt">
-          <label class="lbl">Filter</label>
-          <select id="pinFilter" class="select">
+        <div class="row">
+          <select id="filter">
             <option value="all">(All)</option>
           </select>
         </div>
-
-        <div class="mt">
-          <label class="lbl">Caption list</label>
-          <textarea id="captionList" class="textarea" placeholder="-"></textarea>
+        <div class="row">
+          <textarea id="captionList" placeholder="Caption list"></textarea>
         </div>
-
-        <div class="mt">
-          <label class="lbl">Title / Body</label>
-          <input id="capTitle" class="input" placeholder="Title" />
-          <textarea id="capBody" class="textarea" placeholder="Body"></textarea>
+        <div class="row">
+          <input id="title" placeholder="Title" />
         </div>
-
-        <div class="row gap mt">
-          <button id="btnAddPin" class="btn">+ Pin</button>
-          <button id="btnClear" class="btn subtle">Clear</button>
-          <button id="btnRefresh" class="btn subtle">Refresh images</button>
+        <div class="row">
+          <textarea id="body" placeholder="Body"></textarea>
         </div>
-      </div>
+        <div class="row" style="display:flex;gap:8px;">
+          <button id="addPinBtn">+ Pin</button>
+          <button id="clearBtn" style="background:#374151;">Clear</button>
+        </div>
+      </section>
 
-      <div class="panel-section" data-panel="materials">
-        <p class="muted">Materials tab (coming soon)</p>
-      </div>
-
-      <div class="panel-section" data-panel="views">
-        <p class="muted">Views tab (coming soon)</p>
-      </div>
+      <section id="tab-materials" style="display:none;">(materials here)</section>
+      <section id="tab-views" style="display:none;">(views here)</section>
     </aside>
-  </main>
+  </div>
 
-  <!-- THREE from CDN (global THREE) -->
-  <script src="https://unpkg.com/three@0.150.1/build/three.min.js"></script>
-  <script src="https://unpkg.com/three@0.150.1/examples/js/controls/OrbitControls.js"></script>
-
-  <!-- App scripts -->
-  <script src="./viewer.js"></script>
-  <script src="./app_boot.js"></script>
+  <script type="module" src="./viewer.js"></script>
+  <script type="module">
+    const tabs = document.querySelectorAll('.tabs button');
+    const sections = {
+      captions: document.getElementById('tab-captions'),
+      materials: document.getElementById('tab-materials'),
+      views: document.getElementById('tab-views'),
+    };
+    tabs.forEach(btn => btn.addEventListener('click', () => {
+      tabs.forEach(b => b.classList.toggle('active', b===btn));
+      Object.values(sections).forEach(el => el.style.display='none');
+      sections[btn.dataset.tab].style.display = 'block';
+    }));
+  </script>
 </body>
 </html>
