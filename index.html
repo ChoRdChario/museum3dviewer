@@ -5,10 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>3D Caption Tool</title>
 
-  <!-- Minimal styles -->
   <link rel="stylesheet" href="./app.css" />
 
-  <!-- three.js via import map (adjust versions/paths if you use local copies) -->
   <script type="importmap">
   {
     "imports": {
@@ -18,34 +16,93 @@
   }
   </script>
 
-  <!-- Google APIs (keep order: gsi -> gapi) -->
+  <!-- Google APIs (keep order) -->
   <script src="https://accounts.google.com/gsi/client" async defer></script>
   <script src="https://apis.google.com/js/api.js" async defer></script>
 
-  <!-- IMPORTANT: Do NOT include any SES/lockdown/safe_loader scripts.
-       We intentionally omit:
-         - lockdown-install.js
-         - ses-lockdown.js / lockdown*.js
-         - safe_loader.js
-         - any script that dynamically imports the above
-  -->
   <style>
-    body{margin:0;font-family:system-ui, -apple-system, Segoe UI, Roboto, 'Noto Sans JP', sans-serif;}
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, 'Noto Sans JP', sans-serif; }
+    header { height: 44px; display:flex; align-items:center; justify-content:space-between; padding: 0 10px; border-bottom: 1px solid #e5e7eb; }
+    header .brand { font-weight: 600; }
+    header .auth { display:flex; align-items:center; gap: 8px; }
+    #auth-chip, #auth-signin { padding: 6px 10px; border: 1px solid #e5e7eb; background: #fff; border-radius: 8px; cursor: pointer; }
+    main { display:flex; height: calc(100vh - 44px); }
+    #viewer { flex: 1 1 auto; position: relative; background: #0b0f14; }
+    #sidebar { width: 380px; max-width: 40vw; border-left: 1px solid #e5e7eb; display:flex; flex-direction:column; background:#fff; }
+    .tabs { display:flex; border-bottom: 1px solid #e5e7eb; }
+    .tabs button { flex:1; padding: 10px; background:#fff; border:0; cursor:pointer; }
+    .tabs button.active { background:#f8fafc; font-weight:600; }
+    .panel { flex:1; overflow:auto; padding:10px; display:none; }
+    .panel.active { display:block; }
+
+    /* Captions basic anchors */
+    #pin-toolbar { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:8px; }
+    #pin-palette { display:flex; gap:6px; flex-wrap:wrap; }
+    #pin-palette .chip { width:18px; height:18px; border-radius:4px; border:1px solid #cbd5e1; cursor:pointer; }
+    #pin-filter { padding:6px 8px; border:1px solid #e5e7eb; border-radius:6px; }
+    #pin-list { list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:6px; }
+    #pin-list li { padding:6px 8px; border:1px solid #e5e7eb; border-radius:8px; }
   </style>
 </head>
 <body>
-  <div id="app"></div>
+  <header>
+    <div class="brand">3D Caption Tool</div>
+    <div class="auth">
+      <span id="user-email"></span>
+      <!-- gauth.module.js が探しやすいよう両方置く -->
+      <button id="auth-chip">Sign in</button>
+      <button id="auth-signin" style="display:none">Sign in</button>
+    </div>
+  </header>
 
-  <!-- Single boot entry (ESM). This module is expected to import the rest (viewer/ui/pins/etc.). -->
+  <main>
+    <!-- viewer.js が参照するビューアのルート要素 -->
+    <div id="viewer"></div>
+
+    <aside id="sidebar">
+      <div class="tabs">
+        <button id="tab-captions" class="active" data-target="panel-captions">Captions</button>
+        <button id="tab-materials" data-target="panel-materials">Materials</button>
+        <button id="tab-views" data-target="panel-views">Views</button>
+      </div>
+
+      <section id="panel-captions" class="panel active">
+        <div id="pin-toolbar">
+          <div id="pin-palette" aria-label="pin color palette"></div>
+          <select id="pin-filter">
+            <option value="ALL" selected>Filter ALL</option>
+          </select>
+          <button id="pin-refresh">Refresh</button>
+        </div>
+        <ul id="pin-list"></ul>
+      </section>
+
+      <section id="panel-materials" class="panel">
+        <div id="materials-root"></div>
+      </section>
+
+      <section id="panel-views" class="panel">
+        <div id="views-root"></div>
+      </section>
+    </aside>
+  </main>
+
   <script type="module">
+    // タブ切り替え
+    const tabs = document.querySelectorAll('.tabs button');
+    const panels = document.querySelectorAll('.panel');
+    tabs.forEach(btn => {
+      btn.addEventListener('click', () => {
+        tabs.forEach(b => b.classList.toggle('active', b === btn));
+        panels.forEach(p => p.classList.toggle('active', p.id === btn.dataset.target));
+      });
+    });
+
     import "./app_boot.js";
 
-    window.addEventListener("error", (e) => {
-      console.error("[global:error]", e.error || e.message || e);
-    });
-    window.addEventListener("unhandledrejection", (e) => {
-      console.error("[global:unhandledrejection]", e.reason || e);
-    });
+    window.addEventListener("error", (e) => console.error("[global:error]", e.error || e.message || e));
+    window.addEventListener("unhandledrejection", (e) => console.error("[global:unhandledrejection]", e.reason || e));
   </script>
 </body>
 </html>
