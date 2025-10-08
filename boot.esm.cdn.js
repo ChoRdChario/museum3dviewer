@@ -1,5 +1,5 @@
-// boot.esm.cdn.js — prod wiring + GIS dynamic loader + color filter checkboxes
-import { ensureViewer, loadGlbFromUrl } from './viewer.module.cdn.js';
+// boot.esm.cdn.js — ESM/CDN bootstrap (8-color palette, Drive API loader)
+import { ensureViewer, loadGlbFromDrive } from './viewer.module.cdn.js';
 import { setupAuth, getAccessToken } from './gauth.module.js';
 
 const $ = (id) => document.getElementById(id);
@@ -8,53 +8,32 @@ const enable = (on, ...els) => els.forEach(el => el && (el.disabled = !on));
 // ---------- Viewer ----------
 ensureViewer({ canvas: $('gl') });
 
-// ---------- Google Identity Services Loader (defensive) ----------
-async function loadGIS(timeoutMs = 8000) {
-  if (globalThis.google?.accounts?.id) return true;
-  // if a script tag already exists, wait for it
-  const existing = Array.from(document.scripts).find(s => /accounts\.google\.com\/gsi\/client/.test(s.src));
-  if (!existing) {
-    const s = document.createElement('script');
-    s.src = 'https://accounts.google.com/gsi/client';
-    s.async = true; s.defer = true;
-    document.head.appendChild(s);
-  }
-  const t0 = performance.now();
-  while (performance.now() - t0 < timeoutMs) {
-    if (globalThis.google?.accounts?.id) return true;
-    await new Promise(r => setTimeout(r, 50));
-  }
-  console.warn('[auth] GIS not available after wait — continuing with stub');
-  return false;
-}
-
-// ---------- Auth wiring ----------
+// ---------- Auth wiring (GIS は gauth.module.js 側で動的ロード & メタから client_id を解決) ----------
 const btnAuth = $('auth-signin');
 const signedSwitch = (signed) => {
   document.documentElement.classList.toggle('signed-in', signed);
   enable(signed, $('btnGlb'), $('btnRefreshImages'), $('glbUrl'), $('save-target-sheet'), $('save-target-create'));
 };
+btnAuth && setupAuth(btnAuth, signedSwitch);
 
-(async () => {
-  await loadGIS().catch(() => {});
-  btnAuth && setupAuth(btnAuth, signedSwitch);
-})();
-
-// ---------- GLB load ----------
-const normalizeDrive = (v) => {
-  if (!v) return '';
+// ---------- GLB load (Drive API 経由; CORS 安全) ----------
+const extractDriveId = (v) => {
+  if (!v) return null;
   const m = String(v).match(/[-\w]{25,}/);
-  if (m) return `https://drive.google.com/uc?export=download&id=${m[0]}`;
-  return v;
+  return m ? m[0] : null;
 };
+
 const doLoad = async () => {
   const token = getAccessToken();
   if (!token) { console.warn('[GLB] token missing. Please sign in.'); return; }
-  const url = normalizeDrive($('glbUrl')?.value || '');
-  if (!url) return;
+  const raw = $('glbUrl')?.value?.trim();
+  const fileId = extractDriveId(raw);
+  if (!fileId) { console.warn('[GLB] no fileId found in input'); return; }
   try {
     $('btnGlb').disabled = true;
-    await loadGlbFromUrl(url, { token });
+    await loadGlbFromDrive(fileId, { token });
+  } catch (e) {
+    console.error('[GLB] load error', e);
   } finally {
     $('btnGlb').disabled = false;
   }
@@ -62,10 +41,10 @@ const doLoad = async () => {
 $('btnGlb')?.addEventListener('click', doLoad);
 $('glbUrl')?.addEventListener('keydown', (e) => e.key === 'Enter' && doLoad());
 
-// ---------- Caption: color palette + color filter checkboxes ----------
+// ---------- Caption: 8-color palette + checkbox filter ----------
 const COLORS = ['#ff6b6b','#ffd93d','#6bcb77','#4d96ff','#9b5de5','#f15bb5','#00c2a8','#94a3b8'];
 
-// (A) Pin color palette (simple chips)
+// (A) Pin color palette
 const pinColorsHost = $('pin-colors');
 let currentPinColor = COLORS[0];
 if (pinColorsHost) {
@@ -83,9 +62,9 @@ if (pinColorsHost) {
   const first = pinColorsHost.querySelector('.chip'); first && select(first);
 }
 
-// (B) Color filter = checkbox beside each color
+// (B) Color filter checkboxes（選択色のみ表示させるためのイベント発火）
 const pinFilterHost = $('pin-filter');
-const selectedColors = new Set(COLORS); // default: show all
+const selectedColors = new Set(COLORS); // default show-all
 if (pinFilterHost) {
   pinFilterHost.innerHTML = COLORS.map(c => (
     `<label style="display:flex;align-items:center;gap:6px;margin:2px 8px 2px 0">
@@ -97,12 +76,13 @@ if (pinFilterHost) {
     const cb = e.target.closest('input[type=checkbox][data-color]'); if (!cb) return;
     const color = cb.dataset.color;
     cb.checked ? selectedColors.add(color) : selectedColors.delete(color);
-    const ev = new CustomEvent('pinFilterChange', { detail: { selected: Array.from(selectedColors) } });
-    document.dispatchEvent(ev);
+    document.dispatchEvent(new CustomEvent('pinFilterChange', {
+      detail: { selected: Array.from(selectedColors) }
+    }));
   });
 }
 
-// ---------- Caption buttons (stubs) ----------
+// ---------- Caption buttons (stubs; 後で pins.js に結線) ----------
 $('pin-add')?.addEventListener('click', () => {
   console.log('[Pin] add (color=%s, title=%s, body=%s)',
     currentPinColor, $('caption-title')?.value, $('caption-body')?.value);

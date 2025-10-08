@@ -1,7 +1,4 @@
-
-// viewer.module.cdn.js
-// CDN-based ESM viewer (Three imports via unpkg).
-
+// viewer.module.cdn.js — CDN imports + Drive API loader (CORS-safe)
 import * as THREE from 'https://unpkg.com/three@0.155.0/build/three.module.js';
 import { OrbitControls } from 'https://unpkg.com/three@0.155.0/examples/jsm/controls/OrbitControls.js';
 import { GLTFLoader } from 'https://unpkg.com/three@0.155.0/examples/jsm/loaders/GLTFLoader.js';
@@ -9,6 +6,7 @@ import { GLTFLoader } from 'https://unpkg.com/three@0.155.0/examples/jsm/loaders
 let renderer, scene, camera, controls, loader;
 let current;
 
+// Initialize viewer once
 export function ensureViewer({ canvas }) {
   if (renderer) return;
   if (!canvas) throw new Error('Viewer canvas not found');
@@ -58,20 +56,35 @@ function tick() {
   requestAnimationFrame(tick);
 }
 
-export async function loadGlbFromUrl(url, { token } = {}) {
-  const isDrive = /google\.com\/uc\?/.test(url);
-  let blobUrl = url;
+// --------- Drive API loader (CORS OK) ---------
+export async function loadGlbFromDrive(fileId, { token } = {}) {
+  if (!fileId) throw new Error('fileId required');
+  if (!token) throw new Error('OAuth token required');
 
-  if (isDrive && token) {
-    const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
-    if (!res.ok) throw new Error(`Drive fetch failed: ${res.status}`);
-    const blob = await res.blob();
-    blobUrl = URL.createObjectURL(blob);
+  const url = `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?alt=media&supportsAllDrives=true`;
+
+  const res = await fetch(url, {
+    method: 'GET',
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) {
+    const txt = await res.text().catch(() => '');
+    throw new Error(`Drive fetch failed: ${res.status} ${txt}`);
   }
 
-  const gltf = await new GLTFLoader().loadAsync(blobUrl);
-  if (isDrive && blobUrl.startsWith('blob:')) URL.revokeObjectURL(blobUrl);
+  const blob = await res.blob();
+  const blobUrl = URL.createObjectURL(blob);
 
+  try {
+    const gltf = await loader.loadAsync(blobUrl);
+    attachToScene(gltf);
+  } finally {
+    URL.revokeObjectURL(blobUrl);
+  }
+}
+
+function attachToScene(gltf) {
+  if (!scene) return;
   if (current) {
     scene.remove(current);
     current.traverse?.(o => {
@@ -83,7 +96,6 @@ export async function loadGlbFromUrl(url, { token } = {}) {
   }
   current = gltf.scene || gltf.scenes?.[0];
   scene.add(current);
-
   frameToObject(current);
 }
 
@@ -99,6 +111,7 @@ function frameToObject(root) {
   controls.update();
 }
 
+// Optional getters
 export const getScene = () => scene;
 export const getCamera = () => camera;
 export const getRenderer = () => renderer;
