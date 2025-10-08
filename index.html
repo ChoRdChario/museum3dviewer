@@ -2,137 +2,127 @@
 <html lang="ja">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>LociMyu v6.6</title>
-  <link rel="stylesheet" href="./app.css?v=20251005" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="stylesheet" href="./app.css" />
+
+  <!-- Three を importmap から1回だけ（重複読み込み防止） -->
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+      "three/examples/jsm/controls/OrbitControls.js": "https://unpkg.com/three@0.160.0/examples/jsm/controls/OrbitControls.js"
+    }
+  }
+  </script>
+
   <style>
-    body{margin:0;background:#0f1116;color:#e5e7eb;font:14px/1.5 system-ui,Segoe UI,Roboto,Helvetica,Arial}
-    .app{display:grid;grid-template-columns:1fr 360px;height:100vh}
-    .viewer{position:relative;background:#0f1116}
-    .panel{border-left:1px solid rgba(255,255,255,.06);background:#111319}
-    .row{padding:8px 10px}
-    .row + .row{border-top:1px solid rgba(255,255,255,.06)}
-    h1{margin:0;padding:8px 10px;font-size:12px;letter-spacing:.08em;color:#9aa4b2;border-bottom:1px solid rgba(255,255,255,.06)}
-    .grid2{display:grid;grid-template-columns:1fr auto;gap:6px}
-    input,textarea,select,button{background:#10131a;border:1px solid rgba(255,255,255,.12);color:#e5e7eb;border-radius:6px;padding:6px 8px}
-    textarea{min-height:96px;resize:vertical}
-    .btn{cursor:pointer}
-    .righthead{display:flex;align-items:center;gap:8px;justify-content:space-between;padding:6px 10px;border-bottom:1px solid rgba(255,255,255,.06)}
-    .tabs{display:flex;gap:12px;font-size:13px}
-    .tabs button{background:transparent;border:0;color:#cfd6df;cursor:pointer}
-    .tabs .on{color:#fff;font-weight:600}
-    .auth{display:flex;align-items:center;gap:8px}
-    #overlay{position:absolute;top:16px;left:16px;max-width:36ch;padding:8px 10px;border-radius:8px;background:rgba(15,17,22,.75);backdrop-filter:saturate(1.3) blur(6px);border:1px solid rgba(255,255,255,.12);display:none}
-    #overlay .ob{margin-top:6px;color:#cbd5e1}
-    #capList{height:220px;overflow:auto}
-    .caprow{display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:8px;cursor:pointer}
-    .caprow:hover{background:rgba(255,255,255,.06)}
-    .caprow .dot{width:10px;height:10px;border-radius:50%}
-    .pin-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
-    #pinPalette{display:flex;gap:8px}
-    #pinPalette .sw{width:18px;height:18px;border-radius:50%;border:1px solid rgba(255,255,255,.25);opacity:.75}
-    #pinPalette .sw.active{outline:2px solid #fff;opacity:1}
-    #pinFilterToggles{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
-    #pinFilterToggles label{display:flex;align-items:center;gap:6px}
-    #leader{position:absolute;inset:0;pointer-events:none}
+    html,body {height:100%; margin:0; background:#0f1115; color:#e6e6ea; font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial;}
+    #viewer-root {
+      display:grid;
+      grid-template-columns: 1fr 360px;
+      height:100vh; overflow:hidden;
+    }
+    /* ← viewer.js が参照する可能性のある複数 id を同じ領域に重ねて用意 */
+    #viewer,#viewer-container,#three-root,#renderArea {position:relative; width:100%; height:100%;}
+    #sidepane {background:#151821; border-left:1px solid #222735; display:flex; flex-direction:column;}
+    .tabs {display:flex; gap:16px; padding:12px 12px 0; border-bottom:1px solid #222735;}
+    .tabs button{background:none;border:0;color:#9aa4b2;padding:6px 8px;cursor:pointer}
+    .tabs button.active{color:#fff;border-bottom:2px solid #7aa2ff}
+    .panel{padding:12px; overflow:auto}
+    .row{display:flex; align-items:center; gap:8px; flex-wrap:wrap}
+    #pin-palette .chip{width:18px;height:18px;border-radius:50%;border:2px solid #0006;display:inline-block;cursor:pointer}
+    #filters{display:flex; align-items:center; gap:10px; margin-top:8px}
+    #caption-list{margin-top:12px; display:flex; flex-direction:column; gap:6px; max-height:32vh; overflow:auto}
+    .cap-item{display:flex; align-items:center; gap:8px; padding:8px; background:#0f131a; border:1px solid #23293a; border-radius:8px}
+    .cap-item .dot{width:10px;height:10px;border-radius:50%}
+    .cap-item .title{flex:1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+    .cap-item .pin-delete{background:#2b3245; color:#cdd7e5; border:0; border-radius:6px; padding:4px 6px; cursor:pointer}
+    .field{display:flex; flex-direction:column; gap:6px; margin-top:12px}
+    .field input,.field textarea{width:100%; background:#0f131a; color:#e6e6ea; border:1px solid #23293a; border-radius:8px; padding:8px}
+    .toolbar{display:flex; justify-content:space-between; align-items:center; gap:8px; margin-top:10px}
+    .btn{background:#2b3245; color:#cdd7e5; border:0; border-radius:8px; padding:6px 10px; cursor:pointer}
+    /* auth chip の見た目 */
+    #auth-chip{margin-left:auto; background:#2b3245; color:#cdd7e5; border:0; border-radius:16px; padding:6px 10px; cursor:pointer}
   </style>
 </head>
 <body>
-  <div class="app">
-    <!-- Left: Viewer -->
-    <section class="viewer" id="viewerHost">
-      <canvas id="glcanvas"></canvas>
-      <svg id="leader" width="0" height="0">
-        <line id="leaderLine" x1="0" y1="0" x2="0" y2="0" stroke="#89f" stroke-width="1.5" opacity="0"/>
-      </svg>
-      <div id="overlay"></div>
-    </section>
-
-    <!-- Right: Panel -->
-    <aside class="panel">
-      <div class="righthead">
-        <div class="tabs">
-          <button class="on">Caption</button>
-          <button disabled>Material</button>
-          <button disabled>View</button>
-        </div>
-        <div class="auth">
-          <button id="btnAuth" class="btn">Sign in</button>
+  <div id="viewer-root">
+    <!-- 左：Three.js viewer コンテナ（複数 id を同位置に用意） -->
+    <div id="viewer">
+      <div id="viewer-container">
+        <div id="three-root">
+          <div id="renderArea"></div>
         </div>
       </div>
+    </div>
 
-      <h1>Caption</h1>
-
-      <div class="row grid2">
-        <input id="glbInput" placeholder="Drive File ID or URL" />
-        <button id="btnLoad" class="btn">GLB</button>
+    <!-- 右：UI -->
+    <aside id="sidepane">
+      <div class="tabs">
+        <button id="tab-caption" class="active">Caption</button>
+        <button id="tab-material" disabled>Material</button>
+        <button id="tab-view" disabled>View</button>
+        <!-- gauth.module.js が探すサインイン用 chip/button -->
+        <button id="auth-chip">Sign in</button>
       </div>
 
-      <div class="row grid2">
-        <select id="sheetSelect"></select>
-        <button id="btnNewSheet" class="btn">＋</button>
-      </div>
+      <section id="panel-caption" class="panel">
+        <!-- パレット（pins.js が参照） -->
+        <div id="pin-palette" class="row" aria-label="Pin color palette">
+          <span class="chip" style="background:#89c2ff" data-color="blue"   title="Blue"></span>
+          <span class="chip" style="background:#ffd166" data-color="yellow" title="Yellow"></span>
+          <span class="chip" style="background:#a3d65c" data-color="green"  title="Green"></span>
+          <span class="chip" style="background:#ef6461" data-color="red"    title="Red"></span>
+          <span class="chip" style="background:#9a7cff" data-color="purple" title="Purple"></span>
+          <span class="chip" style="background:#9fb0c6" data-color="gray"   title="Gray"></span>
+        </div>
 
-      <div class="row pin-row">
-        <div id="pinPalette" aria-label="Pin color palette"></div>
-      </div>
+        <!-- フィルタ -->
+        <div id="filters">
+          <label><input id="pin-filter-all" type="checkbox" checked /> All</label>
+          <label><input type="checkbox" name="pin-filter" data-color="blue"   checked /> ●</label>
+          <label><input type="checkbox" name="pin-filter" data-color="yellow" checked /> ●</label>
+          <label><input type="checkbox" name="pin-filter" data-color="green"  checked /> ●</label>
+          <label><input type="checkbox" name="pin-filter" data-color="red"    checked /> ●</label>
+          <label><input type="checkbox" name="pin-filter" data-color="purple" checked /> ●</label>
+          <label><input type="checkbox" name="pin-filter" data-color="gray"   checked /> ●</label>
+        </div>
 
-      <div class="row">
-        <div id="pinFilterToggles"></div>
-      </div>
+        <!-- リスト（pins.js が .cap-item を追加） -->
+        <div id="caption-list" aria-label="Caption list"></div>
 
-      <div class="row">
-        <div id="capList"></div>
-      </div>
+        <!-- 編集 -->
+        <div class="field">
+          <label for="caption-title">Title</label>
+          <input id="caption-title" type="text" placeholder="Title" />
+        </div>
+        <div class="field">
+          <label for="caption-body">Body</label>
+          <textarea id="caption-body" rows="6" placeholder="Body"></textarea>
+        </div>
 
-      <div class="row">
-        <label>Title</label>
-        <input id="capTitle" placeholder="Title" />
-      </div>
-      <div class="row">
-        <label>Body</label>
-        <textarea id="capBody" placeholder="Body"></textarea>
-      </div>
+        <div class="toolbar">
+          <div></div>
+          <div>
+            <button id="refresh-images" class="btn">Refresh</button>
+          </div>
+        </div>
 
-      <div class="row grid2">
-        <button id="btnAddPin" class="btn">+ Pin</button>
-        <button id="btnRefresh" class="btn">Refresh images</button>
-      </div>
+        <!-- pins.js が参照する保存先（hidden 可） -->
+        <select id="save-data" style="display:none">
+          <option value="Pins" selected>Pins</option>
+        </select>
+      </section>
 
-      <div class="row">
-        <div id="imgGrid" class="img-grid"></div>
-      </div>
+      <section id="panel-material" class="panel" hidden></section>
+      <section id="panel-view" class="panel" hidden></section>
     </aside>
   </div>
 
-  <!-- Scripts (Three.js は各モジュール内で1回だけ読み込まれる想定) -->
-  <script type="module" src="./viewer.js?v=20251005"></script>
-  <script type="module">
-    import { setupPins } from './pins.js?v=20251005';
-    import { ensureViewer } from './viewer.js?v=20251005';
-
-    const app = {
-      state: { currentGLBId: null },
-      viewer: await ensureViewer({
-        host: document.getElementById('viewerHost'),
-        canvas: document.getElementById('glcanvas'),
-      })
-    };
-
-    document.getElementById('btnLoad').addEventListener('click', async ()=>{
-      const v = document.getElementById('glbInput').value.trim();
-      if (!v) { alert('GLB の Drive URL または FileID を入力してください'); return; }
-      const id = v.includes('/') ? (new URL(v)).searchParams.get('id') || v.split('/').pop() : v;
-      app.state.currentGLBId = id;
-      await app.viewer.loadGLBFromDrive(id);
-      window.dispatchEvent(new CustomEvent('lmy:model-loaded'));
-    });
-
-    document.getElementById('btnAuth').addEventListener('click', ()=> {
-      console.log('[auth] clicked');
-    });
-
-    setupPins(app);
-  </script>
+  <!-- モジュール読み込み（Three は importmap 経由） -->
+  <script type="module" src="./viewer.js"></script>
+  <script type="module" src="./pins.js"></script>
+  <script type="module" src="./app_boot.js"></script>
 </body>
 </html>
