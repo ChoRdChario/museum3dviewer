@@ -1,95 +1,109 @@
-// pins.js (ESM)
-// UI の存在を検証し、最低限の配線を行う。詳細機能は後続ステップで拡張。
-import { ensureViewer } from './viewer.js';
+import { ensureViewer, loadGLBFromDrive, addPinAtCenter, setPinColor, getAllPins } from './viewer.js';
+import { ensureSpreadsheetForFile, ensurePinsHeader, listSheetTitles, loadPins, savePins } from './sheets_api.js?v=stub';
+import { downloadImageAsBlob } from './utils_drive_images.js?v=stub';
 
-const q = (sel) => /** @type {HTMLElement|null} */(document.querySelector(sel));
-const qa = (sel) => /** @type {NodeListOf<HTMLElement>} */(document.querySelectorAll(sel));
+function $(id){ return document.getElementById(id); }
+function log(...args){ console.log('[pins]', ...args); }
 
-function elRequired(id, el) {
-  if (!el) throw new Error(`[pins] required element missing: ${id}`);
-  return el;
-}
+// --- UI elements ---
+const fileIdInput = $('fileIdInput');
+const btnLoad = $('btnLoad');
+const btnAddPin = $('btnAddPin');
+const btnRefreshImages = $('btnRefreshImages');
+const capList = $('capList');
+const capTitle = $('capTitle');
+const capBody = $('capBody');
+const authChip = $('authChip');
+const sheetSelect = $('sheetSelect');
+const tabs = $('tabs');
 
-function setupTabs() {
-  const tabs = qa('#tabs .tab');
-  const pages = qa('.tabpage');
-  tabs.forEach(btn => {
-    btn.addEventListener('click', () => {
-      tabs.forEach(b => b.classList.remove('active'));
-      pages.forEach(p => p.classList.remove('active'));
-      btn.classList.add('active');
-      const name = btn.getAttribute('data-tab');
-      q(`#tab-${name}`)?.classList.add('active');
-    });
+// Pane containers
+const paneCap = $('pane-cap');
+const paneMat = $('pane-mat');
+const paneView = $('pane-view');
+
+// --- Boot ---
+(async function boot(){
+  log('ready');
+  await ensureViewer();
+  wireTabs();
+  wireAuth();
+  wireGLB();
+  wirePins();
+  await initSheets('demo');
+})();
+
+function wireTabs(){
+  tabs.addEventListener('click', (e)=>{
+    const t = e.target.closest('button');
+    if(!t) return;
+    const name = t.dataset.tab;
+    for(const el of [paneCap, paneMat, paneView]) el.style.display = 'none';
+    (name==='cap'?paneCap:name==='mat'?paneMat:paneView).style.display = 'block';
+    // active ui
+    for(const b of tabs.querySelectorAll('button')) b.classList.toggle('active', b===t);
   });
 }
 
-function setupAuth() {
-  const btnSignin = elRequired('#btnSignin', q('#btnSignin'));
-  btnSignin.addEventListener('click', () => {
-    console.log('[auth] sign-in clicked (stub)');
-    btnSignin.classList.toggle('on');
-    btnSignin.textContent = btnSignin.classList.contains('on') ? 'Signed in' : 'Sign in';
+function wireAuth(){
+  authChip.addEventListener('click', ()=>{
+    log('[auth] sign-in clicked (stub)');
+    alert('Sign-in is stubbed in this offline build.');
   });
 }
 
-function setupPinFilters() {
-  const filterAll = /** @type {HTMLInputElement} */(elRequired('#filterAll', q('#filterAll')));
-  const dots = qa('#pinFilters .dot');
-  filterAll.addEventListener('change', () => {
-    const on = filterAll.checked;
-    dots.forEach(d => d.classList.toggle('off', !on));
-  });
-  dots.forEach(dot => {
-    dot.addEventListener('click', () => {
-      filterAll.checked = false;
-      dot.classList.toggle('off');
-      console.log('[pins] filter toggled', dot.dataset.color, !dot.classList.contains('off'));
-    });
+function wireGLB(){
+  btnLoad.addEventListener('click', async ()=>{
+    const idOrUrl = fileIdInput.value.trim();
+    const resolved = idOrUrl || 'demo';
+    log('[GLB] requested load', resolved);
+    try{
+      await ensureViewer();
+      await loadGLBFromDrive(resolved);
+    }catch(err){
+      console.error('[GLB] load failed', err);
+      alert('Failed to load GLB: ' + err.message);
+    }
   });
 }
 
-function setupCaptionIO() {
-  const inputDrive = /** @type {HTMLInputElement} */(elRequired('#inputDrive', q('#inputDrive')));
-  const btnLoadGLB = elRequired('#btnLoadGLB', q('#btnLoadGLB'));
-  const btnRefresh = elRequired('#btnRefreshImages', q('#btnRefreshImages'));
-  const btnAddPin = elRequired('#btnAddPin', q('#btnAddPin'));
-  const title = /** @type {HTMLInputElement} */(elRequired('#inputTitle', q('#inputTitle')));
-  const body  = /** @type {HTMLTextAreaElement} */(elRequired('#inputBody', q('#inputBody')));
-
-  btnLoadGLB.addEventListener('click', async () => {
-    const v = inputDrive.value.trim();
-    console.log('[GLB] requested load', v || '(demo)');
-    await ensureViewer(); // ビューア起動のみ（GLBロードは後続実装）
-  });
-
-  btnRefresh.addEventListener('click', () => {
-    console.log('[images] refresh requested');
-  });
-
-  btnAddPin.addEventListener('click', () => {
-    console.log('[pins] +Pin clicked (use Shift+Click on viewer in future)');
-  });
-
-  const persist = () => {
-    console.log('[caption] persist draft', { title: title.value, body: body.value });
-  };
-  title.addEventListener('input', persist);
-  body.addEventListener('input', persist);
+function renderCapList(rows){
+  capList.value = (rows||[]).map(r => `• (${r.color||'-'}) ${r.title||''} — ${r.body||''}`).join('\n');
 }
 
-function bootPins() {
-  try {
-    setupTabs();
-    setupAuth();
-    setupPinFilters();
-    setupCaptionIO();
-    console.info('[pins] ready');
-  } catch (err) {
-    console.error('[pins] required elements missing', err);
+function wirePins(){
+  btnAddPin.addEventListener('click', async ()=>{
+    const color = '#ffd54f'; // default amber
+    setPinColor(color);
+    const pin = await addPinAtCenter({ title: capTitle.value, body: capBody.value, color });
+    const all = getAllPins();
+    renderCapList(all);
+    await persistPins();
+  });
+  btnRefreshImages.addEventListener('click', async ()=>{
+    const blob = await downloadImageAsBlob('demo');
+    log('[images] fetched blob', blob.size, 'bytes');
+    alert('Images refreshed (stub).');
+  });
+}
+
+async function initSheets(fileId){
+  const sheetId = await ensureSpreadsheetForFile(fileId);
+  await ensurePinsHeader(sheetId);
+  const sheets = await listSheetTitles(sheetId);
+  sheetSelect.innerHTML = '';
+  for(const s of sheets){
+    const opt = document.createElement('option');
+    opt.value = opt.textContent = s;
+    sheetSelect.appendChild(opt);
   }
+  const rows = await loadPins(sheetId, sheets[0]);
+  renderCapList(rows);
 }
 
-document.addEventListener('DOMContentLoaded', () => {
-  bootPins();
-});
+async function persistPins(){
+  const fileId = 'demo';
+  const sheet = sheetSelect.value || 'Pins';
+  const rows = getAllPins();
+  await savePins(fileId, sheet, rows);
+}
