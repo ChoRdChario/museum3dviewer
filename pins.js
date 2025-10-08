@@ -1,6 +1,5 @@
-// pins.js — A+B UI with click-select, Drive images, no +Pin button
+// pins.js — A+B UI 完了版（旧UI廃止）
 import { ensureSpreadsheetForFile, ensurePinsHeader, listSheetTitles, loadPins, savePins } from './sheets_api.js?v=20251004s3';
-import { driveListImagesInSameFolder } from './utils_drive_images.js';
 
 const PALETTE = [
   { key:'sky',   hex:'#55ccff' },
@@ -13,16 +12,16 @@ const PALETTE = [
 
 export function setupPins(app){
   // DOM
-  const overlay      = document.getElementById('overlay');
-  const titleInput   = document.getElementById('capTitle');
-  const bodyInput    = document.getElementById('capBody');
-  const imgGrid      = document.getElementById('imgGrid');
-  const sheetSelect  = document.getElementById('sheetSelect');
-  const btnNewSheet  = document.getElementById('btnNewSheet');
-  const capList      = document.getElementById('capList');
-  const pinPalette   = document.getElementById('pinPalette');
-  const filterToggles= document.getElementById('pinFilterToggles');
-
+  const overlay = document.getElementById('overlay');
+  const titleInput = document.getElementById('capTitle');
+  const bodyInput  = document.getElementById('capBody');
+  const btnAdd     = document.getElementById('btnAddPin');
+  const imgGrid    = document.getElementById('imgGrid');
+  const sheetSelect= document.getElementById('sheetSelect');
+  const btnNewSheet= document.getElementById('btnNewSheet');
+  const capList    = document.getElementById('capList');
+  const pinPalette = document.getElementById('pinPalette');
+  const filterToggles = document.getElementById('pinFilterToggles');
   if (!overlay || !pinPalette || !filterToggles || !capList) {
     console.error('[pins] required elements missing');
     return;
@@ -69,30 +68,23 @@ export function setupPins(app){
     });
 
     filterToggles.innerHTML = '';
-
     // All
     const labAll = document.createElement('label');
     labAll.className='ft-all';
-    const cAll = document.createElement('input');
-    cAll.type='checkbox'; cAll.checked=true;
-    labAll.appendChild(cAll);
-    labAll.append('All');
+    const cAll = document.createElement('input'); cAll.type='checkbox'; cAll.checked=true;
+    labAll.appendChild(cAll); labAll.append('All');
     cAll.addEventListener('change',()=>{
       const on = !!cAll.checked;
       Object.keys(filterVisible).forEach(h=>filterVisible[h]=on);
-      filterToggles.querySelectorAll('input[data-hex]').forEach(cb=>{ cb.checked = on; });
+      filterToggles.querySelectorAll('input[data-hex]').forEach(cb=>cb.checked=on);
       applyFilter();
     });
     filterToggles.appendChild(labAll);
-
     // each color
     PALETTE.forEach(c=>{
-      const lab = document.createElement('label');
-      lab.className='ft-item';
-      const cb = document.createElement('input');
-      cb.type='checkbox'; cb.checked=true; cb.dataset.hex=c.hex;
-      const dot = document.createElement('i');
-      dot.className='dot'; dot.style.background=c.hex;
+      const lab = document.createElement('label'); lab.className='ft-item';
+      const cb = document.createElement('input'); cb.type='checkbox'; cb.checked=true; cb.dataset.hex=c.hex;
+      const dot = document.createElement('i'); dot.className='dot'; dot.style.background=c.hex;
       lab.appendChild(cb); lab.appendChild(dot);
       cb.addEventListener('change',()=>{
         filterVisible[c.hex] = !!cb.checked;
@@ -110,27 +102,39 @@ export function setupPins(app){
     const v = new THREE.Vector3(vec3.x, vec3.y, vec3.z).project(app.viewer.camera);
     const el = app.viewer.renderer.domElement;
     const w = el.clientWidth, h = el.clientHeight;
-    if (svg.getAttribute('width') !== String(w)) svg.setAttribute('width', String(w));
-    if (svg.getAttribute('height') !== String(h)) svg.setAttribute('height', String(h));
-    return { x: ( v.x * 0.5 + 0.5) * w, y: (-v.y * 0.5 + 0.5) * h };
+    if (svg.getAttribute('width') != String(w)) svg.setAttribute('width', String(w));
+    if (svg.getAttribute('height') != String(h)) svg.setAttribute('height', String(h));
+    return { x: ( v.x * .5 + .5) * w, y: (-v.y * .5 + .5) * h };
   }
   function updateLeaderToOverlay(){
-    if (!selected || overlay.style.display==='none'){
-      leaderLine.setAttribute('opacity','0');
-      halo.style.opacity = 0;
-      return;
-    }
+    if (!selected || overlay.style.display==='none'){ leaderLine.setAttribute('opacity','0'); halo.style.opacity=0; return; }
     const canvasRect = app.viewer.renderer.domElement.getBoundingClientRect();
     const overlayRect = overlay.getBoundingClientRect();
     const ax = overlayRect.left - canvasRect.left + 10;
     const ay = overlayRect.top  - canvasRect.top  + overlayRect.height/2;
     const p = projectToCanvas(selected.obj.position);
-    leaderLine.setAttribute('x1', String(p.x)); leaderLine.setAttribute('y1', String(p.y));
-    leaderLine.setAttribute('x2', String(ax));  leaderLine.setAttribute('y2', String(ay));
+    leaderLine.setAttribute('x1', p.x); leaderLine.setAttribute('y1', p.y);
+    leaderLine.setAttribute('x2', ax); leaderLine.setAttribute('y2', ay);
     leaderLine.setAttribute('opacity','1');
-    halo.setAttribute('cx', String(p.x)); halo.setAttribute('cy', String(p.y));
+    halo.setAttribute('cx', p.x); halo.setAttribute('cy', p.y);
   }
   window.addEventListener('resize', updateLeaderToOverlay);
+
+  /*__OVERLAY_DRAG__*/
+  (function(){
+    let dragging=false, sx=0, sy=0, ox=0, oy=0;
+    function clamp(v,a,b){return Math.max(a,Math.min(b,v));}
+    overlay.addEventListener('mousedown',(e)=>{
+      if(e.button!==0) return; dragging=true; sx=e.clientX; sy=e.clientY; const r=overlay.getBoundingClientRect(); ox=r.left; oy=r.top;});
+    window.addEventListener('mousemove',(e)=>{
+      if(!dragging) return; const dx=e.clientX-sx, dy=e.clientY-sy;
+      const stage=document.getElementById('stage'); const sr=stage.getBoundingClientRect(); const or=overlay.getBoundingClientRect();
+      const nx=clamp(ox+dx, sr.left, sr.right-or.width);
+      const ny=clamp(oy+dy, sr.top, sr.bottom-or.height);
+      overlay.style.left=(nx-sr.left)+'px'; overlay.style.top=(ny-sr.top)+'px'; updateLeaderToOverlay();
+    });
+    window.addEventListener('mouseup',()=>{dragging=false;});
+  })();
   (function raf(){ updateLeaderToOverlay(); requestAnimationFrame(raf); })();
 
   function renderCapList(){
@@ -138,20 +142,16 @@ export function setupPins(app){
       <div class="caprow" data-id="${p.id}">
         <i class="dot" style="background:${p.color}"></i>
         <span class="capttl">${p.title||'(untitled)'}</span>
+        <button class="capdel" data-id="${p.id}" title="Delete">🗑</button>
       </div>`).join('');
   }
 
   function showOverlay(rec){
     overlay.style.display='block';
-    overlay.innerHTML = `<strong>${rec.title||'(untitled)'}</strong>${rec.body? `<div class="ob">${rec.body}</div>`:''}`;
+    overlay.innerHTML = `<strong>${rec.title||'(untitled)'}</strong>` + (rec.body? `<div class="ob">${rec.body}</div>` : '');
     updateLeaderToOverlay();
   }
-  function hideOverlay(){
-    overlay.style.display='none';
-    leaderLine.setAttribute('opacity','0');
-    halo.style.opacity=0;
-    halo.style.animation='none';
-  }
+  function hideOverlay(){ overlay.style.display='none'; leaderLine.setAttribute('opacity','0'); halo.style.opacity=0; halo.style.animation='none'; }
 
   function selectPin(rec){
     selected = rec || null;
@@ -160,8 +160,7 @@ export function setupPins(app){
     bodyInput.value  = rec.body  || '';
     leaderLine.setAttribute('stroke', rec.color || currentColor);
     halo.style.stroke = rec.color || currentColor;
-    halo.style.opacity=1;
-    halo.style.animation='lmyPulse 1.2s ease-out infinite';
+    halo.style.opacity=1; halo.style.animation='lmyPulse 1.2s ease-out infinite';
     showOverlay(rec);
   }
 
@@ -173,9 +172,7 @@ export function setupPins(app){
     pinObj.position.copy(pos);
     app.viewer.scene.add(pinObj);
     const rec = { id: init.id||uuid(), obj: pinObj, title:init.title||'', body:init.body||'', imageId:init.imageId||'', color };
-    pins.push(rec);
-    renderCapList();
-    selectPin(rec);
+    pins.push(rec); renderCapList(); selectPin(rec);
     if (!opts.skipSave) scheduleSave();
     return rec;
   }
@@ -184,95 +181,43 @@ export function setupPins(app){
     for (const p of pins){
       const vis = !!filterVisible[p.color];
       p.obj.visible = vis;
-      if (selected && selected.id===p.id && !vis){
-        selected=null; hideOverlay();
-      }
+      if (selected && selected.id===p.id && !vis){ selected=null; hideOverlay(); }
     }
   }
 
-  // Caption list click → select
+  // events
   capList.addEventListener('click', (e)=>{
-    const el = e.target.closest('[data-id]');
-    if (!el) return;
-    const rec = pins.find(p=>p.id===el.dataset.id);
+    const id = e.target.closest('[data-id]')?.dataset?.id;
+    if (!id) return;
+    const rec = pins.find(p=>p.id===id);
     if (rec) selectPin(rec);
   }, {passive:true});
 
-  // Shift+click → add pin
+  // shift+click で追加（+Pinボタンは今は残す）
   app.viewer.renderer.domElement.addEventListener('click', (e)=>{
     if (!e.shiftKey) return;
     const hit = app.viewer.raycastFromClientXY(e.clientX, e.clientY);
     if (hit) addPinAtPosition(hit.point);
   });
 
-  // Normal click → select pin if hit
-  app.viewer.renderer.domElement.addEventListener('click', (e)=>{
-    if (e.shiftKey) return; // handled above
-    const hit = app.viewer.raycastFromClientXY(e.clientX, e.clientY);
-    if (!hit) return;
-    let obj = hit.object; let found = null;
-    for (const p of pins){ if (p.obj === obj){ found = p; break; } }
-    if (!found && obj){
-      let cur = obj.parent; let depth = 0;
-      while(cur && depth++<3 && !found){
-        for (const p of pins){ if (p.obj === cur){ found = p; break; } }
-        cur = cur.parent;
-      }
-    }
-    if (found) selectPin(found);
+  titleInput.addEventListener('input', ()=>{ if (selected){ selected.title=titleInput.value; renderCapList(); scheduleSave(); } });
+  bodyInput .addEventListener('input', ()=>{ if (selected){ selected.body =bodyInput.value ; scheduleSave(); } });
+  btnAdd?.addEventListener('click', ()=>{
+    const rect = app.viewer.renderer.domElement.getBoundingClientRect();
+    const hit = app.viewer.raycastFromClientXY(rect.left+rect.width/2, rect.top+rect.height/2);
+    if (hit) addPinAtPosition(hit.point);
   });
 
-  // === Drive images in same folder ===
-  async function refreshImages(){
-    const glbId = app.state?.currentGLBId;
-    if (!glbId) {
-      imgGrid.innerHTML = '<div class="muted">Load a GLB to list images.</div>';
-      return;
-    }
-    try{
-      imgGrid.innerHTML = '<div class="muted">Loading images...</div>';
-      const files = await driveListImagesInSameFolder(glbId);
-      if (!files || files.length===0){
-        imgGrid.innerHTML = '<div class="muted">No images in this folder.</div>';
-        return;
-      }
-      imgGrid.innerHTML = files.map(f => (
-        `<button class="imgbtn" data-id="${f.id}" title="${f.name}">`+
-          `<img src="${f.thumbnailLink||''}" alt="${f.name}">`+
-        `</button>`
-      )).join('');
-    }catch(e){
-      console.error('[pins] list images failed', e);
-      imgGrid.innerHTML = '<div class="muted">Failed to list images.</div>';
-    }
-  }
-  document.getElementById('btnRefreshImages')?.addEventListener('click', refreshImages);
-  window.addEventListener('lmy:model-loaded', refreshImages);
-
-  imgGrid.addEventListener('click', (ev)=>{
-    const btn = ev.target.closest('[data-id]');
-    if (!btn || !selected) return;
-    selected.imageId = btn.dataset.id;
-    scheduleSave();
-    btn.classList.add('sel');
-    setTimeout(()=>btn.classList.remove('sel'), 250);
-  });
-
-  // Sheet handling
+  // sheet
   async function populateSheetSelect(){
     const titles = await listSheetTitles(spreadsheetId);
     sheetSelect.innerHTML = titles.map(t=>`<option value="${t}">${t}</option>`).join('');
     if (!titles.includes(sheetName)) sheetName = titles[0] || 'Pins';
     sheetSelect.value = sheetName;
   }
-
   async function restorePins(){
-    // remove meshes
     pins.forEach(p=> app.viewer.scene.remove(p.obj));
-    pins.length = 0;
-    renderCapList();
-    selectPin(null);
-
+    pins.length = 0; renderCapList(); selectPin(null);
     const list = await loadPins(spreadsheetId, sheetName);
     for (const p of list){
       const pos = new app.viewer.THREE.Vector3(p.x,p.y,p.z);
@@ -280,14 +225,12 @@ export function setupPins(app){
     }
     applyFilter();
   }
-
   sheetSelect.addEventListener('change', async ()=>{
-    sheetName = sheetSelect.value || 'Pins';
+    sheetName = sheetSelect.value||'Pins';
     if (!spreadsheetId) return;
     await ensurePinsHeader(spreadsheetId, sheetName);
     await restorePins();
   });
-
   btnNewSheet.addEventListener('click', async ()=>{
     try{
       if (!spreadsheetId){
@@ -303,10 +246,7 @@ export function setupPins(app){
       await populateSheetSelect();
       sheetSelect.value = sheetName;
       await restorePins();
-    }catch(e){
-      console.error('[pins] create sheet failed', e);
-      alert('Failed to create sheet: ' + (e?.message || e));
-    }
+    }catch(e){ console.error('[pins] create sheet failed', e); alert('Failed to create sheet: '+(e?.message||e)); }
   });
 
   window.addEventListener('lmy:model-loaded', async ()=>{
@@ -317,9 +257,7 @@ export function setupPins(app){
       await ensurePinsHeader(spreadsheetId, sheetName);
       await populateSheetSelect();
       await restorePins();
-    }catch(e){
-      console.error('[pins] init failed', e);
-    }
+    }catch(e){ console.error('[pins] init failed', e); }
   });
 
   // save (debounced)
@@ -330,8 +268,30 @@ export function setupPins(app){
       const serial = pins.map(p=>({ id:p.id, x:p.obj.position.x, y:p.obj.position.y, z:p.obj.position.z, title:p.title, body:p.body, imageId:p.imageId, color:p.color }));
       await savePins(spreadsheetId, sheetName, serial);
       console.log('[pins] saved', serial.length, 'to sheet', sheetName);
-    }catch(e){
-      console.error('[pins] save failed', e);
-    }
+    }catch(e){ console.error('[pins] save failed', e); }
   }, 300);
 }
+
+
+// Delete pin via caption list (event delegation)
+document.getElementById('capList').addEventListener('click', (e)=>{
+  const del = e.target.closest('.capdel');
+  if (!del) return;
+  const id = del.dataset.id;
+  const idx = pins.findIndex(p=>p.id===id);
+  if (idx>=0){
+    try{ app.viewer.scene.remove(pins[idx].obj); }catch(_){}
+    if (selected && selected.id===id){ selected=null; hideOverlay(); }
+    pins.splice(idx,1);
+    renderCapList();
+    scheduleSave();
+  }
+});
+
+
+// Open Drive folder of current GLB
+document.getElementById('btnDriveOpen')?.addEventListener('click', async ()=>{
+  const glbId = app.state?.currentGLBId;
+  if (!glbId){ alert('Load a GLB first.'); return; }
+  try{ await openDriveFolderOfFile(glbId); }catch(e){ console.error(e); alert('Failed to open Drive folder'); }
+});
