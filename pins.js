@@ -119,22 +119,6 @@ export function setupPins(app){
     halo.setAttribute('cx', p.x); halo.setAttribute('cy', p.y);
   }
   window.addEventListener('resize', updateLeaderToOverlay);
-
-  /*__OVERLAY_DRAG__*/
-  (function(){
-    let dragging=false, sx=0, sy=0, ox=0, oy=0;
-    function clamp(v,a,b){return Math.max(a,Math.min(b,v));}
-    overlay.addEventListener('mousedown',(e)=>{
-      if(e.button!==0) return; dragging=true; sx=e.clientX; sy=e.clientY; const r=overlay.getBoundingClientRect(); ox=r.left; oy=r.top;});
-    window.addEventListener('mousemove',(e)=>{
-      if(!dragging) return; const dx=e.clientX-sx, dy=e.clientY-sy;
-      const stage=document.getElementById('stage'); const sr=stage.getBoundingClientRect(); const or=overlay.getBoundingClientRect();
-      const nx=clamp(ox+dx, sr.left, sr.right-or.width);
-      const ny=clamp(oy+dy, sr.top, sr.bottom-or.height);
-      overlay.style.left=(nx-sr.left)+'px'; overlay.style.top=(ny-sr.top)+'px'; updateLeaderToOverlay();
-    });
-    window.addEventListener('mouseup',()=>{dragging=false;});
-  })();
   (function raf(){ updateLeaderToOverlay(); requestAnimationFrame(raf); })();
 
   function renderCapList(){
@@ -142,7 +126,6 @@ export function setupPins(app){
       <div class="caprow" data-id="${p.id}">
         <i class="dot" style="background:${p.color}"></i>
         <span class="capttl">${p.title||'(untitled)'}</span>
-        <button class="capdel" data-id="${p.id}" title="Delete">🗑</button>
       </div>`).join('');
   }
 
@@ -271,19 +254,3 @@ export function setupPins(app){
     }catch(e){ console.error('[pins] save failed', e); }
   }, 300);
 }
-
-
-// Delete pin via caption list (event delegation)
-document.getElementById('capList').addEventListener('click', (e)=>{
-  const del = e.target.closest('.capdel');
-  if (!del) return;
-  const id = del.dataset.id;
-  const idx = pins.findIndex(p=>p.id===id);
-  if (idx>=0){
-    try{ app.viewer.scene.remove(pins[idx].obj); }catch(_){}
-    if (selected && selected.id===id){ selected=null; hideOverlay(); }
-    pins.splice(idx,1);
-    renderCapList();
-    scheduleSave();
-  }
-});
