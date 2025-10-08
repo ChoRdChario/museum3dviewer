@@ -1,113 +1,165 @@
 <!doctype html>
 <html lang="ja">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>GLB Caption Tool</title>
-  <link rel="stylesheet" href="./app.css" />
-  <style>
-    /* Minimal safe styles in case app.css is missing pieces */
-    :root { --panel-w: 380px; --gap: 8px; font-family: system-ui, -apple-system, Segoe UI, Roboto, 'Noto Sans JP', sans-serif; }
-    html, body { height: 100%; margin: 0; }
-    body { display: grid; grid-template-rows: auto 1fr; background:#0b0e14; color:#e5e7eb; }
-    header { display:flex; align-items:center; gap:12px; padding:10px 12px; border-bottom:1px solid #1f2937; background:#0f131b; }
-    header h1 { font-size:14px; font-weight:600; margin:0; opacity:.9 }
-    .spacer { flex:1 }
-    .chip { display:inline-flex; align-items:center; gap:8px; padding:6px 10px; border:1px solid #334155; border-radius:999px; background:#111827; }
-    .chip[aria-busy="true"] { opacity:.7 }
-    main { display:grid; grid-template-columns: 1fr var(--panel-w); min-height:0; }
-    #viewer-host { position:relative; overflow:hidden; }
-    #viewer { position:absolute; inset:0; }
-    aside { border-left:1px solid #1f2937; background:#0f131b; display:flex; flex-direction:column; min-width:var(--panel-w); }
-    .tabs { display:flex; border-bottom:1px solid #1f2937; }
-    .tabs button { appearance:none; background:transparent; border:0; color:#9ca3af; padding:10px 12px; font-weight:600; }
-    .tabs button[aria-selected="true"]{ color:#e5e7eb; background:#111827; }
-    .tabpanel { display:none; padding:12px; overflow:auto; }
-    .tabpanel[aria-hidden="false"]{ display:block; }
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>GLB Caption Tool</title>
 
-    .grid-cols { display:grid; grid-template-columns: 1fr auto; gap: var(--gap); align-items:center; }
-    .row { display:flex; gap: var(--gap); align-items:center; }
-    .palette { display:flex; flex-wrap:wrap; gap:6px; }
-    .swatch { width:18px; height:18px; border-radius:4px; border:1px solid #0006; cursor:pointer; display:inline-block; }
-    .swatch[aria-selected="true"]{ outline:2px solid #fff; outline-offset:2px; }
-    .filters { display:flex; gap:12px; flex-wrap:wrap; align-items:center; }
-    .filters .toggle { display:flex; align-items:center; gap:6px; cursor:pointer; }
-    .filters .dot { width:14px; height:14px; border-radius:50%; border:1px solid #0006; display:inline-block; }
-    .list { display:flex; flex-direction:column; gap:8px; margin-top:8px; }
-    .list .item { padding:8px; border:1px solid #233046; border-radius:8px; background:#0b111a; }
-    .muted { color:#9ca3af; font-size:12px; }
-    .danger { color:#ef4444 }
-    .button { background:#1f2937; color:#e5e7eb; border:1px solid #374151; border-radius:8px; padding:8px 10px; cursor:pointer; }
-    .button[disabled]{ opacity:.5; cursor:not-allowed; }
-    .input { background:#0b111a; color:#e5e7eb; border:1px solid #233046; border-radius:8px; padding:8px 10px; width:100%; }
-    .tiny { font-size:12px; opacity:.8 }
-    .toolbar { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
-  </style>
-</head>
-<body>
-  <header>
-    <h1>GLB Caption Tool</h1>
-    <div class="spacer"></div>
+    <!-- Optional favicon (remove to silence 404 if missing)
+    <link rel="icon" href="/favicon.ico" />
+    -->
+    <link rel="stylesheet" href="./app.css" />
 
-    <!-- Google Auth chip & button (selectors duplicated defensively) -->
-    <div id="auth-chip" class="chip" data-auth-chip aria-busy="true" title="Google Sign-In">
-      <span id="auth-status" data-auth-status>未サインイン</span>
-      <button id="auth-btn" data-auth-button class="button tiny">Sign in</button>
-    </div>
-  </header>
+    <style>
+      /* Minimal safety styles so layout holds even if app.css differs */
+      :root { color-scheme: dark; }
+      body { margin:0; background:#0f1115; color:#e5e7eb; font:14px/1.4 system-ui, -apple-system, Segoe UI, Roboto, 'Noto Sans JP', sans-serif; }
+      .row { display:flex; height:100vh; width:100vw; }
+      #viewer { flex:1 1 auto; position:relative; background:#0b0d12; }
+      #viewer-status { position:absolute; left:16px; top:16px; opacity:.6; font-size:12px; }
+      aside { width:360px; max-width:40vw; border-left:1px solid #1f2430; background:#111318; padding:12px 12px 80px; overflow:auto; }
+      .tabs { display:flex; gap:8px; margin-bottom:12px; }
+      .tab { background:#171a21; border:1px solid #252b36; border-radius:8px; padding:6px 10px; cursor:pointer; }
+      .tab[aria-selected="true"] { background:#273043; border-color:#3b4660; }
+      .pane { display:none; gap:12px; }
+      .pane.active { display:block; }
+      .field { margin:10px 0 8px; }
+      .field label { display:block; opacity:.8; margin-bottom:4px; font-size:12px; }
+      input[type="text"], textarea, select { width:100%; background:#0f1420; border:1px solid #293246; border-radius:8px; color:#e5e7eb; padding:8px; }
+      textarea { min-height:120px; resize:vertical; }
+      .row-inline { display:flex; gap:8px; align-items:center; }
+      .btn { background:#202738; border:1px solid #2b354a; color:#e5e7eb; padding:6px 10px; border-radius:8px; cursor:pointer; }
+      .btn:disabled { opacity:.5; cursor:not-allowed; }
+      .chip { padding:6px 10px; border-radius:999px; border:1px solid #2b354a; background:#171a21; }
+      .pin-colors { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+      .dot { width:16px; height:16px; border-radius:999px; border:2px solid #2b354a; cursor:pointer; display:inline-block; }
+      .sr-only { position:absolute; left:-9999px; }
+      .toolbar { display:flex; justify-content:flex-end; gap:8px; margin:8px 0 12px; }
+    </style>
+  </head>
+  <body>
+    <div class="row">
+      <main id="viewer">
+        <div id="viewer-status">ready</div>
+        <!-- The renderer/canvas will be injected by viewer.js -->
+      </main>
 
-  <main>
-    <section id="viewer-host">
-      <canvas id="viewer" aria-label="3D Viewer"></canvas>
-    </section>
-
-    <aside id="right-panel">
-      <div class="tabs" role="tablist">
-        <button id="tab-captions" role="tab" aria-selected="true" aria-controls="panel-captions">Captions</button>
-        <button id="tab-materials" role="tab" aria-selected="false" aria-controls="panel-materials">Materials</button>
-        <button id="tab-views" role="tab" aria-selected="false" aria-controls="panel-views">Views</button>
-      </div>
-
-      <!-- Captions panel -->
-      <div id="panel-captions" class="tabpanel" role="tabpanel" aria-hidden="false">
+      <aside>
+        <!-- ===== top toolbar: tabs + auth ===== -->
         <div class="toolbar">
-          <input id="glb-id-input" class="input" placeholder="Drive: GLB file ID or URL" />
-          <button id="btn-load-glb" class="button" disabled>Load GLB</button>
-          <button id="btn-refresh-images" class="button" disabled>Refresh Images</button>
-          <button id="btn-open-drive" class="button" disabled>Drive…</button>
+          <div id="gauth-bridge"
+               data-client-id="YOUR_GOOGLE_OAUTH_CLIENT_ID"
+               data-scope="https://www.googleapis.com/auth/drive.readonly https://www.googleapis.com/auth/drive.file">
+            <button id="auth-signin" class="chip" type="button">Sign in</button>
+            <button id="auth-signout" class="chip" type="button" hidden>Sign out</button>
+          </div>
         </div>
 
-        <div class="row" style="margin-top:10px">
-          <div class="palette" id="pin-palette" aria-label="Pin colors"></div>
-        </div>
+        <nav class="tabs" aria-label="Primary">
+          <button class="tab" data-tab="captions" aria-selected="true">Captions</button>
+          <button class="tab" data-tab="materials">Materials</button>
+          <button class="tab" data-tab="views">Views</button>
+        </nav>
 
-        <div class="filters" id="pin-filters" style="margin-top:8px"></div>
+        <!-- ===== Captions pane ===== -->
+        <section class="pane active" data-pane="captions">
+          <div class="field">
+            <label for="glb-input">Drive: GLB file ID or URL</label>
+            <div class="row-inline">
+              <input id="glb-input" type="text" placeholder="https://drive.google.com/... or fileId" />
+              <button id="glb-pick" class="btn" type="button" title="Choose from Drive">Drive…</button>
+            </div>
+            <div class="row-inline" style="margin-top:8px">
+              <button id="glb-load" class="btn" type="button">Load GLB</button>
+              <button id="refresh-images" class="btn" type="button">Refresh Images</button>
+            </div>
+          </div>
 
-        <div class="list" id="caption-list" style="margin-top:12px"></div>
-      </div>
+          <div class="field">
+            <label for="save-target">Save data</label>
+            <div class="row-inline">
+              <select id="save-target">
+                <option value="Pins">Pins</option>
+                <option value="Materials">Materials</option>
+                <option value="Views">Views</option>
+              </select>
+              <button id="save-target-new" class="btn" type="button" title="Create new">+</button>
+            </div>
+          </div>
 
-      <!-- Materials panel (placeholder, stays intact) -->
-      <div id="panel-materials" class="tabpanel" role="tabpanel" aria-hidden="true">
-        <p class="muted">Materials UI — 後で配線</p>
-      </div>
+          <div class="field">
+            <label>Pin</label>
+            <div class="pin-colors" id="pin-colors">
+              <input class="sr-only" type="radio" name="pin-color" id="pin-c-sky" data-color="#60a5fa" checked />
+              <label class="dot" for="pin-c-sky" style="background:#60a5fa"></label>
 
-      <!-- Views panel (placeholder, stays intact) -->
-      <div id="panel-views" class="tabpanel" role="tabpanel" aria-hidden="true">
-        <p class="muted">Views UI — 後で配線</p>
-      </div>
-    </aside>
-  </main>
+              <input class="sr-only" type="radio" name="pin-color" id="pin-c-green" data-color="#22c55e" />
+              <label class="dot" for="pin-c-green" style="background:#22c55e"></label>
 
-  <!-- Modules: keep order; import only once each. -->
-  <script type="module" src="./viewer.js"></script>
-  <script type="module" src="./pins.js"></script>
-  <script type="module" src="./app_boot.js"></script>
+              <input class="sr-only" type="radio" name="pin-color" id="pin-c-amber" data-color="#f59e0b" />
+              <label class="dot" for="pin-c-amber" style="background:#f59e0b"></label>
 
-  <!-- IMPORTANT: gauth is kept global-friendly; if your repo loads it via module, keep that path -->
-  <script type="module">
-    import * as gauth from './gauth.module.js';
-    // Expose a small bridge so other modules can access without tight coupling
-    window.__gauth = gauth;
-  </script>
-</body>
+              <input class="sr-only" type="radio" name="pin-color" id="pin-c-violet" data-color="#a855f7" />
+              <label class="dot" for="pin-c-violet" style="background:#a855f7"></label>
+
+              <input class="sr-only" type="radio" name="pin-color" id="pin-c-rose" data-color="#f43f5e" />
+              <label class="dot" for="pin-c-rose" style="background:#f43f5e"></label>
+
+              <input class="sr-only" type="radio" name="pin-color" id="pin-c-slate" data-color="#94a3b8" />
+              <label class="dot" for="pin-c-slate" style="background:#94a3b8"></label>
+            </div>
+          </div>
+
+          <div class="field">
+            <label for="pin-filter">Filter</label>
+            <select id="pin-filter">
+              <option value="all">(All)</option>
+              <option value="sky">Sky</option>
+              <option value="green">Green</option>
+              <option value="amber">Amber</option>
+              <option value="violet">Violet</option>
+              <option value="rose">Rose</option>
+              <option value="slate">Slate</option>
+            </select>
+          </div>
+
+          <div class="field">
+            <label for="caption-list">Caption list</label>
+            <textarea id="caption-list" placeholder="—"></textarea>
+          </div>
+
+          <div class="field">
+            <label for="caption-title">Title / Body</label>
+            <input id="caption-title" type="text" placeholder="Title" />
+            <textarea id="caption-body" placeholder="Body"></textarea>
+          </div>
+
+          <div class="row-inline" style="margin-top:8px">
+            <button id="pin-add"   class="btn" type="button">+ Pin</button>
+            <button id="pin-clear" class="btn" type="button">Clear</button>
+            <button id="refresh-images-2" class="btn" type="button">Refresh images</button>
+          </div>
+        </section>
+
+        <!-- ===== Materials pane (placeholder, elements retained for future wiring) ===== -->
+        <section class="pane" data-pane="materials">
+          <div class="field"><em>Materials pane (placeholder)</em></div>
+        </section>
+
+        <!-- ===== Views pane (placeholder) ===== -->
+        <section class="pane" data-pane="views">
+          <div class="field"><em>Views pane (placeholder)</em></div>
+        </section>
+      </aside>
+    </div>
+
+    <!-- App scripts (expected by existing repo). Keep order: modules last. -->
+    <script src="./vendor/three/three.min.js"></script>
+    <script src="./vendor/three/OrbitControls.js"></script>
+
+    <!-- Your application modules -->
+    <script type="module" src="./viewer.js"></script>
+    <script type="module" src="./pins.js"></script>
+    <script type="module" src="./app_boot.js"></script>
+  </body>
 </html>
