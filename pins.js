@@ -1,6 +1,6 @@
-// pins.js — A+B UI 完了版（旧UI廃止）
+// pins.js — Palette + per-color visibility toggles (A+B案), compact & robust
 import { ensureSpreadsheetForFile, ensurePinsHeader, listSheetTitles, loadPins, savePins } from './sheets_api.js?v=20251004s3';
-import { driveListImagesInSameFolder } from './utils_drive_images.js';
+import { downloadImageAsBlob } from './utils_drive_images.js?v=20251004img2';
 
 const PALETTE = [
   { key:'sky',   hex:'#55ccff' },
@@ -12,30 +12,35 @@ const PALETTE = [
 ];
 
 export function setupPins(app){
-  // DOM
+  // ------- cache DOM -------
   const overlay = document.getElementById('overlay');
   const titleInput = document.getElementById('capTitle');
   const bodyInput  = document.getElementById('capBody');
-    const imgGrid    = document.getElementById('imgGrid');
+  const btnAdd     = document.getElementById('btnAddPin');
+  const imgGrid    = document.getElementById('imgGrid');
   const sheetSelect= document.getElementById('sheetSelect');
   const btnNewSheet= document.getElementById('btnNewSheet');
   const capList    = document.getElementById('capList');
   const pinPalette = document.getElementById('pinPalette');
   const filterToggles = document.getElementById('pinFilterToggles');
-  if (!overlay || !pinPalette || !filterToggles || !capList) {
+
+  if (!overlay || !pinPalette || !filterToggles) {
     console.error('[pins] required elements missing');
     return;
   }
 
-  // state
-  const pins = [];
+  // ------- state -------
+  const pins = []; // {id,obj,title,body,imageId,color}
   let selected = null;
   let spreadsheetId = null;
   let sheetName = 'Pins';
   let currentColor = PALETTE[0].hex;
-  const filterVisible = Object.fromEntries(PALETTE.map(c=>[c.hex,true]));
+  const imageCache = new Map(); // fileId -> objectURL
+  const filterVisible = Object.fromEntries(PALETTE.map(c=>[c.hex,true])); // per color visibility
 
-  // svg leader
+  // ------- small utils -------
+  const uuid = ()=>'p_'+Math.random().toString(36).slice(2,10)+Math.random().toString(36).slice(2,10);
+  const stage = document.getElementById('stage');
   const svg = document.getElementById('leader');
   const leaderLine = document.getElementById('leaderLine');
   let halo = document.getElementById('leaderHalo');
@@ -47,31 +52,33 @@ export function setupPins(app){
     svg.appendChild(halo);
   }
 
-  // palette + toggles
+  // ------- UI builders -------
   function setupPalette(){
     pinPalette.innerHTML = '';
     PALETTE.forEach((c,i)=>{
-      const sw = document.createElement('button');
-      sw.type='button';
-      sw.className='sw'+(i===0?' active':'');
+      const sw = document.createElement('div');
+      sw.className = 'sw'+(i===0?' active':'');
       sw.title = c.key;
       sw.style.background = c.hex;
-      sw.dataset.hex=c.hex;
+      sw.dataset.hex = c.hex;
       sw.addEventListener('click',()=>{
         pinPalette.querySelectorAll('.sw').forEach(x=>x.classList.remove('active'));
         sw.classList.add('active');
         currentColor = c.hex;
-        halo.style.stroke = currentColor;
-        leaderLine.setAttribute('stroke', currentColor);
-      }, {passive:true});
+        if (selected){
+          leaderLine.setAttribute('stroke', currentColor);
+          halo.style.stroke = currentColor;
+        }
+      });
       pinPalette.appendChild(sw);
     });
 
+    // visibility toggles (checkbox + dot)
     filterToggles.innerHTML = '';
-    // All
+    // “All” master
     const labAll = document.createElement('label');
-    labAll.className='ft-all';
-    const cAll = document.createElement('input'); cAll.type='checkbox'; cAll.checked=true;
+    const cAll = document.createElement('input');
+    cAll.type = 'checkbox'; cAll.checked = true;
     labAll.appendChild(cAll); labAll.append('All');
     cAll.addEventListener('change',()=>{
       const on = !!cAll.checked;
@@ -80,14 +87,17 @@ export function setupPins(app){
       applyFilter();
     });
     filterToggles.appendChild(labAll);
-    // each color
+
+    // per color
     PALETTE.forEach(c=>{
-      const lab = document.createElement('label'); lab.className='ft-item';
-      const cb = document.createElement('input'); cb.type='checkbox'; cb.checked=true; cb.dataset.hex=c.hex;
-      const dot = document.createElement('i'); dot.className='dot'; dot.style.background=c.hex;
+      const lab = document.createElement('label');
+      const cb = document.createElement('input');
+      cb.type='checkbox'; cb.checked = true; cb.dataset.hex = c.hex;
+      const dot = document.createElement('span'); dot.className='dot'; dot.style.background=c.hex;
       lab.appendChild(cb); lab.appendChild(dot);
       cb.addEventListener('change',()=>{
         filterVisible[c.hex] = !!cb.checked;
+        // sync “All”
         cAll.checked = Object.values(filterVisible).every(Boolean);
         applyFilter();
       });
@@ -96,15 +106,28 @@ export function setupPins(app){
   }
   setupPalette();
 
-  // project to canvas
+  // overlay content
+  function showOverlay({title, body, imgUrl}){
+    overlay.style.display='block';
+    overlay.innerHTML = `<strong>${title??''}</strong>` + (body? `<div style="margin-top:.25rem;white-space:pre-wrap">${body}</div>` : '');
+    if (imgUrl){
+      const im = new Image(); im.src = imgUrl; im.style.marginTop='.5rem'; im.style.maxWidth='100%'; overlay.appendChild(im);
+    }
+    updateLeaderToOverlay();
+  }
+  function hideOverlay(){ overlay.style.display='none'; leaderLine.setAttribute('opacity','0'); halo.style.opacity=0; halo.style.animation='none'; }
+
   function projectToCanvas(vec3){
     const THREE = app.viewer.THREE;
-    const v = new THREE.Vector3(vec3.x, vec3.y, vec3.z).project(app.viewer.camera);
+    const v = new THREE.Vector3(vec3.x, vec3.y, vec3.z);
+    v.project(app.viewer.camera);
     const el = app.viewer.renderer.domElement;
     const w = el.clientWidth, h = el.clientHeight;
     if (svg.getAttribute('width') != String(w)) svg.setAttribute('width', String(w));
     if (svg.getAttribute('height') != String(h)) svg.setAttribute('height', String(h));
-    return { x: ( v.x * .5 + .5) * w, y: (-v.y * .5 + .5) * h };
+    const x = ( v.x *  0.5 + 0.5) * w;
+    const y = (-v.y *  0.5 + 0.5) * h;
+    return { x, y };
   }
   function updateLeaderToOverlay(){
     if (!selected || overlay.style.display==='none'){ leaderLine.setAttribute('opacity','0'); halo.style.opacity=0; return; }
@@ -113,41 +136,37 @@ export function setupPins(app){
     const ax = overlayRect.left - canvasRect.left + 10;
     const ay = overlayRect.top  - canvasRect.top  + overlayRect.height/2;
     const p = projectToCanvas(selected.obj.position);
-    leaderLine.setAttribute('x1', p.x); leaderLine.setAttribute('y1', p.y);
-    leaderLine.setAttribute('x2', ax); leaderLine.setAttribute('y2', ay);
+    leaderLine.setAttribute('x1', String(p.x));
+    leaderLine.setAttribute('y1', String(p.y));
+    leaderLine.setAttribute('x2', String(ax));
+    leaderLine.setAttribute('y2', String(ay));
     leaderLine.setAttribute('opacity','1');
-    halo.setAttribute('cx', p.x); halo.setAttribute('cy', p.y);
+    halo.setAttribute('cx', String(p.x));
+    halo.setAttribute('cy', String(p.y));
   }
   window.addEventListener('resize', updateLeaderToOverlay);
   (function raf(){ updateLeaderToOverlay(); requestAnimationFrame(raf); })();
 
+  // -------- pins I/O --------
   function renderCapList(){
     capList.innerHTML = pins.map(p=>`
-      <div class="caprow" data-id="${p.id}">
-        <i class="dot" style="background:${p.color}"></i>
-        <span class="capttl">${p.title||'(untitled)'}</span>
+      <div class="row" data-id="${p.id}" style="padding:.4rem .5rem;border-bottom:1px solid #262630;cursor:pointer">
+        <span style="display:inline-block;width:10px;height:10px;background:${p.color};border-radius:999px"></span>
+        <span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${p.title||'(untitled)'}</span>
       </div>`).join('');
   }
-
-  function showOverlay(rec){
-    overlay.style.display='block';
-    overlay.innerHTML = `<strong>${rec.title||'(untitled)'}</strong>` + (rec.body? `<div class="ob">${rec.body}</div>` : '');
-    updateLeaderToOverlay();
-  }
-  function hideOverlay(){ overlay.style.display='none'; leaderLine.setAttribute('opacity','0'); halo.style.opacity=0; halo.style.animation='none'; }
 
   function selectPin(rec){
     selected = rec || null;
     if (!rec){ hideOverlay(); return; }
     titleInput.value = rec.title || '';
-    bodyInput.value  = rec.body  || '';
+    bodyInput.value = rec.body || '';
     leaderLine.setAttribute('stroke', rec.color || currentColor);
     halo.style.stroke = rec.color || currentColor;
-    halo.style.opacity=1; halo.style.animation='lmyPulse 1.2s ease-out infinite';
-    showOverlay(rec);
+    halo.style.opacity = 1; halo.style.animation = 'lmyPulse 1.2s ease-out infinite';
+    showOverlay({ title: rec.title||'(untitled)', body: rec.body||'', imgUrl: '' });
   }
 
-  const uuid = ()=>'p_'+Math.random().toString(36).slice(2,10)+Math.random().toString(36).slice(2,10);
   function addPinAtPosition(pos, init={}, opts={}){
     const THREE = app.viewer.THREE;
     const color = init.color || currentColor;
@@ -159,6 +178,7 @@ export function setupPins(app){
     if (!opts.skipSave) scheduleSave();
     return rec;
   }
+  function addPinFromHit(hit){ addPinAtPosition(hit.point, {}); }
 
   function applyFilter(){
     for (const p of pins){
@@ -168,74 +188,30 @@ export function setupPins(app){
     }
   }
 
-  // events
+  // ---------- events ----------
   capList.addEventListener('click', (e)=>{
     const id = e.target.closest('[data-id]')?.dataset?.id;
     if (!id) return;
     const rec = pins.find(p=>p.id===id);
     if (rec) selectPin(rec);
-  }, {passive:true});
+  });
 
-  // shift+click で追加
   app.viewer.renderer.domElement.addEventListener('click', (e)=>{
     if (!e.shiftKey) return;
     const hit = app.viewer.raycastFromClientXY(e.clientX, e.clientY);
-    if (hit) addPinAtPosition(hit.point);
+    if (hit) addPinFromHit(hit);
   });
 
-  /*__PIN_SELECT_CLICK__*/
-  app.viewer.renderer.domElement.addEventListener('click', (e)=>{
-    if (e.shiftKey) return; // handled above
-    const hit = app.viewer.raycastFromClientXY(e.clientX, e.clientY);
-    if (!hit) return;
-    // Try to match intersection object to a pin's mesh
-    let obj = hit.object;
-    let found = null;
-    for (const p of pins){ if (p.obj === obj) { found = p; break; } }
-    if (!found && obj){ // walk up a few parents just in case
-      let cur = obj.parent; let depth=0;
-      while(cur && depth++<3 && !found){ for(const p of pins){ if (p.obj===cur){ found=p; break; } } cur = cur.parent; }
-    }
-    if (found) selectPin(found);
+  btnAdd?.addEventListener('click', ()=>{
+    const rect = app.viewer.renderer.domElement.getBoundingClientRect();
+    const hit = app.viewer.raycastFromClientXY(rect.left+rect.width/2, rect.top+rect.height/2);
+    if (hit) addPinFromHit(hit);
   });
 
   titleInput.addEventListener('input', ()=>{ if (selected){ selected.title=titleInput.value; renderCapList(); scheduleSave(); } });
   bodyInput .addEventListener('input', ()=>{ if (selected){ selected.body =bodyInput.value ; scheduleSave(); } });
-    const hit = app.viewer.raycastFromClientXY(rect.left+rect.width/2, rect.top+rect.height/2);
-    if (hit) addPinAtPosition(hit.point);
-  });
 
-  
-  // === Drive images in same folder ===
-  async function refreshImages(){
-    const glbId = app.state?.currentGLBId;
-    if (!glbId) { imgGrid.innerHTML = '<div class="muted">Load a GLB to list images.</div>'; return; }
-    try{
-      imgGrid.innerHTML = '<div class="muted">Loading images...</div>';
-      const files = await driveListImagesInSameFolder(glbId);
-      if (!files.length){ imgGrid.innerHTML = '<div class="muted">No images in this folder.</div>'; return; }
-      imgGrid.innerHTML = files.map(f => `
-        <button class="imgbtn" data-id="${f.id}" title="${f.name}">
-          <img src="${f.thumbnailLink || ''}" alt="${f.name}"/>
-        </button>
-      `).join('');
-    }catch(e){
-      console.error('[pins] list images failed', e);
-      imgGrid.innerHTML = '<div class="muted">Failed to list images.</div>';
-    }
-  }
-  document.getElementById('btnRefreshImages')?.addEventListener('click', refreshImages);
-  window.addEventListener('lmy:model-loaded', refreshImages);
-  imgGrid.addEventListener('click', (ev)=>{
-    const id = ev.target.closest('[data-id]')?.dataset?.id;
-    if (!id || !selected) return;
-    selected.imageId = id;
-    scheduleSave();
-    // brief flash on selection
-    ev.target.closest('.imgbtn')?.classList.add('sel');
-    setTimeout(()=>ev.target.closest('.imgbtn')?.classList.remove('sel'), 300);
-  });
-// sheet
+  // sheet
   async function populateSheetSelect(){
     const titles = await listSheetTitles(spreadsheetId);
     sheetSelect.innerHTML = titles.map(t=>`<option value="${t}">${t}</option>`).join('');
