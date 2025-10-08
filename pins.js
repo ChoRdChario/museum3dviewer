@@ -1,115 +1,95 @@
-// pins.js
-const COLORS = ['#8aa7ff','#e9ce57','#80c77a','#b784f5','#6a88a1','#7272ff','#c96a8a','#90a0ff'];
+// pins.js (ESM)
+// UI の存在を検証し、最低限の配線を行う。詳細機能は後続ステップで拡張。
+import { ensureViewer } from './viewer.js';
 
-export function setupPins(opts){
-  const qs = s=>document.querySelector(s);
-  const elList   = qs(opts.capList);
-  const elTitle  = qs(opts.capTitle);
-  const elBody   = qs(opts.capBody);
-  const elPal    = qs(opts.pinPalette);
-  const elFilter = qs(opts.pinFilter);
-  const btnAdd   = qs(opts.btnAdd);
-  const btnRef   = qs(opts.btnRefresh);
+const q = (sel) => /** @type {HTMLElement|null} */(document.querySelector(sel));
+const qa = (sel) => /** @type {NodeListOf<HTMLElement>} */(document.querySelectorAll(sel));
 
-  if(!elList||!elTitle||!elBody||!elPal||!elFilter||!btnAdd){
-    console.warn('[pins] required elements missing');
-    return;
-  }
-
-  // palette
-  elPal.innerHTML = '';
-  COLORS.forEach((c,i)=>{
-    const b = document.createElement('button');
-    b.className = 'color';
-    b.style.background = c;
-    if (i===0) b.classList.add('is-active');
-    b.addEventListener('click', ()=>{
-      elPal.querySelectorAll('.color').forEach(x=>x.classList.remove('is-active'));
-      b.classList.add('is-active');
-      currentColor = c;
-    });
-    elPal.appendChild(b);
-  });
-
-  // filters
-  const filterColors = elFilter.querySelector('#filterColors');
-  const all = elFilter.querySelector('#filterAll');
-  filterColors.innerHTML = '';
-  COLORS.forEach((c)=>{
-    const label = document.createElement('label');
-    label.className = 'check';
-    const cb = document.createElement('input');
-    cb.type = 'checkbox'; cb.checked = true;
-    const dot = document.createElement('span');
-    dot.className = 'color'; dot.style.background = c;
-    label.append(cb, dot);
-    filterColors.appendChild(label);
-    cb.addEventListener('change', ()=>applyFilter());
-  });
-  all.addEventListener('change', ()=>{
-    filterColors.querySelectorAll('input[type=checkbox]').forEach(cb=>cb.checked = all.checked);
-    applyFilter();
-  });
-
-  // list
-  elList.innerHTML = '';
-  let model = []; // {id,title,body,color}
-
-  let currentColor = COLORS[0];
-
-  function applyFilter(){
-    renderList();
-  }
-
-  function renderList(){
-    elList.innerHTML = '';
-    const allowed = new Set();
-    const boxes = filterColors.querySelectorAll('input[type=checkbox]');
-    COLORS.forEach((c,i)=>{ if (boxes[i].checked) allowed.add(c); });
-
-    model.forEach((cap)=>{
-      if (!allowed.has(cap.color)) return;
-      const row = document.createElement('div');
-      row.className = 'item';
-      const dot = document.createElement('span'); dot.className='dot'; dot.style.background=cap.color;
-      const title = document.createElement('div'); title.className='title'; title.textContent = cap.title || '(untitled)';
-      const del = document.createElement('button'); del.className='del'; del.textContent='Delete';
-      del.addEventListener('click', ()=>{
-        model = model.filter(x=>x.id!==cap.id);
-        renderList();
-      });
-      row.append(dot,title,del);
-      row.addEventListener('click', ()=> select(cap.id));
-      elList.appendChild(row);
-    });
-  }
-
-  function select(id){
-    const item = model.find(x=>x.id===id);
-    if (!item) return;
-    elTitle.value = item.title || '';
-    elBody.value  = item.body || '';
-  }
-
-  btnAdd.addEventListener('click', ()=>{
-    const cap = {
-      id: crypto.randomUUID(),
-      title: elTitle.value.trim(),
-      body: elBody.value.trim(),
-      color: currentColor
-    };
-    model.push(cap);
-    elTitle.value = '';
-    elBody.value = '';
-    renderList();
-  });
-
-  if (btnRef){
-    btnRef.addEventListener('click', ()=>{
-      // 後で Drive 画像一覧リフレッシュに接続
-      console.log('[pins] refresh images requested');
-    });
-  }
-
-  renderList();
+function elRequired(id, el) {
+  if (!el) throw new Error(`[pins] required element missing: ${id}`);
+  return el;
 }
+
+function setupTabs() {
+  const tabs = qa('#tabs .tab');
+  const pages = qa('.tabpage');
+  tabs.forEach(btn => {
+    btn.addEventListener('click', () => {
+      tabs.forEach(b => b.classList.remove('active'));
+      pages.forEach(p => p.classList.remove('active'));
+      btn.classList.add('active');
+      const name = btn.getAttribute('data-tab');
+      q(`#tab-${name}`)?.classList.add('active');
+    });
+  });
+}
+
+function setupAuth() {
+  const btnSignin = elRequired('#btnSignin', q('#btnSignin'));
+  btnSignin.addEventListener('click', () => {
+    console.log('[auth] sign-in clicked (stub)');
+    btnSignin.classList.toggle('on');
+    btnSignin.textContent = btnSignin.classList.contains('on') ? 'Signed in' : 'Sign in';
+  });
+}
+
+function setupPinFilters() {
+  const filterAll = /** @type {HTMLInputElement} */(elRequired('#filterAll', q('#filterAll')));
+  const dots = qa('#pinFilters .dot');
+  filterAll.addEventListener('change', () => {
+    const on = filterAll.checked;
+    dots.forEach(d => d.classList.toggle('off', !on));
+  });
+  dots.forEach(dot => {
+    dot.addEventListener('click', () => {
+      filterAll.checked = false;
+      dot.classList.toggle('off');
+      console.log('[pins] filter toggled', dot.dataset.color, !dot.classList.contains('off'));
+    });
+  });
+}
+
+function setupCaptionIO() {
+  const inputDrive = /** @type {HTMLInputElement} */(elRequired('#inputDrive', q('#inputDrive')));
+  const btnLoadGLB = elRequired('#btnLoadGLB', q('#btnLoadGLB'));
+  const btnRefresh = elRequired('#btnRefreshImages', q('#btnRefreshImages'));
+  const btnAddPin = elRequired('#btnAddPin', q('#btnAddPin'));
+  const title = /** @type {HTMLInputElement} */(elRequired('#inputTitle', q('#inputTitle')));
+  const body  = /** @type {HTMLTextAreaElement} */(elRequired('#inputBody', q('#inputBody')));
+
+  btnLoadGLB.addEventListener('click', async () => {
+    const v = inputDrive.value.trim();
+    console.log('[GLB] requested load', v || '(demo)');
+    await ensureViewer(); // ビューア起動のみ（GLBロードは後続実装）
+  });
+
+  btnRefresh.addEventListener('click', () => {
+    console.log('[images] refresh requested');
+  });
+
+  btnAddPin.addEventListener('click', () => {
+    console.log('[pins] +Pin clicked (use Shift+Click on viewer in future)');
+  });
+
+  const persist = () => {
+    console.log('[caption] persist draft', { title: title.value, body: body.value });
+  };
+  title.addEventListener('input', persist);
+  body.addEventListener('input', persist);
+}
+
+function bootPins() {
+  try {
+    setupTabs();
+    setupAuth();
+    setupPinFilters();
+    setupCaptionIO();
+    console.info('[pins] ready');
+  } catch (err) {
+    console.error('[pins] required elements missing', err);
+  }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  bootPins();
+});
