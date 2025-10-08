@@ -2,127 +2,83 @@
 <html lang="ja">
 <head>
   <meta charset="utf-8" />
-  <title>LociMyu v6.6</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <link rel="stylesheet" href="./app.css" />
-
-  <!-- Three を importmap から1回だけ（重複読み込み防止） -->
+  <title>LociMyu v6.6</title>
+  <link rel="icon" href="./favicon.ico">
+  <link rel="stylesheet" href="./app.css">
   <script type="importmap">
-  {
-    "imports": {
-      "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
-      "three/examples/jsm/controls/OrbitControls.js": "https://unpkg.com/three@0.160.0/examples/jsm/controls/OrbitControls.js"
-    }
-  }
+  { "imports": { "three": "https://unpkg.com/three@0.157.0/build/three.module.js" } }
   </script>
-
-  <style>
-    html,body {height:100%; margin:0; background:#0f1115; color:#e6e6ea; font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial;}
-    #viewer-root {
-      display:grid;
-      grid-template-columns: 1fr 360px;
-      height:100vh; overflow:hidden;
-    }
-    /* ← viewer.js が参照する可能性のある複数 id を同じ領域に重ねて用意 */
-    #viewer,#viewer-container,#three-root,#renderArea {position:relative; width:100%; height:100%;}
-    #sidepane {background:#151821; border-left:1px solid #222735; display:flex; flex-direction:column;}
-    .tabs {display:flex; gap:16px; padding:12px 12px 0; border-bottom:1px solid #222735;}
-    .tabs button{background:none;border:0;color:#9aa4b2;padding:6px 8px;cursor:pointer}
-    .tabs button.active{color:#fff;border-bottom:2px solid #7aa2ff}
-    .panel{padding:12px; overflow:auto}
-    .row{display:flex; align-items:center; gap:8px; flex-wrap:wrap}
-    #pin-palette .chip{width:18px;height:18px;border-radius:50%;border:2px solid #0006;display:inline-block;cursor:pointer}
-    #filters{display:flex; align-items:center; gap:10px; margin-top:8px}
-    #caption-list{margin-top:12px; display:flex; flex-direction:column; gap:6px; max-height:32vh; overflow:auto}
-    .cap-item{display:flex; align-items:center; gap:8px; padding:8px; background:#0f131a; border:1px solid #23293a; border-radius:8px}
-    .cap-item .dot{width:10px;height:10px;border-radius:50%}
-    .cap-item .title{flex:1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
-    .cap-item .pin-delete{background:#2b3245; color:#cdd7e5; border:0; border-radius:6px; padding:4px 6px; cursor:pointer}
-    .field{display:flex; flex-direction:column; gap:6px; margin-top:12px}
-    .field input,.field textarea{width:100%; background:#0f131a; color:#e6e6ea; border:1px solid #23293a; border-radius:8px; padding:8px}
-    .toolbar{display:flex; justify-content:space-between; align-items:center; gap:8px; margin-top:10px}
-    .btn{background:#2b3245; color:#cdd7e5; border:0; border-radius:8px; padding:6px 10px; cursor:pointer}
-    /* auth chip の見た目 */
-    #auth-chip{margin-left:auto; background:#2b3245; color:#cdd7e5; border:0; border-radius:16px; padding:6px 10px; cursor:pointer}
-  </style>
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
+  <script src="https://apis.google.com/js/api.js"></script>
+  <script type="module" src="./app_boot.js?v=20251004tabs"></script>
 </head>
 <body>
-  <div id="viewer-root">
-    <!-- 左：Three.js viewer コンテナ（複数 id を同位置に用意） -->
-    <div id="viewer">
-      <div id="viewer-container">
-        <div id="three-root">
-          <div id="renderArea"></div>
-        </div>
-      </div>
+  <div id="app">
+    <div id="stage">
+      <div id="spinner">booting…</div>
+      <svg id="leader"><line id="leaderLine" x1="0" y1="0" x2="0" y2="0" stroke="#ffcc55" stroke-width="2" opacity="0"/></svg>
+      <div id="overlay" class="overlay" style="display:none"></div>
     </div>
 
-    <!-- 右：UI -->
-    <aside id="sidepane">
-      <div class="tabs">
-        <button id="tab-caption" class="active">Caption</button>
-        <button id="tab-material" disabled>Material</button>
-        <button id="tab-view" disabled>View</button>
-        <!-- gauth.module.js が探すサインイン用 chip/button -->
-        <button id="auth-chip">Sign in</button>
+    <aside id="panel">
+      <header id="topbar">
+        <strong>LociMyu v6.6</strong>
+        <div class="spacer"></div>
+        <button id="authChip" class="btn" type="button">Sign in</button>
+      </header>
+
+      <div id="tabs">
+        <div class="tab active" data-tab="cap">Caption</div>
+        <div class="tab" data-tab="mat">Material</div>
+        <div class="tab" data-tab="view">View</div>
       </div>
 
-      <section id="panel-caption" class="panel">
-        <!-- パレット（pins.js が参照） -->
-        <div id="pin-palette" class="row" aria-label="Pin color palette">
-          <span class="chip" style="background:#89c2ff" data-color="blue"   title="Blue"></span>
-          <span class="chip" style="background:#ffd166" data-color="yellow" title="Yellow"></span>
-          <span class="chip" style="background:#a3d65c" data-color="green"  title="Green"></span>
-          <span class="chip" style="background:#ef6461" data-color="red"    title="Red"></span>
-          <span class="chip" style="background:#9a7cff" data-color="purple" title="Purple"></span>
-          <span class="chip" style="background:#9fb0c6" data-color="gray"   title="Gray"></span>
+      <section id="pane-cap" class="pane active">
+        <div class="row">
+          <input id="fileIdInput" class="input" placeholder="Drive File ID or URL">
+          <button id="btnLoad" class="btn">GLB</button>
+        </div>
+        <div class="help muted">?id=&lt;fileId&gt; または <b>demo</b> でデモモデル</div>
+
+        <div class="row">
+          <label class="muted w">Save data</label>
+          <select id="sheetSelect" class="select"></select>
+          <button id="btnNewSheet" class="btn" title="Create new sheet">+</button>
         </div>
 
-        <!-- フィルタ -->
-        <div id="filters">
-          <label><input id="pin-filter-all" type="checkbox" checked /> All</label>
-          <label><input type="checkbox" name="pin-filter" data-color="blue"   checked /> ●</label>
-          <label><input type="checkbox" name="pin-filter" data-color="yellow" checked /> ●</label>
-          <label><input type="checkbox" name="pin-filter" data-color="green"  checked /> ●</label>
-          <label><input type="checkbox" name="pin-filter" data-color="red"    checked /> ●</label>
-          <label><input type="checkbox" name="pin-filter" data-color="purple" checked /> ●</label>
-          <label><input type="checkbox" name="pin-filter" data-color="gray"   checked /> ●</label>
-        </div>
-
-        <!-- リスト（pins.js が .cap-item を追加） -->
-        <div id="caption-list" aria-label="Caption list"></div>
-
-        <!-- 編集 -->
-        <div class="field">
-          <label for="caption-title">Title</label>
-          <input id="caption-title" type="text" placeholder="Title" />
-        </div>
-        <div class="field">
-          <label for="caption-body">Body</label>
-          <textarea id="caption-body" rows="6" placeholder="Body"></textarea>
-        </div>
-
-        <div class="toolbar">
-          <div></div>
-          <div>
-            <button id="refresh-images" class="btn">Refresh</button>
+        <!-- === Pin color row (A+B 完了版) === -->
+        <div class="row pin-row">
+          <label class="muted w">Pin color</label>
+          <div class="pin-controls">
+            <div id="pinPalette" class="palette"></div>
+            <div id="pinFilterToggles" class="ftoggles" aria-label="Pin visibility"></div>
           </div>
         </div>
 
-        <!-- pins.js が参照する保存先（hidden 可） -->
-        <select id="save-data" style="display:none">
-          <option value="Pins" selected>Pins</option>
-        </select>
+        <div class="caplist-block">
+          <div class="muted">Caption list</div>
+          <div id="capList" class="caplist"></div>
+        </div>
+
+        <h3 class="muted">Title / Body</h3>
+        <input id="capTitle" class="input" placeholder="Title">
+        <textarea id="capBody" class="textarea" placeholder="Body" rows="3"></textarea>
+        <div class="row">
+          <button id="btnAddPin" class="btn">+ Pin</button>
+          <button id="btnRefreshImages" class="btn">Refresh images</button>
+        </div>
+        <div id="imgGrid" class="grid"></div>
       </section>
 
-      <section id="panel-material" class="panel" hidden></section>
-      <section id="panel-view" class="panel" hidden></section>
+      <section id="pane-mat" class="pane">
+        <!-- 既存 Material UI（未変更） -->
+      </section>
+
+      <section id="pane-view" class="pane">
+        <!-- 既存 View UI（未変更） -->
+      </section>
     </aside>
   </div>
-
-  <!-- モジュール読み込み（Three は importmap 経由） -->
-  <script type="module" src="./viewer.js"></script>
-  <script type="module" src="./pins.js"></script>
-  <script type="module" src="./app_boot.js"></script>
 </body>
 </html>

@@ -1,3 +1,4 @@
+import { getAccessToken, fetchDriveFileMetadata } from './utils_drive_api.js';
 // utils_drive_images.js — list images in the same folder and HEIC conversion
 import { driveGetFile } from './sheets_api.js?v=20251004s3';
 
@@ -48,4 +49,19 @@ export async function downloadImageAsBlob(fileId){
     return jpg;
   }
   return blob;
+}
+
+
+export async function openDriveFolderOfFile(fileId){
+  const token = getAccessToken();
+  if (!token) throw new Error('[auth] No token');
+  const metaRes = await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?fields=parents`, {
+    headers: { 'Authorization': `Bearer ${token}` }
+  });
+  if (!metaRes.ok) throw new Error('[drive] parents failed ' + metaRes.status);
+  const meta = await metaRes.json();
+  const parent = (meta.parents && meta.parents[0]) || null;
+  if (!parent) { alert('No parent folder found for this file.'); return; }
+  const url = `https://drive.google.com/drive/folders/${parent}`;
+  window.open(url, '_blank');
 }
