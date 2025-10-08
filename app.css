@@ -1,13 +1,9 @@
-/* created */
-
-
-/* Pins filter chips */
+/* Chips & select (将来拡張用) */
 .chip-row{ display:flex; gap:8px; align-items:center; margin-top:6px; }
 .chip{ width:18px; height:18px; border-radius:50%; border:1px solid rgba(255,255,255,.25); cursor:pointer; opacity:.65; background:#999; }
 .chip.active{ outline:2px solid #fff; opacity:1; }
 
 select#pinFilter { font-size: 14px; }
-
 
 /* Custom filter select */
 .filter-select{ position: relative; display:inline-block; }
@@ -19,7 +15,6 @@ select#pinFilter { font-size: 14px; }
 .fs-option .dot{ width:12px; height:12px; border-radius:50%; border:1px solid rgba(0,0,0,.35); display:inline-block; }
 .fs-option[aria-selected="true"], .fs-option:hover{ background:rgba(255,255,255,.08); }
 
-
 /* === Images grid: square thumbnails === */
 #imgGrid{display:grid;gap:8px;grid-template-columns:repeat(auto-fill,minmax(72px,1fr));}
 .imgbtn{display:block;padding:0;border:0;background:#191a22;border-radius:8px;overflow:hidden;aspect-ratio:1/1;cursor:pointer}
@@ -29,7 +24,7 @@ select#pinFilter { font-size: 14px; }
 /* Overlay drag affordance */
 .overlay{cursor:move}
 
-/* Ripple: opacity-only pulse; no translate to avoid slide illusion */
+/* Ripple: opacity-only pulse; no translate → スライド見えの解消 */
 @keyframes lmyPulse {
   0%   { opacity: .9; }
   100% { opacity: 0;  }

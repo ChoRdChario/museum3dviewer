@@ -1,4 +1,5 @@
-// pins.js — A+B UI 完了版（旧UI廃止）
+// pins.js — Captionタブ完成版
+// 依存: viewer.js 側の ensureViewer() が返す { THREE, renderer, camera, scene, raycastFromClientXY, loadGLBFromDrive }
 import { ensureSpreadsheetForFile, ensurePinsHeader, listSheetTitles, loadPins, savePins } from './sheets_api.js?v=20251004s3';
 
 const PALETTE = [
@@ -176,7 +177,7 @@ export function setupPins(app){
     if (rec) selectPin(rec);
   }, {passive:true});
 
-  // shift+click で追加（+Pinボタンは今は残す）
+  // shift+click で追加（+Pinボタンの代替）
   app.viewer.renderer.domElement.addEventListener('click', (e)=>{
     if (!e.shiftKey) return;
     const hit = app.viewer.raycastFromClientXY(e.clientX, e.clientY);
