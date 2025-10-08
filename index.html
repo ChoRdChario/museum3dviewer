@@ -43,4 +43,86 @@
     .toolbar{display:flex; justify-content:space-between; align-items:center; gap:8px; margin-top:10px}
     .btn{background:#2b3245; color:#cdd7e5; border:0; border-radius:8px; padding:6px 10px; cursor:pointer}
     /* auth chip の見た目 */
-    #auth-chip{margin-left:auto; background:#2b3245; color:#cdd7e5; border:0; border-radius:16px; padding:6px 10
+    #auth-chip{margin-left:auto; background:#2b3245; color:#cdd7e5; border:0; border-radius:16px; padding:6px 10px; cursor:pointer}
+  </style>
+</head>
+<body>
+  <div id="viewer-root">
+    <!-- 左：Three.js viewer コンテナ（複数 id を同位置に用意） -->
+    <div id="viewer">
+      <div id="viewer-container">
+        <div id="three-root">
+          <div id="renderArea"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 右：UI -->
+    <aside id="sidepane">
+      <div class="tabs">
+        <button id="tab-caption" class="active">Caption</button>
+        <button id="tab-material" disabled>Material</button>
+        <button id="tab-view" disabled>View</button>
+        <!-- gauth.module.js が探すサインイン用 chip/button -->
+        <button id="auth-chip">Sign in</button>
+      </div>
+
+      <section id="panel-caption" class="panel">
+        <!-- パレット（pins.js が参照） -->
+        <div id="pin-palette" class="row" aria-label="Pin color palette">
+          <span class="chip" style="background:#89c2ff" data-color="blue"   title="Blue"></span>
+          <span class="chip" style="background:#ffd166" data-color="yellow" title="Yellow"></span>
+          <span class="chip" style="background:#a3d65c" data-color="green"  title="Green"></span>
+          <span class="chip" style="background:#ef6461" data-color="red"    title="Red"></span>
+          <span class="chip" style="background:#9a7cff" data-color="purple" title="Purple"></span>
+          <span class="chip" style="background:#9fb0c6" data-color="gray"   title="Gray"></span>
+        </div>
+
+        <!-- フィルタ -->
+        <div id="filters">
+          <label><input id="pin-filter-all" type="checkbox" checked /> All</label>
+          <label><input type="checkbox" name="pin-filter" data-color="blue"   checked /> ●</label>
+          <label><input type="checkbox" name="pin-filter" data-color="yellow" checked /> ●</label>
+          <label><input type="checkbox" name="pin-filter" data-color="green"  checked /> ●</label>
+          <label><input type="checkbox" name="pin-filter" data-color="red"    checked /> ●</label>
+          <label><input type="checkbox" name="pin-filter" data-color="purple" checked /> ●</label>
+          <label><input type="checkbox" name="pin-filter" data-color="gray"   checked /> ●</label>
+        </div>
+
+        <!-- リスト（pins.js が .cap-item を追加） -->
+        <div id="caption-list" aria-label="Caption list"></div>
+
+        <!-- 編集 -->
+        <div class="field">
+          <label for="caption-title">Title</label>
+          <input id="caption-title" type="text" placeholder="Title" />
+        </div>
+        <div class="field">
+          <label for="caption-body">Body</label>
+          <textarea id="caption-body" rows="6" placeholder="Body"></textarea>
+        </div>
+
+        <div class="toolbar">
+          <div></div>
+          <div>
+            <button id="refresh-images" class="btn">Refresh</button>
+          </div>
+        </div>
+
+        <!-- pins.js が参照する保存先（hidden 可） -->
+        <select id="save-data" style="display:none">
+          <option value="Pins" selected>Pins</option>
+        </select>
+      </section>
+
+      <section id="panel-material" class="panel" hidden></section>
+      <section id="panel-view" class="panel" hidden></section>
+    </aside>
+  </div>
+
+  <!-- モジュール読み込み（Three は importmap 経由） -->
+  <script type="module" src="./viewer.js"></script>
+  <script type="module" src="./pins.js"></script>
+  <script type="module" src="./app_boot.js"></script>
+</body>
+</html>
