@@ -2,133 +2,83 @@
 <html lang="ja">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>LociMyu v6.6</title>
-  <link rel="icon" href="data:," />
-  <link rel="stylesheet" href="app.css" />
-
-  <!-- Three.js はここで1回だけ読み込む -->
-  <script defer src="lib/three/three.module.js"></script>
-
-  <!-- 既存のモジュール類（順序重要） -->
-  <script defer src="viewer.js"></script>
-  <script defer src="pins.js"></script>
-  <script defer src="ui.js"></script>
-  <script defer src="gauth.module.js"></script>
-  <script defer src="utils_drive_api.js"></script>
-  <script defer src="utils_drive_images.js"></script>
-  <script defer src="app_boot.js"></script>
-  <style>
-    /* 最低限のレイアウト（既存app.cssを尊重） */
-    body{margin:0;background:#0f1115;color:#e7eaf0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif}
-    .layout{display:grid;grid-template-columns:1fr 360px;height:100vh}
-    #viewer{background:#0b0d11}
-    .pane{border-left:1px solid #222733;display:flex;flex-direction:column}
-    .tabs{display:flex;gap:12px;padding:10px 12px;border-bottom:1px solid #222733}
-    .tabs button{background:#1a1f2b;color:#c9cfdd;border:1px solid #2a3142;border-radius:8px;padding:6px 10px;cursor:pointer}
-    .tabs button.active{background:#263047}
-    .auth{margin-left:auto}
-    .panel{display:none;padding:12px;overflow:auto}
-    .panel.active{display:block}
-    fieldset{border:1px solid #2a3142;border-radius:8px;margin:10px 0;padding:10px}
-    legend{opacity:.75}
-    .row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
-    .chip{width:18px;height:18px;border-radius:50%;border:2px solid #263047;cursor:pointer}
-    .list{height:260px;overflow:auto;border:1px solid #2a3142;border-radius:6px}
-    .toolbar{display:flex;gap:8px;align-items:center;justify-content:flex-end;margin-top:8px}
-  </style>
+  <link rel="icon" href="./favicon.ico">
+  <link rel="stylesheet" href="./app.css">
+  <script type="importmap">
+  { "imports": { "three": "https://unpkg.com/three@0.157.0/build/three.module.js" } }
+  </script>
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
+  <script src="https://apis.google.com/js/api.js"></script>
+  <script type="module" src="./app_boot.js?v=20251004tabs"></script>
 </head>
 <body>
-  <div class="layout">
-    <!-- 3D Viewer -->
-    <div id="viewer" aria-label="3D viewer canvas host"></div>
+  <div id="app">
+    <div id="stage">
+      <div id="spinner">booting…</div>
+      <svg id="leader"><line id="leaderLine" x1="0" y1="0" x2="0" y2="0" stroke="#ffcc55" stroke-width="2" opacity="0"/></svg>
+      <div id="overlay" class="overlay" style="display:none"></div>
+    </div>
 
-    <!-- Right Pane -->
-    <aside class="pane">
-      <div class="tabs">
-        <button class="tab active" data-target="#tab-caption">Caption</button>
-        <button class="tab" data-target="#tab-material">Material</button>
-        <button class="tab" data-target="#tab-view">View</button>
-        <button id="auth-chip" class="auth">Sign in</button>
+    <aside id="panel">
+      <header id="topbar">
+        <strong>LociMyu v6.6</strong>
+        <div class="spacer"></div>
+        <button id="authChip" class="btn" type="button">Sign in</button>
+      </header>
+
+      <div id="tabs">
+        <div class="tab active" data-tab="cap">Caption</div>
+        <div class="tab" data-tab="mat">Material</div>
+        <div class="tab" data-tab="view">View</div>
       </div>
 
-      <!-- Caption tab -->
-      <section id="tab-caption" class="panel active">
-        <fieldset>
-          <legend>Drive File ID or URL</legend>
-          <div class="row">
-            <input id="fileInput" class="fill" placeholder="Drive File ID or URL" style="flex:1 1 auto;min-width:180px;">
-            <button id="openGlbBtn">GLB</button>
-          </div>
-          <div class="row" style="margin-top:6px;">
-            <input id="queryInput" class="fill" placeholder="?id=&lt;fileId&gt; または demo（デモモデル）" style="flex:1 1 auto;">
-            <button id="addDriveSource" title="追加">＋</button>
-          </div>
-        </fieldset>
+      <section id="pane-cap" class="pane active">
+        <div class="row">
+          <input id="fileIdInput" class="input" placeholder="Drive File ID or URL">
+          <button id="btnLoad" class="btn">GLB</button>
+        </div>
+        <div class="help muted">?id=&lt;fileId&gt; または <b>demo</b> でデモモデル</div>
 
-        <fieldset>
-          <legend>Save data</legend>
-          <div id="saveTargetRow" class="row">
-            <select id="saveTarget" style="flex:1 1 auto;min-width:160px">
-              <option value="Pins">Pins</option>
-            </select>
-          </div>
-        </fieldset>
+        <div class="row">
+          <label class="muted w">Save data</label>
+          <select id="sheetSelect" class="select"></select>
+          <button id="btnNewSheet" class="btn" title="Create new sheet">+</button>
+        </div>
 
-        <fieldset>
-          <legend>Pin</legend>
-          <div id="pinColorRow" class="row">
-            <!-- pins.js がここに色チップを描く（#pinColors） -->
-            <div id="pinColors" class="row"></div>
+        <!-- === Pin color row (A+B 完了版) === -->
+        <div class="row pin-row">
+          <label class="muted w">Pin color</label>
+          <div class="pin-controls">
+            <div id="pinPalette" class="palette"></div>
+            <div id="pinFilterToggles" class="ftoggles" aria-label="Pin visibility"></div>
           </div>
-          <div class="row" style="margin-top:6px;gap:12px">
-            <label style="opacity:.8">All</label>
-            <!-- pins.js がここにフィルタチェック群を描く（#pinFilters） -->
-            <div id="pinFilters" class="row"></div>
-          </div>
-        </fieldset>
+        </div>
 
-        <fieldset>
-          <legend>Caption list</legend>
-          <div id="captionList" class="list" role="list"></div>
-        </fieldset>
+        <div class="caplist-block">
+          <div class="muted">Caption list</div>
+          <div id="capList" class="caplist"></div>
+        </div>
 
-        <fieldset>
-          <legend>Title / Body</legend>
-          <div class="row"><input id="titleInput" placeholder="Title" style="flex:1 1 auto"></div>
-          <div class="row"><textarea id="bodyInput" placeholder="Body" rows="4" style="flex:1 1 auto"></textarea></div>
-          <div class="toolbar">
-            <button id="addPinBtn">+ Pin</button>
-            <button id="refreshImagesBtn">Refresh</button>
-          </div>
-        </fieldset>
+        <h3 class="muted">Title / Body</h3>
+        <input id="capTitle" class="input" placeholder="Title">
+        <textarea id="capBody" class="textarea" placeholder="Body" rows="3"></textarea>
+        <div class="row">
+          <button id="btnAddPin" class="btn">+ Pin</button>
+          <button id="btnRefreshImages" class="btn">Refresh images</button>
+        </div>
+        <div id="imgGrid" class="grid"></div>
       </section>
 
-      <!-- Material tab -->
-      <section id="tab-material" class="panel">
-        <p>Material tools (後で復元)</p>
+      <section id="pane-mat" class="pane">
+        <!-- 既存 Material UI（未変更） -->
       </section>
 
-      <!-- View tab -->
-      <section id="tab-view" class="panel">
-        <p>View tools (後で復元)</p>
+      <section id="pane-view" class="pane">
+        <!-- 既存 View UI（未変更） -->
       </section>
     </aside>
   </div>
-
-  <script>
-    // タブ切替（既存 ui.js の補助。二重になっても安全）
-    document.addEventListener('DOMContentLoaded', () => {
-      document.querySelectorAll('.tab').forEach(btn => {
-        btn.addEventListener('click', () => {
-          document.querySelectorAll('.tab').forEach(b=>b.classList.remove('active'));
-          document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
-          btn.classList.add('active');
-          const t = document.querySelector(btn.dataset.target);
-          if (t) t.classList.add('active');
-        });
-      });
-    });
-  </script>
 </body>
 </html>
