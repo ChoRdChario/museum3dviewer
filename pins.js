@@ -1,83 +1,83 @@
+// Pins UI wiring — palette, filters, basic actions. Keeps logic simple.
+// Later we will connect Drive/Sheets once auth path is stable.
 
-import { ensureViewer, setPinColor, addPinAtCenter, clearPins, loadGLB } from './viewer.js';
-import { setupAuth, getAccessToken } from './gauth.module.js';
+import { ensureViewer } from './viewer.js';
 
-const els = {
-  tabs: document.querySelectorAll('.tab'),
-  panes: document.querySelectorAll('.tabpane'),
-  authBtn: document.getElementById('auth-btn'),
-  glbInput: document.getElementById('glb-input'),
-  glbLoad: document.getElementById('glb-load'),
-  colors: document.querySelectorAll('#pin-colors .color'),
-  add: document.getElementById('pin-add'),
-  clear: document.getElementById('pin-clear'),
-  title: document.getElementById('pin-title'),
-  body: document.getElementById('pin-body'),
-  refreshImgs: document.getElementById('images-refresh'),
-  filter: document.getElementById('pin-filter'),
-};
+const PALETTE = [
+  { key: 'sky',  hex: '#60a5fa' },
+  { key: 'lime', hex: '#22c55e' },
+  { key: 'amber',hex: '#f59e0b' },
+  { key: 'violet',hex: '#8b5cf6' },
+  { key: 'rose', hex: '#f43f5e' },
+];
 
-function initTabs() {
-  els.tabs.forEach(btn => {
-    btn.addEventListener('click', () => {
-      els.tabs.forEach(b=>b.classList.remove('active'));
-      els.panes.forEach(p=>p.classList.remove('active'));
-      btn.classList.add('active');
-      document.getElementById('tab-'+btn.dataset.tab).classList.add('active');
+export function setupPins({ viewer }) {
+  // Required elements
+  const palette = document.getElementById('pin-palette');
+  const filters = document.getElementById('pin-filters');
+  const list    = document.getElementById('caption-list');
+  const btnLoad = document.getElementById('btn-load-glb');
+  const btnRef  = document.getElementById('btn-refresh-images');
+  const btnDrv  = document.getElementById('btn-open-drive');
+
+  if (!palette || !filters || !list) {
+    console.warn('[pins] required elements missing');
+    return;
+  }
+
+  // Build palette (horizontal)
+  palette.innerHTML = '';
+  let current = 'sky';
+  for (const c of PALETTE) {
+    const sw = document.createElement('button');
+    sw.className = 'swatch';
+    sw.style.background = c.hex;
+    sw.setAttribute('title', c.key);
+    sw.setAttribute('aria-selected', String(c.key === current));
+    sw.addEventListener('click', () => {
+      current = c.key;
+      for (const el of palette.querySelectorAll('.swatch')) el.setAttribute('aria-selected', 'false');
+      sw.setAttribute('aria-selected', 'true');
+      viewer?.setColor?.(c.hex);
     });
-  });
-}
+    palette.appendChild(sw);
+  }
 
-function initColors() {
-  els.colors.forEach(btn => {
-    btn.addEventListener('click', () => {
-      els.colors.forEach(b=>b.classList.remove('active'));
-      btn.classList.add('active');
-      const hex = btn.dataset.color;
-      setPinColor(hex);
+  // Build filters (color chip + checkbox pairs)
+  filters.innerHTML = '';
+  const state = new Map(PALETTE.map(c => [c.key, true]));
+  for (const c of PALETTE) {
+    const row = document.createElement('label');
+    row.className = 'toggle';
+    const dot = document.createElement('span');
+    dot.className = 'dot';
+    dot.style.background = c.hex;
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.checked = true;
+    cb.addEventListener('change', () => {
+      state.set(c.key, cb.checked);
+      console.debug('[pins] filter toggled', c.key, cb.checked);
+      // later: hide/show pins by color
     });
-  });
-  // Activate first
-  els.colors[0].click();
-}
+    const name = document.createElement('span');
+    name.textContent = c.key;
+    name.className = 'muted tiny';
+    row.append(dot, cb, name);
+    filters.appendChild(row);
+  }
 
-function initAuth() {
-  setupAuth(els.authBtn, (signedIn, resp) => {
-    console.log('[auth] toggled', signedIn);
-    els.authBtn.textContent = signedIn ? 'Sign out' : 'Sign in';
-  });
-}
+  // Basic list placeholder to verify layout
+  list.innerHTML = '';
+  const empty = document.createElement('div');
+  empty.className = 'item muted';
+  empty.textContent = 'No captions loaded yet.';
+  list.appendChild(empty);
 
-function initGLB() {
-  els.glbLoad.addEventListener('click', async () => {
-    const input = els.glbInput.value.trim() || 'demo';
-    try {
-      console.log('[GLB] load request', input, !!getAccessToken());
-      await loadGLB(input);
-    } catch (e) {
-      console.error('[GLB] load failed', e);
-      alert('GLB load failed: ' + e);
-    }
-  });
-}
+  // Toolbar buttons (currently stubbed; will be wired after auth)
+  btnLoad?.addEventListener('click', () => console.debug('[GLB] requested load (demo)'));
+  btnRef?.addEventListener('click', () => console.debug('[images] refresh (demo)'));
+  btnDrv?.addEventListener('click', () => console.debug('[drive] open (demo)'));
 
-function initPins() {
-  els.add.addEventListener('click', () => {
-    addPinAtCenter(els.title.value, els.body.value);
-  });
-  els.clear.addEventListener('click', () => {
-    clearPins();
-  });
+  console.debug('[pins] ready');
 }
-
-function boot() {
-  ensureViewer();
-  initTabs();
-  initColors();
-  initAuth();
-  initGLB();
-  initPins();
-  console.log('[pins] ready');
-}
-
-boot();

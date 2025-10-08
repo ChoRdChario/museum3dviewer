@@ -1,105 +1,113 @@
-
 <!doctype html>
 <html lang="ja">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>LociMyu v6.6</title>
-  <link rel="icon" href="data:,">
-  <link rel="stylesheet" href="./app.css">
-  <!-- Three.js + Addons via importmap (ESM) -->
-  <script type="importmap">
-  {
-    "imports": {
-      "three": "https://unpkg.com/three@0.160.1/build/three.module.js",
-      "three/addons/": "https://unpkg.com/three@0.160.1/examples/jsm/"
-    }
-  }
-  </script>
-  <!-- Google Identity Services -->
-  <script src="https://accounts.google.com/gsi/client" async defer></script>
+  <title>GLB Caption Tool</title>
+  <link rel="stylesheet" href="./app.css" />
+  <style>
+    /* Minimal safe styles in case app.css is missing pieces */
+    :root { --panel-w: 380px; --gap: 8px; font-family: system-ui, -apple-system, Segoe UI, Roboto, 'Noto Sans JP', sans-serif; }
+    html, body { height: 100%; margin: 0; }
+    body { display: grid; grid-template-rows: auto 1fr; background:#0b0e14; color:#e5e7eb; }
+    header { display:flex; align-items:center; gap:12px; padding:10px 12px; border-bottom:1px solid #1f2937; background:#0f131b; }
+    header h1 { font-size:14px; font-weight:600; margin:0; opacity:.9 }
+    .spacer { flex:1 }
+    .chip { display:inline-flex; align-items:center; gap:8px; padding:6px 10px; border:1px solid #334155; border-radius:999px; background:#111827; }
+    .chip[aria-busy="true"] { opacity:.7 }
+    main { display:grid; grid-template-columns: 1fr var(--panel-w); min-height:0; }
+    #viewer-host { position:relative; overflow:hidden; }
+    #viewer { position:absolute; inset:0; }
+    aside { border-left:1px solid #1f2937; background:#0f131b; display:flex; flex-direction:column; min-width:var(--panel-w); }
+    .tabs { display:flex; border-bottom:1px solid #1f2937; }
+    .tabs button { appearance:none; background:transparent; border:0; color:#9ca3af; padding:10px 12px; font-weight:600; }
+    .tabs button[aria-selected="true"]{ color:#e5e7eb; background:#111827; }
+    .tabpanel { display:none; padding:12px; overflow:auto; }
+    .tabpanel[aria-hidden="false"]{ display:block; }
+
+    .grid-cols { display:grid; grid-template-columns: 1fr auto; gap: var(--gap); align-items:center; }
+    .row { display:flex; gap: var(--gap); align-items:center; }
+    .palette { display:flex; flex-wrap:wrap; gap:6px; }
+    .swatch { width:18px; height:18px; border-radius:4px; border:1px solid #0006; cursor:pointer; display:inline-block; }
+    .swatch[aria-selected="true"]{ outline:2px solid #fff; outline-offset:2px; }
+    .filters { display:flex; gap:12px; flex-wrap:wrap; align-items:center; }
+    .filters .toggle { display:flex; align-items:center; gap:6px; cursor:pointer; }
+    .filters .dot { width:14px; height:14px; border-radius:50%; border:1px solid #0006; display:inline-block; }
+    .list { display:flex; flex-direction:column; gap:8px; margin-top:8px; }
+    .list .item { padding:8px; border:1px solid #233046; border-radius:8px; background:#0b111a; }
+    .muted { color:#9ca3af; font-size:12px; }
+    .danger { color:#ef4444 }
+    .button { background:#1f2937; color:#e5e7eb; border:1px solid #374151; border-radius:8px; padding:8px 10px; cursor:pointer; }
+    .button[disabled]{ opacity:.5; cursor:not-allowed; }
+    .input { background:#0b111a; color:#e5e7eb; border:1px solid #233046; border-radius:8px; padding:8px 10px; width:100%; }
+    .tiny { font-size:12px; opacity:.8 }
+    .toolbar { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+  </style>
 </head>
 <body>
-  <div id="app" class="app-root">
-    <div class="viewer-wrap">
-      <canvas id="viewer-canvas"></canvas>
-      <div id="viewer-status" class="viewer-status">ready</div>
+  <header>
+    <h1>GLB Caption Tool</h1>
+    <div class="spacer"></div>
+
+    <!-- Google Auth chip & button (selectors duplicated defensively) -->
+    <div id="auth-chip" class="chip" data-auth-chip aria-busy="true" title="Google Sign-In">
+      <span id="auth-status" data-auth-status>未サインイン</span>
+      <button id="auth-btn" data-auth-button class="button tiny">Sign in</button>
     </div>
-    <aside class="panel">
-      <header class="tabs">
-        <button class="tab active" data-tab="caption">Caption</button>
-        <button class="tab" data-tab="material">Material</button>
-        <button class="tab" data-tab="view">View</button>
-        <button id="auth-btn" class="auth-btn">Sign in</button>
-      </header>
+  </header>
 
-      <section id="tab-caption" class="tabpane active">
-        <label class="row">
-          <span>Drive File ID or URL</span>
-          <div class="row-flex">
-            <input id="glb-input" class="text" placeholder="https://drive.google.com/... or fileId"/>
-            <button id="glb-load" class="btn">GLB</button>
-          </div>
-        </label>
+  <main>
+    <section id="viewer-host">
+      <canvas id="viewer" aria-label="3D Viewer"></canvas>
+    </section>
 
-        <label class="row">
-          <span>Save data</span>
-          <div class="row-flex">
-            <select id="save-target" class="select">
-              <option value="Pins">Pins</option>
-            </select>
-            <button id="save-target-add" class="btn">+</button>
-          </div>
-        </label>
+    <aside id="right-panel">
+      <div class="tabs" role="tablist">
+        <button id="tab-captions" role="tab" aria-selected="true" aria-controls="panel-captions">Captions</button>
+        <button id="tab-materials" role="tab" aria-selected="false" aria-controls="panel-materials">Materials</button>
+        <button id="tab-views" role="tab" aria-selected="false" aria-controls="panel-views">Views</button>
+      </div>
 
-        <label class="row">
-          <span>Pin</span>
-          <div id="pin-colors" class="color-row">
-            <button class="color" data-color="#60a5fa" style="--c:#60a5fa"></button>
-            <button class="color" data-color="#22c55e" style="--c:#22c55e"></button>
-            <button class="color" data-color="#f59e0b" style="--c:#f59e0b"></button>
-            <button class="color" data-color="#a855f7" style="--c:#a855f7"></button>
-            <button class="color" data-color="#ef4444" style="--c:#ef4444"></button>
-            <button class="color" data-color="#14b8a6" style="--c:#14b8a6"></button>
-            <button class="color" data-color="#f97316" style="--c:#f97316"></button>
-            <button class="color" data-color="#94a3b8" style="--c:#94a3b8"></button>
-          </div>
-        </label>
-
-        <label class="row">
-          <span>Filter</span>
-          <select id="pin-filter" class="select">
-            <option value="all">(All)</option>
-          </select>
-        </label>
-
-        <label class="row">
-          <span>Caption list</span>
-          <textarea id="caption-list" class="area" rows="8"></textarea>
-        </label>
-
-        <label class="row">
-          <span>Title</span>
-          <input id="pin-title" class="text" placeholder="Title"/>
-        </label>
-
-        <label class="row">
-          <span>Body</span>
-          <textarea id="pin-body" class="area" rows="4" placeholder="Body"></textarea>
-        </label>
-
-        <div class="row-actions">
-          <button id="pin-add" class="btn">+ Pin</button>
-          <button id="pin-clear" class="btn ghost">Clear</button>
-          <button id="images-refresh" class="btn ghost">Refresh images</button>
+      <!-- Captions panel -->
+      <div id="panel-captions" class="tabpanel" role="tabpanel" aria-hidden="false">
+        <div class="toolbar">
+          <input id="glb-id-input" class="input" placeholder="Drive: GLB file ID or URL" />
+          <button id="btn-load-glb" class="button" disabled>Load GLB</button>
+          <button id="btn-refresh-images" class="button" disabled>Refresh Images</button>
+          <button id="btn-open-drive" class="button" disabled>Drive…</button>
         </div>
-      </section>
 
-      <section id="tab-material" class="tabpane">Coming soon…</section>
-      <section id="tab-view" class="tabpane">Coming soon…</section>
+        <div class="row" style="margin-top:10px">
+          <div class="palette" id="pin-palette" aria-label="Pin colors"></div>
+        </div>
+
+        <div class="filters" id="pin-filters" style="margin-top:8px"></div>
+
+        <div class="list" id="caption-list" style="margin-top:12px"></div>
+      </div>
+
+      <!-- Materials panel (placeholder, stays intact) -->
+      <div id="panel-materials" class="tabpanel" role="tabpanel" aria-hidden="true">
+        <p class="muted">Materials UI — 後で配線</p>
+      </div>
+
+      <!-- Views panel (placeholder, stays intact) -->
+      <div id="panel-views" class="tabpanel" role="tabpanel" aria-hidden="true">
+        <p class="muted">Views UI — 後で配線</p>
+      </div>
     </aside>
-  </div>
+  </main>
 
+  <!-- Modules: keep order; import only once each. -->
+  <script type="module" src="./viewer.js"></script>
   <script type="module" src="./pins.js"></script>
+  <script type="module" src="./app_boot.js"></script>
+
+  <!-- IMPORTANT: gauth is kept global-friendly; if your repo loads it via module, keep that path -->
+  <script type="module">
+    import * as gauth from './gauth.module.js';
+    // Expose a small bridge so other modules can access without tight coupling
+    window.__gauth = gauth;
+  </script>
 </body>
 </html>
