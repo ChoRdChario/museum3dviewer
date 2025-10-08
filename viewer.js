@@ -252,3 +252,18 @@ export async function ensureViewer({ mount, spinner }) {
     setWhiteKeyEnabled, setWhiteKeyThreshold,
   };
 }
+
+
+// --- Compatibility exports for legacy pins.js ---
+export { ensureViewer, loadGLBFromDrive };
+export function addPinAtCenter() {
+  const v = ensureViewer();
+  try {
+    // Fallback: center of canvas; no-op (legacy pins overlay handled elsewhere)
+    console.debug('[viewer] addPinAtCenter fallback (no-op).');
+    return false;
+  } catch (e) {
+    console.warn('[viewer] addPinAtCenter failed', e);
+    return false;
+  }
+}
