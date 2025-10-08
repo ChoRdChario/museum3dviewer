@@ -2,172 +2,127 @@
 <html lang="ja">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>LociMyu v6.6</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
 
+  <!-- レイアウト -->
   <link rel="stylesheet" href="./app.css" />
 
-  <!-- Three.js を 1 本に統一 -->
+  <!-- ★ Three.js は import-map から1回だけ読み込む（重複禁止） -->
   <script type="importmap">
   {
     "imports": {
       "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
-      "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+      "three/examples/jsm/controls/OrbitControls.js": "https://unpkg.com/three@0.160.0/examples/jsm/controls/OrbitControls.js"
     }
   }
   </script>
 
-  <!-- Google APIs -->
-  <script src="https://accounts.google.com/gsi/client" async defer></script>
-  <script src="https://apis.google.com/js/api.js" async defer></script>
-
   <style>
-    * { box-sizing: border-box; }
-    html,body { height:100%; }
-    body { margin:0; font-family: system-ui, -apple-system, Segoe UI, Roboto, 'Noto Sans JP', sans-serif; background:#0b0f14; color:#e5e7eb; }
-    header { height:44px; display:flex; align-items:center; justify-content:space-between; padding:0 10px; border-bottom:1px solid #1f2937; background:#111827; }
-    header .brand { font-weight:600; color:#d1d5db; }
-    header .auth { display:flex; align-items:center; gap:8px; }
-    #auth-chip, #auth-signin { padding:6px 10px; border:1px solid #374151; background:#111827; color:#e5e7eb; border-radius:8px; cursor:pointer; }
-
-    main { display:flex; height:calc(100vh - 44px); }
-    /* 互換: viewer-root と viewer を両方用意 */
-    #viewer-root, #viewer { position:relative; flex:1 1 auto; background:#0b0f14; }
-
-    #sidebar { width:380px; max-width:40vw; border-left:1px solid #1f2937; background:#0f1621; display:flex; flex-direction:column; }
-    .tabs { display:flex; border-bottom:1px solid #1f2937; }
-    .tabs button { flex:1; padding:10px; background:#0f1621; color:#d1d5db; border:0; cursor:pointer; }
-    .tabs button.active { background:#111b29; font-weight:600; }
-    .panel { flex:1; overflow:auto; padding:12px; display:none; }
-    .panel.active { display:block; }
-
-    /* Captions パネル */
-    #pin-toolbar { display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:10px; }
-    /* 互換: pin-palette と pinPaletteEl */
-    #pin-palette, #pinPaletteEl { display:flex; gap:8px; align-items:center; }
-    .chip { width:22px; height:22px; border-radius:50%; border:2px solid #93c5fd22; box-shadow:0 0 0 1px #1f2937 inset; cursor:pointer; }
-    .chip[data-color="0"]{ background:#9CC9FF; }
-    .chip[data-color="1"]{ background:#FFD66B; }
-    .chip[data-color="2"]{ background:#9FE074; }
-    .chip[data-color="3"]{ background:#F08A82; }
-    .chip[data-color="4"]{ background:#9B84F3; }
-    .chip[data-color="5"]{ background:#9DA8BE; }
-
-    /* 互換: pin-filter / pinFilterEl */
-    #pin-filter, #pinFilterEl { padding:6px 8px; border:1px solid #1f2937; border-radius:6px; background:#0f1621; color:#e5e7eb; }
-
-    /* 互換: pin-refresh / btnRefreshImages */
-    #pin-refresh, #btnRefreshImages { padding:6px 10px; border:1px solid #1f2937; border-radius:6px; background:#0f1621; color:#e5e7eb; cursor:pointer; }
-
-    /* 互換: +Pin は非表示で残す */
-    #pin-add, #btnAddPin { display:none; }
-
-    /* リスト（互換: pin-list / pinListEl） */
-    #pin-list, #pinListEl { list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:6px; }
-    #pin-list li, #pinListEl li { padding:8px; border:1px solid #1f2937; border-radius:8px; background:#0b1220; }
-
-    /* Title/Body */
-    .field { display:flex; flex-direction:column; gap:6px; margin-top:12px; }
-    .field input, .field textarea {
-      width:100%; padding:8px 10px; border:1px solid #1f2937; border-radius:6px; background:#0f1621; color:#e5e7eb;
+    /* 最小限の安全レイアウト（app.cssに同等があれば不要） */
+    html,body {height:100%; margin:0; background:#0f1115; color:#e6e6ea; font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial;}
+    #viewer-root {
+      display:grid;
+      grid-template-columns: 1fr 360px; /* 左=Viewer / 右=UI */
+      gap: 0;
+      height: 100vh;
+      overflow: hidden;
     }
+    #viewer { width:100%; height:100%; position:relative; }
+    #sidepane { background:#151821; border-left:1px solid #222735; display:flex; flex-direction:column; }
+    .tabs { display:flex; gap:16px; padding:12px 12px 0; border-bottom:1px solid #222735; }
+    .tabs button { background:none; border:0; color:#9aa4b2; padding:6px 8px; cursor:pointer; }
+    .tabs button.active { color:#fff; border-bottom:2px solid #7aa2ff; }
+    .panel { padding:12px; overflow:auto; }
+    .row { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+    #pin-palette .chip { width:18px; height:18px; border-radius:50%; border:2px solid #0006; display:inline-block; cursor:pointer; }
+    #filters { display:flex; align-items:center; gap:10px; margin-top:8px; }
+    #caption-list { margin-top:12px; display:flex; flex-direction:column; gap:6px; max-height:32vh; overflow:auto; }
+    .cap-item { display:flex; align-items:center; gap:8px; padding:8px; background:#0f131a; border:1px solid #23293a; border-radius:8px; }
+    .cap-item .dot { width:10px; height:10px; border-radius:50%; display:inline-block; }
+    .cap-item .title { flex:1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .cap-item .pin-delete { background:#2b3245; color:#cdd7e5; border:0; border-radius:6px; padding:4px 6px; cursor:pointer; }
+    .field { display:flex; flex-direction:column; gap:6px; margin-top:12px; }
+    .field input, .field textarea { width:100%; background:#0f131a; color:#e6e6ea; border:1px solid #23293a; border-radius:8px; padding:8px; }
+    .toolbar { display:flex; justify-content:flex-end; gap:8px; margin-top:10px; }
+    .btn { background:#2b3245; color:#cdd7e5; border:0; border-radius:8px; padding:6px 10px; cursor:pointer; }
   </style>
 </head>
+
 <body>
-  <header>
-    <div class="brand">LociMyu v6.6</div>
-    <div class="auth">
-      <span id="user-email"></span>
-      <!-- gauth.module.js が探す両方の ID を用意 -->
-      <button id="auth-chip">Sign in</button>
-      <button id="auth-signin" style="display:none">Sign in</button>
-    </div>
-  </header>
+  <div id="viewer-root">
+    <!-- 左：Three.js Viewer コンテナ（必須） -->
+    <div id="viewer"></div>
 
-  <main>
-    <!-- 互換のため両 ID を配置 -->
-    <div id="viewer-root">
-      <div id="viewer"></div>
-    </div>
-
-    <aside id="sidebar">
+    <!-- 右：UI（今回は Caption タブのみ実体化） -->
+    <aside id="sidepane">
       <div class="tabs">
-        <button id="tab-captions" class="active" data-target="panel-captions">Caption</button>
-        <button id="tab-materials" data-target="panel-materials">Material</button>
-        <button id="tab-views" data-target="panel-views">View</button>
+        <button id="tab-caption" class="active">Caption</button>
+        <button id="tab-material" disabled>Material</button>
+        <button id="tab-view" disabled>View</button>
       </div>
 
-      <section id="panel-captions" class="panel active">
-        <div id="pin-toolbar">
-          <!-- 互換: pinPaletteEl / pin-palette -->
-          <div id="pinPaletteEl" aria-label="Pin color palette">
-            <div class="chip" data-color="0" title="blue"></div>
-            <div class="chip" data-color="1" title="yellow"></div>
-            <div class="chip" data-color="2" title="green"></div>
-            <div class="chip" data-color="3" title="red"></div>
-            <div class="chip" data-color="4" title="purple"></div>
-            <div class="chip" data-color="5" title="gray"></div>
-          </div>
-
-          <!-- 互換: pinFilterEl / pin-filter -->
-          <select id="pinFilterEl">
-            <option value="ALL" selected>Filter ALL</option>
-          </select>
-
-          <!-- 互換: btnRefreshImages / pin-refresh -->
-          <button id="btnRefreshImages">Refresh</button>
-
-          <!-- 残すが非表示: 互換用 -->
-          <button id="btnAddPin" style="display:none">+ Pin</button>
+      <!-- Caption パネル -->
+      <section id="panel-caption" class="panel">
+        <!-- パレット（pins.js が参照） -->
+        <div id="pin-palette" class="row" aria-label="Pin color palette">
+          <!-- data-color は pins.js 側の識別と一致させる -->
+          <span class="chip" style="background:#89c2ff" data-color="blue"   title="Blue"></span>
+          <span class="chip" style="background:#ffd166" data-color="yellow" title="Yellow"></span>
+          <span class="chip" style="background:#a3d65c" data-color="green"  title="Green"></span>
+          <span class="chip" style="background:#ef6461" data-color="red"    title="Red"></span>
+          <span class="chip" style="background:#9a7cff" data-color="purple" title="Purple"></span>
+          <span class="chip" style="background:#9fb0c6" data-color="gray"   title="Gray"></span>
         </div>
 
-        <!-- 互換: pinListEl / pin-list -->
-        <ul id="pinListEl"></ul>
+        <!-- フィルタ（pins.js が参照） -->
+        <div id="filters">
+          <label><input id="pin-filter-all" type="checkbox" checked /> All</label>
+          <label><input type="checkbox" name="pin-filter" data-color="blue"   checked /> ●</label>
+          <label><input type="checkbox" name="pin-filter" data-color="yellow" checked /> ●</label>
+          <label><input type="checkbox" name="pin-filter" data-color="green"  checked /> ●</label>
+          <label><input type="checkbox" name="pin-filter" data-color="red"    checked /> ●</label>
+          <label><input type="checkbox" name="pin-filter" data-color="purple" checked /> ●</label>
+          <label><input type="checkbox" name="pin-filter" data-color="gray"   checked /> ●</label>
+        </div>
 
+        <!-- リスト -->
+        <div id="caption-list" aria-label="Caption list">
+          <!-- pins.js が .cap-item を動的に追加。各行に .pin-delete ボタンを入れる -->
+        </div>
+
+        <!-- 編集 -->
         <div class="field">
           <label for="caption-title">Title</label>
-          <input id="caption-title" type="text" />
+          <input id="caption-title" type="text" placeholder="Title" />
         </div>
         <div class="field">
           <label for="caption-body">Body</label>
-          <textarea id="caption-body" rows="4"></textarea>
+          <textarea id="caption-body" rows="6" placeholder="Body"></textarea>
         </div>
+
+        <div class="toolbar">
+          <button id="refresh-images" class="btn">Refresh</button>
+          <!-- Drive ボタンは後段で配線予定ならここに配置しておく
+          <button id="open-drive" class="btn">Drive</button>
+          -->
+        </div>
+
+        <!-- 保存先（pins.js が参照するなら hidden でも置く） -->
+        <select id="save-data" style="display:none">
+          <option value="Pins" selected>Pins</option>
+        </select>
       </section>
 
-      <section id="panel-materials" class="panel">
-        <div id="materials-root"></div>
-      </section>
-
-      <section id="panel-views" class="panel">
-        <div id="views-root"></div>
-      </section>
+      <!-- Material / View のパネルはダミー（IDだけ用意して非活性） -->
+      <section id="panel-material" class="panel" hidden></section>
+      <section id="panel-view" class="panel" hidden></section>
     </aside>
-  </main>
+  </div>
 
-  <script type="module">
-    // タブ切替
-    const tabs = document.querySelectorAll('.tabs button');
-    const panels = document.querySelectorAll('.panel');
-    tabs.forEach(btn => {
-      btn.addEventListener('click', () => {
-        tabs.forEach(b => b.classList.toggle('active', b === btn));
-        panels.forEach(p => p.classList.toggle('active', p.id === btn.dataset.target));
-      });
-    });
-
-    // 起動（DOM 準備後に実行して viewer の null を避ける）
-    window.addEventListener('DOMContentLoaded', async () => {
-      try {
-        const boot = (await import('./app_boot.js')).default?.boot ?? (await import('./app_boot.js')).boot;
-        if (typeof boot === 'function') await boot();
-      } catch (e) {
-        console.error('[boot] failed to import app_boot.js', e);
-      }
-    });
-
-    // グローバルログ
-    window.addEventListener('error', (e) => console.error('[global:error]', e.error || e.message || e));
-    window.addEventListener('unhandledrejection', (e) => console.error('[global:unhandledrejection]', e.reason || e));
-  </script>
+  <!-- アプリ本体（モジュールのみ / Threeの直読みなし） -->
+  <script type="module" src="./viewer.js"></script>
+  <script type="module" src="./pins.js"></script>
+  <script type="module" src="./app_boot.js"></script>
 </body>
 </html>
