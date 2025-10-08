@@ -31,6 +31,17 @@
   </div>
 
   <!-- ESM bootstrap: 既存DOMは変更せず、ここから起動します -->
-  <script type="module" src="./boot.esm.cdn.js?v=20251009"></script>
+  
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://unpkg.com/three@0.155.0/build/three.module.js",
+      "three/examples/jsm/": "https://unpkg.com/three@0.155.0/examples/jsm/"
+    }
+  }
+  </script>
+
+
+<script type="module" src="./boot.esm.cdn.js?v=20251009"></script>
 </body>
 </html>
