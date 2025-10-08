@@ -6,33 +6,19 @@
   <title>LociMyu v6.6</title>
   <link rel="icon" href="./favicon.ico">
   <link rel="stylesheet" href="./app.css">
+
+  <!-- three.js import map -->
   <script type="importmap">
   { "imports": { "three": "https://unpkg.com/three@0.157.0/build/three.module.js" } }
   </script>
+
+  <!-- Google APIs -->
   <script src="https://accounts.google.com/gsi/client" async defer></script>
   <script src="https://apis.google.com/js/api.js"></script>
-  <!-- replaced by safe_loader.js -->
-<script>
-(function(){
-  try {
-    const url = new URL(location.href);
-    if (url.searchParams.get('ses') === '1') {
-      var s = document.createElement('script');
-      s.src = './lockdown-install.js';
-      s.async = false;
-      s.onload = function(){ console.log('[ses] lockdown installed'); };
-      s.onerror = function(e){ console.error('[ses] load failed', e); };
-      document.head.appendChild(s);
-    } else {
-      console.warn('[ses] skipped (enable with ?ses=1)');
-    }
-  } catch (e) {
-    console.error('[ses] switch error', e);
-  }
-})();
-</script>
-<script type="module" src="./safe_loader.js"></script>
 
+  <!-- SES is disabled: removed lockdown-install.js and safe_loader.js -->
+  <!-- App entry (module) -->
+  <script type="module" src="./app_boot.js"></script>
 </head>
 <body>
   <div id="app">
@@ -68,7 +54,7 @@
           <button id="btnNewSheet" class="btn" title="Create new sheet">+</button>
         </div>
 
-        <!-- === Pin color row (A+B 完了版) === -->
+        <!-- Pin color row -->
         <div class="row pin-row">
           <label class="muted w">Pin color</label>
           <div class="pin-controls">
@@ -93,11 +79,11 @@
       </section>
 
       <section id="pane-mat" class="pane">
-        <!-- 既存 Material UI（未変更） -->
+        <!-- Material UI -->
       </section>
 
       <section id="pane-view" class="pane">
-        <!-- 既存 View UI（未変更） -->
+        <!-- View UI -->
       </section>
     </aside>
   </div>
