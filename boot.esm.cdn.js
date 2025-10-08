@@ -63,7 +63,7 @@ $('btnGlb')?.addEventListener('click', doLoad);
 $('glbUrl')?.addEventListener('keydown', (e) => e.key === 'Enter' && doLoad());
 
 // ---------- Caption: color palette + color filter checkboxes ----------
-const COLORS = ['#ff6b6b','#ffd93d','#6bcb77','#4d96ff','#9b5de5','#f15bb5','#00c2a8','#f97316','#84cc16','#14b8a6','#60a5fa','#c084fc','#eab308','#ef4444','#f472b6','#94a3b8'];
+const COLORS = ['#ff6b6b','#ffd93d','#6bcb77','#4d96ff','#9b5de5','#f15bb5','#00c2a8','#94a3b8'];
 
 // (A) Pin color palette (simple chips)
 const pinColorsHost = $('pin-colors');

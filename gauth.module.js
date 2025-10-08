@@ -1,10 +1,4 @@
-// gauth.module.js — GIS wrapper (drop-in replacement)
-// Exports:
-//   setupAuth(buttonEl, onAuthChange)
-//   getAccessToken()
-//   signOut()
-//   getApiKey()
-
+// gauth.module.js — patched to read meta/config and load GIS
 let tokenResponse = null;
 let client = null;
 let _apiKey = null;
@@ -15,8 +9,8 @@ function readMeta(name) {
 }
 
 function resolveClientId() {
-  const fromMeta = readMeta('google-oauth-client_id');
-  if (fromMeta) return fromMeta;
+  const meta = readMeta('google-oauth-client_id');
+  if (meta) return meta;
   if (globalThis.__CONFIG?.GOOGLE_OAUTH_CLIENT_ID) return globalThis.__CONFIG.GOOGLE_OAUTH_CLIENT_ID;
   const literal = "%GOOGLE_OAUTH_CLIENT_ID%";
   return literal.startsWith("%") ? null : literal;
@@ -57,7 +51,7 @@ async function ensureGIS(timeoutMs = 8000) {
 
 export async function setupAuth(buttonEl, onAuthChange) {
   const client_id = resolveClientId();
-  _apiKey = getApiKey(); // optional
+  _apiKey = getApiKey();
 
   const ok = await ensureGIS();
   const scope = [
@@ -74,9 +68,7 @@ export async function setupAuth(buttonEl, onAuthChange) {
   if (!ok || !client_id) {
     console.warn('[auth] setup running in stub mode (client_id missing or GIS not ready)');
     updateLabel();
-    buttonEl?.addEventListener('click', () => {
-      console.warn('[auth] sign-in clicked (stub)');
-    });
+    buttonEl?.addEventListener('click', () => console.warn('[auth] sign-in clicked (stub)'));
     return;
   }
 
