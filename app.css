@@ -18,19 +18,3 @@ select#pinFilter { font-size: 14px; }
 .fs-option{ display:flex; align-items:center; gap:.6rem; padding:.35rem .5rem; border-radius:.3rem; cursor:pointer; color:#e5e7eb; }
 .fs-option .dot{ width:12px; height:12px; border-radius:50%; border:1px solid rgba(0,0,0,.35); display:inline-block; }
 .fs-option[aria-selected="true"], .fs-option:hover{ background:rgba(255,255,255,.08); }
-
-
-/* === Images grid: square thumbnails === */
-#imgGrid{display:grid;gap:8px;grid-template-columns:repeat(auto-fill,minmax(72px,1fr));}
-.imgbtn{display:block;padding:0;border:0;background:#191a22;border-radius:8px;overflow:hidden;aspect-ratio:1/1;cursor:pointer}
-.imgbtn img{width:100%;height:100%;object-fit:cover;display:block}
-.imgbtn.sel{outline:2px solid #89f}
-
-/* Overlay drag affordance */
-.overlay{cursor:move}
-
-/* Ripple: opacity-only pulse; no translate to avoid slide illusion */
-@keyframes lmyPulse {
-  0%   { opacity: .9; }
-  100% { opacity: 0;  }
-}
