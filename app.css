@@ -1,20 +1,86 @@
-/* created */
+/* ---------- Layout ---------- */
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+body {
+  margin: 0;
+  background: #0f1115;
+  color: #e9edf1;
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans', 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji', sans-serif;
+  font-size: 14px;
+}
+#app { position: relative; height: 100dvh; }
 
+#viewer {
+  position: absolute; inset: 0 380px 0 0;
+  background: #0c0f14;
+  display: grid;
+  place-items: center;
+}
+#viewer .booting { color: #a0aec0; font-size: 13px; }
 
-/* Pins filter chips */
-.chip-row{ display:flex; gap:8px; align-items:center; margin-top:6px; }
-.chip{ width:18px; height:18px; border-radius:50%; border:1px solid rgba(255,255,255,.25); cursor:pointer; opacity:.65; background:#999; }
-.chip.active{ outline:2px solid #fff; opacity:1; }
+#side {
+  position: absolute; right: 0; top: 0; bottom: 0; width: 380px;
+  background: #0f1115;
+  border-left: 1px solid #1f2430;
+  overflow: auto;
+  padding: 10px 14px 16px;
+}
 
-select#pinFilter { font-size: 14px; }
+/* ---------- Tabs ---------- */
+#tabs { display: flex; gap: 6px; align-items: center; margin-bottom: 10px; }
+.tab {
+  background: #141924; color: #e9edf1; border: 1px solid #2a3140;
+  border-radius: 8px; padding: 6px 10px; cursor: pointer;
+}
+.tab.active { background: #1a2030; border-color: #3a4660; }
+.sign {
+  margin-left: auto;
+  background: #1a2030; border: 1px solid #3a4660; color: #cbd5e1;
+  border-radius: 999px; padding: 4px 10px; cursor: pointer;
+}
 
+/* ---------- Controls ---------- */
+.row { margin-bottom: 10px; }
+.two { display: grid; grid-template-columns: 1fr; gap: 10px; }
+@media (min-width: 480px) {
+  .two { grid-template-columns: 1fr; } /* keep single column for narrow sidebar */
+}
+.label { display: block; color: #93a3b8; margin-bottom: 4px; font-size: 12px; }
+.hstack { display:flex; align-items:center; gap:8px; }
+.grow { flex: 1 1 auto; }
+.gap { gap: 8px; }
 
-/* Custom filter select */
-.filter-select{ position: relative; display:inline-block; }
-.fs-trigger{ display:flex; align-items:center; gap:.5rem; padding:.35rem .6rem; border:1px solid rgba(255,255,255,.2); border-radius:.4rem; background:#1a1b22; color:#e5e7eb; cursor:pointer; }
-.fs-trigger:focus{ outline:2px solid #60a5fa; outline-offset:1px; }
-.fs-swatch{ width:14px; height:14px; border-radius:50%; border:1px solid rgba(0,0,0,.35); display:inline-block; }
-.fs-menu{ position:absolute; z-index:50; top:110%; right:0; min-width:160px; padding:.35rem; border:1px solid rgba(255,255,255,.2); border-radius:.4rem; background:#111217; box-shadow:0 8px 18px rgba(0,0,0,.35); }
-.fs-option{ display:flex; align-items:center; gap:.6rem; padding:.35rem .5rem; border-radius:.3rem; cursor:pointer; color:#e5e7eb; }
-.fs-option .dot{ width:12px; height:12px; border-radius:50%; border:1px solid rgba(0,0,0,.35); display:inline-block; }
-.fs-option[aria-selected="true"], .fs-option:hover{ background:rgba(255,255,255,.08); }
+.input, .select, .textarea {
+  width: 100%; background: #151a24; color: #e9edf1; border: 1px solid #2a3140;
+  border-radius: 8px; padding: 8px 10px; outline: none;
+}
+.textarea { min-height: 96px; resize: vertical; }
+
+.btn {
+  background: #151a24; color:#e9edf1; border:1px solid #2a3140; border-radius: 8px;
+  padding: 8px 10px; cursor: pointer;
+}
+.btn.primary { background: #223055; border-color: #3e5286; }
+.btn.icon { width: 32px; height: 32px; display:grid; place-items:center; padding:0; }
+
+.muted { color: #94a3b8; }
+
+/* ---------- Listbox ---------- */
+.listbox {
+  background: #0f141d; border: 1px solid #2a3140; border-radius: 8px;
+  min-height: 140px; max-height: 220px; overflow: auto; padding: 6px 8px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
+}
+.listbox .item {
+  padding: 6px 6px; border-radius: 6px; cursor: pointer;
+}
+.listbox .item:hover { background: #121a28; }
+.listbox .item.active { outline: 2px solid #6c87ff; }
+
+/* ---------- Color swatches ---------- */
+.swatches { display: flex; gap: 8px; align-items: center; user-select:none; }
+.swatch {
+  width: 16px; height: 16px; border-radius: 50%; cursor: pointer;
+  border: 1px solid #2a3140;
+}
+.swatch.active { outline: 2px solid #8aa0ff; }

@@ -1,109 +1,145 @@
-import { ensureViewer, loadGLBFromDrive, addPinAtCenter, setPinColor, getAllPins } from './viewer.js';
-import { ensureSpreadsheetForFile, ensurePinsHeader, listSheetTitles, loadPins, savePins } from './sheets_api.js?v=stub';
-import { downloadImageAsBlob } from './utils_drive_images.js?v=stub';
+// pins.js
+import { ensureViewer, loadGLB, addPinAtCenter, setPinColor, refreshImages, setPinMeta, getPins } from './viewer.js';
 
-function $(id){ return document.getElementById(id); }
-function log(...args){ console.log('[pins]', ...args); }
+let els = {};
+let current = {
+  color: '#87ceeb',
+  selectedPinId: null,
+  signed: false,
+};
 
-// --- UI elements ---
-const fileIdInput = $('fileIdInput');
-const btnLoad = $('btnLoad');
-const btnAddPin = $('btnAddPin');
-const btnRefreshImages = $('btnRefreshImages');
-const capList = $('capList');
-const capTitle = $('capTitle');
-const capBody = $('capBody');
-const authChip = $('authChip');
-const sheetSelect = $('sheetSelect');
-const tabs = $('tabs');
+const COLORS = ['#3b82f6','#22c55e','#f59e0b','#ef4444','#a855f7','#10b981','#eab308','#f97316','#64748b','#e2e8f0'];
 
-// Pane containers
-const paneCap = $('pane-cap');
-const paneMat = $('pane-mat');
-const paneView = $('pane-view');
-
-// --- Boot ---
-(async function boot(){
-  log('ready');
-  await ensureViewer();
+window.addEventListener('DOMContentLoaded', async () => {
+  cacheElements();
+  buildColorSwatches();
+  buildFilterOptions();
   wireTabs();
   wireAuth();
-  wireGLB();
-  wirePins();
-  await initSheets('demo');
-})();
+  wireCaptionPanel();
 
-function wireTabs(){
-  tabs.addEventListener('click', (e)=>{
-    const t = e.target.closest('button');
-    if(!t) return;
-    const name = t.dataset.tab;
-    for(const el of [paneCap, paneMat, paneView]) el.style.display = 'none';
-    (name==='cap'?paneCap:name==='mat'?paneMat:paneView).style.display = 'block';
-    // active ui
-    for(const b of tabs.querySelectorAll('button')) b.classList.toggle('active', b===t);
+  await ensureViewer(els.viewer);
+  console.log('[pins] ready');
+});
+
+function cacheElements() {
+  els.viewer = document.getElementById('viewer');
+  els.tabs = document.querySelectorAll('.tab');
+  els.panels = document.querySelectorAll('.panel');
+  els.sign = document.getElementById('btnSign');
+
+  // caption panel
+  els.driveInput = document.getElementById('driveInput');
+  els.btnGlbLoad = document.getElementById('btnGlbLoad');
+  els.saveSelect = document.getElementById('saveSelect');
+  els.btnSaveAdd = document.getElementById('btnSaveAdd');
+  els.pinColors = document.getElementById('pinColors');
+  els.filterSelect = document.getElementById('filterSelect');
+  els.captionList = document.getElementById('captionList');
+  els.titleInput = document.getElementById('titleInput');
+  els.bodyInput = document.getElementById('bodyInput');
+  els.btnAddPin = document.getElementById('btnAddPin');
+  els.btnClear = document.getElementById('btnClear');
+  els.btnRefreshImages = document.getElementById('btnRefreshImages');
+}
+
+function buildColorSwatches() {
+  els.pinColors.innerHTML = '';
+  COLORS.forEach((hex, i) => {
+    const sw = document.createElement('div');
+    sw.className = 'swatch' + (i===0 ? ' active' : '');
+    sw.dataset.pinColor = hex;
+    sw.style.background = hex;
+    sw.title = hex;
+    sw.addEventListener('click', () => {
+      document.querySelectorAll('.swatch').forEach(s => s.classList.remove('active'));
+      sw.classList.add('active');
+      current.color = hex;
+      setPinColor(hex);
+    });
+    els.pinColors.appendChild(sw);
   });
 }
 
-function wireAuth(){
-  authChip.addEventListener('click', ()=>{
-    log('[auth] sign-in clicked (stub)');
-    alert('Sign-in is stubbed in this offline build.');
+function buildFilterOptions() {
+  // (All) のみ
+}
+
+function wireTabs() {
+  els.tabs.forEach(btn => btn.addEventListener('click', () => {
+    const name = btn.dataset.tab;
+    els.tabs.forEach(b => b.classList.toggle('active', b === btn));
+    document.querySelectorAll('[data-panel]').forEach(p => {
+      p.style.display = (p.dataset.panel === name) ? 'block' : 'none';
+    });
+  }));
+}
+
+function wireAuth() {
+  els.sign.addEventListener('click', () => {
+    current.signed = !current.signed;
+    els.sign.textContent = current.signed ? 'Sign out' : 'Sign in';
+    console.info('[auth] toggled', current.signed);
   });
 }
 
-function wireGLB(){
-  btnLoad.addEventListener('click', async ()=>{
-    const idOrUrl = fileIdInput.value.trim();
-    const resolved = idOrUrl || 'demo';
-    log('[GLB] requested load', resolved);
-    try{
-      await ensureViewer();
-      await loadGLBFromDrive(resolved);
-    }catch(err){
-      console.error('[GLB] load failed', err);
-      alert('Failed to load GLB: ' + err.message);
+function wireCaptionPanel() {
+  els.btnGlbLoad.addEventListener('click', () => {
+    const v = (els.driveInput.value || '').trim();
+    loadGLB(v || 'demo');
+  });
+
+  els.btnSaveAdd.addEventListener('click', () => {
+    const name = prompt('New set name?');
+    if (!name) return;
+    const opt = document.createElement('option');
+    opt.value = opt.textContent = name;
+    els.saveSelect.appendChild(opt);
+    els.saveSelect.value = name;
+  });
+
+  els.btnAddPin.addEventListener('click', () => {
+    const id = addPinAtCenter();
+    const title = els.titleInput.value.trim();
+    const body  = els.bodyInput.value.trim();
+    setPinMeta(id, { title, body, color: current.color });
+    renderCaptionList();
+    if (title || body) {
+      els.titleInput.value = '';
+      els.bodyInput.value = '';
     }
   });
-}
 
-function renderCapList(rows){
-  capList.value = (rows||[]).map(r => `• (${r.color||'-'}) ${r.title||''} — ${r.body||''}`).join('\n');
-}
-
-function wirePins(){
-  btnAddPin.addEventListener('click', async ()=>{
-    const color = '#ffd54f'; // default amber
-    setPinColor(color);
-    const pin = await addPinAtCenter({ title: capTitle.value, body: capBody.value, color });
-    const all = getAllPins();
-    renderCapList(all);
-    await persistPins();
+  els.btnClear.addEventListener('click', () => {
+    els.titleInput.value = '';
+    els.bodyInput.value = '';
+    current.selectedPinId = null;
+    document.querySelectorAll('.item').forEach(i => i.classList.remove('active'));
   });
-  btnRefreshImages.addEventListener('click', async ()=>{
-    const blob = await downloadImageAsBlob('demo');
-    log('[images] fetched blob', blob.size, 'bytes');
-    alert('Images refreshed (stub).');
+
+  els.btnRefreshImages.addEventListener('click', () => {
+    refreshImages();
   });
 }
 
-async function initSheets(fileId){
-  const sheetId = await ensureSpreadsheetForFile(fileId);
-  await ensurePinsHeader(sheetId);
-  const sheets = await listSheetTitles(sheetId);
-  sheetSelect.innerHTML = '';
-  for(const s of sheets){
-    const opt = document.createElement('option');
-    opt.value = opt.textContent = s;
-    sheetSelect.appendChild(opt);
-  }
-  const rows = await loadPins(sheetId, sheets[0]);
-  renderCapList(rows);
+function renderCaptionList() {
+  const pins = getPins();
+  els.captionList.innerHTML = '';
+  pins.forEach(p => {
+    const div = document.createElement('div');
+    div.className = 'item';
+    div.textContent = p.title || '(untitled)';
+    div.dataset.id = p.id;
+    div.addEventListener('click', () => {
+      current.selectedPinId = p.id;
+      document.querySelectorAll('.item').forEach(i => i.classList.remove('active'));
+      div.classList.add('active');
+      els.titleInput.value = p.title || '';
+      els.bodyInput.value = p.body || '';
+    });
+    els.captionList.appendChild(div);
+  });
 }
 
-async function persistPins(){
-  const fileId = 'demo';
-  const sheet = sheetSelect.value || 'Pins';
-  const rows = getAllPins();
-  await savePins(fileId, sheet, rows);
-}
+// 初期色を viewer に反映
+setPinColor(current.color);

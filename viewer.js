@@ -1,269 +1,64 @@
-// viewer.js - v6.6 patched
-const THREE_URL = 'https://unpkg.com/three@0.157.0/build/three.module.js';
-const GLTF_URL  = 'https://unpkg.com/three@0.157.0/examples/jsm/loaders/GLTFLoader.js';
-const ORBIT_URL = 'https://unpkg.com/three@0.157.0/examples/jsm/controls/OrbitControls.js';
+// viewer.js
+let state = {
+  ready: false,
+  container: null,
+  glb: null,
+  pins: [],
+  currentColor: '#87ceeb',
+};
 
-export async function ensureViewer({ mount, spinner }) {
-  const THREE = await import(THREE_URL);
-  const { OrbitControls } = await import(ORBIT_URL);
-  const { GLTFLoader } = await import(GLTF_URL);
-
-  const renderer = new THREE.WebGLRenderer({ antialias: true, alpha:false });
-  renderer.setPixelRatio(devicePixelRatio);
-  renderer.setSize(mount.clientWidth, mount.clientHeight);
-  renderer.sortObjects = true;
-  mount.appendChild(renderer.domElement);
-
-  const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x101014);
-
-  const camera = new THREE.PerspectiveCamera(60, mount.clientWidth / Math.max(1,mount.clientHeight), 0.1, 2000);
-  camera.position.set(2.5, 2, 3);
-  const controls = new OrbitControls(camera, renderer.domElement);
-  controls.enableDamping = true;
-
-  const hemi = new THREE.HemisphereLight(0xffffff, 0x222233, 1.0);
-  scene.add(hemi);
-
-  const state = {
-    current: null,
-    materials: [],            // unique THREE.Material[]
-    targetIndex: -1,          // -1 = all
-  };
-
-  function collectUniqueMaterials(root){
-    const arr = [];
-    const seen = new Set();
-    root.traverse((o)=>{
-      if (o.isMesh && o.material){
-        const mats = Array.isArray(o.material) ? o.material : [o.material];
-        for (const m of mats){
-          const key = m.uuid;
-          if (!seen.has(key)){
-            seen.add(key);
-            arr.push(m);
-          }
-          // transparent draw order safety
-          m.depthWrite = !m.transparent;
-        }
-      }
-    });
-    return arr;
-  }
-
-  function applyToTargets(fn){
-    const mats = state.targetIndex < 0 ? state.materials : [state.materials[state.targetIndex]].filter(Boolean);
-    for (const m of mats) fn(m);
-  }
-
-  function animate(){
-    controls.update();
-    renderer.render(scene, camera);
-    requestAnimationFrame(animate);
-  }
-  animate();
-
-  function onResize(){
-    const w = mount.clientWidth, h = Math.max(1, mount.clientHeight);
-    renderer.setSize(w,h);
-    camera.aspect = w/h;
-    camera.updateProjectionMatrix();
-  }
-  new ResizeObserver(onResize).observe(mount);
-
-  async function loadGLBFromArrayBuffer(buf){
-    // clear previous
-    if (state.current){
-      scene.remove(state.current);
-      state.current.traverse?.((o)=>{
-        if (o.geometry) o.geometry.dispose();
-      });
-    }
-    const { GLTFLoader } = await import(GLTF_URL);
-    const blob = new Blob([buf], {type:'model/gltf-binary'});
-    const url = URL.createObjectURL(blob);
-    try{
-      const gltf = await new GLTFLoader().loadAsync(url);
-      const root = gltf.scene || gltf.scenes?.[0];
-      if (!root) throw new Error('GLB has no scene');
-      scene.add(root);
-      state.current = root;
-      state.materials = collectUniqueMaterials(root);
-      state.targetIndex = -1;
-    } finally {
-      URL.revokeObjectURL(url);
-    }
-  }
-
-  // === material helpers ===
-  function ensureBackup(m){
-    if (!m.userData._lmy) m.userData._lmy = {};
-    const u = m.userData._lmy;
-    if (!u.backup){
-      // minimal clone of togglable props
-      u.backup = {
-        type: m.type,
-        color: m.color ? m.color.clone() : null,
-        map: m.map || null,
-        side: m.side,
-        transparent: m.transparent,
-        opacity: m.opacity,
-        toneMapped: m.toneMapped,
-        lights: m.lights ?? true,
-        onBeforeCompile: m.onBeforeCompile || null,
-      };
-    }
-    return u;
-  }
-
-  function setHSL(h, s, l){
-    applyToTargets((m)=>{
-      if (!m.color) return;
-      const c = new THREE.Color();
-      c.setHSL(h/360, s/100, l/100);
-      m.color.copy(c);
-      m.needsUpdate = true;
-    });
-  }
-
-  function setOpacity(p){
-    applyToTargets((m)=>{
-      m.transparent = p < 1.0 || m.userData._lmy?.whiteKeyEnabled;
-      m.opacity = p;
-      m.depthWrite = !m.transparent;
-      m.needsUpdate = true;
-    });
-  }
-
-  function setUnlit(on){
-    applyToTargets((m)=>{
-      const u = ensureBackup(m);
-      if (on){
-        if (m.type !== 'MeshBasicMaterial'){
-          // switch to basic while keeping map/opacity/etc
-          const basic = new THREE.MeshBasicMaterial({
-            map: m.map || null,
-            color: m.color ? m.color.clone() : 0xffffff,
-            transparent: m.transparent,
-            opacity: m.opacity,
-            side: m.side,
-            depthWrite: m.depthWrite,
-            toneMapped: false,
-          });
-          // mark & swap
-          u.swapped = m;
-          u.swappedOriginal = m; // keep reference
-          Object.setPrototypeOf(m, THREE.MeshBasicMaterial.prototype);
-          Object.assign(m, basic);
-          m.needsUpdate = true;
-        }
-      } else {
-        // restore by reapplying backup on the same instance
-        if (u.backup){
-          m.onBeforeCompile = u.backup.onBeforeCompile;
-          m.toneMapped = u.backup.toneMapped;
-          m.lights = u.backup.lights;
-          m.transparent = u.backup.transparent;
-          m.opacity = u.backup.opacity;
-          m.side = u.backup.side;
-          if (u.backup.color && m.color) m.color.copy(u.backup.color);
-          m.map = u.backup.map;
-          // revert prototype if needed
-          if (m.type !== u.backup.type){
-            // reconstruct original Standard material-ish
-            const std = new THREE.MeshStandardMaterial({
-              map: m.map,
-              color: (u.backup.color||new THREE.Color(0xffffff)),
-              transparent: m.transparent,
-              opacity: m.opacity,
-              side: m.side,
-              depthWrite: m.depthWrite,
-            });
-            Object.setPrototypeOf(m, THREE.MeshStandardMaterial.prototype);
-            Object.assign(m, std);
-          }
-          m.needsUpdate = true;
-        }
-      }
-    });
-  }
-
-  function setDoubleSide(on){
-    applyToTargets((m)=>{
-      m.side = on ? THREE.DoubleSide : THREE.FrontSide;
-      m.needsUpdate = true;
-    });
-  }
-
-  // --- white key (white -> alpha) ---
-  function installWhiteKeyShader(m){
-    const u = ensureBackup(m);
-    if (u.whiteKeyInstalled) return;
-    u.whiteKeyInstalled = true;
-    m.onBeforeCompile = (shader)=>{
-      shader.uniforms.uWhiteKey = { value: (u.whiteKeyThreshold ?? 0.97) };
-      shader.fragmentShader = shader.fragmentShader.replace(
-        '#include <dithering_fragment>',
-        `#include <dithering_fragment>
-         float w = max(max(gl_FragColor.r, gl_FragColor.g), gl_FragColor.b);
-         if (w >= uWhiteKey) { gl_FragColor.a = 0.0; }
-        `
-      );
-    };
-    m.transparent = true;
-    m.depthWrite = false;
-    m.needsUpdate = true;
-  }
-  function setWhiteKeyEnabled(on){
-    applyToTargets((m)=>{
-      const u = ensureBackup(m);
-      u.whiteKeyEnabled = on;
-      if (on) installWhiteKeyShader(m);
-      else {
-        // restore shader
-        m.onBeforeCompile = u.backup?.onBeforeCompile || null;
-        m.needsUpdate = true;
-        // transparency might be controlled by opacity separately
-        if (!m.transparent || (m.transparent && m.opacity>=1.0)){
-          m.depthWrite = true;
-        }
-      }
-    });
-  }
-  function setWhiteKeyThreshold(t){
-    applyToTargets((m)=>{
-      const u = ensureBackup(m);
-      u.whiteKeyThreshold = t;
-      installWhiteKeyShader(m);
-      m.needsUpdate = true;
-    });
-  }
-
-  function setMaterialTarget(index){
-    state.targetIndex = index; // -1 = all
-  }
-
-  return {
-    THREE, scene, camera, renderer, controls,
-    loadGLBFromArrayBuffer,
-    loadGLB: loadGLBFromArrayBuffer, // alias
-    setMaterialTarget,
-    setHSL, setOpacity, setUnlit, setDoubleSide,
-    setWhiteKeyEnabled, setWhiteKeyThreshold,
-  };
+function ensureViewer(containerEl) {
+  state.container = containerEl;
+  state.container.innerHTML = '';
+  const msg = document.createElement('div');
+  msg.className = 'booting';
+  msg.textContent = 'ready';
+  state.container.appendChild(msg);
+  state.ready = true;
+  console.info('[viewer] ready');
 }
 
-
-// --- Compatibility exports for legacy pins.js ---
-export { ensureViewer, loadGLBFromDrive };
-export function addPinAtCenter() {
-  const v = ensureViewer();
-  try {
-    // Fallback: center of canvas; no-op (legacy pins overlay handled elsewhere)
-    console.debug('[viewer] addPinAtCenter fallback (no-op).');
-    return false;
-  } catch (e) {
-    console.warn('[viewer] addPinAtCenter failed', e);
-    return false;
-  }
+async function loadGLB(urlOrId) {
+  console.info('[viewer] loadGLB requested', urlOrId || '(empty)');
+  if (!state.container) return;
+  let text = 'loaded: ';
+  if (!urlOrId) text += '(empty)';
+  else if (String(urlOrId).toLowerCase() === 'demo') text += 'demo';
+  else text += String(urlOrId).slice(0, 28);
+  state.container.querySelector('.booting')?.remove();
+  const tip = document.createElement('div');
+  tip.className = 'booting';
+  tip.textContent = text;
+  state.container.innerHTML = '';
+  state.container.appendChild(tip);
+  state.glb = urlOrId || null;
 }
+
+function setPinColor(hex) {
+  state.currentColor = hex;
+  console.info('[viewer] color set', hex);
+}
+
+function addPinAtCenter() {
+  const id = String(Date.now());
+  const pin = { id, x: 0, y: 0, z: 0, color: state.currentColor, title: '', body: '' };
+  state.pins.push(pin);
+  console.info('[viewer] pin added', pin);
+  return id;
+}
+
+function setPinMeta(id, meta) {
+  const p = state.pins.find(p => p.id === id);
+  if (!p) return;
+  Object.assign(p, meta || {});
+}
+
+function getPins() {
+  return state.pins.slice();
+}
+
+async function refreshImages() {
+  console.info('[viewer] refresh images (stub)');
+}
+
+export { ensureViewer, loadGLB, addPinAtCenter, setPinColor, refreshImages, setPinMeta, getPins };
