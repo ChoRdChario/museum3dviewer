@@ -2,83 +2,106 @@
 <html lang="ja">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>LociMyu v6.6</title>
-  <link rel="icon" href="./favicon.ico">
   <link rel="stylesheet" href="./app.css">
-  <script type="importmap">
-  { "imports": { "three": "https://unpkg.com/three@0.157.0/build/three.module.js" } }
-  </script>
-  <script src="https://accounts.google.com/gsi/client" async defer></script>
-  <script src="https://apis.google.com/js/api.js"></script>
-  <script type="module" src="./app_boot.js?v=20251004tabs"></script>
 </head>
 <body>
   <div id="app">
-    <div id="stage">
-      <div id="spinner">booting…</div>
-      <svg id="leader"><line id="leaderLine" x1="0" y1="0" x2="0" y2="0" stroke="#ffcc55" stroke-width="2" opacity="0"/></svg>
-      <div id="overlay" class="overlay" style="display:none"></div>
+    <!-- 左：3Dステージ -->
+    <div id="stageWrap">
+      <div id="stage" aria-label="stage"></div>
+      <div id="spinner" hidden>Loading…</div>
     </div>
 
-    <aside id="panel">
+    <!-- 右：サイドバー -->
+    <aside id="side">
       <header id="topbar">
-        <strong>LociMyu v6.6</strong>
-        <div class="spacer"></div>
-        <button id="authChip" class="btn" type="button">Sign in</button>
+        <nav id="tabs">
+          <button class="tab is-active" data-tab="caption">Caption</button>
+          <button class="tab" data-tab="material">Material</button>
+          <button class="tab" data-tab="view">View</button>
+        </nav>
+        <button id="authChip" class="chip">Sign in</button>
       </header>
 
-      <div id="tabs">
-        <div class="tab active" data-tab="cap">Caption</div>
-        <div class="tab" data-tab="mat">Material</div>
-        <div class="tab" data-tab="view">View</div>
-      </div>
-
-      <section id="pane-cap" class="pane active">
-        <div class="row">
-          <input id="fileIdInput" class="input" placeholder="Drive File ID or URL">
-          <button id="btnLoad" class="btn">GLB</button>
-        </div>
-        <div class="help muted">?id=&lt;fileId&gt; または <b>demo</b> でデモモデル</div>
-
-        <div class="row">
-          <label class="muted w">Save data</label>
-          <select id="sheetSelect" class="select"></select>
-          <button id="btnNewSheet" class="btn" title="Create new sheet">+</button>
-        </div>
-
-        <!-- === Pin color row (A+B 完了版) === -->
-        <div class="row pin-row">
-          <label class="muted w">Pin color</label>
-          <div class="pin-controls">
-            <div id="pinPalette" class="palette"></div>
-            <div id="pinFilterToggles" class="ftoggles" aria-label="Pin visibility"></div>
+      <!-- Caption -->
+      <section class="panel is-active" id="tab-caption" role="tabpanel">
+        <div class="field row">
+          <label class="label">Drive File ID or URL</label>
+          <div class="input-row">
+            <input id="fileIdInput" type="text" placeholder="https://drive.google.com/... or fileId" />
+            <button id="btnGLB" class="btn btn-s">GLB</button>
           </div>
         </div>
 
-        <div class="caplist-block">
-          <div class="muted">Caption list</div>
-          <div id="capList" class="caplist"></div>
+        <div class="field row">
+          <label class="label">?id=&lt;fileId&gt; または demo（デモモデル）</label>
+          <div class="input-row">
+            <select id="saveTarget">
+              <option value="Pins">Pins</option>
+            </select>
+            <button id="btnAddSave" class="btn btn-s">+</button>
+          </div>
         </div>
 
-        <h3 class="muted">Title / Body</h3>
-        <input id="capTitle" class="input" placeholder="Title">
-        <textarea id="capBody" class="textarea" placeholder="Body" rows="3"></textarea>
-        <div class="row">
-          <button id="btnAddPin" class="btn">+ Pin</button>
-          <button id="btnRefreshImages" class="btn">Refresh images</button>
+        <div class="field">
+          <div class="label">Pin</div>
+          <div id="pinPalette" class="chips-row"></div>
+          <div class="label mini">color</div>
+          <div id="pinFilter" class="filters-row">
+            <label class="check"><input type="checkbox" id="filterAll" checked /> <span>All</span></label>
+            <div id="filterColors" class="filter-colors"></div>
+          </div>
         </div>
-        <div id="imgGrid" class="grid"></div>
+
+        <div class="field">
+          <div class="label">Caption list</div>
+          <div id="capList" class="list"></div>
+        </div>
+
+        <div class="field">
+          <div class="label">Title / Body</div>
+          <input id="capTitle" class="text" placeholder="Title" />
+          <textarea id="capBody" class="text" placeholder="Body"></textarea>
+
+          <div class="row end">
+            <button id="btnAddPin" class="btn">+ Pin</button>
+            <button id="btnRefreshImages" class="btn">Refresh images</button>
+          </div>
+        </div>
       </section>
 
-      <section id="pane-mat" class="pane">
-        <!-- 既存 Material UI（未変更） -->
+      <!-- Material -->
+      <section class="panel" id="tab-material" role="tabpanel">
+        <div class="field">
+          <label class="label">Surface color</label>
+          <input type="color" id="matColor" value="#cccccc"/>
+        </div>
+        <div class="field">
+          <label class="label">Metalness</label>
+          <input type="range" id="matMetal" min="0" max="1" step="0.01" value="0"/>
+        </div>
+        <div class="field">
+          <label class="label">Roughness</label>
+          <input type="range" id="matRough" min="0" max="1" step="0.01" value="1"/>
+        </div>
       </section>
 
-      <section id="pane-view" class="pane">
-        <!-- 既存 View UI（未変更） -->
+      <!-- View -->
+      <section class="panel" id="tab-view" role="tabpanel">
+        <div class="field">
+          <div class="label">Background</div>
+          <div id="bgColors" class="chips-row"></div>
+        </div>
+        <div class="field">
+          <button id="btnProj" class="btn">Perspective</button>
+        </div>
       </section>
     </aside>
   </div>
+
+  <!-- 起動 -->
+  <script type="module" src="./app_boot.js"></script>
 </body>
 </html>

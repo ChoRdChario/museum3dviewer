@@ -1,47 +1,44 @@
-// ui.js — import-fix + tab wiring + model-loaded dispatch — 2025-10-07
-import { fetchDriveFileAsArrayBuffer, normalizeDriveIdFromInput } from './utils_drive_api.js';
-
-export function setupUI(app){
-  const inputId = document.getElementById('fileIdInput');
-  const btnLoad = document.getElementById('btnLoad');
-  const spinner = document.getElementById('spinner');
-
+// ui.js
+export function setupUI({ onLoadGLB, onBg, onProj }){
   // Tabs
-  (function setupTabs(){
-    const tabs  = Array.from(document.querySelectorAll('.tab[data-tab]'));
-    const panes = Array.from(document.querySelectorAll('.pane'));
-    function activate(name){
-      tabs.forEach(t => t.classList.toggle('active', t.dataset.tab === name));
-      panes.forEach(p => p.classList.toggle('active', p.id === 'pane-' + name));
-    }
-    tabs.forEach(t => t.addEventListener('click', () => activate(t.dataset.tab)));
-    const current = (tabs.find(t=>t.classList.contains('active'))?.dataset.tab) || (tabs[0]?.dataset.tab) || 'cap';
-    activate(current);
-  })();
+  const tabs = document.querySelectorAll('#tabs .tab');
+  const panels = document.querySelectorAll('.panel');
+  tabs.forEach(t=>{
+    t.addEventListener('click', ()=>{
+      tabs.forEach(x=>x.classList.remove('is-active'));
+      panels.forEach(x=>x.classList.remove('is-active'));
+      t.classList.add('is-active');
+      document.querySelector(`#tab-${t.dataset.tab}`)?.classList.add('is-active');
+    });
+  });
 
-  async function loadFromInput(ev){
-    const raw = (inputId?.value || '').trim();
-    if (!raw) return;
-    const id = normalizeDriveIdFromInput(raw) || raw;
-    if (spinner) spinner.textContent = 'loading model...';
+  // GLB load
+  const input = document.querySelector('#fileIdInput');
+  const btnGLB = document.querySelector('#btnGLB');
+  const doLoad = ()=>{
+    const v = input.value.trim();
+    if (!v) return;
+    onLoadGLB?.(v);
+  };
+  input?.addEventListener('keydown', e=>{ if(e.key==='Enter') doLoad(); });
+  btnGLB?.addEventListener('click', doLoad);
 
-    try{
-      const buf = await fetchDriveFileAsArrayBuffer(id);
-      if (!app.viewer || !app.viewer.loadGLB) throw new Error('viewer.loadGLB not available');
-      await app.viewer.loadGLB(buf);
-      app.state = app.state || {};
-      app.state.currentGLBId = id;
-      window.dispatchEvent(new CustomEvent('lmy:model-loaded', { detail: { glbId: id } }));
-    }catch(e){
-      console.error('[ui] failed to load', e);
-      alert('Failed to load GLB: ' + (e?.message || e));
-    }finally{
-      spinner && spinner.remove?.();
-    }
+  // Background colors
+  const bg = document.querySelector('#bgColors');
+  if (bg){
+    ['#0f1116','#1c1f2b','#000000','#2b2b2b','#224','#334','#223322'].forEach(hex=>{
+      const b = document.createElement('button');
+      b.className='color'; b.style.background=hex;
+      b.addEventListener('click', ()=> onBg?.(hex));
+      bg.appendChild(b);
+    });
   }
 
-  btnLoad?.addEventListener('click', loadFromInput);
-  inputId?.addEventListener('keydown', (ev)=>{ if(ev.key==='Enter') loadFromInput(ev); });
-
-  window.__ui = { loadFromInput };
+  // Projection toggle
+  const btnProj = document.querySelector('#btnProj');
+  btnProj?.addEventListener('click', ()=>{
+    const next = btnProj.textContent==='Perspective' ? 'Orthographic' : 'Perspective';
+    btnProj.textContent = next;
+    onProj?.(next);
+  });
 }

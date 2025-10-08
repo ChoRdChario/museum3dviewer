@@ -1,37 +1,55 @@
-// app_boot.js - updated to import the renamed module (2025-10-07)
-import { ensureViewer } from './viewer.js';
-import { setupUI } from './ui.js';
+// app_boot.js
+import { ensureViewer, loadGLB, setBackground, setProjection } from './viewer.js';
 import { setupPins } from './pins.js';
-import { setupAuth } from './gauth.module.js';  // ← renamed import
+import { setupUI } from './ui.js';
+import { setupAuth } from './gauth.module.js';
 
-const stage = document.getElementById('stage');
-const spinner = document.getElementById('spinner');
+const log = (...a)=>console.log('[boot]', ...a);
 
-const app = { viewer: null, auth: null, state: {} };
-
-(async function boot(){
+async function boot(){
   console.log('[auth] ready');
-  try { app.viewer = await ensureViewer({ mount: stage, spinner }); } catch(e){ console.error('[boot] ensureViewer failed', e); }
-  try { setupUI(app); } catch(e){ console.error('[boot] setupUI failed', e); }
-  try { setupPins?.(app); } catch(e){ console.error('[boot] setupPins failed', e); }
 
-  try {
-    app.auth = setupAuth({
-      onSignedIn(){ /* hook if needed */ },
-      onSignedOut(){ /* hook if needed */ },
+  // Viewer
+  try{
+    await ensureViewer({ mount:'#stage', spinner:'#spinner' });
+  }catch(e){
+    console.error('[boot] ensureViewer failed', e);
+  }
+
+  // Auth chip
+  try{
+    await setupAuth('#authChip');
+  }catch(e){
+    console.error('[boot] setupAuth failed', e);
+  }
+
+  // UI wiring (tabs, inputs)
+  setupUI({
+    onLoadGLB: async (fileIdOrUrl)=>{
+      await loadGLB(fileIdOrUrl);
+    },
+    onBg: (hex)=> setBackground(hex),
+    onProj: (mode)=> setProjection(mode),
+  });
+
+  // Pins
+  try{
+    setupPins({
+      capList:'#capList',
+      capTitle:'#capTitle',
+      capBody:'#capBody',
+      pinPalette:'#pinPalette',
+      pinFilter:'#pinFilter',
+      btnAdd:'#btnAddPin',
+      btnRefresh:'#btnRefreshImages',
     });
-  } catch(e){ console.error('[boot] setupAuth failed', e); }
+  }catch(e){
+    console.error('[pins] setup failed', e);
+  }
+}
 
-  try {
-    const params = new URLSearchParams(location.search);
-    const id = params.get('id');
-    if (id){
-      const input = document.getElementById('fileIdInput');
-      const btn = document.getElementById('btnLoad');
-      if (input) input.value = id;
-      btn?.click?.();
-    } else {
-      spinner?.remove?.();
-    }
-  } catch(e){ console.error('[boot] auto-load failed', e); }
-})();
+if (document.readyState === 'loading'){
+  document.addEventListener('DOMContentLoaded', boot, { once:true });
+}else{
+  boot();
+}
