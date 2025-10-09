@@ -1,4 +1,4 @@
-// viewer.module.cdn.js — render/select pins
+// viewer.module.cdn.js — smaller pins + selection + filter visibility
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
@@ -59,43 +59,52 @@ export function ensureViewer({ canvas }){
     }
   });
 
+  // visibility by color filter
+  document.addEventListener('pinFilterChange', (e)=>{
+    const selected = new Set(e.detail?.selected || []);
+    if (!pinGroup) return;
+    pinGroup.children.forEach(ch => {
+      const c = ch.userData?.pinColor;
+      ch.visible = !c || selected.has(c);
+    });
+  });
+
   const tick = () => { controls.update(); renderer.render(scene, camera); requestAnimationFrame(tick); };
   tick();
 }
 
-export function onCanvasShiftPick(handler){
-  pickHandlers.add(handler);
-  return () => pickHandlers.delete(handler);
-}
-export function onPinSelect(handler){
-  pinSelectHandlers.add(handler);
-  return () => pinSelectHandlers.delete(handler);
-}
+export function onCanvasShiftPick(handler){ pickHandlers.add(handler); return () => pickHandlers.delete(handler); }
+export function onPinSelect(handler){ pinSelectHandlers.add(handler); return () => pinSelectHandlers.delete(handler); }
 
 export function addPinMarker({ id, x, y, z, color = '#ff6b6b' }){
   if (!pinGroup) return;
-  const geo = new THREE.SphereGeometry(0.02, 16, 16);
-  const mat = new THREE.MeshBasicMaterial({ color });
+  // Smaller pin: radius ~ model size aware (use scene bounding box fallback)
+  let radius = 0.01;
+  try {
+    const objList = scene.children.filter(o=>!o.isLight && o!==pinGroup);
+    const box = new THREE.Box3().makeEmpty();
+    objList.forEach(o=>box.expandByObject(o));
+    const size = box.getSize(new THREE.Vector3()).length() || 1;
+    radius = Math.max(0.006, Math.min(0.02, size * 0.002));
+  } catch(_){}
+  const geo = new THREE.SphereGeometry(radius, 16, 16);
+  const mat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.9 });
   const m = new THREE.Mesh(geo, mat);
   m.position.set(x, y, z);
   m.userData.pinId = id;
+  m.userData.pinColor = color;
   pinGroup.add(m);
 }
-export function clearPins(){
-  if (!pinGroup) return;
-  while (pinGroup.children.length) pinGroup.remove(pinGroup.children[0]);
-}
+export function clearPins(){ if (!pinGroup) return; while (pinGroup.children.length) pinGroup.remove(pinGroup.children[0]); }
 export function setPinSelected(id, on){
   if (!pinGroup) return;
   pinGroup.children.forEach(ch => {
     if (ch.userData.pinId === id){
-      ch.scale.set(on?1.8:1, on?1.8:1, on?1.8:1);
+      ch.scale.set(on?1.6:1, on?1.6:1, on?1.6:1);
       ch.material.opacity = on?1:0.8;
-      ch.material.transparent = true;
     } else {
       ch.scale.set(1,1,1);
       ch.material.opacity = 0.6;
-      ch.material.transparent = true;
     }
   });
 }
