@@ -1,5 +1,5 @@
-// boot.esm.cdn.js — HEIC/HEIF thumbnails via Drive thumbnailLink + Shift+Click pin drop
-import { ensureViewer, onCanvasShiftPick } from './viewer.module.cdn.js';
+// boot.esm.cdn.js — HEIC/HEIF thumbnails + Shift+Click pin drop (fixed import)
+import { ensureViewer, onCanvasShiftPick, loadGlbFromDrive } from './viewer.module.cdn.js';
 import { setupAuth, getAccessToken } from './gauth.module.js';
 
 const $ = (id) => document.getElementById(id);
@@ -193,6 +193,7 @@ $('save-target-create')?.addEventListener('click', async ()=>{
   await populateSheetTabs(currentSpreadsheetId, token); await loadCaptionsFromSheet();
 });
 
+// values helpers
 async function putValues(spreadsheetId, rangeA1, values, token) {
   return fetch(`https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(rangeA1)}?valueInputOption=RAW`, { method:'PUT', headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json'}, body:JSON.stringify({ values }) });
 }
