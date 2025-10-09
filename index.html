@@ -5,12 +5,11 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>LociMyu v6.6 (ESM/CDN)</title>
   <link rel="icon" href="data:," />
-  <!-- Keys should already be present; keep meta placeholders -->
   <meta name="google-oauth-client_id" content="595200751510-ncahnf7edci6b9925becn5to49r6cguv.apps.googleusercontent.com">
   <meta name="google-api-key" content="AIzaSyCUnTCr5yWUWPdEXST9bKP1LpgawU5rIbI">
   <script src="https://accounts.google.com/gsi/client" async defer></script>
   <style>
-    :root{--bg:#0f1115;--panel:#0b0d11;--line:#1f2937;--acc:#94a3b8;--text:#cbd5e1;}
+    :root{--bg:#0f1115;--panel:#0b0d11;--line:#1f2937;--acc:#94a3b8;--text:#cbd5e1;--sel:#60a5fa;}
     html,body{height:100%;margin:0;background:var(--bg);color:var(--text);font:14px/1.4 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;}
     #app{display:flex;height:100%;}
     #stage{flex:1;position:relative;background:var(--panel);}
@@ -31,8 +30,14 @@
     .grp{margin:8px 0}
     .chips{display:flex;flex-wrap:wrap;gap:6px}
     .chip{width:18px;height:18px;border-radius:50%;border:1px solid #0003;cursor:pointer;box-shadow:0 0 0 1px #0004 inset}
-    #caption-list{height:200px;overflow:auto;border:1px solid var(--line);border-radius:6px}
+    #caption-list{height:160px;overflow:auto;border:1px solid var(--line);border-radius:6px}
+    .caption-item{display:flex;gap:8px;align-items:flex-start;padding:6px;border-bottom:1px solid #0003}
+    .caption-item img{width:40px;height:40px;object-fit:cover;border-radius:6px;border:1px solid #0004}
     .hint{opacity:.7;font-size:12px}
+    /* thumbnails grid */
+    #images-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(64px,1fr));gap:8px}
+    .thumb{width:100%;aspect-ratio:1/1;border-radius:8px;border:1px solid #0005;background-size:cover;background-position:center;cursor:pointer}
+    .thumb[data-selected="true"]{outline:2px solid var(--sel);outline-offset:2px}
   </style>
 </head>
 <body>
@@ -72,6 +77,13 @@
           <div class="hint">Filter</div>
           <div id="pin-filter" class="chips"></div>
         </div>
+
+        <!-- ▼ 配置入替：先に Caption list、その下に Title/Body -->
+        <div class="grp">
+          <div class="hint">Caption list</div>
+          <div id="caption-list"></div>
+        </div>
+
         <div class="grp">
           <div class="hint">Title / Body</div>
           <input id="caption-title" placeholder="Title" />
@@ -81,12 +93,13 @@
             <button id="pin-clear">Clear</button>
           </div>
         </div>
+
         <div class="grp">
-          <div class="hint">Caption list</div>
-          <div id="caption-list"></div>
-        </div>
-        <div class="grp">
-          <button id="btnRefreshImages" style="width:100%">Refresh images</button>
+          <div class="hint">Images (auto from GLB folder)</div>
+          <div id="images-grid"></div>
+          <div class="row" style="margin-top:8px">
+            <button id="btnRefreshImages" style="width:100%">Refresh images</button>
+          </div>
           <div id="images-status" class="hint" style="margin-top:6px"></div>
         </div>
       </section>
@@ -132,6 +145,6 @@
   }
   </script>
 
-  <script type="module" src="./boot.esm.cdn.js?v=20251011"></script>
+  <script type="module" src="./boot.esm.cdn.js?v=20251011a"></script>
 </body>
 </html>

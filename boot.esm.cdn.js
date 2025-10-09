@@ -1,9 +1,4 @@
-// boot.esm.cdn.js — ESM/CDN bootstrap
-// - GLB: Drive API v3 で CORS安全に読み込み（済）
-// - Images refresh（済）
-// - ▼ 追加：GLBと同階層のスプレッドシート自動検出/自動作成（LociMyu形式）
-// - ▼ 追加：セレクトは「同一スプシ内のシート(タブ)」列挙／Create は新規タブ追加
-
+// boot.esm.cdn.js — images grid & caption attach + sheet-in-folder logic
 import { ensureViewer, loadGlbFromDrive } from './viewer.module.cdn.js';
 import { setupAuth, getAccessToken } from './gauth.module.js';
 
@@ -24,38 +19,31 @@ btnAuth && setupAuth(btnAuth, signedSwitch);
 // ---------- GLB load (Drive API) ----------
 const extractDriveId = (v) => {
   if (!v) return null;
-  const m = String(v).match(/[-\w]{25,}/);
+  const m = String(v).match(/[-\\w]{25,}/);
   return m ? m[0] : null;
 };
 
 let lastGlbFileId = null;
-let currentSpreadsheetId = null; // 同階層で見つかった/作成されたスプシ
-let currentSheetId = null;       // セレクトで選んだタブ
+let currentSpreadsheetId = null;
+let currentSheetId = null;
 
 const doLoad = async () => {
   const token = getAccessToken();
   if (!token) { console.warn('[GLB] token missing. Please sign in.'); return; }
-
   const raw = $('glbUrl')?.value?.trim();
   const fileId = extractDriveId(raw);
   if (!fileId) { console.warn('[GLB] no fileId found in input'); return; }
-
   try {
     $('btnGlb').disabled = true;
-
-    // 1) GLB 読み込み
     await loadGlbFromDrive(fileId, { token });
     lastGlbFileId = fileId;
 
-    // 2) 親フォルダ
     const parentId = await getParentFolderId(fileId, token);
-
-    // 3) 同階層のスプシを LociMyu 形式で自動検出 → なければ作成
     currentSpreadsheetId = await findOrCreateLociMyuSpreadsheet(parentId, token, { glbId: fileId });
-
-    // 4) タブ一覧をセレクトに反映（同一スプシ内のシート）
     await populateSheetTabs(currentSpreadsheetId, token);
 
+    // シート準備後、自動で同階層の画像を列挙してグリッド表示
+    await refreshImagesGrid();
   } catch (e) {
     console.error('[GLB] load error', e);
   } finally {
@@ -65,7 +53,7 @@ const doLoad = async () => {
 $('btnGlb')?.addEventListener('click', doLoad);
 $('glbUrl')?.addEventListener('keydown', (e) => e.key === 'Enter' && doLoad());
 
-// ---------- Caption: 8-color palette + checkbox filter ----------
+// ---------- Caption: colors & filter ----------
 const COLORS = ['#ff6b6b','#ffd93d','#6bcb77','#4d96ff','#9b5de5','#f15bb5','#00c2a8','#94a3b8'];
 
 const pinColorsHost = $('pin-colors');
@@ -103,7 +91,7 @@ if (pinFilterHost) {
   });
 }
 
-// ---------- Drive: images under GLB's parent ----------
+// ---------- Drive helpers ----------
 async function getParentFolderId(fileId, token) {
   const res = await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?fields=parents&supportsAllDrives=true`, {
     headers: { Authorization: `Bearer ${token}` }
@@ -118,36 +106,77 @@ async function listImagesForGlb(fileId, token) {
   const parent = await getParentFolderId(fileId, token);
   if (!parent) return [];
   const q = encodeURIComponent(`'${parent}' in parents and (mimeType contains 'image/') and trashed=false`);
-  const listUrl = `https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name,mimeType,thumbnailLink,webViewLink)&pageSize=100&supportsAllDrives=true`;
+  const listUrl = `https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name,mimeType,thumbnailLink)&pageSize=200&supportsAllDrives=true`;
   const listRes = await fetch(listUrl, { headers: { Authorization: `Bearer ${token}` } });
   if (!listRes.ok) throw new Error(`Drive list failed: ${listRes.status}`);
   const data = await listRes.json();
   return data.files || [];
 }
 
-$('btnRefreshImages')?.addEventListener('click', async () => {
+async function fetchImageBlobUrl(fileId, token) {
+  const res = await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?alt=media&supportsAllDrives=true`, {
+    headers: { Authorization: `Bearer ${token}` }
+  });
+  if (!res.ok) throw new Error(`media fetch failed: ${res.status}`);
+  const blob = await res.blob();
+  return URL.createObjectURL(blob);
+}
+
+// ---------- Images grid & caption attach ----------
+let selectedImage = null; // {id, url}
+
+async function refreshImagesGrid() {
   const token = getAccessToken();
   const fileId = lastGlbFileId || extractDriveId($('glbUrl')?.value || '');
   if (!token || !fileId) {
     $('images-status').textContent = 'Sign in & load a GLB first.';
     return;
   }
-  $('images-status').textContent = 'Listing images…';
+  $('images-status').textContent = 'Loading images…';
+  const grid = $('images-grid');
+  grid.innerHTML = '';
+  selectedImage = null;
+
   try {
     const files = await listImagesForGlb(fileId, token);
     $('images-status').textContent = `${files.length} image(s) found in the GLB folder`;
-    console.log('[Drive images]', files);
+
+    const CONC = 6;
+    const queue = files.slice();
+    const workers = new Array(Math.min(CONC, queue.length)).fill(0).map(async () => {
+      while (queue.length) {
+        const f = queue.shift();
+        try {
+          const url = await fetchImageBlobUrl(f.id, token);
+          const btn = document.createElement('button');
+          btn.className = 'thumb';
+          btn.style.backgroundImage = `url(${url})`;
+          btn.title = f.name;
+          btn.dataset.id = f.id;
+          btn.addEventListener('click', () => {
+            grid.querySelectorAll('.thumb').forEach(x => x.dataset.selected = 'false');
+            btn.dataset.selected = 'true';
+            selectedImage = { id: f.id, url };
+          });
+          grid.appendChild(btn);
+        } catch (e) {
+          console.warn('thumb err', f, e);
+        }
+      }
+    });
+    await Promise.all(workers);
   } catch (e) {
     $('images-status').textContent = `Error: ${e.message}`;
-    console.error('[Drive images] error', e);
+    console.error('[images grid] error', e);
   }
-});
+}
 
-// ---------- Spreadsheet（同階層の自動検出/自動生成 + タブ選択/追加） ----------
-const LOCIMYU_HEADERS = ['id','title','body','color','x','y','z'];      // 初期化時に入れる想定ヘッダ
-const REQUIRED_MIN_HEADERS = new Set(['title','body','color']);         // LociMyu 形式ざっくり判定
+$('btnRefreshImages')?.addEventListener('click', refreshImagesGrid);
 
-// A1:Z1 を見て、どれかのシートに主要3列が揃っていれば LociMyu とみなす
+// ---------- Sheets in same folder ----------
+const LOCIMYU_HEADERS = ['id','title','body','color','x','y','z'];
+const REQUIRED_MIN_HEADERS = new Set(['title','body','color']);
+
 async function isLociMyuSpreadsheet(spreadsheetId, token) {
   const url = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}?includeGridData=true&ranges=A1:Z1&fields=sheets(properties(title,sheetId),data(rowData(values(formattedValue))))`;
   const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
@@ -165,7 +194,6 @@ async function isLociMyuSpreadsheet(spreadsheetId, token) {
   return false;
 }
 
-// 同階層にスプシ作成（Drive API でフォルダ指定）→ ヘッダを1行だけ初期化
 async function createLociMyuSpreadsheet(parentFolderId, token, { glbId } = {}) {
   const name = `LociMyu_Save_${glbId || ''}`.replace(/_+$/,'');
   const createRes = await fetch('https://www.googleapis.com/drive/v3/files', {
@@ -181,18 +209,16 @@ async function createLociMyuSpreadsheet(parentFolderId, token, { glbId } = {}) {
   const file = await createRes.json();
   const spreadsheetId = file.id;
 
-  // A1:Z1 にヘッダを書き込み（Sheet API）
   const valuesRes = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/A1:Z1?valueInputOption=RAW`, {
     method: 'PUT',
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({ values: [LOCIMYU_HEADERS] })
   });
-  if (!valuesRes.ok) console.warn('[Sheets] init headers failed', valuesRes.status, await valuesRes.text().catch(()=>''));  
+  if (!valuesRes.ok) console.warn('[Sheets] init headers failed', valuesRes.status, await valuesRes.text().catch(()=>''));
 
   return spreadsheetId;
 }
 
-// 同階層のスプシを列挙 → LociMyu 形式のものを選択 → なければ作成
 async function findOrCreateLociMyuSpreadsheet(parentFolderId, token, { glbId } = {}) {
   if (!parentFolderId) throw new Error('parentFolderId required');
   const q = encodeURIComponent(`'${parentFolderId}' in parents and mimeType='application/vnd.google-apps.spreadsheet' and trashed=false`);
@@ -208,13 +234,11 @@ async function findOrCreateLociMyuSpreadsheet(parentFolderId, token, { glbId } =
       return f.id;
     }
   }
-  // 見つからなければ新規作成
   const createdId = await createLociMyuSpreadsheet(parentFolderId, token, { glbId });
   console.log('[Sheets] created LociMyu spreadsheet:', createdId);
   return createdId;
 }
 
-// スプシ内のシート(タブ)一覧をセレクトに反映
 async function populateSheetTabs(spreadsheetId, token) {
   const sel = $('save-target-sheet');
   if (!sel || !spreadsheetId) return;
@@ -229,12 +253,10 @@ async function populateSheetTabs(spreadsheetId, token) {
   if (currentSheetId) sel.value = String(currentSheetId);
 }
 
-// セレクトでタブ切り替え
 $('save-target-sheet')?.addEventListener('change', (e) => {
   currentSheetId = e.target.value ? Number(e.target.value) : null;
 });
 
-// Create は「同一スプシ内に新規タブ追加」
 $('save-target-create')?.addEventListener('click', async () => {
   const token = getAccessToken();
   if (!token || !currentSpreadsheetId) return;
@@ -250,6 +272,32 @@ $('save-target-create')?.addEventListener('click', async () => {
   await populateSheetTabs(currentSpreadsheetId, token);
 });
 
-// 初期状態
+// ---------- Caption list UI & attach image ----------
+function appendCaptionItem({title, body, imageUrl}) {
+  const host = $('caption-list');
+  const div = document.createElement('div');
+  div.className = 'caption-item';
+  div.innerHTML = `
+    ${imageUrl ? `<img src="${imageUrl}" alt="">` : ''}
+    <div>
+      <div style="font-weight:600">${title || ''}</div>
+      <div class="hint" style="white-space:pre-wrap">${body || ''}</div>
+    </div>
+  `;
+  host.appendChild(div);
+}
+
+$('pin-add')?.addEventListener('click', () => {
+  const title = $('caption-title')?.value || '';
+  const body = $('caption-body')?.value || '';
+  appendCaptionItem({ title, body, imageUrl: selectedImage?.url || '' });
+});
+
+$('pin-clear')?.addEventListener('click', () => {
+  if ($('caption-title')) $('caption-title').value = '';
+  if ($('caption-body')) $('caption-body').value = '';
+});
+
+// initial state
 signedSwitch(false);
 console.log('[LociMyu ESM/CDN] boot complete');
