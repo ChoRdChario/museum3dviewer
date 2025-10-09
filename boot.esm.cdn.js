@@ -1,4 +1,9 @@
-// boot.esm.cdn.js — ESM/CDN bootstrap (Drive API loader, Sheets picker/Create, UI tweaks)
+// boot.esm.cdn.js — ESM/CDN bootstrap
+// - GLB: Drive API v3 で CORS安全に読み込み（済）
+// - Images refresh（済）
+// - ▼ 追加：GLBと同階層のスプレッドシート自動検出/自動作成（LociMyu形式）
+// - ▼ 追加：セレクトは「同一スプシ内のシート(タブ)」列挙／Create は新規タブ追加
+
 import { ensureViewer, loadGlbFromDrive } from './viewer.module.cdn.js';
 import { setupAuth, getAccessToken } from './gauth.module.js';
 
@@ -8,7 +13,7 @@ const enable = (on, ...els) => els.forEach(el => el && (el.disabled = !on));
 // ---------- Viewer ----------
 ensureViewer({ canvas: $('gl') });
 
-// ---------- Auth wiring ----------
+// ---------- Auth ----------
 const btnAuth = $('auth-signin');
 const signedSwitch = (signed) => {
   document.documentElement.classList.toggle('signed-in', signed);
@@ -24,17 +29,33 @@ const extractDriveId = (v) => {
 };
 
 let lastGlbFileId = null;
+let currentSpreadsheetId = null; // 同階層で見つかった/作成されたスプシ
+let currentSheetId = null;       // セレクトで選んだタブ
 
 const doLoad = async () => {
   const token = getAccessToken();
   if (!token) { console.warn('[GLB] token missing. Please sign in.'); return; }
+
   const raw = $('glbUrl')?.value?.trim();
   const fileId = extractDriveId(raw);
   if (!fileId) { console.warn('[GLB] no fileId found in input'); return; }
+
   try {
     $('btnGlb').disabled = true;
+
+    // 1) GLB 読み込み
     await loadGlbFromDrive(fileId, { token });
     lastGlbFileId = fileId;
+
+    // 2) 親フォルダ
+    const parentId = await getParentFolderId(fileId, token);
+
+    // 3) 同階層のスプシを LociMyu 形式で自動検出 → なければ作成
+    currentSpreadsheetId = await findOrCreateLociMyuSpreadsheet(parentId, token, { glbId: fileId });
+
+    // 4) タブ一覧をセレクトに反映（同一スプシ内のシート）
+    await populateSheetTabs(currentSpreadsheetId, token);
+
   } catch (e) {
     console.error('[GLB] load error', e);
   } finally {
@@ -82,18 +103,20 @@ if (pinFilterHost) {
   });
 }
 
-// ---------- Refresh images (Drive parent folder enumeration) ----------
-async function listImagesForGlb(fileId, token) {
-  if (!fileId) throw new Error('fileId required');
-  // 1) get parents
-  const metaRes = await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?fields=parents&supportsAllDrives=true`, {
+// ---------- Drive: images under GLB's parent ----------
+async function getParentFolderId(fileId, token) {
+  const res = await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?fields=parents&supportsAllDrives=true`, {
     headers: { Authorization: `Bearer ${token}` }
   });
-  if (!metaRes.ok) throw new Error(`Drive meta failed: ${metaRes.status}`);
-  const meta = await metaRes.json();
+  if (!res.ok) throw new Error(`Drive meta failed: ${res.status}`);
+  const meta = await res.json();
   const parent = Array.isArray(meta.parents) && meta.parents[0];
+  return parent || null;
+}
+
+async function listImagesForGlb(fileId, token) {
+  const parent = await getParentFolderId(fileId, token);
   if (!parent) return [];
-  // 2) list images under parent
   const q = encodeURIComponent(`'${parent}' in parents and (mimeType contains 'image/') and trashed=false`);
   const listUrl = `https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name,mimeType,thumbnailLink,webViewLink)&pageSize=100&supportsAllDrives=true`;
   const listRes = await fetch(listUrl, { headers: { Authorization: `Bearer ${token}` } });
@@ -120,43 +143,113 @@ $('btnRefreshImages')?.addEventListener('click', async () => {
   }
 });
 
-// ---------- Sheets: picker (via Drive list) & create (via Sheets API) ----------
-async function populateSheets() {
-  const token = getAccessToken();
-  if (!token) return;
-  const q = encodeURIComponent("mimeType='application/vnd.google-apps.spreadsheet' and trashed=false");
-  const url = `https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name,modifiedTime)&orderBy=modifiedTime desc&pageSize=100&supportsAllDrives=true`;
+// ---------- Spreadsheet（同階層の自動検出/自動生成 + タブ選択/追加） ----------
+const LOCIMYU_HEADERS = ['id','title','body','color','x','y','z'];      // 初期化時に入れる想定ヘッダ
+const REQUIRED_MIN_HEADERS = new Set(['title','body','color']);         // LociMyu 形式ざっくり判定
+
+// A1:Z1 を見て、どれかのシートに主要3列が揃っていれば LociMyu とみなす
+async function isLociMyuSpreadsheet(spreadsheetId, token) {
+  const url = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}?includeGridData=true&ranges=A1:Z1&fields=sheets(properties(title,sheetId),data(rowData(values(formattedValue))))`;
   const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
-  if (!res.ok) return;
+  if (!res.ok) return false;
   const data = await res.json();
-  const sel = $('save-target-sheet');
-  if (!sel) return;
-  sel.innerHTML = `<option value="">Select sheet…</option>` + (data.files||[]).map(f => `<option value="${f.id}">${f.name}</option>`).join('');
+  if (!Array.isArray(data.sheets)) return false;
+  for (const s of data.sheets) {
+    const row = s.data?.[0]?.rowData?.[0]?.values || [];
+    const headers = row.map(v => (v?.formattedValue || '').toString().trim().toLowerCase()).filter(Boolean);
+    const set = new Set(headers);
+    let ok = true;
+    for (const h of REQUIRED_MIN_HEADERS) if (!set.has(h)) ok = false;
+    if (ok) return true;
+  }
+  return false;
 }
 
-$('save-target-create')?.addEventListener('click', async () => {
-  const token = getAccessToken();
-  if (!token) return;
-  const title = `LociMyu_${new Date().toISOString().replace(/[:.]/g,'-')}`;
-  const res = await fetch('https://sheets.googleapis.com/v4/spreadsheets', {
+// 同階層にスプシ作成（Drive API でフォルダ指定）→ ヘッダを1行だけ初期化
+async function createLociMyuSpreadsheet(parentFolderId, token, { glbId } = {}) {
+  const name = `LociMyu_Save_${glbId || ''}`.replace(/_+$/,'');
+  const createRes = await fetch('https://www.googleapis.com/drive/v3/files', {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ properties: { title } })
+    body: JSON.stringify({
+      name,
+      mimeType: 'application/vnd.google-apps.spreadsheet',
+      parents: parentFolderId ? [parentFolderId] : undefined
+    })
   });
-  if (!res.ok) {
-    const t = await res.text().catch(()=>'');
-    console.error('[Sheets create] failed', res.status, t);
-    return;
+  if (!createRes.ok) throw new Error(`Drive files.create failed: ${createRes.status}`);
+  const file = await createRes.json();
+  const spreadsheetId = file.id;
+
+  // A1:Z1 にヘッダを書き込み（Sheet API）
+  const valuesRes = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/A1:Z1?valueInputOption=RAW`, {
+    method: 'PUT',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ values: [LOCIMYU_HEADERS] })
+  });
+  if (!valuesRes.ok) console.warn('[Sheets] init headers failed', valuesRes.status, await valuesRes.text().catch(()=>''));  
+
+  return spreadsheetId;
+}
+
+// 同階層のスプシを列挙 → LociMyu 形式のものを選択 → なければ作成
+async function findOrCreateLociMyuSpreadsheet(parentFolderId, token, { glbId } = {}) {
+  if (!parentFolderId) throw new Error('parentFolderId required');
+  const q = encodeURIComponent(`'${parentFolderId}' in parents and mimeType='application/vnd.google-apps.spreadsheet' and trashed=false`);
+  const listUrl = `https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name,modifiedTime)&orderBy=modifiedTime desc&pageSize=10&supportsAllDrives=true`;
+  const listRes = await fetch(listUrl, { headers: { Authorization: `Bearer ${token}` } });
+  if (!listRes.ok) throw new Error(`Drive list spreadsheets failed: ${listRes.status}`);
+  const data = await listRes.json();
+  const files = data.files || [];
+
+  for (const f of files) {
+    if (await isLociMyuSpreadsheet(f.id, token)) {
+      console.log('[Sheets] found LociMyu spreadsheet:', f);
+      return f.id;
+    }
   }
-  const sheet = await res.json();
-  await populateSheets();
+  // 見つからなければ新規作成
+  const createdId = await createLociMyuSpreadsheet(parentFolderId, token, { glbId });
+  console.log('[Sheets] created LociMyu spreadsheet:', createdId);
+  return createdId;
+}
+
+// スプシ内のシート(タブ)一覧をセレクトに反映
+async function populateSheetTabs(spreadsheetId, token) {
   const sel = $('save-target-sheet');
-  if (sel) { sel.value = sheet.spreadsheetId; }
+  if (!sel || !spreadsheetId) return;
+  sel.innerHTML = `<option value="">Loading…</option>`;
+  const url = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}?fields=sheets(properties(title,sheetId,index))`;
+  const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+  if (!res.ok) { sel.innerHTML = `<option value="">(error)</option>`; return; }
+  const data = await res.json();
+  const sheets = (data.sheets || []).map(s => s.properties).sort((a,b)=>a.index-b.index);
+  sel.innerHTML = sheets.map(p => `<option value="${p.sheetId}">${p.title}</option>`).join('');
+  currentSheetId = sheets[0]?.sheetId || null;
+  if (currentSheetId) sel.value = String(currentSheetId);
+}
+
+// セレクトでタブ切り替え
+$('save-target-sheet')?.addEventListener('change', (e) => {
+  currentSheetId = e.target.value ? Number(e.target.value) : null;
 });
 
-document.addEventListener('DOMContentLoaded', () => populateSheets());
-document.addEventListener('visibilitychange', () => document.visibilityState === 'visible' && populateSheets());
+// Create は「同一スプシ内に新規タブ追加」
+$('save-target-create')?.addEventListener('click', async () => {
+  const token = getAccessToken();
+  if (!token || !currentSpreadsheetId) return;
+  const title = 'Sheet_' + new Date().toISOString().slice(0,19).replace(/[:T]/g,'-');
+  const res = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(currentSpreadsheetId)}:batchUpdate`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ requests: [{ addSheet: { properties: { title } } }] })
+  });
+  if (!res.ok) {
+    console.error('[Sheets addSheet] failed', res.status, await res.text().catch(()=>'')); return;
+  }
+  await populateSheetTabs(currentSpreadsheetId, token);
+});
 
-// initial state
+// 初期状態
 signedSwitch(false);
 console.log('[LociMyu ESM/CDN] boot complete');
