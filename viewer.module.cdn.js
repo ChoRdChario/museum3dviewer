@@ -1,10 +1,12 @@
-// viewer.module.cdn.js — add onCanvasShiftPick for Shift+Click pinning
+// viewer.module.cdn.js — render/select pins
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 
 let renderer, scene, camera, controls, raycaster, canvasEl;
 const pickHandlers = new Set();
+const pinSelectHandlers = new Set();
+let pinGroup;
 
 export function ensureViewer({ canvas }){
   if (renderer) return;
@@ -22,8 +24,10 @@ export function ensureViewer({ canvas }){
   controls = new OrbitControls(camera, canvas);
   controls.enableDamping = true;
 
-  const d1 = new THREE.DirectionalLight(0xffffff, 1.0); d1.position.set(5,10,7); scene.add(d1);
   scene.add(new THREE.AmbientLight(0xffffff, 0.4));
+  const d1 = new THREE.DirectionalLight(0xffffff, 1.0); d1.position.set(5,10,7); scene.add(d1);
+
+  pinGroup = new THREE.Group(); pinGroup.name = 'PinGroup'; scene.add(pinGroup);
 
   raycaster = new THREE.Raycaster();
 
@@ -35,16 +39,23 @@ export function ensureViewer({ canvas }){
   window.addEventListener('resize', onResize);
 
   canvas.addEventListener('pointerdown', (ev) => {
-    if (!ev.shiftKey) return;
     const rect = canvas.getBoundingClientRect();
     const x = ((ev.clientX - rect.left) / rect.width) * 2 - 1;
     const y = -((ev.clientY - rect.top) / rect.height) * 2 + 1;
     raycaster.setFromCamera({ x, y }, camera);
     const intersects = raycaster.intersectObjects(scene.children, true);
-    const hit = intersects.find(i => i && i.point);
-    if (hit) {
-      const p = hit.point;
-      pickHandlers.forEach(fn => { try { fn({ x: p.x, y: p.y, z: p.z }); } catch(_){} });
+    if (ev.shiftKey){
+      const hit = intersects.find(i => i && i.object !== pinGroup && !pinGroup.children.includes(i.object));
+      if (hit && hit.point){
+        pickHandlers.forEach(fn => { try { fn({ x: hit.point.x, y: hit.point.y, z: hit.point.z }); } catch(_){} });
+      }
+    } else {
+      const pinHit = intersects.find(i => i.object && i.object.userData && i.object.userData.pinId);
+      if (pinHit && pinHit.object){
+        const id = pinHit.object.userData.pinId;
+        pinSelectHandlers.forEach(fn => { try { fn(id); } catch(_){} });
+        setPinSelected(id, true);
+      }
     }
   });
 
@@ -56,6 +67,38 @@ export function onCanvasShiftPick(handler){
   pickHandlers.add(handler);
   return () => pickHandlers.delete(handler);
 }
+export function onPinSelect(handler){
+  pinSelectHandlers.add(handler);
+  return () => pinSelectHandlers.delete(handler);
+}
+
+export function addPinMarker({ id, x, y, z, color = '#ff6b6b' }){
+  if (!pinGroup) return;
+  const geo = new THREE.SphereGeometry(0.02, 16, 16);
+  const mat = new THREE.MeshBasicMaterial({ color });
+  const m = new THREE.Mesh(geo, mat);
+  m.position.set(x, y, z);
+  m.userData.pinId = id;
+  pinGroup.add(m);
+}
+export function clearPins(){
+  if (!pinGroup) return;
+  while (pinGroup.children.length) pinGroup.remove(pinGroup.children[0]);
+}
+export function setPinSelected(id, on){
+  if (!pinGroup) return;
+  pinGroup.children.forEach(ch => {
+    if (ch.userData.pinId === id){
+      ch.scale.set(on?1.8:1, on?1.8:1, on?1.8:1);
+      ch.material.opacity = on?1:0.8;
+      ch.material.transparent = true;
+    } else {
+      ch.scale.set(1,1,1);
+      ch.material.opacity = 0.6;
+      ch.material.transparent = true;
+    }
+  });
+}
 
 export async function loadGlbFromDrive(fileId, { token }){
   const url = `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?alt=media&supportsAllDrives=true`;
@@ -66,15 +109,13 @@ export async function loadGlbFromDrive(fileId, { token }){
   try {
     const loader = new GLTFLoader();
     const gltf = await loader.loadAsync(objectURL);
-    // clear previous objects except lights
+    // remove old (except lights & pinGroup)
+    const keep = new Set([pinGroup]);
     for (let i = scene.children.length - 1; i >= 0; i--) {
       const obj = scene.children[i];
-      if (!(obj.isLight)) scene.remove(obj);
+      if (obj.isLight || keep.has(obj)) continue;
+      scene.remove(obj);
     }
-    // lights again just in case
-    scene.add(new THREE.AmbientLight(0xffffff, 0.4));
-    const d1 = new THREE.DirectionalLight(0xffffff, 1.0); d1.position.set(5,10,7); scene.add(d1);
-
     scene.add(gltf.scene);
 
     const box = new THREE.Box3().setFromObject(gltf.scene);
