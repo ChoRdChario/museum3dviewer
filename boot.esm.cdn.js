@@ -28,7 +28,7 @@ const extractDriveId = (v) => {
     const seg = u.pathname.split('/').filter(Boolean);
     const dIdx = seg.indexOf('d');
     if (dIdx !== -1 && seg[dIdx + 1] && /[-\w]{25,}/.test(seg[dIdx + 1])) return seg[dIdx + 1];
-  } catch(_) {}
+  } catch (_) {}
   const m = s.match(/[-\w]{25,}/);
   return m ? m[0] : null;
 };
@@ -36,30 +36,39 @@ const extractDriveId = (v) => {
 let lastGlbFileId = null;
 let currentSpreadsheetId = null;
 let currentSheetId = null;      // numeric sheetId
-let currentSheetTitle = null;   // string title
+let currentSheetTitle = null;   // string title (API次第でタイトル指定が便利)
 
 const doLoad = async () => {
   const token = getAccessToken();
   if (!token) { console.warn('[GLB] token missing. Please sign in.'); return; }
+
   const raw = $('glbUrl')?.value?.trim();
   const fileId = extractDriveId(raw);
   if (!fileId) {
-    if ($('glb-hint')) $('glb-hint').textContent = 'No fileId found. Paste a valid Drive URL or fileId.';
-    console.warn('[GLB] no fileId found in input'); return;
+    const hint = $('glb-hint');
+    if (hint) hint.textContent = 'No fileId found. Paste a valid Drive URL or fileId.';
+    console.warn('[GLB] no fileId found in input');
+    return;
   }
+
   try {
     $('btnGlb').disabled = true;
-    if ($('glb-hint')) $('glb-hint').textContent = '';
+    const hint = $('glb-hint'); if (hint) hint.textContent = '';
+
+    // 1) GLB 読み込み
     await loadGlbFromDrive(fileId, { token });
     lastGlbFileId = fileId;
 
+    // 2) 親フォルダ → 同階層スプシを検出/作成
     const parentId = await getParentFolderId(fileId, token);
     currentSpreadsheetId = await findOrCreateLociMyuSpreadsheet(parentId, token, { glbId: fileId });
-    await populateSheetTabs(currentSpreadsheetId, token);     // set currentSheetId/title
-    await refreshImagesGrid();                                // auto thumbnails
-    await loadCaptionsFromSheet();                            // read existing captions
+
+    // 3) タブ一覧 → 既存キャプション反映 → 画像グリッド自動列挙
+    await populateSheetTabs(currentSpreadsheetId, token);
+    await loadCaptionsFromSheet();
+    await refreshImagesGrid();
   } catch (e) {
-    if ($('glb-hint')) $('glb-hint').textContent = `Load failed: ${e?.message || e}`;
+    const hint2 = $('glb-hint'); if (hint2) hint2.textContent = `Load failed: ${e?.message || e}`;
     console.error('[GLB] load error', e);
   } finally {
     $('btnGlb').disabled = false;
@@ -75,11 +84,12 @@ $('glbUrl')?.dispatchEvent(new Event('input'));
 // ---------- Caption: colors & filter ----------
 const COLORS = ['#ff6b6b','#ffd93d','#6bcb77','#4d96ff','#9b5de5','#f15bb5','#00c2a8','#94a3b8'];
 let currentPinColor = COLORS[0];
+
 const pinColorsHost = $('pin-colors');
 if (pinColorsHost) {
   pinColorsHost.innerHTML = COLORS.map(c => `<button class="chip" data-color="${c}" title="${c}" style="background:${c}"></button>`).join('');
   const select = (el) => {
-    pinColorsHost.querySelectorAll('.chip').forEach(x => x.style.outline = '';
+    pinColorsHost.querySelectorAll('.chip').forEach(x => (x.style.outline = ''));
     el.style.outline = '2px solid #fff4';
     currentPinColor = el.dataset.color;
   };
@@ -88,6 +98,7 @@ if (pinColorsHost) {
   });
   const first = pinColorsHost.querySelector('.chip'); first && select(first);
 }
+
 const pinFilterHost = $('pin-filter');
 const selectedColors = new Set(COLORS);
 if (pinFilterHost) {
@@ -101,7 +112,9 @@ if (pinFilterHost) {
     const cb = e.target.closest('input[type=checkbox][data-color]'); if (!cb) return;
     const color = cb.dataset.color;
     cb.checked ? selectedColors.add(color) : selectedColors.delete(color);
-    document.dispatchEvent(new CustomEvent('pinFilterChange', { detail: { selected: Array.from(selectedColors) } }));
+    document.dispatchEvent(new CustomEvent('pinFilterChange', {
+      detail: { selected: Array.from(selectedColors) }
+    }));
   });
 }
 
@@ -138,38 +151,53 @@ async function fetchImageBlobUrl(fileId, token) {
 
 // ---------- Images grid & caption attach ----------
 let selectedImage = null; // {id, url}
+
 async function refreshImagesGrid() {
   const token = getAccessToken();
   const fileId = lastGlbFileId || extractDriveId($('glbUrl')?.value || '');
   if (!token || !fileId) {
-    $('images-status').textContent = 'Sign in & load a GLB first.'; return;
+    $('images-status').textContent = 'Sign in & load a GLB first.';
+    return;
   }
   $('images-status').textContent = 'Loading images…';
-  const grid = $('images-grid'); grid.innerHTML = ''; selectedImage = null;
+  const grid = $('images-grid');
+  grid.innerHTML = '';
+  selectedImage = null;
+
   try {
     const files = await listImagesForGlb(fileId, token);
     $('images-status').textContent = `${files.length} image(s) found in the GLB folder`;
-    const CONC = 6, queue = files.slice();
+
+    const CONC = 6;
+    const queue = files.slice();
     const workers = new Array(Math.min(CONC, queue.length)).fill(0).map(async () => {
       while (queue.length) {
         const f = queue.shift();
         try {
           const url = await fetchImageBlobUrl(f.id, token);
           const btn = document.createElement('button');
-          btn.className = 'thumb'; btn.style.backgroundImage = `url(${url})`; btn.title = f.name; btn.dataset.id = f.id;
+          btn.className = 'thumb';
+          btn.style.backgroundImage = `url(${url})`;
+          btn.title = f.name;
+          btn.dataset.id = f.id;
           btn.addEventListener('click', () => {
             grid.querySelectorAll('.thumb').forEach(x => x.dataset.selected = 'false');
-            btn.dataset.selected = 'true'; selectedImage = { id: f.id, url };
+            btn.dataset.selected = 'true';
+            selectedImage = { id: f.id, url };
           });
           grid.appendChild(btn);
-        } catch(e){ console.warn('thumb err', f, e); }
+        } catch (e) {
+          console.warn('thumb err', f, e);
+        }
       }
     });
     await Promise.all(workers);
   } catch (e) {
-    $('images-status').textContent = `Error: ${e.message}`; console.error('[images grid] error', e);
+    $('images-status').textContent = `Error: ${e.message}`;
+    console.error('[images grid] error', e);
   }
 }
+
 $('btnRefreshImages')?.addEventListener('click', refreshImagesGrid);
 
 // ---------- Sheets (same-folder) ----------
@@ -186,7 +214,8 @@ async function isLociMyuSpreadsheet(spreadsheetId, token) {
     const row = s.data?.[0]?.rowData?.[0]?.values || [];
     const headers = row.map(v => (v?.formattedValue || '').toString().trim().toLowerCase()).filter(Boolean);
     const set = new Set(headers);
-    let ok = true; for (const h of REQUIRED_MIN_HEADERS) if (!set.has(h)) ok = false;
+    let ok = true;
+    for (const h of REQUIRED_MIN_HEADERS) if (!set.has(h)) ok = false;
     if (ok) return true;
   }
   return false;
@@ -197,10 +226,16 @@ async function createLociMyuSpreadsheet(parentFolderId, token, { glbId } = {}) {
   const createRes = await fetch('https://www.googleapis.com/drive/v3/files', {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name, mimeType: 'application/vnd.google-apps.spreadsheet', parents: parentFolderId ? [parentFolderId] : undefined })
+    body: JSON.stringify({
+      name,
+      mimeType: 'application/vnd.google-apps.spreadsheet',
+      parents: parentFolderId ? [parentFolderId] : undefined
+    })
   });
   if (!createRes.ok) throw new Error(`Drive files.create failed: ${createRes.status}`);
-  const file = await createRes.json(); const spreadsheetId = file.id;
+  const file = await createRes.json();
+  const spreadsheetId = file.id;
+
   await putValues(spreadsheetId, 'A1:Z1', [LOCIMYU_HEADERS], token); // init headers on first sheet
   return spreadsheetId;
 }
@@ -211,20 +246,29 @@ async function findOrCreateLociMyuSpreadsheet(parentFolderId, token, { glbId } =
   const listUrl = `https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name,modifiedTime)&orderBy=modifiedTime desc&pageSize=10&supportsAllDrives=true`;
   const listRes = await fetch(listUrl, { headers: { Authorization: `Bearer ${token}` } });
   if (!listRes.ok) throw new Error(`Drive list spreadsheets failed: ${listRes.status}`);
-  const data = await listRes.json(); const files = data.files || [];
-  for (const f of files) { if (await isLociMyuSpreadsheet(f.id, token)) return f.id; }
+  const data = await listRes.json();
+  const files = data.files || [];
+
+  for (const f of files) {
+    if (await isLociMyuSpreadsheet(f.id, token)) {
+      return f.id;
+    }
+  }
   return await createLociMyuSpreadsheet(parentFolderId, token, { glbId });
 }
 
 async function populateSheetTabs(spreadsheetId, token) {
-  const sel = $('save-target-sheet'); if (!sel || !spreadsheetId) return;
+  const sel = $('save-target-sheet');
+  if (!sel || !spreadsheetId) return;
   sel.innerHTML = `<option value="">Loading…</option>`;
+
   const res = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}?fields=sheets(properties(title,sheetId,index))`, {
     headers: { Authorization: `Bearer ${token}` }
   });
   if (!res.ok) { sel.innerHTML = `<option value="">(error)</option>`; return; }
   const data = await res.json();
   const sheets = (data.sheets || []).map(s => s.properties).sort((a,b)=>a.index-b.index);
+
   sel.innerHTML = sheets.map(p => `<option value="${p.sheetId}" data-title="${p.title}">${p.title}</option>`).join('');
   const first = sheets[0];
   currentSheetId = first?.sheetId || null;
@@ -300,13 +344,16 @@ async function savePinToSheet({ id, title, body, color, x, y, z, imageFileId }) 
   if (!token || !currentSpreadsheetId) return;
   const sheetTitle = currentSheetTitle || 'シート1';
   const range = `'${sheetTitle}'!A:Z`;
+
+  // ヘッダ存在チェック（最低限 title/body/color）
   try {
     const existed = await getValues(currentSpreadsheetId, `'${sheetTitle}'!A1:Z1`, token);
     const headers = existed[0] || [];
     const lower = headers.map(h => (h || '').toString().trim().toLowerCase());
     const ok = REQUIRED_MIN_HEADERS.size === new Set(lower.filter(h => REQUIRED_MIN_HEADERS.has(h))).size;
     if (!ok) await putValues(currentSpreadsheetId, `'${sheetTitle}'!A1:Z1`, [LOCIMYU_HEADERS], token);
-  } catch(_) {}
+  } catch (_) {}
+
   const row = [id, title, body, color, x, y, z, imageFileId];
   await appendValues(currentSpreadsheetId, range, [row], token);
 }
@@ -320,16 +367,19 @@ async function loadCaptionsFromSheet() {
     if (!values.length) return;
     const headers = values[0].map(v => (v||'').toString().trim().toLowerCase());
     const idx = (name) => headers.indexOf(name);
-    const iTitle = idx('title'), iBody=idx('body'), iColor=idx('color'), iImg=idx('imagefileid');
-    for (let r=1; r<values.length; r++) {
+    const iTitle = idx('title'), iBody = idx('body'), iColor = idx('color'), iImg = idx('imagefileid');
+
+    for (let r = 1; r < values.length; r++) {
       const row = values[r]; if (!row) continue;
       const title = row[iTitle] || ''; const body = row[iBody] || ''; const color = row[iColor] || '';
       const imageFileId = row[iImg] || '';
       let imageUrl = '';
-      if (imageFileId) try { imageUrl = await fetchImageBlobUrl(imageFileId, token); } catch(e){}
+      if (imageFileId) {
+        try { imageUrl = await fetchImageBlobUrl(imageFileId, token); } catch(e){}
+      }
       appendCaptionItem({ title, body, color, imageUrl });
     }
-  } catch(e) {
+  } catch (e) {
     console.warn('[loadCaptionsFromSheet] failed', e);
   }
 }
