@@ -1,117 +1,89 @@
-// viewer.module.cdn.js — CDN imports + Drive API loader (CORS-safe)
-import * as THREE from 'https://unpkg.com/three@0.155.0/build/three.module.js';
-import { OrbitControls } from 'https://unpkg.com/three@0.155.0/examples/jsm/controls/OrbitControls.js';
-import { GLTFLoader } from 'https://unpkg.com/three@0.155.0/examples/jsm/loaders/GLTFLoader.js';
+// viewer.module.cdn.js — add onCanvasShiftPick for Shift+Click pinning
+import * as THREE from 'three';
+import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 
-let renderer, scene, camera, controls, loader;
-let current;
+let renderer, scene, camera, controls, raycaster, canvasEl;
+const pickHandlers = new Set();
 
-// Initialize viewer once
-export function ensureViewer({ canvas }) {
+export function ensureViewer({ canvas }){
   if (renderer) return;
-  if (!canvas) throw new Error('Viewer canvas not found');
-
+  canvasEl = canvas;
   renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
-  renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
-  resize();
+  renderer.setPixelRatio(window.devicePixelRatio || 1);
+  renderer.setSize(canvas.clientWidth, canvas.clientHeight, false);
 
   scene = new THREE.Scene();
   scene.background = null;
 
-  camera = new THREE.PerspectiveCamera(60, canvas.clientWidth / Math.max(1, canvas.clientHeight), 0.1, 2000);
+  camera = new THREE.PerspectiveCamera(50, canvas.clientWidth / canvas.clientHeight, 0.1, 2000);
   camera.position.set(3, 2, 6);
 
   controls = new OrbitControls(camera, canvas);
   controls.enableDamping = true;
 
-  const hemi = new THREE.HemisphereLight(0xffffff, 0x444444, 1.0);
-  hemi.position.set(0, 1, 0);
-  scene.add(hemi);
+  const d1 = new THREE.DirectionalLight(0xffffff, 1.0); d1.position.set(5,10,7); scene.add(d1);
+  scene.add(new THREE.AmbientLight(0xffffff, 0.4));
 
-  const dir = new THREE.DirectionalLight(0xffffff, 1.0);
-  dir.position.set(3, 10, 10);
-  scene.add(dir);
+  raycaster = new THREE.Raycaster();
 
-  loader = new GLTFLoader();
+  const onResize = () => {
+    const w = canvas.clientWidth, h = canvas.clientHeight;
+    renderer.setSize(w, h, false);
+    camera.aspect = w / h; camera.updateProjectionMatrix();
+  };
+  window.addEventListener('resize', onResize);
 
-  window.addEventListener('resize', resize);
-  requestAnimationFrame(tick);
-}
-
-function resize() {
-  if (!renderer) return;
-  const c = renderer.domElement;
-  const w = c.clientWidth || (c.parentElement ? c.parentElement.clientWidth : c.width);
-  const h = c.clientHeight || (c.parentElement ? c.parentElement.clientHeight : c.height || 1);
-  renderer.setSize(w, h, false);
-  if (camera) {
-    camera.aspect = w / Math.max(1, h);
-    camera.updateProjectionMatrix();
-  }
-}
-
-function tick() {
-  controls && controls.update();
-  if (renderer && scene && camera) renderer.render(scene, camera);
-  requestAnimationFrame(tick);
-}
-
-// --------- Drive API loader (CORS OK) ---------
-export async function loadGlbFromDrive(fileId, { token } = {}) {
-  if (!fileId) throw new Error('fileId required');
-  if (!token) throw new Error('OAuth token required');
-
-  const url = `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?alt=media&supportsAllDrives=true`;
-
-  const res = await fetch(url, {
-    method: 'GET',
-    headers: { Authorization: `Bearer ${token}` },
+  canvas.addEventListener('pointerdown', (ev) => {
+    if (!ev.shiftKey) return;
+    const rect = canvas.getBoundingClientRect();
+    const x = ((ev.clientX - rect.left) / rect.width) * 2 - 1;
+    const y = -((ev.clientY - rect.top) / rect.height) * 2 + 1;
+    raycaster.setFromCamera({ x, y }, camera);
+    const intersects = raycaster.intersectObjects(scene.children, true);
+    const hit = intersects.find(i => i && i.point);
+    if (hit) {
+      const p = hit.point;
+      pickHandlers.forEach(fn => { try { fn({ x: p.x, y: p.y, z: p.z }); } catch(_){} });
+    }
   });
-  if (!res.ok) {
-    const txt = await res.text().catch(() => '');
-    throw new Error(`Drive fetch failed: ${res.status} ${txt}`);
-  }
 
-  const blob = await res.blob();
-  const blobUrl = URL.createObjectURL(blob);
+  const tick = () => { controls.update(); renderer.render(scene, camera); requestAnimationFrame(tick); };
+  tick();
+}
 
+export function onCanvasShiftPick(handler){
+  pickHandlers.add(handler);
+  return () => pickHandlers.delete(handler);
+}
+
+export async function loadGlbFromDrive(fileId, { token }){
+  const url = `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?alt=media&supportsAllDrives=true`;
+  const r = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+  if (!r.ok) throw new Error(`GLB fetch failed ${r.status}`);
+  const blob = await r.blob();
+  const objectURL = URL.createObjectURL(blob);
   try {
-    const gltf = await loader.loadAsync(blobUrl);
-    attachToScene(gltf);
+    const loader = new GLTFLoader();
+    const gltf = await loader.loadAsync(objectURL);
+    // clear previous objects except lights
+    for (let i = scene.children.length - 1; i >= 0; i--) {
+      const obj = scene.children[i];
+      if (!(obj.isLight)) scene.remove(obj);
+    }
+    // lights again just in case
+    scene.add(new THREE.AmbientLight(0xffffff, 0.4));
+    const d1 = new THREE.DirectionalLight(0xffffff, 1.0); d1.position.set(5,10,7); scene.add(d1);
+
+    scene.add(gltf.scene);
+
+    const box = new THREE.Box3().setFromObject(gltf.scene);
+    const size = box.getSize(new THREE.Vector3()).length();
+    const center = box.getCenter(new THREE.Vector3());
+    controls.target.copy(center);
+    camera.position.copy(center).add(new THREE.Vector3(size*0.8, size*0.6, size*0.8));
+    camera.near = Math.max(size/1000, 0.01); camera.far = size*10; camera.updateProjectionMatrix();
   } finally {
-    URL.revokeObjectURL(blobUrl);
+    URL.revokeObjectURL(objectURL);
   }
 }
-
-function attachToScene(gltf) {
-  if (!scene) return;
-  if (current) {
-    scene.remove(current);
-    current.traverse?.(o => {
-      if (o.geometry) o.geometry.dispose();
-      const m = o.material;
-      if (Array.isArray(m)) m.forEach(mm => mm?.dispose?.());
-      else m?.dispose?.();
-    });
-  }
-  current = gltf.scene || gltf.scenes?.[0];
-  scene.add(current);
-  frameToObject(current);
-}
-
-function frameToObject(root) {
-  const box = new THREE.Box3().setFromObject(root);
-  const size = box.getSize(new THREE.Vector3()).length() || 1;
-  const center = box.getCenter(new THREE.Vector3());
-  controls.target.copy(center);
-  camera.position.copy(center).add(new THREE.Vector3(size * 0.6, size * 0.4, size * 0.6));
-  camera.near = Math.max(0.01, size / 1000);
-  camera.far = Math.max(1000, size * 10);
-  camera.updateProjectionMatrix();
-  controls.update();
-}
-
-// Optional getters
-export const getScene = () => scene;
-export const getCamera = () => camera;
-export const getRenderer = () => renderer;
