@@ -332,19 +332,28 @@ function clearCaptionList(){ const host=$('caption-list'); if (host) host.innerH
 function appendCaptionItem({id,title,body,color,imageUrl}){
   const host=$('caption-list'); if (!host) return;
   const div=document.createElement('div'); div.className='caption-item'; div.dataset.id=id;
-  const safeTitle=(title||'').trim()||'(untitled)'; const safeBody=(body||'').trim()||'(no description)';
-  const imgHtml = imageUrl ? ('<img src="'+imageUrl+'" alt="">') : '';
-  div.innerHTML = imgHtml + `
-    <div class="cap-txt">
-      <div class="c-title">${safeTitle}</div>
-      <div class="c-body hint">${safeBody}</div>
-    </div>
-    <button class="c-del" title="Delete">🗑</button>`;
+
+  const safeTitle=(title||'').trim()||'(untitled)';
+  const safeBody=(body||'').trim()||'(no description)';
+
+  if (imageUrl){
+    const img=document.createElement('img'); img.src=imageUrl; img.alt='';
+    div.appendChild(img);
+  }
+  const txt=document.createElement('div'); txt.className='cap-txt';
+  const t=document.createElement('div'); t.className='c-title'; t.textContent=safeTitle;
+  const b=document.createElement('div'); b.className='c-body hint'; b.textContent=safeBody;
+  txt.appendChild(t); txt.appendChild(b);
+  div.appendChild(txt);
+
+  const del=document.createElement('button'); del.className='c-del'; del.title='Delete'; del.textContent='🗑';
+  div.appendChild(del);
+
   div.addEventListener('click', (e)=>{
     if (e.target.closest('.c-del')) return;
     selectedPinId=id; showOverlayFor(id);
   });
-  div.querySelector('.c-del').addEventListener('click', async (e)=>{
+  del.addEventListener('click', async (e)=>{
     e.stopPropagation();
     if (!confirm('このキャプションを削除しますか？')) return;
     try{
@@ -355,7 +364,7 @@ function appendCaptionItem({id,title,body,color,imageUrl}){
     }catch(err){ console.error('delete failed', err); alert('Delete failed'); }
   });
   host.appendChild(div); captionDomById.set(id, div);
-  div.scrollIntoView({block:'nearest'});
+  try{ div.scrollIntoView({block:'nearest'}); }catch(_){}
 }
 async function enrichRow(row){
   const token=getAccessToken(); let imageUrl=''; if(row.imageFileId) try{ imageUrl=await getFileThumbUrl(row.imageFileId, token);}catch(_){}
