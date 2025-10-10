@@ -1,5 +1,9 @@
 // boot.esm.cdn.js — GLB + Sheets + Pins + Filters + Images + CaptionOverlay
-import { ensureViewer, onCanvasShiftPick, addPinMarker, clearPins, setPinSelected, onPinSelect, loadGlbFromDrive, onRenderTick, projectPoint } from './viewer.module.cdn.js';
+// ★ 修正点：setupAuth に clientId を直接渡すので、HTML で window.GIS_CLIENT_ID を書かなくてOK
+import {
+  ensureViewer, onCanvasShiftPick, addPinMarker, clearPins,
+  setPinSelected, onPinSelect, loadGlbFromDrive, onRenderTick, projectPoint
+} from './viewer.module.cdn.js';
 import { setupAuth, getAccessToken } from './gauth.module.js';
 
 const $ = (id) => document.getElementById(id);
@@ -15,7 +19,10 @@ const signedSwitch = (signed) => {
   document.documentElement.classList.toggle('signed-in', signed);
   enable(signed, $('btnGlb'), $('glbUrl'), $('save-target-sheet'), $('save-target-create'), $('btnRefreshImages'));
 };
-btnAuth && setupAuth(btnAuth, signedSwitch);
+// ★ ここでクライアントIDを直接注入（HTML改修不要）
+btnAuth && setupAuth(btnAuth, signedSwitch, {
+  clientId: '595200751510-ncahnf7edci6b9925becn5to49r6cguv.apps.googleusercontent.com'
+});
 
 // ---------- Utils ----------
 const extractDriveId = (v) => {
@@ -368,4 +375,4 @@ $('pin-add')?.addEventListener('click', async ()=>{
 });
 $('pin-clear')?.addEventListener('click', ()=>{ if ($('caption-title')) $('caption-title').value=''; if ($('caption-body')) $('caption-body').value=''; });
 
-console.log('[LociMyu ESM/CDN] boot complete');
+console.log('[LociMyu ESM/CDN] boot complete (clientId-injected)');
