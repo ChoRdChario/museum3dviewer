@@ -1,5 +1,4 @@
-// boot.esm.cdn.js — conservative syntax build (avoids template pitfalls)
-// Glue: Auth + Drive/Sheets + Viewer + Caption overlay + Image grid
+// boot.esm.cdn.js — conservative syntax build (overlay edit + back-line)
 import {
   ensureViewer, onCanvasShiftPick, addPinMarker, clearPins,
   setPinSelected, onPinSelect, loadGlbFromDrive, onRenderTick,
@@ -7,15 +6,12 @@ import {
 } from './viewer.module.cdn.js';
 import { setupAuth, getAccessToken } from './gauth.module.js';
 
-// ---- helpers ----
 const $ = (id) => document.getElementById(id);
 const enable = (on, ...els) => els.forEach(el => { if (el) el.disabled = !on; });
 const uid = () => Math.random().toString(36).slice(2) + Date.now().toString(36);
 
-// ---- viewer boot ----
 ensureViewer({ canvas: $('gl') });
 
-// ---- auth (with inline fallback) ----
 const __LM_CLIENT_ID = (window.GIS_CLIENT_ID || '595200751510-ncahnf7edci6b9925becn5to49r6cguv.apps.googleusercontent.com');
 const __LM_API_KEY   = (window.GIS_API_KEY   || 'AIzaSyCUnTCr5yWUWPdEXST9bKP1LpgawU5rIbI');
 const __LM_SCOPES    = (window.GIS_SCOPES    || (
@@ -29,10 +25,8 @@ const signedSwitch = (signed) => {
   document.documentElement.classList.toggle('signed-in', !!signed);
   enable(!!signed, $('btnGlb'), $('glbUrl'), $('save-target-sheet'), $('save-target-create'), $('btnRefreshImages'));
 };
-
 setupAuth($('auth-signin'), signedSwitch, { clientId: __LM_CLIENT_ID, apiKey: __LM_API_KEY, scopes: __LM_SCOPES });
 
-// ---- Drive id extraction ----
 function extractDriveId(v){
   if (!v) return null;
   const s = String(v).trim();
@@ -48,7 +42,6 @@ function extractDriveId(v){
   return m ? m[0] : null;
 }
 
-// ---- state ----
 let lastGlbFileId = null;
 let currentSpreadsheetId = null;
 let currentSheetId = null;
@@ -62,7 +55,40 @@ const captionsIndex = new Map();
 const captionDomById = new Map();
 const rowCache = new Map();
 
-// ---- caption overlay ----
+// --- line layer (behind overlays) ---
+let lineLayer = null;
+function ensureLineLayer(){
+  if (lineLayer) return lineLayer;
+  const svg = document.createElementNS('http://www.w3.org/2000/svg','svg');
+  svg.style.position = 'fixed';
+  svg.style.left = '0';
+  svg.style.top = '0';
+  svg.style.width = '100vw';
+  svg.style.height = '100vh';
+  svg.style.pointerEvents = 'none';
+  svg.style.zIndex = '999'; // less than overlay (1000)
+  document.body.appendChild(svg);
+  lineLayer = svg;
+  return lineLayer;
+}
+function getOrMakeLine(id){
+  const layer = ensureLineLayer();
+  let el = layer.querySelector('line[data-id="'+id+'"]');
+  if (!el){
+    el = document.createElementNS('http://www.w3.org/2000/svg','line');
+    el.setAttribute('data-id', id);
+    el.setAttribute('stroke','#ffffffaa');
+    el.setAttribute('stroke-width','2');
+    layer.appendChild(el);
+  }
+  return el;
+}
+function removeLine(id){
+  if (!lineLayer) return;
+  const el = lineLayer.querySelector('line[data-id="'+id+'"]');
+  if (el) el.remove();
+}
+
 const overlays = new Map(); // id -> {root,imgEl}
 
 function removeCaptionOverlay(id){
@@ -70,6 +96,7 @@ function removeCaptionOverlay(id){
   if (!o) return;
   o.root.remove();
   overlays.delete(id);
+  removeLine(id);
 }
 
 function createCaptionOverlay(id, data){
@@ -83,14 +110,14 @@ function createCaptionOverlay(id, data){
   root.style.padding = '10px 12px';
   root.style.borderRadius = '10px';
   root.style.boxShadow = '0 8px 24px #000a';
-  root.style.minWidth = '180px';
-  root.style.maxWidth = '260px';
+  root.style.minWidth = '200px';
+  root.style.maxWidth = '300px';
 
   const topbar = document.createElement('div');
   topbar.style.display = 'flex';
-  topbar.style.gap = '6px';
+  topbar.style.gap = '10px';
   topbar.style.justifyContent = 'flex-end';
-  topbar.style.marginBottom = '4px';
+  topbar.style.marginBottom = '6px';
 
   function mkBtn(txt, cls, title){
     const b = document.createElement('button');
@@ -103,46 +130,50 @@ function createCaptionOverlay(id, data){
     b.style.cursor = 'pointer';
     return b;
   }
-  const bEdit  = mkBtn('✎', 'cap-edit', 'Edit');
-  const bDel   = mkBtn('🗑', 'cap-del', 'Delete');
-  const bClose = mkBtn('×',  'cap-close', 'Close');
+  const bEdit  = mkBtn('✎', 'cap-edit', '編集');
+  const bDel   = mkBtn('🗑', 'cap-del', '削除');
+  const bClose = mkBtn('×',  'cap-close', '閉じる');
   topbar.appendChild(bEdit); topbar.appendChild(bDel); topbar.appendChild(bClose);
 
+  // editable title/body
   const t = document.createElement('div'); t.className = 'cap-title'; t.style.fontWeight = '700'; t.style.marginBottom = '6px';
   const b = document.createElement('div'); b.className = 'cap-body';  b.style.fontSize = '12px'; b.style.opacity = '.95'; b.style.whiteSpace = 'pre-wrap'; b.style.marginBottom = '6px';
   const img = document.createElement('img'); img.className = 'cap-img'; img.alt = ''; img.style.display = 'none'; img.style.width = '100%'; img.style.borderRadius = '8px'; img.style.marginBottom = '2px';
 
-  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-  svg.setAttribute('width','0'); svg.setAttribute('height','0');
-  svg.style.position = 'absolute'; svg.style.left = '0'; svg.style.top = '0'; svg.style.overflow = 'visible'; svg.style.pointerEvents = 'none';
-  const line = document.createElementNS('http://www.w3.org/2000/svg','line');
-  line.setAttribute('x1','0'); line.setAttribute('y1','0'); line.setAttribute('x2','0'); line.setAttribute('y2','0');
-  line.setAttribute('stroke','#ffffffaa'); line.setAttribute('stroke-width','2');
-  svg.appendChild(line);
-
   const safeTitle = (data && data.title ? String(data.title).trim() : '') || '(untitled)';
   const safeBody  = (data && data.body  ? String(data.body).trim()  : '') || '(no description)';
   t.textContent = safeTitle; b.textContent = safeBody;
-  if (data && data.imageUrl){
-    img.src = data.imageUrl; img.style.display = 'block';
+  if (data && data.imageUrl){ img.src = data.imageUrl; img.style.display = 'block'; }
+
+  // edit mode
+  let editing = false;
+  function enterEdit(){
+    if (editing) return; editing = true;
+    t.contentEditable = 'true'; b.contentEditable = 'true';
+    t.style.outline = '1px dashed #fff3'; b.style.outline = '1px dashed #fff3';
+    t.focus();
   }
+  function exitEdit(save){
+    if (!editing) return; editing = false;
+    t.contentEditable = 'false'; b.contentEditable = 'false';
+    t.style.outline = ''; b.style.outline = '';
+    if (save){
+      const newTitle = (t.textContent || '').trim();
+      const newBody  = (b.textContent || '').trim();
+      updateCaptionForPin(id, { title: newTitle, body: newBody }).catch(()=>{});
+    } else {
+      const cur = rowCache.get(id) || {};
+      t.textContent = (cur.title || '').trim() || '(untitled)';
+      b.textContent = (cur.body  || '').trim() || '(no description)';
+    }
+  }
+  bEdit.addEventListener('click', () => { if (editing) exitEdit(true); else enterEdit(); });
+  t.addEventListener('keydown', (e)=>{ if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); exitEdit(true);} });
+  b.addEventListener('keydown', (e)=>{ if(e.key==='Enter' && e.ctrlKey){ e.preventDefault(); exitEdit(true);} });
+  t.addEventListener('blur', ()=>{ if (editing) exitEdit(true); });
+  b.addEventListener('blur', ()=>{ if (editing) exitEdit(true); });
 
   bClose.addEventListener('click', () => removeCaptionOverlay(id));
-  bEdit.addEventListener('click', async () => {
-    const cur = rowCache.get(id) || {};
-    const newTitle = window.prompt('Caption title', cur.title || '');
-    if (newTitle === null) return;
-    const newBody = window.prompt('Caption body', cur.body || '');
-    if (newBody === null) return;
-    try {
-      await updateCaptionForPin(id, { title: newTitle, body: newBody });
-      t.textContent = (newTitle || '').trim() || '(untitled)';
-      b.textContent = (newBody || '').trim() || '(no description)';
-    } catch(e){
-      console.error('[caption edit] failed', e);
-      alert('Failed to update caption on the sheet.');
-    }
-  });
   bDel.addEventListener('click', async () => {
     if (!confirm('このキャプションを削除しますか？')) return;
     try{
@@ -173,7 +204,6 @@ function createCaptionOverlay(id, data){
   root.appendChild(t);
   root.appendChild(b);
   root.appendChild(img);
-  root.appendChild(svg);
 
   document.body.appendChild(root);
   overlays.set(id, { root: root, imgEl: img });
@@ -184,26 +214,26 @@ function updateOverlayPosition(id, initial){
   const o = overlays.get(id); if (!o) return;
   const d = rowCache.get(id); if (!d) return;
   const p = projectPoint(d.x, d.y, d.z);
-  if (!p.visible){ o.root.style.display='none'; return; }
+  if (!p.visible){ o.root.style.display='none'; removeLine(id); return; }
   o.root.style.display='block';
   if (initial && !o.root.style.left){
     o.root.style.left = (p.x + 14) + 'px';
     o.root.style.top  = (p.y + 14) + 'px';
   }
   const r = o.root.getBoundingClientRect();
-  const svg = o.root.querySelector('svg'); const line = svg ? svg.querySelector('line') : null;
-  if (!svg || !line) return;
-  const x1 = 0, y1 = r.height;
-  const x2 = p.x - r.left, y2 = p.y - r.top;
-  svg.setAttribute('width',  String(Math.max(x1,x2)+2));
-  svg.setAttribute('height', String(Math.max(y1,y2)+2));
-  line.setAttribute('x1', String(x1)); line.setAttribute('y1', String(y1));
-  line.setAttribute('x2', String(x2)); line.setAttribute('y2', String(y2));
+  const line = getOrMakeLine(id);
+  const x2 = p.x; const y2 = p.y;
+  // attach line to nearest edge point of the overlay
+  const cx = Math.min(Math.max(x2, r.left), r.right);
+  const cy = Math.min(Math.max(y2, r.top ), r.bottom);
+  line.setAttribute('x1', String(cx));
+  line.setAttribute('y1', String(cy));
+  line.setAttribute('x2', String(x2));
+  line.setAttribute('y2', String(y2));
 }
 onRenderTick(() => { overlays.forEach((_, id) => updateOverlayPosition(id, false)); });
 function showOverlayFor(id){ const d=rowCache.get(id); if(!d) return; createCaptionOverlay(id, d); setPinSelected(id, true); }
 
-// ---- interactions ----
 onPinSelect((id) => { selectedPinId = id; showOverlayFor(id); });
 onCanvasShiftPick(async (pt) => {
   const titleEl = $('caption-title');
@@ -222,7 +252,6 @@ onCanvasShiftPick(async (pt) => {
   if (titleEl) titleEl.focus();
 });
 
-// ---- GLB load ----
 async function doLoad(){
   const token = getAccessToken();
   const urlEl = $('glbUrl');
@@ -248,7 +277,6 @@ if ($('glbUrl')) $('glbUrl').addEventListener('keydown', (e)=>{ if (e.key==='Ent
 if ($('glbUrl')) $('glbUrl').addEventListener('input', ()=>{ if ($('btnGlb')) $('btnGlb').disabled = !extractDriveId($('glbUrl').value||''); });
 if ($('glbUrl')) $('glbUrl').dispatchEvent(new Event('input'));
 
-// ---- colors & filters ----
 const COLORS = ['#ff6b6b','#ffd93d','#6bcb77','#4d96ff','#9b5de5','#f15bb5','#00c2a8','#94a3b8'];
 const pinColorsHost = $('pin-colors');
 if (pinColorsHost){
@@ -288,7 +316,6 @@ if (pinFilterHost){
   });
 }
 
-// ---- Drive helpers ----
 async function getParentFolderId(fileId, token) {
   const res = await fetch('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(fileId)+'?fields=parents&supportsAllDrives=true', { headers:{Authorization:'Bearer '+token} });
   if (!res.ok) throw new Error('Drive meta failed: '+res.status);
@@ -310,7 +337,6 @@ async function getFileThumbUrl(fileId, token) {
   return j.thumbnailLink + sep + 'access_token=' + encodeURIComponent(token);
 }
 
-// ---- image grid ----
 if ($('btnRefreshImages')) $('btnRefreshImages').addEventListener('click', refreshImagesGrid);
 async function refreshImagesGrid(){
   const token = getAccessToken();
@@ -345,12 +371,11 @@ async function refreshImagesGrid(){
           }
         });
         if (grid) grid.appendChild(btn);
-      }catch(e){ /* ignore per-file errors */ }
+      }catch(e){}
     }
   }catch(e){ if (s) s.textContent = 'Error: '+e.message; }
 }
 
-// ---- Sheets helpers ----
 const LOCIMYU_HEADERS = ['id','title','body','color','x','y','z','imageFileId'];
 
 async function putValues(spreadsheetId, rangeA1, values, token) {
@@ -443,7 +468,6 @@ if ($('save-target-create')) $('save-target-create').addEventListener('click', a
   await populateSheetTabs(currentSpreadsheetId, token); await loadCaptionsFromSheet();
 });
 
-// ---- caption list ----
 function clearCaptionList(){ const host=$('caption-list'); if (host) host.innerHTML=''; captionDomById.clear(); }
 function appendCaptionItem(args){
   const id = args.id, title=args.title, body=args.body, color=args.color, imageUrl=args.imageUrl;
@@ -488,7 +512,6 @@ async function enrichRow(row){
   return enriched;
 }
 
-// ---- save/load to sheet ----
 async function savePinToSheet(obj){
   const id=obj.id, title=obj.title, body=obj.body, color=obj.color, x=obj.x, y=obj.y, z=obj.z, imageFileId=obj.imageFileId;
   const token=getAccessToken(); if(!token||!currentSpreadsheetId) return;
@@ -558,7 +581,7 @@ async function deleteCaptionForPin(id){
 
 async function loadCaptionsFromSheet(){
   clearCaptionList(); clearPins(); rowCache.clear();
-  overlays.forEach((_,id)=>removeCaptionOverlay(id)); overlays.clear();
+  overlays.forEach((_,id)=>removeCaptionOverlay(id)); overlays.clear(); if (lineLayer) lineLayer.innerHTML='';
   const token=getAccessToken(); if(!token||!currentSpreadsheetId||!currentSheetTitle) return;
   try {
     const values=await getValues(currentSpreadsheetId, "'"+currentSheetTitle+"'!A1:Z9999", token); if(!values.length) return;
@@ -580,7 +603,6 @@ async function loadCaptionsFromSheet(){
   } catch(e){ console.warn('[loadCaptionsFromSheet] failed', e); }
 }
 
-// ---- buttons ----
 if ($('btnGlb')) $('btnGlb').addEventListener('click', ()=>{ selectedPinId=null; });
 if ($('pin-add')) $('pin-add').addEventListener('click', async ()=>{
   const titleEl = $('caption-title');
@@ -603,4 +625,4 @@ if ($('pin-clear')) $('pin-clear').addEventListener('click', ()=>{
   if ($('caption-body'))  $('caption-body').value='';
 });
 
-console.log('[LociMyu ESM/CDN] boot conservative build loaded');
+console.log('[LociMyu ESM/CDN] boot overlay-edit build loaded');
