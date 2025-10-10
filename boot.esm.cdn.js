@@ -1,5 +1,5 @@
-// boot.esm.cdn.js — Drive GLB + Sheets + Pins + Filters + Images
-import { ensureViewer, onCanvasShiftPick, addPinMarker, clearPins, setPinSelected, onPinSelect, loadGlbFromDrive } from './viewer.module.cdn.js';
+// boot.esm.cdn.js — GLB + Sheets + Pins + Filters + Images + CaptionOverlay
+import { ensureViewer, onCanvasShiftPick, addPinMarker, clearPins, setPinSelected, onPinSelect, loadGlbFromDrive, onRenderTick, projectPoint } from './viewer.module.cdn.js';
 import { setupAuth, getAccessToken } from './gauth.module.js';
 
 const $ = (id) => document.getElementById(id);
@@ -43,20 +43,84 @@ let selectedPinId = null;
 let selectedImage = null;
 let captionsIndex = new Map(); // id -> {rowIndex}
 const captionDomById = new Map();
+const rowCache = new Map(); // id -> {id,title,body,color,x,y,z,imageFileId,imageUrl}
+
+// ---------- Caption Overlay (draggable + tether) ----------
+const overlayHost = document.body;
+const overlays = new Map(); // id -> {root,imgEl}
+function removeCaptionOverlay(id){ const o=overlays.get(id); if(!o) return; o.root.remove(); overlays.delete(id); }
+function createCaptionOverlay(id, data){
+  removeCaptionOverlay(id);
+  const root = document.createElement('div');
+  root.className = 'cap-overlay';
+  root.innerHTML = `
+    <button class="cap-close" title="Close">×</button>
+    <div class="cap-title"></div>
+    <div class="cap-body"></div>
+    <img class="cap-img" alt="" />
+    <svg class="cap-line" width="0" height="0"><line x1="0" y1="0" x2="0" y2="0"/></svg>
+  `;
+  overlayHost.appendChild(root);
+  const safeTitle = (data.title||'').trim() || '(untitled)';
+  const safeBody  = (data.body ||'').trim() || '(no description)';
+  root.querySelector('.cap-title').textContent = safeTitle;
+  root.querySelector('.cap-body').textContent  = safeBody;
+  const imgEl = root.querySelector('.cap-img');
+  if (data.imageUrl){ imgEl.src = data.imageUrl; imgEl.style.display='block'; } else { imgEl.style.display='none'; }
+  root.querySelector('.cap-close').addEventListener('click', ()=> removeCaptionOverlay(id));
+  // drag
+  let dragging=false, sx=0, sy=0, left=0, top=0;
+  const onDown = (e)=>{ dragging=true; sx=e.clientX; sy=e.clientY; const r=root.getBoundingClientRect(); left=r.left; top=r.top; e.preventDefault(); };
+  const onMove = (e)=>{ if(!dragging) return; const dx=e.clientX-sx, dy=e.clientY-sy; root.style.left=(left+dx)+'px'; root.style.top=(top+dy)+'px'; };
+  const onUp = ()=> dragging=false;
+  root.addEventListener('mousedown', onDown);
+  window.addEventListener('mousemove', onMove);
+  window.addEventListener('mouseup', onUp);
+  overlays.set(id, { root, imgEl });
+  updateOverlayPosition(id, true);
+}
+function updateOverlayPosition(id, initial=false){
+  const o = overlays.get(id); if(!o) return;
+  const d = rowCache.get(id); if(!d) return;
+  const p = projectPoint(d.x, d.y, d.z);
+  if (!p.visible){ o.root.style.display='none'; return; }
+  o.root.style.display='block';
+  if (initial && !o.root.style.left){
+    o.root.style.left = (p.x + 16) + 'px';
+    o.root.style.top  = (p.y + 16) + 'px';
+  }
+  const r = o.root.getBoundingClientRect();
+  const svg = o.root.querySelector('.cap-line'); const line = svg.querySelector('line');
+  const x1 = 0, y1 = r.height; // box 左下
+  const x2 = p.x - r.left, y2 = p.y - r.top;
+  svg.setAttribute('width', String(Math.max(x1,x2)+2));
+  svg.setAttribute('height', String(Math.max(y1,y2)+2));
+  line.setAttribute('x1', String(x1)); line.setAttribute('y1', String(y1));
+  line.setAttribute('x2', String(x2)); line.setAttribute('y2', String(y2));
+}
+onRenderTick(()=>{ overlays.forEach((_, id)=> updateOverlayPosition(id)); });
+function showOverlayFor(id){
+  const d = rowCache.get(id); if(!d) return;
+  createCaptionOverlay(id, d);
+  setPinSelected(id, true);
+}
 
 // ---------- Pins: selection/placement ----------
-onPinSelect((id) => { selectedPinId = id; setPinSelected(id, true); });
+onPinSelect((id) => { selectedPinId = id; showOverlayFor(id); });
 
 onCanvasShiftPick(async (pt) => {
   const title = $('caption-title')?.value || '';
   const body = $('caption-body')?.value || '';
   const imageFileId = selectedImage?.id || '';
   const id = uid();
-  await savePinToSheet({ id, title, body, color: currentPinColor, x: pt.x, y: pt.y, z: pt.z, imageFileId });
+  const row = { id, title, body, color: currentPinColor, x: pt.x, y: pt.y, z: pt.z, imageFileId };
+  await savePinToSheet(row);
   addPinMarker({ id, x: pt.x, y: pt.y, z: pt.z, color: currentPinColor });
-  const row = await enrichRow({ id, title, body, color: currentPinColor, imageFileId });
-  appendCaptionItem(row);
+  const enriched = await enrichRow(row);
+  appendCaptionItem(enriched);
   selectedPinId = id; setPinSelected(id, true);
+  showOverlayFor(id);
+  const ti = $('caption-title'); if (ti) ti.focus();
 });
 
 // ---------- GLB load (Drive fileId) ----------
@@ -131,19 +195,19 @@ $('btnRefreshImages')?.addEventListener('click', refreshImagesGrid);
 async function refreshImagesGrid(){
   const token = getAccessToken();
   const fileId = lastGlbFileId || extractDriveId($('glbUrl')?.value||'');
-  if (!token || !fileId) { $('images-status').textContent='Sign in & load a GLB first.'; return; }
-  $('images-status').textContent = 'Loading images…';
-  const grid = $('images-grid'); grid.innerHTML='';
+  if (!token || !fileId) { const s=$('images-status'); if(s) s.textContent='Sign in & load a GLB first.'; return; }
+  const s=$('images-status'); if(s) s.textContent = 'Loading images…';
+  const grid = $('images-grid'); if(grid) grid.innerHTML='';
   try{
     const files = await listImagesForGlb(fileId, token);
-    $('images-status').textContent = `${files.length} image(s) found in the GLB folder`;
+    if (s) s.textContent = `${files.length} image(s) found in the GLB folder`;
     for (const f of files){
       try{
         const url = await getFileThumbUrl(f.id, token);
         const btn = document.createElement('button');
         btn.className='thumb'; btn.style.backgroundImage=`url(${url})`; btn.title=f.name; btn.dataset.id=f.id;
         btn.addEventListener('click', async ()=>{
-          grid.querySelectorAll('.thumb').forEach(x=>x.dataset.selected='false'); btn.dataset.selected='true';
+          grid?.querySelectorAll('.thumb').forEach(x=>x.dataset.selected='false'); btn.dataset.selected='true';
           selectedImage = {id:f.id, url};
           if (selectedPinId){ // 画像を選択中のピンに即アタッチ（リストは消さない）
             await updateImageForPin(selectedPinId, f.id);
@@ -153,13 +217,15 @@ async function refreshImagesGrid(){
               if (img) img.src = url;
               else { const im = document.createElement('img'); im.src = url; target.prepend(im); }
             }
+            const ov = overlays.get(selectedPinId);
+            if (ov){ ov.imgEl.src = url; ov.imgEl.style.display='block'; }
           }
         });
-        grid.appendChild(btn);
+        grid?.appendChild(btn);
       }catch(_){}
     }
   }catch(e){
-    $('images-status').textContent = `Error: ${e.message}`;
+    if (s) s.textContent = `Error: ${e.message}`;
   }
 }
 
@@ -229,24 +295,28 @@ $('save-target-create')?.addEventListener('click', async ()=>{
   await populateSheetTabs(currentSpreadsheetId, token); await loadCaptionsFromSheet();
 });
 
-// ---------- Caption list (no full reload on attach) ----------
+// ---------- Caption list (placeholders + selection) ----------
 function clearCaptionList(){ const host=$('caption-list'); host && (host.innerHTML=''); captionDomById.clear(); }
-function appendCaptionItem({id,title,body,color,imageUrl}){
+function appendCaptionItem({id,title,body,color,imageUrl,x,y,z}){
   const host=$('caption-list'); const div=document.createElement('div'); div.className='caption-item'; div.dataset.id=id;
-  div.innerHTML = `${imageUrl?`<img src="${imageUrl}" alt="">`:''}<div><div style="font-weight:600">${title||''}</div><div class="hint" style="white-space:pre-wrap">${body||''}</div></div>`;
-  div.addEventListener('click', ()=>{ selectedPinId=id; setPinSelected(id, true); });
-  host.appendChild(div); captionDomById.set(id, div);
+  const safeTitle = (title||'').trim() || '(untitled)';
+  const safeBody  = (body ||'').trim() || '(no description)';
+  div.innerHTML = `${imageUrl?`<img src="${imageUrl}" alt="">`:''}<div><div class="c-title" style="font-weight:600">${safeTitle}</div><div class="c-body hint" style="white-space:pre-wrap">${safeBody}</div></div>`;
+  div.addEventListener('click', ()=>{ selectedPinId=id; showOverlayFor(id); });
+  host?.appendChild(div); captionDomById.set(id, div);
+  div.scrollIntoView({block:'nearest'});
 }
 async function enrichRow(row){
   const token=getAccessToken(); let imageUrl=''; if(row.imageFileId) try{ imageUrl=await getFileThumbUrl(row.imageFileId, token);}catch(_){}
-  return { ...row, imageUrl };
+  const enriched = { ...row, imageUrl };
+  rowCache.set(row.id, enriched);
+  return enriched;
 }
 
 // ---------- Save / Load captions ----------
 async function savePinToSheet({ id, title, body, color, x, y, z, imageFileId }){
   const token=getAccessToken(); if(!token||!currentSpreadsheetId) return;
   const sheetTitle=currentSheetTitle||'シート1'; const range=`'${sheetTitle}'!A:Z`;
-  // ensure header
   try { const existed=await getValues(currentSpreadsheetId, `'${sheetTitle}'!A1:Z1`, token); const headers=existed[0]||[]; const lower=headers.map(h=>(h||'').toString().trim().toLowerCase()); const ok=REQUIRED_MIN_HEADERS.size===new Set(lower.filter(h=>REQUIRED_MIN_HEADERS.has(h))).size; if(!ok) await putValues(currentSpreadsheetId, `'${sheetTitle}'!A1:Z1`, [LOCIMYU_HEADERS], token); } catch(_){}
   await appendValues(currentSpreadsheetId, range, [[id,title,body,color,x,y,z,imageFileId]], token);
 }
@@ -264,19 +334,21 @@ async function updateImageForPin(id, imageFileId){
   const hit=captionsIndex.get(id); if(!hit) return;
   const a1 = `'${currentSheetTitle||'シート1'}'!H${hit.rowIndex}`;
   await putValues(currentSpreadsheetId, a1, [[imageFileId]], token);
+  const cached = rowCache.get(id); if (cached){ cached.imageFileId = imageFileId; }
 }
 
 async function loadCaptionsFromSheet(){
-  clearCaptionList(); clearPins(); await ensureIndex();
+  clearCaptionList(); clearPins(); rowCache.clear(); await ensureIndex();
   const token=getAccessToken(); if(!token||!currentSpreadsheetId||!currentSheetTitle) return;
   try {
     const values=await getValues(currentSpreadsheetId, `'${currentSheetTitle}'!A1:Z9999`, token); if(!values.length) return;
     const headers=values[0].map(v=>(v||'').toString().trim().toLowerCase()); const idx=(n)=>headers.indexOf(n);
     const iId=idx('id'), iTitle=idx('title'), iBody=idx('body'), iColor=idx('color'), iX=idx('x'), iY=idx('y'), iZ=idx('z'), iImg=idx('imagefileid');
     for (let r=1; r<values.length; r++){ const row=values[r]; if(!row) continue;
-      const data = { id: row[iId]||uid(), title: row[iTitle]||'', body: row[iBody]||'', color: row[iColor]||COLORS[0], x: Number(row[iX]||0), y: Number(row[iY]||0), z: Number(row[iZ]||0), imageFileId: row[iImg]||'' };
+      const data = { id: (row[iId]||uid()), title: row[iTitle]||'', body: row[iBody]||'', color: row[iColor]||'#ff6b6b', x: Number(row[iX]||0), y: Number(row[iY]||0), z: Number(row[iZ]||0), imageFileId: row[iImg]||'' };
       addPinMarker({ id: data.id, x: data.x, y: data.y, z: data.z, color: data.color });
-      appendCaptionItem(await enrichRow(data));
+      const enriched = await enrichRow(data);
+      appendCaptionItem(enriched);
     }
     await ensureIndex();
   } catch(e){ console.warn('[loadCaptionsFromSheet] failed', e); }
@@ -288,9 +360,11 @@ $('pin-add')?.addEventListener('click', async ()=>{
   const row = { id, title: $('caption-title')?.value||'', body: $('caption-body')?.value||'', color: currentPinColor, x:0, y:0, z:0, imageFileId: selectedImage?.id||'' };
   await savePinToSheet(row);
   addPinMarker({ id, x:0, y:0, z:0, color: currentPinColor });
-  appendCaptionItem(await enrichRow(row));
+  const enriched = await enrichRow(row);
+  appendCaptionItem(enriched);
   selectedPinId = id; setPinSelected(id, true);
-  if ($('caption-title')) $('caption-title').value=''; if ($('caption-body')) $('caption-body').value='';
+  showOverlayFor(id);
+  const ti = $('caption-title'); if (ti) ti.focus();
 });
 $('pin-clear')?.addEventListener('click', ()=>{ if ($('caption-title')) $('caption-title').value=''; if ($('caption-body')) $('caption-body').value=''; });
 
