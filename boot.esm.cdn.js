@@ -32,11 +32,12 @@ setupAuth($('auth-signin'), signedSwitch, { clientId: __LM_CLIENT_ID, apiKey: __
 
 /* ---------------------------- Drive utils ---------------------------- */
 // === Promise-safe Drive helpers ===
-async function resolveThumbUrl(fileId, size=256){
+var resolveThumbUrl = globalThis.resolveThumbUrl || async function (fileId, size=256){
   try{
     const token = (typeof getAccessToken==='function') ? getAccessToken() : null;
     if (!fileId || !token) return '';
-    const u = `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?fields=thumbnailLink&supportsAllDrives=true`;
+    const u = `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)};
+?fields=thumbnailLink&supportsAllDrives=true`;
     const r = await fetch(u, { headers:{ Authorization:`Bearer ${token}` } });
     if (!r.ok) return '';
     const j = await r.json();
@@ -48,11 +49,12 @@ async function resolveThumbUrl(fileId, size=256){
   }
 }
 
-function buildFileBlobUrl(fileId){
+var buildFileBlobUrl = globalThis.buildFileBlobUrl || function (fileId){
   try{
     const token = (typeof getAccessToken==='function') ? getAccessToken() : null;
     if (!fileId || !token) return '';
-    return `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?alt=media&supportsAllDrives=true&access_token=${encodeURIComponent(token)}`;
+    return `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)};
+?alt=media&supportsAllDrives=true&access_token=${encodeURIComponent(token)}`;
   } catch(e) {
     return '';
   }
@@ -60,12 +62,13 @@ function buildFileBlobUrl(fileId){
 
 // ==================================
 
-function extractDriveId(s){
+var extractDriveId = globalThis.extractDriveId || function (s){
   if (!s) return null;
   try{
     const u = new URL(s);
     const q = u.searchParams.get('id');
-    if (q && /[-\w]{25,}/.test(q)) return q;
+    if (q && /[-\w]{25,};
+/.test(q)) return q;
     const seg = u.pathname.split('/').filter(Boolean);
     const dIdx = seg.indexOf('d');
     if (dIdx !== -1 && seg[dIdx + 1] && /[-\w]{25,}/.test(seg[dIdx + 1])) return seg[dIdx + 1];
@@ -76,11 +79,12 @@ function extractDriveId(s){
   return m ? m[0] : null;
 }
 
-async function resolveThumbUrl(fileId, size=256){
+var resolveThumbUrl = globalThis.resolveThumbUrl || async function (fileId, size=256){
   try{
     const token = (typeof getAccessToken==='function') ? getAccessToken() : null;
     if (!fileId || !token) return '';
-    const url = `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?fields=thumbnailLink&supportsAllDrives=true`;
+    const url = `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)};
+?fields=thumbnailLink&supportsAllDrives=true`;
     const r = await fetch(url, { headers:{ Authorization:`Bearer ${token}` } });
     if (!r.ok) return '';
     const j = await r.json();
@@ -91,11 +95,12 @@ async function resolveThumbUrl(fileId, size=256){
   }
 }
 
-function buildFileBlobUrl(fileId){
+var buildFileBlobUrl = globalThis.buildFileBlobUrl || function (fileId){
   try{
     const token = (typeof getAccessToken==='function') ? getAccessToken() : null;
     if (!fileId || !token) return '';
-    return `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?alt=media&supportsAllDrives=true&access_token=${encodeURIComponent(token)}`;
+    return `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)};
+?alt=media&supportsAllDrives=true&access_token=${encodeURIComponent(token)}`;
   } catch(e){ return ''; }
 }
 
