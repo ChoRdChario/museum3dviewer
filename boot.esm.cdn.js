@@ -334,7 +334,6 @@ function showOverlayFor(id){
 
   createCaptionOverlay(id, d);
   setPinSelected(id, true);
-}
 
 /* ----------------------- Pin selection & add ------------------------ */
 onPinSelect((id) => { selectedPinId = id; showOverlayFor(id); });
