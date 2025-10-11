@@ -303,11 +303,9 @@ function updateOverlayPosition(id, initial){
 }
 onRenderTick(() => { overlays.forEach((_, id) => updateOverlayPosition(id, false)); });
 function showOverlayFor(id){
-  const d = rowCache.get(id); if (!d) return;
-  __lm_markListSelected(id);
-  try{ setPinSelected(id, true); }catch(e){}
-  createCaptionOverlay(id, d);
-}
+  const d=rowCache.get(id); if(!d) return;
+  // リスト強調表示
+  for (const [cid, el] of captionDomById.entries()){ el.classList.toggle('selected', cid===id); }
   createCaptionOverlay(id, d);
   setPinSelected(id, true);
 }
@@ -568,25 +566,13 @@ async function ensureIndex(){
   for (let r=1; r<values.length; r++){ const row=values[r]||[]; const id=row[iId]; if(!id) continue; captionsIndex.set(id, { rowIndex:r+1 }); }
 }
 async function updateImageForPin(id, imageFileId){
-  const row = rowCache.get(id); if (!row) return;
-  row.imageFileId = imageFileId || '';
-  rowCache.set(id, row);
-
-  // Update list thumbnail & overlay if exists
-  const liImg = document.querySelector(`#caption-list .caption-item[data-id="${CSS.escape(id)}"] img`);
-  const overlay = overlays && overlays.get ? overlays.get(id) : null;
-  if (!imageFileId){
-    if (liImg) liImg.removeAttribute('src');
-    if (overlay && overlay.imgEl) { overlay.imgEl.removeAttribute('src'); overlay.imgEl.style.display='none'; }
-    return;
-  }
-  const thumb = await resolveThumbUrl(imageFileId, 128);
-  if (liImg && thumb) liImg.src = thumb;
-  if (overlay && overlay.imgEl) {
-    const full = buildFileBlobUrl(imageFileId);
-    if (full) { overlay.imgEl.src = full; overlay.imgEl.style.display='block'; }
-  }
-};
+  const token=getAccessToken(); if(!token||!currentSpreadsheetId) return;
+  if (!captionsIndex.size) await ensureIndex();
+  const hit=captionsIndex.get(id); if(!hit) return;
+  const ci = (currentHeaderIdx['imagefileid']!=null)?currentHeaderIdx['imagefileid']:7;
+  const a1 = "'"+(currentSheetTitle||'シート1')+"'!"+colA1(ci)+String(hit.rowIndex);
+  await putValues(currentSpreadsheetId, a1, [[imageFileId]], token);
+  const cached = rowCache.get(id) || {};
   cached.imageFileId = imageFileId; rowCache.set(id, cached);
   // list thumb
   try{ const turl = await getFileThumbUrl(imageFileId, token, 1024); const dom = captionDomById.get(id); if (dom){ const i=dom.querySelector('img'); if(i) i.src=turl; else{ const im=document.createElement('img'); im.src=turl; dom.prepend(im);} } }catch(e){}
@@ -692,33 +678,21 @@ async function refreshImagesGrid(){
 /* ===== v6.7 selection + form editing & attach/detach ===== */
 function __lm_markListSelected(id){
   const host = $('caption-list'); if (!host) return;
-  const items = host.querySelectorAll('[data-id]');
-  items.forEach(el=>{
-    const on = (el.dataset.id === String(id));
-    if (on) el.classList.add('is-selected'); else el.classList.remove('is-selected');
-    el.setAttribute('aria-selected', on ? 'true' : 'false');
+  host.querySelectorAll('.caption-item.is-selected,[aria-selected="true"]').forEach(el=>{
+    el.classList.remove('is-selected'); el.removeAttribute('aria-selected');
   });
-  // form fill
-  const d = rowCache.get(id);
-  if (d) __lm_fillFormFromCaption(d);
-});
   if (!id) return;
   const li = host.querySelector(`.caption-item[data-id="${CSS.escape(id)}"]`);
   if (li){ li.classList.add('is-selected'); li.setAttribute('aria-selected','true'); li.scrollIntoView({block:'nearest'}); }
 }
 
 function __lm_fillFormFromCaption(obj){
-  const ti=$('caption-title'), bo=$('caption-body'), th=$('currentImageThumb');
-  if (ti) ti.value = (obj && obj.title) ? String(obj.title) : '';
-  if (bo) bo.value = (obj && obj.body)  ? String(obj.body)  : '';
-  if (!th) return;
-  const fid = obj && obj.imageFileId;
-  if (!fid) { th.innerHTML = `<div class="placeholder">No Image</div>`; return; }
-  (async () => {
-    const url = await resolveThumbUrl(fid, 256);
-    th.innerHTML = url ? `<img alt="attached" src="${url}">` : `<div class="placeholder">No Image</div>`;
-  })();
-}">`;
+  const ti = $('caption-title'); const bo = $('caption-body'); const th = $('currentImageThumb');
+  if (!ti || !bo || !th) return;
+  ti.value = (obj && obj.title) ? String(obj.title) : '';
+  bo.value = (obj && obj.body)  ? String(obj.body)  : '';
+  if (obj && obj.imageFileId){
+    th.innerHTML = `<img alt="attached" src="${getFileThumbUrl(obj.imageFileId, getAccessToken(), 256)}">`;
   } else {
     th.innerHTML = `<div class="placeholder">No Image</div>`;
   }
