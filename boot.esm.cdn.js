@@ -483,22 +483,7 @@ if ($('save-target-create')) $('save-target-create').addEventListener('click', a
   await populateSheetTabs(currentSpreadsheetId, token); await loadCaptionsFromSheet();
 });
 
-function clearC
-
-// robust list click delegation (works with any [data-id] item)
-(function(){
-  const host = $('caption-list'); if (!host) return;
-  host.addEventListener('click', (e)=>{
-    const item = (e.target && e.target.closest) ? e.target.closest('[data-id]') : null;
-    if (!item) return;
-    if (e.target.closest && e.target.closest('.c-del')) return;
-    const id = item.dataset.id;
-    try{ __lm_selectPin(id,'list'); }catch(e){}
-    try{ if (typeof showOverlayFor==='function') showOverlayFor(id); }catch(e){}
-  }, {capture:true});
-})();
-
-aptionList(){ const host=$('caption-list'); if (host) host.innerHTML=''; captionDomById.clear(); }
+function clearCaptionList(){ const host=$('caption-list'); if (host) host.innerHTML=''; captionDomById.clear(); }
 
 function appendCaptionItem(row){
   const host = $('caption-list'); if (!host || !row) return;
@@ -508,7 +493,7 @@ function appendCaptionItem(row){
   div.dataset.id = id;
   if (row.imageFileId) div.dataset.imageFileId = row.imageFileId;
   // left color bar
-  div.style.borderLeft = '3px solid ' + (color || '#94a3b8');
+  if (color) div.style.borderLeft = '3px solid ' + color;
 
   const safeTitle = (title||'').trim() || '(untitled)';
   const safeBody  = (body ||'').trim() || '(no description)';
@@ -521,13 +506,6 @@ function appendCaptionItem(row){
   const t   = document.createElement('div'); t.className = 'c-title'; t.textContent = safeTitle;
   const b   = document.createElement('div'); b.className = 'c-body';  b.classList.add('hint'); b.textContent = safeBody;
   txt.appendChild(t); txt.appendChild(b); div.appendChild(txt);
-
-  // selection behavior: select + open overlay + highlight + form sync
-  div.addEventListener('click', (e)=>{
-    if (e.target && e.target.closest && e.target.closest('.c-del')) return;
-    try{ __lm_selectPin(id, 'list'); }catch(e){}
-    try{ if (typeof showOverlayFor==='function') showOverlayFor(id); }catch(e){}
-  });
 
   // delete button
   const del = document.createElement('button'); del.className='c-del'; del.title='Delete'; del.textContent='🗑';
@@ -546,6 +524,19 @@ function appendCaptionItem(row){
   host.appendChild(div); captionDomById.set(id, div);
   try{ div.scrollIntoView({block:'nearest'}); }catch(e){}
 }
+
+// robust list click delegation (works with any [data-id] item)
+;(function(){
+  const host = $('caption-list'); if (!host) return;
+  host.addEventListener('click', (e)=>{
+    const item = (e.target && e.target.closest) ? e.target.closest('[data-id]') : null;
+    if (!item) return;
+    if (e.target.closest && e.target.closest('.c-del')) return;
+    const id = item.dataset.id;
+    try{ __lm_selectPin(id,'list'); }catch(e){}
+    try{ if (typeof showOverlayFor==='function') showOverlayFor(id); }catch(e){}
+  }, {capture:true});
+})();
 
 
 async function enrichRow(row){
