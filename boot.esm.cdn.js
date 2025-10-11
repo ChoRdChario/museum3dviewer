@@ -9,7 +9,7 @@ import { setupAuth, getAccessToken } from './gauth.module.js';
 
 /* ------------------------- small DOM helpers ------------------------- */
 const $ = (id) => document.getElementById(id);
-const enable = (on, ...els) => els.forEach(el => { if (el) el.disabled = !on; });
+const enable = (on, els) => els.forEach(el => { if (el) el.disabled = !on; });
 const uid = () => Math.random().toString(36).slice(2) + Date.now().toString(36);
 
 /* --------------------------- viewer bootstrap ------------------------ */
@@ -643,7 +643,8 @@ async function deleteCaptionForPin(id){
 
 async function loadCaptionsFromSheet(){
   clearCaptionList(); clearPins(); rowCache.clear();
-  overlays.forEach((_,id)=>removeCaptionOverlay(id)); overlays.clear(); if (lineLayer) lineLayer.innerHTML='';
+  overlays.forEach((_,id)=>removeCaptionOverlay(id)); overlays.clear();
+  if (lineLayer) lineLayer.innerHTML='';
   const token = getAccessToken(); if (!token || !currentSpreadsheetId || !currentSheetTitle) return;
   try {
     const range = `'${currentSheetTitle}'!A1:Z9999`;
@@ -826,7 +827,7 @@ let __lm_deb;
         }
         // update cache
         const cur = rowCache.get(selectedPinId) || {};
-        rowCache.set(selectedPinId, { ...cur, title, body });
+        rowCache.set(selectedPinId, { cur, title, body });
       }catch(e){ console.warn('[caption autosave failed]', e); }
     }, 500);
   });
@@ -857,7 +858,7 @@ let __lm_deb;
         if (li) li.src = '';
         // update cache
         const cur = rowCache.get(selectedPinId) || {};
-        rowCache.set(selectedPinId, { ...cur, imageFileId: '' });
+        rowCache.set(selectedPinId, { cur, imageFileId: '' });
       }catch(e){ console.warn('[detach image failed]', e); }
     });
   }
@@ -879,7 +880,7 @@ let __lm_deb;
       if (u128) liImg.src = u128;
     }
     const cur = rowCache.get(selectedPinId) || {};
-    rowCache.set(selectedPinId, { ...cur, imageFileId: fid });
+    rowCache.set(selectedPinId, { cur, imageFileId: fid });
   })();
 }, {capture:true});
 })();
