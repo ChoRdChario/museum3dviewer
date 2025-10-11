@@ -631,6 +631,7 @@ async function updateCaptionForPin(id, args){
     const b = dom.querySelector('.c-body');  if (b) b.textContent = (cached.body ||'').trim() || '(no description)';
   }
 }
+
 async function deleteCaptionForPin(id){
   const token = getAccessToken && getAccessToken();
   if (!token || !currentSpreadsheetId) throw new Error('no auth');
@@ -638,55 +639,42 @@ async function deleteCaptionForPin(id){
   const rowIndex = captionsIndex && captionsIndex.get ? captionsIndex.get(id) : null;
 
   if (rowIndex == null) {
-    // fallback: clear row data via updateCaptionForPin
     try{ await updateCaptionForPin(id, { title: '', body: '', color: '', imageFileId: '' }); }catch(e){}
-  } else {
-    // delete row via batchUpdate
-    let sheetId = currentSheetId;
-    if (typeof sheetId !== 'number') {
-      const meta = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(currentSpreadsheetId)}?fields=sheets.properties`, {
-        headers: { Authorization: `Bearer ${token}` }
-      }).then(r=>r.json());
-      const found = (meta.sheets||[]).map(s=>s.properties).find(p=>p.title===currentSheetName);
-      if (!found) throw new Error('sheet not found');
-      sheetId = currentSheetId = found.sheetId;
-    }
-    const req = { requests: [{ deleteDimension: { range: { sheetId, dimension: 'ROWS', startIndex: rowIndex, endIndex: rowIndex+1 } } }] };
-    const resp = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(currentSpreadsheetId)}:batchUpdate`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify(req)
-    });
-    if (!resp.ok) console.warn('deleteDimension failed', await resp.text());
-
-    // shift local index
-    if (captionsIndex && captionsIndex.delete) {
-      captionsIndex.delete(id);
-      const updated = new Map();
-      for (const [k,v] of captionsIndex.entries()) updated.set(k, v > rowIndex ? v-1 : v);
-      captionsIndex.clear(); updated.forEach((v,k)=>captionsIndex.set(k,v));
-    }
-  }
-
-  // local removals
-  if (rowCache && rowCache.delete) rowCache.delete(id);
-  const el = document.querySelector(`#caption-list .caption-item[data-id="${CSS.escape(id)}"]`);
-  if (el) el.remove();
-  try{ removePinMarker(id); }catch(e){}
-  try{ removeCaptionOverlay(id); }catch(e){}  
-},
-    body: JSON.stringify({ requests: [{ deleteDimension: { range: { sheetId: currentSheetId, dimension: 'ROWS', startIndex: hit.rowIndex-1, endIndex: hit.rowIndex } } }] })
-  });
-  if (!r.ok) throw new Error('delete row '+r.status);
-  captionsIndex.delete(id);
-}
 
 async function loadCaptionsFromSheet(){
   clearCaptionList(); clearPins(); rowCache.clear();
   overlays.forEach((_,id)=>removeCaptionOverlay(id)); overlays.clear(); if (lineLayer) lineLayer.innerHTML='';
-  const token=getAccessToken(); if(!token||!currentSpreadsheetId||!currentSheetTitle) return;
+  const token = getAccessToken(); if (!token || !currentSpreadsheetId || !currentSheetTitle) return;
   try {
-    const values=await getValues(currentSpreadsheetId, "'"+currentSheetTitle+"'!A1:Z9999", token); if(!values.length) return;
-    currentHeaders = values[0].map(v=>(v||'').toString().trim());
-    currentHeaderIdx = {}; for (let i=0;i<currentHeaders.length;i++){ currentHeaderIdx[currentHeaders[i].toLowerCase()] = i; }
+    const range = `'${currentSheetTitle}'!A1:Z9999`;
+    const values = await getValues(currentSpreadsheetId, range, token);
+    if (!values || !values.length) return;
+    currentHeaders = values[0].map(v => (v||'').toString().trim());
+    currentHeaderIdx = {};
+    for (let i=0;i<currentHeaders.length;i++){ currentHeaderIdx[currentHeaders[i].toLowerCase()] = i; }
+    function idx(n){ const k=(n||'').toLowerCase(); return (currentHeaderIdx[k]!=null)?currentHeaderIdx[k]:-1; }
+    const iId=idx('id'), iTitle=idx('title'), iBody=idx('body'), iColor=idx('color'),
+          iX=idx('x'), iY=idx('y'), iZ=idx('z'), iImg=idx('imagefileid');
+
+    for (let r=1; r<values.length; r++){
+      const row = values[r] || [];
+      const data = {
+        id: (row[iId]||uid()),
+        title: row[iTitle]||'',
+        body: row[iBody]||'',
+        color: row[iColor]||'#ff6b6b',
+        x: Number(row[iX]||0),
+        y: Number(row[iY]||0),
+        z: Number(row[iZ]||0),
+        imageFileId: row[iImg]||''
+      };
+      addPinMarker({ id: data.id, x: data.x, y: data.y, z: data.z, color: data.color });
+      const enriched = await enrichRow(data);
+      appendCaptionItem(enriched);
+    }
+    await ensureIndex();
+  } catch(e){ console.warn('[loadCaptionsFromSheet] failed', e); }
+}; for (let i=0;i<currentHeaders.length;i++){ currentHeaderIdx[currentHeaders[i].toLowerCase()] = i; }
     function idx(n){ return (currentHeaderIdx[n]!=null)?currentHeaderIdx[n]:-1; }
     const iId=idx('id'), iTitle=idx('title'), iBody=idx('body'), iColor=idx('color'), iX=idx('x'), iY=idx('y'), iZ=idx('z'), iImg=idx('imagefileid');
     for (let r=1; r<values.length; r++){
