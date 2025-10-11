@@ -484,8 +484,16 @@ if ($('save-target-create')) $('save-target-create').addEventListener('click', a
 });
 
 function clearCaptionList(){ const host=$('caption-list'); if (host) host.innerHTML=''; captionDomById.clear(); }
-\1
-  if (args.imageFileId) div.dataset.imageFileId = args.imageFileId;
+
+function appendCaptionItem(row){
+  const host = $('caption-list'); if (!host || !row) return;
+  const id=row.id, title=row.title, body=row.body, color=row.color, imageUrl=row.imageUrl||'';
+  const div=document.createElement('div');
+  div.className='caption-item';
+  div.dataset.id=id;
+  if (row.imageFileId) div.dataset.imageFileId=row.imageFileId;
+
+  if (color) div.style.borderLeft='3px solid '+color;
 
   const safeTitle=(title||'').trim()||'(untitled)';
   const safeBody=(body||'').trim()||'(no description)';
@@ -496,16 +504,10 @@ function clearCaptionList(){ const host=$('caption-list'); if (host) host.innerH
   }
   const txt=document.createElement('div'); txt.className='cap-txt';
   const t=document.createElement('div'); t.className='c-title'; t.textContent=safeTitle;
-  const b=document.createElement('div'); b.className='c-body';  b.classList.add('hint'); b.textContent=safeBody;
+  const b=document.createElement('div'); b.className='c-body'; b.classList.add('hint'); b.textContent=safeBody;
   txt.appendChild(t); txt.appendChild(b); div.appendChild(txt);
 
-  // 選択状態のUI
-  div.addEventListener('click', (e)=>{
-    if (e.target && e.target.closest && e.target.closest('.c-del')) return;
-    __lm_selectPin(id, 'list');
-  });
-
-  // 個別削除
+  // Delete button
   const del=document.createElement('button'); del.className='c-del'; del.title='Delete'; del.textContent='🗑';
   del.addEventListener('click', async (e)=>{
     e.stopPropagation();
@@ -519,8 +521,16 @@ function clearCaptionList(){ const host=$('caption-list'); if (host) host.innerH
   });
   div.appendChild(del);
 
+  // Select behavior
+  div.addEventListener('click', (e)=>{
+    if (e.target && e.target.closest && e.target.closest('.c-del')) return;
+    try{ __lm_selectPin(id,'list'); }catch(e){}
+    try{ if (typeof showOverlayFor==='function') showOverlayFor(id); }catch(e){}
+  });
+
   host.appendChild(div); captionDomById.set(id, div);
   try{ div.scrollIntoView({block:'nearest'}); }catch(e){}
+}
 
 async function enrichRow(row){
   const token=getAccessToken(); let imageUrl='';
@@ -801,3 +811,17 @@ let __lm_deb;
 })();
 /* ===== end v6.7 injection ===== */
 console.log('[LociMyu ESM/CDN] boot overlay-edit+fixed-zoom build loaded');
+
+/* __LM_LIST_CLICK_BOUND__ */
+(function(){
+  const host = $('caption-list'); if (!host) return;
+  if (host.dataset.lmClickBound) return; host.dataset.lmClickBound='1';
+  host.addEventListener('click', (e)=>{
+    const item = (e.target && e.target.closest) ? e.target.closest('.caption-item[data-id], [data-id]') : null;
+    if (!item) return;
+    if (e.target.closest && e.target.closest('.c-del')) return;
+    const id = item.dataset.id;
+    try{ __lm_selectPin(id,'list'); }catch(e){}
+    try{ showOverlayFor(id); }catch(e){}
+  }, {capture:true});
+})();
