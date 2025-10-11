@@ -42,31 +42,42 @@ async function resolveThumbUrl(fileId, size=256){
     const j = await r.json();
     if (!j || !j.thumbnailLink) return '';
     return j.thumbnailLink.replace(/=s\d+(?:-c)?$/, `=s${size}-c`);
-  } /*__REMOVED_INLINE_CATCH__*/ /*e){ console.warn('[resolveThumbUrl failed]', e); return ''; }
+  } catch(e) {
+    console.warn('[resolveThumbUrl failed]', e);
+    return '';
+  }
 }
+
 function buildFileBlobUrl(fileId){
   try{
     const token = (typeof getAccessToken==='function') ? getAccessToken() : null;
     if (!fileId || !token) return '';
     return `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?alt=media&supportsAllDrives=true&access_token=${encodeURIComponent(token)}`;
-  } /*__REMOVED_INLINE_CATCH__*/ /*e){ return ''; }
+  } catch(e) {
+    return '';
+  }
 }
+
 // ==================================
 
-function extractDriveId(v){
-  if (!v) return null;
-  const s = String(v).trim();
-  try {
+function extractDriveId(s){
+  if (!s) return null;
+  try{
     const u = new URL(s);
     const q = u.searchParams.get('id');
     if (q && /[-\w]{25,}/.test(q)) return q;
     const seg = u.pathname.split('/').filter(Boolean);
     const dIdx = seg.indexOf('d');
     if (dIdx !== -1 && seg[dIdx + 1] && /[-\w]{25,}/.test(seg[dIdx + 1])) return seg[dIdx + 1];
-  } /*__REMOVED_INLINE_CATCH__*/ /*e) {}
+  } catch(e) {
+    // fall back to regex
+  }
   const m = s.match(/[-\w]{25,}/);
   return m ? m[0] : null;
 }
+  const m = s.match(/[-\w]{25,}/);
+  return m ? m[0] : null;
+
 async function getParentFolderId(fileId, token) {
   const res = await fetch('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(fileId)+'?fields=parents&supportsAllDrives=true', { headers:{Authorization:'Bearer '+token} });
   if (!res.ok) throw new Error('Drive meta failed: '+res.status);
@@ -223,14 +234,14 @@ function createCaptionOverlay(id, data){
       try {
         const full = await getFileBlobUrl(row.imageFileId, token);
         img.src = full; img.style.display='block';
-      } /*__REMOVED_INLINE_CATCH__*/ /*e) {
+      } e) {
         try {
           const th = await getFileThumbUrl(row.imageFileId, token, 1024);
           img.src = th; img.style.display='block';
-        } /*__REMOVED_INLINE_CATCH__*/ /*e2) {}
+        } e2 {}
       }
     }
-  })();
+  }();
 
   // 編集モード（タイトル/本文ともにピン設置後も編集可能）
   let editing = false;
@@ -273,8 +284,8 @@ function createCaptionOverlay(id, data){
       rowCache.delete(id);
       removeCaptionOverlay(id);
       selectedPinId = null;
-    } /*__REMOVED_INLINE_CATCH__*/ /*e){ console.error('[caption delete] failed', e); alert('Failed to delete caption row.'); }
-  });
+    } e){ console.error('[caption delete] failed', e); alert('Failed to delete caption row.'); }
+  };
 
   // ドラッグ
   let dragging=false,sx=0,sy=0,left=0,top=0;
@@ -328,7 +339,7 @@ onRenderTick(() => { overlays.forEach((_, id) => updateOverlayPosition(id, false
 function showOverlayFor(id){
   const d = rowCache.get(id); if (!d) return;
   __lm_markListSelected(id);
-  try{ setPinSelected(id, true); } /*__REMOVED_INLINE_CATCH__*/ /*e){}
+  try{ setPinSelected(id, true); } e{}
 // removed leaked fragment
 }
 
@@ -369,7 +380,7 @@ async function doLoad(){
     await populateSheetTabs(currentSpreadsheetId, token);
     await loadCaptionsFromSheet();
     await refreshImagesGrid();
-  } /*__REMOVED_INLINE_CATCH__*/ /*e) { console.error('[GLB] load error', e); }
+  } e { console.error('[GLB] load error', e); }
   finally { if ($('btnGlb')) $('btnGlb').disabled = false; }
 }
 if ($('btnGlb')) $('btnGlb').addEventListener('click', doLoad);
@@ -542,25 +553,25 @@ function appendCaptionItem(row){
       removePinMarker(id);
       div.remove(); captionDomById.delete(id); rowCache.delete(id);
       removeCaptionOverlay(id);
-    } /*__REMOVED_INLINE_CATCH__*/ /*err){ console.error('delete failed', err); alert('Delete failed'); }
-  });
+    } err){ console.error('delete failed', err); alert('Delete failed'); }
+  };
   div.appendChild(del);
 
   // Select behavior
   div.addEventListener('click', (e)=>{
     if (e.target && e.target.closest && e.target.closest('.c-del')) return;
-    try{ __lm_selectPin(id,'list'); } /*__REMOVED_INLINE_CATCH__*/ /*e){}
-    try{ if (typeof showOverlayFor==='function') showOverlayFor(id); } /*__REMOVED_INLINE_CATCH__*/ /*e){}
-  });
+    try{ __lm_selectPin(id,'list'); } e){}
+    try{ if (typeof showOverlayFor==='function') showOverlayFor(id); } e{}
+  };
 
   host.appendChild(div); captionDomById.set(id, div);
-  try{ div.scrollIntoView({block:'nearest'}); } /*__REMOVED_INLINE_CATCH__*/ /*e){}
+  try{ div.scrollIntoView({block:'nearest'}); } e{}
 }
 
 async function enrichRow(row){
   const token=getAccessToken(); let imageUrl='';
   if(row.imageFileId){
-    try{ imageUrl=await getFileThumbUrl(row.imageFileId, token, 512);} /*__REMOVED_INLINE_CATCH__*/ /*e){}
+    try{ imageUrl=await getFileThumbUrl(row.imageFileId, token, 512);} e{}
   }
   const enriched = { id:row.id, title:row.title, body:row.body, color:row.color, x:row.x, y:row.y, z:row.z, imageFileId:row.imageFileId, imageUrl };
   rowCache.set(row.id, enriched);
@@ -578,7 +589,7 @@ async function savePinToSheet(obj){
     const lower = currentHeaders.map(h=>h.toLowerCase());
     const hasTitle = lower.indexOf('title')>=0, hasBody = lower.indexOf('body')>=0, hasColor=lower.indexOf('color')>=0;
     if(!(hasTitle && hasBody && hasColor)) await putValues(currentSpreadsheetId, "'"+sheetTitle+"'!A1:Z1", [LOCIMYU_HEADERS], token);
-  } /*__REMOVED_INLINE_CATCH__*/ /*e){}
+  } e{}
   await appendValues(currentSpreadsheetId, range, [[id,title,body,color,x,y,z,imageFileId]], token);
 }
 async function ensureIndex(){
@@ -679,7 +690,7 @@ async function loadCaptionsFromSheet(){
       appendCaptionItem(enriched);
     }
     await ensureIndex();
-  } /*__REMOVED_INLINE_CATCH__*/ /*e){ console.warn('[loadCaptionsFromSheet] failed', e); }
+  } e{ console.warn('[loadCaptionsFromSheet] failed', e); }
 }; for (let i=0;i<currentHeaders.length;i++){ currentHeaderIdx[currentHeaders[i].toLowerCase()] = i; }
     function idx(n){ return (currentHeaderIdx[n]!=null)?currentHeaderIdx[n]:-1; }
     const iId=idx('id'), iTitle=idx('title'), iBody=idx('body'), iColor=idx('color'), iX=idx('x'), iY=idx('y'), iZ=idx('z'), iImg=idx('imagefileid');
@@ -728,9 +739,9 @@ async function refreshImagesGrid(){
           if (hint) hint.textContent = 'Attached to the selected caption.';
         });
         if (grid) grid.appendChild(btn);
-      } /*__REMOVED_INLINE_CATCH__*/ /*e){ console.warn('[thumb build failed]', e); }
+      } e{ console.warn('[thumb build failed]', e); }
     }
-  } /*__REMOVED_INLINE_CATCH__*/ /*e){
+  } e{
     if (s) s.textContent='Loading images failed';
     console.error('[refreshImagesGrid failed]', e);
   }
@@ -828,10 +839,10 @@ let __lm_deb;
         // update cache
         const cur = rowCache.get(selectedPinId) || {};
         rowCache.set(selectedPinId, { ...cur, title, body });
-      } /*__REMOVED_INLINE_CATCH__*/ /*e){ console.warn('[caption autosave failed]', e); }
+      } e){ console.warn('[caption autosave failed]', e); }
     }, 500);
   });
-});
+};
 
 // attach / detach UI
 (function(){
@@ -859,10 +870,10 @@ let __lm_deb;
         // update cache
         const cur = rowCache.get(selectedPinId) || {};
         rowCache.set(selectedPinId, { ...cur, imageFileId: '' });
-      } /*__REMOVED_INLINE_CATCH__*/ /*e){ console.warn('[detach image failed]', e); }
+      } e){ console.warn('[detach image failed]', e); }
     });
   }
-})();
+}();
 
 // When images-grid click attaches image (existing behavior), also update preview
 (function(){
@@ -879,9 +890,9 @@ let __lm_deb;
       const cur = rowCache.get(selectedPinId) || {};
       rowCache.set(selectedPinId, { ...cur, imageFileId: fid });
     (async()=>{ const url = await resolveThumbUrl(fid,256); if ($('currentImageThumb')) $('currentImageThumb').innerHTML = url ? `<img alt="attached" src="${url}">` : `<div class="placeholder">No Image</div>`; const liImg = document.querySelector(`#caption-list .caption-item[data-id="${CSS.escape(selectedPinId)}"] img`); if (liImg){ const u128 = await resolveThumbUrl(fid,128); if (u128) liImg.src = u128; } })();
-    } /*__REMOVED_INLINE_CATCH__*/ /*e){}
+    } e){}
   }, {capture:true});
-})();
+}();
 /* ===== end v6.7 injection ===== */
 console.log('[LociMyu ESM/CDN] boot overlay-edit+fixed-zoom build loaded');
 
@@ -894,7 +905,7 @@ console.log('[LociMyu ESM/CDN] boot overlay-edit+fixed-zoom build loaded');
     if (!item) return;
     if (e.target.closest && e.target.closest('.c-del')) return;
     const id = item.dataset.id;
-    try{ __lm_selectPin(id,'list'); } /*__REMOVED_INLINE_CATCH__*/ /*e){}
-    try{ showOverlayFor(id); } /*__REMOVED_INLINE_CATCH__*/ /*e){}
-  }, {capture:true});
-})();
+    try{ __lm_selectPin(id,'list'); } e){}
+    try{ showOverlayFor(id); } e){}
+  }, {capture:true};
+}();
