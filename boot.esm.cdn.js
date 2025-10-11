@@ -31,6 +31,30 @@ const signedSwitch = (signed) => {
 setupAuth($('auth-signin'), signedSwitch, { clientId: __LM_CLIENT_ID, apiKey: __LM_API_KEY, scopes: __LM_SCOPES });
 
 /* ---------------------------- Drive utils ---------------------------- */
+
+// --- Drive thumbnail helpers (Promise-safe) ---
+async function resolveThumbUrl(fileId, size = 256) {
+  try {
+    const token = getAccessToken && getAccessToken();
+    if (!fileId || !token) return '';
+    const metaUrl = `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?fields=thumbnailLink&supportsAllDrives=true`;
+    const res = await fetch(metaUrl, { headers: { Authorization: `Bearer ${token}` } });
+    if (!res.ok) return '';
+    const meta = await res.json();
+    if (!meta || !meta.thumbnailLink) return '';
+    return meta.thumbnailLink.replace(/=s\d+(?:-c)?$/, `=s${size}-c`);
+  } catch(e){ console.warn('[thumb resolve failed]', e); return ''; }
+}
+
+function buildFileBlobUrl(fileId) {
+  try {
+    const token = getAccessToken && getAccessToken();
+    if (!fileId || !token) return '';
+    return `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?alt=media&supportsAllDrives=true&access_token=${encodeURIComponent(token)}`;
+  } catch(e){ return ''; }
+}
+
+
 function extractDriveId(v){
   if (!v) return null;
   const s = String(v).trim();
@@ -305,8 +329,8 @@ onRenderTick(() => { overlays.forEach((_, id) => updateOverlayPosition(id, false
 function showOverlayFor(id){
   const d = rowCache.get(id); if (!d) return;
   __lm_markListSelected(id);
+  try{ setPinSelected(id, true); }catch(e){}
   createCaptionOverlay(id, d);
-  setPinSelected(id, true);
 }
 /* ----------------------- Pin selection & add ------------------------ */
 onPinSelect((id)=>{ if (!id) return; try{ __lm_selectPin(id,'viewer'); }catch(e){} try{ if (typeof showOverlayFor==='function') showOverlayFor(id); }catch(e){} });
@@ -608,11 +632,47 @@ async function updateCaptionForPin(id, args){
   }
 }
 async function deleteCaptionForPin(id){
-  const token=getAccessToken(); if(!token||!currentSpreadsheetId||!currentSheetId) return;
-  if (!captionsIndex.size) await ensureIndex();
-  const hit=captionsIndex.get(id); if(!hit) throw new Error('row not found');
-  const r = await fetch('https://sheets.googleapis.com/v4/spreadsheets/'+encodeURIComponent(currentSpreadsheetId)+':batchUpdate', {
-    method:'POST', headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},
+  const token = getAccessToken && getAccessToken();
+  if (!token || !currentSpreadsheetId) throw new Error('no auth');
+  if (typeof ensureIndex === 'function') await ensureIndex();
+  const rowIndex = captionsIndex && captionsIndex.get ? captionsIndex.get(id) : null;
+
+  if (rowIndex == null) {
+    // fallback: clear row data via updateCaptionForPin
+    try{ await updateCaptionForPin(id, { title: '', body: '', color: '', imageFileId: '' }); }catch(e){}
+  } else {
+    // delete row via batchUpdate
+    let sheetId = currentSheetId;
+    if (typeof sheetId !== 'number') {
+      const meta = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(currentSpreadsheetId)}?fields=sheets.properties`, {
+        headers: { Authorization: `Bearer ${token}` }
+      }).then(r=>r.json());
+      const found = (meta.sheets||[]).map(s=>s.properties).find(p=>p.title===currentSheetName);
+      if (!found) throw new Error('sheet not found');
+      sheetId = currentSheetId = found.sheetId;
+    }
+    const req = { requests: [{ deleteDimension: { range: { sheetId, dimension: 'ROWS', startIndex: rowIndex, endIndex: rowIndex+1 } } }] };
+    const resp = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(currentSpreadsheetId)}:batchUpdate`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify(req)
+    });
+    if (!resp.ok) console.warn('deleteDimension failed', await resp.text());
+
+    // shift local index
+    if (captionsIndex && captionsIndex.delete) {
+      captionsIndex.delete(id);
+      const updated = new Map();
+      for (const [k,v] of captionsIndex.entries()) updated.set(k, v > rowIndex ? v-1 : v);
+      captionsIndex.clear(); updated.forEach((v,k)=>captionsIndex.set(k,v));
+    }
+  }
+
+  // local removals
+  if (rowCache && rowCache.delete) rowCache.delete(id);
+  const el = document.querySelector(`#caption-list .caption-item[data-id="${CSS.escape(id)}"]`);
+  if (el) el.remove();
+  try{ removePinMarker(id); }catch(e){}
+  try{ removeCaptionOverlay(id); }catch(e){}  
+},
     body: JSON.stringify({ requests: [{ deleteDimension: { range: { sheetId: currentSheetId, dimension: 'ROWS', startIndex: hit.rowIndex-1, endIndex: hit.rowIndex } } }] })
   });
   if (!r.ok) throw new Error('delete row '+r.status);
@@ -706,12 +766,18 @@ function __lm_markListSelected(id){
 }
 
 function __lm_fillFormFromCaption(obj){
-  const ti = $('caption-title'); const bo = $('caption-body'); const th = $('currentImageThumb');
-  if (!ti || !bo || !th) return;
-  ti.value = (obj && obj.title) ? String(obj.title) : '';
-  bo.value = (obj && obj.body)  ? String(obj.body)  : '';
-  if (obj && obj.imageFileId){
-    th.innerHTML = `<img alt="attached" src="${getFileThumbUrl(obj.imageFileId, getAccessToken(), 256)}">`;
+  const ti=$('caption-title'), bo=$('caption-body'), th=$('currentImageThumb');
+  if (ti) ti.value = (obj && obj.title) ? String(obj.title) : '';
+  if (bo) bo.value = (obj && obj.body)  ? String(obj.body)  : '';
+  if (!th) return;
+  th.innerHTML = `<div class="placeholder">No Image</div>`;
+  const fid = obj && obj.imageFileId;
+  if (!fid) return;
+  (async () => {
+    const url = await resolveThumbUrl(fid, 256);
+    if (url) th.innerHTML = `<img alt="attached" src="${url}">`;
+  })();
+}">`;
   } else {
     th.innerHTML = `<div class="placeholder">No Image</div>`;
   }
@@ -813,18 +879,21 @@ let __lm_deb;
 (function(){
   const g = $('images-grid'); if (!g) return;
   g.addEventListener('click', (e)=>{
-    const btn = e.target && e.target.closest ? e.target.closest('.thumb[data-id]') : null;
-    if (!btn || !selectedPinId) return;
-    const fid = btn.dataset.id;
-    // Preview
-    try{
-      $('currentImageThumb').innerHTML = `<img alt="attached" src="${getFileThumbUrl(fid, getAccessToken(), 256)}">`;
-      const liImg = document.querySelector(`#caption-list .caption-item[data-id="${CSS.escape(selectedPinId)}"] img`);
-      if (liImg) liImg.src = getFileThumbUrl(fid, getAccessToken(), 128);
-      const cur = rowCache.get(selectedPinId) || {};
-      rowCache.set(selectedPinId, { ...cur, imageFileId: fid });
-    }catch(e){}
-  }, {capture:true});
+  const btn = e.target && e.target.closest ? e.target.closest('.thumb[data-id]') : null;
+  if (!btn || !selectedPinId) return;
+  const fid = btn.dataset.id;
+  (async () => {
+    const url = await resolveThumbUrl(fid, 256);
+    if ($('currentImageThumb')) $('currentImageThumb').innerHTML = url ? `<img alt="attached" src="${url}">` : `<div class="placeholder">No Image</div>`;
+    const liImg = document.querySelector(`#caption-list .caption-item[data-id="${CSS.escape(selectedPinId)}"] img`);
+    if (liImg) {
+      const u128 = await resolveThumbUrl(fid, 128);
+      if (u128) liImg.src = u128;
+    }
+    const cur = rowCache.get(selectedPinId) || {};
+    rowCache.set(selectedPinId, { ...cur, imageFileId: fid });
+  })();
+}, {capture:true});
 })();
 /* ===== end v6.7 injection ===== */
 console.log('[LociMyu ESM/CDN] boot overlay-edit+fixed-zoom build loaded');
