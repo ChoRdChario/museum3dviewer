@@ -179,10 +179,9 @@ function createCaptionOverlay(id, data){
     b.style.border='none'; b.style.background='transparent'; b.style.color='#ddd'; b.style.cursor='pointer';
     return b;
   }
-  const bEdit  = mkBtn('✎', 'cap-edit', '編集');
   const bDel   = mkBtn('🗑', 'cap-del', '削除');
   const bClose = mkBtn('×',  'cap-close', '閉じる');
-  topbar.appendChild(bEdit); topbar.appendChild(bDel); topbar.appendChild(bClose);
+   topbar.appendChild(bDel); topbar.appendChild(bClose);
 
   const t = document.createElement('div'); t.className='cap-title'; t.style.fontWeight='700'; t.style.marginBottom='6px';
   const body = document.createElement('div'); body.className='cap-body'; body.style.fontSize='12px'; body.style.opacity='.95'; body.style.whiteSpace='pre-wrap'; body.style.marginBottom='6px';
@@ -485,10 +484,8 @@ if ($('save-target-create')) $('save-target-create').addEventListener('click', a
 });
 
 function clearCaptionList(){ const host=$('caption-list'); if (host) host.innerHTML=''; captionDomById.clear(); }
-function appendCaptionItem(args){
-  const id = args.id, title=args.title, body=args.body, color=args.color, imageUrl=args.imageUrl;
-  const host=$('caption-list'); if (!host) return;
-  const div=document.createElement('div'); div.className='caption-item'; div.dataset.id=id;
+\1
+  if (args.imageFileId) div.dataset.imageFileId = args.imageFileId;
 
   const safeTitle=(title||'').trim()||'(untitled)';
   const safeBody=(body||'').trim()||'(no description)';
@@ -505,7 +502,7 @@ function appendCaptionItem(args){
   // 選択状態のUI
   div.addEventListener('click', (e)=>{
     if (e.target && e.target.closest && e.target.closest('.c-del')) return;
-    selectedPinId=id; showOverlayFor(id);
+    __lm_selectPin(id, 'list');
   });
 
   // 個別削除
@@ -667,4 +664,139 @@ async function refreshImagesGrid(){
   }catch(e){ if (s) s.textContent = 'Error: '+e.message; }
 }
 
+
+/* ===== v6.7 selection + form editing & attach/detach ===== */
+function __lm_markListSelected(id){
+  const host = $('caption-list'); if (!host) return;
+  host.querySelectorAll('.caption-item.is-selected,[aria-selected="true"]').forEach(el=>{
+    el.classList.remove('is-selected'); el.removeAttribute('aria-selected');
+  });
+  if (!id) return;
+  const li = host.querySelector(`.caption-item[data-id="${CSS.escape(id)}"]`);
+  if (li){ li.classList.add('is-selected'); li.setAttribute('aria-selected','true'); li.scrollIntoView({block:'nearest'}); }
+}
+
+function __lm_fillFormFromCaption(obj){
+  const ti = $('caption-title'); const bo = $('caption-body'); const th = $('currentImageThumb');
+  if (!ti || !bo || !th) return;
+  ti.value = (obj && obj.title) ? String(obj.title) : '';
+  bo.value = (obj && obj.body)  ? String(obj.body)  : '';
+  if (obj && obj.imageFileId){
+    th.innerHTML = `<img alt="attached" src="${getFileThumbUrl(obj.imageFileId, getAccessToken(), 256)}">`;
+  } else {
+    th.innerHTML = `<div class="placeholder">No Image</div>`;
+  }
+}
+
+function __lm_getCaptionDataById(id){
+  // We can reconstruct from current DOM and cache rowCache if present
+  const li = document.querySelector(`#caption-list .caption-item[data-id="${CSS.escape(id)}"]`);
+  if (!li) return null;
+  const titleEl = li.querySelector('.c-title'); const bodyEl = li.querySelector('.c-body');
+  const thumb = li.querySelector('img');
+  const imageFileId = (li.dataset.imageFileId || '');
+  return { id, title: titleEl ? titleEl.textContent : '', body: bodyEl ? bodyEl.textContent : '', imageFileId };
+}
+
+function __lm_selectPin(id, source='unknown'){
+  selectedPinId = id;
+  setPinSelected(id, true);
+  __lm_markListSelected(id);
+  const obj = rowCache.get(id) || __lm_getCaptionDataById(id);
+  __lm_fillFormFromCaption(obj);
+  // focus title for quick edit when coming from viewer
+  if (source === 'viewer') { $('caption-title')?.focus(); }
+}
+
+// viewer -> selection
+onPinSelect((id)=>{ if (id) __lm_selectPin(id, 'viewer'); });
+
+// list -> selection (augment existing handler by also syncing the form)
+(function(){
+  const host = $('caption-list');
+  if (!host) return;
+  host.addEventListener('click', (e)=>{
+    const item = e.target && e.target.closest ? e.target.closest('.caption-item[data-id]') : null;
+    if (!item) return;
+    // keep existing delete handler functional
+    if (e.target.closest && e.target.closest('.c-del')) return;
+    __lm_selectPin(item.dataset.id, 'list');
+  }, {capture:true});
+})();
+
+// form -> update (debounced)
+let __lm_deb;
+['caption-title','caption-body'].forEach(id=>{
+  const el = $(id); if (!el) return;
+  el.addEventListener('input', ()=>{
+    if (!selectedPinId) return;
+    clearTimeout(__lm_deb);
+    __lm_deb = setTimeout(async ()=>{
+      const title = $('caption-title').value.trim();
+      const body  = $('caption-body').value.trim();
+      try{
+        await updateCaptionForPin(selectedPinId, { title, body });
+        // reflect to list item
+        const li = document.querySelector(`#caption-list .caption-item[data-id="${CSS.escape(selectedPinId)}"]`);
+        if (li){
+          li.querySelector('.c-title').textContent = title || '(untitled)';
+          const bEl = li.querySelector('.c-body'); if (bEl) bEl.textContent = body || '(no description)';
+        }
+        // update cache
+        const cur = rowCache.get(selectedPinId) || {};
+        rowCache.set(selectedPinId, { ...cur, title, body });
+      }catch(e){ console.warn('[caption autosave failed]', e); }
+    }, 500);
+  });
+});
+
+// attach / detach UI
+(function(){
+  const attach = $('btnAttachImage');
+  const detach = $('btnDetachImage');
+  const grid   = $('images-grid');
+  const hint   = $('images-status');
+  if (attach){
+    attach.addEventListener('click', ()=>{
+      if (!selectedPinId){ alert('キャプションを選択してください'); return; }
+      // Scroll images grid into view and hint the user to select a thumbnail
+      grid?.scrollIntoView({behavior:'smooth', block:'nearest'});
+      if (hint) hint.textContent = '画像を選ぶと選択キャプションに添付されます。';
+    });
+  }
+  if (detach){
+    detach.addEventListener('click', async ()=>{
+      if (!selectedPinId){ alert('キャプションを選択してください'); return; }
+      try{
+        await updateImageForPin(selectedPinId, '');
+        // Update preview
+        $('currentImageThumb').innerHTML = '<div class="placeholder">No Image</div>';
+        const li = document.querySelector(`#caption-list .caption-item[data-id="${CSS.escape(selectedPinId)}"] img`);
+        if (li) li.src = '';
+        // update cache
+        const cur = rowCache.get(selectedPinId) || {};
+        rowCache.set(selectedPinId, { ...cur, imageFileId: '' });
+      }catch(e){ console.warn('[detach image failed]', e); }
+    });
+  }
+})();
+
+// When images-grid click attaches image (existing behavior), also update preview
+(function(){
+  const g = $('images-grid'); if (!g) return;
+  g.addEventListener('click', (e)=>{
+    const btn = e.target && e.target.closest ? e.target.closest('.thumb[data-id]') : null;
+    if (!btn || !selectedPinId) return;
+    const fid = btn.dataset.id;
+    // Preview
+    try{
+      $('currentImageThumb').innerHTML = `<img alt="attached" src="${getFileThumbUrl(fid, getAccessToken(), 256)}">`;
+      const liImg = document.querySelector(`#caption-list .caption-item[data-id="${CSS.escape(selectedPinId)}"] img`);
+      if (liImg) liImg.src = getFileThumbUrl(fid, getAccessToken(), 128);
+      const cur = rowCache.get(selectedPinId) || {};
+      rowCache.set(selectedPinId, { ...cur, imageFileId: fid });
+    }catch(e){}
+  }, {capture:true});
+})();
+/* ===== end v6.7 injection ===== */
 console.log('[LociMyu ESM/CDN] boot overlay-edit+fixed-zoom build loaded');

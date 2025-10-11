@@ -66,3 +66,21 @@ body{
 .panel-section.active{ display:block; }
 
 .muted{ color:var(--muted); font-size:13px; }
+
+/* --- LociMyu v6.7: caption list selection & image row --- */
+#caption-list .caption-item.is-selected,
+#caption-list .caption-item[aria-selected="true"]{
+  background: rgba(255,255,255,0.06);
+  border-left: 3px solid var(--acc);
+}
+#caption-image-row{
+  display:flex; gap:10px; align-items:center; margin-top:8px;
+}
+#currentImageThumb{
+  width:56px; height:56px; border-radius:8px; border:1px solid var(--border);
+  display:flex; align-items:center; justify-content:center; overflow:hidden;
+  background:#0b0f18;
+}
+#currentImageThumb img{ width:100%; height:100%; object-fit:cover; display:block; }
+#currentImageThumb .placeholder{ font-size:11px; color:var(--muted); }
+
