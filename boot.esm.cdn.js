@@ -483,35 +483,8 @@ if ($('save-target-create')) $('save-target-create').addEventListener('click', a
   await populateSheetTabs(currentSpreadsheetId, token); await loadCaptionsFromSheet();
 });
 
-
-function appendCaptionItem(row){
-  const host = $('caption-list'); if (!host || !row) return;
-  const id = row.id;
-  const div = document.createElement('div');
-  div.dataset.id = id;
-  div.className = (row.className || 'caption-item');
-  if (row.imageFileId) div.dataset.imageFileId = row.imageFileId;
-  const t = document.createElement('div'); t.className='c-title'; t.textContent=(row.title||'(untitled)');
-  const b = document.createElement('div'); b.className='c-body hint'; b.textContent=(row.body||'(no description)');
-  div.appendChild(t); div.appendChild(b);
-  const del = document.createElement('button'); del.className='c-del'; del.title='Delete'; del.textContent='🗑';
-  del.addEventListener('click', async (e)=>{
-    e.stopPropagation();
-    if (!confirm('このキャプションを削除しますか？')) return;
-    try{
-      await deleteCaptionForPin(id);
-      removePinMarker(id);
-      div.remove(); captionDomById && captionDomById.delete && captionDomById.delete(id);
-      rowCache && rowCache.delete && rowCache.delete(id);
-      removeCaptionOverlay && removeCaptionOverlay(id);
-    }catch(err){ console.error('delete failed', err); alert('Delete failed'); }
-  });
-  div.appendChild(del);
-  host.appendChild(div);
-}
-
 function clearCaptionList(){ const host=$('caption-list'); if (host) host.innerHTML=''; captionDomById.clear(); }
-\1
+
   if (args.imageFileId) div.dataset.imageFileId = args.imageFileId;
 
   const safeTitle=(title||'').trim()||'(untitled)';
