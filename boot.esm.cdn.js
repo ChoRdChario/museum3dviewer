@@ -303,9 +303,12 @@ function updateOverlayPosition(id, initial){
 }
 onRenderTick(() => { overlays.forEach((_, id) => updateOverlayPosition(id, false)); });
 function showOverlayFor(id){
-  const d=rowCache.get(id); if(!d) return;
-  // リスト強調表示
-  for (const [cid, el] of captionDomById.entries()){ el.classList.toggle('selected', cid===id); }
+  const d = rowCache.get(id); if (!d) return;
+  __lm_markListSelected(id);
+  createCaptionOverlay(id, d);
+  setPinSelected(id, true);
+}
+
   createCaptionOverlay(id, d);
   setPinSelected(id, true);
 }
@@ -645,6 +648,20 @@ async function loadCaptionsFromSheet(){
   } catch(e){ console.warn('[loadCaptionsFromSheet] failed', e); }
 }
 
+
+/* __LM_LIST_CLICK_BOUND__ */
+(function(){
+  const host = $('caption-list'); if (!host) return;
+  if (host.dataset.lmClickBound) return; host.dataset.lmClickBound = '1';
+  host.addEventListener('click', (e)=>{
+    const item = (e.target && e.target.closest) ? e.target.closest('.caption-item[data-id], [data-id]') : null;
+    if (!item) return;
+    if (e.target.closest && e.target.closest('.c-del')) return;
+    const id = item.dataset.id;
+    try{ __lm_selectPin(id,'list'); }catch(e){}
+    try{ showOverlayFor(id); }catch(e){}
+  }, {capture:true});
+})();
 /* --------------------------- Images UX --------------------------- */
 if ($('btnRefreshImages')) $('btnRefreshImages').addEventListener('click', refreshImagesGrid);
 async function refreshImagesGrid(){
