@@ -308,11 +308,6 @@ function showOverlayFor(id){
   createCaptionOverlay(id, d);
   setPinSelected(id, true);
 }
-
-  createCaptionOverlay(id, d);
-  setPinSelected(id, true);
-}
-
 /* ----------------------- Pin selection & add ------------------------ */
 onPinSelect((id)=>{ if (!id) return; try{ __lm_selectPin(id,'viewer'); }catch(e){} try{ if (typeof showOverlayFor==='function') showOverlayFor(id); }catch(e){} });
 onCanvasShiftPick(async (pt) => {
