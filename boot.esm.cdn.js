@@ -311,7 +311,7 @@ function showOverlayFor(id){
 }
 
 /* ----------------------- Pin selection & add ------------------------ */
-onPinSelect((id)=>{ if (id) __lm_selectPin(id,'viewer'); });
+onPinSelect((id)=>{ if (!id) return; try{ __lm_selectPin(id,'viewer'); }catch(e){} try{ if (typeof showOverlayFor==='function') showOverlayFor(id); }catch(e){} });
 onCanvasShiftPick(async (pt) => {
   const titleEl = $('caption-title');
   const bodyEl  = $('caption-body');
@@ -507,13 +507,14 @@ function appendCaptionItem(row){
   const b   = document.createElement('div'); b.className = 'c-body';  b.classList.add('hint'); b.textContent = safeBody;
   txt.appendChild(t); txt.appendChild(b); div.appendChild(txt);
 
-  // selection behavior
+  // selection behavior: select + open overlay
   div.addEventListener('click', (e)=>{
     if (e.target && e.target.closest && e.target.closest('.c-del')) return;
-    __lm_selectPin(id, 'list');
+    try{ __lm_selectPin(id, 'list'); }catch(e){}
+    try{ if (typeof showOverlayFor==='function') showOverlayFor(id); }catch(e){}
   });
 
-  // delete button
+  // per-item delete button
   const del = document.createElement('button'); del.className='c-del'; del.title='Delete'; del.textContent='🗑';
   del.addEventListener('click', async (e)=>{
     e.stopPropagation();
@@ -530,6 +531,8 @@ function appendCaptionItem(row){
   host.appendChild(div); captionDomById.set(id, div);
   try{ div.scrollIntoView({block:'nearest'}); }catch(e){}
 }
+
+
 async function enrichRow(row){
   const token=getAccessToken(); let imageUrl='';
   if(row.imageFileId){
