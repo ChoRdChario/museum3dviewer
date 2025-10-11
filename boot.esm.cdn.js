@@ -483,7 +483,22 @@ if ($('save-target-create')) $('save-target-create').addEventListener('click', a
   await populateSheetTabs(currentSpreadsheetId, token); await loadCaptionsFromSheet();
 });
 
-function clearCaptionList(){ const host=$('caption-list'); if (host) host.innerHTML=''; captionDomById.clear(); }
+function clearC
+
+// robust list click delegation (works with any [data-id] item)
+(function(){
+  const host = $('caption-list'); if (!host) return;
+  host.addEventListener('click', (e)=>{
+    const item = (e.target && e.target.closest) ? e.target.closest('[data-id]') : null;
+    if (!item) return;
+    if (e.target.closest && e.target.closest('.c-del')) return;
+    const id = item.dataset.id;
+    try{ __lm_selectPin(id,'list'); }catch(e){}
+    try{ if (typeof showOverlayFor==='function') showOverlayFor(id); }catch(e){}
+  }, {capture:true});
+})();
+
+aptionList(){ const host=$('caption-list'); if (host) host.innerHTML=''; captionDomById.clear(); }
 
 function appendCaptionItem(row){
   const host = $('caption-list'); if (!host || !row) return;
@@ -507,14 +522,14 @@ function appendCaptionItem(row){
   const b   = document.createElement('div'); b.className = 'c-body';  b.classList.add('hint'); b.textContent = safeBody;
   txt.appendChild(t); txt.appendChild(b); div.appendChild(txt);
 
-  // selection behavior: select + open overlay
+  // selection behavior: select + open overlay + highlight + form sync
   div.addEventListener('click', (e)=>{
     if (e.target && e.target.closest && e.target.closest('.c-del')) return;
     try{ __lm_selectPin(id, 'list'); }catch(e){}
     try{ if (typeof showOverlayFor==='function') showOverlayFor(id); }catch(e){}
   });
 
-  // per-item delete button
+  // delete button
   const del = document.createElement('button'); del.className='c-del'; del.title='Delete'; del.textContent='🗑';
   del.addEventListener('click', async (e)=>{
     e.stopPropagation();
