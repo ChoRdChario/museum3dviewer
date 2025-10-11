@@ -653,6 +653,36 @@ async function loadCaptionsFromSheet(){
     currentHeaders = values[0].map(v => (v||'').toString().trim());
     currentHeaderIdx = {};
     for (let i=0;i<currentHeaders.length;i++){ currentHeaderIdx[currentHeaders[i].toLowerCase()] = i; }
+    const idx = (n)=>{ const k=(n||'').toLowerCase(); return (currentHeaderIdx[k]!=null)?currentHeaderIdx[k]:-1; };
+    const iId=idx('id'), iTitle=idx('title'), iBody=idx('body'), iColor=idx('color'),
+          iX=idx('x'), iY=idx('y'), iZ=idx('z'), iImg=idx('imagefileid');
+
+    for (let r=1; r<values.length; r++){
+      const row = values[r] || [];
+      const data = {
+        id: (row[iId]||uid()),
+        title: row[iTitle]||'',
+        body: row[iBody]||'',
+        color: row[iColor]||'#ff6b6b',
+        x: Number(row[iX]||0),
+        y: Number(row[iY]||0),
+        z: Number(row[iZ]||0),
+        imageFileId: row[iImg]||''
+      };
+      addPinMarker({ id: data.id, x: data.x, y: data.y, z: data.z, color: data.color });
+      const enriched = await enrichRow(data);
+      appendCaptionItem(enriched);
+    }
+    await ensureIndex();
+  } catch(e){
+    console.warn('[loadCaptionsFromSheet] failed', e);
+  }
+}'!A1:Z9999`;
+    const values = await getValues(currentSpreadsheetId, range, token);
+    if (!values || !values.length) return;
+    currentHeaders = values[0].map(v => (v||'').toString().trim());
+    currentHeaderIdx = {};
+    for (let i=0;i<currentHeaders.length;i++){ currentHeaderIdx[currentHeaders[i].toLowerCase()] = i; }
     function idx(n){ const k=(n||'').toLowerCase(); return (currentHeaderIdx[k]!=null)?currentHeaderIdx[k]:-1; }
     const iId=idx('id'), iTitle=idx('title'), iBody=idx('body'), iColor=idx('color'),
           iX=idx('x'), iY=idx('y'), iZ=idx('z'), iImg=idx('imagefileid');
@@ -674,38 +704,8 @@ async function loadCaptionsFromSheet(){
       appendCaptionItem(enriched);
     }
     await ensureIndex();
-  } catch(e){ console.warn('[loadCaptionsFromSheet] failed', e); }
-}; for (let i=0;i<currentHeaders.length;i++){ currentHeaderIdx[currentHeaders[i].toLowerCase()] = i; }
-    function idx(n){ return (currentHeaderIdx[n]!=null)?currentHeaderIdx[n]:-1; }
-    const iId=idx('id'), iTitle=idx('title'), iBody=idx('body'), iColor=idx('color'), iX=idx('x'), iY=idx('y'), iZ=idx('z'), iImg=idx('imagefileid');
-    for (let r=1; r<values.length; r++){
-      const row=values[r]||[];
-      const data = {
-        id: (row[iId]||uid()), title: row[iTitle]||'', body: row[iBody]||'', color: row[iColor]||'#ff6b6b',
-        x: Number(row[iX]||0), y: Number(row[iY]||0), z: Number(row[iZ]||0), imageFileId: row[iImg]||''
-      };
-      addPinMarker({ id: data.id, x: data.x, y: data.y, z: data.z, color: data.color });
-      const enriched = await enrichRow(data);
-      appendCaptionItem(enriched);
-    }
-    await ensureIndex();
-  } catch(e){ console.warn('[loadCaptionsFromSheet] failed', e); }
+} //__FIX__: removed malformed catch
 }
-
-
-/* __LM_LIST_CLICK_BOUND__ */
-(function(){
-  const host = $('caption-list'); if (!host) return;
-  if (host.dataset.lmClickBound) return; host.dataset.lmClickBound = '1';
-  host.addEventListener('click', (e)=>{
-    const item = (e.target && e.target.closest) ? e.target.closest('.caption-item[data-id], [data-id]') : null;
-    if (!item) return;
-    if (e.target.closest && e.target.closest('.c-del')) return;
-    const id = item.dataset.id;
-    try{ __lm_selectPin(id,'list'); }catch(e){}
-    try{ showOverlayFor(id); }catch(e){}
-  }, {capture:true});
-})();
 /* --------------------------- Images UX --------------------------- */
 if ($('btnRefreshImages')) $('btnRefreshImages').addEventListener('click', refreshImagesGrid);
 async function refreshImagesGrid(){
@@ -759,17 +759,12 @@ function __lm_fillFormFromCaption(obj){
   if (ti) ti.value = (obj && obj.title) ? String(obj.title) : '';
   if (bo) bo.value = (obj && obj.body)  ? String(obj.body)  : '';
   if (!th) return;
-  th.innerHTML = `<div class="placeholder">No Image</div>`;
   const fid = obj && obj.imageFileId;
-  if (!fid) return;
+  if (!fid) { th.innerHTML = `<div class="placeholder">No Image</div>`; return; }
   (async () => {
     const url = await resolveThumbUrl(fid, 256);
-    if (url) th.innerHTML = `<img alt="attached" src="${url}">`;
+    th.innerHTML = url ? `<img alt="attached" src="${url}">` : `<div class="placeholder">No Image</div>`;
   })();
-}">`;
-  } else {
-    th.innerHTML = `<div class="placeholder">No Image</div>`;
-  }
 }
 
 function __lm_getCaptionDataById(id){
