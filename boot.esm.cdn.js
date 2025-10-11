@@ -232,7 +232,7 @@ function createCaptionOverlay(id, data){
       body.textContent = (cur.body  || '').trim() || '(no description)';
     }
   }
-
+  bEdit.addEventListener('click', () => { if (editing) exitEdit(true); else enterEdit(); });
   t.addEventListener('dblclick', enterEdit);
   body.addEventListener('dblclick', enterEdit);
   t.addEventListener('keydown', (e)=>{ if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); exitEdit(true);} });
@@ -311,7 +311,7 @@ function showOverlayFor(id){
 }
 
 /* ----------------------- Pin selection & add ------------------------ */
-onPinSelect((id) => { selectedPinId = id; showOverlayFor(id); });
+onPinSelect((id)=>{ if (id) __lm_selectPin(id,'viewer'); });
 onCanvasShiftPick(async (pt) => {
   const titleEl = $('caption-title');
   const bodyEl  = $('caption-body');
@@ -483,56 +483,72 @@ if ($('save-target-create')) $('save-target-create').addEventListener('click', a
   await populateSheetTabs(currentSpreadsheetId, token); await loadCaptionsFromSheet();
 });
 
+
+function appendCaptionItem(row){
+  const host = $('caption-list'); if (!host || !row) return;
+  const id = row.id;
+  const div = document.createElement('div');
+  div.dataset.id = id;
+  div.className = (row.className || 'caption-item');
+  if (row.imageFileId) div.dataset.imageFileId = row.imageFileId;
+  const t = document.createElement('div'); t.className='c-title'; t.textContent=(row.title||'(untitled)');
+  const b = document.createElement('div'); b.className='c-body hint'; b.textContent=(row.body||'(no description)');
+  div.appendChild(t); div.appendChild(b);
+  const del = document.createElement('button'); del.className='c-del'; del.title='Delete'; del.textContent='🗑';
+  del.addEventListener('click', async (e)=>{
+    e.stopPropagation();
+    if (!confirm('このキャプションを削除しますか？')) return;
+    try{
+      await deleteCaptionForPin(id);
+      removePinMarker(id);
+      div.remove(); captionDomById && captionDomById.delete && captionDomById.delete(id);
+      rowCache && rowCache.delete && rowCache.delete(id);
+      removeCaptionOverlay && removeCaptionOverlay(id);
+    }catch(err){ console.error('delete failed', err); alert('Delete failed'); }
+  });
+  div.appendChild(del);
+  host.appendChild(div);
+}
+
 function clearCaptionList(){ const host=$('caption-list'); if (host) host.innerHTML=''; captionDomById.clear(); }
+\1
+  if (args.imageFileId) div.dataset.imageFileId = args.imageFileId;
 
-    function appendCaptionItem(row){
-      const host = $('caption-list');
-      if (!host || !row) return;
-      const id = row.id, title = row.title, body = row.body, color = row.color, imageUrl = row.imageUrl || '';
-      const div = document.createElement('div');
-      div.className = 'caption-item';
-      div.dataset.id = id;
-      if (row.imageFileId) div.dataset.imageFileId = row.imageFileId;
-      // left color bar
-      div.style.borderLeft = '3px solid ' + (color || '#94a3b8');
+  const safeTitle=(title||'').trim()||'(untitled)';
+  const safeBody=(body||'').trim()||'(no description)';
 
-      const safeTitle = (title||'').trim() || '(untitled)';
-      const safeBody  = (body ||'').trim() || '(no description)';
+  if (imageUrl){
+    const img=document.createElement('img'); img.src=imageUrl; img.alt='';
+    div.appendChild(img);
+  }
+  const txt=document.createElement('div'); txt.className='cap-txt';
+  const t=document.createElement('div'); t.className='c-title'; t.textContent=safeTitle;
+  const b=document.createElement('div'); b.className='c-body';  b.classList.add('hint'); b.textContent=safeBody;
+  txt.appendChild(t); txt.appendChild(b); div.appendChild(txt);
 
-      if (imageUrl){
-        const img = document.createElement('img'); img.src = imageUrl; img.alt = '';
-        div.appendChild(img);
-      }
-      const txt = document.createElement('div'); txt.className = 'cap-txt';
-      const t   = document.createElement('div'); t.className = 'c-title'; t.textContent = safeTitle;
-      const b   = document.createElement('div'); b.className = 'c-body';  b.classList.add('hint'); b.textContent = safeBody;
-      txt.appendChild(t); txt.appendChild(b); div.appendChild(txt);
+  // 選択状態のUI
+  div.addEventListener('click', (e)=>{
+    if (e.target && e.target.closest && e.target.closest('.c-del')) return;
+    __lm_selectPin(id, 'list');
+  });
 
-      // selection behavior: highlight + sync form
-      div.addEventListener('click', (e)=>{
-        if (e.target && e.target.closest && e.target.closest('.c-del')) return;
-        __lm_selectPin(id, 'list');
-      });
+  // 個別削除
+  const del=document.createElement('button'); del.className='c-del'; del.title='Delete'; del.textContent='🗑';
+  del.addEventListener('click', async (e)=>{
+    e.stopPropagation();
+    if (!confirm('このキャプションを削除しますか？')) return;
+    try{
+      await deleteCaptionForPin(id);
+      removePinMarker(id);
+      div.remove(); captionDomById.delete(id); rowCache.delete(id);
+      removeCaptionOverlay(id);
+    }catch(err){ console.error('delete failed', err); alert('Delete failed'); }
+  });
+  div.appendChild(del);
 
-      // per-item delete button (kept as in current UX)
-      const del = document.createElement('button'); del.className='c-del'; del.title='Delete'; del.textContent='🗑';
-      del.addEventListener('click', async (e)=>{
-        e.stopPropagation();
-        if (!confirm('このキャプションを削除しますか？')) return;
-        try{
-          await deleteCaptionForPin(id);
-          removePinMarker(id);
-          div.remove(); captionDomById.delete(id); rowCache.delete(id);
-          removeCaptionOverlay(id);
-        }catch(err){ console.error('delete failed', err); alert('Delete failed'); }
-      });
-      div.appendChild(del);
-
-      host.appendChild(div); captionDomById.set(id, div);
-      try{ div.scrollIntoView({block:'nearest'}); }catch(e){}
-    }
-    
-
+  host.appendChild(div); captionDomById.set(id, div);
+  try{ div.scrollIntoView({block:'nearest'}); }catch(e){}
+}
 async function enrichRow(row){
   const token=getAccessToken(); let imageUrl='';
   if(row.imageFileId){
@@ -739,8 +755,7 @@ onPinSelect((id)=>{ if (id) __lm_selectPin(id, 'viewer'); });
 let __lm_deb;
 ['caption-title','caption-body'].forEach(id=>{
   const el = $(id); if (!el) return;
-  el.addEventListener('input', ()=>{
-    if (!selectedPinId) return;
+  el.addEventListener('input', ()=>{ if (!selectedPinId) return; if (!(rowCache && rowCache.has && rowCache.has(selectedPinId))) return;
     clearTimeout(__lm_deb);
     __lm_deb = setTimeout(async ()=>{
       const title = $('caption-title').value.trim();
