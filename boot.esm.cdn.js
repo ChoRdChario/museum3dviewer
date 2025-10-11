@@ -608,24 +608,22 @@ async function updateImageForPin(id, imageFileId){
     if (full){ ov.imgEl.src = full; ov.imgEl.style.display='block'; }
   }
 }
-;
-  cached.imageFileId = imageFileId; rowCache.set(id, cached);
-  // list thumb
-  try{ const turl = await getFileThumbUrl(imageFileId, token, 1024); const dom = captionDomById.get(id); if (dom){ const i=dom.querySelector('img'); if(i) i.src=turl; else{ const im=document.createElement('img'); im.src=turl; dom.prepend(im);} } }catch(e){}
-  // overlay full-res (scaled)
-  try{ const full = await getFileBlobUrl(imageFileId, token); const ov=overlays.get(id); if(ov){ ov.imgEl.src=full; ov.imgEl.style.display='block'; } }catch(e){}
 async function updateCaptionForPin(id, args){
   const title = args.title; const body = args.body; const color = args.color;
-  const token=getAccessToken(); if(!token||!currentSpreadsheetId) return;
+  const token = getAccessToken(); if (!token || !currentSpreadsheetId) return;
   if (!captionsIndex.size) await ensureIndex();
-  const hit=captionsIndex.get(id); if(!hit) throw new Error('row not found');
+  const hit = captionsIndex.get(id); if (!hit) throw new Error('row not found');
   const st = currentSheetTitle || 'シート1';
   function col(name){ const i=(currentHeaderIdx[name]!=null)?currentHeaderIdx[name]:-1; return colA1(i); }
   const reqs = [];
-  if (typeof title === 'string' && currentHeaderIdx['title']!=null) reqs.push( putValues(currentSpreadsheetId, "'"+st+"'!"+col('title')+String(hit.rowIndex), [[title]], token) );
-  if (typeof body  === 'string' && currentHeaderIdx['body'] !=null) reqs.push( putValues(currentSpreadsheetId, "'"+st+"'!"+col('body') +String(hit.rowIndex), [[body ]], token) );
-  if (typeof color === 'string' && currentHeaderIdx['color']!=null) reqs.push( putValues(currentSpreadsheetId, "'"+st+"'!"+col('color')+String(hit.rowIndex), [[color]], token) );
+  if (typeof title === 'string' && currentHeaderIdx['title']!=null)
+    reqs.push( setValues(currentSpreadsheetId, `'${st}'!${col('title')}${String(hit.rowIndex)}`, [[title]], token) );
+  if (typeof body  === 'string' && currentHeaderIdx['body']!=null)
+    reqs.push( setValues(currentSpreadsheetId, `'${st}'!${col('body')}${String(hit.rowIndex)}`, [[body ]], token) );
+  if (typeof color === 'string' && currentHeaderIdx['color']!=null)
+    reqs.push( setValues(currentSpreadsheetId, `'${st}'!${col('color')}${String(hit.rowIndex)}`, [[color]], token) );
   await Promise.all(reqs);
+
   const cached = rowCache.get(id) || {};
   if (typeof title === 'string') cached.title = title;
   if (typeof body  === 'string') cached.body  = body;
@@ -651,12 +649,38 @@ async function deleteCaptionForPin(id){
 
 async function loadCaptionsFromSheet(){
   clearCaptionList(); clearPins(); rowCache.clear();
-  overlays.forEach((_,id)=>removeCaptionOverlay(id)); overlays.clear(); if (lineLayer) lineLayer.innerHTML='';
-  const token=getAccessToken(); if(!token||!currentSpreadsheetId||!currentSheetTitle) return;
+  overlays.forEach((_,id)=>removeCaptionOverlay(id)); overlays.clear();
+  if (lineLayer) lineLayer.innerHTML='';
+  const token = getAccessToken(); if (!token || !currentSpreadsheetId || !currentSheetTitle) return;
   try {
-    const values=await getValues(currentSpreadsheetId, "'"+currentSheetTitle+"'!A1:Z9999", token); if(!values.length) return;
-    currentHeaders = values[0].map(v=>(v||'').toString().trim());
-    currentHeaderIdx = {}; for (let i=0;i<currentHeaders.length;i++){ currentHeaderIdx[currentHeaders[i].toLowerCase()] = i; }
+    const range = `'${currentSheetTitle}'!A1:Z9999`;
+    const values = await getValues(currentSpreadsheetId, range, token);
+    if (!values || !values.length) return;
+    currentHeaders = values[0].map(v => (v||'').toString().trim());
+    currentHeaderIdx = {};
+    for (let i=0;i<currentHeaders.length;i++){ currentHeaderIdx[currentHeaders[i].toLowerCase()] = i; }
+    const idx=(n)=>{ const k=(n||'').toLowerCase(); return (currentHeaderIdx[k]!=null)?currentHeaderIdx[k]:-1; };
+    const iId=idx('id'), iTitle=idx('title'), iBody=idx('body'), iColor=idx('color'),
+          iX=idx('x'), iY=idx('y'), iZ=idx('z'), iImg=idx('imagefileid');
+    for (let r=1; r<values.length; r++){
+      const row = values[r] || [];
+      const data = {
+        id: (row[iId]||uid()),
+        title: row[iTitle]||'',
+        body: row[iBody]||'',
+        color: row[iColor]||'#ff6b6b',
+        x: Number(row[iX]||0),
+        y: Number(row[iY]||0),
+        z: Number(row[iZ]||0),
+        imageFileId: row[iImg]||''
+      };
+      addPinMarker({ id: data.id, x: data.x, y: data.y, z: data.z, color: data.color });
+      const enriched = await enrichRow(data);
+      appendCaptionItem(enriched);
+    }
+    await ensureIndex();
+  } catch(e){ console.warn('[loadCaptionsFromSheet] failed', e); }
+}; for (let i=0;i<currentHeaders.length;i++){ currentHeaderIdx[currentHeaders[i].toLowerCase()] = i; }
     function idx(n){ return (currentHeaderIdx[n]!=null)?currentHeaderIdx[n]:-1; }
     const iId=idx('id'), iTitle=idx('title'), iBody=idx('body'), iColor=idx('color'), iX=idx('x'), iY=idx('y'), iZ=idx('z'), iImg=idx('imagefileid');
     for (let r=1; r<values.length; r++){
@@ -670,15 +694,15 @@ async function loadCaptionsFromSheet(){
       appendCaptionItem(enriched);
     }
     await ensureIndex();
-  } catch(e){ console.warn('[loadCaptionsFromSheet] failed', e); }
-}
+   catch(e){ console.warn('[loadCaptionsFromSheet] failed', e); }
+
 
 /* --------------------------- Images UX --------------------------- */
 if ($('btnRefreshImages')) $('btnRefreshImages').addEventListener('click', refreshImagesGrid);
 async function refreshImagesGrid(){
   const token = getAccessToken();
   const fileId = lastGlbFileId || extractDriveId($('glbUrl')?$('glbUrl').value:'');
-  const s=$('images-status'); const grid = $('images-grid'); if (grid) grid.innerHTML='';
+  const s=$('images-status'); const grid=$('images-grid'); if (grid) grid.innerHTML='';
   const hint=$('images-hint');
   if (!token || !fileId) { if(s) s.textContent='Sign in & load a GLB first.'; return; }
   if (s) s.textContent = 'Loading images…';
@@ -688,9 +712,9 @@ async function refreshImagesGrid(){
     for (let i=0;i<files.length;i++){
       const f = files[i];
       try{
-        const url = await getFileThumbUrl(f.id, token, 256);
+        const url = await resolveThumbUrl(f.id, 256);
         const btn = document.createElement('button');
-        btn.className='thumb'; btn.style.backgroundImage='url('+url+')'; btn.title=f.name; btn.dataset.id=f.id;
+        btn.className='thumb'; if (url) btn.style.backgroundImage='url('+url+')'; btn.title=f.name; btn.dataset.id=f.id;
         btn.addEventListener('click', async ()=>{
           if (!selectedPinId){
             if (hint) hint.textContent = 'Select a caption from the list, then click a thumbnail to attach it.';
@@ -699,18 +723,18 @@ async function refreshImagesGrid(){
           const all = grid ? grid.querySelectorAll('.thumb') : [];
           for (let k=0;k<all.length;k++){ all[k].dataset.selected='false'; }
           btn.dataset.selected='true';
-          selectedImage = {id:f.id, url:url};
+          selectedImage = {id:f.id, url:url||''};
           await updateImageForPin(selectedPinId, f.id);
           if (hint) hint.textContent = 'Attached to the selected caption.';
         });
         if (grid) grid.appendChild(btn);
-      }catch(e){}
+      }catch(e){ console.warn('[thumb build failed]', e); }
     }
-  }catch(e){ if (s) s.textContent = 'Error: '+e.message; }
+  }catch(e){
+    if (s) s.textContent='Loading images failed';
+    console.error('[refreshImagesGrid failed]', e);
+  }
 }
-
-
-/* ===== v6.7 selection + form editing & attach/detach ===== */
 
 function __lm_markListSelected(id){
   const host = $('caption-list'); if (!host) return;
@@ -723,11 +747,16 @@ function __lm_markListSelected(id){
   const d = rowCache.get(id);
   if (d) __lm_fillFormFromCaption(d);
 }
-);
+;
+  const d = rowCache.get(id);
+  if (d) __lm_fillFormFromCaption(d);
+
+
   if (!id) return;
   const li = host.querySelector(`.caption-item[data-id="${CSS.escape(id)}"]`);
   if (li){ li.classList.add('is-selected'); li.setAttribute('aria-selected','true'); li.scrollIntoView({block:'nearest'}); }
-}
+
+
 
 
 function __lm_fillFormFromCaption(obj){
@@ -736,18 +765,12 @@ function __lm_fillFormFromCaption(obj){
   if (bo) bo.value = (obj && obj.body)  ? String(obj.body)  : '';
   if (!th) return;
   const fid = obj && obj.imageFileId;
-  if (!fid){ th.innerHTML = `<div class="placeholder">No Image</div>`; return; }
-  (async()=>{
-    const url = await resolveThumbUrl(fid,256);
+  if (!fid) { th.innerHTML = `<div class="placeholder">No Image</div>`; return; }
+  (async () => {
+    const url = await resolveThumbUrl(fid, 256);
     th.innerHTML = url ? `<img alt="attached" src="${url}">` : `<div class="placeholder">No Image</div>`;
   })();
 }
-">`;
-  } else {
-    th.innerHTML = `<div class="placeholder">No Image</div>`;
-  }
-}
-
 function __lm_getCaptionDataById(id){
   // We can reconstruct from current DOM and cache rowCache if present
   const li = document.querySelector(`#caption-list .caption-item[data-id="${CSS.escape(id)}"]`);
