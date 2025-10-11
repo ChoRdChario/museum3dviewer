@@ -329,7 +329,7 @@ function showOverlayFor(id){
   const d = rowCache.get(id); if (!d) return;
   __lm_markListSelected(id);
   try{ setPinSelected(id, true); }catch(e){}
-  createCaptionOverlay(id, d);
+// removed leaked fragment
 }
 
   createCaptionOverlay(id, d);
@@ -614,7 +614,6 @@ async function updateImageForPin(id, imageFileId){
   try{ const turl = await getFileThumbUrl(imageFileId, token, 1024); const dom = captionDomById.get(id); if (dom){ const i=dom.querySelector('img'); if(i) i.src=turl; else{ const im=document.createElement('img'); im.src=turl; dom.prepend(im);} } }catch(e){}
   // overlay full-res (scaled)
   try{ const full = await getFileBlobUrl(imageFileId, token); const ov=overlays.get(id); if(ov){ ov.imgEl.src=full; ov.imgEl.style.display='block'; } }catch(e){}
-}
 async function updateCaptionForPin(id, args){
   const title = args.title; const body = args.body; const color = args.color;
   const token=getAccessToken(); if(!token||!currentSpreadsheetId) return;
