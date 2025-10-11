@@ -1,4 +1,7 @@
-// boot.esm.cdn.js — conservative syntax build (overlay edit + back-line)
+// boot.esm.cdn.js — overlay-edit + zoom (progressive image) + back-line, no pin-add
+// This file expects existing modules:
+//   - viewer.module.cdn.js  (ensureViewer, onCanvasShiftPick, addPinMarker, clearPins, setPinSelected, onPinSelect, loadGlbFromDrive, onRenderTick, projectPoint, removePinMarker)
+//   - gauth.module.js       (setupAuth, getAccessToken)
 import {
   ensureViewer, onCanvasShiftPick, addPinMarker, clearPins,
   setPinSelected, onPinSelect, loadGlbFromDrive, onRenderTick,
@@ -12,6 +15,7 @@ const uid = () => Math.random().toString(36).slice(2) + Date.now().toString(36);
 
 ensureViewer({ canvas: $('gl') });
 
+// === Auth bootstrap (safe defaults in case env injection is missing) ===
 const __LM_CLIENT_ID = (window.GIS_CLIENT_ID || '595200751510-ncahnf7edci6b9925becn5to49r6cguv.apps.googleusercontent.com');
 const __LM_API_KEY   = (window.GIS_API_KEY   || 'AIzaSyCUnTCr5yWUWPdEXST9bKP1LpgawU5rIbI');
 const __LM_SCOPES    = (window.GIS_SCOPES    || (
@@ -27,6 +31,7 @@ const signedSwitch = (signed) => {
 };
 setupAuth($('auth-signin'), signedSwitch, { clientId: __LM_CLIENT_ID, apiKey: __LM_API_KEY, scopes: __LM_SCOPES });
 
+// === Drive helpers ===
 function extractDriveId(v){
   if (!v) return null;
   const s = String(v).trim();
@@ -42,6 +47,38 @@ function extractDriveId(v){
   return m ? m[0] : null;
 }
 
+async function getParentFolderId(fileId, token) {
+  const res = await fetch('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(fileId)+'?fields=parents&supportsAllDrives=true', { headers:{Authorization:'Bearer '+token} });
+  if (!res.ok) throw new Error('Drive meta failed: '+res.status);
+  const meta = await res.json(); return (Array.isArray(meta.parents)&&meta.parents[0])||null;
+}
+async function listImagesForGlb(fileId, token) {
+  const parent = await getParentFolderId(fileId, token); if(!parent) return [];
+  const q = encodeURIComponent("'" + parent + "' in parents and (mimeType contains 'image/') and trashed=false");
+  const url = 'https://www.googleapis.com/drive/v3/files?q='+q+'&fields=files(id,name,mimeType,thumbnailLink)&pageSize=200&supportsAllDrives=true';
+  const r = await fetch(url, { headers:{Authorization:'Bearer '+token} });
+  if(!r.ok) throw new Error('Drive list failed: '+r.status);
+  const d = await r.json(); return d.files||[];
+}
+async function getFileThumbUrl(fileId, token, size=1024) {
+  // Drive thumbnailLink is JPEG; allow size via sz parameter (s32..s2048). Fallback to 512 if not supported.
+  const r = await fetch('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(fileId)+'?fields=thumbnailLink&supportsAllDrives=true', { headers:{Authorization:'Bearer '+token} });
+  if (!r.ok) throw new Error('thumb meta '+r.status);
+  const j = await r.json(); if (!j.thumbnailLink) throw new Error('no thumbnailLink');
+  const sz = Math.max(64, Math.min(2048, size|0));
+  const sep = (j.thumbnailLink.indexOf('?')>=0)?'&':'?';
+  return j.thumbnailLink + sep + 'sz=s'+String(sz) + '&access_token=' + encodeURIComponent(token);
+}
+async function getFileBlobUrl(fileId, token) {
+  // full-res (may be HEIC/HEIF: browser may not display; keep thumbnail in that case)
+  const r = await fetch('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(fileId)+'?alt=media&supportsAllDrives=true', { headers:{Authorization:'Bearer '+token} });
+  if (!r.ok) throw new Error('media '+r.status);
+  const blob = await r.blob();
+  // HEIC/HEIF may not render; let browser decide. If it fails, caller should keep thumbnail.
+  return URL.createObjectURL(blob);
+}
+
+// === Sheet state ===
 let lastGlbFileId = null;
 let currentSpreadsheetId = null;
 let currentSheetId = null;
@@ -55,7 +92,7 @@ const captionsIndex = new Map();
 const captionDomById = new Map();
 const rowCache = new Map();
 
-// --- line layer (behind overlays) ---
+// === Line layer (behind overlays) ===
 let lineLayer = null;
 function ensureLineLayer(){
   if (lineLayer) return lineLayer;
@@ -66,7 +103,7 @@ function ensureLineLayer(){
   svg.style.width = '100vw';
   svg.style.height = '100vh';
   svg.style.pointerEvents = 'none';
-  svg.style.zIndex = '999'; // less than overlay (1000)
+  svg.style.zIndex = '999'; // overlays are 1000
   document.body.appendChild(svg);
   lineLayer = svg;
   return lineLayer;
@@ -89,7 +126,8 @@ function removeLine(id){
   if (el) el.remove();
 }
 
-const overlays = new Map(); // id -> {root,imgEl}
+// === Overlays ===
+const overlays = new Map(); // id -> {root,imgEl,zoom}
 
 function removeCaptionOverlay(id){
   const o = overlays.get(id);
@@ -135,17 +173,44 @@ function createCaptionOverlay(id, data){
   const bClose = mkBtn('×',  'cap-close', '閉じる');
   topbar.appendChild(bEdit); topbar.appendChild(bDel); topbar.appendChild(bClose);
 
-  // editable title/body
   const t = document.createElement('div'); t.className = 'cap-title'; t.style.fontWeight = '700'; t.style.marginBottom = '6px';
   const b = document.createElement('div'); b.className = 'cap-body';  b.style.fontSize = '12px'; b.style.opacity = '.95'; b.style.whiteSpace = 'pre-wrap'; b.style.marginBottom = '6px';
-  const img = document.createElement('img'); img.className = 'cap-img'; img.alt = ''; img.style.display = 'none'; img.style.width = '100%'; img.style.borderRadius = '8px'; img.style.marginBottom = '2px';
+
+  const imgWrap = document.createElement('div');
+  imgWrap.style.position = 'relative';
+  imgWrap.style.marginBottom = '2px';
+
+  const img = document.createElement('img'); img.className = 'cap-img'; img.alt = '';
+  img.style.display = 'none'; img.style.width = '100%'; img.style.borderRadius = '8px';
+
+  const zoomBar = document.createElement('div');
+  zoomBar.style.position = 'absolute';
+  zoomBar.style.top = '6px';
+  zoomBar.style.right = '6px';
+  zoomBar.style.display = 'flex';
+  zoomBar.style.gap = '6px';
+
+  function zbtn(label, title){
+    const z = document.createElement('button');
+    z.textContent = label; z.title = title;
+    z.style.width = '24px'; z.style.height = '24px';
+    z.style.borderRadius = '6px';
+    z.style.border = 'none';
+    z.style.background = '#1118';
+    z.style.color = '#fff';
+    z.style.cursor = 'pointer';
+    return z;
+  }
+  const zIn  = zbtn('+', '拡大');
+  const zOut = zbtn('−', '縮小');
+  zoomBar.appendChild(zIn); zoomBar.appendChild(zOut);
+  imgWrap.appendChild(img); imgWrap.appendChild(zoomBar);
 
   const safeTitle = (data && data.title ? String(data.title).trim() : '') || '(untitled)';
   const safeBody  = (data && data.body  ? String(data.body).trim()  : '') || '(no description)';
   t.textContent = safeTitle; b.textContent = safeBody;
   if (data && data.imageUrl){ img.src = data.imageUrl; img.style.display = 'block'; }
 
-  // edit mode
   let editing = false;
   function enterEdit(){
     if (editing) return; editing = true;
@@ -168,6 +233,8 @@ function createCaptionOverlay(id, data){
     }
   }
   bEdit.addEventListener('click', () => { if (editing) exitEdit(true); else enterEdit(); });
+  t.addEventListener('dblclick', enterEdit);
+  b.addEventListener('dblclick', enterEdit);
   t.addEventListener('keydown', (e)=>{ if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); exitEdit(true);} });
   b.addEventListener('keydown', (e)=>{ if(e.key==='Enter' && e.ctrlKey){ e.preventDefault(); exitEdit(true);} });
   t.addEventListener('blur', ()=>{ if (editing) exitEdit(true); });
@@ -191,7 +258,7 @@ function createCaptionOverlay(id, data){
     }
   });
 
-  // drag
+  // drag move
   let dragging = false, sx = 0, sy = 0, left = 0, top = 0;
   const onDown = (e)=>{ dragging=true; sx=e.clientX; sy=e.clientY; const r=root.getBoundingClientRect(); left=r.left; top=r.top; e.preventDefault(); };
   const onMove = (e)=>{ if(!dragging) return; const dx=e.clientX-sx, dy=e.clientY-sy; root.style.left=(left+dx)+'px'; root.style.top=(top+dy)+'px'; updateOverlayPosition(id); };
@@ -200,13 +267,41 @@ function createCaptionOverlay(id, data){
   window.addEventListener('mousemove', onMove);
   window.addEventListener('mouseup', onUp);
 
+  // zoom state & progressive upgrade
+  const BASE_W = 260;
+  const state = { zoom: 1.0, upgraded:false };
+  async function maybeUpgradeImage(){
+    if (state.upgraded) return;
+    try{
+      const token = getAccessToken();
+      const dataRow = rowCache.get(id);
+      if (!token || !dataRow || !dataRow.imageFileId) return;
+      // Try full-res; if browser fails (HEIC), silently keep thumbnail
+      const url = await getFileBlobUrl(dataRow.imageFileId, token);
+      img.src = url; // if unsupported, the img will error; but most images (jpeg/png) will show crisp
+      state.upgraded = true;
+    }catch(e){
+      // ignore; keep thumbnail
+    }
+  }
+  function applyZoom(){
+    const z = Math.max(0.75, Math.min(2.0, state.zoom));
+    root.style.maxWidth = (BASE_W * z) + 'px';
+    root.style.minWidth = (200 * z) + 'px';
+    if (z > 1.15) { maybeUpgradeImage(); }
+    updateOverlayPosition(id);
+  }
+  zIn.addEventListener('click', ()=>{ state.zoom *= 1.15; applyZoom(); });
+  zOut.addEventListener('click', ()=>{ state.zoom /= 1.15; applyZoom(); });
+
   root.appendChild(topbar);
   root.appendChild(t);
   root.appendChild(b);
-  root.appendChild(img);
+  root.appendChild(imgWrap);
 
   document.body.appendChild(root);
-  overlays.set(id, { root: root, imgEl: img });
+  overlays.set(id, { root: root, imgEl: img, zoom: state.zoom });
+  applyZoom();
   updateOverlayPosition(id, true);
 }
 
@@ -223,7 +318,6 @@ function updateOverlayPosition(id, initial){
   const r = o.root.getBoundingClientRect();
   const line = getOrMakeLine(id);
   const x2 = p.x; const y2 = p.y;
-  // attach line to nearest edge point of the overlay
   const cx = Math.min(Math.max(x2, r.left), r.right);
   const cy = Math.min(Math.max(y2, r.top ), r.bottom);
   line.setAttribute('x1', String(cx));
@@ -252,6 +346,7 @@ onCanvasShiftPick(async (pt) => {
   if (titleEl) titleEl.focus();
 });
 
+// === GLB Load orchestration ===
 async function doLoad(){
   const token = getAccessToken();
   const urlEl = $('glbUrl');
@@ -277,6 +372,7 @@ if ($('glbUrl')) $('glbUrl').addEventListener('keydown', (e)=>{ if (e.key==='Ent
 if ($('glbUrl')) $('glbUrl').addEventListener('input', ()=>{ if ($('btnGlb')) $('btnGlb').disabled = !extractDriveId($('glbUrl').value||''); });
 if ($('glbUrl')) $('glbUrl').dispatchEvent(new Event('input'));
 
+// === UI: colors & filters ===
 const COLORS = ['#ff6b6b','#ffd93d','#6bcb77','#4d96ff','#9b5de5','#f15bb5','#00c2a8','#94a3b8'];
 const pinColorsHost = $('pin-colors');
 if (pinColorsHost){
@@ -316,66 +412,7 @@ if (pinFilterHost){
   });
 }
 
-async function getParentFolderId(fileId, token) {
-  const res = await fetch('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(fileId)+'?fields=parents&supportsAllDrives=true', { headers:{Authorization:'Bearer '+token} });
-  if (!res.ok) throw new Error('Drive meta failed: '+res.status);
-  const meta = await res.json(); return (Array.isArray(meta.parents)&&meta.parents[0])||null;
-}
-async function listImagesForGlb(fileId, token) {
-  const parent = await getParentFolderId(fileId, token); if(!parent) return [];
-  const q = encodeURIComponent("'" + parent + "' in parents and (mimeType contains 'image/') and trashed=false");
-  const url = 'https://www.googleapis.com/drive/v3/files?q='+q+'&fields=files(id,name,mimeType,thumbnailLink)&pageSize=200&supportsAllDrives=true';
-  const r = await fetch(url, { headers:{Authorization:'Bearer '+token} });
-  if(!r.ok) throw new Error('Drive list failed: '+r.status);
-  const d = await r.json(); return d.files||[];
-}
-async function getFileThumbUrl(fileId, token) {
-  const r = await fetch('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(fileId)+'?fields=thumbnailLink&supportsAllDrives=true', { headers:{Authorization:'Bearer '+token} });
-  if (!r.ok) throw new Error('thumb meta '+r.status);
-  const j = await r.json(); if (!j.thumbnailLink) throw new Error('no thumbnailLink');
-  const sep = (j.thumbnailLink.indexOf('?')>=0)?'&':'?';
-  return j.thumbnailLink + sep + 'access_token=' + encodeURIComponent(token);
-}
-
-if ($('btnRefreshImages')) $('btnRefreshImages').addEventListener('click', refreshImagesGrid);
-async function refreshImagesGrid(){
-  const token = getAccessToken();
-  const fileId = lastGlbFileId || extractDriveId($('glbUrl')?$('glbUrl').value:'');
-  const s=$('images-status'); const grid = $('images-grid'); if (grid) grid.innerHTML='';
-  if (!token || !fileId) { if(s) s.textContent='Sign in & load a GLB first.'; return; }
-  if (s) s.textContent = 'Loading images…';
-  try{
-    const files = await listImagesForGlb(fileId, token);
-    if (s) s.textContent = String(files.length) + ' image(s) found in the GLB folder';
-    for (let i=0;i<files.length;i++){
-      const f = files[i];
-      try{
-        const url = await getFileThumbUrl(f.id, token);
-        const btn = document.createElement('button');
-        btn.className='thumb'; btn.style.backgroundImage='url('+url+')'; btn.title=f.name; btn.dataset.id=f.id;
-        btn.addEventListener('click', async ()=>{
-          const all = grid ? grid.querySelectorAll('.thumb') : [];
-          for (let k=0;k<all.length;k++){ all[k].dataset.selected='false'; }
-          btn.dataset.selected='true';
-          selectedImage = {id:f.id, url:url};
-          if (selectedPinId){
-            await updateImageForPin(selectedPinId, f.id);
-            const target = captionDomById.get(selectedPinId);
-            if (target) {
-              const img = target.querySelector('img');
-              if (img) img.src = url;
-              else { const im = document.createElement('img'); im.src = url; target.prepend(im); }
-            }
-            const ov = overlays.get(selectedPinId);
-            if (ov){ ov.imgEl.src = url; ov.imgEl.style.display='block'; }
-          }
-        });
-        if (grid) grid.appendChild(btn);
-      }catch(e){}
-    }
-  }catch(e){ if (s) s.textContent = 'Error: '+e.message; }
-}
-
+// === Sheets I/O ===
 const LOCIMYU_HEADERS = ['id','title','body','color','x','y','z','imageFileId'];
 
 async function putValues(spreadsheetId, rangeA1, values, token) {
@@ -483,7 +520,7 @@ function appendCaptionItem(args){
   }
   const txt=document.createElement('div'); txt.className='cap-txt';
   const t=document.createElement('div'); t.className='c-title'; t.textContent=safeTitle;
-  const b=document.createElement('div'); b.className='c-body'; b.classList.add('hint'); b.textContent=safeBody;
+  const b=document.createElement('div'); b.className='c-body';  b.classList.add('hint'); b.textContent=safeBody;
   txt.appendChild(t); txt.appendChild(b); div.appendChild(txt);
 
   const del=document.createElement('button'); del.className='c-del'; del.title='Delete'; del.textContent='🗑';
@@ -506,7 +543,7 @@ function appendCaptionItem(args){
 }
 async function enrichRow(row){
   const token=getAccessToken(); let imageUrl='';
-  if(row.imageFileId){ try{ imageUrl=await getFileThumbUrl(row.imageFileId, token);}catch(e){} }
+  if(row.imageFileId){ try{ imageUrl=await getFileThumbUrl(row.imageFileId, token, 1024);}catch(e){} }
   const enriched = { id:row.id, title:row.title, body:row.body, color:row.color, x:row.x, y:row.y, z:row.z, imageFileId:row.imageFileId, imageUrl:imageUrl };
   rowCache.set(row.id, enriched);
   return enriched;
@@ -542,7 +579,10 @@ async function updateImageForPin(id, imageFileId){
   const ci = (currentHeaderIdx['imagefileid']!=null)?currentHeaderIdx['imagefileid']:7;
   const a1 = "'"+(currentSheetTitle||'シート1')+"'!"+colA1(ci)+String(hit.rowIndex);
   await putValues(currentSpreadsheetId, a1, [[imageFileId]], token);
-  const cached = rowCache.get(id); if (cached){ cached.imageFileId = imageFileId; }
+  const cached = rowCache.get(id) || {};
+  cached.imageFileId = imageFileId; rowCache.set(id, cached);
+  // refresh overlay preview to thumb (it will upscale on zoom)
+  try{ const thumb = await getFileThumbUrl(imageFileId, token, 1024); const ov = overlays.get(id); if (ov){ ov.imgEl.src = thumb; ov.imgEl.style.display='block'; } }catch(e){}
 }
 async function updateCaptionForPin(id, args){
   const title = args.title; const body = args.body; const color = args.color;
@@ -603,26 +643,50 @@ async function loadCaptionsFromSheet(){
   } catch(e){ console.warn('[loadCaptionsFromSheet] failed', e); }
 }
 
-if ($('btnGlb')) $('btnGlb').addEventListener('click', ()=>{ selectedPinId=null; });
-if ($('pin-add')) $('pin-add').addEventListener('click', async ()=>{
-  const titleEl = $('caption-title');
-  const bodyEl  = $('caption-body');
-  const id=uid();
-  const row = {
-    id:id, title: titleEl?(titleEl.value||''):'', body: bodyEl?(bodyEl.value||''):'',
-    color: currentPinColor, x:0, y:0, z:0, imageFileId: selectedImage? (selectedImage.id||'') : ''
-  };
-  await savePinToSheet(row);
-  addPinMarker({ id:id, x:0, y:0, z:0, color: currentPinColor });
-  const enriched = await enrichRow(row);
-  appendCaptionItem(enriched);
-  selectedPinId = id; setPinSelected(id, true);
-  showOverlayFor(id);
-  if (titleEl) titleEl.focus();
-});
+// remove "+Pin" explicit UI binding if exists (we rely on Shift+click to add pins)
 if ($('pin-clear')) $('pin-clear').addEventListener('click', ()=>{
   if ($('caption-title')) $('caption-title').value='';
   if ($('caption-body'))  $('caption-body').value='';
 });
 
-console.log('[LociMyu ESM/CDN] boot overlay-edit build loaded');
+// === Images strip ===
+if ($('btnRefreshImages')) $('btnRefreshImages').addEventListener('click', refreshImagesGrid);
+async function refreshImagesGrid(){
+  const token = getAccessToken();
+  const fileId = lastGlbFileId || extractDriveId($('glbUrl')?$('glbUrl').value:'');
+  const s=$('images-status'); const grid = $('images-grid'); if (grid) grid.innerHTML='';
+  if (!token || !fileId) { if(s) s.textContent='Sign in & load a GLB first.'; return; }
+  if (s) s.textContent = 'Loading images…';
+  try{
+    const files = await listImagesForGlb(fileId, token);
+    if (s) s.textContent = String(files.length) + ' image(s) found in the GLB folder';
+    for (let i=0;i<files.length;i++){
+      const f = files[i];
+      try{
+        const url = await getFileThumbUrl(f.id, token, 512);
+        const btn = document.createElement('button');
+        btn.className='thumb'; btn.style.backgroundImage='url('+url+')'; btn.title=f.name; btn.dataset.id=f.id;
+        btn.addEventListener('click', async ()=>{
+          const all = grid ? grid.querySelectorAll('.thumb') : [];
+          for (let k=0;k<all.length;k++){ all[k].dataset.selected='false'; }
+          btn.dataset.selected='true';
+          selectedImage = {id:f.id, url:url};
+          if (selectedPinId){
+            await updateImageForPin(selectedPinId, f.id);
+            const target = captionDomById.get(selectedPinId);
+            if (target) {
+              const img = target.querySelector('img');
+              if (img) img.src = await getFileThumbUrl(f.id, token, 1024);
+              else { const im = document.createElement('img'); im.src = await getFileThumbUrl(f.id, token, 1024); target.prepend(im); }
+            }
+            const ov = overlays.get(selectedPinId);
+            if (ov){ ov.imgEl.src = await getFileThumbUrl(f.id, token, 1024); ov.imgEl.style.display='block'; }
+          }
+        });
+        if (grid) grid.appendChild(btn);
+      }catch(e){}
+    }
+  }catch(e){ if (s) s.textContent = 'Error: '+e.message; }
+}
+
+console.log('[LociMyu ESM/CDN] boot overlay-edit+zoom build loaded');
