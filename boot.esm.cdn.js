@@ -9,7 +9,7 @@ import { setupAuth, getAccessToken } from './gauth.module.js';
 
 /* ------------------------- small DOM helpers ------------------------- */
 const $ = (id) => document.getElementById(id);
-const enable = (on, els) => els.forEach(el => { if (el) el.disabled = !on; });
+const enable = (on, ...els) => els.forEach(el => { if (el) el.disabled = !on; });
 const uid = () => Math.random().toString(36).slice(2) + Date.now().toString(36);
 
 /* --------------------------- viewer bootstrap ------------------------ */
@@ -31,30 +31,6 @@ const signedSwitch = (signed) => {
 setupAuth($('auth-signin'), signedSwitch, { clientId: __LM_CLIENT_ID, apiKey: __LM_API_KEY, scopes: __LM_SCOPES });
 
 /* ---------------------------- Drive utils ---------------------------- */
-
-// --- Drive thumbnail helpers (Promise-safe) ---
-async function resolveThumbUrl(fileId, size = 256) {
-  try {
-    const token = getAccessToken && getAccessToken();
-    if (!fileId || !token) return '';
-    const metaUrl = `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?fields=thumbnailLink&supportsAllDrives=true`;
-    const res = await fetch(metaUrl, { headers: { Authorization: `Bearer ${token}` } });
-    if (!res.ok) return '';
-    const meta = await res.json();
-    if (!meta || !meta.thumbnailLink) return '';
-    return meta.thumbnailLink.replace(/=s\d+(?:-c)?$/, `=s${size}-c`);
-  } catch(e){ console.warn('[thumb resolve failed]', e); return ''; }
-}
-
-function buildFileBlobUrl(fileId) {
-  try {
-    const token = getAccessToken && getAccessToken();
-    if (!fileId || !token) return '';
-    return `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?alt=media&supportsAllDrives=true&access_token=${encodeURIComponent(token)}`;
-  } catch(e){ return ''; }
-}
-
-
 function extractDriveId(v){
   if (!v) return null;
   const s = String(v).trim();
@@ -327,13 +303,15 @@ function updateOverlayPosition(id, initial){
 }
 onRenderTick(() => { overlays.forEach((_, id) => updateOverlayPosition(id, false)); });
 function showOverlayFor(id){
-  const d = rowCache.get(id); if (!d) return;
-  __lm_markListSelected(id);
-  try{ setPinSelected(id, true); }catch(e){}
+  const d=rowCache.get(id); if(!d) return;
+  // リスト強調表示
+  for (const [cid, el] of captionDomById.entries()){ el.classList.toggle('selected', cid===id); }
   createCaptionOverlay(id, d);
+  setPinSelected(id, true);
 }
+
 /* ----------------------- Pin selection & add ------------------------ */
-onPinSelect((id)=>{ if (!id) return; try{ __lm_selectPin(id,'viewer'); }catch(e){} try{ if (typeof showOverlayFor==='function') showOverlayFor(id); }catch(e){} });
+onPinSelect((id) => { selectedPinId = id; showOverlayFor(id); });
 onCanvasShiftPick(async (pt) => {
   const titleEl = $('caption-title');
   const bodyEl  = $('caption-body');
@@ -506,31 +484,29 @@ if ($('save-target-create')) $('save-target-create').addEventListener('click', a
 });
 
 function clearCaptionList(){ const host=$('caption-list'); if (host) host.innerHTML=''; captionDomById.clear(); }
+\1
+  if (args.imageFileId) div.dataset.imageFileId = args.imageFileId;
 
-function appendCaptionItem(row){
-  const host = $('caption-list'); if (!host || !row) return;
-  const id = row.id, title = row.title, body = row.body, color = row.color, imageUrl = row.imageUrl || '';
-  const div = document.createElement('div');
-  div.className = 'caption-item';
-  div.dataset.id = id;
-  if (row.imageFileId) div.dataset.imageFileId = row.imageFileId;
-  // left color bar
-  if (color) div.style.borderLeft = '3px solid ' + color;
-
-  const safeTitle = (title||'').trim() || '(untitled)';
-  const safeBody  = (body ||'').trim() || '(no description)';
+  const safeTitle=(title||'').trim()||'(untitled)';
+  const safeBody=(body||'').trim()||'(no description)';
 
   if (imageUrl){
-    const img = document.createElement('img'); img.src = imageUrl; img.alt = '';
+    const img=document.createElement('img'); img.src=imageUrl; img.alt='';
     div.appendChild(img);
   }
-  const txt = document.createElement('div'); txt.className = 'cap-txt';
-  const t   = document.createElement('div'); t.className = 'c-title'; t.textContent = safeTitle;
-  const b   = document.createElement('div'); b.className = 'c-body';  b.classList.add('hint'); b.textContent = safeBody;
+  const txt=document.createElement('div'); txt.className='cap-txt';
+  const t=document.createElement('div'); t.className='c-title'; t.textContent=safeTitle;
+  const b=document.createElement('div'); b.className='c-body';  b.classList.add('hint'); b.textContent=safeBody;
   txt.appendChild(t); txt.appendChild(b); div.appendChild(txt);
 
-  // delete button
-  const del = document.createElement('button'); del.className='c-del'; del.title='Delete'; del.textContent='🗑';
+  // 選択状態のUI
+  div.addEventListener('click', (e)=>{
+    if (e.target && e.target.closest && e.target.closest('.c-del')) return;
+    __lm_selectPin(id, 'list');
+  });
+
+  // 個別削除
+  const del=document.createElement('button'); del.className='c-del'; del.title='Delete'; del.textContent='🗑';
   del.addEventListener('click', async (e)=>{
     e.stopPropagation();
     if (!confirm('このキャプションを削除しますか？')) return;
@@ -545,21 +521,6 @@ function appendCaptionItem(row){
 
   host.appendChild(div); captionDomById.set(id, div);
   try{ div.scrollIntoView({block:'nearest'}); }catch(e){}
-}
-
-// robust list click delegation (works with any [data-id] item)
-;(function(){
-  const host = $('caption-list'); if (!host) return;
-  host.addEventListener('click', (e)=>{
-    const item = (e.target && e.target.closest) ? e.target.closest('[data-id]') : null;
-    if (!item) return;
-    if (e.target.closest && e.target.closest('.c-del')) return;
-    const id = item.dataset.id;
-    try{ __lm_selectPin(id,'list'); }catch(e){}
-    try{ if (typeof showOverlayFor==='function') showOverlayFor(id); }catch(e){}
-  }, {capture:true});
-})();
-
 
 async function enrichRow(row){
   const token=getAccessToken(); let imageUrl='';
@@ -631,53 +592,42 @@ async function updateCaptionForPin(id, args){
     const b = dom.querySelector('.c-body');  if (b) b.textContent = (cached.body ||'').trim() || '(no description)';
   }
 }
-
 async function deleteCaptionForPin(id){
-  const token = getAccessToken && getAccessToken();
-  if (!token || !currentSpreadsheetId) throw new Error('no auth');
-  if (typeof ensureIndex === 'function') await ensureIndex();
-  const rowIndex = captionsIndex && captionsIndex.get ? captionsIndex.get(id) : null;
-
-  if (rowIndex == null) {
-    try{ await updateCaptionForPin(id, { title: '', body: '', color: '', imageFileId: '' }); }catch(e){}
+  const token=getAccessToken(); if(!token||!currentSpreadsheetId||!currentSheetId) return;
+  if (!captionsIndex.size) await ensureIndex();
+  const hit=captionsIndex.get(id); if(!hit) throw new Error('row not found');
+  const r = await fetch('https://sheets.googleapis.com/v4/spreadsheets/'+encodeURIComponent(currentSpreadsheetId)+':batchUpdate', {
+    method:'POST', headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},
+    body: JSON.stringify({ requests: [{ deleteDimension: { range: { sheetId: currentSheetId, dimension: 'ROWS', startIndex: hit.rowIndex-1, endIndex: hit.rowIndex } } }] })
+  });
+  if (!r.ok) throw new Error('delete row '+r.status);
+  captionsIndex.delete(id);
+}
 
 async function loadCaptionsFromSheet(){
   clearCaptionList(); clearPins(); rowCache.clear();
-  overlays.forEach((_,id)=>removeCaptionOverlay(id)); overlays.clear();
-  if (lineLayer) lineLayer.innerHTML='';
-  const token = getAccessToken(); if (!token || !currentSpreadsheetId || !currentSheetTitle) return;
+  overlays.forEach((_,id)=>removeCaptionOverlay(id)); overlays.clear(); if (lineLayer) lineLayer.innerHTML='';
+  const token=getAccessToken(); if(!token||!currentSpreadsheetId||!currentSheetTitle) return;
   try {
-    const range = `'${currentSheetTitle}'!A1:Z9999`;
-    const values = await getValues(currentSpreadsheetId, range, token);
-    if (!values || !values.length) return;
-    currentHeaders = values[0].map(v => (v||'').toString().trim());
-    currentHeaderIdx = {};
-    for (let i=0;i<currentHeaders.length;i++){ currentHeaderIdx[currentHeaders[i].toLowerCase()] = i; }
-    const idx = (n)=>{ const k=(n||'').toLowerCase(); return (currentHeaderIdx[k]!=null)?currentHeaderIdx[k]:-1; };
-    const iId=idx('id'), iTitle=idx('title'), iBody=idx('body'), iColor=idx('color'),
-          iX=idx('x'), iY=idx('y'), iZ=idx('z'), iImg=idx('imagefileid');
-
+    const values=await getValues(currentSpreadsheetId, "'"+currentSheetTitle+"'!A1:Z9999", token); if(!values.length) return;
+    currentHeaders = values[0].map(v=>(v||'').toString().trim());
+    currentHeaderIdx = {}; for (let i=0;i<currentHeaders.length;i++){ currentHeaderIdx[currentHeaders[i].toLowerCase()] = i; }
+    function idx(n){ return (currentHeaderIdx[n]!=null)?currentHeaderIdx[n]:-1; }
+    const iId=idx('id'), iTitle=idx('title'), iBody=idx('body'), iColor=idx('color'), iX=idx('x'), iY=idx('y'), iZ=idx('z'), iImg=idx('imagefileid');
     for (let r=1; r<values.length; r++){
-      const row = values[r] || [];
+      const row=values[r]||[];
       const data = {
-        id: (row[iId]||uid()),
-        title: row[iTitle]||'',
-        body: row[iBody]||'',
-        color: row[iColor]||'#ff6b6b',
-        x: Number(row[iX]||0),
-        y: Number(row[iY]||0),
-        z: Number(row[iZ]||0),
-        imageFileId: row[iImg]||''
+        id: (row[iId]||uid()), title: row[iTitle]||'', body: row[iBody]||'', color: row[iColor]||'#ff6b6b',
+        x: Number(row[iX]||0), y: Number(row[iY]||0), z: Number(row[iZ]||0), imageFileId: row[iImg]||''
       };
       addPinMarker({ id: data.id, x: data.x, y: data.y, z: data.z, color: data.color });
       const enriched = await enrichRow(data);
       appendCaptionItem(enriched);
     }
     await ensureIndex();
-  } catch(e){
-    console.warn('[loadCaptionsFromSheet] failed', e);
-  }
+  } catch(e){ console.warn('[loadCaptionsFromSheet] failed', e); }
 }
+
 /* --------------------------- Images UX --------------------------- */
 if ($('btnRefreshImages')) $('btnRefreshImages').addEventListener('click', refreshImagesGrid);
 async function refreshImagesGrid(){
@@ -727,16 +677,15 @@ function __lm_markListSelected(id){
 }
 
 function __lm_fillFormFromCaption(obj){
-  const ti=$('caption-title'), bo=$('caption-body'), th=$('currentImageThumb');
-  if (ti) ti.value = (obj && obj.title) ? String(obj.title) : '';
-  if (bo) bo.value = (obj && obj.body)  ? String(obj.body)  : '';
-  if (!th) return;
-  const fid = obj && obj.imageFileId;
-  if (!fid) { th.innerHTML = `<div class="placeholder">No Image</div>`; return; }
-  (async () => {
-    const url = await resolveThumbUrl(fid, 256);
-    th.innerHTML = url ? `<img alt="attached" src="${url}">` : `<div class="placeholder">No Image</div>`;
-  })();
+  const ti = $('caption-title'); const bo = $('caption-body'); const th = $('currentImageThumb');
+  if (!ti || !bo || !th) return;
+  ti.value = (obj && obj.title) ? String(obj.title) : '';
+  bo.value = (obj && obj.body)  ? String(obj.body)  : '';
+  if (obj && obj.imageFileId){
+    th.innerHTML = `<img alt="attached" src="${getFileThumbUrl(obj.imageFileId, getAccessToken(), 256)}">`;
+  } else {
+    th.innerHTML = `<div class="placeholder">No Image</div>`;
+  }
 }
 
 function __lm_getCaptionDataById(id){
@@ -779,7 +728,8 @@ onPinSelect((id)=>{ if (id) __lm_selectPin(id, 'viewer'); });
 let __lm_deb;
 ['caption-title','caption-body'].forEach(id=>{
   const el = $(id); if (!el) return;
-  el.addEventListener('input', ()=>{ if (!selectedPinId) return; if (!(rowCache && rowCache.has && rowCache.has(selectedPinId))) return;
+  el.addEventListener('input', ()=>{
+    if (!selectedPinId) return;
     clearTimeout(__lm_deb);
     __lm_deb = setTimeout(async ()=>{
       const title = $('caption-title').value.trim();
@@ -794,7 +744,7 @@ let __lm_deb;
         }
         // update cache
         const cur = rowCache.get(selectedPinId) || {};
-        rowCache.set(selectedPinId, { cur, title, body });
+        rowCache.set(selectedPinId, { ...cur, title, body });
       }catch(e){ console.warn('[caption autosave failed]', e); }
     }, 500);
   });
@@ -825,7 +775,7 @@ let __lm_deb;
         if (li) li.src = '';
         // update cache
         const cur = rowCache.get(selectedPinId) || {};
-        rowCache.set(selectedPinId, { cur, imageFileId: '' });
+        rowCache.set(selectedPinId, { ...cur, imageFileId: '' });
       }catch(e){ console.warn('[detach image failed]', e); }
     });
   }
@@ -835,21 +785,19 @@ let __lm_deb;
 (function(){
   const g = $('images-grid'); if (!g) return;
   g.addEventListener('click', (e)=>{
-  const btn = e.target && e.target.closest ? e.target.closest('.thumb[data-id]') : null;
-  if (!btn || !selectedPinId) return;
-  const fid = btn.dataset.id;
-  (async () => {
-    const url = await resolveThumbUrl(fid, 256);
-    if ($('currentImageThumb')) $('currentImageThumb').innerHTML = url ? `<img alt="attached" src="${url}">` : `<div class="placeholder">No Image</div>`;
-    const liImg = document.querySelector(`#caption-list .caption-item[data-id="${CSS.escape(selectedPinId)}"] img`);
-    if (liImg) {
-      const u128 = await resolveThumbUrl(fid, 128);
-      if (u128) liImg.src = u128;
-    }
-    const cur = rowCache.get(selectedPinId) || {};
-    rowCache.set(selectedPinId, { cur, imageFileId: fid });
-  })();
-}, {capture:true});
+    const btn = e.target && e.target.closest ? e.target.closest('.thumb[data-id]') : null;
+    if (!btn || !selectedPinId) return;
+    const fid = btn.dataset.id;
+    // Preview
+    try{
+      $('currentImageThumb').innerHTML = `<div class="placeholder">Loading...</div>`;
+      const liImg = document.querySelector(`#caption-list .caption-item[data-id="${CSS.escape(selectedPinId)}"] img`);
+      if (liImg) liImg.src = getFileThumbUrl(fid, getAccessToken(), 128);
+      const cur = rowCache.get(selectedPinId) || {};
+      rowCache.set(selectedPinId, { ...cur, imageFileId: fid });
+    (async()=>{ const url = await resolveThumbUrl(fid,256); if ($('currentImageThumb')) $('currentImageThumb').innerHTML = url ? `<img alt="attached" src="${url}">` : `<div class="placeholder">No Image</div>`; const liImg = document.querySelector(`#caption-list .caption-item[data-id="${CSS.escape(selectedPinId)}"] img`); if (liImg){ const u128 = await resolveThumbUrl(fid,128); if (u128) liImg.src = u128; } })();
+    }catch(e){}
+  }, {capture:true});
 })();
 /* ===== end v6.7 injection ===== */
 console.log('[LociMyu ESM/CDN] boot overlay-edit+fixed-zoom build loaded');
