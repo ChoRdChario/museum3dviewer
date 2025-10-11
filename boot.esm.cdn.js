@@ -70,19 +70,36 @@ function extractDriveId(s){
     const dIdx = seg.indexOf('d');
     if (dIdx !== -1 && seg[dIdx + 1] && /[-\w]{25,}/.test(seg[dIdx + 1])) return seg[dIdx + 1];
   } catch(e) {
-    // fall back to regex
+    // fall through
   }
-  const m = s.match(/[-\w]{25,}/);
+  const m = String(s).match(/[-\w]{25,}/);
   return m ? m[0] : null;
 }
-  const m = s.match(/[-\w]{25,}/);
-  return m ? m[0] : null;
 
-async function getParentFolderId(fileId, token) {
-  const res = await fetch('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(fileId)+'?fields=parents&supportsAllDrives=true', { headers:{Authorization:'Bearer '+token} });
-  if (!res.ok) throw new Error('Drive meta failed: '+res.status);
-  const meta = await res.json(); return (Array.isArray(meta.parents)&&meta.parents[0])||null;
+async function resolveThumbUrl(fileId, size=256){
+  try{
+    const token = (typeof getAccessToken==='function') ? getAccessToken() : null;
+    if (!fileId || !token) return '';
+    const url = `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?fields=thumbnailLink&supportsAllDrives=true`;
+    const r = await fetch(url, { headers:{ Authorization:`Bearer ${token}` } });
+    if (!r.ok) return '';
+    const j = await r.json();
+    if (!j || !j.thumbnailLink) return '';
+    return j.thumbnailLink.replace(/=s\d+(?:-c)?$/, `=s${Math.max(64, Math.min(2048, size|0))}-c`);
+  } catch(e){
+    console.warn('[resolveThumbUrl failed]', e); return '';
+  }
 }
+
+function buildFileBlobUrl(fileId){
+  try{
+    const token = (typeof getAccessToken==='function') ? getAccessToken() : null;
+    if (!fileId || !token) return '';
+    return `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?alt=media&supportsAllDrives=true&access_token=${encodeURIComponent(token)}`;
+  } catch(e){ return ''; }
+}
+
+
 async function listImagesForGlb(fileId, token) {
   const parent = await getParentFolderId(fileId, token); if(!parent) return [];
   const q = encodeURIComponent("'" + parent + "' in parents and (mimeType contains 'image/') and trashed=false");
