@@ -232,7 +232,7 @@ function createCaptionOverlay(id, data){
       body.textContent = (cur.body  || '').trim() || '(no description)';
     }
   }
-  bEdit.addEventListener('click', () => { if (editing) exitEdit(true); else enterEdit(); });
+
   t.addEventListener('dblclick', enterEdit);
   body.addEventListener('dblclick', enterEdit);
   t.addEventListener('keydown', (e)=>{ if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); exitEdit(true);} });
@@ -484,44 +484,55 @@ if ($('save-target-create')) $('save-target-create').addEventListener('click', a
 });
 
 function clearCaptionList(){ const host=$('caption-list'); if (host) host.innerHTML=''; captionDomById.clear(); }
-\1
-  if (args.imageFileId) div.dataset.imageFileId = args.imageFileId;
 
-  const safeTitle=(title||'').trim()||'(untitled)';
-  const safeBody=(body||'').trim()||'(no description)';
+    function appendCaptionItem(row){
+      const host = $('caption-list');
+      if (!host || !row) return;
+      const id = row.id, title = row.title, body = row.body, color = row.color, imageUrl = row.imageUrl || '';
+      const div = document.createElement('div');
+      div.className = 'caption-item';
+      div.dataset.id = id;
+      if (row.imageFileId) div.dataset.imageFileId = row.imageFileId;
+      // left color bar
+      div.style.borderLeft = '3px solid ' + (color || '#94a3b8');
 
-  if (imageUrl){
-    const img=document.createElement('img'); img.src=imageUrl; img.alt='';
-    div.appendChild(img);
-  }
-  const txt=document.createElement('div'); txt.className='cap-txt';
-  const t=document.createElement('div'); t.className='c-title'; t.textContent=safeTitle;
-  const b=document.createElement('div'); b.className='c-body';  b.classList.add('hint'); b.textContent=safeBody;
-  txt.appendChild(t); txt.appendChild(b); div.appendChild(txt);
+      const safeTitle = (title||'').trim() || '(untitled)';
+      const safeBody  = (body ||'').trim() || '(no description)';
 
-  // 選択状態のUI
-  div.addEventListener('click', (e)=>{
-    if (e.target && e.target.closest && e.target.closest('.c-del')) return;
-    __lm_selectPin(id, 'list');
-  });
+      if (imageUrl){
+        const img = document.createElement('img'); img.src = imageUrl; img.alt = '';
+        div.appendChild(img);
+      }
+      const txt = document.createElement('div'); txt.className = 'cap-txt';
+      const t   = document.createElement('div'); t.className = 'c-title'; t.textContent = safeTitle;
+      const b   = document.createElement('div'); b.className = 'c-body';  b.classList.add('hint'); b.textContent = safeBody;
+      txt.appendChild(t); txt.appendChild(b); div.appendChild(txt);
 
-  // 個別削除
-  const del=document.createElement('button'); del.className='c-del'; del.title='Delete'; del.textContent='🗑';
-  del.addEventListener('click', async (e)=>{
-    e.stopPropagation();
-    if (!confirm('このキャプションを削除しますか？')) return;
-    try{
-      await deleteCaptionForPin(id);
-      removePinMarker(id);
-      div.remove(); captionDomById.delete(id); rowCache.delete(id);
-      removeCaptionOverlay(id);
-    }catch(err){ console.error('delete failed', err); alert('Delete failed'); }
-  });
-  div.appendChild(del);
+      // selection behavior: highlight + sync form
+      div.addEventListener('click', (e)=>{
+        if (e.target && e.target.closest && e.target.closest('.c-del')) return;
+        __lm_selectPin(id, 'list');
+      });
 
-  host.appendChild(div); captionDomById.set(id, div);
-  try{ div.scrollIntoView({block:'nearest'}); }catch(e){}
-}
+      // per-item delete button (kept as in current UX)
+      const del = document.createElement('button'); del.className='c-del'; del.title='Delete'; del.textContent='🗑';
+      del.addEventListener('click', async (e)=>{
+        e.stopPropagation();
+        if (!confirm('このキャプションを削除しますか？')) return;
+        try{
+          await deleteCaptionForPin(id);
+          removePinMarker(id);
+          div.remove(); captionDomById.delete(id); rowCache.delete(id);
+          removeCaptionOverlay(id);
+        }catch(err){ console.error('delete failed', err); alert('Delete failed'); }
+      });
+      div.appendChild(del);
+
+      host.appendChild(div); captionDomById.set(id, div);
+      try{ div.scrollIntoView({block:'nearest'}); }catch(e){}
+    }
+    
+
 async function enrichRow(row){
   const token=getAccessToken(); let imageUrl='';
   if(row.imageFileId){
