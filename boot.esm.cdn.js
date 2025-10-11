@@ -485,28 +485,36 @@ if ($('save-target-create')) $('save-target-create').addEventListener('click', a
 
 function clearCaptionList(){ const host=$('caption-list'); if (host) host.innerHTML=''; captionDomById.clear(); }
 
-  if (args.imageFileId) div.dataset.imageFileId = args.imageFileId;
+function appendCaptionItem(row){
+  const host = $('caption-list'); if (!host || !row) return;
+  const id = row.id, title = row.title, body = row.body, color = row.color, imageUrl = row.imageUrl || '';
+  const div = document.createElement('div');
+  div.className = 'caption-item';
+  div.dataset.id = id;
+  if (row.imageFileId) div.dataset.imageFileId = row.imageFileId;
+  // left color bar
+  div.style.borderLeft = '3px solid ' + (color || '#94a3b8');
 
-  const safeTitle=(title||'').trim()||'(untitled)';
-  const safeBody=(body||'').trim()||'(no description)';
+  const safeTitle = (title||'').trim() || '(untitled)';
+  const safeBody  = (body ||'').trim() || '(no description)';
 
   if (imageUrl){
-    const img=document.createElement('img'); img.src=imageUrl; img.alt='';
+    const img = document.createElement('img'); img.src = imageUrl; img.alt = '';
     div.appendChild(img);
   }
-  const txt=document.createElement('div'); txt.className='cap-txt';
-  const t=document.createElement('div'); t.className='c-title'; t.textContent=safeTitle;
-  const b=document.createElement('div'); b.className='c-body';  b.classList.add('hint'); b.textContent=safeBody;
+  const txt = document.createElement('div'); txt.className = 'cap-txt';
+  const t   = document.createElement('div'); t.className = 'c-title'; t.textContent = safeTitle;
+  const b   = document.createElement('div'); b.className = 'c-body';  b.classList.add('hint'); b.textContent = safeBody;
   txt.appendChild(t); txt.appendChild(b); div.appendChild(txt);
 
-  // 選択状態のUI
+  // selection behavior
   div.addEventListener('click', (e)=>{
     if (e.target && e.target.closest && e.target.closest('.c-del')) return;
     __lm_selectPin(id, 'list');
   });
 
-  // 個別削除
-  const del=document.createElement('button'); del.className='c-del'; del.title='Delete'; del.textContent='🗑';
+  // delete button
+  const del = document.createElement('button'); del.className='c-del'; del.title='Delete'; del.textContent='🗑';
   del.addEventListener('click', async (e)=>{
     e.stopPropagation();
     if (!confirm('このキャプションを削除しますか？')) return;
