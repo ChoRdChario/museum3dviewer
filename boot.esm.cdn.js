@@ -677,34 +677,6 @@ async function loadCaptionsFromSheet(){
   } catch(e){
     console.warn('[loadCaptionsFromSheet] failed', e);
   }
-}'!A1:Z9999`;
-    const values = await getValues(currentSpreadsheetId, range, token);
-    if (!values || !values.length) return;
-    currentHeaders = values[0].map(v => (v||'').toString().trim());
-    currentHeaderIdx = {};
-    for (let i=0;i<currentHeaders.length;i++){ currentHeaderIdx[currentHeaders[i].toLowerCase()] = i; }
-    function idx(n){ const k=(n||'').toLowerCase(); return (currentHeaderIdx[k]!=null)?currentHeaderIdx[k]:-1; }
-    const iId=idx('id'), iTitle=idx('title'), iBody=idx('body'), iColor=idx('color'),
-          iX=idx('x'), iY=idx('y'), iZ=idx('z'), iImg=idx('imagefileid');
-
-    for (let r=1; r<values.length; r++){
-      const row = values[r] || [];
-      const data = {
-        id: (row[iId]||uid()),
-        title: row[iTitle]||'',
-        body: row[iBody]||'',
-        color: row[iColor]||'#ff6b6b',
-        x: Number(row[iX]||0),
-        y: Number(row[iY]||0),
-        z: Number(row[iZ]||0),
-        imageFileId: row[iImg]||''
-      };
-      addPinMarker({ id: data.id, x: data.x, y: data.y, z: data.z, color: data.color });
-      const enriched = await enrichRow(data);
-      appendCaptionItem(enriched);
-    }
-    await ensureIndex();
-} //__FIX__: removed malformed catch
 }
 /* --------------------------- Images UX --------------------------- */
 if ($('btnRefreshImages')) $('btnRefreshImages').addEventListener('click', refreshImagesGrid);
