@@ -460,3 +460,75 @@ function __lm_fillFormFromCaption(obj){
 }
 
 console.log('[LociMyu ESM/CDN] boot overlay-edit+fixed-zoom build loaded (修正版)');
+
+
+/* ==== LociMyu Sheets/Drive helpers (added) ==== */
+const LOCIMYU_HEADERS = ['id','title','body','color','x','y','z','imageFileId'];
+
+async function putValues(spreadsheetId, rangeA1, values, token) {
+  return fetch('https://sheets.googleapis.com/v4/spreadsheets/'+encodeURIComponent(spreadsheetId)+'/values/'+encodeURIComponent(rangeA1)+'?valueInputOption=RAW', {
+    method:'PUT', headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'}, body:JSON.stringify({ values })
+  });
+}
+async function appendValues(spreadsheetId, rangeA1, values, token) {
+  return fetch('https://sheets.googleapis.com/v4/spreadsheets/'+encodeURIComponent(spreadsheetId)+'/values/'+encodeURIComponent(rangeA1)+':append?valueInputOption=RAW&insertDataOption=INSERT_ROWS', {
+    method:'POST', headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'}, body:JSON.stringify({ values })
+  });
+}
+async function getValues(spreadsheetId, rangeA1, token) {
+  const r = await fetch('https://sheets.googleapis.com/v4/spreadsheets/'+encodeURIComponent(spreadsheetId)+'/values/'+encodeURIComponent(rangeA1), { headers:{Authorization:'Bearer '+token} });
+  if (!r.ok) throw new Error('values.get '+r.status);
+  const d = await r.json(); return d.values||[];
+}
+
+async function isLociMyuSpreadsheet(spreadsheetId, token) {
+  const url = 'https://sheets.googleapis.com/v4/spreadsheets/'+encodeURIComponent(spreadsheetId)+'?includeGridData=true&ranges=A1:Z1&fields=sheets(properties(title,sheetId),data(rowData(values(formattedValue))))';
+  const res = await fetch(url, { headers:{Authorization:'Bearer '+token} });
+  if (!res.ok) return false;
+  const data = await res.json(); if (!Array.isArray(data.sheets)) return false;
+  for (let i=0;i<data.sheets.length;i++){
+    const s = data.sheets[i];
+    const row = (((s||{}).data||[])[0]||{}).rowData || [];
+    const vals = (row[0]||{}).values || [];
+    const headers = [];
+    for (let k=0;k<vals.length;k++){
+      const v=vals[k]; const fv = (v && v.formattedValue) ? String(v.formattedValue).trim().toLowerCase() : '';
+      if (fv) headers.push(fv);
+    }
+    const hasTitle = headers.indexOf('title')>=0;
+    const hasBody  = headers.indexOf('body')>=0;
+    const hasColor = headers.indexOf('color')>=0;
+    if (hasTitle && hasBody && hasColor) return true;
+  }
+  return false;
+}
+
+async function createLociMyuSpreadsheet(parentFolderId, token, opts) {
+  const glbId = (opts && opts.glbId) ? opts.glbId : '';
+  const name = ('LociMyu_Save_'+glbId).replace(/_+$/,'');
+  const r = await fetch('https://www.googleapis.com/drive/v3/files', {
+    method:'POST', headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},
+    body:JSON.stringify({ name, mimeType:'application/vnd.google-apps.spreadsheet', parents: parentFolderId?[parentFolderId]:undefined })
+  });
+  if (!r.ok) throw new Error('Drive files.create failed: '+r.status);
+  const file = await r.json(); const spreadsheetId = file.id;
+  await putValues(spreadsheetId, 'A1:Z1', [LOCIMYU_HEADERS], token);
+  return spreadsheetId;
+}
+
+async function findOrCreateLociMyuSpreadsheet(parentFolderId, token, opts) {
+  if (!parentFolderId) throw new Error('parentFolderId required');
+  const q = encodeURIComponent("'" + parentFolderId + "' in parents and mimeType='application/vnd.google-apps.spreadsheet' and trashed=false");
+  const url = 'https://www.googleapis.com/drive/v3/files?q='+q+'&fields=files(id,name,modifiedTime)&orderBy=modifiedTime desc&pageSize=10&supportsAllDrives=true';
+  const r = await fetch(url, { headers:{Authorization:'Bearer '+token} });
+  if(!r.ok) throw new Error('Drive list spreadsheets failed: '+r.status);
+  const d = await r.json(); const files = d.files||[];
+  for (let i=0;i<files.length;i++){
+    const f=files[i];
+    try { if (await isLociMyuSpreadsheet(f.id, token)) return f.id; } catch(_){}
+  }
+  return await createLociMyuSpreadsheet(parentFolderId, token, opts||{});
+}
+
+window.findOrCreateLociMyuSpreadsheet = findOrCreateLociMyuSpreadsheet;
+/* ==== /helpers ==== */
