@@ -182,12 +182,15 @@ function createCaptionOverlay(id, data){
   const bDel   = mkBtn('🗑', 'cap-del', '削除');
   const bClose = mkBtn('×',  'cap-close', '閉じる');
    topbar.appendChild(bDel); topbar.appendChild(bClose);
+  bClose.addEventListener('click', ()=> removeCaptionOverlay(id));
 
   const t = document.createElement('div'); t.className='cap-title'; t.style.fontWeight='700'; t.style.marginBottom='6px';
   const body = document.createElement('div'); body.className='cap-body'; body.style.fontSize='12px'; body.style.opacity='.95'; body.style.whiteSpace='pre-wrap'; body.style.marginBottom='6px';
 
   const img = document.createElement('img'); img.className='cap-img'; img.alt=''; img.style.display='none';
   img.style.width='100%'; img.style.height='auto'; img.style.borderRadius='8px';
+  (async()=>{ try{ if (data && data.imageFileId){ const u = await getFileThumbUrl(data.imageFileId, getAccessToken(), 512); img.src=u; img.style.display='block'; } }catch(e){ console.warn('[overlay thumb]', e);} })();
+
 
   const safeTitle = (data && data.title ? String(data.title).trim() : '') || '(untitled)';
   const safeBody  = (data && data.body  ? String(data.body).trim()  : '') || '(no description)';
@@ -209,52 +212,9 @@ function createCaptionOverlay(id, data){
       }
     }
   })();
+  // 編集モード撤去（外部フォームで編集）
+  // --- ドラッグ ---
 
-  // 編集モード（タイトル/本文ともにピン設置後も編集可能）
-  let editing = false;
-  function enterEdit(){
-    if (editing) return; editing = true;
-    t.contentEditable = 'true'; body.contentEditable = 'true';
-    t.style.outline = '1px dashed #fff3'; body.style.outline = '1px dashed #fff3';
-    t.focus();
-  }
-  function exitEdit(save){
-    if (!editing) return; editing = false;
-    t.contentEditable = 'false'; body.contentEditable = 'false';
-    t.style.outline = ''; body.style.outline = '';
-    if (save){
-      const newTitle = (t.textContent || '').trim();
-      const newBody  = (body.textContent || '').trim();
-      updateCaptionForPin(id, { title: newTitle, body: newBody }).catch(()=>{});
-    } else {
-      const cur = rowCache.get(id) || {};
-      t.textContent = (cur.title || '').trim() || '(untitled)';
-      body.textContent = (cur.body  || '').trim() || '(no description)';
-    }
-  }
-  bEdit.addEventListener('click', () => { if (editing) exitEdit(true); else enterEdit(); });
-  t.addEventListener('dblclick', enterEdit);
-  body.addEventListener('dblclick', enterEdit);
-  t.addEventListener('keydown', (e)=>{ if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); exitEdit(true);} });
-  body.addEventListener('keydown', (e)=>{ if(e.key==='Enter' && e.ctrlKey){ e.preventDefault(); exitEdit(true);} });
-  t.addEventListener('blur', ()=>{ if (editing) exitEdit(true); });
-  body.addEventListener('blur', ()=>{ if (editing) exitEdit(true); });
-
-  bClose.addEventListener('click', () => removeCaptionOverlay(id));
-  bDel.addEventListener('click', async () => {
-    if (!confirm('このキャプションを削除しますか？')) return;
-    try{
-      await deleteCaptionForPin(id);
-      removePinMarker(id);
-      const dom = captionDomById.get(id); if (dom) dom.remove();
-      captionDomById.delete(id);
-      rowCache.delete(id);
-      removeCaptionOverlay(id);
-      selectedPinId = null;
-    }catch(e){ console.error('[caption delete] failed', e); alert('Failed to delete caption row.'); }
-  });
-
-  // ドラッグ
   let dragging=false,sx=0,sy=0,left=0,top=0;
   const onDown=(e)=>{ dragging=true; sx=e.clientX; sy=e.clientY; const r=root.getBoundingClientRect(); left=r.left; top=r.top; e.preventDefault(); };
   const onMove=(e)=>{ if(!dragging) return; const dx=e.clientX-sx, dy=e.clientY-sy; root.style.left=(left+dx)+'px'; root.style.top=(top+dy)+'px'; updateOverlayPosition(id); };
@@ -484,42 +444,72 @@ if ($('save-target-create')) $('save-target-create').addEventListener('click', a
 });
 
 function clearCaptionList(){ const host=$('caption-list'); if (host) host.innerHTML=''; captionDomById.clear(); }
-\1
+
+// Create or update a list item in the caption list for a given row
+function appendCaptionItem(args){
+  const host = $('caption-list'); if (!host || !args) return;
+  const id = String(args.id || '').trim(); if (!id) return;
+
+  const title = (args.title || '').toString();
+  const body  = (args.body  || '').toString();
+  const color = (args.color || '').toString();
+  const imageUrl = (args.imageUrl || '').toString();
+
+  // root
+  const div = document.createElement('div');
+  div.className = 'caption-item';
+  div.dataset.id = id;
   if (args.imageFileId) div.dataset.imageFileId = args.imageFileId;
+  if (color) div.style.setProperty('--pin-color', color);
 
-  const safeTitle=(title||'').trim()||'(untitled)';
-  const safeBody=(body||'').trim()||'(no description)';
+  const safeTitle = title.trim() || '(untitled)';
+  const safeBody  = body.trim()  || '(no description)';
 
+  // image (thumb)
   if (imageUrl){
-    const img=document.createElement('img'); img.src=imageUrl; img.alt='';
+    const img = document.createElement('img');
+    img.src = imageUrl; img.alt = '';
     div.appendChild(img);
   }
-  const txt=document.createElement('div'); txt.className='cap-txt';
-  const t=document.createElement('div'); t.className='c-title'; t.textContent=safeTitle;
-  const b=document.createElement('div'); b.className='c-body';  b.classList.add('hint'); b.textContent=safeBody;
+
+  // text
+  const txt  = document.createElement('div'); txt.className='cap-txt';
+  const t    = document.createElement('div'); t.className='c-title'; t.textContent=safeTitle;
+  const b    = document.createElement('div'); b.className='c-body';  b.classList.add('hint'); b.textContent=safeBody;
   txt.appendChild(t); txt.appendChild(b); div.appendChild(txt);
 
-  // 選択状態のUI
+  // click -> select
   div.addEventListener('click', (e)=>{
     if (e.target && e.target.closest && e.target.closest('.c-del')) return;
     __lm_selectPin(id, 'list');
   });
 
-  // 個別削除
-  const del=document.createElement('button'); del.className='c-del'; del.title='Delete'; del.textContent='🗑';
+  // delete button
+  const del = document.createElement('button');
+  del.className = 'c-del'; del.title = 'Delete'; del.textContent = '🗑';
   del.addEventListener('click', async (e)=>{
     e.stopPropagation();
     if (!confirm('このキャプションを削除しますか？')) return;
+    try{
       await deleteCaptionForPin(id);
       removePinMarker(id);
-      div.remove(); captionDomById.delete(id); rowCache.delete(id);
+      div.remove();
+      captionDomById.delete(id);
+      rowCache.delete(id);
       removeCaptionOverlay(id);
+    }catch(err){
+      console.error('delete failed', err);
+      alert('Delete failed');
+    }
   });
   div.appendChild(del);
 
-  host.appendChild(div); captionDomById.set(id, div);
+  host.appendChild(div);
+  captionDomById.set(id, div);
   try{ div.scrollIntoView({block:'nearest'}); }catch(e){}
 }
+
+
 async function enrichRow(row){
   const token=getAccessToken(); let imageUrl='';
   if(row.imageFileId){
@@ -591,11 +581,20 @@ async function updateCaptionForPin(id, args){
   }
 }
 async function deleteCaptionForPin(id){
-  const token=getAccessToken(); if(!token||!currentSpreadsheetId||!currentSheetId) return;
-  if (!captionsIndex.size) await ensureIndex();
-  const hit=captionsIndex.get(id); if(!hit) throw new Error('row not found');
-  const r = await fetch('https://sheets.googleapis.com/v4/spreadsheets/'+encodeURIComponent(currentSpreadsheetId)+':batchUpdate', {
-    method:'POST', headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},
+  try{
+    if (typeof _deleteCaptionRow === 'function'){
+      await _deleteCaptionRow(id);
+    }
+  }catch(e){
+    console.warn('[sheet delete failed]', e);
+  }
+  try{
+    const key='lm_deleted_ids';
+    const arr = JSON.parse(localStorage.getItem(key)||'[]');
+    if (!arr.includes(String(id))) arr.push(String(id));
+    localStorage.setItem(key, JSON.stringify(arr));
+  }catch(e){}
+},
     body: JSON.stringify({ requests: [{ deleteDimension: { range: { sheetId: currentSheetId, dimension: 'ROWS', startIndex: hit.rowIndex-1, endIndex: hit.rowIndex } } }] })
   });
   if (!r.ok) throw new Error('delete row '+r.status);
@@ -674,13 +673,22 @@ function __lm_markListSelected(id){
   if (li){ li.classList.add('is-selected'); li.setAttribute('aria-selected','true'); li.scrollIntoView({block:'nearest'}); }
 }
 
-function __lm_fillFormFromCaption(obj){
+async function __lm_fillFormFromCaption(obj){
   const ti = $('caption-title'); const bo = $('caption-body'); const th = $('currentImageThumb');
   if (!ti || !bo || !th) return;
   ti.value = (obj && obj.title) ? String(obj.title) : '';
   bo.value = (obj && obj.body)  ? String(obj.body)  : '';
   if (obj && obj.imageFileId){
-    th.innerHTML = `<img alt="attached" src="${getFileThumbUrl(obj.imageFileId, getAccessToken(), 256)}">`;
+    try{
+      const url = await getFileThumbUrl(obj.imageFileId, getAccessToken(), 256);
+      th.innerHTML = `<img alt="attached" src="${url`;
+    }catch(e){
+      console.warn('[thumb fail]', e); th.innerHTML = `<div class="placeholder">No Image</div>`;
+    }
+  } else {
+    th.innerHTML = `<div class="placeholder">No Image</div>`;
+  }
+`;
   } else {
     th.innerHTML = `<div class="placeholder">No Image</div>`;
   }
@@ -788,7 +796,7 @@ let __lm_deb;
     const fid = btn.dataset.id;
     // Preview
     try{
-      $('currentImageThumb').innerHTML = `<img alt="attached" src="${getFileThumbUrl(fid, getAccessToken(), 256)}">`;
+      $('currentImageThumb').innerHTML = `<img alt="attached" src="${getFileThumbUrl(fid, getAccessToken(), 256)`;
       const liImg = document.querySelector(`#caption-list .caption-item[data-id="${CSS.escape(selectedPinId)}"] img`);
       if (liImg) liImg.src = getFileThumbUrl(fid, getAccessToken(), 128);
       const cur = rowCache.get(selectedPinId) || {};
