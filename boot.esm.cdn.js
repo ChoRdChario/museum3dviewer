@@ -614,7 +614,6 @@ async function updateImageForPin(id, imageFileId){
   try{ const turl = await getFileThumbUrl(imageFileId, token, 1024); const dom = captionDomById.get(id); if (dom){ const i=dom.querySelector('img'); if(i) i.src=turl; else{ const im=document.createElement('img'); im.src=turl; dom.prepend(im);} } }catch(e){}
   // overlay full-res (scaled)
   try{ const full = await getFileBlobUrl(imageFileId, token); const ov=overlays.get(id); if(ov){ ov.imgEl.src=full; ov.imgEl.style.display='block'; } }catch(e){}
-}
 async function updateCaptionForPin(id, args){
   const title = args.title; const body = args.body; const color = args.color;
   const token=getAccessToken(); if(!token||!currentSpreadsheetId) return;
@@ -724,11 +723,9 @@ function __lm_markListSelected(id){
   const d = rowCache.get(id);
   if (d) __lm_fillFormFromCaption(d);
 }
-);
   if (!id) return;
   const li = host.querySelector(`.caption-item[data-id="${CSS.escape(id)}"]`);
   if (li){ li.classList.add('is-selected'); li.setAttribute('aria-selected','true'); li.scrollIntoView({block:'nearest'}); }
-}
 
 
 function __lm_fillFormFromCaption(obj){
@@ -1007,4 +1004,3 @@ console.log('[LociMyu ESM/CDN] boot overlay-edit+fixed-zoom build loaded');
   console.log('[LM][M1] selection+form+overlay patch active');
 })();
 /* ==== /M1 augmentation ==== */
-;window.LM_BUILD='20251012100702'; console.log('[LM] build', window.LM_BUILD);
