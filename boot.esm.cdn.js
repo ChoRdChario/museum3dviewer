@@ -730,11 +730,7 @@ function __lm_fillFormFromCaption(obj){
     th.innerHTML = url ? `<img alt="attached" src="${url}">` : `<div class="placeholder">No Image</div>`;
   })();
 }
-">`;
-  } else {
-    th.innerHTML = `<div class="placeholder">No Image</div>`;
-  }
-}
+ 
 
 function __lm_getCaptionDataById(id){
   // We can reconstruct from current DOM and cache rowCache if present
