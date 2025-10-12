@@ -34,10 +34,32 @@
     .caption-item{display:flex;gap:8px;align-items:flex-start;padding:6px;border-bottom:1px solid #0003}
     .caption-item img{width:40px;height:40px;object-fit:cover;border-radius:6px;border:1px solid #0004}
     .hint{opacity:.7;font-size:12px}
-    /* thumbnails grid */
     #images-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(64px,1fr));gap:8px}
     .thumb{width:100%;aspect-ratio:1/1;border-radius:8px;border:1px solid #0005;background-size:cover;background-position:center;cursor:pointer}
     .thumb[data-selected="true"]{outline:2px solid var(--sel);outline-offset:2px}
+    
+    /* ★ 選択状態のスタイル追加 */
+    #caption-list .caption-item.is-selected,
+    #caption-list .caption-item[aria-selected="true"]{
+      background: rgba(96, 165, 250, 0.15);
+      border-left: 3px solid #60a5fa;
+    }
+    
+    /* ★ 画像プレビュー欄 */
+    #caption-image-row{
+      display:flex; gap:10px; align-items:center; margin-top:8px;
+    }
+    #currentImageThumb{
+      width:56px; height:56px; border-radius:8px; border:1px solid var(--line);
+      display:flex; align-items:center; justify-content:center; overflow:hidden;
+      background:#0b0f18;
+    }
+    #currentImageThumb img{ 
+      width:100%; height:100%; object-fit:cover; display:block; 
+    }
+    #currentImageThumb .placeholder{ 
+      font-size:11px; color:var(--muted); 
+    }
   </style>
 </head>
 <body>
@@ -73,103 +95,4 @@
           <div class="hint">Pin color</div>
           <div id="pin-colors" class="chips"></div>
         </div>
-        <div class="grp">
-          <div class="hint">Filter</div>
-          <div id="pin-filter" class="chips"></div>
-        </div>
-
-        <!-- ▼ 配置入替：先に Caption list、その下に Title/Body -->
-        <div class="grp">
-          <div class="hint">Caption list</div>
-          <div id="caption-list"></div>
-        </div>
-
-        <div class="grp">
-          <div class="hint">Title / Body</div>
-          <input id="caption-title" placeholder="Title" />
-          <input id="caption-body" placeholder="Body" />
-          <div class="row" style="margin-top:6px">
-            <button id="pin-add">+ Pin</button>
-            <button id="pin-clear">Clear</button>
-          </div>
-        </div>
-        <div class="grp">
-          <div class="row" id="caption-image-row">
-            <div id="currentImageThumb" aria-label="attached image preview"><div class="placeholder">No Image</div></div>
-            <div class="buttons" style="display:flex; gap:8px;">
-              <button id="btnAttachImage">画像を添付</button>
-              <button id="btnDetachImage" class="ghost">デタッチ</button>
-            </div>
-          </div>
-        </div>
-
-
-
-        <div class="grp">
-          <div class="hint">Images (auto from GLB folder)</div>
-          <div id="images-grid"></div>
-          <div class="row" style="margin-top:8px">
-            <button id="btnRefreshImages" style="width:100%">Refresh images</button>
-          </div>
-          <div id="images-status" class="hint" style="margin-top:6px"></div>
-        </div>
-      </section>
-
-      <section id="pane-material" class="pane" data-pane="material">
-        <div class="grp">
-          <label><input type="checkbox" id="mat-unlit" /> Unlit</label>
-          <label><input type="checkbox" id="mat-doubleside" /> Double-sided</label>
-        </div>
-        <div class="grp">
-          <label>Opacity <input type="range" id="mat-opacity" min="0" max="1" step="0.01" value="1"/></label>
-        </div>
-        <div class="grp">
-          <label><input type="checkbox" id="mat-white2alpha" /> White → Alpha</label>
-        </div>
-      </section>
-
-      <section id="pane-views" class="pane" data-pane="views">
-        <div class="grp">
-          <button id="view-save">Save view</button>
-          <div class="row"><label><input type="checkbox" id="proj-ortho" /> Orthographic</label></div>
-        </div>
-        <div id="views-preset-list"></div>
-      </section>
-    </aside>
-  </div>
-
-  <script>
-    const tabs = document.querySelectorAll('[role="tab"]');
-    const panes = document.querySelectorAll('.pane');
-    tabs.forEach(t => t.addEventListener('click', () => {
-      tabs.forEach(x => x.setAttribute('aria-selected', String(x===t)));
-      panes.forEach(p => p.dataset.active = String(p.dataset.pane===t.dataset.tab));
-    }));
-  </script>
-
-  <script type="importmap">
-  {
-    "imports": {
-      "three": "https://unpkg.com/three@0.155.0/build/three.module.js",
-      "three/examples/jsm/": "https://unpkg.com/three@0.155.0/examples/jsm/"
-    }
-  }
-  </script>
-
-  <script type="module" src="./boot.esm.cdn.js"></script>
-
-
-  <div id="glb-loader" style="position:fixed;left:1rem;bottom:1rem;z-index:1000;background:#fff8;padding:.5rem 1rem;border:1px solid #ddd;border-radius:.5rem;">
-    <label style="cursor:pointer;">GLB:
-      <input type="file" id="glb-file" accept=".glb,model/gltf-binary">
-    </label>
-    <button id="btn-glb-load" type="button">Load</button>
-  </div>
-  <script>
-    (function(){
-      var btn=document.getElementById('btn-glb-load');
-      if(btn){ btn.addEventListener('click', function(){ if (typeof doLoad==='function') doLoad(); }); }
-    })();
-  </script>
-</body>
-</html>
+        <div class
