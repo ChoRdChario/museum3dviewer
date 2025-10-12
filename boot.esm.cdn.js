@@ -713,27 +713,32 @@ function __lm_markListSelected(id){
   const d = rowCache.get(id);
   if (d) __lm_fillFormFromCaption(d);
 }
-  if (!id) return;
-  const li = host.querySelector(`.caption-item[data-id="${CSS.escape(id)}"]`);
-  if (li){ li.classList.add('is-selected'); li.setAttribute('aria-selected','true'); li.scrollIntoView({block:'nearest'}); }
-
-
 function __lm_fillFormFromCaption(obj){
-  const ti=$('caption-title'), bo=$('caption-body'), th=$('currentImageThumb');
+  const ti = $('caption-title');
+  const bo = $('caption-body');
+  const th = $('currentImageThumb');
   if (ti) ti.value = (obj && obj.title) ? String(obj.title) : '';
   if (bo) bo.value = (obj && obj.body)  ? String(obj.body)  : '';
   if (!th) return;
   const fid = obj && obj.imageFileId;
-  if (!fid){ th.innerHTML = `<div class="placeholder">No Image</div>`; return; }
+  if (!fid){
+    th.innerHTML = '<div class="placeholder">No Image</div>';
+
+  }
   (async()=>{
+    try{
+      const url = await resolveThumbUrl(fid, 256);
+      th.innerHTML = url ? ('<img alt="attached" src="'+url+'">') : '<div class="placeholder">No Image</div>';
+    }catch(e){
+      th.innerHTML = '<div class="placeholder">No Image</div>';
+    }
+  })();
+}
+(async()=>{
     const url = await resolveThumbUrl(fid,256);
     th.innerHTML = url ? `<img alt="attached" src="${url}">` : `<div class="placeholder">No Image</div>`;
   })();
 }
-">`;
-  } else {
-    th.innerHTML = `<div class="placeholder">No Image</div>`;
-  }
 }
 
 function __lm_getCaptionDataById(id){
