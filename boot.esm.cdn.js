@@ -36,8 +36,7 @@ var resolveThumbUrl = globalThis.resolveThumbUrl || async function (fileId, size
   try{
     const token = (typeof getAccessToken==='function') ? getAccessToken() : null;
     if (!fileId || !token) return '';
-    const u = `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)};
-?fields=thumbnailLink&supportsAllDrives=true`;
+    const u = `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?fields=thumbnailLink&supportsAllDrives=true`;
     const r = await fetch(u, { headers:{ Authorization:`Bearer ${token}` } });
     if (!r.ok) return '';
     const j = await r.json();
@@ -53,8 +52,7 @@ var buildFileBlobUrl = globalThis.buildFileBlobUrl || function (fileId){
   try{
     const token = (typeof getAccessToken==='function') ? getAccessToken() : null;
     if (!fileId || !token) return '';
-    return `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)};
-?alt=media&supportsAllDrives=true&access_token=${encodeURIComponent(token)}`;
+    return `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?alt=media&supportsAllDrives=true&access_token=${encodeURIComponent(token)}`;
   } catch(e) {
     return '';
   }
@@ -79,62 +77,7 @@ var extractDriveId = globalThis.extractDriveId || function (s){
   return m ? m[0] : null;
 }
 
-var resolveThumbUrl = globalThis.resolveThumbUrl || async function (fileId, size=256){
-  try{
-    const token = (typeof getAccessToken==='function') ? getAccessToken() : null;
-    if (!fileId || !token) return '';
-    const url = `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)};
-?fields=thumbnailLink&supportsAllDrives=true`;
-    const r = await fetch(url, { headers:{ Authorization:`Bearer ${token}` } });
-    if (!r.ok) return '';
-    const j = await r.json();
-    if (!j || !j.thumbnailLink) return '';
-    return j.thumbnailLink.replace(/=s\d+(?:-c)?$/, `=s${Math.max(64, Math.min(2048, size|0))}-c`);
-  } catch(e){
-    console.warn('[resolveThumbUrl failed]', e); return '';
-  }
-}
 
-var buildFileBlobUrl = globalThis.buildFileBlobUrl || function (fileId){
-  try{
-    const token = (typeof getAccessToken==='function') ? getAccessToken() : null;
-    if (!fileId || !token) return '';
-    return `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)};
-?alt=media&supportsAllDrives=true&access_token=${encodeURIComponent(token)}`;
-  } catch(e){ return ''; }
-}
-
-
-async function listImagesForGlb(fileId, token) {
-  const parent = await getParentFolderId(fileId, token); if(!parent) return [];
-  const q = encodeURIComponent("'" + parent + "' in parents and (mimeType contains 'image/') and trashed=false");
-  const url = 'https://www.googleapis.com/drive/v3/files?q='+q+'&fields=files(id,name,mimeType,thumbnailLink)&pageSize=200&supportsAllDrives=true';
-  const r = await fetch(url, { headers:{Authorization:'Bearer '+token} });
-  if(!r.ok) throw new Error('Drive list failed: '+r.status);
-  const d = await r.json(); return d.files||[];
-}
-async function getFileThumbUrl(fileId, token, size=1024) {
-  const r = await fetch('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(fileId)+'?fields=thumbnailLink&supportsAllDrives=true', { headers:{Authorization:'Bearer '+token} });
-  if (!r.ok) throw new Error('thumb meta '+r.status);
-  const j = await r.json(); if (!j.thumbnailLink) throw new Error('no thumbnailLink');
-  const sz = Math.max(64, Math.min(2048, size|0));
-  const sep = (j.thumbnailLink.indexOf('?')>=0)?'&':'?';
-  return j.thumbnailLink + sep + 'sz=s'+String(sz) + '&access_token=' + encodeURIComponent(token);
-}
-async function getFileBlobUrl(fileId, token) {
-  const r = await fetch('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(fileId)+'?alt=media&supportsAllDrives=true', { headers:{Authorization:'Bearer '+token} });
-  if (!r.ok) throw new Error('media '+r.status);
-  const blob = await r.blob();
-  return URL.createObjectURL(blob);
-}
-
-/* ------------------------------ state -------------------------------- */
-let lastGlbFileId = null;
-let currentSpreadsheetId = null;
-let currentSheetId = null;
-let currentSheetTitle = null;
-let currentHeaders = [];
-let currentHeaderIdx = {};
 let currentPinColor = '#ff6b6b';
 let selectedPinId = null;
 let selectedImage = null;
@@ -256,7 +199,7 @@ function createCaptionOverlay(id, data){
       try {
         const full = await getFileBlobUrl(row.imageFileId, token);
         img.src = full; img.style.display='block';
-      } e) {
+      } catch(e) {
         try {
           const th = await getFileThumbUrl(row.imageFileId, token, 1024);
           img.src = th; img.style.display='block';
@@ -306,7 +249,7 @@ function createCaptionOverlay(id, data){
       rowCache.delete(id);
       removeCaptionOverlay(id);
       selectedPinId = null;
-    } e){ console.error('[caption delete] failed', e); alert('Failed to delete caption row.'); }
+    } catch(e) { console.error('[caption delete] failed', e); alert('Failed to delete caption row.'); }
   };
 
   // ドラッグ
@@ -582,7 +525,7 @@ function appendCaptionItem(row){
   // Select behavior
   div.addEventListener('click', (e)=>{
     if (e.target && e.target.closest && e.target.closest('.c-del')) return;
-    try{ __lm_selectPin(id,'list'); } e){}
+    try{ __lm_selectPin(id,'list'); } catch(e) {}
     try{ if (typeof showOverlayFor==='function') showOverlayFor(id); } e{}
   };
 
@@ -727,7 +670,7 @@ async function loadCaptionsFromSheet(){
       appendCaptionItem(enriched);
     }
     await ensureIndex();
-   catch(e){ console.warn('[loadCaptionsFromSheet] failed', e); }
+//__REMOVED_TOPLEVEL_CATCH__ catch(e){ console.warn('[loadCaptionsFromSheet] failed', e); }
 
 
 /* --------------------------- Images UX --------------------------- */
@@ -861,7 +804,7 @@ let __lm_deb;
         // update cache
         const cur = rowCache.get(selectedPinId) || {};
         rowCache.set(selectedPinId, { ...cur, title, body });
-      } e){ console.warn('[caption autosave failed]', e); }
+      } catch(e) { console.warn('[caption autosave failed]', e); }
     }, 500);
   });
 };
@@ -892,7 +835,7 @@ let __lm_deb;
         // update cache
         const cur = rowCache.get(selectedPinId) || {};
         rowCache.set(selectedPinId, { ...cur, imageFileId: '' });
-      } e){ console.warn('[detach image failed]', e); }
+      } catch(e) { console.warn('[detach image failed]', e); }
     });
   }
 }();
@@ -912,7 +855,7 @@ let __lm_deb;
       const cur = rowCache.get(selectedPinId) || {};
       rowCache.set(selectedPinId, { ...cur, imageFileId: fid });
     (async()=>{ const url = await resolveThumbUrl(fid,256); if ($('currentImageThumb')) $('currentImageThumb').innerHTML = url ? `<img alt="attached" src="${url}">` : `<div class="placeholder">No Image</div>`; const liImg = document.querySelector(`#caption-list .caption-item[data-id="${CSS.escape(selectedPinId)}"] img`); if (liImg){ const u128 = await resolveThumbUrl(fid,128); if (u128) liImg.src = u128; } })();
-    } e){}
+    } catch(e) {}
   }, {capture:true});
 }();
 /* ===== end v6.7 injection ===== */
@@ -927,7 +870,7 @@ console.log('[LociMyu ESM/CDN] boot overlay-edit+fixed-zoom build loaded');
     if (!item) return;
     if (e.target.closest && e.target.closest('.c-del')) return;
     const id = item.dataset.id;
-    try{ __lm_selectPin(id,'list'); } e){}
-    try{ showOverlayFor(id); } e){}
+    try{ __lm_selectPin(id,'list'); } catch(e) {}
+    try{ showOverlayFor(id); } catch(e) {}
   }, {capture:true};
 }();
