@@ -71,7 +71,118 @@ async function getFileThumbUrl(fileId, token, size=1024) {
 }
 
 async function getFileBlobUrl(fileId, token) {
-  const r = await fetch('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(fileId)+'?alt=media&supportsAllDrives=true', { headers:{Authorization:'Bearer '+token} });
+  const r = await fetch('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(fileId)+'?alt=media&supportsAllDrives=true', { headers:{Authorization:'Bearer '+token}
+
+/* -------------------------- Images grid & attach -------------------------- */
+async function refreshImagesGrid(){
+  try{
+    const grid = document.getElementById('images-grid');
+    const statusEl = document.getElementById('images-status');
+    if (!grid){ console.warn('[images] #images-grid not found'); return; }
+    grid.innerHTML = '';
+    if (!lastGlbFileId){ statusEl && (statusEl.textContent='GLB 未読込'); return; }
+    const token = getAccessToken();
+    if (!token){ statusEl && (statusEl.textContent='未サインイン'); return; }
+    statusEl && (statusEl.textContent='Loading…');
+    const files = await listImagesForGlb(lastGlbFileId, token);
+    if (!files.length){ statusEl && (statusEl.textContent='画像が見つかりません'); return; }
+    statusEl && (statusEl.textContent=files.length+' images');
+
+    const selClass = 'thumb';
+    let current = selectedImage ? selectedImage.id : null;
+
+    for (const f of files){
+      const el = document.createElement('div');
+      el.className = selClass;
+      el.dataset.id = f.id;
+      el.title = f.name || f.id;
+      try{
+        const thumb = await getFileThumbUrl(f.id, token, 256);
+        el.style.backgroundImage = 'url("'+thumb+'")';
+      }catch(_){ /* ignore thumb error */ }
+      if (current && f.id === current) el.setAttribute('data-selected','true');
+      el.addEventListener('click', async ()=>{
+        // toggle selection
+        grid.querySelectorAll('.thumb[data-selected="true"]').forEach(n=>n.removeAttribute('data-selected'));
+        el.setAttribute('data-selected','true');
+        selectedImage = { id: f.id, name: f.name };
+        // preview on the right panel
+        const prev = document.getElementById('currentImageThumb');
+        if (prev){
+          try{
+            const th = await getFileThumbUrl(f.id, token, 256);
+            prev.innerHTML = '<img alt="attached" src="'+th+'" />';
+          }catch(_){
+            prev.innerHTML = '<div class="placeholder">No preview</div>';
+          }
+        }
+      });
+      grid.appendChild(el);
+    }
+  }catch(e){
+    console.error('[images] refreshImagesGrid failed', e);
+    const statusEl = document.getElementById('images-status');
+    statusEl && (statusEl.textContent='画像の取得に失敗: '+(e?.message||e));
+  }
+}
+
+// Wire the buttons once (idempotent)
+(function __wireImageButtonsOnce(){
+  try{
+    const a = document.getElementById('btnAttachImage');
+    const d = document.getElementById('btnDetachImage');
+    if (a && !a.__lm_wired){
+      a.__lm_wired = true;
+      a.addEventListener('click', async ()=>{
+        if (!selectedPinId || !selectedImage){ alert('ピンまたは画像が選択されていません'); return; }
+        try{
+          await updateCaptionForPin(selectedPinId, { imageFileId: selectedImage.id });
+          // update local cache view
+          const row = rowCache.get(selectedPinId) || {};
+          row.imageFileId = selectedImage.id;
+          rowCache.set(selectedPinId, row);
+          __lm_fillFormFromCaption(row);
+          // overlay image refresh: recreate
+          showOverlayFor(selectedPinId);
+        }catch(e){
+          console.error('[attach] failed', e);
+          alert('画像の添付に失敗しました');
+        }
+      });
+    }
+    if (d && !d.__lm_wired){
+      d.__lm_wired = true;
+      d.addEventListener('click', async ()=>{
+        if (!selectedPinId){ alert('ピンが選択されていません'); return; }
+        try{
+          await updateCaptionForPin(selectedPinId, { imageFileId: '' });
+          const row = rowCache.get(selectedPinId) || {};
+          row.imageFileId = '';
+          rowCache.set(selectedPinId, row);
+          __lm_fillFormFromCaption(row);
+          showOverlayFor(selectedPinId);
+          // also unselect image
+          selectedImage = null;
+          const grid = document.getElementById('images-grid');
+          grid && grid.querySelectorAll('.thumb[data-selected="true"]').forEach(n=>n.removeAttribute('data-selected'));
+        }catch(e){
+          console.error('[detach] failed', e);
+          alert('デタッチに失敗しました');
+        }
+      });
+    }
+    const r = document.getElementById('btnRefreshImages');
+    if (r && !r.__lm_wired){
+      r.__lm_wired = true;
+      r.addEventListener('click', ()=> refreshImagesGrid());
+    }
+  }catch(e){
+    console.warn('[images] button wiring failed', e);
+  }
+})();
+/* ------------------------ /Images grid & attach ------------------------ */
+
+ });
   if (!r.ok) throw new Error('media '+r.status);
   const blob = await r.blob();
   return URL.createObjectURL(blob);
