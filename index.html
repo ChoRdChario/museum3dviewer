@@ -158,5 +158,18 @@
 
   <script type="module" src="./boot.esm.cdn.js"></script>
 
+
+  <div id="glb-loader" style="position:fixed;left:1rem;bottom:1rem;z-index:1000;background:#fff8;padding:.5rem 1rem;border:1px solid #ddd;border-radius:.5rem;">
+    <label style="cursor:pointer;">GLB:
+      <input type="file" id="glb-file" accept=".glb,model/gltf-binary">
+    </label>
+    <button id="btn-glb-load" type="button">Load</button>
+  </div>
+  <script>
+    (function(){
+      var btn=document.getElementById('btn-glb-load');
+      if(btn){ btn.addEventListener('click', function(){ if (typeof doLoad==='function') doLoad(); }); }
+    })();
+  </script>
 </body>
 </html>

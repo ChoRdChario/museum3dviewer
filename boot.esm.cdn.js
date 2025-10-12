@@ -288,21 +288,69 @@ onCanvasShiftPick(async (pt) => {
 
 /* ----------------------------- GLB Load ----------------------------- */
 async function doLoad(){
-  const token = getAccessToken();
-  const urlEl = $('glbUrl');
-  const fileId = extractDriveId(urlEl ? (urlEl.value||'') : '');
-  if (!token || !fileId) { console.warn('[GLB] missing token or fileId'); return; }
-  try {
-    if ($('btnGlb')) $('btnGlb').disabled = true;
-    await loadGlbFromDrive(fileId, { token });
-    lastGlbFileId = fileId;
-    const parentId = await getParentFolderId(fileId, token);
-    currentSpreadsheetId = await findOrCreateLociMyuSpreadsheet(parentId, token, { glbId: fileId });
-    await populateSheetTabs(currentSpreadsheetId, token);
-    await loadCaptionsFromSheet();
-    await refreshImagesGrid();
-  } catch (e) { console.error('[GLB] load error', e); }
-  finally { if ($('btnGlb')) $('btnGlb').disabled = false; }
+  const qp = new URLSearchParams(location.search);
+  const qGlb   = qp.get('glb');
+  const qFileId= qp.get('fileId') || qp.get('id');
+  const qToken = qp.get('token');
+
+  let srcUrl = null;
+  let revoke = null;
+
+  const fileInput = document.getElementById('glb-file') 
+                 || document.querySelector('input[type="file"][accept*="glb"]');
+  if (fileInput && fileInput.files && fileInput.files[0]){
+    try{
+      const f = fileInput.files[0];
+      srcUrl = URL.createObjectURL(f);
+      revoke = srcUrl;
+    }catch(e){
+      console.warn('[GLB] local file objectURL failed', e);
+    }
+  }
+
+  if (!srcUrl && qGlb && /^https?:\/\//i.test(qGlb)){
+    srcUrl = qGlb;
+  }
+
+  if (!srcUrl){
+    const token = qToken || (typeof getAccessToken==='function' ? getAccessToken() : null);
+    const fileId= qFileId|| (typeof getCurrentGlbFileId==='function' ? getCurrentGlbFileId() : null);
+    if (token && fileId){
+      try{
+        if (typeof buildFileBlobUrl==='function'){
+          srcUrl = buildFileBlobUrl(fileId) || null;
+        }
+        if (!srcUrl && typeof getFileBlobUrl==='function'){
+          srcUrl = await getFileBlobUrl(fileId, token);
+        }
+        if (!srcUrl){
+          srcUrl = `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?alt=media&supportsAllDrives=true&access_token=${encodeURIComponent(token)}`;
+        }
+      }catch(e){
+        console.warn('[GLB] drive url resolve failed', e);
+      }
+    }
+  }
+
+  if (!srcUrl){
+    console.warn('[GLB] missing source; select a local .glb or add ?glb=<URL> or provide fileId+token');
+    alert('GLBの読み込み元が見つかりません。ローカルGLBを選択するか、?glb=URL を指定するか、fileId+token を渡してください。');
+    return;
+  }
+
+  try{
+    if (typeof viewer !== 'undefined' && viewer && typeof viewer.load==='function'){
+      await viewer.load(srcUrl);
+    }else{
+      console.error('[GLB] viewer.load not available');
+      alert('viewer が初期化されていません（viewer.load が見つかりません）。');
+    }
+  }catch(e){
+    console.error('[GLB] load failed', e);
+    alert('GLBの読み込みに失敗しました: ' + (e && e.message || e));
+  }finally{
+    if (revoke){ try{ URL.revokeObjectURL(revoke); }catch(_e){} }
+  }
 }
 if ($('btnGlb')) $('btnGlb').addEventListener('click', doLoad);
 if ($('glbUrl')) $('glbUrl').addEventListener('keydown', (e)=>{ if (e.key==='Enter') doLoad(); });
