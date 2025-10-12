@@ -1,4 +1,5 @@
-// boot.esm.cdn.js — stabilized M1 (selection highlight + form editing + attach/detach + overlay view)
+// boot.esm.cdn.js — overlay-edit + fixed zoom controls (top-left), always full-res image (scaled), caption highlight, clearer attach UX, hide +Pin
+// This file replaces the previous placeholder. It expects viewer.module.cdn.js and gauth.module.js to expose the same public API as earlier builds.
 import {
   ensureViewer, onCanvasShiftPick, addPinMarker, clearPins,
   setPinSelected, onPinSelect, loadGlbFromDrive, onRenderTick,
@@ -17,13 +18,12 @@ ensureViewer({ canvas: $('gl') });
 /* ------------------------------ auth -------------------------------- */
 const __LM_CLIENT_ID = (window.GIS_CLIENT_ID || '595200751510-ncahnf7edci6b9925becn5to49r6cguv.apps.googleusercontent.com');
 const __LM_API_KEY   = (window.GIS_API_KEY   || 'AIzaSyCUnTCr5yWUWPdEXST9bKP1LpgawU5rIbI');
-const __LM_SCOPES    = (window.GIS_SCOPES    || [
-  'https://www.googleapis.com/auth/drive.readonly',
-  'https://www.googleapis.com/auth/drive.file',
-  'https://www.googleapis.com/auth/drive.metadata.readonly',
+const __LM_SCOPES    = (window.GIS_SCOPES    || (
+  'https://www.googleapis.com/auth/drive.readonly ' +
+  'https://www.googleapis.com/auth/drive.file ' +
+  'https://www.googleapis.com/auth/drive.metadata.readonly ' +
   'https://www.googleapis.com/auth/spreadsheets'
-].join(' '));
-
+));
 const signedSwitch = (signed) => {
   document.documentElement.classList.toggle('signed-in', !!signed);
   enable(!!signed, $('btnGlb'), $('glbUrl'), $('save-target-sheet'), $('save-target-create'), $('btnRefreshImages'));
@@ -58,7 +58,7 @@ async function listImagesForGlb(fileId, token) {
   if(!r.ok) throw new Error('Drive list failed: '+r.status);
   const d = await r.json(); return d.files||[];
 }
-async function getFileThumbUrl(fileId, token, size=512) {
+async function getFileThumbUrl(fileId, token, size=1024) {
   const r = await fetch('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(fileId)+'?fields=thumbnailLink&supportsAllDrives=true', { headers:{Authorization:'Bearer '+token} });
   if (!r.ok) throw new Error('thumb meta '+r.status);
   const j = await r.json(); if (!j.thumbnailLink) throw new Error('no thumbnailLink');
@@ -95,7 +95,11 @@ let lineLayer = null;
 function ensureLineLayer(){
   if (lineLayer) return lineLayer;
   const svg = document.createElementNS('http://www.w3.org/2000/svg','svg');
-  Object.assign(svg.style, { position:'fixed', left:'0', top:'0', width:'100vw', height:'100vh', pointerEvents:'none', zIndex:'999' });
+  svg.style.position = 'fixed';
+  svg.style.left = '0'; svg.style.top = '0';
+  svg.style.width = '100vw'; svg.style.height = '100vh';
+  svg.style.pointerEvents = 'none';
+  svg.style.zIndex = '999'; // overlay: 1000
   document.body.appendChild(svg);
   lineLayer = svg; return svg;
 }
@@ -118,7 +122,7 @@ function removeLine(id){
 }
 
 /* --------------------------- overlays (UI) --------------------------- */
-const overlays = new Map(); // id -> {root,imgEl}
+const overlays = new Map(); // id -> {root,imgEl,zoom}
 
 function removeCaptionOverlay(id){
   const o = overlays.get(id);
@@ -132,46 +136,144 @@ function createCaptionOverlay(id, data){
   removeCaptionOverlay(id);
   const root = document.createElement('div');
   root.className = 'cap-overlay';
-  Object.assign(root.style, {
-    position:'fixed', zIndex:'1000', background:'#0b0f14ef', color:'#e5e7eb',
-    padding:'10px 12px 12px 12px', borderRadius:'10px', boxShadow:'0 8px 24px #000a',
-    minWidth:'200px', maxWidth:'300px'
-  });
+  root.style.position = 'fixed';
+  root.style.zIndex = '1000';
+  root.style.background = '#0b0f14ef';
+  root.style.color = '#e5e7eb';
+  root.style.padding = '10px 12px 12px 12px';
+  root.style.borderRadius = '10px';
+  root.style.boxShadow = '0 8px 24px #000a';
+  root.style.minWidth = '200px';
+  root.style.maxWidth = '300px';
 
+  // 固定位置のズームバー（左上・ウィンドウ拡縮でも位置が変わらない）
+  const fixedZoomBar = document.createElement('div');
+  fixedZoomBar.style.position = 'absolute';
+  fixedZoomBar.style.left = '8px';
+  fixedZoomBar.style.top = '8px';
+  fixedZoomBar.style.display = 'flex';
+  fixedZoomBar.style.gap = '6px';
+  function zbtn(label, title){
+    const z = document.createElement('button');
+    z.textContent = label; z.title = title;
+    z.style.width = '24px'; z.style.height = '24px';
+    z.style.borderRadius = '6px';
+    z.style.border = 'none';
+    z.style.background = '#1118';
+    z.style.color = '#fff';
+    z.style.cursor = 'pointer';
+    return z;
+  }
+  const zIn  = zbtn('+', '拡大');
+  const zOut = zbtn('−', '縮小');
+  fixedZoomBar.appendChild(zIn); fixedZoomBar.appendChild(zOut);
+  root.appendChild(fixedZoomBar);
+
+  // タイトル・本文・画像
   const topbar = document.createElement('div');
-  Object.assign(topbar.style, { display:'flex', gap:'10px', justifyContent:'flex-end', marginBottom:'6px' });
-  const mkBtn = (txt, title) => {
+  topbar.style.display = 'flex'; topbar.style.gap = '10px';
+  topbar.style.justifyContent = 'flex-end'; topbar.style.marginBottom = '6px';
+  function mkBtn(txt, cls, title){
     const b = document.createElement('button');
-    b.textContent = txt; b.title = title||'';
-    Object.assign(b.style, { border:'none', background:'transparent', color:'#ddd', cursor:'pointer' });
+    b.textContent = txt; b.className = cls; b.title = title||'';
+    b.style.border='none'; b.style.background='transparent'; b.style.color='#ddd'; b.style.cursor='pointer';
     return b;
-  };
-  const bClose = mkBtn('×','閉じる');
-  bClose.addEventListener('click', ()=> removeCaptionOverlay(id));
-  topbar.appendChild(bClose);
+  }
+  const bDel   = mkBtn('🗑', 'cap-del', '削除');
+  const bClose = mkBtn('×',  'cap-close', '閉じる');
+   topbar.appendChild(bDel); topbar.appendChild(bClose);
 
   const t = document.createElement('div'); t.className='cap-title'; t.style.fontWeight='700'; t.style.marginBottom='6px';
   const body = document.createElement('div'); body.className='cap-body'; body.style.fontSize='12px'; body.style.opacity='.95'; body.style.whiteSpace='pre-wrap'; body.style.marginBottom='6px';
-  const img = document.createElement('img'); img.className='cap-img'; img.alt=''; img.style.display='none'; img.style.width='100%'; img.style.borderRadius='8px';
+
+  const img = document.createElement('img'); img.className='cap-img'; img.alt=''; img.style.display='none';
+  img.style.width='100%'; img.style.height='auto'; img.style.borderRadius='8px';
 
   const safeTitle = (data && data.title ? String(data.title).trim() : '') || '(untitled)';
   const safeBody  = (data && data.body  ? String(data.body).trim()  : '') || '(no description)';
   t.textContent = safeTitle; body.textContent = safeBody;
 
-  (async()=>{
-    try{
-      const token = getAccessToken();
-      if (token && data && data.imageFileId){
+  // 画像は最初から full-res を取りに行き、描画は CSS で縮小（失敗時は thumb にフォールバック）
+  (async ()=>{
+    const token = getAccessToken();
+    const row = rowCache.get(id);
+    if (token && row && row.imageFileId){
+      try {
+        const full = await getFileBlobUrl(row.imageFileId, token);
+        img.src = full; img.style.display='block';
+      } catch (e) {
         try {
-          const full = await getFileBlobUrl(data.imageFileId, token);
-          img.src = full; img.style.display='block';
-        } catch (e) {
-          const th = await getFileThumbUrl(data.imageFileId, token, 1024);
+          const th = await getFileThumbUrl(row.imageFileId, token, 1024);
           img.src = th; img.style.display='block';
-        }
+        } catch (e2) {}
       }
-    }catch(e){ console.warn('[overlay image]', e); }
+    }
   })();
+
+  // 編集モード（タイトル/本文ともにピン設置後も編集可能）
+  let editing = false;
+  function enterEdit(){
+    if (editing) return; editing = true;
+    t.contentEditable = 'true'; body.contentEditable = 'true';
+    t.style.outline = '1px dashed #fff3'; body.style.outline = '1px dashed #fff3';
+    t.focus();
+  }
+  function exitEdit(save){
+    if (!editing) return; editing = false;
+    t.contentEditable = 'false'; body.contentEditable = 'false';
+    t.style.outline = ''; body.style.outline = '';
+    if (save){
+      const newTitle = (t.textContent || '').trim();
+      const newBody  = (body.textContent || '').trim();
+      updateCaptionForPin(id, { title: newTitle, body: newBody }).catch(()=>{});
+    } else {
+      const cur = rowCache.get(id) || {};
+      t.textContent = (cur.title || '').trim() || '(untitled)';
+      body.textContent = (cur.body  || '').trim() || '(no description)';
+    }
+  }
+  bEdit.addEventListener('click', () => { if (editing) exitEdit(true); else enterEdit(); });
+  t.addEventListener('dblclick', enterEdit);
+  body.addEventListener('dblclick', enterEdit);
+  t.addEventListener('keydown', (e)=>{ if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); exitEdit(true);} });
+  body.addEventListener('keydown', (e)=>{ if(e.key==='Enter' && e.ctrlKey){ e.preventDefault(); exitEdit(true);} });
+  t.addEventListener('blur', ()=>{ if (editing) exitEdit(true); });
+  body.addEventListener('blur', ()=>{ if (editing) exitEdit(true); });
+
+  bClose.addEventListener('click', () => removeCaptionOverlay(id));
+  bDel.addEventListener('click', async () => {
+    if (!confirm('このキャプションを削除しますか？')) return;
+    try{
+      await deleteCaptionForPin(id);
+      removePinMarker(id);
+      const dom = captionDomById.get(id); if (dom) dom.remove();
+      captionDomById.delete(id);
+      rowCache.delete(id);
+      removeCaptionOverlay(id);
+      selectedPinId = null;
+    }catch(e){ console.error('[caption delete] failed', e); alert('Failed to delete caption row.'); }
+  });
+
+  // ドラッグ
+  let dragging=false,sx=0,sy=0,left=0,top=0;
+  const onDown=(e)=>{ dragging=true; sx=e.clientX; sy=e.clientY; const r=root.getBoundingClientRect(); left=r.left; top=r.top; e.preventDefault(); };
+  const onMove=(e)=>{ if(!dragging) return; const dx=e.clientX-sx, dy=e.clientY-sy; root.style.left=(left+dx)+'px'; root.style.top=(top+dy)+'px'; updateOverlayPosition(id); };
+  const onUp=()=>{ dragging=false; };
+  root.addEventListener('mousedown', onDown);
+  window.addEventListener('mousemove', onMove);
+  window.addEventListener('mouseup', onUp);
+
+  // ズーム（固定バーの [+][-]）
+  const BASE_W = 260;
+  const state = { zoom: 1.0 };
+  function applyZoom(){
+    const z = Math.max(0.75, Math.min(2.0, state.zoom));
+    root.style.maxWidth = (BASE_W * z) + 'px';
+    root.style.minWidth = (200 * z) + 'px';
+    updateOverlayPosition(id);
+  }
+  zIn.addEventListener('click', ()=>{ state.zoom *= 1.15; applyZoom(); });
+  zOut.addEventListener('click', ()=>{ state.zoom /= 1.15; applyZoom(); });
 
   root.appendChild(topbar);
   root.appendChild(t);
@@ -179,11 +281,12 @@ function createCaptionOverlay(id, data){
   root.appendChild(img);
 
   document.body.appendChild(root);
-  overlays.set(id, { root, imgEl: img });
+  overlays.set(id, { root, imgEl: img, zoom: state.zoom });
+  applyZoom();
   updateOverlayPosition(id, true);
 }
 
-function updateOverlayPosition(id, initial=false){
+function updateOverlayPosition(id, initial){
   const o = overlays.get(id); if (!o) return;
   const d = rowCache.get(id); if (!d) return;
   const p = projectPoint(d.x, d.y, d.z);
@@ -192,26 +295,28 @@ function updateOverlayPosition(id, initial=false){
   if (initial && !o.root.style.left){ o.root.style.left = (p.x + 14) + 'px'; o.root.style.top  = (p.y + 14) + 'px'; }
   const r = o.root.getBoundingClientRect();
   const line = getOrMakeLine(id);
-  const x2 = p.x, y2 = p.y;
+  const x2 = p.x; const y2 = p.y;
   const cx = Math.min(Math.max(x2, r.left), r.right);
   const cy = Math.min(Math.max(y2, r.top ), r.bottom);
   line.setAttribute('x1', String(cx)); line.setAttribute('y1', String(cy));
   line.setAttribute('x2', String(x2)); line.setAttribute('y2', String(y2));
 }
 onRenderTick(() => { overlays.forEach((_, id) => updateOverlayPosition(id, false)); });
-
 function showOverlayFor(id){
   const d=rowCache.get(id); if(!d) return;
-  __lm_markListSelected(id);
+  // リスト強調表示
+  for (const [cid, el] of captionDomById.entries()){ el.classList.toggle('selected', cid===id); }
   createCaptionOverlay(id, d);
   setPinSelected(id, true);
 }
 
 /* ----------------------- Pin selection & add ------------------------ */
-onPinSelect((id) => { if (id){ selectedPinId = id; showOverlayFor(id); } });
+onPinSelect((id) => { selectedPinId = id; showOverlayFor(id); });
 onCanvasShiftPick(async (pt) => {
-  const title = ($('caption-title')?.value || '');
-  const body  = ($('caption-body')?.value  || '');
+  const titleEl = $('caption-title');
+  const bodyEl  = $('caption-body');
+  const title = titleEl ? (titleEl.value || '') : '';
+  const body  = bodyEl  ? (bodyEl.value  || '') : '';
   const imageFileId = selectedImage ? (selectedImage.id || '') : '';
   const id = uid();
   const row = { id, title, body, color: currentPinColor, x: pt.x, y: pt.y, z: pt.z, imageFileId };
@@ -221,18 +326,17 @@ onCanvasShiftPick(async (pt) => {
   appendCaptionItem(enriched);
   selectedPinId = id; setPinSelected(id, true);
   showOverlayFor(id);
-  $('caption-title')?.focus();
+  if (titleEl) titleEl.focus();
 });
 
 /* ----------------------------- GLB Load ----------------------------- */
 async function doLoad(){
   const token = getAccessToken();
-  const fileId = extractDriveId($('glbUrl') ? $('glbUrl').value : '');
+  const urlEl = $('glbUrl');
+  const fileId = extractDriveId(urlEl ? (urlEl.value||'') : '');
   if (!token || !fileId) { console.warn('[GLB] missing token or fileId'); return; }
   try {
-    $('btnGlb') && ($('btnGlb').disabled = true);
-  } catch(e) {}
-  try {
+    if ($('btnGlb')) $('btnGlb').disabled = true;
     await loadGlbFromDrive(fileId, { token });
     lastGlbFileId = fileId;
     const parentId = await getParentFolderId(fileId, token);
@@ -240,16 +344,13 @@ async function doLoad(){
     await populateSheetTabs(currentSpreadsheetId, token);
     await loadCaptionsFromSheet();
     await refreshImagesGrid();
-  } catch (e) {
-    console.error('[GLB] load error', e);
-  } finally {
-    $('btnGlb') && ($('btnGlb').disabled = false);
-  }
+  } catch (e) { console.error('[GLB] load error', e); }
+  finally { if ($('btnGlb')) $('btnGlb').disabled = false; }
 }
-$('btnGlb')?.addEventListener('click', doLoad);
-$('glbUrl')?.addEventListener('keydown', (e)=>{ if (e.key==='Enter') doLoad(); });
-$('glbUrl')?.addEventListener('input', ()=>{ const ok = !!extractDriveId($('glbUrl').value||''); if ($('btnGlb')) $('btnGlb').disabled = !ok; });
-$('glbUrl')?.dispatchEvent(new Event('input'));
+if ($('btnGlb')) $('btnGlb').addEventListener('click', doLoad);
+if ($('glbUrl')) $('glbUrl').addEventListener('keydown', (e)=>{ if (e.key==='Enter') doLoad(); });
+if ($('glbUrl')) $('glbUrl').addEventListener('input', ()=>{ if ($('btnGlb')) $('btnGlb').disabled = !extractDriveId($('glbUrl').value||''); });
+if ($('glbUrl')) $('glbUrl').dispatchEvent(new Event('input'));
 
 /* ------------------------ Colors & Filter UI ------------------------ */
 const COLORS = ['#ff6b6b','#ffd93d','#6bcb77','#4d96ff','#9b5de5','#f15bb5','#00c2a8','#94a3b8'];
@@ -274,10 +375,20 @@ if (pinColorsHost){
 }
 const selectedColors = new Set(COLORS);
 const pinFilterHost = $('pin-filter');
-pinFilterHost?.addEventListener('change', ()=>{
-  const selected = Array.from(pinFilterHost.querySelectorAll('input[type="checkbox"]')).filter(x=>x.checked).map(x=>x.dataset.color);
-  document.dispatchEvent(new CustomEvent('pinFilterChange', { detail:{ selected } }));
-});
+if (pinFilterHost){
+  pinFilterHost.innerHTML = '';
+  COLORS.forEach((c) => {
+    const label = document.createElement('label'); label.className='filter-chip';
+    const cb = document.createElement('input'); cb.type='checkbox'; cb.dataset.color=c; cb.checked=true;
+    const span = document.createElement('span'); span.className='chip'; span.style.background=c;
+    label.appendChild(cb); label.appendChild(span);
+    cb.addEventListener('change', () => {
+      if (cb.checked) selectedColors.add(c); else selectedColors.delete(c);
+      document.dispatchEvent(new CustomEvent('pinFilterChange', { detail:{ selected: Array.from(selectedColors) } }));
+    });
+    pinFilterHost.appendChild(label);
+  });
+}
 
 /* ---------------------------- Sheets I/O ---------------------------- */
 const LOCIMYU_HEADERS = ['id','title','body','color','x','y','z','imageFileId'];
@@ -338,9 +449,9 @@ async function findOrCreateLociMyuSpreadsheet(parentFolderId, token, opts) {
 }
 async function populateSheetTabs(spreadsheetId, token) {
   const sel = $('save-target-sheet'); if (!sel || !spreadsheetId) return;
-  sel.innerHTML = '<option value="">Loading…</option>';
+  sel.innerHTML = '<option value=\"\">Loading…</option>';
   const r = await fetch('https://sheets.googleapis.com/v4/spreadsheets/'+encodeURIComponent(spreadsheetId)+'?fields=sheets(properties(title,sheetId,index))', { headers:{Authorization:'Bearer '+token} });
-  if (!r.ok) { sel.innerHTML = '<option value="">(error)</option>'; return; }
+  if (!r.ok) { sel.innerHTML = '<option value=\"\">(error)</option>'; return; }
   const data = await r.json();
   const sheets = (data.sheets||[]).map(s=>s.properties).sort((a,b)=>a.index-b.index);
   sel.innerHTML = '';
@@ -355,13 +466,13 @@ async function populateSheetTabs(spreadsheetId, token) {
   const first = sheets[0]; currentSheetId = first ? first.sheetId : null; currentSheetTitle = first ? first.title : null;
   if (currentSheetId) sel.value = String(currentSheetId);
 }
-$('save-target-sheet')?.addEventListener('change', (e)=>{
+if ($('save-target-sheet')) $('save-target-sheet').addEventListener('change', (e)=>{
   const sel = e.target; const opt = sel && sel.selectedOptions ? sel.selectedOptions[0] : null;
   currentSheetId = opt && opt.value ? Number(opt.value) : null;
   currentSheetTitle = (opt && opt.dataset) ? (opt.dataset.title || null) : null;
   loadCaptionsFromSheet();
 });
-$('save-target-create')?.addEventListener('click', async ()=>{
+if ($('save-target-create')) $('save-target-create').addEventListener('click', async ()=>{
   const token = getAccessToken(); if(!token||!currentSpreadsheetId) return;
   const title='Sheet_'+new Date().toISOString().slice(0,19).replace(/[:T]/g,'-');
   const r = await fetch('https://sheets.googleapis.com/v4/spreadsheets/'+encodeURIComponent(currentSpreadsheetId)+':batchUpdate', {
@@ -372,70 +483,49 @@ $('save-target-create')?.addEventListener('click', async ()=>{
   await populateSheetTabs(currentSpreadsheetId, token); await loadCaptionsFromSheet();
 });
 
-function clearCaptionList(){ const host=$('caption-list'); if (host) host.innerHTML=''; captionDomById.clear(); captionsIndex.clear(); }
-
-function appendCaptionItem(args){
-  const host = $('caption-list'); if (!host || !args) return;
-  const id = String(args.id || '').trim(); if (!id) return;
-  const title = (args.title || '').toString();
-  const body  = (args.body  || '').toString();
-  const color = (args.color || '').toString();
-  const imageUrl = (args.imageUrl || '').toString();
-
-  const div = document.createElement('div');
-  div.className = 'caption-item';
-  div.dataset.id = id;
+function clearCaptionList(){ const host=$('caption-list'); if (host) host.innerHTML=''; captionDomById.clear(); }
+\1
   if (args.imageFileId) div.dataset.imageFileId = args.imageFileId;
-  if (color) div.style.setProperty('--pin-color', color);
 
-  const safeTitle = title.trim() || '(untitled)';
-  const safeBody  = body.trim()  || '(no description)';
+  const safeTitle=(title||'').trim()||'(untitled)';
+  const safeBody=(body||'').trim()||'(no description)';
 
   if (imageUrl){
-    const img = document.createElement('img');
-    img.src = imageUrl; img.alt = '';
+    const img=document.createElement('img'); img.src=imageUrl; img.alt='';
     div.appendChild(img);
   }
-
-  const txt  = document.createElement('div'); txt.className='cap-txt';
-  const t    = document.createElement('div'); t.className='c-title'; t.textContent=safeTitle;
-  const b    = document.createElement('div'); b.className='c-body'; b.classList.add('hint'); b.textContent=safeBody;
+  const txt=document.createElement('div'); txt.className='cap-txt';
+  const t=document.createElement('div'); t.className='c-title'; t.textContent=safeTitle;
+  const b=document.createElement('div'); b.className='c-body';  b.classList.add('hint'); b.textContent=safeBody;
   txt.appendChild(t); txt.appendChild(b); div.appendChild(txt);
 
+  // 選択状態のUI
   div.addEventListener('click', (e)=>{
     if (e.target && e.target.closest && e.target.closest('.c-del')) return;
     __lm_selectPin(id, 'list');
   });
 
-  const del = document.createElement('button');
-  del.className = 'c-del'; del.title = 'Delete'; del.textContent = '🗑';
+  // 個別削除
+  const del=document.createElement('button'); del.className='c-del'; del.title='Delete'; del.textContent='🗑';
   del.addEventListener('click', async (e)=>{
     e.stopPropagation();
     if (!confirm('このキャプションを削除しますか？')) return;
     try{
       await deleteCaptionForPin(id);
       removePinMarker(id);
-      div.remove();
-      captionDomById.delete(id);
-      rowCache.delete(id);
-      overlays.delete(id);
-      removeLine(id);
-    }catch(err){
-      console.error('delete failed', err);
-      alert('Delete failed');
-    }
+      div.remove(); captionDomById.delete(id); rowCache.delete(id);
+      removeCaptionOverlay(id);
+    }catch(err){ console.error('delete failed', err); alert('Delete failed'); }
   });
   div.appendChild(del);
 
-  host.appendChild(div);
-  captionDomById.set(id, div);
+  host.appendChild(div); captionDomById.set(id, div);
   try{ div.scrollIntoView({block:'nearest'}); }catch(e){}
 }
-
 async function enrichRow(row){
   const token=getAccessToken(); let imageUrl='';
   if(row.imageFileId){
-    try{ imageUrl=await getFileThumbUrl(row.imageFileId, token, 256);}catch(e){}
+    try{ imageUrl=await getFileThumbUrl(row.imageFileId, token, 512);}catch(e){}
   }
   const enriched = { id:row.id, title:row.title, body:row.body, color:row.color, x:row.x, y:row.y, z:row.z, imageFileId:row.imageFileId, imageUrl };
   rowCache.set(row.id, enriched);
@@ -443,6 +533,7 @@ async function enrichRow(row){
 }
 
 async function savePinToSheet(obj){
+  const id=obj.id, title=obj.title, body=obj.body, color=obj.color, x=obj.x, y=obj.y, z=obj.z, imageFileId=obj.imageFileId;
   const token=getAccessToken(); if(!token||!currentSpreadsheetId) return;
   const sheetTitle=currentSheetTitle||'シート1'; const range="'"+sheetTitle+"'!A:Z";
   try {
@@ -453,28 +544,75 @@ async function savePinToSheet(obj){
     const hasTitle = lower.indexOf('title')>=0, hasBody = lower.indexOf('body')>=0, hasColor=lower.indexOf('color')>=0;
     if(!(hasTitle && hasBody && hasColor)) await putValues(currentSpreadsheetId, "'"+sheetTitle+"'!A1:Z1", [LOCIMYU_HEADERS], token);
   } catch(e){}
-  await appendValues(currentSpreadsheetId, range, [[obj.id, obj.title, obj.body, obj.color, obj.x, obj.y, obj.z, obj.imageFileId]], token);
+  await appendValues(currentSpreadsheetId, range, [[id,title,body,color,x,y,z,imageFileId]], token);
 }
-
 async function ensureIndex(){
   captionsIndex.clear();
-  for (const [id, row] of rowCache.entries()){
-    captionsIndex.set(id, row);
+  const token=getAccessToken(); if(!token||!currentSpreadsheetId||!currentSheetTitle) return;
+  const values=await getValues(currentSpreadsheetId, "'"+currentSheetTitle+"'!A1:Z9999", token); if(!values.length) return;
+  currentHeaders = values[0].map(v=>(v||'').toString().trim());
+  currentHeaderIdx = {}; for (let i=0;i<currentHeaders.length;i++){ currentHeaderIdx[currentHeaders[i].toLowerCase()] = i; }
+  const iId=(currentHeaderIdx['id']!=null)?currentHeaderIdx['id']:-1;
+  for (let r=1; r<values.length; r++){ const row=values[r]||[]; const id=row[iId]; if(!id) continue; captionsIndex.set(id, { rowIndex:r+1 }); }
+}
+async function updateImageForPin(id, imageFileId){
+  const token=getAccessToken(); if(!token||!currentSpreadsheetId) return;
+  if (!captionsIndex.size) await ensureIndex();
+  const hit=captionsIndex.get(id); if(!hit) return;
+  const ci = (currentHeaderIdx['imagefileid']!=null)?currentHeaderIdx['imagefileid']:7;
+  const a1 = "'"+(currentSheetTitle||'シート1')+"'!"+colA1(ci)+String(hit.rowIndex);
+  await putValues(currentSpreadsheetId, a1, [[imageFileId]], token);
+  const cached = rowCache.get(id) || {};
+  cached.imageFileId = imageFileId; rowCache.set(id, cached);
+  // list thumb
+  try{ const turl = await getFileThumbUrl(imageFileId, token, 1024); const dom = captionDomById.get(id); if (dom){ const i=dom.querySelector('img'); if(i) i.src=turl; else{ const im=document.createElement('img'); im.src=turl; dom.prepend(im);} } }catch(e){}
+  // overlay full-res (scaled)
+  try{ const full = await getFileBlobUrl(imageFileId, token); const ov=overlays.get(id); if(ov){ ov.imgEl.src=full; ov.imgEl.style.display='block'; } }catch(e){}
+}
+async function updateCaptionForPin(id, args){
+  const title = args.title; const body = args.body; const color = args.color;
+  const token=getAccessToken(); if(!token||!currentSpreadsheetId) return;
+  if (!captionsIndex.size) await ensureIndex();
+  const hit=captionsIndex.get(id); if(!hit) throw new Error('row not found');
+  const st = currentSheetTitle || 'シート1';
+  function col(name){ const i=(currentHeaderIdx[name]!=null)?currentHeaderIdx[name]:-1; return colA1(i); }
+  const reqs = [];
+  if (typeof title === 'string' && currentHeaderIdx['title']!=null) reqs.push( putValues(currentSpreadsheetId, "'"+st+"'!"+col('title')+String(hit.rowIndex), [[title]], token) );
+  if (typeof body  === 'string' && currentHeaderIdx['body'] !=null) reqs.push( putValues(currentSpreadsheetId, "'"+st+"'!"+col('body') +String(hit.rowIndex), [[body ]], token) );
+  if (typeof color === 'string' && currentHeaderIdx['color']!=null) reqs.push( putValues(currentSpreadsheetId, "'"+st+"'!"+col('color')+String(hit.rowIndex), [[color]], token) );
+  await Promise.all(reqs);
+  const cached = rowCache.get(id) || {};
+  if (typeof title === 'string') cached.title = title;
+  if (typeof body  === 'string') cached.body  = body;
+  if (typeof color === 'string') cached.color = color;
+  rowCache.set(id, cached);
+  const dom = captionDomById.get(id);
+  if (dom){
+    const t = dom.querySelector('.c-title'); if (t) t.textContent = (cached.title||'').trim() || '(untitled)';
+    const b = dom.querySelector('.c-body');  if (b) b.textContent = (cached.body ||'').trim() || '(no description)';
   }
+}
+async function deleteCaptionForPin(id){
+  const token=getAccessToken(); if(!token||!currentSpreadsheetId||!currentSheetId) return;
+  if (!captionsIndex.size) await ensureIndex();
+  const hit=captionsIndex.get(id); if(!hit) throw new Error('row not found');
+  const r = await fetch('https://sheets.googleapis.com/v4/spreadsheets/'+encodeURIComponent(currentSpreadsheetId)+':batchUpdate', {
+    method:'POST', headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},
+    body: JSON.stringify({ requests: [{ deleteDimension: { range: { sheetId: currentSheetId, dimension: 'ROWS', startIndex: hit.rowIndex-1, endIndex: hit.rowIndex } } }] })
+  });
+  if (!r.ok) throw new Error('delete row '+r.status);
+  captionsIndex.delete(id);
 }
 
 async function loadCaptionsFromSheet(){
-  const token = getAccessToken(); if(!token||!currentSpreadsheetId) return;
-  const sheetTitle=currentSheetTitle||'シート1';
-  try{
-    clearPins(); clearCaptionList(); overlays.clear();
-    const values = await getValues(currentSpreadsheetId, "'"+sheetTitle+"'!A1:Z10000", token);
-    if (!values || !values.length) return;
-    const headers = values[0]||[];
-    const idx = (name) => {
-      const i = headers.findIndex(h => String(h||'').toLowerCase() === name);
-      return (i>=0) ? i : -1;
-    };
+  clearCaptionList(); clearPins(); rowCache.clear();
+  overlays.forEach((_,id)=>removeCaptionOverlay(id)); overlays.clear(); if (lineLayer) lineLayer.innerHTML='';
+  const token=getAccessToken(); if(!token||!currentSpreadsheetId||!currentSheetTitle) return;
+  try {
+    const values=await getValues(currentSpreadsheetId, "'"+currentSheetTitle+"'!A1:Z9999", token); if(!values.length) return;
+    currentHeaders = values[0].map(v=>(v||'').toString().trim());
+    currentHeaderIdx = {}; for (let i=0;i<currentHeaders.length;i++){ currentHeaderIdx[currentHeaders[i].toLowerCase()] = i; }
+    function idx(n){ return (currentHeaderIdx[n]!=null)?currentHeaderIdx[n]:-1; }
     const iId=idx('id'), iTitle=idx('title'), iBody=idx('body'), iColor=idx('color'), iX=idx('x'), iY=idx('y'), iZ=idx('z'), iImg=idx('imagefileid');
     for (let r=1; r<values.length; r++){
       const row=values[r]||[];
@@ -491,7 +629,7 @@ async function loadCaptionsFromSheet(){
 }
 
 /* --------------------------- Images UX --------------------------- */
-$('btnRefreshImages')?.addEventListener('click', refreshImagesGrid);
+if ($('btnRefreshImages')) $('btnRefreshImages').addEventListener('click', refreshImagesGrid);
 async function refreshImagesGrid(){
   const token = getAccessToken();
   const fileId = lastGlbFileId || extractDriveId($('glbUrl')?$('glbUrl').value:'');
@@ -526,6 +664,7 @@ async function refreshImagesGrid(){
   }catch(e){ if (s) s.textContent = 'Error: '+e.message; }
 }
 
+
 /* ===== v6.7 selection + form editing & attach/detach ===== */
 function __lm_markListSelected(id){
   const host = $('caption-list'); if (!host) return;
@@ -537,27 +676,24 @@ function __lm_markListSelected(id){
   if (li){ li.classList.add('is-selected'); li.setAttribute('aria-selected','true'); li.scrollIntoView({block:'nearest'}); }
 }
 
-async function __lm_fillFormFromCaption(obj){
+function __lm_fillFormFromCaption(obj){
   const ti = $('caption-title'); const bo = $('caption-body'); const th = $('currentImageThumb');
   if (!ti || !bo || !th) return;
   ti.value = (obj && obj.title) ? String(obj.title) : '';
   bo.value = (obj && obj.body)  ? String(obj.body)  : '';
   if (obj && obj.imageFileId){
-    try{
-      const url = await getFileThumbUrl(obj.imageFileId, getAccessToken(), 256);
-      th.innerHTML = `<img alt="attached" src="${url}">`;
-    }catch(e){
-      console.warn('[thumb fail]', e); th.innerHTML = `<div class="placeholder">No Image</div>`;
-    }
+    th.innerHTML = `<img alt="attached" src="${getFileThumbUrl(obj.imageFileId, getAccessToken(), 256)}">`;
   } else {
     th.innerHTML = `<div class="placeholder">No Image</div>`;
   }
 }
 
 function __lm_getCaptionDataById(id){
+  // We can reconstruct from current DOM and cache rowCache if present
   const li = document.querySelector(`#caption-list .caption-item[data-id="${CSS.escape(id)}"]`);
   if (!li) return null;
   const titleEl = li.querySelector('.c-title'); const bodyEl = li.querySelector('.c-body');
+  const thumb = li.querySelector('img');
   const imageFileId = (li.dataset.imageFileId || '');
   return { id, title: titleEl ? titleEl.textContent : '', body: bodyEl ? bodyEl.textContent : '', imageFileId };
 }
@@ -568,19 +704,21 @@ function __lm_selectPin(id, source='unknown'){
   __lm_markListSelected(id);
   const obj = rowCache.get(id) || __lm_getCaptionDataById(id);
   __lm_fillFormFromCaption(obj);
+  // focus title for quick edit when coming from viewer
   if (source === 'viewer') { $('caption-title')?.focus(); }
 }
 
 // viewer -> selection
 onPinSelect((id)=>{ if (id) __lm_selectPin(id, 'viewer'); });
 
-// list -> selection
+// list -> selection (augment existing handler by also syncing the form)
 (function(){
   const host = $('caption-list');
   if (!host) return;
   host.addEventListener('click', (e)=>{
     const item = e.target && e.target.closest ? e.target.closest('.caption-item[data-id]') : null;
     if (!item) return;
+    // keep existing delete handler functional
     if (e.target.closest && e.target.closest('.c-del')) return;
     __lm_selectPin(item.dataset.id, 'list');
   }, {capture:true});
@@ -598,11 +736,13 @@ let __lm_deb;
       const body  = $('caption-body').value.trim();
       try{
         await updateCaptionForPin(selectedPinId, { title, body });
+        // reflect to list item
         const li = document.querySelector(`#caption-list .caption-item[data-id="${CSS.escape(selectedPinId)}"]`);
         if (li){
-          const t = li.querySelector('.c-title'); if (t) t.textContent = title || '(untitled)';
-          const b = li.querySelector('.c-body');  if (b) b.textContent = body  || '(no description)';
+          li.querySelector('.c-title').textContent = title || '(untitled)';
+          const bEl = li.querySelector('.c-body'); if (bEl) bEl.textContent = body || '(no description)';
         }
+        // update cache
         const cur = rowCache.get(selectedPinId) || {};
         rowCache.set(selectedPinId, { ...cur, title, body });
       }catch(e){ console.warn('[caption autosave failed]', e); }
@@ -619,6 +759,7 @@ let __lm_deb;
   if (attach){
     attach.addEventListener('click', ()=>{
       if (!selectedPinId){ alert('キャプションを選択してください'); return; }
+      // Scroll images grid into view and hint the user to select a thumbnail
       grid?.scrollIntoView({behavior:'smooth', block:'nearest'});
       if (hint) hint.textContent = '画像を選ぶと選択キャプションに添付されます。';
     });
@@ -628,62 +769,97 @@ let __lm_deb;
       if (!selectedPinId){ alert('キャプションを選択してください'); return; }
       try{
         await updateImageForPin(selectedPinId, '');
+        // Update preview
         $('currentImageThumb').innerHTML = '<div class="placeholder">No Image</div>';
-        const im = document.querySelector(`#caption-list .caption-item[data-id="${CSS.escape(selectedPinId)}"] img`);
-        if (im) im.remove();
+        const li = document.querySelector(`#caption-list .caption-item[data-id="${CSS.escape(selectedPinId)}"] img`);
+        if (li) li.src = '';
+        // update cache
         const cur = rowCache.get(selectedPinId) || {};
-        rowCache.set(selectedPinId, { ...cur, imageFileId:'' , imageUrl:'' });
-      }catch(e){ console.warn('[detach failed]', e); }
+        rowCache.set(selectedPinId, { ...cur, imageFileId: '' });
+      }catch(e){ console.warn('[detach image failed]', e); }
     });
   }
 })();
 
-/* --------------------- Update helpers (Sheets row ops) --------------- */
-function buildHeaderIndex(headers){
-  const idx = {}; for (let i=0;i<headers.length;i++){ idx[String(headers[i]||'').toLowerCase()] = i; } return idx;
-}
-async function ensureHeadersAndIndex(sheetTitle, token){
-  const existed=await getValues(currentSpreadsheetId, "'"+sheetTitle+"'!A1:Z1", token);
-  currentHeaders = (existed[0]||[]).map(h=>(h||'').toString().trim());
-  if (!currentHeaders.length){ await putValues(currentSpreadsheetId, "'"+sheetTitle+"'!A1:Z1", [LOCIMYU_HEADERS], token); currentHeaders = LOCIMYU_HEADERS.slice(); }
-  currentHeaderIdx = buildHeaderIndex(currentHeaders);
-}
-async function updateCaptionForPin(id, { title, body }){
-  const token=getAccessToken(); if(!token||!currentSpreadsheetId) throw new Error('no sheet');
-  const sheetTitle=currentSheetTitle||'シート1';
-  await ensureHeadersAndIndex(sheetTitle, token);
-  const range = "'"+sheetTitle+"'!A1:Z10000";
-  const rows = await getValues(currentSpreadsheetId, range, token);
-  const idx = currentHeaderIdx;
-  let rowIndex = -1;
-  for (let i=1;i<rows.length;i++){ if ((rows[i][idx.id]||'')===id){ rowIndex = i; break; } }
-  if (rowIndex<0) throw new Error('row not found');
-  rows[rowIndex][idx.title] = title;
-  rows[rowIndex][idx.body]  = body;
-  const startCol = 0; const endCol = Math.max(rows[rowIndex].length-1, LOCIMYU_HEADERS.length-1);
-  const a1 = "'"+sheetTitle+"'!"+colA1(startCol)+String(rowIndex+1)+":"+colA1(endCol)+String(rowIndex+1);
-  await putValues(currentSpreadsheetId, a1, [rows[rowIndex]], token);
-}
-async function updateImageForPin(id, imageFileId){
-  const token=getAccessToken(); if(!token||!currentSpreadsheetId) throw new Error('no sheet');
-  const sheetTitle=currentSheetTitle||'シート1';
-  await ensureHeadersAndIndex(sheetTitle, token);
-  const range = "'"+sheetTitle+"'!A1:Z10000";
-  const rows = await getValues(currentSpreadsheetId, range, token);
-  const idx = currentHeaderIdx;
-  let rowIndex = -1;
-  for (let i=1;i<rows.length;i++){ if ((rows[i][idx.id]||'')===id){ rowIndex = i; break; } }
-  if (rowIndex<0) throw new Error('row not found');
-  rows[rowIndex][idx.imagefileid] = imageFileId || '';
-  const startCol = 0; const endCol = Math.max(rows[rowIndex].length-1, LOCIMYU_HEADERS.length-1);
-  const a1 = "'"+sheetTitle+"'!"+colA1(startCol)+String(rowIndex+1)+":"+colA1(endCol)+String(rowIndex+1);
-  await putValues(currentSpreadsheetId, a1, [rows[rowIndex]], token);
-}
-
-/* ------------------------------ Export small API (for tests) -------- */
-window.__lm_debug = {
-  extractDriveId, __lm_markListSelected, __lm_fillFormFromCaption, __lm_selectPin,
-  updateCaptionForPin, updateImageForPin, listImagesForGlb
-};
-
+// When images-grid click attaches image (existing behavior), also update preview
+(function(){
+  const g = $('images-grid'); if (!g) return;
+  g.addEventListener('click', (e)=>{
+    const btn = e.target && e.target.closest ? e.target.closest('.thumb[data-id]') : null;
+    if (!btn || !selectedPinId) return;
+    const fid = btn.dataset.id;
+    // Preview
+    try{
+      $('currentImageThumb').innerHTML = `<img alt="attached" src="${getFileThumbUrl(fid, getAccessToken(), 256)}">`;
+      const liImg = document.querySelector(`#caption-list .caption-item[data-id="${CSS.escape(selectedPinId)}"] img`);
+      if (liImg) liImg.src = getFileThumbUrl(fid, getAccessToken(), 128);
+      const cur = rowCache.get(selectedPinId) || {};
+      rowCache.set(selectedPinId, { ...cur, imageFileId: fid });
+    }catch(e){}
+  }, {capture:true});
+})();
+/* ===== end v6.7 injection ===== */
 console.log('[LociMyu ESM/CDN] boot overlay-edit+fixed-zoom build loaded');
+
+
+/* === M1 hardening patch v6.7.1 === */
+(function(){
+  const $ = (id)=>document.getElementById(id);
+  /* 1) Robust list click delegation (document-level) */
+  document.addEventListener('click', (e)=>{
+    const item = e.target && e.target.closest ? e.target.closest('.caption-item[data-id]') : null;
+    if (!item) return;
+    if (e.target && e.target.closest && e.target.closest('.c-del')) return;
+    if (typeof window.__lm_selectPin === 'function'){
+      window.__lm_selectPin(String(item.dataset.id||''), 'list-doc');
+      e.preventDefault();
+      e.stopPropagation();
+    }
+  }, {capture:true});
+
+  /* 2) Force mark when overlay shown from viewer */
+  const _show = window.showOverlayFor;
+  window.showOverlayFor = function(id){
+    try{ if (typeof window.__lm_markListSelected==='function') window.__lm_markListSelected(String(id||'')); }catch(_){}
+    return _show ? _show.apply(this, arguments) : undefined;
+  };
+
+  /* 3) Overlay drag (UX) */
+  function enableOverlayDrag(){
+    document.addEventListener('pointerdown', (ev)=>{
+      const root = ev.target && ev.target.closest ? ev.target.closest('.cap-overlay') : null;
+      if (!root) return;
+      const rect = root.getBoundingClientRect();
+      const ox = ev.clientX - rect.left, oy = ev.clientY - rect.top;
+      const move = (e)=>{
+        root.style.left = Math.max(0, e.clientX - ox) + 'px';
+        root.style.top  = Math.max(0, e.clientY - oy) + 'px';
+      };
+      const up = ()=>{
+        window.removeEventListener('pointermove', move, true);
+        window.removeEventListener('pointerup', up, true);
+      };
+      window.addEventListener('pointermove', move, true);
+      window.addEventListener('pointerup', up, true);
+      ev.preventDefault();
+    }, {capture:true});
+  }
+  enableOverlayDrag();
+
+  /* 4) Ensure form sync when list is selected (failsafe) */
+  if (!window.__lm_selectPin_failsafe){
+    window.__lm_selectPin_failsafe = true;
+    const _sel = window.__lm_selectPin;
+    window.__lm_selectPin = function(id, src){
+      try{ if (_sel) _sel.call(this, id, src); }catch(e){ console.warn('[M1] __lm_selectPin base failed', e); }
+      try{
+        if (typeof window.__lm_markListSelected==='function') window.__lm_markListSelected(String(id||''));
+        const obj = (window.rowCache && window.rowCache.get && window.rowCache.get(String(id))) || null;
+        if (obj && typeof window.__lm_fillFormFromCaption==='function') window.__lm_fillFormFromCaption(obj);
+        window.selectedPinId = String(id||'');
+      }catch(e){ console.warn('[M1] selectPin failsafe error', e); }
+    };
+  }
+  console.log('[M1] hardening patch v6.7.1 applied');
+})();
+/* === /M1 hardening patch === */
