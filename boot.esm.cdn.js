@@ -31,6 +31,28 @@ const signedSwitch = (signed) => {
 setupAuth($('auth-signin'), signedSwitch, { clientId: __LM_CLIENT_ID, apiKey: __LM_API_KEY, scopes: __LM_SCOPES });
 
 /* ---------------------------- Drive utils ---------------------------- */
+// === Promise-safe Drive helpers ===
+async function resolveThumbUrl(fileId, size=256){
+  try{
+    const token = (typeof getAccessToken==='function') ? getAccessToken() : null;
+    if (!fileId || !token) return '';
+    const u = `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?fields=thumbnailLink&supportsAllDrives=true`;
+    const r = await fetch(u, { headers:{ Authorization:`Bearer ${token}` } });
+    if (!r.ok) return '';
+    const j = await r.json();
+    if (!j || !j.thumbnailLink) return '';
+    return j.thumbnailLink.replace(/=s\d+(?:-c)?$/, `=s${size}-c`);
+  }catch(e){ console.warn('[resolveThumbUrl failed]', e); return ''; }
+}
+function buildFileBlobUrl(fileId){
+  try{
+    const token = (typeof getAccessToken==='function') ? getAccessToken() : null;
+    if (!fileId || !token) return '';
+    return `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?alt=media&supportsAllDrives=true&access_token=${encodeURIComponent(token)}`;
+  }catch(e){ return ''; }
+}
+// ==================================
+
 function extractDriveId(v){
   if (!v) return null;
   const s = String(v).trim();
@@ -209,9 +231,52 @@ function createCaptionOverlay(id, data){
       }
     }
   })();
-  // 編集モード撤去（外部フォームで編集）
-  // --- ドラッグ ---
 
+  // 編集モード（タイトル/本文ともにピン設置後も編集可能）
+  let editing = false;
+  function enterEdit(){
+    if (editing) return; editing = true;
+    t.contentEditable = 'true'; body.contentEditable = 'true';
+    t.style.outline = '1px dashed #fff3'; body.style.outline = '1px dashed #fff3';
+    t.focus();
+  }
+  function exitEdit(save){
+    if (!editing) return; editing = false;
+    t.contentEditable = 'false'; body.contentEditable = 'false';
+    t.style.outline = ''; body.style.outline = '';
+    if (save){
+      const newTitle = (t.textContent || '').trim();
+      const newBody  = (body.textContent || '').trim();
+      updateCaptionForPin(id, { title: newTitle, body: newBody }).catch(()=>{});
+    } else {
+      const cur = rowCache.get(id) || {};
+      t.textContent = (cur.title || '').trim() || '(untitled)';
+      body.textContent = (cur.body  || '').trim() || '(no description)';
+    }
+  }
+  bEdit.addEventListener('click', () => { if (editing) exitEdit(true); else enterEdit(); });
+  t.addEventListener('dblclick', enterEdit);
+  body.addEventListener('dblclick', enterEdit);
+  t.addEventListener('keydown', (e)=>{ if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); exitEdit(true);} });
+  body.addEventListener('keydown', (e)=>{ if(e.key==='Enter' && e.ctrlKey){ e.preventDefault(); exitEdit(true);} });
+  t.addEventListener('blur', ()=>{ if (editing) exitEdit(true); });
+  body.addEventListener('blur', ()=>{ if (editing) exitEdit(true); });
+
+  bClose.addEventListener('click', () => removeCaptionOverlay(id));
+  bDel.addEventListener('click', async () => {
+    if (!confirm('このキャプションを削除しますか？')) return;
+    try{
+      await deleteCaptionForPin(id);
+      removePinMarker(id);
+      const dom = captionDomById.get(id); if (dom) dom.remove();
+      captionDomById.delete(id);
+      rowCache.delete(id);
+      removeCaptionOverlay(id);
+      selectedPinId = null;
+    }catch(e){ console.error('[caption delete] failed', e); alert('Failed to delete caption row.'); }
+  });
+
+  // ドラッグ
   let dragging=false,sx=0,sy=0,left=0,top=0;
   const onDown=(e)=>{ dragging=true; sx=e.clientX; sy=e.clientY; const r=root.getBoundingClientRect(); left=r.left; top=r.top; e.preventDefault(); };
   const onMove=(e)=>{ if(!dragging) return; const dx=e.clientX-sx, dy=e.clientY-sy; root.style.left=(left+dx)+'px'; root.style.top=(top+dy)+'px'; updateOverlayPosition(id); };
@@ -259,10 +324,14 @@ function updateOverlayPosition(id, initial){
   line.setAttribute('x2', String(x2)); line.setAttribute('y2', String(y2));
 }
 onRenderTick(() => { overlays.forEach((_, id) => updateOverlayPosition(id, false)); });
+
 function showOverlayFor(id){
-  const d=rowCache.get(id); if(!d) return;
-  // リスト強調表示
-  for (const [cid, el] of captionDomById.entries()){ el.classList.toggle('selected', cid===id); }
+  const d = rowCache.get(id); if (!d) return;
+  __lm_markListSelected(id);
+  try{ setPinSelected(id, true); }catch(e){}
+  createCaptionOverlay(id, d);
+}
+
   createCaptionOverlay(id, d);
   setPinSelected(id, true);
 }
@@ -442,70 +511,52 @@ if ($('save-target-create')) $('save-target-create').addEventListener('click', a
 
 function clearCaptionList(){ const host=$('caption-list'); if (host) host.innerHTML=''; captionDomById.clear(); }
 
-// Create or update a list item in the caption list for a given row
-function appendCaptionItem(args){
-  const host = $('caption-list'); if (!host || !args) return;
-  const id = String(args.id || '').trim(); if (!id) return;
+function appendCaptionItem(row){
+  const host = $('caption-list'); if (!host || !row) return;
+  const id=row.id, title=row.title, body=row.body, color=row.color, imageUrl=row.imageUrl||'';
+  const div=document.createElement('div');
+  div.className='caption-item';
+  div.dataset.id=id;
+  if (row.imageFileId) div.dataset.imageFileId=row.imageFileId;
 
-  const title = (args.title || '').toString();
-  const body  = (args.body  || '').toString();
-  const color = (args.color || '').toString();
-  const imageUrl = (args.imageUrl || '').toString();
+  if (color) div.style.borderLeft='3px solid '+color;
 
-  // root
-  const div = document.createElement('div');
-  div.className = 'caption-item';
-  div.dataset.id = id;
-  if (args.imageFileId) div.dataset.imageFileId = args.imageFileId;
-  if (color) div.style.setProperty('--pin-color', color);
+  const safeTitle=(title||'').trim()||'(untitled)';
+  const safeBody=(body||'').trim()||'(no description)';
 
-  const safeTitle = title.trim() || '(untitled)';
-  const safeBody  = body.trim()  || '(no description)';
-
-  // image (thumb)
   if (imageUrl){
-    const img = document.createElement('img');
-    img.src = imageUrl; img.alt = '';
+    const img=document.createElement('img'); img.src=imageUrl; img.alt='';
     div.appendChild(img);
   }
-
-  // text
-  const txt  = document.createElement('div'); txt.className='cap-txt';
-  const t    = document.createElement('div'); t.className='c-title'; t.textContent=safeTitle;
-  const b    = document.createElement('div'); b.className='c-body';  b.classList.add('hint'); b.textContent=safeBody;
+  const txt=document.createElement('div'); txt.className='cap-txt';
+  const t=document.createElement('div'); t.className='c-title'; t.textContent=safeTitle;
+  const b=document.createElement('div'); b.className='c-body'; b.classList.add('hint'); b.textContent=safeBody;
   txt.appendChild(t); txt.appendChild(b); div.appendChild(txt);
 
-  // click -> select
-  div.addEventListener('click', (e)=>{
-    if (e.target && e.target.closest && e.target.closest('.c-del')) return;
-    __lm_selectPin(id, 'list');
-  });
-
-  // delete button
-  const del = document.createElement('button');
-  del.className = 'c-del'; del.title = 'Delete'; del.textContent = '🗑';
+  // Delete button
+  const del=document.createElement('button'); del.className='c-del'; del.title='Delete'; del.textContent='🗑';
   del.addEventListener('click', async (e)=>{
     e.stopPropagation();
     if (!confirm('このキャプションを削除しますか？')) return;
     try{
       await deleteCaptionForPin(id);
       removePinMarker(id);
-      div.remove();
-      captionDomById.delete(id);
-      rowCache.delete(id);
+      div.remove(); captionDomById.delete(id); rowCache.delete(id);
       removeCaptionOverlay(id);
-    }catch(err){
-      console.error('delete failed', err);
-      alert('Delete failed');
-    }
+    }catch(err){ console.error('delete failed', err); alert('Delete failed'); }
   });
   div.appendChild(del);
 
-  host.appendChild(div);
-  captionDomById.set(id, div);
+  // Select behavior
+  div.addEventListener('click', (e)=>{
+    if (e.target && e.target.closest && e.target.closest('.c-del')) return;
+    try{ __lm_selectPin(id,'list'); }catch(e){}
+    try{ if (typeof showOverlayFor==='function') showOverlayFor(id); }catch(e){}
+  });
+
+  host.appendChild(div); captionDomById.set(id, div);
   try{ div.scrollIntoView({block:'nearest'}); }catch(e){}
 }
-
 
 async function enrichRow(row){
   const token=getAccessToken(); let imageUrl='';
@@ -540,14 +591,25 @@ async function ensureIndex(){
   const iId=(currentHeaderIdx['id']!=null)?currentHeaderIdx['id']:-1;
   for (let r=1; r<values.length; r++){ const row=values[r]||[]; const id=row[iId]; if(!id) continue; captionsIndex.set(id, { rowIndex:r+1 }); }
 }
+
 async function updateImageForPin(id, imageFileId){
-  const token=getAccessToken(); if(!token||!currentSpreadsheetId) return;
-  if (!captionsIndex.size) await ensureIndex();
-  const hit=captionsIndex.get(id); if(!hit) return;
-  const ci = (currentHeaderIdx['imagefileid']!=null)?currentHeaderIdx['imagefileid']:7;
-  const a1 = "'"+(currentSheetTitle||'シート1')+"'!"+colA1(ci)+String(hit.rowIndex);
-  await putValues(currentSpreadsheetId, a1, [[imageFileId]], token);
-  const cached = rowCache.get(id) || {};
+  const row = rowCache.get(id) || {}; row.imageFileId = imageFileId || ''; rowCache.set(id, row);
+  const liImg = document.querySelector(`#caption-list .caption-item[data-id="${CSS.escape(id)}"] img`);
+  const ov = overlays && overlays.get ? overlays.get(id) : null;
+
+  if (!imageFileId){
+    if (liImg) liImg.removeAttribute('src');
+    if (ov && ov.imgEl){ ov.imgEl.removeAttribute('src'); ov.imgEl.style.display='none'; }
+    return;
+  }
+  const th = await resolveThumbUrl(imageFileId, 128);
+  if (liImg && th) liImg.src = th;
+  if (ov && ov.imgEl){
+    const full = buildFileBlobUrl(imageFileId);
+    if (full){ ov.imgEl.src = full; ov.imgEl.style.display='block'; }
+  }
+}
+;
   cached.imageFileId = imageFileId; rowCache.set(id, cached);
   // list thumb
   try{ const turl = await getFileThumbUrl(imageFileId, token, 1024); const dom = captionDomById.get(id); if (dom){ const i=dom.querySelector('img'); if(i) i.src=turl; else{ const im=document.createElement('img'); im.src=turl; dom.prepend(im);} } }catch(e){}
@@ -651,23 +713,38 @@ async function refreshImagesGrid(){
 
 
 /* ===== v6.7 selection + form editing & attach/detach ===== */
+
 function __lm_markListSelected(id){
   const host = $('caption-list'); if (!host) return;
-  host.querySelectorAll('.caption-item.is-selected,[aria-selected="true"]').forEach(el=>{
-    el.classList.remove('is-selected'); el.removeAttribute('aria-selected');
+  const items = host.querySelectorAll('[data-id]');
+  items.forEach(el=>{
+    const on = (el.dataset.id === String(id));
+    el.classList.toggle('is-selected', on);
+    el.setAttribute('aria-selected', on ? 'true' : 'false');
   });
+  const d = rowCache.get(id);
+  if (d) __lm_fillFormFromCaption(d);
+}
+);
   if (!id) return;
   const li = host.querySelector(`.caption-item[data-id="${CSS.escape(id)}"]`);
   if (li){ li.classList.add('is-selected'); li.setAttribute('aria-selected','true'); li.scrollIntoView({block:'nearest'}); }
 }
 
+
 function __lm_fillFormFromCaption(obj){
-  const ti = $('caption-title'); const bo = $('caption-body'); const th = $('currentImageThumb');
-  if (!ti || !bo || !th) return;
-  ti.value = (obj && obj.title) ? String(obj.title) : '';
-  bo.value = (obj && obj.body)  ? String(obj.body)  : '';
-  if (obj && obj.imageFileId){
-    th.innerHTML = `<img alt="attached" src="${getFileThumbUrl(obj.imageFileId, getAccessToken(), 256)}">`;
+  const ti=$('caption-title'), bo=$('caption-body'), th=$('currentImageThumb');
+  if (ti) ti.value = (obj && obj.title) ? String(obj.title) : '';
+  if (bo) bo.value = (obj && obj.body)  ? String(obj.body)  : '';
+  if (!th) return;
+  const fid = obj && obj.imageFileId;
+  if (!fid){ th.innerHTML = `<div class="placeholder">No Image</div>`; return; }
+  (async()=>{
+    const url = await resolveThumbUrl(fid,256);
+    th.innerHTML = url ? `<img alt="attached" src="${url}">` : `<div class="placeholder">No Image</div>`;
+  })();
+}
+">`;
   } else {
     th.innerHTML = `<div class="placeholder">No Image</div>`;
   }
@@ -775,13 +852,159 @@ let __lm_deb;
     const fid = btn.dataset.id;
     // Preview
     try{
-      $('currentImageThumb').innerHTML = `<img alt="attached" src="${getFileThumbUrl(fid, getAccessToken(), 256)}">`;
+      $('currentImageThumb').innerHTML = `<div class="placeholder">Loading...</div>`;
       const liImg = document.querySelector(`#caption-list .caption-item[data-id="${CSS.escape(selectedPinId)}"] img`);
       if (liImg) liImg.src = getFileThumbUrl(fid, getAccessToken(), 128);
       const cur = rowCache.get(selectedPinId) || {};
       rowCache.set(selectedPinId, { ...cur, imageFileId: fid });
+    (async()=>{ const url = await resolveThumbUrl(fid,256); if ($('currentImageThumb')) $('currentImageThumb').innerHTML = url ? `<img alt="attached" src="${url}">` : `<div class="placeholder">No Image</div>`; const liImg = document.querySelector(`#caption-list .caption-item[data-id="${CSS.escape(selectedPinId)}"] img`); if (liImg){ const u128 = await resolveThumbUrl(fid,128); if (u128) liImg.src = u128; } })();
     }catch(e){}
   }, {capture:true});
 })();
 /* ===== end v6.7 injection ===== */
 console.log('[LociMyu ESM/CDN] boot overlay-edit+fixed-zoom build loaded');
+
+/* __LM_LIST_CLICK_BOUND__ */
+(function(){
+  const host = $('caption-list'); if (!host) return;
+  if (host.dataset.lmClickBound) return; host.dataset.lmClickBound='1';
+  host.addEventListener('click', (e)=>{
+    const item = (e.target && e.target.closest) ? e.target.closest('.caption-item[data-id], [data-id]') : null;
+    if (!item) return;
+    if (e.target.closest && e.target.closest('.c-del')) return;
+    const id = item.dataset.id;
+    try{ __lm_selectPin(id,'list'); }catch(e){}
+    try{ showOverlayFor(id); }catch(e){}
+  }, {capture:true});
+})();
+
+
+/* ==== M1 augmentation (safe, idempotent) [2025-10-12T09:50:50Z] ==== */
+(function(){'use strict';
+  // CSS injection for .is-selected (non-intrusive)
+  try{ 
+    var style = document.createElement('style');
+    style.setAttribute('data-lm','m1');
+    style.textContent = ".caption-item.is-selected{outline:2px solid #3b82f6;background:rgba(59,130,246,.08);}";
+    document.head && document.head.appendChild(style);
+  }catch(_e){}
+
+  // Small helpers
+  const $ = (id)=> document.getElementById(id);
+  const $$ = (sel,root=document)=> Array.from(root.querySelectorAll(sel));
+  const debounce = (fn, ms)=>{ let t; return (...a)=>{ clearTimeout(t); t=setTimeout(()=>fn(...a), ms); }; };
+
+  // Global caches (tolerant): use existing or fallback
+  const rowCache = (window.rowCache ||= new Map());
+  const captionsIndex = (window.captionsIndex ||= new Map());
+
+  // ---- Selection highlight ----
+  function clearListHighlight(){ $$('.caption-item.is-selected').forEach(el=> el.classList.remove('is-selected')); }
+  function highlightListItem(id){ 
+    clearListHighlight();
+    const el = document.querySelector('.caption-item[data-id="'+CSS.escape(String(id))+'"]');
+    if(el) el.classList.add('is-selected');
+  }
+
+  // Wrap original __lm_selectPin if exists
+  const _origSelectPin = window.__lm_selectPin;
+  window.__lm_selectPin = async function __lm_selectPin_patched(id, opts){ 
+    try{ if(_origSelectPin) await _origSelectPin.call(this, id, opts); }catch(e){ console.warn('[LM][M1] selectPin orig failed', e); }
+    try{ highlightListItem(id); fillFormFromCache(id); }catch(e){ console.warn('[LM][M1] selectPin extra failed', e); }
+  };
+
+  // ---- Form sync (fill) ----
+  function fillFormFromCache(id){ 
+    try{ 
+      const rec = (rowCache.get(String(id)) || captionsIndex.get(String(id)));
+      if(!rec) return;
+      const t = $('captionTitleInput'); if(t && t.value !== (rec.title||'')) t.value = rec.title||'';
+      const b = $('captionBodyInput');  if(b && b.value !== (rec.body||''))  b.value = rec.body||'';
+      const c = $('captionColor');      if(c && c.value !== (rec.color||'#ff6b6b')) c.value = rec.color || '#ff6b6b';
+      // image thumb
+      const imgHost = $('currentImageThumb');
+      if(imgHost){ 
+        if(rec.imageFileId) imgHost.setAttribute('data-file-id', rec.imageFileId);
+        else imgHost.removeAttribute('data-file-id');
+      }
+    }catch(e){ console.warn('[LM][M1] fillForm failed', e); }
+  }
+
+  // ---- Debounced editors ----
+  function patchEditors(){ 
+    const title = $('captionTitleInput');
+    const body  = $('captionBodyInput');
+    const color = $('captionColor');
+    const getCurrentId = () => { 
+      // attempt from highlighted list or last selected
+      const el = document.querySelector('.caption-item.is-selected');
+      if(el) return el.getAttribute('data-id');
+      return (window.__lm_lastSelectedId || null);
+    };
+    // remember selection id whenever we highlight
+    const _hl = highlightListItem;
+    highlightListItem = function(id){ window.__lm_lastSelectedId = String(id); return _hl(id); };
+
+    const doUpdate = async (patch) => {
+      const id = getCurrentId(); if(!id) return;
+      if(typeof window.updateCaptionForPin === 'function') {
+        try{ await window.updateCaptionForPin(String(id), patch); }
+        catch(e){ console.warn('[LM][M1] update failed', patch, e); }
+      }
+    };
+    if(title) title.addEventListener('input', debounce(()=> doUpdate({ title: title.value }), 300), {passive:true});
+    if(body)  body .addEventListener('input', debounce(()=> doUpdate({ body:  body.value  }), 300), {passive:true});
+    if(color) color.addEventListener('change', ()=> doUpdate({ color: color.value }), {passive:true});
+  }
+
+  if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', patchEditors, {once:true});
+  else patchEditors();
+
+  // ---- Overlay close (×) ----
+  function enableOverlayCloseDelegation(){
+    document.addEventListener('click', function(e){
+      const btn = e.target && (e.target.closest && e.target.closest('.caption-overlay .btn-close'));
+      if(!btn) return;
+      const overlay = btn.closest('.caption-overlay');
+      if(!overlay) return;
+      const id = overlay.getAttribute('data-id');
+      try{ 
+        if(typeof window.removeCaptionOverlay === 'function') window.removeCaptionOverlay(id);
+        overlay.remove();
+      }catch(err){ console.warn('[LM][M1] overlay close failed', err); }
+      e.preventDefault();
+      e.stopPropagation();
+    }, {capture:true});
+  }
+  enableOverlayCloseDelegation();
+
+  // ---- Ensure image promise isn't leaked to DOM ----
+  async function safeSetThumb(imgEl, fileId){ 
+    try{ 
+      if(!imgEl) return; 
+      if(!fileId) { imgEl.src=''; imgEl.alt='No Image'; return; }
+      // prefer existing helper if available
+      if(typeof window.getFileThumbUrl === 'function') {
+        const token = (typeof window.getAccessToken==='function') ? window.getAccessToken() : null;
+        const url = await window.getFileThumbUrl(String(fileId), token, 256);
+        imgEl.src = url; return;
+      }
+      // fallback: Drive v3 thumbnailLink
+      const token = (typeof window.getAccessToken==='function') ? window.getAccessToken() : null;
+      if(!token) return;
+      const res = await fetch('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(String(fileId))+'?fields=thumbnailLink&supportsAllDrives=true',{ headers: { Authorization: 'Bearer '+token } });
+      if(!res.ok) throw new Error('thumb '+res.status);
+      const js = await res.json();
+      if(js && js.thumbnailLink) imgEl.src = js.thumbnailLink;
+    }catch(e){ console.warn('[LM][M1] safeSetThumb failed', fileId, e); }
+  }
+
+  // Expose for other code paths if needed
+  window.__lm_highlightListItem = highlightListItem;
+  window.__lm_clearListHighlight = clearListHighlight;
+  window.__lm_fillFormFromCache = fillFormFromCache;
+  window.__lm_safeSetThumb = safeSetThumb;
+
+  console.log('[LM][M1] selection+form+overlay patch active');
+})();
+/* ==== /M1 augmentation ==== */
