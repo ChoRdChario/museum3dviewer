@@ -766,6 +766,9 @@ function __rebuildPinsFiltered(){
   if(selectedPinId) setPinSelected(selectedPinId, true);
 }
 function applyFilter(mode, color){
+  try{ const sel = new Set(); if(mode==='color'){ sel.add((color||currentPinColor||'').toLowerCase()); }
+    document.dispatchEvent(new CustomEvent('pinFilterChange', { detail:{ selected: sel } })); }catch(_){ }
+
   filterMode = mode || 'all';
   if(mode==='color' && color) filterColor = color;
   __applyFilterToList();
@@ -779,3 +782,65 @@ document.addEventListener('DOMContentLoaded', ()=>{
   try{ wireColorChips(); }catch(e){}
   try{ wireFilterChips(); }catch(e){}
 });
+
+
+// Shift+Click to add pin at picked 3D point
+try{
+  onCanvasShiftPick(({x,y,z})=>{
+    const id = 'pin_' + Math.random().toString(36).slice(2,10);
+    const row = { id, title:'', body:'', color: currentPinColor, x, y, z, imageFileId:'' };
+    updateCaptionForPin(id, row).then(()=>{
+      // cache→UI→3D
+      rowCache.set(id, row);
+      appendCaptionItem(row);
+      addPinMarker({ id, x, y, z, color: currentPinColor });
+      selectCaption(id);
+    }).catch(e=> console.warn('[shift+click add] failed', e));
+  });
+}catch(e){ console.warn('onCanvasShiftPick wiring failed', e); }
+
+
+// Spreadsheet rename (Drive files.update) & delete (Drive files.delete)
+function driveRenameFile(fileId, newName, token){
+  const url = `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}`;
+  return fetch(url, { method:'PATCH', headers:{ Authorization:'Bearer '+token, 'Content-Type':'application/json' }, body: JSON.stringify({ name:newName }) })
+    .then(r=>{ if(!r.ok) throw new Error('rename failed'); return r.json(); });
+}
+function driveDeleteFile(fileId, token){
+  const url = `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}`;
+  return fetch(url, { method:'DELETE', headers:{ Authorization:'Bearer '+token } })
+    .then(r=>{ if(!r.ok) throw new Error('delete failed'); return true; });
+}
+
+(function wireSheetMgmt(){
+  const bRename = $('save-target-rename');
+  const bDelete = $('save-target-delete');
+  const inp = $('rename-input');
+  if(bRename){
+    bRename.addEventListener('click', ()=>{
+      if(!currentSpreadsheetId){ alert('No spreadsheet selected.'); return; }
+      const name = (inp?.value||'').trim();
+      if(!name){ alert('Enter new title.'); return; }
+      const t = ensureToken();
+      bRename.disabled = true;
+      driveRenameFile(currentSpreadsheetId, name, t).then(()=>{
+        alert('Renamed.');
+      }).catch(e=>{
+        console.warn('[rename] failed', e); alert('Rename failed: '+e);
+      }).finally(()=>{ bRename.disabled = false; });
+    });
+  }
+  if(bDelete){
+    bDelete.addEventListener('click', ()=>{
+      if(!currentSpreadsheetId){ alert('No spreadsheet selected.'); return; }
+      if(!confirm('Delete this spreadsheet from Drive? This cannot be undone.')) return;
+      const t = ensureToken();
+      bDelete.disabled = true;
+      driveDeleteFile(currentSpreadsheetId, t).then(()=>{
+        alert('Deleted. Reload the page and select/create another sheet.');
+      }).catch(e=>{
+        console.warn('[delete] failed', e); alert('Delete failed: '+e);
+      }).finally(()=>{ bDelete.disabled = false; });
+    });
+  }
+})();
