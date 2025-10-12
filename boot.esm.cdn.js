@@ -334,7 +334,6 @@ function showOverlayFor(id){
 
   createCaptionOverlay(id, d);
   setPinSelected(id, true);
-}
 
 /* ----------------------- Pin selection & add ------------------------ */
 onPinSelect((id) => { selectedPinId = id; showOverlayFor(id); });
@@ -1008,3 +1007,4 @@ console.log('[LociMyu ESM/CDN] boot overlay-edit+fixed-zoom build loaded');
   console.log('[LM][M1] selection+form+overlay patch active');
 })();
 /* ==== /M1 augmentation ==== */
+;window.LM_BUILD='20251012100702'; console.log('[LM] build', window.LM_BUILD);
