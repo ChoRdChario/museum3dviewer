@@ -254,8 +254,7 @@ function createCaptionOverlay(id, data){
       body.textContent = (cur.body  || '').trim() || '(no description)';
     }
   }
-  bEdit.addEventListener('click', () => { if (editing) exitEdit(true); else enterEdit(); });
-  t.addEventListener('dblclick', enterEdit);
+t.addEventListener('dblclick', enterEdit);
   body.addEventListener('dblclick', enterEdit);
   t.addEventListener('keydown', (e)=>{ if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); exitEdit(true);} });
   body.addEventListener('keydown', (e)=>{ if(e.key==='Enter' && e.ctrlKey){ e.preventDefault(); exitEdit(true);} });
@@ -331,10 +330,6 @@ function showOverlayFor(id){
   try{ setPinSelected(id, true); }catch(e){}
   createCaptionOverlay(id, d);
 }
-
-  createCaptionOverlay(id, d);
-  setPinSelected(id, true);
-
 /* ----------------------- Pin selection & add ------------------------ */
 onPinSelect((id) => { selectedPinId = id; showOverlayFor(id); });
 onCanvasShiftPick(async (pt) => {
@@ -599,7 +594,7 @@ async function updateImageForPin(id, imageFileId){
   if (!imageFileId){
     if (liImg) liImg.removeAttribute('src');
     if (ov && ov.imgEl){ ov.imgEl.removeAttribute('src'); ov.imgEl.style.display='none'; }
-    return;
+
   }
   const th = await resolveThumbUrl(imageFileId, 128);
   if (liImg && th) liImg.src = th;
@@ -608,12 +603,7 @@ async function updateImageForPin(id, imageFileId){
     if (full){ ov.imgEl.src = full; ov.imgEl.style.display='block'; }
   }
 }
-;
-  cached.imageFileId = imageFileId; rowCache.set(id, cached);
-  // list thumb
-  try{ const turl = await getFileThumbUrl(imageFileId, token, 1024); const dom = captionDomById.get(id); if (dom){ const i=dom.querySelector('img'); if(i) i.src=turl; else{ const im=document.createElement('img'); im.src=turl; dom.prepend(im);} } }catch(e){}
-  // overlay full-res (scaled)
-  try{ const full = await getFileBlobUrl(imageFileId, token); const ov=overlays.get(id); if(ov){ ov.imgEl.src=full; ov.imgEl.style.display='block'; } }catch(e){}
+
 async function updateCaptionForPin(id, args){
   const title = args.title; const body = args.body; const color = args.color;
   const token=getAccessToken(); if(!token||!currentSpreadsheetId) return;
@@ -694,7 +684,7 @@ async function refreshImagesGrid(){
         btn.addEventListener('click', async ()=>{
           if (!selectedPinId){
             if (hint) hint.textContent = 'Select a caption from the list, then click a thumbnail to attach it.';
-            return;
+
           }
           const all = grid ? grid.querySelectorAll('.thumb') : [];
           for (let k=0;k<all.length;k++){ all[k].dataset.selected='false'; }
