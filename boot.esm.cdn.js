@@ -1,4 +1,4 @@
-// boot.esm.cdn.js — COMPLETE (row-ensure + overlay drag + list sync + image attach/detach + Sheets I/O)
+// boot.esm.cdn.js — COMPLETE (robust row ensure + overlay drag/close + list sync + image attach/detach + Sheets I/O + sheet rename hook)
 import {
   ensureViewer, onCanvasShiftPick, addPinMarker, clearPins,
   setPinSelected, onPinSelect, loadGlbFromDrive, onRenderTick,
@@ -19,7 +19,7 @@ const __LM_API_KEY  =(window.GIS_API_KEY  ||'AIzaSyCUnTCr5yWUWPdEXST9bKP1LpgawU5
 const __LM_SCOPES   =(window.GIS_SCOPES   ||('https://www.googleapis.com/auth/drive.readonly https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/drive.metadata.readonly https://www.googleapis.com/auth/spreadsheets'));
 const signedSwitch=(signed)=>{
   document.documentElement.classList.toggle('signed-in',!!signed);
-  enable(!!signed,$('btnGlb'),$('glbUrl'),$('save-target-sheet'),$('save-target-create'),$('btnRefreshImages'));
+  enable(!!signed,$('btnGlb'),$('glbUrl'),$('save-target-sheet'),$('save-target-create'),$('btnRefreshImages'),$('save-target-rename'),$('rename-input'));
 };
 setupAuth($('auth-signin'), signedSwitch, { clientId:__LM_CLIENT_ID, apiKey:__LM_API_KEY, scopes:__LM_SCOPES });
 
@@ -101,7 +101,7 @@ function createCaptionOverlay(id,data){
   // overlay drag
   let dragging=false, startX=0,startY=0,baseLeft=0,baseTop=0;
   topbar.style.cursor='move';
-  topbar.addEventListener('pointerdown',(ev)=>{ dragging=true; startX=ev.clientX; startY=ev.clientY; baseLeft=parseFloat(root.style.left||'0'); baseTop=parseFloat(root.style.top||'0'); root.setPointerCapture?.(ev.pointerId); });
+  topbar.addEventListener('pointerdown',(ev)=>{ dragging=true; startX=ev.clientX; startY=ev.clientY; baseLeft=parseFloat(root.style.left||'0'); baseTop=parseFloat(root.style.top||'0'); root.setPointerCapture?.(ev.pointerId); ev.stopPropagation(); });
   window.addEventListener('pointermove',(ev)=>{ if(!dragging) return; const dx=ev.clientX-startX, dy=ev.clientY-startY; root.style.left=(baseLeft+dx)+'px'; root.style.top=(baseTop+dy)+'px'; });
   window.addEventListener('pointerup',()=>{ dragging=false; });
 
@@ -125,8 +125,9 @@ function createCaptionOverlay(id,data){
   t.addEventListener('keydown', (e)=>{ if(e.key==='Enter'&&!e.shiftKey){ e.preventDefault(); exitEdit(true);} });
   body.addEventListener('keydown', (e)=>{ if(e.key==='Enter'&&e.ctrlKey){ e.preventDefault(); exitEdit(true);} });
   t.addEventListener('blur', ()=>{ if(editing) exitEdit(true); }); body.addEventListener('blur', ()=>{ if(editing) exitEdit(true); });
-  bClose.addEventListener('click', ()=>removeCaptionOverlay(id));
-  bDel.addEventListener('click', async ()=>{
+  bClose.addEventListener('click', (e)=>{ e.stopPropagation(); removeCaptionOverlay(id); });
+  bDel.addEventListener('click', async (e)=>{
+    e.stopPropagation();
     if(!confirm('このキャプションを削除しますか？')) return;
     try{ await deleteCaptionForPin(id); removePinMarker(id); const dom=captionDomById.get(id); if(dom) dom.remove(); captionDomById.delete(id); rowCache.delete(id); removeCaptionOverlay(id); selectedPinId=null; }
     catch(e){ console.error('[caption delete] failed',e); alert('Failed to delete caption row.'); }
@@ -223,12 +224,30 @@ $('save-target-create')?.addEventListener('click', async ()=>{
   if(!r.ok){ console.error('[Sheets addSheet] failed', r.status); return; }
   await populateSheetTabs(currentSpreadsheetId, token); await loadCaptionsFromSheet();
 });
+// (New) Rename current sheet if #save-target-rename and #rename-input exist
+$('save-target-rename')?.addEventListener('click', async ()=>{
+  const token=getAccessToken(); if(!token||!currentSpreadsheetId||!currentSheetId) return;
+  const newTitle=($('rename-input')?.value||'').trim(); if(!newTitle) return;
+  const body={ requests:[{ updateSheetProperties:{ properties:{ sheetId: currentSheetId, title:newTitle }, fields:'title' } }] };
+  const r=await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(currentSpreadsheetId)}:batchUpdate`,{
+    method:'POST', headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json'}, body:JSON.stringify(body)
+  });
+  if(!r.ok){ console.error('[Sheets rename] failed', r.status); return; }
+  await populateSheetTabs(currentSpreadsheetId, token); await loadCaptionsFromSheet();
+});
 
 // ---------- Indexing / ensure row ----------
 async function ensureIndex(){
   captionsIndex.clear();
   const token=getAccessToken(); if(!token||!currentSpreadsheetId||!currentSheetTitle) return;
-  const values=await getValues(currentSpreadsheetId,`'${currentSheetTitle}'!A1:Z9999`, token); if(!values.length) return;
+  let values=[];
+  try{
+    values=await getValues(currentSpreadsheetId,`'${currentSheetTitle}'!A1:Z9999`, token);
+  }catch(e){
+    console.warn('[ensureIndex] values.get failed, best-effort continue', e);
+    return;
+  }
+  if(!values.length) return;
   currentHeaders=values[0].map(v=>(v||'').toString().trim()); currentHeaderIdx={}; currentHeaders.forEach((h,i)=> currentHeaderIdx[h.toLowerCase()]=i);
   const iId=(currentHeaderIdx['id']!=null)?currentHeaderIdx['id']:-1;
   for(let r=1;r<values.length;r++){ const row=values[r]||[]; const id=row[iId]; if(!id) continue; captionsIndex.set(String(id),{rowIndex:r+1}); }
@@ -237,17 +256,34 @@ async function sheetsAppendRow(spreadsheetId, sheetTitle, obj){
   const token=getAccessToken(); if(!token) return;
   const range=`'${sheetTitle}'!A:Z`;
   const now=new Date().toISOString();
-  const vals=[[ obj.id, obj.title||'', obj.body||'', obj.color||currentPinColor, obj.x, obj.y, obj.z, obj.imageFileId||'', obj.createdAt||now, obj.updatedAt||now ]];
+  const vals=[[ obj.id, obj.title||'', obj.body||'', obj.color||currentPinColor, obj.x||0, obj.y||0, obj.z||0, obj.imageFileId||'', obj.createdAt||now, obj.updatedAt||now ]];
   await appendValues(spreadsheetId, range, vals, token);
   await ensureIndex();
 }
 async function ensureRow(id, seed = {}) {
+  // use cache if exists
   if (rowCache.has(id)) return rowCache.get(id);
   await ensureIndex();
   if (captionsIndex.has(id)) return rowCache.get(id)||{ id, ...seed };
-  if(!currentSpreadsheetId || !currentSheetTitle) return { id, ...seed }; // safety
-  const row = { id, title:seed.title||'', body:seed.body||'', color:seed.color||currentPinColor, x:seed.x, y:seed.y, z:seed.z, imageFileId:seed.imageFileId||'', createdAt:new Date().toISOString(), updatedAt:new Date().toISOString() };
-  await sheetsAppendRow(currentSpreadsheetId, currentSheetTitle, row);
+
+  if(!currentSpreadsheetId){
+    console.warn('[ensureRow] no spreadsheet set, caching only');
+    const row = { id, ...seed };
+    rowCache.set(id,row);
+    return row;
+  }
+  const sheetTitle=currentSheetTitle||'シート1';
+  const row = {
+    id,
+    title:seed.title||'',
+    body:seed.body||'',
+    color:seed.color||currentPinColor,
+    x:('x' in seed)?seed.x:0, y:('y' in seed)?seed.y:0, z:('z' in seed)?seed.z:0,
+    imageFileId:seed.imageFileId||'',
+    createdAt:new Date().toISOString(),
+    updatedAt:new Date().toISOString()
+  };
+  await sheetsAppendRow(currentSpreadsheetId, sheetTitle, row);
   rowCache.set(id,row);
   return row;
 }
@@ -276,9 +312,29 @@ async function enrichRow(row){
 
 // ---------- Save / Update / Delete ----------
 async function updateCaptionForPin(id, fields){
-  await ensureRow(id, fields);
+  // First ensure row; if it doesn't exist in Sheets, create it.
+  const seedFromCache = rowCache.get(id) || { id };
+  const seed = { ...seedFromCache, ...fields };
+  await ensureRow(id, seed);
+
   await ensureIndex();
-  const meta=captionsIndex.get(id); if(!meta) throw new Error('row not found');
+  let meta=captionsIndex.get(id);
+  // If still not found (e.g., Sheets indexing delayed or empty sheet), try to create explicitly then re-index
+  if(!meta && currentSpreadsheetId){
+    const sheetTitle=currentSheetTitle||'シート1';
+    await sheetsAppendRow(currentSpreadsheetId, sheetTitle, {
+      id,
+      title:seed.title||'',
+      body:seed.body||'',
+      color:seed.color||currentPinColor,
+      x:('x' in seed)?seed.x:0, y:('y' in seed)?seed.y:0, z:('z' in seed)?seed.z:0,
+      imageFileId:seed.imageFileId||''
+    });
+    await ensureIndex();
+    meta=captionsIndex.get(id);
+  }
+  if(!meta) throw new Error('row not found');
+
   const token=getAccessToken(); if(!token||!currentSpreadsheetId||!currentSheetTitle) return;
   const rowIdx=meta.rowIndex;
   const values=await getValues(currentSpreadsheetId,`'${currentSheetTitle}'!A${rowIdx}:Z${rowIdx}`, token);
@@ -331,8 +387,13 @@ async function updateCaptionForPin(id, fields){
     }
   }
 }
-async function updateImageForPin(id, fileId){ await ensureRow(id,{ imageFileId:fileId }); await updateCaptionForPin(id,{ imageFileId:fileId }); }
+async function updateImageForPin(id, fileId){
+  // ensure row, then update field; also refresh overlay explicitly
+  await ensureRow(id,{ imageFileId:fileId });
+  await updateCaptionForPin(id,{ imageFileId:fileId });
+}
 
+// Save new pin
 async function savePinToSheet(obj){
   const token=getAccessToken(); if(!token||!currentSpreadsheetId) return;
   const sheetTitle=currentSheetTitle||'シート1'; const range=`'${sheetTitle}'!A:Z`;
@@ -396,12 +457,13 @@ async function refreshImagesGrid(){
       host.querySelectorAll('.thumb[data-selected="true"]').forEach(n=>n.removeAttribute('data-selected'));
       div.setAttribute('data-selected','true');
       const slot=$('currentImageThumb'); if(slot) slot.innerHTML = th ? `<img alt="" src="${th}">` : '';
-      if (selectedPinId) await updateImageForPin(selectedPinId, f.id);
+      // ここでは自動アタッチは行わず、Attachボタンで反映（誤タップ防止）
     });
     host.appendChild(div);
   }
 }
 $('btnRefreshImages')?.addEventListener('click', refreshImagesGrid);
+// Attach/Detach 操作
 $('btnAttachImage')?.addEventListener('click', ()=>{ if(!selectedPinId||!selectedImage) return; updateImageForPin(selectedPinId, selectedImage.id).catch(()=>{}); });
 $('btnDetachImage')?.addEventListener('click', ()=>{ if(!selectedPinId) return; selectedImage=null; updateCaptionForPin(selectedPinId,{ imageFileId:'' }).catch(()=>{}); const slot=$('currentImageThumb'); if(slot) slot.innerHTML=''; });
 
@@ -451,4 +513,4 @@ $('glbUrl')?.addEventListener('keydown',(e)=>{ if(e.key==='Enter') doLoad(); });
 $('glbUrl')?.addEventListener('input',()=>{ if($('btnGlb')) $('btnGlb').disabled=!extractDriveId($('glbUrl').value||''); });
 $('glbUrl')?.dispatchEvent(new Event('input'));
 
-console.log('[LociMyu ESM/CDN] boot overlay-edit+fixed-zoom build loaded (完全版+image-fix+row-ensure)');
+console.log('[LociMyu ESM/CDN] boot overlay-edit+fixed-zoom build loaded (完全版+image-fix+row-ensure+rename)');
