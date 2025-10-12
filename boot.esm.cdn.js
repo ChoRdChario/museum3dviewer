@@ -189,8 +189,6 @@ function createCaptionOverlay(id, data){
 
   const img = document.createElement('img'); img.className='cap-img'; img.alt=''; img.style.display='none';
   img.style.width='100%'; img.style.height='auto'; img.style.borderRadius='8px';
-  (async()=>{ try{ if (data && data.imageFileId){ const u = await getFileThumbUrl(data.imageFileId, getAccessToken(), 512); img.src=u; img.style.display='block'; } }catch(e){ console.warn('[overlay thumb]', e);} })();
-
 
   const safeTitle = (data && data.title ? String(data.title).trim() : '') || '(untitled)';
   const safeBody  = (data && data.body  ? String(data.body).trim()  : '') || '(no description)';
@@ -265,7 +263,7 @@ onRenderTick(() => { overlays.forEach((_, id) => updateOverlayPosition(id, false
 function showOverlayFor(id){
   const d=rowCache.get(id); if(!d) return;
   // リスト強調表示
-  for (const [cid, el] of captionDomById.entries()){ el.classList.toggle('selected', cid===id); }
+  for (const [cid, el] of captionDomById.entries()){ el.classList.toggle('is-selected', cid===id); }
   createCaptionOverlay(id, d);
   setPinSelected(id, true);
 }
@@ -444,72 +442,43 @@ if ($('save-target-create')) $('save-target-create').addEventListener('click', a
 });
 
 function clearCaptionList(){ const host=$('caption-list'); if (host) host.innerHTML=''; captionDomById.clear(); }
-
-// Create or update a list item in the caption list for a given row
-function appendCaptionItem(args){
-  const host = $('caption-list'); if (!host || !args) return;
-  const id = String(args.id || '').trim(); if (!id) return;
-
-  const title = (args.title || '').toString();
-  const body  = (args.body  || '').toString();
-  const color = (args.color || '').toString();
-  const imageUrl = (args.imageUrl || '').toString();
-
-  // root
-  const div = document.createElement('div');
-  div.className = 'caption-item';
-  div.dataset.id = id;
   if (args.imageFileId) div.dataset.imageFileId = args.imageFileId;
-  if (color) div.style.setProperty('--pin-color', color);
 
-  const safeTitle = title.trim() || '(untitled)';
-  const safeBody  = body.trim()  || '(no description)';
+  const safeTitle=(title||'').trim()||'(untitled)';
+  const safeBody=(body||'').trim()||'(no description)';
 
-  // image (thumb)
   if (imageUrl){
-    const img = document.createElement('img');
-    img.src = imageUrl; img.alt = '';
+    const img=document.createElement('img'); img.src=imageUrl; img.alt='';
     div.appendChild(img);
   }
-
-  // text
-  const txt  = document.createElement('div'); txt.className='cap-txt';
-  const t    = document.createElement('div'); t.className='c-title'; t.textContent=safeTitle;
-  const b    = document.createElement('div'); b.className='c-body';  b.classList.add('hint'); b.textContent=safeBody;
+  const txt=document.createElement('div'); txt.className='cap-txt';
+  const t=document.createElement('div'); t.className='c-title'; t.textContent=safeTitle;
+  const b=document.createElement('div'); b.className='c-body';  b.classList.add('hint'); b.textContent=safeBody;
   txt.appendChild(t); txt.appendChild(b); div.appendChild(txt);
 
-  // click -> select
+  // 選択状態のUI
   div.addEventListener('click', (e)=>{
     if (e.target && e.target.closest && e.target.closest('.c-del')) return;
     __lm_selectPin(id, 'list');
   });
 
-  // delete button
-  const del = document.createElement('button');
-  del.className = 'c-del'; del.title = 'Delete'; del.textContent = '🗑';
+  // 個別削除
+  const del=document.createElement('button'); del.className='c-del'; del.title='Delete'; del.textContent='🗑';
   del.addEventListener('click', async (e)=>{
     e.stopPropagation();
     if (!confirm('このキャプションを削除しますか？')) return;
     try{
       await deleteCaptionForPin(id);
       removePinMarker(id);
-      div.remove();
-      captionDomById.delete(id);
-      rowCache.delete(id);
+      div.remove(); captionDomById.delete(id); rowCache.delete(id);
       removeCaptionOverlay(id);
-    }catch(err){
-      console.error('delete failed', err);
-      alert('Delete failed');
-    }
+    }catch(err){ console.error('delete failed', err); alert('Delete failed'); }
   });
   div.appendChild(del);
 
-  host.appendChild(div);
-  captionDomById.set(id, div);
+  host.appendChild(div); captionDomById.set(id, div);
   try{ div.scrollIntoView({block:'nearest'}); }catch(e){}
 }
-
-
 async function enrichRow(row){
   const token=getAccessToken(); let imageUrl='';
   if(row.imageFileId){
@@ -581,20 +550,11 @@ async function updateCaptionForPin(id, args){
   }
 }
 async function deleteCaptionForPin(id){
-  try{
-    if (typeof _deleteCaptionRow === 'function'){
-      await _deleteCaptionRow(id);
-    }
-  }catch(e){
-    console.warn('[sheet delete failed]', e);
-  }
-  try{
-    const key='lm_deleted_ids';
-    const arr = JSON.parse(localStorage.getItem(key)||'[]');
-    if (!arr.includes(String(id))) arr.push(String(id));
-    localStorage.setItem(key, JSON.stringify(arr));
-  }catch(e){}
-},
+  const token=getAccessToken(); if(!token||!currentSpreadsheetId||!currentSheetId) return;
+  if (!captionsIndex.size) await ensureIndex();
+  const hit=captionsIndex.get(id); if(!hit) throw new Error('row not found');
+  const r = await fetch('https://sheets.googleapis.com/v4/spreadsheets/'+encodeURIComponent(currentSpreadsheetId)+':batchUpdate', {
+    method:'POST', headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},
     body: JSON.stringify({ requests: [{ deleteDimension: { range: { sheetId: currentSheetId, dimension: 'ROWS', startIndex: hit.rowIndex-1, endIndex: hit.rowIndex } } }] })
   });
   if (!r.ok) throw new Error('delete row '+r.status);
@@ -673,22 +633,13 @@ function __lm_markListSelected(id){
   if (li){ li.classList.add('is-selected'); li.setAttribute('aria-selected','true'); li.scrollIntoView({block:'nearest'}); }
 }
 
-async function __lm_fillFormFromCaption(obj){
+function __lm_fillFormFromCaption(obj){
   const ti = $('caption-title'); const bo = $('caption-body'); const th = $('currentImageThumb');
   if (!ti || !bo || !th) return;
   ti.value = (obj && obj.title) ? String(obj.title) : '';
   bo.value = (obj && obj.body)  ? String(obj.body)  : '';
   if (obj && obj.imageFileId){
-    try{
-      const url = await getFileThumbUrl(obj.imageFileId, getAccessToken(), 256);
-      th.innerHTML = `<img alt="attached" src="${url}">`;
-    }catch(e){
-      console.warn('[thumb fail]', e); th.innerHTML = `<div class="placeholder">No Image</div>`;
-    }
-  } else {
-    th.innerHTML = `<div class="placeholder">No Image</div>`;
-  }
-}">`;
+    th.innerHTML = `<img alt="attached" src="${getFileThumbUrl(obj.imageFileId, getAccessToken(), 256)}
   } else {
     th.innerHTML = `<div class="placeholder">No Image</div>`;
   }
@@ -790,15 +741,15 @@ let __lm_deb;
 // When images-grid click attaches image (existing behavior), also update preview
 (function(){
   const g = $('images-grid'); if (!g) return;
-  g.addEventListener('click', (e)=>{
+  g.addEventListener('click', async (e)=>{
     const btn = e.target && e.target.closest ? e.target.closest('.thumb[data-id]') : null;
     if (!btn || !selectedPinId) return;
     const fid = btn.dataset.id;
     // Preview
     try{
-      $('currentImageThumb').innerHTML = `<img alt="attached" src="${getFileThumbUrl(fid, getAccessToken(), 256)}">`;
+      $('currentImageThumb').innerHTML = `<img alt="attached" src="${await getFileThumbUrl(fid, getAccessToken(), 256)}">`;
       const liImg = document.querySelector(`#caption-list .caption-item[data-id="${CSS.escape(selectedPinId)}"] img`);
-      if (liImg) liImg.src = getFileThumbUrl(fid, getAccessToken(), 128);
+      if (liImg) liImg.src = await getFileThumbUrl(fid, getAccessToken(), 128);
       const cur = rowCache.get(selectedPinId) || {};
       rowCache.set(selectedPinId, { ...cur, imageFileId: fid });
     }catch(e){}
