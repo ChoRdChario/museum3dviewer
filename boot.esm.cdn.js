@@ -532,3 +532,202 @@ async function findOrCreateLociMyuSpreadsheet(parentFolderId, token, opts) {
 
 window.findOrCreateLociMyuSpreadsheet = findOrCreateLociMyuSpreadsheet;
 /* ==== /helpers ==== */
+
+
+/* ==== [restored] Sheet tabs + captions I/O ==== */
+async function ensureCaptionsSheet(spreadsheetId, token){
+  const metaUrl = 'https://sheets.googleapis.com/v4/spreadsheets/'+encodeURIComponent(spreadsheetId)+'?fields=sheets(properties(title,sheetId))';
+  const r = await fetch(metaUrl, { headers:{ Authorization:'Bearer '+token } });
+  if (!r.ok) throw new Error('sheets.meta '+r.status);
+  const d = await r.json();
+  const sheets = (d && d.sheets) || [];
+  let found = sheets.find(s => s.properties && s.properties.title === 'Captions');
+  if (found) return found.properties;
+
+  const buUrl = 'https://sheets.googleapis.com/v4/spreadsheets/'+encodeURIComponent(spreadsheetId)+':batchUpdate';
+  const body = {
+    requests: [{
+      addSheet: { properties: { title:'Captions' } }
+    },{
+      updateCells: {
+        range: { sheetId: null, startRowIndex:0, endRowIndex:1, startColumnIndex:0, endColumnIndex:8 },
+        rows: [{
+          values: ['id','title','body','color','x','y','z','imageFileId'].map(v=>({ userEnteredValue:{ stringValue:String(v) } }))
+        }],
+        fields: 'userEnteredValue'
+      }
+    }]
+  };
+  const rr = await fetch(buUrl, { method:'POST', headers:{ Authorization:'Bearer '+token,'Content-Type':'application/json' }, body: JSON.stringify(body) });
+  if (!rr.ok) throw new Error('sheets.add Captions '+rr.status);
+
+  const r2 = await fetch(metaUrl, { headers:{ Authorization:'Bearer '+token } });
+  const d2 = await r2.json();
+  const fresh = (d2.sheets||[]).find(s => s.properties && s.properties.title === 'Captions');
+  if (!fresh) throw new Error('Captions sheet not found after create');
+  return fresh.properties;
+}
+
+async function populateSheetTabs(spreadsheetId, token){
+  const sel = document.getElementById('save-target-sheet');
+  if (!sel) return;
+  sel.innerHTML = '<option value="">Loading…</option>';
+
+  const props = await ensureCaptionsSheet(spreadsheetId, token);
+  currentSheetId = props.sheetId;
+  currentSheetTitle = props.title || 'Captions';
+
+  sel.innerHTML = '';
+  const opt = document.createElement('option');
+  opt.value = String(currentSheetId); opt.textContent = currentSheetTitle;
+  sel.appendChild(opt);
+  sel.value = String(currentSheetId);
+
+  sel.onchange = () => {
+    currentSheetId = sel.value ? Number(sel.value) : null;
+    currentSheetTitle = opt.textContent || 'Captions';
+    loadCaptionsFromSheet().catch(e=>console.warn('[sheet] reload captions failed', e));
+  };
+}
+
+function headerIndexMap(headers){
+  const map = {}; headers.forEach((h,i)=>{ map[String(h).trim().toLowerCase()] = i; });
+  return map;
+}
+
+async function loadCaptionsFromSheet(){
+  if (!currentSpreadsheetId) return;
+  const token = getAccessToken();
+  let values = await getValues(currentSpreadsheetId, 'Captions!A1:Z1', token);
+  const hdr = (values[0]||[]).map(v => String(v||'').trim());
+  currentHeaders = hdr;
+  currentHeaderIdx = headerIndexMap(hdr);
+
+  values = await getValues(currentSpreadsheetId, 'Captions!A2:Z', token);
+  captionsIndex.clear();
+  rowCache.clear();
+  const host = document.getElementById('caption-list');
+  if (host) host.innerHTML = '';
+
+  const idIx = currentHeaderIdx['id'] ?? 0;
+  const titleIx = currentHeaderIdx['title'] ?? 1;
+  const bodyIx = currentHeaderIdx['body'] ?? 2;
+  const colorIx = currentHeaderIdx['color'] ?? 3;
+  const xIx = currentHeaderIdx['x'] ?? 4;
+  const yIx = currentHeaderIdx['y'] ?? 5;
+  const zIx = currentHeaderIdx['z'] ?? 6;
+  const imgIx = currentHeaderIdx['imagefileid'] ?? 7;
+
+  values.forEach((row, i) => {
+    const id = String(row[idIx] || '').trim();
+    if (!id) return;
+    const obj = {
+      id,
+      title: row[titleIx] || '',
+      body: row[bodyIx] || '',
+      color: row[colorIx] || '#ff6b6b',
+      x: Number(row[xIx]||0), y: Number(row[yIx]||0), z: Number(row[zIx]||0),
+      imageFileId: row[imgIx] || ''
+    };
+    const sheetRow = i + 2;
+    captionsIndex.set(id, sheetRow);
+    rowCache.set(id, obj);
+    appendCaptionItem(obj);
+    addPinMarker({ id, x: obj.x, y: obj.y, z: obj.z, color: obj.color });
+  });
+}
+
+function appendCaptionItem(obj){
+  const host = document.getElementById('caption-list');
+  if (!host) return;
+  const el = document.createElement('div');
+  el.className = 'caption-item';
+  el.dataset.id = obj.id;
+  el.innerHTML = `
+    <img alt="" src="" style="background:#111;"/>
+    <div class="txt"><div class="t">${obj.title||'(untitled)'}</div><div class="b" style="opacity:.8;font-size:12px">${obj.body||''}</div></div>
+    <button class="c-del" title="Delete" style="margin-left:auto">🗑</button>
+  `;
+  const token = getAccessToken();
+  if (obj.imageFileId && token){
+    getFileThumbUrl(obj.imageFileId, token, 80).then(u => { el.querySelector('img').src = u; }).catch(()=>{});
+  }
+  el.addEventListener('click', (e)=>{
+    if (e.target && e.target.closest('.c-del')) return;
+    __lm_selectPin(obj.id, 'list');
+  });
+  host.appendChild(el);
+  captionDomById.set(obj.id, el);
+}
+
+async function savePinToSheet(row){
+  const token = getAccessToken();
+  const v = [
+    row.id, row.title||'', row.body||'', row.color||'#ff6b6b',
+    row.x, row.y, row.z, row.imageFileId||''
+  ];
+  await appendValues(currentSpreadsheetId, 'Captions!A2:H', [v], token);
+  await loadCaptionsFromSheet();
+}
+
+async function updateCaptionForPin(id, patch){
+  const rowNum = captionsIndex.get(id);
+  if (!rowNum) throw new Error('row not found');
+  const token = getAccessToken();
+
+  const cur = rowCache.get(id) || {}; Object.assign(cur, patch); rowCache.set(id, cur);
+
+  const updates = [];
+  if (patch.title !== undefined) updates.push({ col:'B', val: String(patch.title||'') });
+  if (patch.body  !== undefined) updates.push({ col:'C', val: String(patch.body||'') });
+  if (patch.color !== undefined) updates.push({ col:'D', val: String(patch.color||'#ff6b6b') });
+  if (patch.x     !== undefined) updates.push({ col:'E', val: Number(patch.x||0) });
+  if (patch.y     !== undefined) updates.push({ col:'F', val: Number(patch.y||0) });
+  if (patch.z     !== undefined) updates.push({ col:'G', val: Number(patch.z||0) });
+  if (patch.imageFileId !== undefined) updates.push({ col:'H', val: String(patch.imageFileId||'') });
+
+  for (const u of updates){
+    await putValues(currentSpreadsheetId, `Captions!${u.col}${rowNum}:${u.col}${rowNum}`, [[u.val]], token);
+  }
+
+  const el = captionDomById.get(id);
+  if (el){
+    if (patch.title !== undefined) el.querySelector('.t').textContent = patch.title || '(untitled)';
+    if (patch.body  !== undefined) el.querySelector('.b').textContent = patch.body || '';
+    if (patch.imageFileId !== undefined){
+      const img = el.querySelector('img');
+      if (patch.imageFileId){
+        getFileThumbUrl(patch.imageFileId, token, 80).then(u => img.src = u).catch(()=>{});
+      }else{
+        img.removeAttribute('src');
+      }
+    }
+  }
+}
+
+async function deleteCaptionForPin(id){
+  const rowNum = captionsIndex.get(id);
+  if (!rowNum) return;
+  const token = getAccessToken();
+  const url = 'https://sheets.googleapis.com/v4/spreadsheets/'+encodeURIComponent(currentSpreadsheetId)+':batchUpdate';
+  const body = {
+    requests: [{
+      deleteDimension: {
+        range: { sheetId: currentSheetId, dimension: 'ROWS', startIndex: rowNum-1, endIndex: rowNum }
+      }
+    }]
+  };
+  const r = await fetch(url, { method:'POST', headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'}, body: JSON.stringify(body) });
+  if (!r.ok) throw new Error('rows.delete '+r.status);
+  await loadCaptionsFromSheet();
+}
+
+function __lm_selectPin(id, src){
+  selectedPinId = id;
+  __lm_markListSelected(id);
+  const obj = rowCache.get(id);
+  if (obj) __lm_fillFormFromCaption(obj);
+  showOverlayFor(id);
+  setPinSelected(id, true);
+}
+
