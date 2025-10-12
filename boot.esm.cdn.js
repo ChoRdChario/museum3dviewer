@@ -55,7 +55,16 @@ async function resolveThumbUrl(fileId,size=256){
   }catch(_){ return ''; }
 }
 async function getFileBlobUrl(fileId, token){
-  const r=await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?alt=media&supportsAllDrives=true`,{headers:{Authorization:`Bearer ${token}`}});
+  const url = `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?alt=media&supportsAllDrives=true`;
+  const r = await fetch(url, { headers: { Authorization: `Bearer ${token}` }});
+  if (!r.ok) throw new Error('media '+r.status);
+  const ct = (r.headers.get('Content-Type') || '').toLowerCase();
+  if (/image\/(heic|heif)/.test(ct)) {
+    throw new Error('unsupported image format: HEIC');
+  }
+  const blob = await r.blob();
+  return URL.createObjectURL(blob);
+}?alt=media&supportsAllDrives=true`,{headers:{Authorization:`Bearer ${token}`}});
   if(!r.ok) throw new Error('media '+r.status);
   const blob=await r.blob(); return URL.createObjectURL(blob);
 }
@@ -387,10 +396,32 @@ async function updateCaptionForPin(id, fields){
     }
   }
 }
-async function updateImageForPin(id, fileId){
-  // ensure row, then update field; also refresh overlay explicitly
-  await ensureRow(id,{ imageFileId:fileId });
-  await updateCaptionForPin(id,{ imageFileId:fileId });
+async function updateImageForPin(id){
+  const token = getAccessToken();
+  const row = rowCache.get(id);
+  if (!token || !row) return;
+  const item = captionDomById.get(id);
+  const overlay = overlays.get(id);
+
+  let imgUrl = '';
+  if (row.imageFileId) {
+    try {
+      imgUrl = await getFileBlobUrl(row.imageFileId, token);
+    } catch (e) {
+      try { imgUrl = await getFileThumbUrl(row.imageFileId, token, 1024); } catch(_) { imgUrl = ''; }
+    }
+  }
+  if (overlay && overlay.imgEl) {
+    if (imgUrl) { overlay.imgEl.src = imgUrl; overlay.imgEl.style.display = 'block'; }
+    else { overlay.imgEl.removeAttribute('src'); overlay.imgEl.style.display = 'none'; }
+  }
+  if (item) {
+    let imgEl = item.querySelector('img');
+    if (imgUrl) {
+      if (!imgEl) { imgEl = document.createElement('img'); item.insertBefore(imgEl, item.firstChild); }
+      imgEl.src = imgUrl; imgEl.style.display = 'block';
+    } else if (imgEl) { imgEl.remove(); }
+  }
 }
 
 // Save new pin
