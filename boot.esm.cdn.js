@@ -55,7 +55,9 @@ async function resolveThumbUrl(fileId,size=256){
   }catch(_){ return ''; }
 }
 async function getFileBlobUrl(fileId, token){
-  const url = `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}` } });
+  if(!fileId || !token) throw new Error('missing fileId/token');
+  const url = `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?alt=media&supportsAllDrives=true`;
+  const r = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
   if (!r.ok) throw new Error('media ' + r.status);
   const ct = (r.headers.get('Content-Type') || '').toLowerCase();
   if (/image\/(heic|heif)/.test(ct)) {
@@ -64,17 +66,6 @@ async function getFileBlobUrl(fileId, token){
   }
   const blob = await r.blob();
   return URL.createObjectURL(blob);
-}` }});
-  if (!r.ok) throw new Error('media '+r.status);
-  const ct = (r.headers.get('Content-Type') || '').toLowerCase();
-  if (/image\/(heic|heif)/.test(ct)) {
-    throw new Error('unsupported image format: HEIC');
-  }
-  const blob = await r.blob();
-  return URL.createObjectURL(blob);
-}`}});
-  if(!r.ok) throw new Error('media '+r.status);
-  const blob=await r.blob(); return URL.createObjectURL(blob);
 }
 async function getParentFolderId(fileId, token){
   const r=await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?fields=parents&supportsAllDrives=true`,{headers:{Authorization:`Bearer ${token}`}});
@@ -404,33 +395,10 @@ async function updateCaptionForPin(id, fields){
     }
   }
 }
-async function updateImageForPin(id){
-  const token = getAccessToken && getAccessToken();
-  const row = rowCache && rowCache.get ? rowCache.get(id) : null;
-  if (!token || !row) return;
-  const item = captionDomById && captionDomById.get ? captionDomById.get(id) : null;
-  const overlay = overlays && overlays.get ? overlays.get(id) : null;
-
-  let imgUrl = '';
-  if (row.imageFileId) {
-    try {
-      imgUrl = await getFileBlobUrl(row.imageFileId, token);
-    } catch (e) {
-      try { imgUrl = await getFileThumbUrl(row.imageFileId, token, 1024); } catch(_) { imgUrl = ''; }
-    }
-  }
-
-  if (overlay && overlay.imgEl) {
-    if (imgUrl) { overlay.imgEl.src = imgUrl; overlay.imgEl.style.display = 'block'; }
-    else { overlay.imgEl.removeAttribute('src'); overlay.imgEl.style.display = 'none'; }
-  }
-  if (item) {
-    let imgEl = item.querySelector && item.querySelector('img');
-    if (imgUrl) {
-      if (!imgEl) { imgEl = document.createElement('img'); item.insertBefore(imgEl, item.firstChild); }
-      imgEl.src = imgUrl; imgEl.style.display = 'block';
-    } else if (imgEl) { imgEl.remove(); }
-  }
+async function updateImageForPin(id, fileId){
+  // ensure row, then update field; also refresh overlay explicitly
+  await ensureRow(id,{ imageFileId:fileId });
+  await updateCaptionForPin(id,{ imageFileId:fileId });
 }
 
 // Save new pin
