@@ -400,7 +400,7 @@ async function doLoad(){
     await refreshImagesGrid();
   } catch (e) { 
     console.error('[GLB] load error', e); 
-    alert('GLBの読み込みに失敗しました: ' + e.message);
+    alert('GLB load failed: ' + e.message);
   }
   finally { 
     if ($('btnGlb')) $('btnGlb').disabled = false; 
@@ -452,123 +452,11 @@ function __lm_fillFormFromCaption(obj){
       })
       .catch(e => {
         console.warn('Thumb load failed:', e);
-        th.innerHTML = '<div class="placeholder">読込失敗</div>';
+        th.innerHTML = '<div class="placeholder">Load failed</div>';
       });
   } else {
     th.innerHTML = '<div class="placeholder">No Image</div>';
   }
 }
 
-
-async function findOrCreateLociMyuSpreadsheet(parentFolderId, token, { glbId } = {}){
-  if (!token) throw new Error('no token');
-  const q = encodeURIComponent("'" + parentFolderId + "' in parents and mimeType = 'application/vnd.google-apps.spreadsheet' and trashed=false');
-  const url = 'https://www.googleapis.com/drive/v3/files?q='+q+'&fields=files(id,name)&pageSize=50&supportsAllDrives=true';
-  const res = await fetch(url, { headers: { Authorization: 'Bearer '+token }});
-  if (!res.ok) throw new Error('Drive search failed: '+res.status);
-  const data = await res.json();
-  if (data.files && data.files[0]) return data.files[0].id;
-
-  const title = 'LociMyu Captions ' + (glbId || '');
-  const createRes = await fetch('https://sheets.googleapis.com/v4/spreadsheets', {
-    method: 'POST',
-    headers: { 'Authorization': 'Bearer '+token, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ properties: { title }, sheets: [{ properties: { title: 'Captions' } }] })
-  });
-  if (!createRes.ok) throw new Error('Sheets create failed: '+createRes.status);
-  const sheetMeta = await createRes.json();
-  const spreadsheetId = sheetMeta.spreadsheetId;
-
-  try{
-    await fetch('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(spreadsheetId)+'?addParents='+encodeURIComponent(parentFolderId)+'&supportsAllDrives=true', {
-      method: 'PATCH',
-      headers: { 'Authorization': 'Bearer '+token, 'Content-Type': 'application/json' },
-      body: JSON.stringify({})
-    });
-  }catch(e){ console.warn('[Sheets] move to folder failed', e); }
-
-  await populateSheetTabs(spreadsheetId, token);
-  return spreadsheetId;
-}
-
-async function populateSheetTabs(spreadsheetId, token){
-  if (!token) throw new Error('no token');
-  const metaRes = await fetch('https://sheets.googleapis.com/v4/spreadsheets/'+encodeURIComponent(spreadsheetId), {
-    headers: { Authorization: 'Bearer '+token }
-  });
-  if (!metaRes.ok) throw new Error('Sheets metadata failed: '+metaRes.status);
-  const meta = await metaRes.json();
-  const sheets = meta.sheets || [];
-  const hasCaptions = sheets.some(s => s.properties && s.properties.title === 'Captions');
-  if (!hasCaptions){
-    const addRes = await fetch('https://sheets.googleapis.com/v4/spreadsheets/'+encodeURIComponent(spreadsheetId)+':batchUpdate', {
-      method: 'POST',
-      headers: { Authorization: 'Bearer '+token, 'Content-Type':'application/json' },
-      body: JSON.stringify({ requests: [{ addSheet: { properties: { title: 'Captions' } } }] })
-    });
-    if (!addRes.ok) throw new Error('Add sheet failed: '+addRes.status);
-  }
-  const headerValues = [['id','title','body','color','x','y','z','imageFileId','createdAt','updatedAt']];
-  await fetch('https://sheets.googleapis.com/v4/spreadsheets/'+encodeURIComponent(spreadsheetId)+'/values/Captions!A1:J1?valueInputOption=RAW', {
-    method: 'PUT',
-    headers: { Authorization: 'Bearer '+token, 'Content-Type':'application/json' },
-    body: JSON.stringify({ range:'Captions!A1:J1', values: headerValues })
-  });
-}
-
-async function loadCaptionsFromSheet(){
-  if (!currentSpreadsheetId) return;
-  const token = getAccessToken(); if (!token) return;
-  const url = 'https://sheets.googleapis.com/v4/spreadsheets/'+encodeURIComponent(currentSpreadsheetId)+'/values/Captions!A2:J10000';
-  const res = await fetch(url, { headers: { Authorization: 'Bearer '+token } });
-  if (!res.ok){ console.warn('[Sheets] read failed', res.status); return; }
-  const data = await res.json();
-  const values = data.values || [];
-
-  captionsIndex.clear();
-  rowCache.clear();
-  clearCaptionList();
-
-  for (const row of values){
-    const [id,title,body,color,x,y,z,imageFileId,createdAt,updatedAt] = row;
-    if (!id) continue;
-    const rec = {
-      id:String(id), title:title||'', body:body||'',
-      color:color||'#ff6b6b',
-      x: parseFloat(x)||0, y:parseFloat(y)||0, z:parseFloat(z)||0,
-      imageFileId:imageFileId||'',
-      createdAt:createdAt||'', updatedAt:updatedAt||''
-    };
-    captionsIndex.set(rec.id, rec);
-    rowCache.set(rec.id, rec);
-    appendCaptionItem(await enrichRow(rec));
-  }
-}
-
-async function refreshImagesGrid(){
-  const host = $('images-grid'); if (!host) return;
-  host.innerHTML = '';
-  const token = getAccessToken(); if (!token || !lastGlbFileId) return;
-  try{
-    const files = await listImagesForGlb(lastGlbFileId, token);
-    for (const f of files){
-      const li = document.createElement('div'); li.className='img-item'; li.dataset.id=f.id;
-      const img = document.createElement('img'); img.alt=f.name||''; img.loading='lazy';
-      try{ img.src = await getFileThumbUrl(f.id, token, 256); }catch(e){}
-      li.appendChild(img);
-      li.addEventListener('click', async ()=>{
-        selectedImage = f;
-        const th = $('currentImageThumb');
-        if (th){
-          try{ th.innerHTML = '<img alt="attached" src="'+(await getFileThumbUrl(f.id, token, 256))+'">'; }
-          catch{ th.innerHTML = '<div class="placeholder">No Image</div>'; }
-        }
-      }, {capture:true});
-      host.appendChild(li);
-    }
-  }catch(e){
-    console.warn('[Images] grid refresh failed:', e);
-  }
-}
-
-console.log('[LociMyu ESM/CDN] boot overlay-edit+fixed-zoom build loaded (修正版)');
+console.log('[LociMyu ESM/CDN] boot overlay-edit+fixed-zoom build loaded (safe)');
