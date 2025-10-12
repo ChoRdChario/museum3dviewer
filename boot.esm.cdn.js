@@ -209,52 +209,9 @@ function createCaptionOverlay(id, data){
       }
     }
   })();
+  // 編集モード撤去（外部フォームで編集）
+  // --- ドラッグ ---
 
-  // 編集モード（タイトル/本文ともにピン設置後も編集可能）
-  let editing = false;
-  function enterEdit(){
-    if (editing) return; editing = true;
-    t.contentEditable = 'true'; body.contentEditable = 'true';
-    t.style.outline = '1px dashed #fff3'; body.style.outline = '1px dashed #fff3';
-    t.focus();
-  }
-  function exitEdit(save){
-    if (!editing) return; editing = false;
-    t.contentEditable = 'false'; body.contentEditable = 'false';
-    t.style.outline = ''; body.style.outline = '';
-    if (save){
-      const newTitle = (t.textContent || '').trim();
-      const newBody  = (body.textContent || '').trim();
-      updateCaptionForPin(id, { title: newTitle, body: newBody }).catch(()=>{});
-    } else {
-      const cur = rowCache.get(id) || {};
-      t.textContent = (cur.title || '').trim() || '(untitled)';
-      body.textContent = (cur.body  || '').trim() || '(no description)';
-    }
-  }
-  bEdit.addEventListener('click', () => { if (editing) exitEdit(true); else enterEdit(); });
-  t.addEventListener('dblclick', enterEdit);
-  body.addEventListener('dblclick', enterEdit);
-  t.addEventListener('keydown', (e)=>{ if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); exitEdit(true);} });
-  body.addEventListener('keydown', (e)=>{ if(e.key==='Enter' && e.ctrlKey){ e.preventDefault(); exitEdit(true);} });
-  t.addEventListener('blur', ()=>{ if (editing) exitEdit(true); });
-  body.addEventListener('blur', ()=>{ if (editing) exitEdit(true); });
-
-  bClose.addEventListener('click', () => removeCaptionOverlay(id));
-  bDel.addEventListener('click', async () => {
-    if (!confirm('このキャプションを削除しますか？')) return;
-    try{
-      await deleteCaptionForPin(id);
-      removePinMarker(id);
-      const dom = captionDomById.get(id); if (dom) dom.remove();
-      captionDomById.delete(id);
-      rowCache.delete(id);
-      removeCaptionOverlay(id);
-      selectedPinId = null;
-    }catch(e){ console.error('[caption delete] failed', e); alert('Failed to delete caption row.'); }
-  });
-
-  // ドラッグ
   let dragging=false,sx=0,sy=0,left=0,top=0;
   const onDown=(e)=>{ dragging=true; sx=e.clientX; sy=e.clientY; const r=root.getBoundingClientRect(); left=r.left; top=r.top; e.preventDefault(); };
   const onMove=(e)=>{ if(!dragging) return; const dx=e.clientX-sx, dy=e.clientY-sy; root.style.left=(left+dx)+'px'; root.style.top=(top+dy)+'px'; updateOverlayPosition(id); };
@@ -330,23 +287,61 @@ onCanvasShiftPick(async (pt) => {
 });
 
 /* ----------------------------- GLB Load ----------------------------- */
+
 async function doLoad(){
-  const token = getAccessToken();
-  const urlEl = $('glbUrl');
-  const fileId = extractDriveId(urlEl ? (urlEl.value||'') : '');
-  if (!token || !fileId) { console.warn('[GLB] missing token or fileId'); return; }
-  try {
-    if ($('btnGlb')) $('btnGlb').disabled = true;
-    await loadGlbFromDrive(fileId, { token });
-    lastGlbFileId = fileId;
-    const parentId = await getParentFolderId(fileId, token);
-    currentSpreadsheetId = await findOrCreateLociMyuSpreadsheet(parentId, token, { glbId: fileId });
-    await populateSheetTabs(currentSpreadsheetId, token);
-    await loadCaptionsFromSheet();
-    await refreshImagesGrid();
-  } catch (e) { console.error('[GLB] load error', e); }
-  finally { if ($('btnGlb')) $('btnGlb').disabled = false; }
+  // Robust GLB loading path resolution:
+  // 1) HTML file input (#glb-file)
+  // 2) Query param ?glb=<url>
+  // 3) Google Drive fileId + token
+  const fileInput = document.getElementById('glb-file');
+  const qp = new URLSearchParams(location.search);
+  const qGlb = qp.get('glb');
+  const qToken = qp.get('token');
+  const qFileId = qp.get('fileId') || qp.get('id');
+
+  let srcUrl = null;
+  let revokeUrl = null;
+
+  try{
+    if (fileInput && fileInput.files && fileInput.files[0]){
+      const f = fileInput.files[0];
+      srcUrl = URL.createObjectURL(f);
+      revokeUrl = srcUrl;
+    } else if (qGlb && /^https?:\/\//i.test(qGlb)){
+      srcUrl = qGlb;
+    } else {
+      const token = qToken || (typeof getAccessToken==='function' ? getAccessToken() : null);
+      const fileId = qFileId || (typeof getCurrentGlbFileId==='function' ? getCurrentGlbFileId() : null);
+      if (token && fileId){
+        if (typeof buildFileBlobUrl==='function'){
+          srcUrl = buildFileBlobUrl(fileId) || null;
+        } else if (typeof getFileBlobUrl==='function'){
+          srcUrl = await getFileBlobUrl(fileId, token);
+        } else {
+          srcUrl = `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?alt=media&supportsAllDrives=true&access_token=${encodeURIComponent(token)}`;
+        }
+      }
+    }
+  }catch(e){
+    console.warn('[GLB] source resolve failed', e);
+  }
+
+  if (!srcUrl){
+    console.warn('[GLB] missing source; try selecting a local GLB or add ?glb=URL');
+    alert('GLBの読み込み元が見つかりません。ローカルGLBを選択するか、?glb= でURLを指定してください。');
+    return;
+  }
+
+  try{
+    await viewer.load(srcUrl);
+  }catch(e){
+    console.error('[GLB] load failed', e);
+    alert('GLBの読み込みに失敗しました: ' + (e&&e.message || e));
+  }finally{
+    if (revokeUrl) { try{ URL.revokeObjectURL(revokeUrl); }catch(_){} }
+  }
 }
+
 if ($('btnGlb')) $('btnGlb').addEventListener('click', doLoad);
 if ($('glbUrl')) $('glbUrl').addEventListener('keydown', (e)=>{ if (e.key==='Enter') doLoad(); });
 if ($('glbUrl')) $('glbUrl').addEventListener('input', ()=>{ if ($('btnGlb')) $('btnGlb').disabled = !extractDriveId($('glbUrl').value||''); });
@@ -484,70 +479,43 @@ if ($('save-target-create')) $('save-target-create').addEventListener('click', a
 });
 
 function clearCaptionList(){ const host=$('caption-list'); if (host) host.innerHTML=''; captionDomById.clear(); }
-
-
-// Create or update a list item in the caption list for a given row
-function appendCaptionItem(args){
-  const host = $('caption-list'); if (!host || !args) return;
-  const id = String(args.id || '').trim(); if (!id) return;
-
-  const title = (args.title || '').toString();
-  const body  = (args.body  || '').toString();
-  const color = (args.color || '').toString();
-  const imageUrl = (args.imageUrl || '').toString();
-
-  // root
-  const div = document.createElement('div');
-  div.className = 'caption-item';
-  div.dataset.id = id;
   if (args.imageFileId) div.dataset.imageFileId = args.imageFileId;
-  if (color) div.style.setProperty('--pin-color', color);
 
   const safeTitle=(title||'').trim()||'(untitled)';
   const safeBody=(body||'').trim()||'(no description)';
 
   if (imageUrl){
-    const img = document.createElement('img');
-    img.src = imageUrl; img.alt = '';
+    const img=document.createElement('img'); img.src=imageUrl; img.alt='';
     div.appendChild(img);
   }
-
-  const txt = document.createElement('div'); txt.className='cap-txt';
-  const t = document.createElement('div'); t.className='c-title'; t.textContent=safeTitle;
-  const b = document.createElement('div'); b.className='c-body'; b.classList.add('hint'); b.textContent=safeBody;
+  const txt=document.createElement('div'); txt.className='cap-txt';
+  const t=document.createElement('div'); t.className='c-title'; t.textContent=safeTitle;
+  const b=document.createElement('div'); b.className='c-body';  b.classList.add('hint'); b.textContent=safeBody;
   txt.appendChild(t); txt.appendChild(b); div.appendChild(txt);
 
-  // click -> select
+  // 選択状態のUI
   div.addEventListener('click', (e)=>{
     if (e.target && e.target.closest && e.target.closest('.c-del')) return;
     __lm_selectPin(id, 'list');
   });
 
-  const del = document.createElement('button');
-  del.className = 'c-del'; del.title = 'Delete'; del.textContent = '🗑';
+  // 個別削除
+  const del=document.createElement('button'); del.className='c-del'; del.title='Delete'; del.textContent='🗑';
   del.addEventListener('click', async (e)=>{
     e.stopPropagation();
     if (!confirm('このキャプションを削除しますか？')) return;
     try{
       await deleteCaptionForPin(id);
       removePinMarker(id);
-      div.remove();
-      captionDomById.delete(id);
-      rowCache.delete(id);
+      div.remove(); captionDomById.delete(id); rowCache.delete(id);
       removeCaptionOverlay(id);
-    }catch(err){
-      console.error('delete failed', err);
-      alert('Delete failed');
-    }
+    }catch(err){ console.error('delete failed', err); alert('Delete failed'); }
   });
   div.appendChild(del);
 
-  host.appendChild(div);
-  captionDomById.set(id, div);
+  host.appendChild(div); captionDomById.set(id, div);
   try{ div.scrollIntoView({block:'nearest'}); }catch(e){}
 }
-
-
 async function enrichRow(row){
   const token=getAccessToken(); let imageUrl='';
   if(row.imageFileId){
