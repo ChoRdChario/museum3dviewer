@@ -109,6 +109,9 @@ let currentHeaders = [];
 let currentHeaderIdx = {};
 let currentPinColor = '#ff6b6b';
 let selectedPinId = null;
+let filterMode = 'all'; // 'all' | 'selected' | 'color'
+let filterColor = currentPinColor;
+const PIN_PALETTE = ['#ff6b6b','#ffd166','#06d6a0','#118ab2','#a78bfa','#f472b6'];
 
 // indices & caches
 const captionsIndex = new Map();  // id -> { rowIndex }
@@ -222,6 +225,36 @@ function createCaptionOverlay(id, data){
   applyOverlayZoom(id, 1.0);
   updateOverlayPosition(id, true);
 }
+
+// Inject +/- into overlay topbar (left) and keep it fixed when size changes.
+(function(){
+  const orig = createCaptionOverlay;
+  createCaptionOverlay = function(id, data){
+    orig(id, data);
+    const o = overlays.get(id); if(!o) return;
+    // Rebuild topbar to have left(zoom) & right(close)
+    const root = o.root;
+    const bars = root.querySelectorAll(':scope > div');
+    const topbar = bars[0];
+    if(topbar && !topbar.dataset.zoomified){
+      topbar.dataset.zoomified = '1';
+      topbar.style.justifyContent='space-between';
+      const left = document.createElement('div');
+      left.style.display='flex'; left.style.gap='6px'; left.style.alignItems='center';
+      const minus = document.createElement('button'); minus.textContent='−'; minus.title='Zoom out';
+      const plus  = document.createElement('button'); plus.textContent='＋'; plus.title='Zoom in';
+      [minus,plus].forEach(b=>{ b.style.border='none'; b.style.background='transparent'; b.style.color='#ddd'; b.style.cursor='pointer'; b.style.fontWeight='700'; b.style.fontSize='16px'; });
+      left.appendChild(minus); left.appendChild(plus);
+      topbar.prepend(left);
+      // keep zoom in overlays map
+      if(o.zoom==null) o.zoom = 1.0;
+      const setZ = (z)=>{ o.zoom = Math.max(0.6, Math.min(2.0, z)); applyOverlayZoom(id, o.zoom); };
+      minus.addEventListener('click', (e)=>{ e.stopPropagation(); setZ((o.zoom||1)-0.1); });
+      plus .addEventListener('click', (e)=>{ e.stopPropagation(); setZ((o.zoom||1)+0.1); });
+    }
+  };
+})();
+
 function applyOverlayZoom(id, z){
   const o = overlays.get(id); if(!o) return;
   const BASE=260;
@@ -704,4 +737,45 @@ function doLoad(){
 $('btnGlb')?.addEventListener('click', doLoad);
 $('glbUrl')?.addEventListener('keydown', (e)=>{ if(e.key==='Enter') doLoad(); });
 
-console.log('[LociMyu ESM/CDN] boot overlay-edit+fixed-zoom build loaded (no ensureFreshToken)');
+
+function __passesFilter(row){
+  if(!row) return false;
+  if(filterMode==='all') return true;
+  if(filterMode==='selected') return selectedPinId && row.id===selectedPinId;
+  if(filterMode==='color') return (row.color||'').toLowerCase() === (filterColor||'').toLowerCase();
+  return true;
+}
+function __applyFilterToList(){
+  const host = $('caption-list'); if(!host) return;
+  host.querySelectorAll('.caption-item').forEach(el=>{
+    const id = el.dataset.id;
+    const row = rowCache.get(id);
+    el.classList.toggle('is-hidden', !__passesFilter(row));
+  });
+}
+function __rebuildPinsFiltered(){
+  try{
+    clearPins();
+  }catch(e){}
+  rowCache.forEach(row=>{
+    if(__passesFilter(row)){
+      addPinMarker({ id:row.id, x:row.x, y:row.y, z:row.z, color:row.color||currentPinColor });
+    }
+  });
+  // keep selection scale
+  if(selectedPinId) setPinSelected(selectedPinId, true);
+}
+function applyFilter(mode, color){
+  filterMode = mode || 'all';
+  if(mode==='color' && color) filterColor = color;
+  __applyFilterToList();
+  __rebuildPinsFiltered();
+}
+
+console.log('[LociMyu ESM/CDN] +chips+filter wiring loaded');
+
+
+document.addEventListener('DOMContentLoaded', ()=>{
+  try{ wireColorChips(); }catch(e){}
+  try{ wireFilterChips(); }catch(e){}
+});
