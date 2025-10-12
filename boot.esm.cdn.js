@@ -182,15 +182,12 @@ function createCaptionOverlay(id, data){
   const bDel   = mkBtn('🗑', 'cap-del', '削除');
   const bClose = mkBtn('×',  'cap-close', '閉じる');
    topbar.appendChild(bDel); topbar.appendChild(bClose);
-  bClose.addEventListener('click', ()=> removeCaptionOverlay(id));
 
   const t = document.createElement('div'); t.className='cap-title'; t.style.fontWeight='700'; t.style.marginBottom='6px';
   const body = document.createElement('div'); body.className='cap-body'; body.style.fontSize='12px'; body.style.opacity='.95'; body.style.whiteSpace='pre-wrap'; body.style.marginBottom='6px';
 
   const img = document.createElement('img'); img.className='cap-img'; img.alt=''; img.style.display='none';
   img.style.width='100%'; img.style.height='auto'; img.style.borderRadius='8px';
-  (async()=>{ try{ if (data && data.imageFileId){ const u = await getFileThumbUrl(data.imageFileId, getAccessToken(), 512); img.src=u; img.style.display='block'; } }catch(e){ console.warn('[overlay thumb]', e);} })();
-
 
   const safeTitle = (data && data.title ? String(data.title).trim() : '') || '(untitled)';
   const safeBody  = (data && data.body  ? String(data.body).trim()  : '') || '(no description)';
@@ -581,20 +578,11 @@ async function updateCaptionForPin(id, args){
   }
 }
 async function deleteCaptionForPin(id){
-  try{
-    if (typeof _deleteCaptionRow === 'function'){
-      await _deleteCaptionRow(id);
-    }
-  }catch(e){
-    console.warn('[sheet delete failed]', e);
-  }
-  try{
-    const key='lm_deleted_ids';
-    const arr = JSON.parse(localStorage.getItem(key)||'[]');
-    if (!arr.includes(String(id))) arr.push(String(id));
-    localStorage.setItem(key, JSON.stringify(arr));
-  }catch(e){}
-},
+  const token=getAccessToken(); if(!token||!currentSpreadsheetId||!currentSheetId) return;
+  if (!captionsIndex.size) await ensureIndex();
+  const hit=captionsIndex.get(id); if(!hit) throw new Error('row not found');
+  const r = await fetch('https://sheets.googleapis.com/v4/spreadsheets/'+encodeURIComponent(currentSpreadsheetId)+':batchUpdate', {
+    method:'POST', headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},
     body: JSON.stringify({ requests: [{ deleteDimension: { range: { sheetId: currentSheetId, dimension: 'ROWS', startIndex: hit.rowIndex-1, endIndex: hit.rowIndex } } }] })
   });
   if (!r.ok) throw new Error('delete row '+r.status);
@@ -673,22 +661,13 @@ function __lm_markListSelected(id){
   if (li){ li.classList.add('is-selected'); li.setAttribute('aria-selected','true'); li.scrollIntoView({block:'nearest'}); }
 }
 
-async function __lm_fillFormFromCaption(obj){
+function __lm_fillFormFromCaption(obj){
   const ti = $('caption-title'); const bo = $('caption-body'); const th = $('currentImageThumb');
   if (!ti || !bo || !th) return;
   ti.value = (obj && obj.title) ? String(obj.title) : '';
   bo.value = (obj && obj.body)  ? String(obj.body)  : '';
   if (obj && obj.imageFileId){
-    try{
-      const url = await getFileThumbUrl(obj.imageFileId, getAccessToken(), 256);
-      th.innerHTML = `<img alt="attached" src="${url`;
-    }catch(e){
-      console.warn('[thumb fail]', e); th.innerHTML = `<div class="placeholder">No Image</div>`;
-    }
-  } else {
-    th.innerHTML = `<div class="placeholder">No Image</div>`;
-  }
-`;
+    th.innerHTML = `<img alt="attached" src="${getFileThumbUrl(obj.imageFileId, getAccessToken(), 256)}">`;
   } else {
     th.innerHTML = `<div class="placeholder">No Image</div>`;
   }
@@ -796,7 +775,7 @@ let __lm_deb;
     const fid = btn.dataset.id;
     // Preview
     try{
-      $('currentImageThumb').innerHTML = `<img alt="attached" src="${getFileThumbUrl(fid, getAccessToken(), 256)`;
+      $('currentImageThumb').innerHTML = `<img alt="attached" src="${getFileThumbUrl(fid, getAccessToken(), 256)}">`;
       const liImg = document.querySelector(`#caption-list .caption-item[data-id="${CSS.escape(selectedPinId)}"] img`);
       if (liImg) liImg.src = getFileThumbUrl(fid, getAccessToken(), 128);
       const cur = rowCache.get(selectedPinId) || {};
