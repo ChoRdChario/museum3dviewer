@@ -628,7 +628,11 @@ function loadCaptionsFromSheet(){
 function refreshImagesGrid(){
   const token = ensureToken(); if(!lastGlbFileId) return Promise.resolve();
   return getParentFolderId(lastGlbFileId, token).then(parent=>{
-    if(!parent){ $('images-status')?.textContent = '親フォルダが見つかりません'; return; }
+    if(!parent){
+      const stat=$('images-status');
+      if(stat) stat.textContent='親フォルダが見つかりません';
+      return;
+    }
     const q = encodeURIComponent(`'${parent}' in parents and mimeType contains 'image/' and trashed=false`);
     const url = `https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name,mimeType,thumbnailLink)&orderBy=modifiedTime desc&pageSize=200&supportsAllDrives=true`;
     return fetch(url, { headers:{ Authorization:'Bearer '+token } }).then(r=>r.json()).then(d=>{
