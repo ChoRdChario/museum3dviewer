@@ -33,11 +33,41 @@ setupAuth($('auth-signin'), signedSwitch, { clientId: __LM_CLIENT_ID, apiKey: __
 function extractDriveId(v){
   if (!v) return null;
   const s = String(v).trim();
-  // 既存のロジック
+
+  // 1) If it's already a bare id
+  const bare = s.match(/^[A-Za-z0-9_-]{25,}$/);
+  if (bare) return bare[0];
+
+  // 2) If it's a URL, try official patterns first
   try {
     const u = new URL(s);
-    const q = u.searchParams.get('id');
-    if (q && /[-\w]{25,}/.test(q)) return q;
+
+    // a) /file/d/{id}/...
+    const m1 = u.pathname.match(/\/file\/d\/([A-Za-z0-9_-]{25,})/);
+    if (m1) return m1[1];
+
+    // b) id param
+    const idParam = u.searchParams.get('id');
+    if (idParam && /^[A-Za-z0-9_-]{25,}$/.test(idParam)) return idParam;
+
+    // c) other param names we occasionally see
+    const altKeys = ['resourcekey','ids','fileId'];
+    for (const k of altKeys){
+      const val = u.searchParams.get(k);
+      if (val && /^[A-Za-z0-9_-]{25,}$/.test(val)) return val;
+    }
+
+    // d) last resort: any 25+ token in full URL
+    const any = (u.href || '').match(/[A-Za-z0-9_-]{25,}/);
+    if (any) return any[0];
+  } catch (_) {
+    // not a URL string
+  }
+
+  // 3) Fallback: greedy token search in raw string
+  const any2 = s.match(/[A-Za-z0-9_-]{25,}/);
+  return any2 ? any2[0] : null;
+}/.test(q)) return q;
     const seg = u.pathname.split('/').filter(Boolean);
     const dIdx = seg.indexOf('d');
     if (dIdx !== -1 && seg[dIdx + 1] && /[-\w]{25,}/.test(seg[dIdx + 1])) return seg[dIdx + 1];
