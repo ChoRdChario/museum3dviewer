@@ -572,9 +572,9 @@ function loadCaptionsFromSheet(){
 
 /* ---------------- Right-pane images grid (attach on click) ---------------- */
 (function wireImagesGrid(){
-  let grid = $ $('images-grid'); if(!grid) return;
+  let grid = document.getElementById('images-grid'); if(!grid) return;
   if(grid.dataset.wired==='1') return; grid.dataset.wired='1';
-  grid = $('images-grid'); if(!grid) return;
+  grid = document.getElementById('images-grid'); if(!grid) return;
   grid.addEventListener('click', (e)=>{
     const cell = e.target.closest('.thumb'); if(!cell) return;
     if(!selectedPinId) { alert('先にキャプションを選択してください。'); return; }
@@ -584,7 +584,7 @@ function loadCaptionsFromSheet(){
       alert('画像の添付に失敗しました。サインイン状態と権限を確認してください。');
     });
   });
-  const btn = $('btnRefreshImages');
+  const btn = document.getElementById('btnRefreshImages');
   if(btn) btn.addEventListener('click', ()=> refreshImagesGrid().catch(()=>{}));
 })();
 
@@ -599,7 +599,7 @@ function refreshImagesGrid(){
     const q = encodeURIComponent(`'${parent}' in parents and mimeType contains 'image/' and trashed=false`);
     const url = `https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name,mimeType,thumbnailLink)&orderBy=modifiedTime desc&pageSize=200&supportsAllDrives=true`;
     return fetch(url, { headers:{ Authorization:'Bearer '+token } }).then(r=>r.json()).then(d=>{
-      const grid = $('images-grid'); const stat = $('images-status');
+      const grid = document.getElementById('images-grid'); const stat = $('images-status');
       if(grid) grid.innerHTML = '';
       const files = d.files||[];
       files.forEach(f=>{
