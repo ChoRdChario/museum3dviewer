@@ -175,9 +175,6 @@ function createCaptionOverlay(id, data){
   });
   ctrl.append(bZoomOut,bZoomIn,bClose);
   root.appendChild(ctrl);
-  // close overlay
-  if (bClose) bClose.addEventListener('click', (e)=>{ e.stopPropagation(); try{ removeCaptionOverlay(id); }catch(_){ console.warn('close failed'); } });
-
 
   // drag handle under the controls
   const topbar = document.createElement('div');
@@ -452,6 +449,7 @@ function enrichRow(row){
 }
 
 function reflectRowToUI(id){
+  // ensure text & image reflect for current selection
   const row=rowCache.get(id)||{};
   if(selectedPinId===id){
     const t=$('caption-title'), b=$('caption-body');
@@ -463,7 +461,14 @@ function reflectRowToUI(id){
   let div=captionDomById.get(id);
   if(!div){ appendCaptionItem(Object.assign({id}, row)); div=captionDomById.get(id); }
   if(!div) return;
-  if(row.color) div.style.borderLeft='3px solid '+row.color;
+  
+  if (selectedPinId === id) {
+    if (!row || !row.imageFileId) renderCurrentImage(null);
+    else renderCurrentImage({ id: row.imageFileId });
+  }
+  const lt = div.querySelector('.cap-title'); if (lt) lt.textContent = (row.title||'').trim()||'(untitled)';
+  const lb = div.querySelector('.cap-body');  if (lb) lb.textContent = (row.body ||'').trim()||'(no description)';
+if(row.color) div.style.borderLeft='3px solid '+row.color;
   let img=div.querySelector('img');
   if(row.imageFileId){
     if(!img){ img=document.createElement('img'); img.alt=''; div.insertBefore(img, div.firstChild); }
@@ -572,9 +577,7 @@ function loadCaptionsFromSheet(){
 
 /* ---------------- Right-pane images grid (attach on click) ---------------- */
 (function wireImagesGrid(){
-  let grid = document.getElementById('images-grid'); if(!grid) return;
-  if(grid.dataset.wired==='1') return; grid.dataset.wired='1';
-  grid = document.getElementById('images-grid'); if(!grid) return;
+  const grid = $('images-grid'); if(!grid) return;
   grid.addEventListener('click', (e)=>{
     const cell = e.target.closest('.thumb'); if(!cell) return;
     if(!selectedPinId) { alert('先にキャプションを選択してください。'); return; }
@@ -584,7 +587,7 @@ function loadCaptionsFromSheet(){
       alert('画像の添付に失敗しました。サインイン状態と権限を確認してください。');
     });
   });
-  const btn = document.getElementById('btnRefreshImages');
+  const btn = $('btnRefreshImages');
   if(btn) btn.addEventListener('click', ()=> refreshImagesGrid().catch(()=>{}));
 })();
 
@@ -599,7 +602,7 @@ function refreshImagesGrid(){
     const q = encodeURIComponent(`'${parent}' in parents and mimeType contains 'image/' and trashed=false`);
     const url = `https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name,mimeType,thumbnailLink)&orderBy=modifiedTime desc&pageSize=200&supportsAllDrives=true`;
     return fetch(url, { headers:{ Authorization:'Bearer '+token } }).then(r=>r.json()).then(d=>{
-      const grid = document.getElementById('images-grid'); const stat = $('images-status');
+      const grid = $('images-grid'); const stat = $('images-status');
       if(grid) grid.innerHTML = '';
       const files = d.files||[];
       files.forEach(f=>{
@@ -774,20 +777,43 @@ if(btnRename){
 
 console.log('[LociMyu ESM/CDN] boot overlay-edit+fixed-zoom build loaded (A–E)');
 
-function dedupeImagesGrid(){
-  const grid = document.getElementById('images-grid'); if(!grid) return;
-  const seen = new Set();
-  [...grid.querySelectorAll('.thumb')].forEach(el=>{
-    const id = el.dataset.fileId || '';
-    if(seen.has(id)) el.remove(); else seen.add(id);
-  });
+// --- toast feedback ---
+function showSaveToast(msg){
+  let t = document.getElementById('lm-save-toast');
+  if(!t){
+    t = document.createElement('div');
+    t.id = 'lm-save-toast';
+    t.className = 'save-toast';
+    document.body.appendChild(t);
+  }
+  t.textContent = msg || 'Saved';
+  t.classList.add('show');
+  clearTimeout(t._tm);
+  t._tm = setTimeout(()=> t.classList.remove('show'), 1200);
 }
-(function observeImagesGrid(){
-  const grid = document.getElementById('images-grid'); if(!grid) return;
-  const mo = new MutationObserver(()=> dedupeImagesGrid());
-  mo.observe(grid, { childList:true, subtree:false });
-  dedupeImagesGrid();
-})();
+
+function wireCaptionInputs(){
+  const t = document.getElementById('caption-title');
+  const b = document.getElementById('caption-body');
+  let timer = null;
+  const onEdit = ()=>{
+    if(!selectedPinId) return;
+    const row = rowCache.get(selectedPinId) || { id: selectedPinId };
+    row.title = t ? (t.value||'') : '';
+    row.body  = b ? (b.value||'') : '';
+    rowCache.set(selectedPinId, row);
+    reflectRowToUI(selectedPinId); // immediate reflect
+    if(timer) clearTimeout(timer);
+    timer = setTimeout(()=>{
+      updateCaptionForPin(selectedPinId, { title: row.title, body: row.body })
+        .then(()=> showSaveToast('Saved'))
+        .catch(e=> console.warn('[autosave fail]', e));
+    }, 500);
+  };
+  if(t) t.addEventListener('input', onEdit);
+  if(b) b.addEventListener('input', onEdit);
+}
+document.addEventListener('DOMContentLoaded', ()=>{ try{ wireCaptionInputs(); }catch(e){} });
 
 function markActiveThumb(fileId){
   document.querySelectorAll('#images-grid .thumb').forEach(el=> el.classList.remove('is-active'));
@@ -796,61 +822,80 @@ function markActiveThumb(fileId){
   if(el) el.classList.add('is-active');
 }
 
-function driveViewUrl(fileId){ return `https://drive.google.com/file/d/${fileId}/view`; }
-function driveThumbUrl(fileId){ return `https://drive.google.com/thumbnail?id=${fileId}`; }
-
 function renderImageThumb(file){
-  // file: {id, thumbUrl?, name}
   const d = document.createElement('div');
   d.className = 'thumb';
   d.dataset.fileId = file.id;
   const img = document.createElement('img');
-  img.src = file.thumbUrl || driveThumbUrl(file.id);
-  img.alt = file.name || '';
+  img.src = file.thumbUrl; img.alt = file.name||'';
   d.appendChild(img);
-  const bx = document.createElement('div');
-  bx.className='btn-x'; bx.textContent='×'; bx.title='Detach';
+  const bx = document.createElement('div'); bx.className='btn-x'; bx.textContent='×'; bx.title='Detach';
   bx.addEventListener('click', (e)=>{
     e.stopPropagation();
     if(!selectedPinId) return;
-    updateCaptionForPin(selectedPinId, { imageFileId: '' }).then(()=>{
-      markActiveThumb(null);
-      renderCurrentImage(null);
-    }).catch(e=> console.warn('[detach failed]', e));
+    updateCaptionForPin(selectedPinId, { imageFileId: null })
+      .then(()=>{ markActiveThumb(null); showSaveToast('Detached'); })
+      .catch(e=> console.warn('[detach image failed]', e));
   });
   d.appendChild(bx);
   d.addEventListener('click', ()=>{
     if(!selectedPinId) return;
-    updateCaptionForPin(selectedPinId, { imageFileId: file.id }).then(()=>{
-      markActiveThumb(file.id);
-      renderCurrentImage({ id:file.id, thumbUrl: img.src, name:file.name||'' });
-    }).catch(e=> console.warn('[attach failed]', e));
+    updateCaptionForPin(selectedPinId, { imageFileId: file.id })
+      .then(()=>{ markActiveThumb(file.id); showSaveToast('Updated'); })
+      .catch(e=> console.warn('[attach image failed]', e));
   });
   return d;
 }
 
 function populateImagesGrid(files, currentId){
-  const grid = document.getElementById('images-grid'); if(!grid) return;
+  const grid = document.getElementById('images-grid');
+  if(!grid) return;
   grid.innerHTML = '';
-  (files||[]).forEach(f=> grid.appendChild(renderImageThumb(f)));
+  files.forEach(f=> grid.appendChild(renderImageThumb(f)));
   markActiveThumb(currentId||'');
 }
 
+
+function driveViewUrl(fileId){ return `https://drive.google.com/file/d/${fileId}/view`; }
+function driveThumbUrl(fileId){ return `https://drive.google.com/thumbnail?id=${fileId}`; }
+
+
+
 function renderCurrentImage(file){
   const holder = document.getElementById('currentImageThumb'); if(!holder) return;
-  holder.innerHTML = '';
+  holder.innerHTML='';
   const wrap = document.createElement('div'); wrap.className='wrap'; holder.appendChild(wrap);
   if(!file || !file.id){
-    const ph = document.createElement('div'); ph.style.padding='24px'; ph.style.color='#94a3b8'; ph.textContent='No image';
-    wrap.appendChild(ph);
-    return;
+    const ph = document.createElement('div'); ph.style.padding='20px'; ph.style.color='#94a3b8'; ph.textContent='No image';
+    wrap.appendChild(ph); return;
   }
-  const img = document.createElement('img');
-  img.src = file.thumbUrl || driveThumbUrl(file.id);
-  img.alt = file.name||'';
-  wrap.appendChild(img);
-  const a = document.createElement('a');
-  a.className = 'open-original'; a.href = driveViewUrl(file.id); a.target = '_blank'; a.rel='noopener';
-  a.textContent = 'Open original';
-  wrap.appendChild(a);
+  const img = document.createElement('img'); img.src = file.thumbUrl || driveThumbUrl(file.id); img.alt = file.name||''; wrap.appendChild(img);
+  const a = document.createElement('a'); a.className='open-original'; a.href = driveViewUrl(file.id); a.target='_blank'; a.rel='noopener'; a.textContent='Open original'; wrap.appendChild(a);
 }
+
+
+
+let __lmSaveTimers = new Map();
+function debounceSave(id, fields, ms=500){
+  clearTimeout(__lmSaveTimers.get(id));
+  __lmSaveTimers.set(id, setTimeout(()=>{
+    updateCaptionForPin(id, fields).catch(e=> console.warn('[debounce save]', e));
+  }, ms));
+}
+
+
+
+function initShiftPickOnce(){
+  if (window.__lmShiftPickWired) return;
+  if (typeof onCanvasShiftPick !== 'function'){ setTimeout(initShiftPickOnce, 200); return; }
+  window.__lmShiftPickWired = true;
+  onCanvasShiftPick(({x,y,z})=>{
+    const id = 'pin_' + Math.random().toString(36).slice(2,10);
+    const row = { id, title:'', body:'', color:(window.currentPinColor||'#ff6b6b'), x,y,z, imageFileId: null };
+    rowCache.set(id, row);
+    try{ appendCaptionItem(row); addPinMarker({ id, x, y, z, color: row.color }); selectCaption(id); }catch(e){ console.warn('[shift pick reflect]', e); }
+    debounceSave(id, { title:'', body:'', color: row.color, x, y, z });
+  });
+}
+document.addEventListener('DOMContentLoaded', ()=>{ try{ initShiftPickOnce(); }catch(e){} });
+
