@@ -138,10 +138,20 @@ body{
 .canvas-float, .noninteractive { pointer-events:none; }
 .canvas-float .interactive { pointer-events:auto; }
 
-#pin-color-filter-row select{ height:26px; background:#0f172a; color:#e5e7eb; border:1px solid #334155; border-radius:8px; padding:2px 8px; }
-#pin-color-filter-row label{ user-select:none; }
-.open-original.side{
-  background:#0f172a; color:#e5e7eb; border:1px solid #334155;
-  padding:6px 10px; border-radius:8px; text-decoration:none; font-size:12px;
-  align-self:center;
+/* === Color chips & filter chips === */
+.chip-row{ display:flex; gap:8px; flex-wrap:wrap; margin:6px 0 10px 0; }
+.color-chip{
+  width:22px; height:22px; border-radius:999px; cursor:pointer; position:relative;
+  border:2px solid rgba(255,255,255,.25); box-shadow: inset 0 0 0 1px rgba(0,0,0,.35);
 }
+.color-chip.is-active{ outline:2px solid #fff; outline-offset:2px; }
+.color-chip.is-active::after{ content:""; position:absolute; inset:6px; border-radius:999px; box-shadow:0 0 0 2px rgba(0,0,0,.55) inset; }
+
+.filter-chip{
+  width:22px; height:22px; border-radius:4px; cursor:pointer; position:relative;
+  border:2px solid currentColor; color:#64748b; background:transparent; display:grid; place-items:center;
+}
+.filter-chip .mark{ width:12px; height:12px; background:#fff; display:none; }
+.filter-chip.is-on .mark{ display:block; }
+.chip-actions{ display:flex; gap:6px; margin:4px 0; }
+.chip-action{ font-size:11px; padding:4px 8px; border-radius:8px; background:#0f172a; color:#e5e7eb; border:1px solid #334155; cursor:pointer; }
