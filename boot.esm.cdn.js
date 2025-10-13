@@ -430,10 +430,10 @@ function appendCaptionItem(row){
   const b=document.createElement('div'); b.className='cap-body hint'; b.textContent=safeBody;
   txt.appendChild(t); txt.appendChild(b); div.appendChild(txt);
 
-  // detach ×
-  const detach=document.createElement('button'); detach.className='c-del'; detach.title='Detach image'; detach.textContent='×';
-  detach.addEventListener('click', (e)=>{ e.stopPropagation(); updateImageForPin(row.id, null); });
-  div.appendChild(detach);
+  // delete caption (×) in list
+  const del=document.createElement('button'); del.className='c-del'; del.title='Delete caption'; del.textContent='×';
+  del.addEventListener('click', (e)=>{ e.stopPropagation(); deleteCaption(row.id); });
+  div.appendChild(del);
 
   div.addEventListener('click', ()=> selectCaption(row.id));
   host.appendChild(div); captionDomById.set(row.id, div);
@@ -538,6 +538,8 @@ function updateImageForPin(id, fileIdOrNull){
 
 /* ---------------- Load captions from sheet ---------------- */
 function loadCaptionsFromSheet(){
+  // reset selection & overlays when switching save sheet
+  selectedPinId=null; overlays.forEach((_,id)=>removeCaptionOverlay(id)); clearPins();
   const token = getAccessToken(); if(!token||!currentSpreadsheetId||!currentSheetTitle) return;
   const range = `'${currentSheetTitle}'!A1:Z9999`;
   getValues(currentSpreadsheetId, range, token).then(values=>{
@@ -770,6 +772,7 @@ if(btnRename){
 }
 
 console.log('[LociMyu ESM/CDN] boot overlay-edit+fixed-zoom build loaded (A–E)');
+wireShiftPick();
 
 function lm_hexToRgb(hex){ const m=/^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(String(hex||"000000")); return { r:parseInt((m&&m[1])||"00",16), g:parseInt((m&&m[2])||"00",16), b:parseInt((m&&m[3])||"00",16) }; }
 
@@ -777,7 +780,7 @@ function nearestPalette(hex){ const p=window.LM_PALETTE||[]; const c=lm_hexToRgb
 
 function renderColorChips(){ const host=document.getElementById('pin-colors'); if(!host) return; host.innerHTML=''; (window.LM_PALETTE||[]).forEach(hex=>{ const b=document.createElement('button'); b.className='chip chip-color'; b.style.setProperty('--chip', hex); b.title=hex; if(nearestPalette(window.currentPinColor)===hex) b.classList.add('is-active'); b.addEventListener('click', ()=> setPinColor(hex)); host.appendChild(b); }); }
 
-function renderFilterChips(){ const host=document.getElementById('pin-filter'); if(!host) return; host.innerHTML=''; if(!window.__lmFilter){ try{ const saved=JSON.parse(localStorage.getItem('lmFilterColors')||'[]'); window.__lmFilter=new Set(saved.length?saved:(window.LM_PALETTE||[])); }catch{ window.__lmFilter=new Set(window.LM_PALETTE||[]);} } (window.LM_PALETTE||[]).forEach(hex=>{ const b=document.createElement('button'); b.className='chip chip-filter'; b.style.setProperty('--chip', hex); const mark=document.createElement('span'); mark.className='mark'; mark.textContent='✓'; b.appendChild(mark); if(window.__lmFilter.has(hex)) b.classList.add('is-on'); b.addEventListener('click', ()=>{ if(window.__lmFilter.has(hex)) window.__lmFilter.delete(hex); else window.__lmFilter.add(hex); localStorage.setItem('lmFilterColors', JSON.stringify([window.__lmFilter])); applyColorFilter(); renderFilterChips(); }); host.appendChild(b); }); }
+function renderFilterChips(){ const host=document.getElementById('pin-filter'); if(!host) return; host.innerHTML=''; if(!window.__lmFilter){ try{ const saved=JSON.parse(localStorage.getItem('lmFilterColors')||'[]'); window.__lmFilter=new Set(saved.length?saved:(window.LM_PALETTE||[])); }catch{ window.__lmFilter=new Set(window.LM_PALETTE||[]);} } (window.LM_PALETTE||[]).forEach(hex=>{ const b=document.createElement('button'); b.className='chip chip-filter'; b.style.setProperty('--chip', hex); const mark=document.createElement('span'); mark.className='mark'; mark.textContent='✓'; b.appendChild(mark); if(window.__lmFilter.has(hex)) b.classList.add('is-on'); b.addEventListener('click', ()=>{ if(window.__lmFilter.has(hex)) window.__lmFilter.delete(hex); else window.__lmFilter.add(hex); try{ localStorage.setItem('lmFilterColors', JSON.stringify(Array.from(window.__lmFilter))); }catch{} applyColorFilter(); renderFilterChips(); }); host.appendChild(b); }); }
 
 function rowPassesColorFilter(row){ const set=window.__lmFilter; if(!set||set.size===0) return true; const pal=nearestPalette(row && row.color ? row.color : (window.LM_PALETTE?window.LM_PALETTE[0]:'#ef9368')); return set.has(pal); }
 
@@ -788,3 +791,44 @@ function setPinColor(hex){ window.currentPinColor=hex; const host=document.getEl
 function wireDetachOverlay(){ const btn=document.getElementById('detach-thumb'); if(!btn||btn.dataset.wired) return; btn.dataset.wired='1'; btn.addEventListener('click', ()=>{ if(!window.selectedPinId||!window.rowCache) return; const row=rowCache.get(selectedPinId)||{id:selectedPinId}; row.imageFileId=null; rowCache.set(selectedPinId,row); try{ updateCaptionForPin && updateCaptionForPin(selectedPinId,{ imageFileId:null }); }catch(_){} try{ const thumb=document.getElementById('currentImageThumb'); if(thumb){ thumb.classList.remove('has-image'); thumb.innerHTML='<button id="detach-thumb" class="thumb-detach" aria-label="Detach image">×</button><div class="placeholder">No Image</div>'; } }catch(_){} wireDetachOverlay(); }); }
 
 document.addEventListener('DOMContentLoaded', ()=>{ try{ renderColorChips(); renderFilterChips(); applyColorFilter(); wireDetachOverlay(); }catch(e){ console.warn('[chips init]', e); } });
+
+/* ---------------- Delete caption row ---------------- */
+function deleteCaption(id){
+  const meta = captionsIndex.get(id);
+  if(!meta || !currentSpreadsheetId || !currentSheetId){ 
+    // local only
+    captionDomById.get(id)?.remove(); captionDomById.delete(id);
+    rowCache.delete(id); removeCaptionOverlay(id); removePinMarker(id); captionsIndex.delete(id);
+    return;
+  }
+  if(!confirm('このキャプションをシートから削除します。よろしいですか？')) return;
+  const token = ensureToken();
+  const start = meta.rowIndex - 1; // 0-based, includes header row at 0
+  const body = { requests: [{ deleteDimension: { range: { sheetId: currentSheetId, dimension: 'ROWS', startIndex: start, endIndex: start+1 }}}]};
+  const url = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(currentSpreadsheetId)}:batchUpdate`;
+  fetch(url, { method:'POST', headers:{ Authorization:`Bearer ${token}`, 'Content-Type':'application/json' }, body: JSON.stringify(body)})
+    .then(r=>{ if(!r.ok) throw new Error(String(r.status)); })
+    .then(()=>{
+      captionDomById.get(id)?.remove(); captionDomById.delete(id);
+      rowCache.delete(id); removeCaptionOverlay(id); removePinMarker(id); captionsIndex.delete(id);
+      // reindex
+      return ensureIndex().then(()=> loadCaptionsFromSheet());
+    })
+    .catch(e=> console.error('[Sheets deleteDimension] failed', e));
+}
+
+/* ---------------- Shift+Click pin add ---------------- */
+function wireShiftPick(){
+  try{
+    onCanvasShiftPick(({x,y,z})=>{
+      const id = 'pin_' + Math.random().toString(36).slice(2,10);
+      const row = { id, title:'', body:'', color: currentPinColor, x, y, z, imageFileId:'' };
+      rowCache.set(id, row);
+      addPinMarker({ id, x, y, z, color: row.color });
+      appendCaptionItem(row);
+      selectCaption(id);
+      // persist
+      updateCaptionForPin(id, row).catch(e=> console.warn('[pin add save failed]', e));
+    });
+  }catch(e){ console.warn('[wireShiftPick]', e); }
+}
