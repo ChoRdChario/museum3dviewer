@@ -109,9 +109,6 @@ let currentHeaders = [];
 let currentHeaderIdx = {};
 let currentPinColor = '#ff6b6b';
 let selectedPinId = null;
-let filterMode = 'all'; // 'all' | 'selected' | 'color'
-let filterColor = currentPinColor;
-const PIN_PALETTE = ['#ff6b6b','#ffd166','#06d6a0','#118ab2','#a78bfa','#f472b6'];
 
 // indices & caches
 const captionsIndex = new Map();  // id -> { rowIndex }
@@ -155,6 +152,7 @@ function removeLine(id){
   const el = lineLayer.querySelector('line[data-id="'+id+'"]');
   if(el) el.remove();
 }
+function closeOverlay(id){ try{ removeCaptionOverlay(id); }catch(_){ /* noop */ } }
 function removeCaptionOverlay(id){
   const o = overlays.get(id);
   if(!o) return;
@@ -217,7 +215,7 @@ function createCaptionOverlay(id, data){
     }catch(_){}
   })();
 
-  bClose.addEventListener('click', (e)=>{ e.stopPropagation(); removeCaptionOverlay(id); });
+  bClose.addEventListener('click', (e)=>{ e.stopPropagation(); closeOverlay(id); });
 
   root.appendChild(topbar); root.appendChild(t); root.appendChild(body); root.appendChild(img);
   document.body.appendChild(root);
@@ -225,36 +223,6 @@ function createCaptionOverlay(id, data){
   applyOverlayZoom(id, 1.0);
   updateOverlayPosition(id, true);
 }
-
-// Inject +/- into overlay topbar (left) and keep it fixed when size changes.
-(function(){
-  const orig = createCaptionOverlay;
-  createCaptionOverlay = function(id, data){
-    orig(id, data);
-    const o = overlays.get(id); if(!o) return;
-    // Rebuild topbar to have left(zoom) & right(close)
-    const root = o.root;
-    const bars = root.querySelectorAll(':scope > div');
-    const topbar = bars[0];
-    if(topbar && !topbar.dataset.zoomified){
-      topbar.dataset.zoomified = '1';
-      topbar.style.justifyContent='space-between';
-      const left = document.createElement('div');
-      left.style.display='flex'; left.style.gap='6px'; left.style.alignItems='center';
-      const minus = document.createElement('button'); minus.textContent='−'; minus.title='Zoom out';
-      const plus  = document.createElement('button'); plus.textContent='＋'; plus.title='Zoom in';
-      [minus,plus].forEach(b=>{ b.style.border='none'; b.style.background='transparent'; b.style.color='#ddd'; b.style.cursor='pointer'; b.style.fontWeight='700'; b.style.fontSize='16px'; });
-      left.appendChild(minus); left.appendChild(plus);
-      topbar.prepend(left);
-      // keep zoom in overlays map
-      if(o.zoom==null) o.zoom = 1.0;
-      const setZ = (z)=>{ o.zoom = Math.max(0.6, Math.min(2.0, z)); applyOverlayZoom(id, o.zoom); };
-      minus.addEventListener('click', (e)=>{ e.stopPropagation(); setZ((o.zoom||1)-0.1); });
-      plus .addEventListener('click', (e)=>{ e.stopPropagation(); setZ((o.zoom||1)+0.1); });
-    }
-  };
-})();
-
 function applyOverlayZoom(id, z){
   const o = overlays.get(id); if(!o) return;
   const BASE=260;
@@ -570,6 +538,10 @@ function updateCaptionForPin(id, fields){
         createdAt:seed.createdAt||new Date().toISOString(),
         updatedAt:new Date().toISOString()
       }).then(()=>{ rowCache.set(id, seed); reflectRowToUI(id); });
+    }else if(!currentSpreadsheetId){
+      rowCache.set(id, seed);
+      reflectRowToUI(id);
+      return Promise.resolve();
     }else{
       // update existing row via batchUpdate (values.update)
       const token = ensureToken();
@@ -737,110 +709,4 @@ function doLoad(){
 $('btnGlb')?.addEventListener('click', doLoad);
 $('glbUrl')?.addEventListener('keydown', (e)=>{ if(e.key==='Enter') doLoad(); });
 
-
-function __passesFilter(row){
-  if(!row) return false;
-  if(filterMode==='all') return true;
-  if(filterMode==='selected') return selectedPinId && row.id===selectedPinId;
-  if(filterMode==='color') return (row.color||'').toLowerCase() === (filterColor||'').toLowerCase();
-  return true;
-}
-function __applyFilterToList(){
-  const host = $('caption-list'); if(!host) return;
-  host.querySelectorAll('.caption-item').forEach(el=>{
-    const id = el.dataset.id;
-    const row = rowCache.get(id);
-    el.classList.toggle('is-hidden', !__passesFilter(row));
-  });
-}
-function __rebuildPinsFiltered(){
-  try{
-    clearPins();
-  }catch(e){}
-  rowCache.forEach(row=>{
-    if(__passesFilter(row)){
-      addPinMarker({ id:row.id, x:row.x, y:row.y, z:row.z, color:row.color||currentPinColor });
-    }
-  });
-  // keep selection scale
-  if(selectedPinId) setPinSelected(selectedPinId, true);
-}
-function applyFilter(mode, color){
-  try{ const sel = new Set(); if(mode==='color'){ sel.add((color||currentPinColor||'').toLowerCase()); }
-    document.dispatchEvent(new CustomEvent('pinFilterChange', { detail:{ selected: sel } })); }catch(_){ }
-
-  filterMode = mode || 'all';
-  if(mode==='color' && color) filterColor = color;
-  __applyFilterToList();
-  __rebuildPinsFiltered();
-}
-
-console.log('[LociMyu ESM/CDN] +chips+filter wiring loaded');
-
-
-document.addEventListener('DOMContentLoaded', ()=>{
-  try{ wireColorChips(); }catch(e){}
-  try{ wireFilterChips(); }catch(e){}
-});
-
-
-// Shift+Click to add pin at picked 3D point
-try{
-  onCanvasShiftPick(({x,y,z})=>{
-    const id = 'pin_' + Math.random().toString(36).slice(2,10);
-    const row = { id, title:'', body:'', color: currentPinColor, x, y, z, imageFileId:'' };
-    updateCaptionForPin(id, row).then(()=>{
-      // cache→UI→3D
-      rowCache.set(id, row);
-      appendCaptionItem(row);
-      addPinMarker({ id, x, y, z, color: currentPinColor });
-      selectCaption(id);
-    }).catch(e=> console.warn('[shift+click add] failed', e));
-  });
-}catch(e){ console.warn('onCanvasShiftPick wiring failed', e); }
-
-
-// Spreadsheet rename (Drive files.update) & delete (Drive files.delete)
-function driveRenameFile(fileId, newName, token){
-  const url = `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}`;
-  return fetch(url, { method:'PATCH', headers:{ Authorization:'Bearer '+token, 'Content-Type':'application/json' }, body: JSON.stringify({ name:newName }) })
-    .then(r=>{ if(!r.ok) throw new Error('rename failed'); return r.json(); });
-}
-function driveDeleteFile(fileId, token){
-  const url = `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}`;
-  return fetch(url, { method:'DELETE', headers:{ Authorization:'Bearer '+token } })
-    .then(r=>{ if(!r.ok) throw new Error('delete failed'); return true; });
-}
-
-(function wireSheetMgmt(){
-  const bRename = $('save-target-rename');
-  const bDelete = $('save-target-delete');
-  const inp = $('rename-input');
-  if(bRename){
-    bRename.addEventListener('click', ()=>{
-      if(!currentSpreadsheetId){ alert('No spreadsheet selected.'); return; }
-      const name = (inp?.value||'').trim();
-      if(!name){ alert('Enter new title.'); return; }
-      const t = ensureToken();
-      bRename.disabled = true;
-      driveRenameFile(currentSpreadsheetId, name, t).then(()=>{
-        alert('Renamed.');
-      }).catch(e=>{
-        console.warn('[rename] failed', e); alert('Rename failed: '+e);
-      }).finally(()=>{ bRename.disabled = false; });
-    });
-  }
-  if(bDelete){
-    bDelete.addEventListener('click', ()=>{
-      if(!currentSpreadsheetId){ alert('No spreadsheet selected.'); return; }
-      if(!confirm('Delete this spreadsheet from Drive? This cannot be undone.')) return;
-      const t = ensureToken();
-      bDelete.disabled = true;
-      driveDeleteFile(currentSpreadsheetId, t).then(()=>{
-        alert('Deleted. Reload the page and select/create another sheet.');
-      }).catch(e=>{
-        console.warn('[delete] failed', e); alert('Delete failed: '+e);
-      }).finally(()=>{ bDelete.disabled = false; });
-    });
-  }
-})();
+console.log('[LociMyu ESM/CDN] boot overlay-edit+fixed-zoom build loaded (no ensureFreshToken)');
