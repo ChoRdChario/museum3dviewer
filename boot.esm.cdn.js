@@ -1,24 +1,14 @@
-// boot.esm.cdn.js — LociMyu boot (full build, no ensureFreshToken import)
-// - selection highlight, overlay drag/close
-// - right-pane thumbnail attach (click) + list-side detach (×)
-// - Sheets I/O with ensureRow/ensureIndex, HEIC fallback
-// - GLB load: tokenチェック + 401はサインイン促しのフォールバック
-//
-// 前提: index.html で ESM として読み込まれる（type="module"）
-// 依存: viewer.module.cdn.js / gauth.module.js / locimyu.config.js（window.GIS_*）
-//      gauth.module.js は setupAuth(), getAccessToken(), getLastAuthError() を提供する。
-
+// boot.esm.cdn.js — LociMyu boot (A–E features restored)
+// ESM build. Do not import ensureFreshToken.
 import {
   ensureViewer, onCanvasShiftPick, addPinMarker, setPinSelected, onPinSelect,
   loadGlbFromDrive, onRenderTick, projectPoint, clearPins, removePinMarker
 } from './viewer.module.cdn.js';
-
 import { setupAuth, getAccessToken, getLastAuthError } from './gauth.module.js';
 
-/* ---------------- DOM helpers ---------------- */
+/* ---------------- small helpers ---------------- */
 const $ = (id)=>document.getElementById(id);
 const setEnabled = (on, ...els)=> els.forEach(el=>{ if(el) el.disabled = !on; });
-const uid = ()=> Math.random().toString(36).slice(2)+Date.now().toString(36);
 const textOrEmpty = (v)=> v==null ? '' : String(v);
 const clamp = (n,min,max)=> Math.min(Math.max(n,min),max);
 
@@ -35,11 +25,10 @@ function onSigned(signed){
 }
 setupAuth($('auth-signin'), onSigned, { clientId: __LM_CLIENT_ID, apiKey: __LM_API_KEY, scopes: __LM_SCOPES });
 
-/* ---------------- Simple token helper (no ensureFreshToken) ---------------- */
 function ensureToken() {
   const t = getAccessToken();
   if (!t) {
-    const err = getLastAuthError?.();
+    const err = (typeof getLastAuthError === 'function') ? getLastAuthError() : null;
     if (err) console.warn('[auth] last error:', err);
     alert('Google サインインが必要です。「Sign in」をクリックしてください。');
     throw new Error('token_missing');
@@ -97,7 +86,7 @@ function getParentFolderId(fileId, token){
   const url = 'https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(fileId)+'?fields=parents&supportsAllDrives=true';
   return fetch(url, { headers: { Authorization:'Bearer '+token } })
     .then(r => r.ok ? r.json() : null)
-    .then(j => (j?.parents?.[0] || null));
+    .then(j => (j && j.parents && j.parents[0]) ? j.parents[0] : null);
 }
 
 /* ---------------- Global states ---------------- */
@@ -109,25 +98,26 @@ let currentHeaders = [];
 let currentHeaderIdx = {};
 let currentPinColor = '#ff6b6b';
 let selectedPinId = null;
-let filterMode = 'all'; // 'all' | 'selected' | 'color'
-let filterColor = currentPinColor;
-const PIN_PALETTE = ['#ff6b6b','#ffd166','#06d6a0','#118ab2','#a78bfa','#f472b6'];
 
-// indices & caches
 const captionsIndex = new Map();  // id -> { rowIndex }
 const captionDomById = new Map(); // id -> element
 const rowCache = new Map();       // id -> row
-const overlays = new Map();       // id -> { root, imgEl }
-const pendingUpdates = new Map(); // id -> fields
+const overlays = new Map();       // id -> { root, imgEl, zoom }
+let  filterMode = 'all';          // 'all' | 'selected' | 'color:#rrggbb'
 
-/* ---------------- Inline style for selection ---------------- */
-(() => {
-  const st = document.createElement('style');
-  st.textContent = ".caption-item.is-selected{outline:2px solid #fff;outline-offset:-2px;border-radius:6px}";
+/* ---------------- Style additions ---------------- */
+(()=>{
+  const st=document.createElement('style');
+  st.textContent = `
+  .caption-item.is-selected{outline:2px solid #fff;outline-offset:-2px;border-radius:6px}
+  .caption-item.is-hidden{display:none}
+  .cap-overlay{user-select:none}
+  .cap-overlay button{font:inherit}
+  `;
   document.head.appendChild(st);
 })();
 
-/* ---------------- Overlay (drag, close, line) ---------------- */
+/* ---------------- Overlay (drag, close, zoom, line) ---------------- */
 let lineLayer = null;
 function ensureLineLayer(){
   if(lineLayer) return lineLayer;
@@ -169,28 +159,42 @@ function createCaptionOverlay(id, data){
   root.style.background='#0b0f14ef'; root.style.color='#e5e7eb';
   root.style.padding='10px 12px'; root.style.borderRadius='10px';
   root.style.boxShadow='0 8px 24px #000a'; root.style.minWidth='200px'; root.style.maxWidth='300px';
+  // keep controls fixed at top-left regardless of size changes
+  root.style.paddingTop = '40px';
 
+  // controls
+  const ctrl = document.createElement('div');
+  ctrl.style.position='absolute'; ctrl.style.left='10px'; ctrl.style.top='8px';
+  ctrl.style.display='flex'; ctrl.style.gap='8px';
+  const bZoomOut = document.createElement('button'); bZoomOut.textContent='–';
+  const bZoomIn  = document.createElement('button'); bZoomIn.textContent = '+';
+  const bClose   = document.createElement('button'); bClose.textContent  = '×';
+  [bZoomOut,bZoomIn,bClose].forEach(b=>{
+    b.style.border='none'; b.style.background='transparent'; b.style.color='#ddd'; b.style.cursor='pointer';
+    b.style.fontWeight='700';
+  });
+  ctrl.append(bZoomOut,bZoomIn,bClose);
+  root.appendChild(ctrl);
+
+  // drag handle under the controls
   const topbar = document.createElement('div');
-  topbar.style.display='flex'; topbar.style.gap='10px'; topbar.style.justifyContent='flex-end';
-  topbar.style.marginBottom='6px'; topbar.style.cursor='move';
-  const bClose = document.createElement('button'); bClose.textContent='×';
-  bClose.style.border='none'; bClose.style.background='transparent'; bClose.style.color='#ddd'; bClose.style.cursor='pointer';
-  topbar.appendChild(bClose);
+  topbar.style.height='20px'; topbar.style.marginBottom='6px'; topbar.style.cursor='move';
+  root.appendChild(topbar);
 
   const t = document.createElement('div'); t.className='cap-title'; t.style.fontWeight='700'; t.style.marginBottom='6px';
   const body = document.createElement('div'); body.className='cap-body'; body.style.fontSize='12px'; body.style.opacity='.95'; body.style.whiteSpace='pre-wrap'; body.style.marginBottom='6px';
   const img = document.createElement('img'); img.className='cap-img'; img.alt=''; img.style.display='none'; img.style.width='100%'; img.style.height='auto'; img.style.borderRadius='8px';
 
-  const safeTitle = (data?.title ? String(data.title).trim() : '') || '(untitled)';
-  const safeBody  = (data?.body  ? String(data.body ).trim() : '') || '(no description)';
+  const safeTitle = (data && data.title ? String(data.title).trim() : '') || '(untitled)';
+  const safeBody  = (data && data.body  ? String(data.body ).trim() : '') || '(no description)';
   t.textContent = safeTitle; body.textContent = safeBody;
 
-  // drag
+  // drag move
   let dragging=false, startX=0, startY=0, baseLeft=0, baseTop=0;
   topbar.addEventListener('pointerdown', (ev)=>{
     dragging=true; startX=ev.clientX; startY=ev.clientY;
     baseLeft=parseFloat(root.style.left||'0'); baseTop=parseFloat(root.style.top||'0');
-    root.setPointerCapture?.(ev.pointerId);
+    root.setPointerCapture && root.setPointerCapture(ev.pointerId);
     ev.stopPropagation();
   });
   window.addEventListener('pointermove', (ev)=>{
@@ -200,12 +204,12 @@ function createCaptionOverlay(id, data){
   });
   window.addEventListener('pointerup', ()=>{ dragging=false; });
 
-  // load image if any
-  (()=>{
+  // image
+  (function(){
     try{
       const token = getAccessToken();
       const row = rowCache.get(id);
-      if(token && row?.imageFileId){
+      if(token && row && row.imageFileId){
         getFileBlobUrl(row.imageFileId, token).then((url)=>{
           img.src=url; img.style.display='block';
         }).catch(()=>{
@@ -217,44 +221,18 @@ function createCaptionOverlay(id, data){
     }catch(_){}
   })();
 
-  bClose.addEventListener('click', (e)=>{ e.stopPropagation(); removeCaptionOverlay(id); });
+  // zoom
+  let zoom = 1.0;
+  bZoomIn .addEventListener('click', (e)=>{ e.stopPropagation(); zoom = Math.min(2.0, zoom+0.1); applyOverlayZoom(id, zoom); });
+  bZoomOut.addEventListener('click', (e)=>{ e.stopPropagation(); zoom = Math.max(0.6, zoom-0.1); applyOverlayZoom(id, zoom); });
+  bClose  .addEventListener('click', (e)=>{ e.stopPropagation(); removeCaptionOverlay(id); });
 
-  root.appendChild(topbar); root.appendChild(t); root.appendChild(body); root.appendChild(img);
+  root.append(t, body, img);
   document.body.appendChild(root);
-  overlays.set(id, { root, imgEl:img });
-  applyOverlayZoom(id, 1.0);
+  overlays.set(id, { root, imgEl:img, zoom });
+  applyOverlayZoom(id, zoom);
   updateOverlayPosition(id, true);
 }
-
-// Inject +/- into overlay topbar (left) and keep it fixed when size changes.
-(function(){
-  const orig = createCaptionOverlay;
-  createCaptionOverlay = function(id, data){
-    orig(id, data);
-    const o = overlays.get(id); if(!o) return;
-    // Rebuild topbar to have left(zoom) & right(close)
-    const root = o.root;
-    const bars = root.querySelectorAll(':scope > div');
-    const topbar = bars[0];
-    if(topbar && !topbar.dataset.zoomified){
-      topbar.dataset.zoomified = '1';
-      topbar.style.justifyContent='space-between';
-      const left = document.createElement('div');
-      left.style.display='flex'; left.style.gap='6px'; left.style.alignItems='center';
-      const minus = document.createElement('button'); minus.textContent='−'; minus.title='Zoom out';
-      const plus  = document.createElement('button'); plus.textContent='＋'; plus.title='Zoom in';
-      [minus,plus].forEach(b=>{ b.style.border='none'; b.style.background='transparent'; b.style.color='#ddd'; b.style.cursor='pointer'; b.style.fontWeight='700'; b.style.fontSize='16px'; });
-      left.appendChild(minus); left.appendChild(plus);
-      topbar.prepend(left);
-      // keep zoom in overlays map
-      if(o.zoom==null) o.zoom = 1.0;
-      const setZ = (z)=>{ o.zoom = Math.max(0.6, Math.min(2.0, z)); applyOverlayZoom(id, o.zoom); };
-      minus.addEventListener('click', (e)=>{ e.stopPropagation(); setZ((o.zoom||1)-0.1); });
-      plus .addEventListener('click', (e)=>{ e.stopPropagation(); setZ((o.zoom||1)+0.1); });
-    }
-  };
-})();
-
 function applyOverlayZoom(id, z){
   const o = overlays.get(id); if(!o) return;
   const BASE=260;
@@ -294,6 +272,8 @@ function __lm_fillFormFromCaption(id){
   const t=$('caption-title'), b=$('caption-body');
   if(t) t.value = row.title || '';
   if(b) b.value = row.body  || '';
+  const col = $('pinColor');
+  if(col && row.color) col.value = row.color;
 }
 function selectCaption(id){
   selectedPinId = id;
@@ -307,13 +287,16 @@ onPinSelect((id)=> selectCaption(id));
 /* ---------------- Sheets I/O ---------------- */
 const LOCIMYU_HEADERS = ['id','title','body','color','x','y','z','imageFileId','createdAt','updatedAt'];
 
+function colA1(i0){ let n=i0+1,s=''; while(n){ n--; s=String.fromCharCode(65+(n%26))+s; n=(n/26)|0; } return s; }
 function putValues(spreadsheetId, rangeA1, values, token){
   const url = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(rangeA1)}?valueInputOption=RAW`;
-  return fetch(url, { method:'PUT', headers:{ Authorization:'Bearer '+token, 'Content-Type':'application/json' }, body: JSON.stringify({ values }) });
+  return fetch(url, { method:'PUT', headers:{ Authorization:'Bearer '+token, 'Content-Type':'application/json' }, body: JSON.stringify({ values }) })
+    .then(r=>{ if(!r.ok) throw new Error('values.update '+r.status); });
 }
 function appendValues(spreadsheetId, rangeA1, values, token){
   const url = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(rangeA1)}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`;
-  return fetch(url, { method:'POST', headers:{ Authorization:'Bearer '+token, 'Content-Type':'application/json' }, body: JSON.stringify({ values }) });
+  return fetch(url, { method:'POST', headers:{ Authorization:'Bearer '+token, 'Content-Type':'application/json' }, body: JSON.stringify({ values }) })
+    .then(r=>{ if(!r.ok) throw new Error('values.append '+r.status); });
 }
 function getValues(spreadsheetId, rangeA1, token){
   const url = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(rangeA1)}`;
@@ -321,8 +304,6 @@ function getValues(spreadsheetId, rangeA1, token){
     .then(r=>{ if(!r.ok) throw new Error('values.get '+r.status); return r.json(); })
     .then(d=> d.values||[]);
 }
-function colA1(i0){ let n=i0+1,s=''; while(n){ n--; s=String.fromCharCode(65+(n%26))+s; n=(n/26)|0; } return s; }
-
 function isLociMyuSpreadsheet(spreadsheetId, token){
   const url=`https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}?includeGridData=true&ranges=A1:Z1&fields=sheets(properties(title,sheetId),data(rowData(values(formattedValue))))`;
   return fetch(url, { headers:{ Authorization:'Bearer '+token } })
@@ -330,11 +311,11 @@ function isLociMyuSpreadsheet(spreadsheetId, token){
     .then(data=>{
       if(!data || !Array.isArray(data.sheets)) return false;
       for(const s of data.sheets){
-        const d = s?.data||[]; if(!d[0]) continue;
+        const d = s && s.data || []; if(!d[0]) continue;
         const row = d[0].rowData || []; const vals = (row[0]||{}).values || [];
         const headers = [];
         for(const v of vals){
-          const fv = v?.formattedValue ? String(v.formattedValue).trim().toLowerCase() : '';
+          const fv = v && v.formattedValue ? String(v.formattedValue).trim().toLowerCase() : '';
           if(fv) headers.push(fv);
         }
         if(headers.includes('title') && headers.includes('body') && headers.includes('color')) return true;
@@ -369,69 +350,6 @@ function findOrCreateLociMyuSpreadsheet(parentFolderId, token, opts){
       }
       return next(0);
     });
-}
-
-function populateSheetTabs(spreadsheetId, token){
-  const sel = $('save-target-sheet'); if(!sel||!spreadsheetId) return Promise.resolve();
-  sel.innerHTML = '<option value="">Loading…</option>';
-  const url=`https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}?fields=sheets(properties(title,sheetId,index))`;
-  return fetch(url, { headers:{ Authorization:'Bearer '+token } })
-    .then(r=> r.ok ? r.json() : null)
-    .then(data=>{
-      if(!data) { sel.innerHTML='<option value="">(error)</option>'; return; }
-      const sheets = (data.sheets||[]).map(s=>s.properties).sort((a,b)=> a.index-b.index);
-      sel.innerHTML='';
-      for(const p of sheets){
-        const opt = document.createElement('option');
-        opt.value = String(p.sheetId);
-        opt.textContent = p.title;
-        opt.dataset.title = p.title;
-        sel.appendChild(opt);
-      }
-      const first = sheets[0];
-      currentSheetId = first ? first.sheetId : null;
-      currentSheetTitle = first ? first.title : null;
-      if(currentSheetId) sel.value = String(currentSheetId);
-    });
-}
-const sheetSel = $('save-target-sheet');
-if(sheetSel){
-  sheetSel.addEventListener('change', (e)=>{
-    const sel = e.target;
-    const opt = sel?.selectedOptions?.[0];
-    currentSheetId = opt?.value ? Number(opt.value) : null;
-    currentSheetTitle = opt?.dataset?.title || null;
-    loadCaptionsFromSheet();
-  });
-}
-const btnCreate = $('save-target-create');
-if(btnCreate){
-  btnCreate.addEventListener('click', ()=>{
-    const token = ensureToken(); if(!currentSpreadsheetId) return;
-    const title='Sheet_'+new Date().toISOString().slice(0,19).replace(/[:T]/g,'-');
-    const url=`https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(currentSpreadsheetId)}:batchUpdate`;
-    const body={ requests:[{ addSheet:{ properties:{ title } } }] };
-    fetch(url,{ method:'POST', headers:{ Authorization:'Bearer '+token, 'Content-Type':'application/json' }, body: JSON.stringify(body) })
-      .then(r=>{ if(!r.ok) throw new Error(String(r.status)); })
-      .then(()=> populateSheetTabs(currentSpreadsheetId, token))
-      .then(()=> loadCaptionsFromSheet())
-      .catch(e=> console.error('[Sheets addSheet] failed', e));
-  });
-}
-const btnRename = $('save-target-rename');
-if(btnRename){
-  btnRename.addEventListener('click', ()=>{
-    const token = ensureToken(); if(!currentSpreadsheetId||!currentSheetId) return;
-    const input=$('rename-input'); const newTitle = input && input.value ? String(input.value).trim() : '';
-    if(!newTitle) return;
-    const url=`https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(currentSpreadsheetId)}:batchUpdate`;
-    const body={ requests:[{ updateSheetProperties:{ properties:{ sheetId: currentSheetId, title: newTitle }, fields: 'title' } }] };
-    fetch(url,{ method:'POST', headers:{ Authorization:'Bearer '+token, 'Content-Type':'application/json' }, body: JSON.stringify(body) })
-      .then(r=>{ if(!r.ok) throw new Error(String(r.status)); })
-      .then(()=> populateSheetTabs(currentSpreadsheetId, token))
-      .then(()=> loadCaptionsFromSheet())
-      .catch(e=> console.error('[Sheets rename] failed', e));
-  });
 }
 
 /* ---------------- Index / ensure row ---------------- */
@@ -530,13 +448,13 @@ function enrichRow(row){
   });
 }
 
-/* ---------------- Save / Update / Delete ---------------- */
 function reflectRowToUI(id){
   const row=rowCache.get(id)||{};
   if(selectedPinId===id){
     const t=$('caption-title'), b=$('caption-body');
     if(t && document.activeElement!==t) t.value=row.title||'';
     if(b && document.activeElement!==b) b.value=row.body||'';
+    const col=$('pinColor'); if(col && row.color) col.value=row.color;
   }
   const host=$('caption-list'); if(!host) return;
   let div=captionDomById.get(id);
@@ -553,6 +471,7 @@ function reflectRowToUI(id){
   }
 }
 
+/* ---------------- Save / Update / Delete ---------------- */
 function updateCaptionForPin(id, fields){
   const cached=rowCache.get(id)||{id};
   const seed=Object.assign({}, cached, fields||{});
@@ -569,11 +488,10 @@ function updateCaptionForPin(id, fields){
         imageFileId:seed.imageFileId||'',
         createdAt:seed.createdAt||new Date().toISOString(),
         updatedAt:new Date().toISOString()
-      }).then(()=>{ rowCache.set(id, seed); reflectRowToUI(id); });
+      }).then(()=>{ rowCache.set(id, seed); reflectRowToUI(id); refreshPinMarkerFromRow(id); });
     }else{
-      // update existing row via batchUpdate (values.update)
       const token = ensureToken();
-      const rowIndex = meta?.rowIndex || 2;
+      const rowIndex = meta ? meta.rowIndex : 2;
       const headers = LOCIMYU_HEADERS;
       const values = headers.map(h=>{
         const key = h;
@@ -582,10 +500,16 @@ function updateCaptionForPin(id, fields){
       });
       const rangeA1 = `'${currentSheetTitle||'シート1'}'!A${rowIndex}:`+String(colA1(headers.length-1))+String(rowIndex);
       return putValues(currentSpreadsheetId, rangeA1, [values], token)
-        .then(()=>{ rowCache.set(id, seed); reflectRowToUI(id); })
+        .then(()=>{ rowCache.set(id, seed); reflectRowToUI(id); refreshPinMarkerFromRow(id); })
         .catch(e=>{ console.error('[values.update] failed', e); throw e; });
     }
   });
+}
+
+function refreshPinMarkerFromRow(id){
+  const row=rowCache.get(id); if(!row) return;
+  removePinMarker(id);
+  addPinMarker({ id, x:row.x||0, y:row.y||0, z:row.z||0, color:row.color||currentPinColor });
 }
 
 /* ---------------- Image attach/detach ---------------- */
@@ -637,12 +561,13 @@ function loadCaptionsFromSheet(){
       rowCache.set(id, obj);
       captionsIndex.set(id, { rowIndex: r+1 });
       enrichRow(obj).then(appendCaptionItem);
-      addPinMarker({ id, x:obj.x, y:obj.y, z:obj.z, color:obj.color });
+      addPinMarker({ id, x:obj.x, y:obj.y, z:obj.z, color:obj.color||currentPinColor });
     }
+    applyFilter(); // reflect current filter mode
   }).catch(e=> console.warn('[loadCaptionsFromSheet] failed', e));
 }
 
-/* ---------------- Wire right-pane image grid (attach on click) ---------------- */
+/* ---------------- Right-pane images grid (attach on click) ---------------- */
 (function wireImagesGrid(){
   const grid = $('images-grid'); if(!grid) return;
   grid.addEventListener('click', (e)=>{
@@ -678,9 +603,9 @@ function refreshImagesGrid(){
         div.dataset.fileId = f.id;
         const thumb = (f.thumbnailLink ? (f.thumbnailLink + (f.thumbnailLink.includes('?')?'&':'?') + 'sz=s256') : '');
         if(thumb) div.style.backgroundImage = `url("${thumb}")`;
-        grid?.appendChild(div);
+        if(grid) grid.appendChild(div);
       });
-      stat && (stat.textContent = `${files.length} images`);
+      if(stat) stat.textContent = `${files.length} images`;
     });
   });
 }
@@ -693,27 +618,69 @@ function refreshImagesGrid(){
     if(!selectedPinId) return;
     clearTimeout(timer);
     timer=setTimeout(()=>{
-      updateCaptionForPin(selectedPinId, { title: t?.value||'', body: b?.value||'' })
+      updateCaptionForPin(selectedPinId, { title: t ? t.value||'' : '', body: b ? b.value||'' : '' })
         .catch(e=> console.warn('[caption autosave failed]', e));
     }, 600);
   }
-  t?.addEventListener('input', schedule);
-  b?.addEventListener('input', schedule);
+  if(t) t.addEventListener('input', schedule);
+  if(b) b.addEventListener('input', schedule);
 })();
 
-/* ---------------- GLB load (with simple 401 handling) ---------------- */
+/* ---------------- Pin color input ---------------- */
+(function wirePinColor(){
+  const inp = $('pinColor'); if(!inp) return;
+  inp.addEventListener('change', ()=>{
+    if(!selectedPinId) return;
+    const color = String(inp.value||'').trim();
+    updateCaptionForPin(selectedPinId, { color })
+      .then(()=> refreshPinMarkerFromRow(selectedPinId))
+      .catch(e=> console.warn('[color update failed]', e));
+  });
+})();
+
+/* ---------------- Filter UI ---------------- */
+function applyFilter(){
+  const host = $('caption-list'); if(!host) return;
+  // List
+  host.querySelectorAll('.caption-item').forEach(div=>{
+    const id = div.dataset.id;
+    const row = rowCache.get(id)||{};
+    let visible = true;
+    if(filterMode==='selected') visible = (id===selectedPinId);
+    else if(filterMode.startsWith('color:')) visible = (row.color && row.color.toLowerCase() === filterMode.slice(6).toLowerCase());
+    div.classList.toggle('is-hidden', !visible);
+  });
+  // 3D
+  clearPins();
+  rowCache.forEach((row, id)=>{
+    let visible = true;
+    if(filterMode==='selected') visible = (id===selectedPinId);
+    else if(filterMode.startsWith('color:')) visible = (row.color && row.color.toLowerCase() === filterMode.slice(6).toLowerCase());
+    if(visible) addPinMarker({ id, x:row.x, y:row.y, z:row.z, color:row.color||currentPinColor });
+  });
+}
+(function wireFilter(){
+  $('btnShowAll')      && $('btnShowAll').addEventListener('click', ()=>{ filterMode='all'; applyFilter(); });
+  $('btnShowSelected') && $('btnShowSelected').addEventListener('click', ()=>{ filterMode='selected'; applyFilter(); });
+  $('btnFilterColor')  && $('btnFilterColor').addEventListener('click', ()=>{
+    const v = $('pinColor') && $('pinColor').value || '';
+    if(!v) return;
+    filterMode = 'color:'+v;
+    applyFilter();
+  });
+})();
+
+/* ---------------- GLB load ---------------- */
 function doLoad(){
   try{
     const token = ensureToken();
-    const raw = $('glbUrl')?.value || '';
+    const raw = ($('glbUrl') && $('glbUrl').value) || '';
     const fileId = extractDriveId(raw);
     if(!fileId){ console.warn('[GLB] missing token or fileId'); return; }
     $('btnGlb') && ($('btnGlb').disabled = true);
 
-    // try load once; if 401, ask user to Sign in again
     return loadGlbFromDrive(fileId, { token }).then(()=>{
       lastGlbFileId = fileId;
-      // シートを確保
       return getParentFolderId(fileId, token)
         .then(parent => findOrCreateLociMyuSpreadsheet(parent, token, { glbId:fileId }))
         .then(spreadsheetId=>{
@@ -729,118 +696,136 @@ function doLoad(){
     }).finally(()=>{
       $('btnGlb') && ($('btnGlb').disabled = false);
     });
-
   }catch(e){
     console.warn('[GLB] token missing or other error', e);
   }
 }
-$('btnGlb')?.addEventListener('click', doLoad);
-$('glbUrl')?.addEventListener('keydown', (e)=>{ if(e.key==='Enter') doLoad(); });
+$('btnGlb') && $('btnGlb').addEventListener('click', doLoad);
+$('glbUrl') && $('glbUrl').addEventListener('keydown', (e)=>{ if(e.key==='Enter') doLoad(); });
 
-
-function __passesFilter(row){
-  if(!row) return false;
-  if(filterMode==='all') return true;
-  if(filterMode==='selected') return selectedPinId && row.id===selectedPinId;
-  if(filterMode==='color') return (row.color||'').toLowerCase() === (filterColor||'').toLowerCase();
-  return true;
-}
-function __applyFilterToList(){
-  const host = $('caption-list'); if(!host) return;
-  host.querySelectorAll('.caption-item').forEach(el=>{
-    const id = el.dataset.id;
-    const row = rowCache.get(id);
-    el.classList.toggle('is-hidden', !__passesFilter(row));
-  });
-}
-function __rebuildPinsFiltered(){
-  try{
-    clearPins();
-  }catch(e){}
-  rowCache.forEach(row=>{
-    if(__passesFilter(row)){
-      addPinMarker({ id:row.id, x:row.x, y:row.y, z:row.z, color:row.color||currentPinColor });
-    }
-  });
-  // keep selection scale
-  if(selectedPinId) setPinSelected(selectedPinId, true);
-}
-function applyFilter(mode, color){
-  try{ const sel = new Set(); if(mode==='color'){ sel.add((color||currentPinColor||'').toLowerCase()); }
-    document.dispatchEvent(new CustomEvent('pinFilterChange', { detail:{ selected: sel } })); }catch(_){ }
-
-  filterMode = mode || 'all';
-  if(mode==='color' && color) filterColor = color;
-  __applyFilterToList();
-  __rebuildPinsFiltered();
-}
-
-console.log('[LociMyu ESM/CDN] +chips+filter wiring loaded');
-
-
-document.addEventListener('DOMContentLoaded', ()=>{
-  try{ wireColorChips(); }catch(e){}
-  try{ wireFilterChips(); }catch(e){}
-});
-
-
-// Shift+Click to add pin at picked 3D point
-try{
-  onCanvasShiftPick(({x,y,z})=>{
-    const id = 'pin_' + Math.random().toString(36).slice(2,10);
-    const row = { id, title:'', body:'', color: currentPinColor, x, y, z, imageFileId:'' };
-    updateCaptionForPin(id, row).then(()=>{
-      // cache→UI→3D
-      rowCache.set(id, row);
-      appendCaptionItem(row);
-      addPinMarker({ id, x, y, z, color: currentPinColor });
-      selectCaption(id);
-    }).catch(e=> console.warn('[shift+click add] failed', e));
-  });
-}catch(e){ console.warn('onCanvasShiftPick wiring failed', e); }
-
-
-// Spreadsheet rename (Drive files.update) & delete (Drive files.delete)
-function driveRenameFile(fileId, newName, token){
-  const url = `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}`;
-  return fetch(url, { method:'PATCH', headers:{ Authorization:'Bearer '+token, 'Content-Type':'application/json' }, body: JSON.stringify({ name:newName }) })
-    .then(r=>{ if(!r.ok) throw new Error('rename failed'); return r.json(); });
-}
-function driveDeleteFile(fileId, token){
-  const url = `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}`;
-  return fetch(url, { method:'DELETE', headers:{ Authorization:'Bearer '+token } })
-    .then(r=>{ if(!r.ok) throw new Error('delete failed'); return true; });
-}
-
-(function wireSheetMgmt(){
-  const bRename = $('save-target-rename');
-  const bDelete = $('save-target-delete');
-  const inp = $('rename-input');
-  if(bRename){
-    bRename.addEventListener('click', ()=>{
-      if(!currentSpreadsheetId){ alert('No spreadsheet selected.'); return; }
-      const name = (inp?.value||'').trim();
-      if(!name){ alert('Enter new title.'); return; }
-      const t = ensureToken();
-      bRename.disabled = true;
-      driveRenameFile(currentSpreadsheetId, name, t).then(()=>{
-        alert('Renamed.');
-      }).catch(e=>{
-        console.warn('[rename] failed', e); alert('Rename failed: '+e);
-      }).finally(()=>{ bRename.disabled = false; });
+/* ---------------- Sheet tabs & rename ---------------- */
+function populateSheetTabs(spreadsheetId, token){
+  const sel = $('save-target-sheet'); if(!sel||!spreadsheetId) return Promise.resolve();
+  sel.innerHTML = '<option value="">Loading…</option>';
+  const url=`https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}?fields=sheets(properties(title,sheetId,index))`;
+  return fetch(url, { headers:{ Authorization:'Bearer '+token } })
+    .then(r=> r.ok ? r.json() : null)
+    .then(data=>{
+      if(!data) { sel.innerHTML='<option value="">(error)</option>'; return; }
+      const sheets = (data.sheets||[]).map(s=>s.properties).sort((a,b)=> a.index-b.index);
+      sel.innerHTML='';
+      for(const p of sheets){
+        const opt = document.createElement('option');
+        opt.value = String(p.sheetId);
+        opt.textContent = p.title;
+        opt.dataset.title = p.title;
+        sel.appendChild(opt);
+      }
+      const first = sheets[0];
+      currentSheetId = first ? first.sheetId : null;
+      currentSheetTitle = first ? first.title : null;
+      if(currentSheetId) sel.value = String(currentSheetId);
     });
+}
+const sheetSel = $('save-target-sheet');
+if(sheetSel){
+  sheetSel.addEventListener('change', (e)=>{
+    const sel = e.target;
+    const opt = sel && sel.selectedOptions && sel.selectedOptions[0];
+    currentSheetId = (opt && opt.value) ? Number(opt.value) : null;
+    currentSheetTitle = (opt && opt.dataset && opt.dataset.title) ? opt.dataset.title : null;
+    loadCaptionsFromSheet();
+  });
+}
+const btnCreate = $('save-target-create');
+if(btnCreate){
+  btnCreate.addEventListener('click', ()=>{
+    const token = ensureToken(); if(!currentSpreadsheetId) return;
+    const title='Sheet_'+new Date().toISOString().slice(0,19).replace(/[:T]/g,'-');
+    const url=`https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(currentSpreadsheetId)}:batchUpdate`;
+    const body={ requests:[{ addSheet:{ properties:{ title } } }] };
+    fetch(url,{ method:'POST', headers:{ Authorization:'Bearer '+token, 'Content-Type':'application/json' }, body: JSON.stringify(body) })
+      .then(r=>{ if(!r.ok) throw new Error(String(r.status)); })
+      .then(()=> populateSheetTabs(currentSpreadsheetId, token))
+      .then(()=> loadCaptionsFromSheet())
+      .catch(e=> console.error('[Sheets addSheet] failed', e));
+  });
+}
+const btnRename = $('save-target-rename');
+if(btnRename){
+  btnRename.addEventListener('click', ()=>{
+    const token = ensureToken(); if(!currentSpreadsheetId||!currentSheetId) return;
+    const input=$('rename-input'); const newTitle = input && input.value ? String(input.value).trim() : '';
+    if(!newTitle) return;
+    const url=`https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(currentSpreadsheetId)}:batchUpdate`;
+    const body={ requests:[{ updateSheetProperties:{ properties:{ sheetId: currentSheetId, title: newTitle }, fields: 'title' } }] };
+    fetch(url,{ method:'POST', headers:{ Authorization:'Bearer '+token, 'Content-Type':'application/json' }, body: JSON.stringify(body) })
+      .then(r=>{ if(!r.ok) throw new Error(String(r.status)); })
+      .then(()=> populateSheetTabs(currentSpreadsheetId, token))
+      .then(()=> loadCaptionsFromSheet())
+      .catch(e=> console.error('[Sheets rename] failed', e));
+  });
+}
+
+console.log('[LociMyu ESM/CDN] boot overlay-edit+fixed-zoom build loaded (A–E)');
+
+const LM_PALETTE = ["#ef9368","#e9df5d","#a8e063","#8bb6ff","#b38bff","#86d2c4","#d58cc1","#9aa1a6"];
+window.currentPinColor = window.currentPinColor || LM_PALETTE[0];
+let lmFilterSet = new Set(JSON.parse(localStorage.getItem('lmFilterColors')||'[]')); if(lmFilterSet.size===0) lmFilterSet=new Set(LM_PALETTE);
+function saveFilter(){ localStorage.setItem('lmFilterColors', JSON.stringify([...lmFilterSet])); }
+function hexToRgb(hex){ const m=/^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex); if(!m) return {r:0,g:0,b:0}; return { r:parseInt(m[1],16), g:parseInt(m[2],16), b:parseInt(m[3],16) }; }
+function nearestPalette(hex){ const c=hexToRgb(hex||LM_PALETTE[0]); let best=LM_PALETTE[0],score=1e9; for(const p of LM_PALETTE){ const q=hexToRgb(p); const d=(c.r-q.r)**2+(c.g-q.g)**2+(c.b-q.b)**2; if(d<score){ score=d; best=p; } } return best; }
+
+
+function renderColorChips(){
+  const host = document.getElementById('pinColorChips') || document.getElementById('pin-picker');
+  if(!host) return;
+  host.innerHTML = '';
+  LM_PALETTE.forEach(hex=>{
+    const b = document.createElement('button');
+    b.className = 'chip chip-color'; b.style.setProperty('--chip', hex); b.title = hex;
+    if (nearestPalette(window.currentPinColor) === hex) b.classList.add('is-active');
+    b.addEventListener('click', ()=> setPinColor(hex));
+    host.appendChild(b);
+  });
+}
+
+
+
+function renderFilterChips(){
+  const host = document.getElementById('pinFilterChips') || document.getElementById('pin-filter');
+  if(!host) return;
+  host.innerHTML = '';
+  // If this container doesn't have All/None buttons nearby, inject a small pair before it
+  if(!host.previousElementSibling || !host.previousElementSibling.classList || !host.previousElementSibling.classList.contains('chip-actions')){
+    const bar = document.createElement('div'); bar.className='chip-actions';
+    const a = document.createElement('button'); a.id='filterAll'; a.className='chip-action'; a.textContent='All';
+    const n = document.createElement('button'); n.id='filterNone'; n.className='chip-action'; n.textContent='None';
+    a.addEventListener('click', ()=>{ lmFilterSet=new Set(LM_PALETTE); saveFilter(); applyColorFilter(); renderFilterChips(); });
+    n.addEventListener('click', ()=>{ lmFilterSet=new Set(); saveFilter(); applyColorFilter(); renderFilterChips(); });
+    host.parentNode.insertBefore(bar, host);
+    bar.appendChild(a); bar.appendChild(n);
   }
-  if(bDelete){
-    bDelete.addEventListener('click', ()=>{
-      if(!currentSpreadsheetId){ alert('No spreadsheet selected.'); return; }
-      if(!confirm('Delete this spreadsheet from Drive? This cannot be undone.')) return;
-      const t = ensureToken();
-      bDelete.disabled = true;
-      driveDeleteFile(currentSpreadsheetId, t).then(()=>{
-        alert('Deleted. Reload the page and select/create another sheet.');
-      }).catch(e=>{
-        console.warn('[delete] failed', e); alert('Delete failed: '+e);
-      }).finally(()=>{ bDelete.disabled = false; });
+  LM_PALETTE.forEach(hex=>{
+    const b = document.createElement('button');
+    b.className = 'chip chip-filter'; b.style.setProperty('--chip', hex); b.title = `filter ${hex}`;
+    const mark = document.createElement('span'); mark.className='mark'; mark.textContent='✓'; b.appendChild(mark);
+    if(lmFilterSet.has(hex)) b.classList.add('is-on');
+    b.addEventListener('click', ()=>{
+      if(lmFilterSet.has(hex)) lmFilterSet.delete(hex); else lmFilterSet.add(hex);
+      saveFilter(); applyColorFilter(); renderFilterChips();
     });
-  }
-})();
+    host.appendChild(b);
+  });
+}
+
+
+
+function rowPassesColorFilter(row){
+  if(lmFilterSet.size===0) return true;
+  const bucket = nearestPalette(row?.color || LM_PALETTE[0]);
+  return lmFilterSet.has(bucket);
+}
+
+
+document.addEventListener('DOMContentLoaded', ()=>{ try{ renderColorChips(); renderFilterChips(); applyColorFilter(); }catch(e){} });
