@@ -572,9 +572,9 @@ function loadCaptionsFromSheet(){
 
 /* ---------------- Right-pane images grid (attach on click) ---------------- */
 (function wireImagesGrid(){
-  const grid = $('images-grid'); if(!grid) return;
+  let grid = $ $('images-grid'); if(!grid) return;
   if(grid.dataset.wired==='1') return; grid.dataset.wired='1';
-  const grid = $('images-grid'); if(!grid) return;
+  grid = $('images-grid'); if(!grid) return;
   grid.addEventListener('click', (e)=>{
     const cell = e.target.closest('.thumb'); if(!cell) return;
     if(!selectedPinId) { alert('先にキャプションを選択してください。'); return; }
