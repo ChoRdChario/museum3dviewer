@@ -1,27 +1,3 @@
-window.currentPinColor = window.currentPinColor || (window.LM_PALETTE && window.LM_PALETTE[0]) || "#ef9368";
-
-// ---- Guarded helpers (idempotent) ----
-if (typeof window.lm_hexToRgb !== 'function') {
-  window.lm_hexToRgb = function lm_hexToRgb(hex){
-    const m=/^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(String(hex||"000000"));
-    return { r:parseInt((m&&m[1])||"00",16), g:parseInt((m&&m[2])||"00",16), b:parseInt((m&&m[3])||"00",16) };
-  };
-}
-if (typeof window.nearestPalette !== 'function') {
-  window.nearestPalette = function nearestPalette(hex){
-    const P = window.LM_PALETTE||[];
-    const base = (P && P.length ? P[0] : "#ef9368");
-    const c = window.lm_hexToRgb(hex||base);
-    let best = base, score = 1e9;
-    for (const p of P){
-      const q = window.lm_hexToRgb(p);
-      const d = (c.r-q.r)**2 + (c.g-q.g)**2 + (c.b-q.b)**2;
-      if (d < score) { score = d; best = p; }
-    }
-    return best;
-  };
-}
-
 // boot.esm.cdn.js — LociMyu boot (A–E features restored)
 // ESM build. Do not import ensureFreshToken.
 import {
@@ -730,7 +706,7 @@ $('glbUrl') && $('glbUrl').addEventListener('keydown', (e)=>{ if(e.key==='Enter'
 /* ---------------- Sheet tabs & rename ---------------- */
 function populateSheetTabs(spreadsheetId, token){
   const sel = $('save-target-sheet'); if(!sel||!spreadsheetId) return Promise.resolve();
-  sel.innerHTML = '<option value="">Loading...</option>';
+  sel.innerHTML = '<option value="">Loading…</option>';
   const url=`https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}?fields=sheets(properties(title,sheetId,index))`;
   return fetch(url, { headers:{ Authorization:'Bearer '+token } })
     .then(r=> r.ok ? r.json() : null)
@@ -768,7 +744,7 @@ if(btnCreate){
     const title='Sheet_'+new Date().toISOString().slice(0,19).replace(/[:T]/g,'-');
     const url=`https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(currentSpreadsheetId)}:batchUpdate`;
     const body={ requests:[{ addSheet:{ properties:{ title } } }] };
-    fetch(url,{ method:'POST', headers:{ Authorization:`Bearer ${token}`, 'Content-Type':'application/json' }, body: JSON.stringify(body) })
+    fetch(url,{ method:'POST', headers:{ Authorization:'Bearer '+token, 'Content-Type':'application/json' }, body: JSON.stringify(body) })
       .then(r=>{ if(!r.ok) throw new Error(String(r.status)); })
       .then(()=> populateSheetTabs(currentSpreadsheetId, token))
       .then(()=> loadCaptionsFromSheet())
@@ -782,9 +758,9 @@ if(btnRename){
     const input=$('rename-input'); const newTitle = input && input.value ? String(input.value).trim() : '';
     if(!newTitle) return;
     const url=`https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(currentSpreadsheetId)}:batchUpdate`;
-    const url=`https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(currentSpreadsheetId)}:batchUpdate`;
-    const body={ requests:[{ updateSheetProperties:{ properties:{ sheetId: currentSheetId, title: newTitle } }, fields: 'title' }] };
-    fetch(url,{ method:'POST', headers:{ Authorization:`Bearer ${token}`, 'Content-Type':'application/json' }, body: JSON.stringify(body) })
+    const body={ requests:[{ updateSheetProperties:{ properties:{ sheetId: currentSheetId, title: newTitle }, fields: 'title' } }] };
+    fetch(url,{ method:'POST', headers:{ Authorization:'Bearer '+token, 'Content-Type':'application/json' }, body: JSON.stringify(body) })
+      .then(r=>{ if(!r.ok) throw new Error(String(r.status)); })
       .then(()=> populateSheetTabs(currentSpreadsheetId, token))
       .then(()=> loadCaptionsFromSheet())
       .catch(e=> console.error('[Sheets rename] failed', e));
@@ -793,13 +769,22 @@ if(btnRename){
 
 console.log('[LociMyu ESM/CDN] boot overlay-edit+fixed-zoom build loaded (A–E)');
 
+const LM_PALETTE = ["#ef9368","#e9df5d","#a8e063","#8bb6ff","#b38bff","#86d2c4","#d58cc1","#9aa1a6"];
+window.currentPinColor = window.currentPinColor || LM_PALETTE[0];
+let lmFilterSet = new Set(JSON.parse(localStorage.getItem('lmFilterColors')||'[]')); if(lmFilterSet.size===0) lmFilterSet=new Set(LM_PALETTE);
+function saveFilter(){ localStorage.setItem('lmFilterColors', JSON.stringify([...lmFilterSet])); }
+function hexToRgb(hex){ const m=/^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex); if(!m) return {r:0,g:0,b:0}; return { r:parseInt(m[1],16), g:parseInt(m[2],16), b:parseInt(m[3],16) }; }
+function nearestPalette(hex){ const c=hexToRgb(hex||LM_PALETTE[0]); let best=LM_PALETTE[0],score=1e9; for(const p of LM_PALETTE){ const q=hexToRgb(p); const d=(c.r-q.r)**2+(c.g-q.g)**2+(c.b-q.b)**2; if(d<score){ score=d; best=p; } } return best; }
+
+
 function renderColorChips(){
-  const host=document.getElementById('pin-picker'); if(!host) return;
-  host.innerHTML='';
-  (window.LM_PALETTE||[]).forEach(hex=>{
-    const b=document.createElement('button');
-    b.className='chip chip-color'; b.style.setProperty('--chip', hex); b.style.backgroundColor=hex; b.title=hex;
-    if(window.nearestPalette(window.currentPinColor)===hex) b.classList.add('is-active');
+  const host = document.getElementById('pinColorChips') || document.getElementById('pin-picker');
+  if(!host) return;
+  host.innerHTML = '';
+  LM_PALETTE.forEach(hex=>{
+    const b = document.createElement('button');
+    b.className = 'chip chip-color'; b.style.setProperty('--chip', hex); b.title = hex;
+    if (nearestPalette(window.currentPinColor) === hex) b.classList.add('is-active');
     b.addEventListener('click', ()=> setPinColor(hex));
     host.appendChild(b);
   });
@@ -807,82 +792,107 @@ function renderColorChips(){
 
 
 
-let __lmFilter;
-function renderFilterChips(){
-  const host=document.getElementById('pin-filter'); if(!host) return;
-  if(!__lmFilter){
-    try{ const saved=JSON.parse(localStorage.getItem('lmFilterColors')||'[]'); __lmFilter=new Set(saved.length?saved:(window.LM_PALETTE||[])); }
-    catch{ __lmFilter=new Set(window.LM_PALETTE||[]); }
-  }
-  if(!host.previousElementSibling || !host.previousElementSibling.classList || !host.previousElementSibling.classList.contains('chip-actions')){
-    const bar=document.createElement('div'); bar.className='chip-actions';
-    const a=document.createElement('button'); a.className='ghost small'; a.textContent='All';
-    const n=document.createElement('button'); n.className='ghost small'; n.textContent='None';
-    a.addEventListener('click', ()=>{ __lmFilter=new Set(window.LM_PALETTE||[]); try{ localStorage.setItem('lmFilterColors', JSON.stringify(Array.from(__lmFilter))); }catch{} applyColorFilter(); renderFilterChips(); });
-    n.addEventListener('click', ()=>{ __lmFilter=new Set(); try{ localStorage.setItem('lmFilterColors', JSON.stringify(Array.from(__lmFilter))); }catch{} applyColorFilter(); renderFilterChips(); });
-    host.parentNode.insertBefore(bar, host); bar.appendChild(a); bar.appendChild(n);
-  }
-  host.innerHTML='';
-  (window.LM_PALETTE||[]).forEach(hex=>{
-    const b=document.createElement('button');
-    b.className='chip chip-filter'; b.style.setProperty('--chip', hex); b.style.backgroundColor=hex; b.title=`filter ${hex}`;
-    const mark=document.createElement('span'); mark.className='mark'; mark.textContent='✓'; b.appendChild(mark);
-    if(__lmFilter.has(hex)) b.classList.add('is-on');
-    b.addEventListener('click', ()=>{
-      if(__lmFilter.has(hex)) __lmFilter.delete(hex); else __lmFilter.add(hex);
-      try{ localStorage.setItem('lmFilterColors', JSON.stringify(Array.from(__lmFilter))); }catch{}
-      applyColorFilter(); renderFilterChips();
+
+function applyColorFilter(){
+  // Update right-pane list
+  const host = document.getElementById('caption-list');
+  if (host){
+    host.querySelectorAll('.caption-item').forEach(div=>{
+      const id = div.dataset.id;
+      const row = rowCache.get(id)||{};
+      const bucket = nearestPalette(row.color || LM_PALETTE[0]);
+      const visible = lmFilterSet.size===0 || lmFilterSet.has(bucket);
+      div.classList.toggle('is-hidden', !visible);
     });
+  }
+  // Notify viewer to toggle 3D pin visibility (handled in viewer.module.cdn.js)
+  try{
+    const evt = new CustomEvent('pinFilterChange', { detail: { selected: Array.from(lmFilterSet) } });
+    document.dispatchEvent(evt);
+  }catch(_){}
+}
+
+// ===== LociMyu: Color Chips & Filter (clean tail) =====
+const LM_PALETTE = (window.LM_PALETTE)||["#ef9368","#e9df5d","#a8e063","#8bb6ff","#b38bff","#86d2c4","#d58cc1","#9aa1a6"];
+window.LM_PALETTE = LM_PALETTE;
+window.currentPinColor = window.currentPinColor || LM_PALETTE[0];
+
+function lm_hexToRgb(hex){
+  const m=/^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(String(hex||"000000"));
+  return { r:parseInt((m&&m[1])||"00",16), g:parseInt((m&&m[2])||"00",16), b:parseInt((m&&m[3])||"00",16) };
+}
+function nearestPalette(hex){
+  const c = lm_hexToRgb(hex||LM_PALETTE[0]); let best=LM_PALETTE[0],score=1e9;
+  for(const p of LM_PALETTE){ const q=lm_hexToRgb(p); const d=(c.r-q.r)**2+(c.g-q.g)**2+(c.b-q.b)**2; if(d<score){ score=d; best=p; } }
+  return best;
+}
+
+let lmFilterSet=(()=>{ try{ const s=JSON.parse(localStorage.getItem('lmFilterColors')||'[]'); return new Set(s.length?s:LM_PALETTE); }catch(_){ return new Set(LM_PALETTE);} })();
+function saveFilter(){ try{ localStorage.setItem('lmFilterColors', JSON.stringify(Array.from(lmFilterSet))); }catch(_){} }
+
+function renderColorChips(){
+  const host = document.getElementById('pin-picker') || document.getElementById('pinColorChips'); if(!host) return;
+  host.innerHTML = '';
+  LM_PALETTE.forEach(hex=>{
+    const b=document.createElement('button');
+    b.className='chip chip-color'; b.style.setProperty('--chip', hex); b.title=hex;
+    if(nearestPalette(window.currentPinColor)===hex) b.classList.add('is-active');
+    b.addEventListener('click', ()=> setPinColor(hex));
     host.appendChild(b);
   });
 }
 
-
+function renderFilterChips(){
+  const host = document.getElementById('pin-filter') || document.getElementById('pinFilterChips'); if(!host) return;
+  if(!host.previousElementSibling || !host.previousElementSibling.classList || !host.previousElementSibling.classList.contains('chip-actions')){
+    const bar=document.createElement('div'); bar.className='chip-actions';
+    const a=document.createElement('button'); a.id='filterAll'; a.className='chip-action'; a.textContent='All';
+    const n=document.createElement('button'); n.id='filterNone'; n.className='chip-action'; n.textContent='None';
+    a.addEventListener('click', ()=>{ lmFilterSet=new Set(LM_PALETTE); saveFilter(); applyColorFilter(); renderFilterChips(); });
+    n.addEventListener('click', ()=>{ lmFilterSet=new Set(); saveFilter(); applyColorFilter(); renderFilterChips(); });
+    host.parentNode.insertBefore(bar, host); bar.appendChild(a); bar.appendChild(n);
+  }
+  host.innerHTML='';
+  LM_PALETTE.forEach(hex=>{
+    const b=document.createElement('button');
+    b.className='chip chip-filter'; b.style.setProperty('--chip', hex); b.title=`filter ${hex}`;
+    const mark=document.createElement('span'); mark.className='mark'; mark.textContent='✓'; b.appendChild(mark);
+    if(lmFilterSet.has(hex)) b.classList.add('is-on');
+    b.addEventListener('click', ()=>{ if(lmFilterSet.has(hex)) lmFilterSet.delete(hex); else lmFilterSet.add(hex); saveFilter(); applyColorFilter(); renderFilterChips(); });
+    host.appendChild(b);
+  });
+}
 
 function rowPassesColorFilter(row){
-  if(!row) return false;
-  if(!__lmFilter || __lmFilter.size===0) return true;
-  const bucket = window.nearestPalette(row.color || (window.LM_PALETTE?window.LM_PALETTE[0]:"#ef9368"));
-  return __lmFilter.has(bucket);
+  if(!row) return false; if(lmFilterSet.size===0) return true;
+  return lmFilterSet.has(nearestPalette(row.color||LM_PALETTE[0]));
 }
-
-
 
 function applyColorFilter(){
-  const host=document.getElementById('caption-list');
-  if(host){
-    host.querySelectorAll('.caption-item').forEach(div=>{
-      const id=div.dataset.id; const row=(window.rowCache&&rowCache.get)?rowCache.get(id):null;
-      div.classList.toggle('is-hidden', !(row && rowPassesColorFilter(row)));
+  const listHost=document.getElementById('caption-list');
+  if(listHost){
+    listHost.querySelectorAll('.caption-item').forEach(div=>{
+      const id=div.dataset.id; const row=(window.rowCache && rowCache.get)? rowCache.get(id):null;
+      const ok=rowPassesColorFilter(row||{});
+      div.classList.toggle('is-hidden', !ok);
     });
   }
-  try{ document.dispatchEvent(new CustomEvent('pinFilterChange',{ detail:{ selected: Array.from(__lmFilter||[]) } })); }catch(_){}
+  try{ document.dispatchEvent(new CustomEvent('pinFilterChange',{ detail:{ selected:Array.from(lmFilterSet) } })); }catch(_){}
 }
 
-
-
 function setPinColor(hex){
-  window.currentPinColor = hex;
-  const host=document.getElementById('pin-picker');
-  if(host){
-    host.querySelectorAll('.chip-color').forEach(el=>{
-      const c = getComputedStyle(el).getPropertyValue('--chip').trim();
-      el.classList.toggle('is-active', c===hex);
-    });
-  }
+  window.currentPinColor=hex;
+  const host=document.getElementById('pin-picker')||document.getElementById('pinColorChips');
+  if(host){ host.querySelectorAll('.chip-color').forEach(el=> el.classList.toggle('is-active', getComputedStyle(el).getPropertyValue('--chip').trim()===hex)); }
   if(window.selectedPinId && window.rowCache){
     const row=rowCache.get(selectedPinId)||{id:selectedPinId};
     row.color=hex; rowCache.set(selectedPinId,row);
     try{ window.refreshPinMarkerFromRow && refreshPinMarkerFromRow(selectedPinId); }catch(_){}
-    try{ window.updateCaptionForPin && updateCaptionForPin(selectedPinId,{ color: hex }); }catch(_){}
+    try{ window.updateCaptionForPin && updateCaptionForPin(selectedPinId,{ color:hex }); }catch(_){}
   }
 }
 
-
 document.addEventListener('DOMContentLoaded', ()=>{
-  try{
-    renderColorChips(); renderFilterChips(); applyColorFilter();
-    if (typeof wireDetachInline === 'function') wireDetachInline();
-    if (typeof wireDetachOverlay === 'function') wireDetachOverlay();
-  }catch(e){ console.warn('[init]', e); }
+  try{ renderColorChips(); renderFilterChips(); applyColorFilter(); }catch(e){ console.warn('[chips init]', e); }
 });
+// ===== end chips/filter tail =====
