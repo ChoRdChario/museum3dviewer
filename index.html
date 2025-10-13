@@ -70,11 +70,14 @@
 
       <section id="pane-caption" class="pane" data-pane="caption" data-active="true">
         <div class="grp">
-          <div class="hint">Pin color</div>
+          <div class="hint">Pin color
+        <div id="pinColorChips" class="chip-row"></div></div>
           <div id="pin-colors" class="chips"></div>
         </div>
         <div class="grp">
-          <div class="hint">Filter</div>
+          <div class="hint">Filter
+        <div class="chip-actions"><button id="filterAll" class="chip-action">All</button><button id="filterNone" class="chip-action">None</button></div>
+        <div id="pinFilterChips" class="chip-row"></div></div>
           <div id="pin-filter" class="chips"></div>
         </div>
 
@@ -89,18 +92,13 @@
           <input id="caption-title" placeholder="Title" />
           <input id="caption-body" placeholder="Body" />
           <div class="row" style="margin-top:6px">
-            <button id="pin-add">+ Pin</button>
-            <button id="pin-clear">Clear</button>
-          </div>
+</div>
         </div>
         <div class="grp">
           <div class="row" id="caption-image-row">
-            <div id="currentImageThumb"><button id="detach-thumb" class="thumb-detach" aria-label="Detach image">×</button> aria-label="attached image preview"><div class="placeholder">No Image</div>
-<div class="img-actions"><button id="btnDetachInline" class="ghost small">デタッチ</button></div></div>
+            <div id="currentImageThumb" aria-label="attached image preview"><div class="placeholder">No Image</div></div>
             <div class="buttons" style="display:flex; gap:8px;">
-              <button id="btnAttachImage">画像を添付</button>
-              <button id="btnDetachImage" class="ghost">デタッチ</button>
-            </div>
+</div>
           </div>
         </div>
 
@@ -159,6 +157,5 @@
 
   <script type="module" src="./boot.esm.cdn.js"></script>
 
-  <script type="module" src="./boot.esm.cdn.patch.js"></script>
 </body>
 </html>
