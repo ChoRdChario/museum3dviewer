@@ -174,11 +174,6 @@ function createCaptionOverlay(id, data){
     b.style.fontWeight='700';
   });
   ctrl.append(bZoomOut,bZoomIn,bClose);
-
-  // wire overlay controls
-  bClose.addEventListener('click', (e)=>{ e.stopPropagation(); try{ removeCaptionOverlay(id); }catch(_){} });
-  bZoomIn .addEventListener('click', (e)=>{ e.stopPropagation(); const o=overlays.get(id)||{}; o.zoom=(o.zoom||1)+0.1; if(o.zoom>2.0) o.zoom=2.0; overlays.set(id,o); applyOverlayZoom(id,o.zoom); });
-  bZoomOut.addEventListener('click', (e)=>{ e.stopPropagation(); const o=overlays.get(id)||{}; o.zoom=(o.zoom||1)-0.1; if(o.zoom<0.6) o.zoom=0.6; overlays.set(id,o); applyOverlayZoom(id,o.zoom); });
   root.appendChild(ctrl);
 
   // drag handle under the controls
@@ -466,16 +461,6 @@ function reflectRowToUI(id){
   if(!div){ appendCaptionItem(Object.assign({id}, row)); div=captionDomById.get(id); }
   if(!div) return;
   if(row.color) div.style.borderLeft='3px solid '+row.color;
-  // update list item's text fields
-  const lt = div.querySelector('.cap-title'); if(lt) lt.textContent = (row.title||'').trim()||'(untitled)';
-  const lb = div.querySelector('.cap-body' ); if(lb) lb.textContent = (row.body ||'').trim()||'(no description)';
-  // update overlay text if visible
-  const ov = overlays.get(id);
-  if(ov && ov.root){
-    const ot = ov.root.querySelector('.cap-title'); if(ot) ot.textContent = (row.title||'').trim()||'(untitled)';
-    const ob = ov.root.querySelector('.cap-body' ); if(ob) ob.textContent = (row.body ||'').trim()||'(no description)';
-  }
-
   let img=div.querySelector('img');
   if(row.imageFileId){
     if(!img){ img=document.createElement('img'); img.alt=''; div.insertBefore(img, div.firstChild); }
@@ -632,7 +617,10 @@ function refreshImagesGrid(){
   function schedule(){
     if(!selectedPinId) return;
     clearTimeout(timer);
-    timer=setTimeout(()=>{ try{ const id=selectedPinId; const row=rowCache.get(id)||{}; row.title = t ? (t.value||'') : ''; row.body = b ? (b.value||'') : ''; rowCache.set(id,row); reflectRowToUI(id); }catch(_){ } updateCaptionForPin(selectedPinId, { title: t ? t.value||'' : '', body: b ? b.value||'' : '' }).catch(e=> console.warn('[caption autosave failed]', e)); }, 500);
+    timer=setTimeout(()=>{
+      updateCaptionForPin(selectedPinId, { title: t ? t.value||'' : '', body: b ? b.value||'' : '' })
+        .catch(e=> console.warn('[caption autosave failed]', e));
+    }, 600);
   }
   if(t) t.addEventListener('input', schedule);
   if(b) b.addEventListener('input', schedule);
@@ -780,3 +768,70 @@ if(btnRename){
 }
 
 console.log('[LociMyu ESM/CDN] boot overlay-edit+fixed-zoom build loaded (A–E)');
+
+
+// ===== Shift+Click to add pin (optimistic UI) =====
+try{
+  onCanvasShiftPick(({x,y,z})=>{
+    const id = 'pin_' + Math.random().toString(36).slice(2,10);
+    const row = { id, title:'', body:'', color: currentPinColor || '#ff6b6b', x, y, z, imageFileId:'' };
+    try{
+      rowCache.set(id, row);
+      appendCaptionItem(row);
+      addPinMarker({ id, x, y, z, color: row.color });
+      selectCaption(id);
+    }catch(e){ console.warn('[shift+click optimistic] UI reflect failed', e); }
+    updateCaptionForPin(id, row).catch(e=> console.warn('[shift+click persist failed]', e));
+  });
+}catch(e){ console.warn('[shift+click wiring] unavailable', e); }
+
+
+// ===== Sheets/Drive management (rename spreadsheet, delete individual sheet) =====
+function driveRenameFile(fileId, newName, token){
+  const url = `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}`;
+  return fetch(url, { method:'PATCH', headers:{ Authorization:'Bearer '+token, 'Content-Type':'application/json' }, body: JSON.stringify({ name:newName }) })
+    .then(r=>{ if(!r.ok) throw new Error('rename failed'); return r.json(); });
+}
+function sheetsDeleteSheet(spreadsheetId, sheetId, token){
+  const url = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}:batchUpdate`;
+  const body = { requests: [{ deleteSheet: { sheetId: Number(sheetId) } }] };
+  return fetch(url, { method:'POST', headers:{ Authorization:'Bearer '+token, 'Content-Type':'application/json' }, body: JSON.stringify(body) })
+    .then(r=>{ if(!r.ok) throw new Error('deleteSheet failed'); return r.json(); });
+}
+
+(function wireSheetMgmt(){
+  const sel = document.getElementById('save-target-sheet');
+  const inp = document.getElementById('rename-input');
+  const bRename = document.getElementById('save-target-rename');
+  const bDelete = document.getElementById('save-target-delete');
+  if(bRename){
+    bRename.addEventListener('click', ()=>{
+      if(!currentSpreadsheetId){ alert('No spreadsheet selected.'); return; }
+      const name = (inp?.value||'').trim();
+      if(!name){ alert('Enter new title.'); return; }
+      const t = ensureToken();
+      bRename.disabled = true;
+      driveRenameFile(currentSpreadsheetId, name, t).then(()=>{
+        alert('Renamed.');
+      }).catch(e=>{
+        console.warn('[rename] failed', e); alert('Rename failed: '+e);
+      }).finally(()=>{ bRename.disabled = false; });
+    });
+  }
+  if(bDelete){
+    bDelete.addEventListener('click', ()=>{
+      if(!currentSpreadsheetId){ alert('No spreadsheet selected.'); return; }
+      const sheetId = sel?.value;
+      if(!sheetId){ alert('Select a sheet tab to delete.'); return; }
+      if(!confirm('Delete this SHEET (tab) from the spreadsheet? This cannot be undone.')) return;
+      const t = ensureToken();
+      bDelete.disabled = true;
+      sheetsDeleteSheet(currentSpreadsheetId, sheetId, t).then(()=>{
+        alert('Sheet deleted.');
+        try{ sel.querySelector(`option[value="${sheetId}"]`)?.remove(); sel.value=''; }catch(_){}
+      }).catch(e=>{
+        console.warn('[deleteSheet] failed', e); alert('Delete sheet failed: '+e);
+      }).finally(()=>{ bDelete.disabled = false; });
+    });
+  }
+})();
