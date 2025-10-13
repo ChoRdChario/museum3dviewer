@@ -792,11 +792,30 @@ function renderColorChips(){
 
 
 
+
+function applyColorFilter(){
+  // Update right-pane list
+  const host = document.getElementById('caption-list');
+  if (host){
+    host.querySelectorAll('.caption-item').forEach(div=>{
+      const id = div.dataset.id;
+      const row = rowCache.get(id)||{};
+      const bucket = nearestPalette(row.color || LM_PALETTE[0]);
+      const visible = lmFilterSet.size===0 || lmFilterSet.has(bucket);
+      div.classList.toggle('is-hidden', !visible);
+    });
+  }
+  // Notify viewer to toggle 3D pin visibility (handled in viewer.module.cdn.js)
+  try{
+    const evt = new CustomEvent('pinFilterChange', { detail: { selected: Array.from(lmFilterSet) } });
+    document.dispatchEvent(evt);
+  }catch(_){}
+}
 function renderFilterChips(){
   const host = document.getElementById('pinFilterChips') || document.getElementById('pin-filter');
   if(!host) return;
   host.innerHTML = '';
-  // If this container doesn't have All/None buttons nearby, inject a small pair before it
+  // Insert All/None bar if missing
   if(!host.previousElementSibling || !host.previousElementSibling.classList || !host.previousElementSibling.classList.contains('chip-actions')){
     const bar = document.createElement('div'); bar.className='chip-actions';
     const a = document.createElement('button'); a.id='filterAll'; a.className='chip-action'; a.textContent='All';
@@ -806,6 +825,18 @@ function renderFilterChips(){
     host.parentNode.insertBefore(bar, host);
     bar.appendChild(a); bar.appendChild(n);
   }
+  LM_PALETTE.forEach(hex=>{
+    const b=document.createElement('button');
+    b.className='chip chip-filter'; b.style.setProperty('--chip', hex); b.title=`filter ${hex}`;
+    const mark=document.createElement('span'); mark.className='mark'; mark.textContent='✓'; b.appendChild(mark);
+    if(lmFilterSet.has(hex)) b.classList.add('is-on');
+    b.addEventListener('click', ()=>{
+      if(lmFilterSet.has(hex)) lmFilterSet.delete(hex); else lmFilterSet.add(hex);
+      saveFilter(); applyColorFilter(); renderFilterChips();
+    });
+    host.appendChild(b);
+  });
+}
   LM_PALETTE.forEach(hex=>{
     const b = document.createElement('button');
     b.className = 'chip chip-filter'; b.style.setProperty('--chip', hex); b.title = `filter ${hex}`;
@@ -829,3 +860,15 @@ function rowPassesColorFilter(row){
 
 
 document.addEventListener('DOMContentLoaded', ()=>{ try{ renderColorChips(); renderFilterChips(); applyColorFilter(); }catch(e){} });
+
+function setPinColor(hex){
+  window.currentPinColor = hex;
+  (document.getElementById('pinColorChips')||document.getElementById('pin-picker'))?.querySelectorAll('.chip-color')
+    .forEach(el=> el.classList.toggle('is-active', getComputedStyle(el).getPropertyValue('--chip').trim()===hex));
+  if(selectedPinId){
+    const row=rowCache.get(selectedPinId)||{id:selectedPinId};
+    row.color = hex; rowCache.set(selectedPinId,row);
+    try{ refreshPinMarkerFromRow && refreshPinMarkerFromRow(selectedPinId); }catch(_){}
+    try{ updateCaptionForPin(selectedPinId,{ color: hex }); }catch(e){ console.warn('[color save]', e); }
+  }
+}
