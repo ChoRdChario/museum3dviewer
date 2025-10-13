@@ -70,14 +70,11 @@
 
       <section id="pane-caption" class="pane" data-pane="caption" data-active="true">
         <div class="grp">
-          <div class="hint">Pin color
-        <div id="pinColorChips" class="chip-row"></div></div>
+          <div class="hint">Pin color</div>
           <div id="pin-colors" class="chips"></div>
         </div>
         <div class="grp">
-          <div class="hint">Filter
-        <div class="chip-actions"><button id="filterAll" class="chip-action">All</button><button id="filterNone" class="chip-action">None</button></div>
-        <div id="pinFilterChips" class="chip-row"></div></div>
+          <div class="hint">Filter</div>
           <div id="pin-filter" class="chips"></div>
         </div>
 
@@ -92,13 +89,17 @@
           <input id="caption-title" placeholder="Title" />
           <input id="caption-body" placeholder="Body" />
           <div class="row" style="margin-top:6px">
-</div>
+            <button id="pin-add">+ Pin</button>
+            <button id="pin-clear">Clear</button>
+          </div>
         </div>
         <div class="grp">
           <div class="row" id="caption-image-row">
             <div id="currentImageThumb" aria-label="attached image preview"><div class="placeholder">No Image</div></div>
             <div class="buttons" style="display:flex; gap:8px;">
-</div>
+              <button id="btnAttachImage">画像を添付</button>
+              <button id="btnDetachImage" class="ghost">デタッチ</button>
+            </div>
           </div>
         </div>
 
