@@ -569,6 +569,8 @@ function loadCaptionsFromSheet(){
 
 /* ---------------- Right-pane images grid (attach on click) ---------------- */
 (function wireImagesGrid(){
+  if(document.getElementById('images-grid')?.dataset?.wired==='1') return;
+  if(document.getElementById('images-grid')) document.getElementById('images-grid').dataset.wired='1';
   const grid = $('images-grid'); if(!grid) return;
   grid.addEventListener('click', (e)=>{
     const cell = e.target.closest('.thumb'); if(!cell) return;
