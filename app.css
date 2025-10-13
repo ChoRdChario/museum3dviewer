@@ -85,73 +85,18 @@ body{
 #currentImageThumb .placeholder{ font-size:11px; color:var(--muted); }
 
 
-
-/* ==== Stronger Attach/Detach UX ==== */
-#images-grid { position: relative; display:grid; grid-template-columns: repeat(auto-fill, minmax(120px,1fr)); gap:10px; }
-.thumb { position: relative; border-radius: 10px; overflow: hidden; background:#111; }
-.thumb img { width:100%; height:100%; object-fit:cover; display:block; }
-.thumb .btn-x {
-  position:absolute; top:6px; right:6px; z-index:2;
-  width:24px; height:24px; border-radius:999px; display:grid; place-items:center;
-  background:rgba(0,0,0,.65); color:#f3f4f6; border:1px solid rgba(255,255,255,.25);
-  font-weight:800; font-size:14px; line-height:1; opacity:0; transition:opacity .12s ease; cursor:pointer;
-}
-.thumb:hover .btn-x { opacity:1; }
-.thumb.is-active {
-  outline:2px solid var(--accent, #60a5fa); outline-offset:2px;
-  box-shadow: 0 0 0 2px rgba(96,165,250,.25) inset, 0 0 0 1px rgba(0,0,0,.6);
-}
-.thumb.is-active::after{
-  content:"✓"; position:absolute; left:6px; top:6px; z-index:2;
-  width:22px; height:22px; border-radius:999px; display:grid; place-items:center;
-  background:#10b981; color:#fff; font-weight:800; font-size:13px;
-}
-/* small toast for saved status */
-.save-toast {
-  position:fixed; bottom:14px; right:14px; z-index:99999;
-  background:rgba(17,24,39,.9); color:#e5e7eb; padding:8px 12px; border:1px solid #334155; border-radius:8px; font:12px/1.4 ui-sans-serif,system-ui;
-  transform:translateY(20px); opacity:0; transition:.18s ease;
-}
-.save-toast.show { transform:translateY(0); opacity:1; }
-
-
-/* === LociMyu caption image UX (agreed spec) === */
-.images-grid, #images-grid { display:grid; grid-template-columns: repeat(auto-fill, minmax(116px,1fr)); gap:10px; }
-.thumb { position:relative; border-radius:10px; overflow:hidden; background:#111; }
-.thumb img { width:100%; height:100%; object-fit:cover; display:block; }
-.thumb .btn-x {
-  position:absolute; top:6px; right:6px; z-index:2;
-  width:24px; height:24px; border-radius:999px; display:grid; place-items:center;
-  background:rgba(0,0,0,.68); color:#e5e7eb; border:1px solid rgba(255,255,255,.25);
-  font-weight:800; font-size:14px; line-height:1; opacity:0; transition:opacity .12s ease; cursor:pointer;
-}
-.thumb:hover .btn-x { opacity:1; }
-.thumb.is-active { outline:2px solid var(--accent,#60a5fa); outline-offset:2px; box-shadow: 0 0 0 2px rgba(96,165,250,.2) inset; }
-.thumb.is-active::after{ content:"✓"; position:absolute; left:6px; top:6px; z-index:2; width:22px; height:22px; border-radius:999px; display:grid; place-items:center; background:#10b981; color:#fff; font-weight:800; font-size:13px; }
-
-.current-image { margin:8px 0 12px; border-radius:10px; overflow:hidden; background:#0f172a; border:1px solid #334155; }
-.current-image .wrap { position:relative; }
-.current-image img { width:100%; display:block; object-fit:contain; background:#0f172a; }
-.current-image .open-original { position:absolute; right:8px; bottom:8px; z-index:2; background:rgba(0,0,0,.7); color:#e5e7eb; border:1px solid #334155; padding:6px 10px; border-radius:8px; text-decoration:none; font-size:12px; }
-
-/* prevent UI overlays from blocking canvas unless interactive */
-.canvas-float, .noninteractive { pointer-events:none; }
-.canvas-float .interactive { pointer-events:auto; }
-
-/* === Color chips & filter chips === */
-.chip-row{ display:flex; gap:8px; flex-wrap:wrap; margin:6px 0 10px 0; }
-.color-chip{
-  width:22px; height:22px; border-radius:999px; cursor:pointer; position:relative;
-  border:2px solid rgba(255,255,255,.25); box-shadow: inset 0 0 0 1px rgba(0,0,0,.35);
-}
-.color-chip.is-active{ outline:2px solid #fff; outline-offset:2px; }
-.color-chip.is-active::after{ content:""; position:absolute; inset:6px; border-radius:999px; box-shadow:0 0 0 2px rgba(0,0,0,.55) inset; }
-
+/* Colored filter chips */
 .filter-chip{
-  width:22px; height:22px; border-radius:4px; cursor:pointer; position:relative;
-  border:2px solid currentColor; color:#64748b; background:transparent; display:grid; place-items:center;
+  width:22px; height:22px; border-radius:6px; cursor:pointer; position:relative;
+  border:2px solid rgba(255,255,255,.2); background:#111; box-shadow: inset 0 0 0 1px rgba(0,0,0,.35);
 }
-.filter-chip .mark{ width:12px; height:12px; background:#fff; display:none; }
-.filter-chip.is-on .mark{ display:block; }
-.chip-actions{ display:flex; gap:6px; margin:4px 0; }
-.chip-action{ font-size:11px; padding:4px 8px; border-radius:8px; background:#0f172a; color:#e5e7eb; border:1px solid #334155; cursor:pointer; }
+.filter-chip .swatch{
+  position:absolute; inset:3px; border-radius:4px; background:currentColor;
+}
+.filter-chip .tick{
+  position:absolute; inset:auto 2px 2px auto; width:12px; height:12px;
+  background:#fff; color:#111; border-radius:3px; font-size:10px; font-weight:700;
+  line-height:12px; text-align:center; display:none;
+}
+.filter-chip.is-on{ outline:2px solid rgba(255,255,255,.55); outline-offset:2px; }
+.filter-chip.is-on .tick{ display:block; }
