@@ -1,5 +1,3 @@
-window.currentPinColor = window.currentPinColor || (window.LM_PALETTE && window.LM_PALETTE[0]) || '#ef9368';
-window.LM_PALETTE = window.LM_PALETTE || ["#ef9368","#e9df5d","#a8e063","#8bb6ff","#b38bff","#86d2c4","#d58cc1","#9aa1a6"]; 
 // boot.esm.cdn.js — LociMyu boot (A–E features restored)
 // ESM build. Do not import ensureFreshToken.
 import {
@@ -10,7 +8,7 @@ import { setupAuth, getAccessToken, getLastAuthError } from './gauth.module.js';
 
 /* ---------------- small helpers ---------------- */
 const $ = (id)=>document.getElementById(id);
-const setEnabled = (on, els)=> els.forEach(el=>{ if(el) el.disabled = !on; });
+const setEnabled = (on, ...els)=> els.forEach(el=>{ if(el) el.disabled = !on; });
 const textOrEmpty = (v)=> v==null ? '' : String(v);
 const clamp = (n,min,max)=> Math.min(Math.max(n,min),max);
 
@@ -430,10 +428,10 @@ function appendCaptionItem(row){
   const b=document.createElement('div'); b.className='cap-body hint'; b.textContent=safeBody;
   txt.appendChild(t); txt.appendChild(b); div.appendChild(txt);
 
-  // delete caption (×) in list
-  const del=document.createElement('button'); del.className='c-del'; del.title='Delete caption'; del.textContent='×';
-  del.addEventListener('click', (e)=>{ e.stopPropagation(); deleteCaption(row.id); });
-  div.appendChild(del);
+  // detach ×
+  const detach=document.createElement('button'); detach.className='c-del'; detach.title='Detach image'; detach.textContent='×';
+  detach.addEventListener('click', (e)=>{ e.stopPropagation(); updateImageForPin(row.id, null); });
+  div.appendChild(detach);
 
   div.addEventListener('click', ()=> selectCaption(row.id));
   host.appendChild(div); captionDomById.set(row.id, div);
@@ -538,8 +536,6 @@ function updateImageForPin(id, fileIdOrNull){
 
 /* ---------------- Load captions from sheet ---------------- */
 function loadCaptionsFromSheet(){
-  // reset selection & overlays when switching save sheet
-  selectedPinId=null; overlays.forEach((_,id)=>removeCaptionOverlay(id)); clearPins();
   const token = getAccessToken(); if(!token||!currentSpreadsheetId||!currentSheetTitle) return;
   const range = `'${currentSheetTitle}'!A1:Z9999`;
   getValues(currentSpreadsheetId, range, token).then(values=>{
@@ -772,63 +768,169 @@ if(btnRename){
 }
 
 console.log('[LociMyu ESM/CDN] boot overlay-edit+fixed-zoom build loaded (A–E)');
-wireShiftPick();
 
-function lm_hexToRgb(hex){ const m=/^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(String(hex||"000000")); return { r:parseInt((m&&m[1])||"00",16), g:parseInt((m&&m[2])||"00",16), b:parseInt((m&&m[3])||"00",16) }; }
 
-function nearestPalette(hex){ const p=window.LM_PALETTE||[]; const c=lm_hexToRgb(hex||p[0]); let best=p[0],score=1e9; for(const q of p){ const t=lm_hexToRgb(q); const d=(c.r-t.r)**2+(c.g-t.g)**2+(c.b-t.b)**2; if(d<score){score=d;best=q;} } return best; }
+window.currentPinColor = window.currentPinColor || LM_PALETTE[0];
+let lmFilterSet = new Set(JSON.parse(localStorage.getItem('lmFilterColors')||'[]')); if(lmFilterSet.size===0) lmFilterSet=new Set(LM_PALETTE);
+function saveFilter(){ localStorage.setItem('lmFilterColors', JSON.stringify([...lmFilterSet])); }
+function hexToRgb(hex){ const m=/^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex); if(!m) return {r:0,g:0,b:0}; return { r:parseInt(m[1],16), g:parseInt(m[2],16), b:parseInt(m[3],16) }; }
+function nearestPalette(hex){ const c=hexToRgb(hex||LM_PALETTE[0]); let best=LM_PALETTE[0],score=1e9; for(const p of LM_PALETTE){ const q=hexToRgb(p); const d=(c.r-q.r)**2+(c.g-q.g)**2+(c.b-q.b)**2; if(d<score){ score=d; best=p; } } return best; }
 
-function renderColorChips(){ const host=document.getElementById('pin-colors'); if(!host) return; host.innerHTML=''; (window.LM_PALETTE||[]).forEach(hex=>{ const b=document.createElement('button'); b.className='chip chip-color'; b.style.setProperty('--chip', hex); b.title=hex; if(nearestPalette(window.currentPinColor)===hex) b.classList.add('is-active'); b.addEventListener('click', ()=> setPinColor(hex)); host.appendChild(b); }); }
 
-function renderFilterChips(){ const host=document.getElementById('pin-filter'); if(!host) return; host.innerHTML=''; if(!window.__lmFilter){ try{ const saved=JSON.parse(localStorage.getItem('lmFilterColors')||'[]'); window.__lmFilter=new Set(saved.length?saved:(window.LM_PALETTE||[])); }catch{ window.__lmFilter=new Set(window.LM_PALETTE||[]);} } (window.LM_PALETTE||[]).forEach(hex=>{ const b=document.createElement('button'); b.className='chip chip-filter'; b.style.setProperty('--chip', hex); const mark=document.createElement('span'); mark.className='mark'; mark.textContent='✓'; b.appendChild(mark); if(window.__lmFilter.has(hex)) b.classList.add('is-on'); b.addEventListener('click', ()=>{ if(window.__lmFilter.has(hex)) window.__lmFilter.delete(hex); else window.__lmFilter.add(hex); try{ localStorage.setItem('lmFilterColors', JSON.stringify(Array.from(window.__lmFilter))); }catch{} applyColorFilter(); renderFilterChips(); }); host.appendChild(b); }); }
-
-function rowPassesColorFilter(row){ const set=window.__lmFilter; if(!set||set.size===0) return true; const pal=nearestPalette(row && row.color ? row.color : (window.LM_PALETTE?window.LM_PALETTE[0]:'#ef9368')); return set.has(pal); }
-
-function applyColorFilter(){ const host=document.getElementById('caption-list'); if(host){ host.querySelectorAll('.caption-item').forEach(div=>{ const id=div.dataset.id; const row=(window.rowCache&&rowCache.get)?rowCache.get(id):null; div.classList.toggle('is-hidden', !(row && rowPassesColorFilter(row))); }); } try{ document.dispatchEvent(new CustomEvent('pinFilterChange', { detail:{ selected: Array.from(window.__lmFilter||[]) } })); }catch(_){} }
-
-function setPinColor(hex){ window.currentPinColor=hex; const host=document.getElementById('pin-colors'); if(host){ host.querySelectorAll('.chip-color').forEach(el=> el.classList.toggle('is-active', getComputedStyle(el).getPropertyValue('--chip').trim()===hex)); } if(window.selectedPinId && window.rowCache){ const row=rowCache.get(selectedPinId)||{id:selectedPinId}; row.color=hex; rowCache.set(selectedPinId,row); try{ window.refreshPinMarkerFromRow && refreshPinMarkerFromRow(selectedPinId); }catch(_){} try{ window.updateCaptionForPin && updateCaptionForPin(selectedPinId,{ color:hex }); }catch(_){} } }
-
-function wireDetachOverlay(){ const btn=document.getElementById('detach-thumb'); if(!btn||btn.dataset.wired) return; btn.dataset.wired='1'; btn.addEventListener('click', ()=>{ if(!window.selectedPinId||!window.rowCache) return; const row=rowCache.get(selectedPinId)||{id:selectedPinId}; row.imageFileId=null; rowCache.set(selectedPinId,row); try{ updateCaptionForPin && updateCaptionForPin(selectedPinId,{ imageFileId:null }); }catch(_){} try{ const thumb=document.getElementById('currentImageThumb'); if(thumb){ thumb.classList.remove('has-image'); thumb.innerHTML='<button id="detach-thumb" class="thumb-detach" aria-label="Detach image">×</button><div class="placeholder">No Image</div>'; } }catch(_){} wireDetachOverlay(); }); }
-
-document.addEventListener('DOMContentLoaded', ()=>{ try{ renderColorChips(); renderFilterChips(); applyColorFilter(); wireDetachOverlay(); }catch(e){ console.warn('[chips init]', e); } });
-
-/* ---------------- Delete caption row ---------------- */
-function deleteCaption(id){
-  const meta = captionsIndex.get(id);
-  if(!meta || !currentSpreadsheetId || !currentSheetId){ 
-    // local only
-    captionDomById.get(id)?.remove(); captionDomById.delete(id);
-    rowCache.delete(id); removeCaptionOverlay(id); removePinMarker(id); captionsIndex.delete(id);
-    return;
-  }
-  if(!confirm('このキャプションをシートから削除します。よろしいですか？')) return;
-  const token = ensureToken();
-  const start = meta.rowIndex - 1; // 0-based, includes header row at 0
-  const body = { requests: [{ deleteDimension: { range: { sheetId: currentSheetId, dimension: 'ROWS', startIndex: start, endIndex: start+1 }}}]};
-  const url = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(currentSpreadsheetId)}:batchUpdate`;
-  fetch(url, { method:'POST', headers:{ Authorization:`Bearer ${token}`, 'Content-Type':'application/json' }, body: JSON.stringify(body)})
-    .then(r=>{ if(!r.ok) throw new Error(String(r.status)); })
-    .then(()=>{
-      captionDomById.get(id)?.remove(); captionDomById.delete(id);
-      rowCache.delete(id); removeCaptionOverlay(id); removePinMarker(id); captionsIndex.delete(id);
-      // reindex
-      return ensureIndex().then(()=> loadCaptionsFromSheet());
-    })
-    .catch(e=> console.error('[Sheets deleteDimension] failed', e));
+function renderColorChips(){
+  const host = document.getElementById('pinColorChips') || document.getElementById('pin-picker');
+  if(!host) return;
+  host.innerHTML = '';
+  LM_PALETTE.forEach(hex=>{
+    const b = document.createElement('button');
+    b.className = 'chip chip-color'; b.style.setProperty('--chip', hex); b.title = hex;
+    if (nearestPalette(window.currentPinColor) === hex) b.classList.add('is-active');
+    b.addEventListener('click', ()=> setPinColor(hex));
+    host.appendChild(b);
+  });
 }
 
-/* ---------------- Shift+Click pin add ---------------- */
-function wireShiftPick(){
-  try{
-    onCanvasShiftPick(({x,y,z})=>{
-      const id = 'pin_' + Math.random().toString(36).slice(2,10);
-      const row = { id, title:'', body:'', color: currentPinColor, x, y, z, imageFileId:'' };
-      rowCache.set(id, row);
-      addPinMarker({ id, x, y, z, color: row.color });
-      appendCaptionItem(row);
-      selectCaption(id);
-      // persist
-      updateCaptionForPin(id, row).catch(e=> console.warn('[pin add save failed]', e));
+
+
+
+function applyColorFilter(){
+  // Update right-pane list
+  const host = document.getElementById('caption-list');
+  if (host){
+    host.querySelectorAll('.caption-item').forEach(div=>{
+      const id = div.dataset.id;
+      const row = rowCache.get(id)||{};
+      const bucket = nearestPalette(row.color || LM_PALETTE[0]);
+      const visible = lmFilterSet.size===0 || lmFilterSet.has(bucket);
+      div.classList.toggle('is-hidden', !visible);
     });
-  }catch(e){ console.warn('[wireShiftPick]', e); }
+  }
+  // Notify viewer to toggle 3D pin visibility (handled in viewer.module.cdn.js)
+  try{
+    const evt = new CustomEvent('pinFilterChange', { detail: { selected: Array.from(lmFilterSet) } });
+    document.dispatchEvent(evt);
+  }catch(_){}
 }
+
+// ===== LociMyu: Color Chips & Filter (clean tail) =====
+
+window.LM_PALETTE = LM_PALETTE;
+window.currentPinColor = window.currentPinColor || LM_PALETTE[0];
+
+function lm_hexToRgb(hex){
+  const m=/^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(String(hex||"000000"));
+  return { r:parseInt((m&&m[1])||"00",16), g:parseInt((m&&m[2])||"00",16), b:parseInt((m&&m[3])||"00",16) };
+}
+function nearestPalette(hex){
+  const c = lm_hexToRgb(hex||LM_PALETTE[0]); let best=LM_PALETTE[0],score=1e9;
+  for(const p of LM_PALETTE){ const q=lm_hexToRgb(p); const d=(c.r-q.r)**2+(c.g-q.g)**2+(c.b-q.b)**2; if(d<score){ score=d; best=p; } }
+  return best;
+}
+
+let lmFilterSet=(()=>{ try{ const s=JSON.parse(localStorage.getItem('lmFilterColors')||'[]'); return new Set(s.length?s:LM_PALETTE); }catch(_){ return new Set(LM_PALETTE);} })();
+function saveFilter(){ try{ localStorage.setItem('lmFilterColors', JSON.stringify(Array.from(lmFilterSet))); }catch(_){} }
+
+function renderColorChips(){
+  const host = document.getElementById('pin-picker') || document.getElementById('pinColorChips'); if(!host) return;
+  host.innerHTML = '';
+  LM_PALETTE.forEach(hex=>{
+    const b=document.createElement('button');
+    b.className='chip chip-color'; b.style.setProperty('--chip', hex); b.title=hex;
+    if(nearestPalette(window.currentPinColor)===hex) b.classList.add('is-active');
+    b.addEventListener('click', ()=> setPinColor(hex));
+    host.appendChild(b);
+  });
+}
+
+function renderFilterChips(){
+  const host = document.getElementById('pin-filter') || document.getElementById('pinFilterChips'); if(!host) return;
+  if(!host.previousElementSibling || !host.previousElementSibling.classList || !host.previousElementSibling.classList.contains('chip-actions')){
+    const bar=document.createElement('div'); bar.className='chip-actions';
+    const a=document.createElement('button'); a.id='filterAll'; a.className='chip-action'; a.textContent='All';
+    const n=document.createElement('button'); n.id='filterNone'; n.className='chip-action'; n.textContent='None';
+    a.addEventListener('click', ()=>{ lmFilterSet=new Set(LM_PALETTE); saveFilter(); applyColorFilter(); renderFilterChips(); });
+    n.addEventListener('click', ()=>{ lmFilterSet=new Set(); saveFilter(); applyColorFilter(); renderFilterChips(); });
+    host.parentNode.insertBefore(bar, host); bar.appendChild(a); bar.appendChild(n);
+  }
+  host.innerHTML='';
+  LM_PALETTE.forEach(hex=>{
+    const b=document.createElement('button');
+    b.className='chip chip-filter'; b.style.setProperty('--chip', hex); b.title=`filter ${hex}`;
+    const mark=document.createElement('span'); mark.className='mark'; mark.textContent='✓'; b.appendChild(mark);
+    if(lmFilterSet.has(hex)) b.classList.add('is-on');
+    b.addEventListener('click', ()=>{ if(lmFilterSet.has(hex)) lmFilterSet.delete(hex); else lmFilterSet.add(hex); saveFilter(); applyColorFilter(); renderFilterChips(); });
+    host.appendChild(b);
+  });
+}
+
+function rowPassesColorFilter(row){
+  if(!row) return false; if(lmFilterSet.size===0) return true;
+  return lmFilterSet.has(nearestPalette(row.color||LM_PALETTE[0]));
+}
+
+function applyColorFilter(){
+  const listHost=document.getElementById('caption-list');
+  if(listHost){
+    listHost.querySelectorAll('.caption-item').forEach(div=>{
+      const id=div.dataset.id; const row=(window.rowCache && rowCache.get)? rowCache.get(id):null;
+      const ok=rowPassesColorFilter(row||{});
+      div.classList.toggle('is-hidden', !ok);
+    });
+  }
+  try{ document.dispatchEvent(new CustomEvent('pinFilterChange',{ detail:{ selected:Array.from(lmFilterSet) } })); }catch(_){}
+}
+
+function setPinColor(hex){
+  window.currentPinColor=hex;
+  const host=document.getElementById('pin-picker')||document.getElementById('pinColorChips');
+  if(host){ host.querySelectorAll('.chip-color').forEach(el=> el.classList.toggle('is-active', getComputedStyle(el).getPropertyValue('--chip').trim()===hex)); }
+  if(window.selectedPinId && window.rowCache){
+    const row=rowCache.get(selectedPinId)||{id:selectedPinId};
+    row.color=hex; rowCache.set(selectedPinId,row);
+    try{ window.refreshPinMarkerFromRow && refreshPinMarkerFromRow(selectedPinId); }catch(_){}
+    try{ window.updateCaptionForPin && updateCaptionForPin(selectedPinId,{ color:hex }); }catch(_){}
+  }
+}
+
+renderFilterChips(); applyColorFilter(); }catch(e){ console.warn('[chips init]', e); }
+});
+// ===== end chips/filter tail =====
+
+function wireDetachInline(){
+  const btn=document.getElementById('btnDetachInline');
+  if(!btn || btn.dataset.wired) return;
+  btn.dataset.wired='1';
+  btn.addEventListener('click', ()=>{
+    if(!window.selectedPinId||!window.rowCache) return;
+    const row=rowCache.get(selectedPinId)||{id:selectedPinId};
+    row.imageFileId=null; rowCache.set(selectedPinId,row);
+    try{ updateCaptionForPin && updateCaptionForPin(selectedPinId,{ imageFileId:null }); }catch(_){}
+    try{
+      const thumb=document.getElementById('currentImageThumb');
+      if(thumb){ thumb.classList.remove('has-image'); const ph=thumb.querySelector('.placeholder'); if(ph) ph.style.display=''; const img=thumb.querySelector('img'); if(img) img.remove(); }
+    }catch(_){}
+  });
+}
+
+function wireDetachOverlay(){
+  const btn=document.getElementById('detach-thumb');
+  if(!btn || btn.dataset.wired) return;
+  btn.dataset.wired='1';
+  btn.addEventListener('click', ()=>{
+    if(!window.selectedPinId||!window.rowCache) return;
+    const row=rowCache.get(selectedPinId)||{id:selectedPinId};
+    row.imageFileId=null; rowCache.set(selectedPinId,row);
+    try{ updateCaptionForPin && updateCaptionForPin(selectedPinId,{ imageFileId:null }); }catch(_){}
+    try{
+      const thumb=document.getElementById('currentImageThumb');
+      if(thumb){ thumb.classList.remove('has-image'); const ph=thumb.querySelector('.placeholder'); if(ph) ph.style.display=''; const img=thumb.querySelector('img'); if(img) img.remove(); }
+    }catch(_){}
+  });
+}
+
+document.addEventListener('DOMContentLoaded', ()=>{
+  try{
+    renderColorChips(); renderFilterChips(); applyColorFilter();
+    wireDetachInline(); wireDetachOverlay();
+  }catch(e){ console.warn('[init]', e); }
+});
