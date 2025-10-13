@@ -60,13 +60,6 @@
           <select id="save-target-sheet"><option value="">Select sheet…</option></select>
           <button id="save-target-create">Create</button>
         </div>
-        <div class="row" style="margin-top:6px">
-          <input id="rename-input" type="text" placeholder="Rename sheet to…" />
-          <button id="save-target-rename">Rename</button>
-        </div>
-        <div class="row" style="margin-top:6px">
-          <button id="save-target-delete" style="background:#dc2626;border-color:#7f1d1d">Delete sheet</button>
-        </div>
       </div>
 
       <nav class="tabs" role="tablist">
@@ -85,9 +78,29 @@
           <div id="pin-filter" class="chips"></div>
         </div>
 
-        <!-- ▼ 配置入替：先に Caption list、その下に Title/Body -->
+        <!-- ▼ 配置入替：先に Caption list
+        <div class="row" id="pin-color-filter-row" style="margin:6px 0 10px 0; gap:8px;">
+          <label style="font-size:12px; color:#a3a3a3;">Pin color</label>
+          <input type="color" id="pinColor" value="#ff6b6b" style="width:36px;height:24px;padding:0;border:none;background:transparent" />
+          <label style="margin-left:10px;font-size:12px; color:#a3a3a3;">Filter</label>
+          <select id="pinFilterMode">
+            <option value="all">All</option>
+            <option value="selected">Selected</option>
+            <option value="color">Color</option>
+          </select>
+        </div>、その下に Title/Body -->
         <div class="grp">
-          <div class="hint">Caption list</div>
+          <div class="hint">Caption list
+        <div class="row" id="pin-color-filter-row" style="margin:6px 0 10px 0; gap:8px;">
+          <label style="font-size:12px; color:#a3a3a3;">Pin color</label>
+          <input type="color" id="pinColor" value="#ff6b6b" style="width:36px;height:24px;padding:0;border:none;background:transparent" />
+          <label style="margin-left:10px;font-size:12px; color:#a3a3a3;">Filter</label>
+          <select id="pinFilterMode">
+            <option value="all">All</option>
+            <option value="selected">Selected</option>
+            <option value="color">Color</option>
+          </select>
+        </div></div>
           <div id="caption-list"></div>
         </div>
 
@@ -101,7 +114,6 @@
         <div class="grp">
           <div class="row" id="caption-image-row">
             <div id="currentImageThumb" aria-label="attached image preview"><div class="placeholder">No Image</div></div>
-            <a id="openOriginalLink" class="open-original side" href="#" target="_blank" rel="noopener" style="display:none">Open original</a>
             <div class="buttons" style="display:flex; gap:8px;">
 </div>
           </div>

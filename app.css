@@ -138,7 +138,8 @@ body{
 .canvas-float, .noninteractive { pointer-events:none; }
 .canvas-float .interactive { pointer-events:auto; }
 
-/* Open original link (side of preview) */
+#pin-color-filter-row select{ height:26px; background:#0f172a; color:#e5e7eb; border:1px solid #334155; border-radius:8px; padding:2px 8px; }
+#pin-color-filter-row label{ user-select:none; }
 .open-original.side{
   background:#0f172a; color:#e5e7eb; border:1px solid #334155;
   padding:6px 10px; border-radius:8px; text-decoration:none; font-size:12px;

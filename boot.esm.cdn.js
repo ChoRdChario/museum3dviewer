@@ -742,7 +742,7 @@ if(sheetSel){
     const opt = sel && sel.selectedOptions && sel.selectedOptions[0];
     currentSheetId = (opt && opt.value) ? Number(opt.value) : null;
     currentSheetTitle = (opt && opt.dataset && opt.dataset.title) ? opt.dataset.title : null;
-    removeAllOverlays(); selectedPinId=null; clearPins(); loadCaptionsFromSheet();
+    loadCaptionsFromSheet();
   });
 }
 const btnCreate = $('save-target-create');
@@ -902,31 +902,90 @@ function initShiftPickOnce(){
 document.addEventListener('DOMContentLoaded', ()=>{ try{ initShiftPickOnce(); }catch(e){} });
 
 
-function removeAllOverlays(){
-  try{ overlays.forEach((_, id)=> removeCaptionOverlay(id)); }catch(_){}
-  overlays.clear && overlays.clear();
+function wirePinColorAndFilter(){
+  const color = document.getElementById('pinColor');
+  const filter = document.getElementById('pinFilterMode');
+  if(color && !color.dataset.wired){
+    color.dataset.wired='1';
+    color.addEventListener('input', ()=>{
+      window.currentPinColor = color.value;
+      if(selectedPinId){
+        const row = rowCache.get(selectedPinId) || { id:selectedPinId };
+        row.color = window.currentPinColor;
+        rowCache.set(selectedPinId, row);
+        try{ refreshPinMarkerFromRow && refreshPinMarkerFromRow(selectedPinId); }catch(_){}
+        updateCaptionForPin(selectedPinId, { color: row.color }).catch(e=>console.warn('[color save]', e));
+      }
+    });
+  }
+  if(filter && !filter.dataset.wired){
+    filter.dataset.wired='1';
+    filter.addEventListener('change', ()=> applyPinFilter(filter.value));
+  }
+}
+document.addEventListener('DOMContentLoaded', ()=>{ try{ wirePinColorAndFilter(); }catch(e){} });
+
+function applyPinFilter(mode){
+  document.querySelectorAll('.caption-item').forEach(it=> it.classList.remove('is-hidden'));
+  if(mode === 'selected' && selectedPinId){
+    document.querySelectorAll('.caption-item').forEach(it=>{ if(it.dataset.id !== selectedPinId) it.classList.add('is-hidden'); });
+  }else if(mode === 'color' && window.currentPinColor){
+    document.querySelectorAll('.caption-item').forEach(it=>{
+      const id = it.dataset.id; const row = rowCache.get(id);
+      if(!row || String(row.color||'').toLowerCase() !== String(window.currentPinColor).toLowerCase()) it.classList.add('is-hidden');
+    });
+  }
+  try{ rebuildAllPins && rebuildAllPins(); }catch(_){}
 }
 
-function deleteCaption(id){
-  const meta = captionsIndex.get(id);
-  const token = getAccessToken();
-  if(!id || !meta || !currentSpreadsheetId || !currentSheetTitle || !token){
-    // fallback: local remove
-    rowCache.delete(id); captionsIndex.delete(id);
-    const el = captionDomById.get(id); if(el) el.remove(); captionDomById.delete(id);
-    removeCaptionOverlay(id); removePinMarker(id);
-    if(selectedPinId === id){ selectedPinId = null; }
-    return Promise.resolve();
-  }
-  const url = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(currentSpreadsheetId)}:batchUpdate`;
-  const req = { requests: [{ deleteDimension: { range: { sheetId: currentSheetId, dimension: "ROWS", startIndex: (meta.rowIndex-1), endIndex: meta.rowIndex } } }] };
-  return fetch(url, { method:'POST', headers:{ Authorization:'Bearer '+token, 'Content-Type':'application/json' }, body: JSON.stringify(req) })
-    .then(r=>{ if(!r.ok) throw new Error('delete row '+r.status); })
-    .then(()=>{
-      rowCache.delete(id); captionsIndex.delete(id);
-      const el = captionDomById.get(id); if(el) el.remove(); captionDomById.delete(id);
-      removeCaptionOverlay(id); removePinMarker(id);
-      if(selectedPinId === id){ selectedPinId = null; }
-      return ensureIndex();
-    });
+function sheetsDeleteSheet(spreadsheetId, sheetId, token){
+  const url = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}:batchUpdate`;
+  const body = { requests: [{ deleteSheet: { sheetId: Number(sheetId) } }] };
+  return fetch(url, { method:'POST', headers:{ Authorization:'Bearer '+token, 'Content-Type':'application/json' }, body: JSON.stringify(body) })
+    .then(r=>{ if(!r.ok) throw new Error('deleteSheet failed: '+r.status); return r.json(); });
 }
+
+function wireSheetMgmtUI(){
+  const sel = document.getElementById('save-target-sheet');
+  const bDelete = document.getElementById('save-target-delete');
+  const bRename = document.getElementById('save-target-rename');
+  const inp     = document.getElementById('rename-input');
+  if(bDelete && !bDelete.dataset.wired){
+    bDelete.dataset.wired='1';
+    bDelete.addEventListener('click', ()=>{
+      if(!currentSpreadsheetId){ alert('No spreadsheet selected.'); return; }
+      const sheetId = sel?.value; if(!sheetId){ alert('Select a sheet tab to delete.'); return; }
+      if(!confirm('Delete this SHEET (tab)?')) return;
+      const t = getAccessToken();
+      bDelete.disabled = true;
+      sheetsDeleteSheet(currentSpreadsheetId, sheetId, t).then(()=>{
+        sel.querySelector(`option[value="${sheetId}"]`)?.remove();
+        sel.value='';
+        try{ removeAllOverlays && removeAllOverlays(); selectedPinId=null; clearPins && clearPins(); }catch(_){}
+        try{ loadCaptionsFromSheet && loadCaptionsFromSheet(); }catch(_){}
+        alert('Sheet deleted.');
+      }).catch(e=>{ console.warn('[deleteSheet]', e); alert('Delete sheet failed: '+e); }).finally(()=> bDelete.disabled=false);
+    });
+  }
+  if(bRename && !bRename.dataset.wired){
+    bRename.dataset.wired='1';
+    bRename.addEventListener('click', ()=>{
+      if(!currentSpreadsheetId){ alert('No spreadsheet selected.'); return; }
+      const name = (inp?.value||'').trim(); if(!name){ alert('Enter new title.'); return; }
+      const t = getAccessToken();
+      fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(currentSpreadsheetId)}`, {
+        method:'PATCH', headers:{ Authorization:'Bearer '+t, 'Content-Type':'application/json' }, body: JSON.stringify({ name })
+      }).then(r=>{ if(!r.ok) throw new Error('rename failed: '+r.status); return r.json(); })
+        .then(()=> alert('Renamed.'))
+        .catch(e=>{ console.warn('[rename]', e); alert('Rename failed: '+e); });
+    });
+  }
+  if(sel && !sel.dataset.wired){
+    sel.dataset.wired='1';
+    sel.addEventListener('change', ()=>{
+      try{ removeAllOverlays && removeAllOverlays(); selectedPinId=null; clearPins && clearPins(); }catch(_){}
+      try{ loadCaptionsFromSheet && loadCaptionsFromSheet(); }catch(_){}
+    });
+  }
+}
+document.addEventListener('DOMContentLoaded', ()=>{ try{ wireSheetMgmtUI(); }catch(e){} });
