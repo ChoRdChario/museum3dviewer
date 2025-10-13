@@ -1,3 +1,5 @@
+window.currentPinColor = window.currentPinColor || (window.LM_PALETTE && window.LM_PALETTE[0]) || '#ef9368';
+window.LM_PALETTE = window.LM_PALETTE || ["#ef9368","#e9df5d","#a8e063","#8bb6ff","#b38bff","#86d2c4","#d58cc1","#9aa1a6"]; 
 // boot.esm.cdn.js — LociMyu boot (A–E features restored)
 // ESM build. Do not import ensureFreshToken.
 import {
@@ -8,7 +10,7 @@ import { setupAuth, getAccessToken, getLastAuthError } from './gauth.module.js';
 
 /* ---------------- small helpers ---------------- */
 const $ = (id)=>document.getElementById(id);
-const setEnabled = (on, ...els)=> els.forEach(el=>{ if(el) el.disabled = !on; });
+const setEnabled = (on, els)=> els.forEach(el=>{ if(el) el.disabled = !on; });
 const textOrEmpty = (v)=> v==null ? '' : String(v);
 const clamp = (n,min,max)=> Math.min(Math.max(n,min),max);
 
@@ -768,3 +770,21 @@ if(btnRename){
 }
 
 console.log('[LociMyu ESM/CDN] boot overlay-edit+fixed-zoom build loaded (A–E)');
+
+function lm_hexToRgb(hex){ const m=/^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(String(hex||"000000")); return { r:parseInt((m&&m[1])||"00",16), g:parseInt((m&&m[2])||"00",16), b:parseInt((m&&m[3])||"00",16) }; }
+
+function nearestPalette(hex){ const p=window.LM_PALETTE||[]; const c=lm_hexToRgb(hex||p[0]); let best=p[0],score=1e9; for(const q of p){ const t=lm_hexToRgb(q); const d=(c.r-t.r)**2+(c.g-t.g)**2+(c.b-t.b)**2; if(d<score){score=d;best=q;} } return best; }
+
+function renderColorChips(){ const host=document.getElementById('pin-colors'); if(!host) return; host.innerHTML=''; (window.LM_PALETTE||[]).forEach(hex=>{ const b=document.createElement('button'); b.className='chip chip-color'; b.style.setProperty('--chip', hex); b.title=hex; if(nearestPalette(window.currentPinColor)===hex) b.classList.add('is-active'); b.addEventListener('click', ()=> setPinColor(hex)); host.appendChild(b); }); }
+
+function renderFilterChips(){ const host=document.getElementById('pin-filter'); if(!host) return; host.innerHTML=''; if(!window.__lmFilter){ try{ const saved=JSON.parse(localStorage.getItem('lmFilterColors')||'[]'); window.__lmFilter=new Set(saved.length?saved:(window.LM_PALETTE||[])); }catch{ window.__lmFilter=new Set(window.LM_PALETTE||[]);} } (window.LM_PALETTE||[]).forEach(hex=>{ const b=document.createElement('button'); b.className='chip chip-filter'; b.style.setProperty('--chip', hex); const mark=document.createElement('span'); mark.className='mark'; mark.textContent='✓'; b.appendChild(mark); if(window.__lmFilter.has(hex)) b.classList.add('is-on'); b.addEventListener('click', ()=>{ if(window.__lmFilter.has(hex)) window.__lmFilter.delete(hex); else window.__lmFilter.add(hex); localStorage.setItem('lmFilterColors', JSON.stringify([window.__lmFilter])); applyColorFilter(); renderFilterChips(); }); host.appendChild(b); }); }
+
+function rowPassesColorFilter(row){ const set=window.__lmFilter; if(!set||set.size===0) return true; const pal=nearestPalette(row && row.color ? row.color : (window.LM_PALETTE?window.LM_PALETTE[0]:'#ef9368')); return set.has(pal); }
+
+function applyColorFilter(){ const host=document.getElementById('caption-list'); if(host){ host.querySelectorAll('.caption-item').forEach(div=>{ const id=div.dataset.id; const row=(window.rowCache&&rowCache.get)?rowCache.get(id):null; div.classList.toggle('is-hidden', !(row && rowPassesColorFilter(row))); }); } try{ document.dispatchEvent(new CustomEvent('pinFilterChange', { detail:{ selected: Array.from(window.__lmFilter||[]) } })); }catch(_){} }
+
+function setPinColor(hex){ window.currentPinColor=hex; const host=document.getElementById('pin-colors'); if(host){ host.querySelectorAll('.chip-color').forEach(el=> el.classList.toggle('is-active', getComputedStyle(el).getPropertyValue('--chip').trim()===hex)); } if(window.selectedPinId && window.rowCache){ const row=rowCache.get(selectedPinId)||{id:selectedPinId}; row.color=hex; rowCache.set(selectedPinId,row); try{ window.refreshPinMarkerFromRow && refreshPinMarkerFromRow(selectedPinId); }catch(_){} try{ window.updateCaptionForPin && updateCaptionForPin(selectedPinId,{ color:hex }); }catch(_){} } }
+
+function wireDetachOverlay(){ const btn=document.getElementById('detach-thumb'); if(!btn||btn.dataset.wired) return; btn.dataset.wired='1'; btn.addEventListener('click', ()=>{ if(!window.selectedPinId||!window.rowCache) return; const row=rowCache.get(selectedPinId)||{id:selectedPinId}; row.imageFileId=null; rowCache.set(selectedPinId,row); try{ updateCaptionForPin && updateCaptionForPin(selectedPinId,{ imageFileId:null }); }catch(_){} try{ const thumb=document.getElementById('currentImageThumb'); if(thumb){ thumb.classList.remove('has-image'); thumb.innerHTML='<button id="detach-thumb" class="thumb-detach" aria-label="Detach image">×</button><div class="placeholder">No Image</div>'; } }catch(_){} wireDetachOverlay(); }); }
+
+document.addEventListener('DOMContentLoaded', ()=>{ try{ renderColorChips(); renderFilterChips(); applyColorFilter(); wireDetachOverlay(); }catch(e){ console.warn('[chips init]', e); } });
