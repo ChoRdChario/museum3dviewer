@@ -89,7 +89,9 @@
           <input id="caption-title" placeholder="Title" />
           <input id="caption-body" placeholder="Body" />
           <div class="row" style="margin-top:6px">
-</div>
+            <button id="pin-add">+ Pin</button>
+            <button id="pin-clear">Clear</button>
+          </div>
         </div>
         <div class="grp">
           <div class="row" id="caption-image-row">
@@ -145,7 +147,7 @@
     }));
   </script>
 
-  <!-- importmap removed to avoid duplicate three.js -->
+  <script type="importmap">{"imports":{"three":"https://unpkg.com/three@0.159.0/build/three.module.js","three/examples/jsm/":"https://unpkg.com/three@0.159.0/examples/jsm/"}}</script>
 
   <script type="module" src="./boot.esm.cdn.js"></script>
 

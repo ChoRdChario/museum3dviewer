@@ -175,6 +175,9 @@ function createCaptionOverlay(id, data){
   });
   ctrl.append(bZoomOut,bZoomIn,bClose);
   root.appendChild(ctrl);
+  // close overlay
+  if (bClose) bClose.addEventListener('click', (e)=>{ e.stopPropagation(); try{ removeCaptionOverlay(id); }catch(_){ console.warn('close failed'); } });
+
 
   // drag handle under the controls
   const topbar = document.createElement('div');
@@ -569,8 +572,8 @@ function loadCaptionsFromSheet(){
 
 /* ---------------- Right-pane images grid (attach on click) ---------------- */
 (function wireImagesGrid(){
-  if(document.getElementById('images-grid')?.dataset?.wired==='1') return;
-  if(document.getElementById('images-grid')) document.getElementById('images-grid').dataset.wired='1';
+  const grid = $('images-grid'); if(!grid) return;
+  if(grid.dataset.wired==='1') return; grid.dataset.wired='1';
   const grid = $('images-grid'); if(!grid) return;
   grid.addEventListener('click', (e)=>{
     const cell = e.target.closest('.thumb'); if(!cell) return;
@@ -771,80 +774,17 @@ if(btnRename){
 
 console.log('[LociMyu ESM/CDN] boot overlay-edit+fixed-zoom build loaded (A–E)');
 
-// --- toast feedback ---
-function showSaveToast(msg){
-  let t = document.getElementById('lm-save-toast');
-  if(!t){
-    t = document.createElement('div');
-    t.id = 'lm-save-toast';
-    t.className = 'save-toast';
-    document.body.appendChild(t);
-  }
-  t.textContent = msg || 'Saved';
-  t.classList.add('show');
-  clearTimeout(t._tm);
-  t._tm = setTimeout(()=> t.classList.remove('show'), 1200);
-}
-
-function wireCaptionInputs(){
-  const t = document.getElementById('caption-title');
-  const b = document.getElementById('caption-body');
-  let timer = null;
-  const onEdit = ()=>{
-    if(!selectedPinId) return;
-    const row = rowCache.get(selectedPinId) || { id: selectedPinId };
-    row.title = t ? (t.value||'') : '';
-    row.body  = b ? (b.value||'') : '';
-    rowCache.set(selectedPinId, row);
-    reflectRowToUI(selectedPinId); // immediate reflect
-    if(timer) clearTimeout(timer);
-    timer = setTimeout(()=>{
-      updateCaptionForPin(selectedPinId, { title: row.title, body: row.body })
-        .then(()=> showSaveToast('Saved'))
-        .catch(e=> console.warn('[autosave fail]', e));
-    }, 500);
-  };
-  if(t) t.addEventListener('input', onEdit);
-  if(b) b.addEventListener('input', onEdit);
-}
-document.addEventListener('DOMContentLoaded', ()=>{ try{ wireCaptionInputs(); }catch(e){} });
-
-function markActiveThumb(fileId){
-  document.querySelectorAll('#images-grid .thumb').forEach(el=> el.classList.remove('is-active'));
-  if(!fileId) return;
-  const el = document.querySelector(`#images-grid .thumb[data-file-id="${CSS.escape(fileId)}"]`);
-  if(el) el.classList.add('is-active');
-}
-
-function renderImageThumb(file){
-  const d = document.createElement('div');
-  d.className = 'thumb';
-  d.dataset.fileId = file.id;
-  const img = document.createElement('img');
-  img.src = file.thumbUrl; img.alt = file.name||'';
-  d.appendChild(img);
-  const bx = document.createElement('div'); bx.className='btn-x'; bx.textContent='×'; bx.title='Detach';
-  bx.addEventListener('click', (e)=>{
-    e.stopPropagation();
-    if(!selectedPinId) return;
-    updateCaptionForPin(selectedPinId, { imageFileId: '' })
-      .then(()=>{ markActiveThumb(null); showSaveToast('Detached'); })
-      .catch(e=> console.warn('[detach image failed]', e));
+function dedupeImagesGrid(){
+  const grid = document.getElementById('images-grid'); if(!grid) return;
+  const seen = new Set();
+  [...grid.querySelectorAll('.thumb')].forEach(el=>{
+    const id = el.dataset.fileId || '';
+    if(seen.has(id)) el.remove(); else seen.add(id);
   });
-  d.appendChild(bx);
-  d.addEventListener('click', ()=>{
-    if(!selectedPinId) return;
-    updateCaptionForPin(selectedPinId, { imageFileId: file.id })
-      .then(()=>{ markActiveThumb(file.id); showSaveToast('Updated'); })
-      .catch(e=> console.warn('[attach image failed]', e));
-  });
-  return d;
 }
-
-function populateImagesGrid(files, currentId){
-  const grid = document.getElementById('images-grid');
-  if(!grid) return;
-  grid.innerHTML = '';
-  files.forEach(f=> grid.appendChild(renderImageThumb(f)));
-  markActiveThumb(currentId||'');
-}
+(function observeImagesGrid(){
+  const grid = document.getElementById('images-grid'); if(!grid) return;
+  const mo = new MutationObserver(()=> dedupeImagesGrid());
+  mo.observe(grid, { childList:true, subtree:false });
+  dedupeImagesGrid();
+})();
