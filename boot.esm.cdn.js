@@ -1,3 +1,24 @@
+if (typeof window.lm_hexToRgb !== 'function') {
+  window.lm_hexToRgb = function lm_hexToRgb(hex){
+    const m=/^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(String(hex||"000000"));
+    return { r:parseInt((m&&m[1])||"00",16), g:parseInt((m&&m[2])||"00",16), b:parseInt((m&&m[3])||"00",16) };
+  };
+}
+if (typeof window.nearestPalette !== 'function') {
+  window.nearestPalette = function nearestPalette(hex){
+    const P = window.LM_PALETTE||[];
+    const base = (P && P.length ? P[0] : "#ef9368");
+    const c = window.lm_hexToRgb(hex||base);
+    let best = base, score = 1e9;
+    for (const p of P){
+      const q = window.lm_hexToRgb(p);
+      const d = (c.r-q.r)**2 + (c.g-q.g)**2 + (c.b-q.b)**2;
+      if (d < score) { score = d; best = p; }
+    }
+    return best;
+  };
+}
+window.LM_PALETTE = window.LM_PALETTE || ["#ef9368","#e9df5d","#a8e063","#8bb6ff","#b38bff","#86d2c4","#d58cc1","#9aa1a6"];
 // boot.esm.cdn.js — LociMyu boot (A–E features restored)
 // ESM build. Do not import ensureFreshToken.
 import {
@@ -769,7 +790,6 @@ if(btnRename){
 
 console.log('[LociMyu ESM/CDN] boot overlay-edit+fixed-zoom build loaded (A–E)');
 
-const LM_PALETTE = ["#ef9368","#e9df5d","#a8e063","#8bb6ff","#b38bff","#86d2c4","#d58cc1","#9aa1a6"];
 window.currentPinColor = window.currentPinColor || LM_PALETTE[0];
 let lmFilterSet = new Set(JSON.parse(localStorage.getItem('lmFilterColors')||'[]')); if(lmFilterSet.size===0) lmFilterSet=new Set(LM_PALETTE);
 function saveFilter(){ localStorage.setItem('lmFilterColors', JSON.stringify([...lmFilterSet])); }
