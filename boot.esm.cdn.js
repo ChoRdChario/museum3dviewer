@@ -788,3 +788,69 @@ function dedupeImagesGrid(){
   mo.observe(grid, { childList:true, subtree:false });
   dedupeImagesGrid();
 })();
+
+function markActiveThumb(fileId){
+  document.querySelectorAll('#images-grid .thumb').forEach(el=> el.classList.remove('is-active'));
+  if(!fileId) return;
+  const el = document.querySelector(`#images-grid .thumb[data-file-id="${CSS.escape(fileId)}"]`);
+  if(el) el.classList.add('is-active');
+}
+
+function driveViewUrl(fileId){ return `https://drive.google.com/file/d/${fileId}/view`; }
+function driveThumbUrl(fileId){ return `https://drive.google.com/thumbnail?id=${fileId}`; }
+
+function renderImageThumb(file){
+  // file: {id, thumbUrl?, name}
+  const d = document.createElement('div');
+  d.className = 'thumb';
+  d.dataset.fileId = file.id;
+  const img = document.createElement('img');
+  img.src = file.thumbUrl || driveThumbUrl(file.id);
+  img.alt = file.name || '';
+  d.appendChild(img);
+  const bx = document.createElement('div');
+  bx.className='btn-x'; bx.textContent='×'; bx.title='Detach';
+  bx.addEventListener('click', (e)=>{
+    e.stopPropagation();
+    if(!selectedPinId) return;
+    updateCaptionForPin(selectedPinId, { imageFileId: '' }).then(()=>{
+      markActiveThumb(null);
+      renderCurrentImage(null);
+    }).catch(e=> console.warn('[detach failed]', e));
+  });
+  d.appendChild(bx);
+  d.addEventListener('click', ()=>{
+    if(!selectedPinId) return;
+    updateCaptionForPin(selectedPinId, { imageFileId: file.id }).then(()=>{
+      markActiveThumb(file.id);
+      renderCurrentImage({ id:file.id, thumbUrl: img.src, name:file.name||'' });
+    }).catch(e=> console.warn('[attach failed]', e));
+  });
+  return d;
+}
+
+function populateImagesGrid(files, currentId){
+  const grid = document.getElementById('images-grid'); if(!grid) return;
+  grid.innerHTML = '';
+  (files||[]).forEach(f=> grid.appendChild(renderImageThumb(f)));
+  markActiveThumb(currentId||'');
+}
+
+function renderCurrentImage(file){
+  const holder = document.getElementById('currentImageThumb'); if(!holder) return;
+  holder.innerHTML = '';
+  const wrap = document.createElement('div'); wrap.className='wrap'; holder.appendChild(wrap);
+  if(!file || !file.id){
+    const ph = document.createElement('div'); ph.style.padding='24px'; ph.style.color='#94a3b8'; ph.textContent='No image';
+    wrap.appendChild(ph);
+    return;
+  }
+  const img = document.createElement('img');
+  img.src = file.thumbUrl || driveThumbUrl(file.id);
+  img.alt = file.name||'';
+  wrap.appendChild(img);
+  const a = document.createElement('a');
+  a.className = 'open-original'; a.href = driveViewUrl(file.id); a.target = '_blank'; a.rel='noopener';
+  a.textContent = 'Open original';
+  wrap.appendChild(a);
+}
