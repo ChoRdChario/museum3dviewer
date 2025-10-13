@@ -793,42 +793,25 @@ function renderColorChips(){
 
 
 
-function applyColorFilter(){
-  // Update right-pane list
-  const host = document.getElementById('caption-list');
-  if (host){
-    host.querySelectorAll('.caption-item').forEach(div=>{
-      const id = div.dataset.id;
-      const row = rowCache.get(id)||{};
-      const bucket = nearestPalette(row.color || LM_PALETTE[0]);
-      const visible = lmFilterSet.size===0 || lmFilterSet.has(bucket);
-      div.classList.toggle('is-hidden', !visible);
-    });
-  }
-  // Notify viewer to toggle 3D pin visibility (handled in viewer.module.cdn.js)
-  try{
-    const evt = new CustomEvent('pinFilterChange', { detail: { selected: Array.from(lmFilterSet) } });
-    document.dispatchEvent(evt);
-  }catch(_){}
-}
+
 function renderFilterChips(){
   const host = document.getElementById('pinFilterChips') || document.getElementById('pin-filter');
   if(!host) return;
   host.innerHTML = '';
-  // Insert All/None bar if missing
+  // ensure All/None control exists just above the host
   if(!host.previousElementSibling || !host.previousElementSibling.classList || !host.previousElementSibling.classList.contains('chip-actions')){
     const bar = document.createElement('div'); bar.className='chip-actions';
     const a = document.createElement('button'); a.id='filterAll'; a.className='chip-action'; a.textContent='All';
     const n = document.createElement('button'); n.id='filterNone'; n.className='chip-action'; n.textContent='None';
-    a.addEventListener('click', ()=>{ lmFilterSet=new Set(LM_PALETTE); saveFilter(); applyColorFilter(); renderFilterChips(); });
-    n.addEventListener('click', ()=>{ lmFilterSet=new Set(); saveFilter(); applyColorFilter(); renderFilterChips(); });
+    a.addEventListener('click', ()=>{ lmFilterSet = new Set(LM_PALETTE); saveFilter(); applyColorFilter(); renderFilterChips(); });
+    n.addEventListener('click', ()=>{ lmFilterSet = new Set(); saveFilter(); applyColorFilter(); renderFilterChips(); });
     host.parentNode.insertBefore(bar, host);
     bar.appendChild(a); bar.appendChild(n);
   }
   LM_PALETTE.forEach(hex=>{
-    const b=document.createElement('button');
-    b.className='chip chip-filter'; b.style.setProperty('--chip', hex); b.title=`filter ${hex}`;
-    const mark=document.createElement('span'); mark.className='mark'; mark.textContent='✓'; b.appendChild(mark);
+    const b = document.createElement('button');
+    b.className = 'chip chip-filter'; b.style.setProperty('--chip', hex); b.title = `filter ${hex}`;
+    const mark = document.createElement('span'); mark.className = 'mark'; mark.textContent = '✓'; b.appendChild(mark);
     if(lmFilterSet.has(hex)) b.classList.add('is-on');
     b.addEventListener('click', ()=>{
       if(lmFilterSet.has(hex)) lmFilterSet.delete(hex); else lmFilterSet.add(hex);
@@ -852,14 +835,10 @@ function renderFilterChips(){
 
 
 
-function rowPassesColorFilter(row){
-  if(lmFilterSet.size===0) return true;
-  const bucket = nearestPalette(row?.color || LM_PALETTE[0]);
-  return lmFilterSet.has(bucket);
-}
 
 
-document.addEventListener('DOMContentLoaded', ()=>{ try{ renderColorChips(); renderFilterChips(); applyColorFilter(); }catch(e){} });
+
+renderFilterChips(); applyColorFilter(); }catch(e){} });
 
 function setPinColor(hex){
   window.currentPinColor = hex;
@@ -872,3 +851,35 @@ function setPinColor(hex){
     try{ updateCaptionForPin(selectedPinId,{ color: hex }); }catch(e){ console.warn('[color save]', e); }
   }
 }
+
+function rowPassesColorFilter(row){
+  if(lmFilterSet.size===0) return true;
+  const bucket = nearestPalette((row && row.color) ? row.color : LM_PALETTE[0]);
+  return lmFilterSet.has(bucket);
+}
+
+function applyColorFilter(){
+  // List filtering
+  const host = document.getElementById('caption-list');
+  if (host){
+    host.querySelectorAll('.caption-item').forEach(div=>{
+      const id = div.dataset.id;
+      const row = rowCache.get(id)||{};
+      const ok = rowPassesColorFilter(row);
+      div.classList.toggle('is-hidden', !ok);
+    });
+  }
+  // 3D filtering: let viewer hide unmatched pins through a custom event
+  try{
+    const evt = new CustomEvent('pinFilterChange', { detail: { selected: Array.from(lmFilterSet) } });
+    document.dispatchEvent(evt);
+  }catch(_){}
+}
+
+document.addEventListener('DOMContentLoaded', ()=>{
+  try{
+    if (typeof renderColorChips === 'function') renderColorChips();
+    if (typeof renderFilterChips === 'function') renderFilterChips();
+    if (typeof applyColorFilter === 'function') applyColorFilter();
+  }catch(e){ console.warn('[init chips]', e); }
+});
