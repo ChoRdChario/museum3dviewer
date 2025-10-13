@@ -798,7 +798,6 @@ function renderFilterChips(){
   const host = document.getElementById('pinFilterChips') || document.getElementById('pin-filter');
   if(!host) return;
   host.innerHTML = '';
-  // ensure All/None control exists just above the host
   if(!host.previousElementSibling || !host.previousElementSibling.classList || !host.previousElementSibling.classList.contains('chip-actions')){
     const bar = document.createElement('div'); bar.className='chip-actions';
     const a = document.createElement('button'); a.id='filterAll'; a.className='chip-action'; a.textContent='All';
@@ -808,37 +807,6 @@ function renderFilterChips(){
     host.parentNode.insertBefore(bar, host);
     bar.appendChild(a); bar.appendChild(n);
   }
-  LM_PALETTE.forEach(hex=>{
-    const b = document.createElement('button');
-    b.className = 'chip chip-filter'; b.style.setProperty('--chip', hex); b.title = `filter ${hex}`;
-    const mark = document.createElement('span'); mark.className = 'mark'; mark.textContent = '✓'; b.appendChild(mark);
-    if(lmFilterSet.has(hex)) b.classList.add('is-on');
-    b.addEventListener('click', ()=>{
-      if(lmFilterSet.has(hex)) lmFilterSet.delete(hex); else lmFilterSet.add(hex);
-      saveFilter(); applyColorFilter(); renderFilterChips();
-    });
-    host.appendChild(b);
-  });
-}
-  LM_PALETTE.forEach(hex=>{
-    const b = document.createElement('button');
-    b.className = 'chip chip-filter'; b.style.setProperty('--chip', hex); b.title = `filter ${hex}`;
-    const mark = document.createElement('span'); mark.className='mark'; mark.textContent='✓'; b.appendChild(mark);
-    if(lmFilterSet.has(hex)) b.classList.add('is-on');
-    b.addEventListener('click', ()=>{
-      if(lmFilterSet.has(hex)) lmFilterSet.delete(hex); else lmFilterSet.add(hex);
-      saveFilter(); applyColorFilter(); renderFilterChips();
-    });
-    host.appendChild(b);
-  });
-}
-
-
-
-
-
-
-renderFilterChips(); applyColorFilter(); }catch(e){} });
 
 function setPinColor(hex){
   window.currentPinColor = hex;
