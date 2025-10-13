@@ -60,6 +60,13 @@
           <select id="save-target-sheet"><option value="">Select sheet…</option></select>
           <button id="save-target-create">Create</button>
         </div>
+        <div class="row" style="margin-top:6px">
+          <input id="rename-input" type="text" placeholder="Rename sheet to…" />
+          <button id="save-target-rename">Rename</button>
+        </div>
+        <div class="row" style="margin-top:6px">
+          <button id="save-target-delete" style="background:#dc2626;border-color:#7f1d1d">Delete sheet</button>
+        </div>
       </div>
 
       <nav class="tabs" role="tablist">
@@ -94,6 +101,7 @@
         <div class="grp">
           <div class="row" id="caption-image-row">
             <div id="currentImageThumb" aria-label="attached image preview"><div class="placeholder">No Image</div></div>
+            <a id="openOriginalLink" class="open-original side" href="#" target="_blank" rel="noopener" style="display:none">Open original</a>
             <div class="buttons" style="display:flex; gap:8px;">
 </div>
           </div>

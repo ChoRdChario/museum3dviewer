@@ -742,7 +742,7 @@ if(sheetSel){
     const opt = sel && sel.selectedOptions && sel.selectedOptions[0];
     currentSheetId = (opt && opt.value) ? Number(opt.value) : null;
     currentSheetTitle = (opt && opt.dataset && opt.dataset.title) ? opt.dataset.title : null;
-    loadCaptionsFromSheet();
+    removeAllOverlays(); selectedPinId=null; clearPins(); loadCaptionsFromSheet();
   });
 }
 const btnCreate = $('save-target-create');
@@ -866,6 +866,8 @@ function renderCurrentImage(file){
   holder.innerHTML='';
   const wrap = document.createElement('div'); wrap.className='wrap'; holder.appendChild(wrap);
   if(!file || !file.id){
+  const side = document.getElementById('openOriginalLink'); if(side){ side.style.display='none'; side.removeAttribute('href'); }
+
     const ph = document.createElement('div'); ph.style.padding='20px'; ph.style.color='#94a3b8'; ph.textContent='No image';
     wrap.appendChild(ph); return;
   }
@@ -899,3 +901,32 @@ function initShiftPickOnce(){
 }
 document.addEventListener('DOMContentLoaded', ()=>{ try{ initShiftPickOnce(); }catch(e){} });
 
+
+function removeAllOverlays(){
+  try{ overlays.forEach((_, id)=> removeCaptionOverlay(id)); }catch(_){}
+  overlays.clear && overlays.clear();
+}
+
+function deleteCaption(id){
+  const meta = captionsIndex.get(id);
+  const token = getAccessToken();
+  if(!id || !meta || !currentSpreadsheetId || !currentSheetTitle || !token){
+    // fallback: local remove
+    rowCache.delete(id); captionsIndex.delete(id);
+    const el = captionDomById.get(id); if(el) el.remove(); captionDomById.delete(id);
+    removeCaptionOverlay(id); removePinMarker(id);
+    if(selectedPinId === id){ selectedPinId = null; }
+    return Promise.resolve();
+  }
+  const url = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(currentSpreadsheetId)}:batchUpdate`;
+  const req = { requests: [{ deleteDimension: { range: { sheetId: currentSheetId, dimension: "ROWS", startIndex: (meta.rowIndex-1), endIndex: meta.rowIndex } } }] };
+  return fetch(url, { method:'POST', headers:{ Authorization:'Bearer '+token, 'Content-Type':'application/json' }, body: JSON.stringify(req) })
+    .then(r=>{ if(!r.ok) throw new Error('delete row '+r.status); })
+    .then(()=>{
+      rowCache.delete(id); captionsIndex.delete(id);
+      const el = captionDomById.get(id); if(el) el.remove(); captionDomById.delete(id);
+      removeCaptionOverlay(id); removePinMarker(id);
+      if(selectedPinId === id){ selectedPinId = null; }
+      return ensureIndex();
+    });
+}
