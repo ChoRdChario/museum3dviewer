@@ -86,7 +86,23 @@ body{
 
 
 
-/* ===== Sheet ops layout tweaks ===== */
-.row { display:flex; gap:6px; align-items:center; }
-.row .flex { flex:1; min-width:0; }
-.sheet-ops .btn { white-space:nowrap; padding:6px 10px; }
+/* ==== Attach/Detach UX ==== */
+#images-grid { position: relative; }
+.thumb { position: relative; border-radius: 10px; overflow: hidden; }
+.thumb .btn-x {
+  position: absolute; top: 6px; right: 6px;
+  width: 24px; height: 24px; border-radius: 999px;
+  display: grid; place-items: center;
+  background: rgba(17,17,17,.65); color: #e5e7eb; border: 1px solid rgba(255,255,255,.2);
+  font-weight: 700; font-size: 14px; line-height: 1;
+  opacity: 0; transition: opacity .12s ease;
+  cursor: pointer; user-select: none;
+}
+.thumb:hover .btn-x { opacity: 1; }
+.thumb.is-active { outline: 2px solid var(--accent, #60a5fa); outline-offset: 2px; }
+.thumb.is-active::after {
+  content: "✓"; position: absolute; left: 6px; top: 6px;
+  background: rgba(16,185,129,.9); color: #fff;
+  width: 22px; height: 22px; border-radius: 999px;
+  display: grid; place-items: center; font-size: 13px; font-weight: 800;
+}

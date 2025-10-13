@@ -60,15 +60,15 @@
           <select id="save-target-sheet"><option value="">Select sheet…</option></select>
           <button id="save-target-create">Create</button>
         
-        </div>
-        <div class="row sheet-ops">
-          <input id="rename-input" class="flex" type="text" placeholder="Rename spreadsheet title" />
+        <div class="row" style="margin-top:8px">
+          <input id="rename-input" type="text" placeholder="Rename spreadsheet (title)" class="flex" />
           <button id="save-target-rename" class="btn subtle">Rename</button>
-          <button id="save-target-delete" class="btn subtle" title="Delete selected SHEET (tab)">Delete</button>
+          <button id="save-target-delete" class="btn subtle" title="Delete spreadsheet (Drive)">Delete</button>
         </div>
       </div>
 
-      <nav class="tabs" role="tablist">
+      <nav class="tabs"
+ role="tablist">
         <button id="tab-caption" role="tab" aria-selected="true" data-tab="caption">Caption</button>
         <button id="tab-material" role="tab" aria-selected="false" data-tab="material">Material</button>
         <button id="tab-views" role="tab" aria-selected="false" data-tab="views">Views</button>
@@ -95,17 +95,11 @@
           <input id="caption-title" placeholder="Title" />
           <input id="caption-body" placeholder="Body" />
           <div class="row" style="margin-top:6px">
-            <button id="pin-add">+ Pin</button>
-            <button id="pin-clear">Clear</button>
-          </div>
+                      </div>
         </div>
         <div class="grp">
           <div class="row" id="caption-image-row">
             <div id="currentImageThumb" aria-label="attached image preview"><div class="placeholder">No Image</div></div>
-            <div class="buttons" style="display:flex; gap:8px;">
-              <button id="btnAttachImage">画像を添付</button>
-              <button id="btnDetachImage" class="ghost">デタッチ</button>
-            </div>
           </div>
         </div>
 
