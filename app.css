@@ -96,3 +96,6 @@ body{
 .chip-filter.is-on .mark{ display:block; }
 .chip-actions{ display:flex; gap:6px; margin:4px 0; }
 .chip-action{ font-size:11px; padding:4px 8px; border-radius:8px; background:#0f172a; color:#e5e7eb; border:1px solid #334155; cursor:pointer; }
+
+/* LociMyu: keep images grid inside right pane */
+#images-grid{max-height:28vh;overflow:auto}
