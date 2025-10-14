@@ -496,25 +496,25 @@ function refreshPinMarkerFromRow(id){
 
 // ---------- Image attach/detach (right pane) ----------
 function renderCurrentImageThumb(){
-  // legacy preview cleared; use renderCurrentImageThumb()
-  const hostRow = document.getElementById('caption-image-row');
-  if(hostRow){ hostRow.querySelectorAll('.current-image-wrap').forEach(n=>n.remove()); }
+  const box = $('currentImageThumb');
+  if(!box) return;
+  box.innerHTML='';
   const row = selectedPinId ? (rowCache.get(selectedPinId)||{}) : null;
   if(!row || !row.imageFileId){
-    box.innerHTML='<div class="placeholder">No Image</div>';
+    box.innerHTML = '<div class="placeholder">No Image</div>';
     return;
   }
   const token = getAccessToken();
-  getFileThumbUrl(row.imageFileId, token, 512).then(url=>{
+  getFileThumbUrl(row.imageFileId, token, 512).then(function(url){
     const wrap=document.createElement('div'); wrap.className='current-image-wrap'; wrap.style.position='relative'; wrap.style.display='inline-block';
     const img=document.createElement('img'); img.src=url; img.alt=''; img.style.borderRadius='12px'; img.style.maxWidth='100%';
     const x=document.createElement('button'); x.textContent='×'; x.title='Detach image';
     x.style.position='absolute'; x.style.right='6px'; x.style.top='6px';
     x.style.border='none'; x.style.width='28px'; x.style.height='28px';
     x.style.borderRadius='999px'; x.style.background='#000a'; x.style.color='#fff'; x.style.cursor='pointer';
-    x.addEventListener('click', (e)=>{ e.stopPropagation(); updateImageForPin(selectedPinId, null).then(renderCurrentImageThumb); });
+    x.addEventListener('click', function(e){ e.stopPropagation(); updateImageForPin(selectedPinId, null).then(renderCurrentImageThumb); });
     wrap.appendChild(img); wrap.appendChild(x); box.appendChild(wrap);
-  }).catch(()=>{ box.innerHTML='<div class="placeholder">No Image</div>'; });
+  }).catch(function(){ box.innerHTML = '<div class="placeholder">No Image</div>'; });
 }
 
 function updateImageForPin(id, fileIdOrNull){
