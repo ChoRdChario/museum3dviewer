@@ -426,14 +426,15 @@ function appendCaptionItem(row){
   const host=$('caption-list'); if(!host||!row) return;
   const div=document.createElement('div'); div.className='caption-item'; div.dataset.id=row.id;
   if(row.color) div.style.borderLeft='3px solid '+row.color;
-  const safeTitle=(row.title||'').trim()||'(untitled)';
-  const safeBody =(row.body ||'').trim()||'(no description)';
-  const txt=document.createElement('div'); txt.className='cap-txt';
-  const t=document.createElement('div'); t.className='cap-title'; t.textContent=safeTitle;
-  const b=document.createElement('div'); b.className='cap-body hint'; b.textContent=safeBody;
-  txt.appendChild(t); txt.appendChild(b); div.appendChild(txt);
+  const wrap=document.createElement('div'); wrap.className='cap-wrap';
+  const t=document.createElement('div'); t.className='cap-title'; t.textContent=(row.title||'').trim()||'(untitled)';
+  const b=document.createElement('div'); b.className='cap-body hint'; b.textContent=(row.body||'').trim()||'(no description)';
+  const del=document.createElement('button'); del.className='cap-del'; del.textContent='×'; del.title='Delete this pin';
+  del.addEventListener('click', (ev)=>{ ev.stopPropagation(); try{ removePinMarker(row.id); }catch(_){ } try{ removeCaptionOverlay(row.id);}catch(_){ } const el=host.querySelector('[data-id=\"'+row.id+'\"]'); if(el) el.remove(); rowCache.delete(row.id); captionsIndex.delete(row.id); });
+  wrap.append(t,b); div.append(wrap,del);
   div.addEventListener('click', ()=> selectCaption(row.id));
-  host.appendChild(div); captionDomById.set(row.id, div);
+  host.appendChild(div);
+  captionDomById.set(row.id, div);
 }
 
 function reflectRowToUI(id){

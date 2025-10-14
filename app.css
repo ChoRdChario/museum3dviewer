@@ -99,3 +99,11 @@ body{
 
 /* LociMyu: keep images grid inside right pane */
 #images-grid{max-height:28vh;overflow:auto}
+
+
+/* LociMyu: keep images grid inside the right pane */
+#images-grid-wrapper{max-height:28vh; overflow:auto; padding-bottom:4px; border-radius:8px;}
+#images-grid{display:grid; grid-template-columns:repeat(auto-fill,minmax(64px,1fr)); gap:8px;}
+.cap-del{margin-left:auto;border:0;background:#0b0f14;color:#e5e7eb;cursor:pointer;border-radius:6px;width:24px;height:24px;}
+.cap-del:hover{background:#111827}
+
