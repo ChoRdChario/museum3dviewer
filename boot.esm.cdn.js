@@ -1,4 +1,4 @@
-// ---- Guarded helpers (idempotent) ----
+import { ensureViewer, onCanvasShiftPick, addPinMarker, setPinSelected, onPinSelect, loadGlbFromDrive, onRenderTick, projectPoint, clearPins, removePinMarker } from './viewer.module.cdn.js';
 if (typeof window.lm_hexToRgb !== 'function') {
   window.lm_hexToRgb = function lm_hexToRgb(hex){
     const m=/^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(String(hex||"000000"));
@@ -20,14 +20,68 @@ if (typeof window.nearestPalette !== 'function') {
   };
 }
 window.LM_PALETTE = window.LM_PALETTE || ["#ef9368","#e9df5d","#a8e063","#8bb6ff","#b38bff","#86d2c4","#d58cc1","#9aa1a6"];
+// boot.esm.cdn.js — LociMyu boot (A–E features restored)
+// ESM build. Do not import ensureFreshToken.
+import {
+  ensureViewer, onCanvasShiftPick, addPinMarker, setPinSelected, onPinSelect,
+  loadGlbFromDrive, onRenderTick, projectPoint, clearPins, removePinMarker
+} from './viewer.module.cdn.js';
+import { setupAuth, getAccessToken, getLastAuthError } from './gauth.module.js';
 
-if (typeof window.lm_hexToRgb !== 'function') {
-  window.lm_hexToRgb = function lm_hexToRgb(hex){
-    const m=/^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(String(hex||"000000"));
-    return { r:parseInt((m&&m[1])||"00",16), g:parseInt((m&&m[2])||"00",16), b:parseInt((m&&m[3])||"00",16) };
-  };
+/* ---------------- small helpers ---------------- */
+const $ = (id)=>document.getElementById(id);
+const setEnabled = (on, ...els)=> els.forEach(el=>{ if(el) el.disabled = !on; });
+const textOrEmpty = (v)=> v==null ? '' : String(v);
+const clamp = (n,min,max)=> Math.min(Math.max(n,min),max);
+
+/* ---------------- Boot viewer & auth ---------------- */
+ensureViewer({ canvas: $('gl') });
+
+const __LM_CLIENT_ID = (window.GIS_CLIENT_ID || '595200751510-ncahnf7edci6b9925becn5to49r6cguv.apps.googleusercontent.com');
+const __LM_API_KEY   = (window.GIS_API_KEY   || '');
+const __LM_SCOPES    = (window.GIS_SCOPES    || 'https://www.googleapis.com/auth/drive.readonly https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/drive.metadata.readonly https://www.googleapis.com/auth/spreadsheets');
+
+function onSigned(signed){
+  document.documentElement.classList.toggle('signed-in', !!signed);
+  setEnabled(!!signed, $('btnGlb'), $('glbUrl'), $('save-target-sheet'), $('save-target-create'), $('save-target-rename'), $('rename-input'));
 }
-)
+setupAuth($('auth-signin'), onSigned, { clientId: __LM_CLIENT_ID, apiKey: __LM_API_KEY, scopes: __LM_SCOPES });
+
+function ensureToken() {
+  const t = getAccessToken();
+  if (!t) {
+    const err = (typeof getLastAuthError === 'function') ? getLastAuthError() : null;
+    if (err) console.warn('[auth] last error:', err);
+    alert('Google サインインが必要です。「Sign in」をクリックしてください。');
+    throw new Error('token_missing');
+  }
+  return t;
+}
+
+/* ---------------- Drive helpers ---------------- */
+function extractDriveId(input){
+  if(!input) return null;
+  const s = String(input).trim();
+  const m = s.match(/^[A-Za-z0-9_-]{25,}$/);
+  if(m) return m[0];
+  try{
+    const u = new URL(s);
+    const q = u.searchParams.get('id');
+    if(q && /^[A-Za-z0-9_-]{25,}$/.test(q)) return q;
+    const seg = u.pathname.split('/').filter(Boolean);
+    const ix = seg.indexOf('d');
+    if(ix!==-1 && seg[ix+1] && /^[A-Za-z0-9_-]{25,}$/.test(seg[ix+1])) return seg[ix+1];
+    const any = (u.href||'').match(/[A-Za-z0-9_-]{25,}/);
+    if(any) return any[0];
+  }catch(_){}
+  const any2 = s.match(/[A-Za-z0-9_-]{25,}/);
+  return any2? any2[0] : null;
+}
+
+function getFileThumbUrl(fileId, token, size){
+  size = size|0; if(!size) size=1024;
+  const url = 'https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(fileId)+'?fields=thumbnailLink&supportsAllDrives=true';
+  return fetch(url, { headers: { Authorization: 'Bearer '+token } })
     .then(r => { if(!r.ok) throw new Error('thumb meta '+r.status); return r.json(); })
     .then(j => {
       if(!j.thumbnailLink) throw new Error('no thumbnailLink');
@@ -737,13 +791,11 @@ if(btnRename){
 
 console.log('[LociMyu ESM/CDN] boot overlay-edit+fixed-zoom build loaded (A–E)');
 
-/* duplicate LM_PALETTE removed */
 window.currentPinColor = window.currentPinColor || LM_PALETTE[0];
 let lmFilterSet = new Set(JSON.parse(localStorage.getItem('lmFilterColors')||'[]')); if(lmFilterSet.size===0) lmFilterSet=new Set(LM_PALETTE);
 function saveFilter(){ localStorage.setItem('lmFilterColors', JSON.stringify([...lmFilterSet])); }
 function hexToRgb(hex){ const m=/^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex); if(!m) return {r:0,g:0,b:0}; return { r:parseInt(m[1],16), g:parseInt(m[2],16), b:parseInt(m[3],16) }; }
-
-/* duplicate removed */
+function nearestPalette(hex){ const c=hexToRgb(hex||LM_PALETTE[0]); let best=LM_PALETTE[0],score=1e9; for(const p of LM_PALETTE){ const q=hexToRgb(p); const d=(c.r-q.r)**2+(c.g-q.g)**2+(c.b-q.b)**2; if(d<score){ score=d; best=p; } } return best; }
 
 
 function renderColorChips(){
@@ -786,10 +838,13 @@ const LM_PALETTE = (window.LM_PALETTE)||["#ef9368","#e9df5d","#a8e063","#8bb6ff"
 window.LM_PALETTE = LM_PALETTE;
 window.currentPinColor = window.currentPinColor || LM_PALETTE[0];
 
-
-/* duplicate removed */
-
-/* duplicate removed */
+function lm_hexToRgb(hex){
+  const m=/^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(String(hex||"000000"));
+  return { r:parseInt((m&&m[1])||"00",16), g:parseInt((m&&m[2])||"00",16), b:parseInt((m&&m[3])||"00",16) };
+}
+function nearestPalette(hex){
+  const c = lm_hexToRgb(hex||LM_PALETTE[0]); let best=LM_PALETTE[0],score=1e9;
+  for(const p of LM_PALETTE){ const q=lm_hexToRgb(p); const d=(c.r-q.r)**2+(c.g-q.g)**2+(c.b-q.b)**2; if(d<score){ score=d; best=p; } }
   return best;
 }
 
