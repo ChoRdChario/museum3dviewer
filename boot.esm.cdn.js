@@ -22,10 +22,7 @@ if (typeof window.nearestPalette !== 'function') {
 window.LM_PALETTE = window.LM_PALETTE || ["#ef9368","#e9df5d","#a8e063","#8bb6ff","#b38bff","#86d2c4","#d58cc1","#9aa1a6"];
 // boot.esm.cdn.js — LociMyu boot (A–E features restored)
 // ESM build. Do not import ensureFreshToken.
-import {
-  ensureViewer, onCanvasShiftPick, addPinMarker, setPinSelected, onPinSelect,
-  loadGlbFromDrive, onRenderTick, projectPoint, clearPins, removePinMarker
-} from './viewer.module.cdn.js';
+
 import { setupAuth, getAccessToken, getLastAuthError } from './gauth.module.js';
 
 /* ---------------- small helpers ---------------- */
