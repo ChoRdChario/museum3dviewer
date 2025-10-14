@@ -1,41 +1,102 @@
-import { ensureViewer, onCanvasShiftPick, addPinMarker, setPinSelected, onPinSelect, loadGlbFromDrive, onRenderTick, projectPoint, clearPins, removePinMarker } from './viewer.module.cdn.js';
+window.currentPinColor = window.currentPinColor || (window.LM_PALETTE && window.LM_PALETTE[0]) || '#ef9368';
+window.LM_PALETTE = window.LM_PALETTE || ["#ef9368","#e9df5d","#a8e063","#8bb6ff","#b38bff","#86d2c4","#d58cc1","#9aa1a6"]; 
+
+
+// ---- Canonical color helper ----
+function lmCanonicalColor(hex){
+  try { return window.nearestPalette ? window.nearestPalette(hex||window.currentPinColor||LM_PALETTE[0]) : (hex||LM_PALETTE[0]); }
+  catch(_){ return hex||LM_PALETTE[0]; }
+}
+
+// boot.esm.cdn.js — LociMyu boot (A–E features restored)
+// ESM build. Do not import ensureFreshToken.
+import {
+  ensureViewer, onCanvasShiftPick, addPinMarker, setPinSelected, onPinSelect,
+  loadGlbFromDrive, onRenderTick, projectPoint, clearPins, removePinMarker
+} from './viewer.module.cdn.js';
 import { setupAuth, getAccessToken, getLastAuthError } from './gauth.module.js';
 
-// ---- Guarded helpers (idempotent) ----
-if (typeof window.lm_hexToRgb !== 'function') {
-  window.lm_hexToRgb = function lm_hexToRgb(hex){
-    const m=/^#?([a-f\d]{2}
-    return { r:parseInt((m&&m[1])||"00",16), g:parseInt((m&&m[2])||"00",16), b:parseInt((m&&m[3])||"00",16) };
-  };
+/* ---------------- small helpers ---------------- */
+const $ = (id)=>document.getElementById(id);
+const setEnabled = (on, els)=> els.forEach(el=>{ if(el) el.disabled = !on; });
+const textOrEmpty = (v)=> v==null ? '' : String(v);
+const clamp = (n,min,max)=> Math.min(Math.max(n,min),max);
+
+/* ---------------- Boot viewer & auth ---------------- */
+ensureViewer({ canvas: $('gl') });
+
+const __LM_CLIENT_ID = (window.GIS_CLIENT_ID || '595200751510-ncahnf7edci6b9925becn5to49r6cguv.apps.googleusercontent.com');
+const __LM_API_KEY   = (window.GIS_API_KEY   || '');
+const __LM_SCOPES    = (window.GIS_SCOPES    || 'https://www.googleapis.com/auth/drive.readonly https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/drive.metadata.readonly https://www.googleapis.com/auth/spreadsheets');
+
+function onSigned(signed){
+  document.documentElement.classList.toggle('signed-in', !!signed);
+  setEnabled(!!signed, $('btnGlb'), $('glbUrl'), $('save-target-sheet'), $('save-target-create'), $('save-target-rename'), $('rename-input'));
 }
-if (typeof window.nearestPalette !== 'function') {
-  window.nearestPalette = function nearestPalette(hex){
-    const P = window.LM_PALETTE||[];
-    const base = (P && P.length ? P[0] : "#ef9368");
-    const c = window.lm_hexToRgb(hex||base);
-    let best = base, score = 1e9;
-    for (const p of P){
-      const q = window.lm_hexToRgb(p);
-      const d = (c.r-q.r)**2 + (c.g-q.g)**2 + (c.b-q.b)**2;
-      if (d < score) { score = d; best = p; }
-    };
+setupAuth($('auth-signin'), onSigned, { clientId: __LM_CLIENT_ID, apiKey: __LM_API_KEY, scopes: __LM_SCOPES });
+
+function ensureToken() {
+  const t = getAccessToken();
+  if (!t) {
+    const err = (typeof getLastAuthError === 'function') ? getLastAuthError() : null;
+    if (err) console.warn('[auth] last error:', err);
+    alert('Google サインインが必要です。「Sign in」をクリックしてください。');
+    throw new Error('token_missing');
+  }
+  return t;
 }
-window.LM_PALETTE = window.LM_PALETTE || ["#ef9368","#e9df5d","#a8e063","#8bb6ff","#b38bff","#86d2c4","#d58cc1","#9aa1a6"];
+
+/* ---------------- Drive helpers ---------------- */
+function extractDriveId(input){
+  if(!input) return null;
+  const s = String(input).trim();
+  const m = s.match(/^[A-Za-z0-9_-]{25,}$/);
+  if(m) return m[0];
+  try{
+    const u = new URL(s);
+    const q = u.searchParams.get('id');
+    if(q && /^[A-Za-z0-9_-]{25,}$/.test(q)) return q;
+    const seg = u.pathname.split('/').filter(Boolean);
+    const ix = seg.indexOf('d');
+    if(ix!==-1 && seg[ix+1] && /^[A-Za-z0-9_-]{25,}$/.test(seg[ix+1])) return seg[ix+1];
+    const any = (u.href||'').match(/[A-Za-z0-9_-]{25,}/);
+    if(any) return any[0];
+  }catch(_){}
+  const any2 = s.match(/[A-Za-z0-9_-]{25,}/);
+  return any2? any2[0] : null;
+}
+
+function getFileThumbUrl(fileId, token, size){
+  size = size|0; if(!size) size=1024;
+  const url = 'https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(fileId)+'?fields=thumbnailLink&supportsAllDrives=true';
+  return fetch(url, { headers: { Authorization: 'Bearer '+token } })
+    .then(r => { if(!r.ok) throw new Error('thumb meta '+r.status); return r.json(); })
+    .then(j => {
+      if(!j.thumbnailLink) throw new Error('no thumbnailLink');
+      const sz = clamp(size,64,2048);
+      const sep = j.thumbnailLink.includes('?') ? '&' : '?';
+      return j.thumbnailLink + sep + 'sz=s'+String(sz);
+    });
+}
 
 function getFileBlobUrl(fileId, token){
   if(!fileId || !token) return Promise.reject(new Error('missing fileId/token'));
   const url = 'https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(fileId)+'?alt=media&supportsAllDrives=true';
-  return fetch(url, { headers: { Authorization: 'Bearer '+token } }).then(r => {
+  return fetch(url, { headers: { Authorization: 'Bearer '+token } })
+    .then(r => {
       if(!r.ok) throw new Error('media '+r.status);
       const ct = (r.headers.get('Content-Type')||'').toLowerCase();
       if(/image\/(heic|heif)/.test(ct)) throw new Error('unsupported image format: HEIC');
       return r.blob();
-    }).then(blob => URL.createObjectURL(blob));
+    })
+    .then(blob => URL.createObjectURL(blob));
 }
 
 function getParentFolderId(fileId, token){
   const url = 'https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(fileId)+'?fields=parents&supportsAllDrives=true';
-  return fetch(url, { headers: { Authorization:'Bearer '+token } }).then(r => r.ok ? r.json() : null).then(j => (j && j.parents && j.parents[0]) ? j.parents[0] : null);
+  return fetch(url, { headers: { Authorization:'Bearer '+token } })
+    .then(r => r.ok ? r.json() : null)
+    .then(j => (j && j.parents && j.parents[0]) ? j.parents[0] : null);
 }
 
 /* ---------------- Global states ---------------- */
@@ -239,19 +300,25 @@ const LOCIMYU_HEADERS = ['id','title','body','color','x','y','z','imageFileId','
 function colA1(i0){ let n=i0+1,s=''; while(n){ n--; s=String.fromCharCode(65+(n%26))+s; n=(n/26)|0; } return s; }
 function putValues(spreadsheetId, rangeA1, values, token){
   const url = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(rangeA1)}?valueInputOption=RAW`;
-  return fetch(url, { method:'PUT', headers:{ Authorization:'Bearer '+token, 'Content-Type':'application/json' }, body: JSON.stringify({ values }) }).then(r=>{ if(!r.ok) throw new Error('values.update '+r.status); });
+  return fetch(url, { method:'PUT', headers:{ Authorization:'Bearer '+token, 'Content-Type':'application/json' }, body: JSON.stringify({ values }) })
+    .then(r=>{ if(!r.ok) throw new Error('values.update '+r.status); });
 }
 function appendValues(spreadsheetId, rangeA1, values, token){
   const url = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(rangeA1)}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`;
-  return fetch(url, { method:'POST', headers:{ Authorization:'Bearer '+token, 'Content-Type':'application/json' }, body: JSON.stringify({ values }) }).then(r=>{ if(!r.ok) throw new Error('values.append '+r.status); });
+  return fetch(url, { method:'POST', headers:{ Authorization:'Bearer '+token, 'Content-Type':'application/json' }, body: JSON.stringify({ values }) })
+    .then(r=>{ if(!r.ok) throw new Error('values.append '+r.status); });
 }
 function getValues(spreadsheetId, rangeA1, token){
   const url = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(rangeA1)}`;
-  return fetch(url, { headers:{ Authorization:'Bearer '+token } }).then(r=>{ if(!r.ok) throw new Error('values.get '+r.status); return r.json(); }).then(d=> d.values||[]);
+  return fetch(url, { headers:{ Authorization:'Bearer '+token } })
+    .then(r=>{ if(!r.ok) throw new Error('values.get '+r.status); return r.json(); })
+    .then(d=> d.values||[]);
 }
 function isLociMyuSpreadsheet(spreadsheetId, token){
   const url=`https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}?includeGridData=true&ranges=A1:Z1&fields=sheets(properties(title,sheetId),data(rowData(values(formattedValue))))`;
-  return fetch(url, { headers:{ Authorization:'Bearer '+token } }).then(res=> res.ok ? res.json() : false).then(data=>{
+  return fetch(url, { headers:{ Authorization:'Bearer '+token } })
+    .then(res=> res.ok ? res.json() : false)
+    .then(data=>{
       if(!data || !Array.isArray(data.sheets)) return false;
       for(const s of data.sheets){
         const d = s && s.data || []; if(!d[0]) continue;
@@ -272,7 +339,9 @@ function createLociMyuSpreadsheet(parentFolderId, token, opts){
   const url = 'https://www.googleapis.com/drive/v3/files';
   const body = { name, mimeType:'application/vnd.google-apps.spreadsheet' };
   if(parentFolderId) body.parents = [ parentFolderId ];
-  return fetch(url, { method:'POST', headers:{ Authorization:'Bearer '+token, 'Content-Type':'application/json' }, body: JSON.stringify(body) }).then(r=>{ if(!r.ok) throw new Error('Drive files.create '+r.status); return r.json(); }).then(file=>{
+  return fetch(url, { method:'POST', headers:{ Authorization:'Bearer '+token, 'Content-Type':'application/json' }, body: JSON.stringify(body) })
+    .then(r=>{ if(!r.ok) throw new Error('Drive files.create '+r.status); return r.json(); })
+    .then(file=>{
       const spreadsheetId = file.id;
       return putValues(spreadsheetId, 'A1:Z1', [LOCIMYU_HEADERS], token).then(()=> spreadsheetId);
     });
@@ -281,7 +350,9 @@ function findOrCreateLociMyuSpreadsheet(parentFolderId, token, opts){
   if(!parentFolderId) return Promise.reject(new Error('parentFolderId required'));
   const q = encodeURIComponent(`'${parentFolderId}' in parents and mimeType='application/vnd.google-apps.spreadsheet' and trashed=false`);
   const url=`https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name,modifiedTime)&orderBy=modifiedTime desc&pageSize=10&supportsAllDrives=true`;
-  return fetch(url, { headers:{ Authorization:'Bearer '+token } }).then(r=>{ if(!r.ok) throw new Error('Drive list spreadsheets '+r.status); return r.json(); }).then(d=>{
+  return fetch(url, { headers:{ Authorization:'Bearer '+token } })
+    .then(r=>{ if(!r.ok) throw new Error('Drive list spreadsheets '+r.status); return r.json(); })
+    .then(d=>{
       const files = d.files || [];
       function next(i){
         if(i>=files.length) return createLociMyuSpreadsheet(parentFolderId, token, opts||{});
@@ -412,6 +483,7 @@ function reflectRowToUI(id){
 
 /* ---------------- Save / Update / Delete ---------------- */
 function updateCaptionForPin(id, fields){
+  if(fields && 'color' in fields){ fields.color = lmCanonicalColor(fields.color); }
   const cached=rowCache.get(id)||{id};
   const seed=Object.assign({}, cached, fields||{});
   return ensureRow(id, seed).then(()=> ensureIndex()).then(()=>{
@@ -438,7 +510,9 @@ function updateCaptionForPin(id, fields){
         const v = seed[key]; return (v==null?'':String(v));
       });
       const rangeA1 = `'${currentSheetTitle||'シート1'}'!A${rowIndex}:`+String(colA1(headers.length-1))+String(rowIndex);
-      return putValues(currentSpreadsheetId, rangeA1, [values], token).then(()=>{ rowCache.set(id, seed); reflectRowToUI(id); refreshPinMarkerFromRow(id); }).catch(e=>{ console.error('[values.update] failed', e); throw e; });
+      return putValues(currentSpreadsheetId, rangeA1, [values], token)
+        .then(()=>{ rowCache.set(id, seed); reflectRowToUI(id); refreshPinMarkerFromRow(id); })
+        .catch(e=>{ console.error('[values.update] failed', e); throw e; });
     }
   });
 }
@@ -459,9 +533,11 @@ function updateImageForPin(id, fileIdOrNull){
     if(box){
       box.innerHTML = '';
       if(patch.imageFileId){
-        getFileThumbUrl(patch.imageFileId, token, 256).then(url=>{
+        getFileThumbUrl(patch.imageFileId, token, 256)
+          .then(url=>{
             const img=document.createElement('img'); img.src=url; box.appendChild(img);
-          }).catch(()=>{ box.innerHTML='<div class="placeholder">No Image</div>'; });
+          })
+          .catch(()=>{ box.innerHTML='<div class="placeholder">No Image</div>'; });
       }else{
         box.innerHTML='<div class="placeholder">No Image</div>';
       }
@@ -487,7 +563,7 @@ function loadCaptionsFromSheet(){
         id,
         title: textOrEmpty(row[map['title']||1]),
         body : textOrEmpty(row[map['body'] ||2]),
-        color: textOrEmpty(row[map['color']||3]) || currentPinColor,
+        color: lmCanonicalColor(textOrEmpty(row[map['color']||3]) || currentPinColor),
         x: Number(row[map['x']||4]||0), y: Number(row[map['y']||5]||0), z: Number(row[map['z']||6]||0),
         imageFileId: textOrEmpty(row[map['imagefileid']||7]),
         createdAt: textOrEmpty(row[map['createdat']||8]),
@@ -553,7 +629,8 @@ function refreshImagesGrid(){
     if(!selectedPinId) return;
     clearTimeout(timer);
     timer=setTimeout(()=>{
-      updateCaptionForPin(selectedPinId, { title: t ? t.value||'' : '', body: b ? b.value||'' : '' }).catch(e=> console.warn('[caption autosave failed]', e));
+      updateCaptionForPin(selectedPinId, { title: t ? t.value||'' : '', body: b ? b.value||'' : '' })
+        .catch(e=> console.warn('[caption autosave failed]', e));
     }, 600);
   }
   if(t) t.addEventListener('input', schedule);
@@ -566,7 +643,9 @@ function refreshImagesGrid(){
   inp.addEventListener('change', ()=>{
     if(!selectedPinId) return;
     const color = String(inp.value||'').trim();
-    updateCaptionForPin(selectedPinId, { color }).then(()=> refreshPinMarkerFromRow(selectedPinId)).catch(e=> console.warn('[color update failed]', e));
+    updateCaptionForPin(selectedPinId, { color })
+      .then(()=> refreshPinMarkerFromRow(selectedPinId))
+      .catch(e=> console.warn('[color update failed]', e));
   });
 })();
 
@@ -613,10 +692,13 @@ function doLoad(){
 
     return loadGlbFromDrive(fileId, { token }).then(()=>{
       lastGlbFileId = fileId;
-      return getParentFolderId(fileId, token).then(parent => findOrCreateLociMyuSpreadsheet(parent, token, { glbId:fileId })).then(spreadsheetId=>{
+      return getParentFolderId(fileId, token)
+        .then(parent => findOrCreateLociMyuSpreadsheet(parent, token, { glbId:fileId }))
+        .then(spreadsheetId=>{
           currentSpreadsheetId = spreadsheetId;
           return populateSheetTabs(spreadsheetId, token).then(()=> loadCaptionsFromSheet());
-        }).then(()=> refreshImagesGrid());
+        })
+        .then(()=> refreshImagesGrid());
     }).catch(e=>{
       console.error('[GLB] load error', e);
       if(String(e).includes('401')){
@@ -637,7 +719,9 @@ function populateSheetTabs(spreadsheetId, token){
   const sel = $('save-target-sheet'); if(!sel||!spreadsheetId) return Promise.resolve();
   sel.innerHTML = '<option value="">Loading…</option>';
   const url=`https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}?fields=sheets(properties(title,sheetId,index))`;
-  return fetch(url, { headers:{ Authorization:'Bearer '+token } }).then(r=> r.ok ? r.json() : null).then(data=>{
+  return fetch(url, { headers:{ Authorization:'Bearer '+token } })
+    .then(r=> r.ok ? r.json() : null)
+    .then(data=>{
       if(!data) { sel.innerHTML='<option value="">(error)</option>'; return; }
       const sheets = (data.sheets||[]).map(s=>s.properties).sort((a,b)=> a.index-b.index);
       sel.innerHTML='';
@@ -671,7 +755,11 @@ if(btnCreate){
     const title='Sheet_'+new Date().toISOString().slice(0,19).replace(/[:T]/g,'-');
     const url=`https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(currentSpreadsheetId)}:batchUpdate`;
     const body={ requests:[{ addSheet:{ properties:{ title } } }] };
-    fetch(url,{ method:'POST', headers:{ Authorization:'Bearer '+token, 'Content-Type':'application/json' }, body: JSON.stringify(body) }).then(r=>{ if(!r.ok) throw new Error(String(r.status)); }).then(()=> populateSheetTabs(currentSpreadsheetId, token)).then(()=> loadCaptionsFromSheet()).catch(e=> console.error('[Sheets addSheet] failed', e));
+    fetch(url,{ method:'POST', headers:{ Authorization:'Bearer '+token, 'Content-Type':'application/json' }, body: JSON.stringify(body) })
+      .then(r=>{ if(!r.ok) throw new Error(String(r.status)); })
+      .then(()=> populateSheetTabs(currentSpreadsheetId, token))
+      .then(()=> loadCaptionsFromSheet())
+      .catch(e=> console.error('[Sheets addSheet] failed', e));
   });
 }
 const btnRename = $('save-target-rename');
@@ -682,103 +770,57 @@ if(btnRename){
     if(!newTitle) return;
     const url=`https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(currentSpreadsheetId)}:batchUpdate`;
     const body={ requests:[{ updateSheetProperties:{ properties:{ sheetId: currentSheetId, title: newTitle }, fields: 'title' } }] };
-    fetch(url,{ method:'POST', headers:{ Authorization:'Bearer '+token, 'Content-Type':'application/json' }, body: JSON.stringify(body) }).then(r=>{ if(!r.ok) throw new Error(String(r.status)); }).then(()=> populateSheetTabs(currentSpreadsheetId, token)).then(()=> loadCaptionsFromSheet()).catch(e=> console.error('[Sheets rename] failed', e));
+    fetch(url,{ method:'POST', headers:{ Authorization:'Bearer '+token, 'Content-Type':'application/json' }, body: JSON.stringify(body) })
+      .then(r=>{ if(!r.ok) throw new Error(String(r.status)); })
+      .then(()=> populateSheetTabs(currentSpreadsheetId, token))
+      .then(()=> loadCaptionsFromSheet())
+      .catch(e=> console.error('[Sheets rename] failed', e));
   });
 }
 
 console.log('[LociMyu ESM/CDN] boot overlay-edit+fixed-zoom build loaded (A–E)');
 
-window.currentPinColor = window.currentPinColor || LM_PALETTE[0];
-let lmFilterSet = new Set(JSON.parse(localStorage.getItem('lmFilterColors')||'[]')); if(lmFilterSet.size===0) lmFilterSet=new Set(LM_PALETTE);function hexToRgb(hex){ const m=/^#?([a-f\d]{2}
-});
-};
-      const bucket = nearestPalette(row.color || LM_PALETTE[0]);
-      const visible = lmFilterSet.size===0 || lmFilterSet.has(bucket);
-      div.classList.toggle('is-hidden', !visible);
-    });
-  }
-  // Notify viewer to toggle 3D pin visibility (handled in viewer.module.cdn.js)
-  try{
-    const evt = new CustomEvent('pinFilterChange', { detail: { selected: Array.from(lmFilterSet) } });
-    document.dispatchEvent(evt);
-  }catch(_){}
-}
+function lm_hexToRgb(hex){ const m=/^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(String(hex||"000000")); return { r:parseInt((m&&m[1])||"00",16), g:parseInt((m&&m[2])||"00",16), b:parseInt((m&&m[3])||"00",16) }; }
 
-// ===== LociMyu: Color Chips & Filter (clean tail) =====
-window.LM_PALETTE = LM_PALETTE;
-window.currentPinColor = window.currentPinColor || LM_PALETTE[0];
+function nearestPalette(hex){ const p=window.LM_PALETTE||[]; const c=lm_hexToRgb(hex||p[0]); let best=p[0],score=1e9; for(const q of p){ const t=lm_hexToRgb(q); const d=(c.r-t.r)**2+(c.g-t.g)**2+(c.b-t.b)**2; if(d<score){score=d;best=q;} } return best; }
 
-  return { r:parseInt((m&&m[1])||"00",16), g:parseInt((m&&m[2])||"00",16), b:parseInt((m&&m[3])||"00",16) };
-}
-}
+function renderColorChips(){ const host=document.getElementById('pin-colors'); if(!host) return; host.innerHTML=''; (window.LM_PALETTE||[]).forEach(hex=>{ const b=document.createElement('button'); b.className='chip chip-color'; b.style.setProperty('--chip', hex); b.title=hex; if(nearestPalette(window.currentPinColor)===hex) b.classList.add('is-active'); b.addEventListener('click', ()=> setPinColor(hex)); host.appendChild(b); }); }
 
-let lmFilterSet=(()=>{ try{ const s=JSON.parse(localStorage.getItem('lmFilterColors')||'[]'); return new Set(s.length?s:LM_PALETTE); }catch(_){ return new Set(LM_PALETTE);} })();catch(_){} });
-}
+function renderFilterChips(){ const host=document.getElementById('pin-filter'); if(!host) return; host.innerHTML=''; if(!window.__lmFilter){ try{ const saved=JSON.parse(localStorage.getItem('lmFilterColors')||'[]'); window.__lmFilter=new Set(saved.length?saved:(window.LM_PALETTE||[])); }catch{ window.__lmFilter=new Set(window.LM_PALETTE||[]);} } (window.LM_PALETTE||[]).forEach(hex=>{ const b=document.createElement('button'); b.className='chip chip-filter'; b.style.setProperty('--chip', hex); const mark=document.createElement('span'); mark.className='mark'; mark.textContent='✓'; b.appendChild(mark); if(window.__lmFilter.has(hex)) b.classList.add('is-on'); b.addEventListener('click', ()=>{ if(window.__lmFilter.has(hex)) window.__lmFilter.delete(hex); else window.__lmFilter.add(hex); localStorage.setItem('lmFilterColors', JSON.stringify([window.__lmFilter])); applyColorFilter(); renderFilterChips(); }); host.appendChild(b); }); }
 
-function renderFilterChips(){
-  const host = document.getElementById('pin-filter') || document.getElementById('pinFilterChips'); if(!host) return;
-  if(!host.previousElementSibling || !host.previousElementSibling.classList || !host.previousElementSibling.classList.contains('chip-actions')){
-    const bar=document.createElement('div'); bar.className='chip-actions';
-    const a=document.createElement('button'); a.id='filterAll'; a.className='chip-action'; a.textContent='All';
-    const n=document.createElement('button'); n.id='filterNone'; n.className='chip-action'; n.textContent='None';
-    a.addEventListener('click', ()=>{ lmFilterSet=new Set(LM_PALETTE); saveFilter(); applyColorFilter(); renderFilterChips(); });
-    n.addEventListener('click', ()=>{ lmFilterSet=new Set(); saveFilter(); applyColorFilter(); renderFilterChips(); });
-    host.parentNode.insertBefore(bar, host); bar.appendChild(a); bar.appendChild(n);
-  }
-  host.innerHTML='';
-  LM_PALETTE.forEach(hex=>{
-    const b=document.createElement('button');
-    b.className='chip chip-filter'; b.style.setProperty('--chip', hex); b.title=`filter ${hex}`;
-    const mark=document.createElement('span'); mark.className='mark'; mark.textContent='✓'; b.appendChild(mark);
-    if(lmFilterSet.has(hex)) b.classList.add('is-on');
-    b.addEventListener('click', ()=>{ if(lmFilterSet.has(hex)) lmFilterSet.delete(hex); else lmFilterSet.add(hex); saveFilter(); applyColorFilter(); renderFilterChips(); });
-    host.appendChild(b);
-  });
-}
+function rowPassesColorFilter(row){ const set=window.__lmFilter; if(!set||set.size===0) return true; const pal=nearestPalette(row && row.color ? row.color : (window.LM_PALETTE?window.LM_PALETTE[0]:'#ef9368')); return set.has(pal); }
 
-function rowPassesColorFilter(row){
-  if(!row) return false; if(lmFilterSet.size===0) return true;
-  return lmFilterSet.has(nearestPalette(row.color||LM_PALETTE[0]));
-});
-      div.classList.toggle('is-hidden', !ok);
-    });
-  }
-  try{ document.dispatchEvent(new CustomEvent('pinFilterChange',{ detail:{ selected:Array.from(lmFilterSet) } })); }catch(_){}
-}
+function applyColorFilter(){ const host=document.getElementById('caption-list'); if(host){ host.querySelectorAll('.caption-item').forEach(div=>{ const id=div.dataset.id; const row=(window.rowCache&&rowCache.get)?rowCache.get(id):null; div.classList.toggle('is-hidden', !(row && rowPassesColorFilter(row))); }); } try{ document.dispatchEvent(new CustomEvent('pinFilterChange', { detail:{ selected: Array.from(window.__lmFilter||[]) } })); }catch(_){} }
 
 function setPinColor(hex){
-  window.currentPinColor=hex;
+  const canon = lmCanonicalColor(hex);
+  window.currentPinColor = canon;
   const host=document.getElementById('pin-picker')||document.getElementById('pinColorChips');
-  if(host){ host.querySelectorAll('.chip-color').forEach(el=> el.classList.toggle('is-active', getComputedStyle(el).getPropertyValue('--chip').trim()===hex)); }
+  if(host){
+    host.querySelectorAll('.chip-color').forEach(el=> {
+      const c = getComputedStyle(el).getPropertyValue('--chip').trim();
+      el.classList.toggle('is-active', c===canon);
+    });
+  }
   if(window.selectedPinId && window.rowCache){
     const row=rowCache.get(selectedPinId)||{id:selectedPinId};
-    row.color=hex; rowCache.set(selectedPinId,row);
+    row.color=canon; rowCache.set(selectedPinId,row);
     try{ window.refreshPinMarkerFromRow && refreshPinMarkerFromRow(selectedPinId); }catch(_){}
-    try{ window.updateCaptionForPin && updateCaptionForPin(selectedPinId,{ color:hex }); }catch(_){}
+    try{ window.updateCaptionForPin && updateCaptionForPin(selectedPinId,{ color:canon }); }catch(_){}
   }
-}
+}if(window.selectedPinId && window.rowCache){ const row=rowCache.get(selectedPinId)||{id:selectedPinId}; row.color=hex; rowCache.set(selectedPinId,row); try{ window.refreshPinMarkerFromRow && refreshPinMarkerFromRow(selectedPinId); }catch(_){} try{ window.updateCaptionForPin && updateCaptionForPin(selectedPinId,{ color:hex }); }catch(_){} } }
 
-document.addEventListener('DOMContentLoaded', ()=>{
-  try{ renderColorChips(); renderFilterChips(); applyColorFilter(); }catch(e){ console.warn('[chips init]', e); }
+function wireDetachOverlay(){ const btn=document.getElementById('detach-thumb'); if(!btn||btn.dataset.wired) return; btn.dataset.wired='1'; btn.addEventListener('click', ()=>{ if(!window.selectedPinId||!window.rowCache) return; const row=rowCache.get(selectedPinId)||{id:selectedPinId}; row.imageFileId=null; rowCache.set(selectedPinId,row); try{ updateCaptionForPin && updateCaptionForPin(selectedPinId,{ imageFileId:null }); }catch(_){} try{ const thumb=document.getElementById('currentImageThumb'); if(thumb){ thumb.classList.remove('has-image'); thumb.innerHTML='<button id="detach-thumb" class="thumb-detach" aria-label="Detach image">×</button><div class="placeholder">No Image</div>'; } }catch(_){} wireDetachOverlay(); }); }
+
+document.addEventListener('DOMContentLoaded', ()=>{ try{ renderColorChips(); renderFilterChips(); applyColorFilter(); wireDetachOverlay(); }catch(e){ console.warn('[chips init]', e); } });
+
+
+// ---------- Shift+Click add pin ----------
+onCanvasShiftPick((x,y,z)=>{
+  const id = 'p' + Date.now();
+  const color = lmCanonicalColor(window.currentPinColor||LM_PALETTE[0]);
+  addPinMarker({ id, x, y, z, color });
+  ensureRow(id, { x, y, z, color }).then(()=> selectCaption(id));
 });
-// ===== end chips/filter tail =====
-
-function renderColorChips(){
-  const host = document.getElementById('pin-picker') || document.getElementById('pinColorChips'); if(!host) return;
-  host.innerHTML = '';
-  LM_PALETTE.forEach(hex=>{
-    const b=document.createElement('button');
-    b.className='chip chip-color'; b.style.setProperty('--chip', hex); b.title=hex;
-    if(nearestPalette(window.currentPinColor)===hex) b.classList.add('is-active');
-    b.addEventListener('click', ()=> setPinColor(hex));
-    host.appendChild(b);
-  }
-
-function applyColorFilter(){
-  const listHost=document.getElementById('caption-list');
-  if(listHost){
-    listHost.querySelectorAll('.caption-item').forEach(div=>{
-      const id=div.dataset.id; const row=(window.rowCache && rowCache.get)? rowCache.get(id):null;
-      const ok=rowPassesColorFilter(row||{}
-
-function saveFilter(){ try{ localStorage.setItem('lmFilterColors', JSON.stringify(Array.from(lmFilterSet))); }
+// legacy alias for older call sites
+const applyFilter = applyColorFilter;
