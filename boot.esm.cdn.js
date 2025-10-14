@@ -4,7 +4,7 @@ import { setupAuth, getAccessToken, getLastAuthError } from './gauth.module.js';
 // ---- Guarded helpers (idempotent) ----
 if (typeof window.lm_hexToRgb !== 'function') {
   window.lm_hexToRgb = function lm_hexToRgb(hex){
-    const m=/^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(String(hex||"000000"));
+    const m=/^#?([a-f\d]{2}
     return { r:parseInt((m&&m[1])||"00",16), g:parseInt((m&&m[2])||"00",16), b:parseInt((m&&m[3])||"00",16) };
   };
 }
@@ -18,21 +18,9 @@ if (typeof window.nearestPalette !== 'function') {
       const q = window.lm_hexToRgb(p);
       const d = (c.r-q.r)**2 + (c.g-q.g)**2 + (c.b-q.b)**2;
       if (d < score) { score = d; best = p; }
-    }
-    return best;
-  };
+    };
 }
 window.LM_PALETTE = window.LM_PALETTE || ["#ef9368","#e9df5d","#a8e063","#8bb6ff","#b38bff","#86d2c4","#d58cc1","#9aa1a6"];
-
-)
-    .then(r => { if(!r.ok) throw new Error('thumb meta '+r.status); return r.json(); })
-    .then(j => {
-      if(!j.thumbnailLink) throw new Error('no thumbnailLink');
-      const sz = clamp(size,64,2048);
-      const sep = j.thumbnailLink.includes('?') ? '&' : '?';
-      return j.thumbnailLink + sep + 'sz=s'+String(sz);
-    });
-}
 
 function getFileBlobUrl(fileId, token){
   if(!fileId || !token) return Promise.reject(new Error('missing fileId/token'));
@@ -735,35 +723,9 @@ if(btnRename){
 console.log('[LociMyu ESM/CDN] boot overlay-edit+fixed-zoom build loaded (A–E)');
 
 window.currentPinColor = window.currentPinColor || LM_PALETTE[0];
-let lmFilterSet = new Set(JSON.parse(localStorage.getItem('lmFilterColors')||'[]')); if(lmFilterSet.size===0) lmFilterSet=new Set(LM_PALETTE);
-function saveFilter(){ localStorage.setItem('lmFilterColors', JSON.stringify([...lmFilterSet])); }
-function hexToRgb(hex){ const m=/^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex); if(!m) return {r:0,g:0,b:0}; return { r:parseInt(m[1],16), g:parseInt(m[2],16), b:parseInt(m[3],16) }; }
-} return best; }
-
-
-function renderColorChips(){
-  const host = document.getElementById('pinColorChips') || document.getElementById('pin-picker');
-  if(!host) return;
-  host.innerHTML = '';
-  LM_PALETTE.forEach(hex=>{
-    const b = document.createElement('button');
-    b.className = 'chip chip-color'; b.style.setProperty('--chip', hex); b.title = hex;
-    if (nearestPalette(window.currentPinColor) === hex) b.classList.add('is-active');
-    b.addEventListener('click', ()=> setPinColor(hex));
-    host.appendChild(b);
-  });
-}
-
-
-
-
-function applyColorFilter(){
-  // Update right-pane list
-  const host = document.getElementById('caption-list');
-  if (host){
-    host.querySelectorAll('.caption-item').forEach(div=>{
-      const id = div.dataset.id;
-      const row = rowCache.get(id)||{};
+let lmFilterSet = new Set(JSON.parse(localStorage.getItem('lmFilterColors')||'[]')); if(lmFilterSet.size===0) lmFilterSet=new Set(LM_PALETTE);function hexToRgb(hex){ const m=/^#?([a-f\d]{2}
+});
+};
       const bucket = nearestPalette(row.color || LM_PALETTE[0]);
       const visible = lmFilterSet.size===0 || lmFilterSet.has(bucket);
       div.classList.toggle('is-hidden', !visible);
@@ -777,29 +739,14 @@ function applyColorFilter(){
 }
 
 // ===== LociMyu: Color Chips & Filter (clean tail) =====
-const LM_PALETTE = (window.LM_PALETTE)||["#ef9368","#e9df5d","#a8e063","#8bb6ff","#b38bff","#86d2c4","#d58cc1","#9aa1a6"];
 window.LM_PALETTE = LM_PALETTE;
 window.currentPinColor = window.currentPinColor || LM_PALETTE[0];
-)([a-f\d]{2})([a-f\d]{2})$/i.exec(String(hex||"000000"));
+
   return { r:parseInt((m&&m[1])||"00",16), g:parseInt((m&&m[2])||"00",16), b:parseInt((m&&m[3])||"00",16) };
 }
 }
-  return best;
-}
 
-let lmFilterSet=(()=>{ try{ const s=JSON.parse(localStorage.getItem('lmFilterColors')||'[]'); return new Set(s.length?s:LM_PALETTE); }catch(_){ return new Set(LM_PALETTE);} })();
-function saveFilter(){ try{ localStorage.setItem('lmFilterColors', JSON.stringify(Array.from(lmFilterSet))); }catch(_){} }
-
-function renderColorChips(){
-  const host = document.getElementById('pin-picker') || document.getElementById('pinColorChips'); if(!host) return;
-  host.innerHTML = '';
-  LM_PALETTE.forEach(hex=>{
-    const b=document.createElement('button');
-    b.className='chip chip-color'; b.style.setProperty('--chip', hex); b.title=hex;
-    if(nearestPalette(window.currentPinColor)===hex) b.classList.add('is-active');
-    b.addEventListener('click', ()=> setPinColor(hex));
-    host.appendChild(b);
-  });
+let lmFilterSet=(()=>{ try{ const s=JSON.parse(localStorage.getItem('lmFilterColors')||'[]'); return new Set(s.length?s:LM_PALETTE); }catch(_){ return new Set(LM_PALETTE);} })();catch(_){} });
 }
 
 function renderFilterChips(){
@@ -826,14 +773,7 @@ function renderFilterChips(){
 function rowPassesColorFilter(row){
   if(!row) return false; if(lmFilterSet.size===0) return true;
   return lmFilterSet.has(nearestPalette(row.color||LM_PALETTE[0]));
-}
-
-function applyColorFilter(){
-  const listHost=document.getElementById('caption-list');
-  if(listHost){
-    listHost.querySelectorAll('.caption-item').forEach(div=>{
-      const id=div.dataset.id; const row=(window.rowCache && rowCache.get)? rowCache.get(id):null;
-      const ok=rowPassesColorFilter(row||{});
+});
       div.classList.toggle('is-hidden', !ok);
     });
   }
@@ -856,3 +796,23 @@ document.addEventListener('DOMContentLoaded', ()=>{
   try{ renderColorChips(); renderFilterChips(); applyColorFilter(); }catch(e){ console.warn('[chips init]', e); }
 });
 // ===== end chips/filter tail =====
+
+function renderColorChips(){
+  const host = document.getElementById('pin-picker') || document.getElementById('pinColorChips'); if(!host) return;
+  host.innerHTML = '';
+  LM_PALETTE.forEach(hex=>{
+    const b=document.createElement('button');
+    b.className='chip chip-color'; b.style.setProperty('--chip', hex); b.title=hex;
+    if(nearestPalette(window.currentPinColor)===hex) b.classList.add('is-active');
+    b.addEventListener('click', ()=> setPinColor(hex));
+    host.appendChild(b);
+  }
+
+function applyColorFilter(){
+  const listHost=document.getElementById('caption-list');
+  if(listHost){
+    listHost.querySelectorAll('.caption-item').forEach(div=>{
+      const id=div.dataset.id; const row=(window.rowCache && rowCache.get)? rowCache.get(id):null;
+      const ok=rowPassesColorFilter(row||{}
+
+function saveFilter(){ try{ localStorage.setItem('lmFilterColors', JSON.stringify(Array.from(lmFilterSet))); }
