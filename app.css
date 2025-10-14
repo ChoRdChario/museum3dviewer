@@ -96,3 +96,20 @@ body{
 .chip-filter.is-on .mark{ display:block; }
 .chip-actions{ display:flex; gap:6px; margin:4px 0; }
 .chip-action{ font-size:11px; padding:4px 8px; border-radius:8px; background:#0f172a; color:#e5e7eb; border:1px solid #334155; cursor:pointer; }
+
+/* Ensure images grid sticks inside panel */
+#images-grid{
+  max-height: 28vh;
+  overflow: auto;
+  padding: 4px 0;
+}
+
+/* Right pane current image thumb sizing */
+#currentImageThumb img{ display:block; max-width: 100%; height:auto; border-radius:12px; }
+
+/* Chip visuals */
+.chip{ --chip:#999; width:22px; height:22px; border-radius:999px; border:2px solid rgba(0,0,0,.35); background:var(--chip); display:inline-block; margin:2px; }
+.chip-color.is-active{ outline:2px solid #fff; outline-offset:2px; }
+.chip-action{ padding:.25rem .5rem; border-radius:8px; border:1px solid #334155; background:#0b0f14; color:#e5e7eb; }
+.chip-filter.is-on .mark{ display:inline; }
+.chip-filter .mark{ display:none; font-weight:bold; }
