@@ -71,11 +71,11 @@
       <section id="pane-caption" class="pane" data-pane="caption" data-active="true">
         <div class="grp">
           <div class="hint">Pin color</div>
-          <div id="pinColorChips" class="chips"></div>
+          <div id="pin-colors" class="chips"></div>
         </div>
         <div class="grp">
           <div class="hint">Filter</div>
-          <div id="pinFilterChips" class="chips"></div>
+          <div id="pin-filter" class="chips"></div>
         </div>
 
         <!-- ▼ 配置入替：先に Caption list、その下に Title/Body -->
@@ -88,18 +88,26 @@
           <div class="hint">Title / Body</div>
           <input id="caption-title" placeholder="Title" />
           <input id="caption-body" placeholder="Body" />
+          <div class="row" style="margin-top:6px">
+            <button id="pin-add">+ Pin</button>
+            <button id="pin-clear">Clear</button>
           </div>
+        </div>
         <div class="grp">
-          <div class="row" id="caption-image-row"><div id="currentImageThumb" aria-label="attached image preview"><div class="placeholder">No Image</div></div></div>
-</div>
-</div>
+          <div class="row" id="caption-image-row">
+            <div id="currentImageThumb" aria-label="attached image preview"><button id="btnDetachImage" class="btn tiny" title="Detach image">×</button><div class="preview"></div><div class="placeholder">No Image</div></div></div>
+            <div class="buttons" style="display:flex; gap:8px;">
+              <button id="btnAttachImage">画像を添付</button>
+              <button id="btnDetachImage" class="ghost">デタッチ</button>
+            </div>
+          </div>
         </div>
 
 
 
         <div class="grp">
           <div class="hint">Images (auto from GLB folder)</div>
-          <div id="images-grid-wrapper"><div id="images-grid"></div>
+          <div id="images-grid"></div>
           <div class="row" style="margin-top:8px">
             <button id="btnRefreshImages" style="width:100%">Refresh images</button>
           </div>
@@ -149,5 +157,6 @@
   </script>
 
   <script type="module" src="./boot.esm.cdn.js"></script>
+
 </body>
 </html>
