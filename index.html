@@ -71,11 +71,11 @@
       <section id="pane-caption" class="pane" data-pane="caption" data-active="true">
         <div class="grp">
           <div class="hint">Pin color</div>
-          <div id="pin-colors" class="chips"></div>
+          <div id="pinColorChips" class="chips"></div>
         </div>
         <div class="grp">
           <div class="hint">Filter</div>
-          <div id="pin-filter" class="chips"></div>
+          <div id="pinFilterChips" class="chips"></div>
         </div>
 
         <!-- ▼ 配置入替：先に Caption list、その下に Title/Body -->
@@ -88,14 +88,10 @@
           <div class="hint">Title / Body</div>
           <input id="caption-title" placeholder="Title" />
           <input id="caption-body" placeholder="Body" />
-          <div class="row" style="margin-top:6px">
-            <button id="pin-add">+ Pin</button>
-            <button id="pin-clear">Clear</button>
           </div>
-        </div>
         <div class="grp">
-          <div class="row" id="caption-image-row">
-            <div id="currentImageThumb" aria-label="attached image preview"><div class="placeholder">No Image</div></div>
+          <div class="row" id="caption-image-row"><div id="currentImageThumb" aria-label="attached image preview"><div class="placeholder">No Image</div></div></div>
+</div>
             <div class="buttons" style="display:flex; gap:8px;">
               <button id="btnAttachImage">画像を添付</button>
               <button id="btnDetachImage" class="ghost">デタッチ</button>

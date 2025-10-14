@@ -497,6 +497,8 @@ function refreshPinMarkerFromRow(id){
 function renderCurrentImageThumb(){
   const box = $('currentImageThumb'); if(!box) return;
   box.innerHTML='';
+  const hostRow = document.getElementById('caption-image-row');
+  if(hostRow){ hostRow.querySelectorAll('.current-image-wrap').forEach(n=>n.remove()); }
   const row = selectedPinId ? (rowCache.get(selectedPinId)||{}) : null;
   if(!row || !row.imageFileId){
     box.innerHTML='<div class="placeholder">No Image</div>';
@@ -504,7 +506,7 @@ function renderCurrentImageThumb(){
   }
   const token = getAccessToken();
   getFileThumbUrl(row.imageFileId, token, 512).then(url=>{
-    const wrap=document.createElement('div'); wrap.style.position='relative'; wrap.style.display='inline-block';
+    const wrap=document.createElement('div'); wrap.className='current-image-wrap'; wrap.style.position='relative'; wrap.style.display='inline-block';
     const img=document.createElement('img'); img.src=url; img.alt=''; img.style.borderRadius='12px'; img.style.maxWidth='100%';
     const x=document.createElement('button'); x.textContent='×'; x.title='Detach image';
     x.style.position='absolute'; x.style.right='6px'; x.style.top='6px';
@@ -628,7 +630,7 @@ function refreshImagesGrid(){
 // ---------- Pin color chips & filter chips ----------
 function setPinColor(hex){
   window.currentPinColor = hex;
-  const host=document.getElementById('pin-picker')||document.getElementById('pinColorChips');
+  const host=document.getElementById('pinColorChips')||document.getElementById('pinColorChips');
   if(host){
     host.querySelectorAll('.chip-color').forEach(el=>{
       const v = getComputedStyle(el).getPropertyValue('--chip').trim();
@@ -643,7 +645,7 @@ function setPinColor(hex){
   }
 }
 function renderColorChips(){
-  const host = document.getElementById('pin-picker') || document.getElementById('pinColorChips'); if(!host) return;
+  const host = document.getElementById('pinColorChips') || document.getElementById('pinColorChips'); if(!host) return;
   host.innerHTML = '';
   window.LM_PALETTE.forEach(function(hex){
     const b=document.createElement('button');
@@ -673,7 +675,7 @@ function applyColorFilter(){
   try{ document.dispatchEvent(new CustomEvent('pinFilterChange',{ detail:{ selected:Array.from(lmFilterSet) } })); }catch(_){}
 }
 function renderFilterChips(){
-  const host = document.getElementById('pin-filter') || document.getElementById('pinFilterChips'); if(!host) return;
+  const host = document.getElementById('pinFilterChips') || document.getElementById('pinFilterChips'); if(!host) return;
   if(!host.previousElementSibling || !host.previousElementSibling.classList || !host.previousElementSibling.classList.contains('chip-actions')){
     const bar=document.createElement('div'); bar.className='chip-actions';
     const a=document.createElement('button'); a.id='filterAll'; a.className='chip-action'; a.textContent='All';
