@@ -496,8 +496,7 @@ function refreshPinMarkerFromRow(id){
 
 // ---------- Image attach/detach (right pane) ----------
 function renderCurrentImageThumb(){
-  const box = $('currentImageThumb'); if(!box) return;
-  box.innerHTML='';
+  // legacy preview cleared; use renderCurrentImageThumb()
   const hostRow = document.getElementById('caption-image-row');
   if(hostRow){ hostRow.querySelectorAll('.current-image-wrap').forEach(n=>n.remove()); }
   const row = selectedPinId ? (rowCache.get(selectedPinId)||{}) : null;
@@ -517,11 +516,15 @@ function renderCurrentImageThumb(){
     wrap.appendChild(img); wrap.appendChild(x); box.appendChild(wrap);
   }).catch(()=>{ box.innerHTML='<div class="placeholder">No Image</div>'; });
 }
+
 function updateImageForPin(id, fileIdOrNull){
-  const token = ensureToken(); // also acts as auth guard
+  try { ensureToken && ensureToken(); } catch(_){}
   const patch = { imageFileId: fileIdOrNull ? String(fileIdOrNull) : '' };
-  return updateCaptionForPin(id, patch).then(()=> renderCurrentImageThumb());
+  return updateCaptionForPin(id, patch).then(()=>{
+    try { renderCurrentImageThumb(); } catch(_){ }
+  });
 }
+
 
 // ---------- Load captions from sheet ----------
 function loadCaptionsFromSheet(){
@@ -552,7 +555,7 @@ function loadCaptionsFromSheet(){
       appendCaptionItem(obj);
       addPinMarker({ id, x:obj.x, y:obj.y, z:obj.z, color:obj.color||window.currentPinColor });
     }
-    applyFilter();
+    applyColorFilter();
   }).catch(e=> console.warn('[loadCaptionsFromSheet] failed', e));
 }
 
