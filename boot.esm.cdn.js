@@ -1,20 +1,40 @@
-// boot.esm.cdn.js — LociMyu boot (A–E features restored)
-// ESM build. Do not import ensureFreshToken.
+// boot.esm.cdn.js — LociMyu boot (clean full build)
+// NOTE: single-import, no duplicate globals, no leading .then/.catch chains.
+
+// ---------- Globals (palette & helpers) ----------
+window.LM_PALETTE = window.LM_PALETTE || ["#ef9368","#e9df5d","#a8e063","#8bb6ff","#b38bff","#86d2c4","#d58cc1","#9aa1a6"];
+window.currentPinColor = window.currentPinColor || window.LM_PALETTE[0];
+
+function lm_hexToRgb(hex){
+  const m=/^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(String(hex||"000000"));
+  return { r:parseInt((m&&m[1])||"00",16), g:parseInt((m&&m[2])||"00",16), b:parseInt((m&&m[3])||"00",16) };
+}
+window.nearestPalette = window.nearestPalette || function nearestPalette(hex){
+  const P=window.LM_PALETTE;
+  const base=P[0];
+  const c=lm_hexToRgb(hex||base); let best=base,score=1e9;
+  for(const q of P){ const t=lm_hexToRgb(q); const d=(c.r-t.r)**2+(c.g-t.g)**2+(c.b-t.b)**2; if(d<score){score=d;best=q;} }
+  return best;
+};
+function lmCanonicalColor(hex){
+  try{ return window.nearestPalette(hex||window.currentPinColor||window.LM_PALETTE[0]); }
+  catch(_){ return hex||window.LM_PALETTE[0]; }
+}
+
+// ---------- Imports (single) ----------
 import {
   ensureViewer, onCanvasShiftPick, addPinMarker, setPinSelected, onPinSelect,
   loadGlbFromDrive, onRenderTick, projectPoint, clearPins, removePinMarker
 } from './viewer.module.cdn.js';
 import { setupAuth, getAccessToken, getLastAuthError } from './gauth.module.js';
 
-/* ---------------- small helpers ---------------- */
+// ---------- DOM helpers ----------
 const $ = (id)=>document.getElementById(id);
 const setEnabled = (on, ...els)=> els.forEach(el=>{ if(el) el.disabled = !on; });
 const textOrEmpty = (v)=> v==null ? '' : String(v);
 const clamp = (n,min,max)=> Math.min(Math.max(n,min),max);
 
-function ensureSinglePreview(){ const box=$('currentImageThumb'); if(!box) return; const pv=box.querySelector('.preview'); if(pv){ const imgs=pv.querySelectorAll('img'); if(imgs.length>1){ pv.innerHTML=''; pv.appendChild(imgs[imgs.length-1]); } } }
-
-/* ---------------- Boot viewer & auth ---------------- */
+// ---------- Boot viewer & auth ----------
 ensureViewer({ canvas: $('gl') });
 
 const __LM_CLIENT_ID = (window.GIS_CLIENT_ID || '595200751510-ncahnf7edci6b9925becn5to49r6cguv.apps.googleusercontent.com');
@@ -38,7 +58,7 @@ function ensureToken() {
   return t;
 }
 
-/* ---------------- Drive helpers ---------------- */
+// ---------- Drive helpers ----------
 function extractDriveId(input){
   if(!input) return null;
   const s = String(input).trim();
@@ -57,7 +77,6 @@ function extractDriveId(input){
   const any2 = s.match(/[A-Za-z0-9_-]{25,}/);
   return any2? any2[0] : null;
 }
-
 function getFileThumbUrl(fileId, token, size){
   size = size|0; if(!size) size=1024;
   const url = 'https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(fileId)+'?fields=thumbnailLink&supportsAllDrives=true';
@@ -70,7 +89,6 @@ function getFileThumbUrl(fileId, token, size){
       return j.thumbnailLink + sep + 'sz=s'+String(sz);
     });
 }
-
 function getFileBlobUrl(fileId, token){
   if(!fileId || !token) return Promise.reject(new Error('missing fileId/token'));
   const url = 'https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(fileId)+'?alt=media&supportsAllDrives=true';
@@ -83,7 +101,6 @@ function getFileBlobUrl(fileId, token){
     })
     .then(blob => URL.createObjectURL(blob));
 }
-
 function getParentFolderId(fileId, token){
   const url = 'https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(fileId)+'?fields=parents&supportsAllDrives=true';
   return fetch(url, { headers: { Authorization:'Bearer '+token } })
@@ -91,14 +108,11 @@ function getParentFolderId(fileId, token){
     .then(j => (j && j.parents && j.parents[0]) ? j.parents[0] : null);
 }
 
-/* ---------------- Global states ---------------- */
+// ---------- Global state ----------
 let lastGlbFileId = null;
 let currentSpreadsheetId = null;
 let currentSheetId = null;
 let currentSheetTitle = null;
-let currentHeaders = [];
-let currentHeaderIdx = {};
-let currentPinColor = '#ff6b6b';
 let selectedPinId = null;
 
 const captionsIndex = new Map();  // id -> { rowIndex }
@@ -107,7 +121,7 @@ const rowCache = new Map();       // id -> row
 const overlays = new Map();       // id -> { root, imgEl, zoom }
 let  filterMode = 'all';          // 'all' | 'selected' | 'color:#rrggbb'
 
-/* ---------------- Style additions ---------------- */
+// ---------- Quick styles for chips/overlay ----------
 (()=>{
   const st=document.createElement('style');
   st.textContent = `
@@ -115,11 +129,18 @@ let  filterMode = 'all';          // 'all' | 'selected' | 'color:#rrggbb'
   .caption-item.is-hidden{display:none}
   .cap-overlay{user-select:none}
   .cap-overlay button{font:inherit}
+  .chip{--chip:#ccc; inline-size:28px; block-size:20px; border-radius:999px; border:1px solid #0006; background:var(--chip); cursor:pointer; margin:2px}
+  .chip-color.is-active{outline:2px solid #fff; outline-offset:1px}
+  .chip-actions{display:flex; gap:.5rem; margin:.25rem 0}
+  .chip-action{padding:.25rem .5rem; border-radius:8px; border:1px solid #334155; background:#0b0f14; color:#e5e7eb; cursor:pointer}
+  .chip-filter .mark{display:none; font-weight:700}
+  .chip-filter.is-on .mark{display:inline}
+  .thumb{width:64px;height:64px;background-size:cover;background-position:center;border-radius:8px;cursor:pointer;margin:4px;display:inline-block}
   `;
   document.head.appendChild(st);
 })();
 
-/* ---------------- Overlay (drag, close, zoom, line) ---------------- */
+// ---------- Overlay (drag, close, fixed zoom) ----------
 let lineLayer = null;
 function ensureLineLayer(){
   if(lineLayer) return lineLayer;
@@ -161,8 +182,7 @@ function createCaptionOverlay(id, data){
   root.style.background='#0b0f14ef'; root.style.color='#e5e7eb';
   root.style.padding='10px 12px'; root.style.borderRadius='10px';
   root.style.boxShadow='0 8px 24px #000a'; root.style.minWidth='200px'; root.style.maxWidth='300px';
-  // keep controls fixed at top-left regardless of size changes
-  root.style.paddingTop = '40px';
+  root.style.paddingTop = '40px'; // keep controls fixed top-left
 
   // controls
   const ctrl = document.createElement('div');
@@ -178,7 +198,7 @@ function createCaptionOverlay(id, data){
   ctrl.append(bZoomOut,bZoomIn,bClose);
   root.appendChild(ctrl);
 
-  // drag handle under the controls
+  // drag handle
   const topbar = document.createElement('div');
   topbar.style.height='20px'; topbar.style.marginBottom='6px'; topbar.style.cursor='move';
   root.appendChild(topbar);
@@ -262,55 +282,48 @@ function updateOverlayPosition(id, initial){
 }
 onRenderTick(()=>{ overlays.forEach((_,id)=> updateOverlayPosition(id,false)); });
 
-/* ---------------- Selection helpers ---------------- */
-function __lm_markListSelected(id){
+// ---------- Selection helpers ----------
+function markListSelected(id){
   const host = $('caption-list'); if(!host) return;
   host.querySelectorAll('.caption-item.is-selected').forEach(n=>n.classList.remove('is-selected'));
   const el = host.querySelector('.caption-item[data-id="'+CSS.escape(id)+'"]');
   if(el) el.classList.add('is-selected');
 }
-function __lm_fillFormFromCaption(id){
+function fillFormFromCaption(id){
   const row = rowCache.get(id) || {};
   const t=$('caption-title'), b=$('caption-body');
   if(t) t.value = row.title || '';
   if(b) b.value = row.body  || '';
-  const col = $('pinColor');
-  if(col && row.color) col.value = row.color;
+  const col = $('pinColor'); if(col && row.color) col.value = row.color;
 }
 function selectCaption(id){
   selectedPinId = id;
-  __lm_markListSelected(id);
-  __lm_fillFormFromCaption(id);
+  markListSelected(id);
+  fillFormFromCaption(id);
   setPinSelected(id, true);
   createCaptionOverlay(id, rowCache.get(id) || {});
 }
 onPinSelect((id)=> selectCaption(id));
 
-/* ---------------- Sheets I/O ---------------- */
+// ---------- Sheets I/O ----------
 const LOCIMYU_HEADERS = ['id','title','body','color','x','y','z','imageFileId','createdAt','updatedAt'];
 
 function colA1(i0){ let n=i0+1,s=''; while(n){ n--; s=String.fromCharCode(65+(n%26))+s; n=(n/26)|0; } return s; }
 function putValues(spreadsheetId, rangeA1, values, token){
   const url = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(rangeA1)}?valueInputOption=RAW`;
-  return fetch(url, { method:'PUT', headers:{ Authorization:'Bearer '+token, 'Content-Type':'application/json' }, body: JSON.stringify({ values }) })
-    .then(r=>{ if(!r.ok) throw new Error('values.update '+r.status); });
+  return fetch(url, { method:'PUT', headers:{ Authorization:'Bearer '+token, 'Content-Type':'application/json' }, body: JSON.stringify({ values }) }).then(r=>{ if(!r.ok) throw new Error('values.update '+r.status); });
 }
 function appendValues(spreadsheetId, rangeA1, values, token){
   const url = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(rangeA1)}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`;
-  return fetch(url, { method:'POST', headers:{ Authorization:'Bearer '+token, 'Content-Type':'application/json' }, body: JSON.stringify({ values }) })
-    .then(r=>{ if(!r.ok) throw new Error('values.append '+r.status); });
+  return fetch(url, { method:'POST', headers:{ Authorization:'Bearer '+token, 'Content-Type':'application/json' }, body: JSON.stringify({ values }) }).then(r=>{ if(!r.ok) throw new Error('values.append '+r.status); });
 }
 function getValues(spreadsheetId, rangeA1, token){
   const url = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(rangeA1)}`;
-  return fetch(url, { headers:{ Authorization:'Bearer '+token } })
-    .then(r=>{ if(!r.ok) throw new Error('values.get '+r.status); return r.json(); })
-    .then(d=> d.values||[]);
+  return fetch(url, { headers:{ Authorization:'Bearer '+token } }).then(r=>{ if(!r.ok) throw new Error('values.get '+r.status); return r.json(); }).then(d=> d.values||[]);
 }
 function isLociMyuSpreadsheet(spreadsheetId, token){
   const url=`https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}?includeGridData=true&ranges=A1:Z1&fields=sheets(properties(title,sheetId),data(rowData(values(formattedValue))))`;
-  return fetch(url, { headers:{ Authorization:'Bearer '+token } })
-    .then(res=> res.ok ? res.json() : false)
-    .then(data=>{
+  return fetch(url, { headers:{ Authorization:'Bearer '+token } }).then(res=> res.ok ? res.json() : false).then(data=>{
       if(!data || !Array.isArray(data.sheets)) return false;
       for(const s of data.sheets){
         const d = s && s.data || []; if(!d[0]) continue;
@@ -331,9 +344,7 @@ function createLociMyuSpreadsheet(parentFolderId, token, opts){
   const url = 'https://www.googleapis.com/drive/v3/files';
   const body = { name, mimeType:'application/vnd.google-apps.spreadsheet' };
   if(parentFolderId) body.parents = [ parentFolderId ];
-  return fetch(url, { method:'POST', headers:{ Authorization:'Bearer '+token, 'Content-Type':'application/json' }, body: JSON.stringify(body) })
-    .then(r=>{ if(!r.ok) throw new Error('Drive files.create '+r.status); return r.json(); })
-    .then(file=>{
+  return fetch(url, { method:'POST', headers:{ Authorization:'Bearer '+token, 'Content-Type':'application/json' }, body: JSON.stringify(body) }).then(r=>{ if(!r.ok) throw new Error('Drive files.create '+r.status); return r.json(); }).then(file=>{
       const spreadsheetId = file.id;
       return putValues(spreadsheetId, 'A1:Z1', [LOCIMYU_HEADERS], token).then(()=> spreadsheetId);
     });
@@ -342,9 +353,7 @@ function findOrCreateLociMyuSpreadsheet(parentFolderId, token, opts){
   if(!parentFolderId) return Promise.reject(new Error('parentFolderId required'));
   const q = encodeURIComponent(`'${parentFolderId}' in parents and mimeType='application/vnd.google-apps.spreadsheet' and trashed=false`);
   const url=`https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name,modifiedTime)&orderBy=modifiedTime desc&pageSize=10&supportsAllDrives=true`;
-  return fetch(url, { headers:{ Authorization:'Bearer '+token } })
-    .then(r=>{ if(!r.ok) throw new Error('Drive list spreadsheets '+r.status); return r.json(); })
-    .then(d=>{
+  return fetch(url, { headers:{ Authorization:'Bearer '+token } }).then(r=>{ if(!r.ok) throw new Error('Drive list spreadsheets '+r.status); return r.json(); }).then(d=>{
       const files = d.files || [];
       function next(i){
         if(i>=files.length) return createLociMyuSpreadsheet(parentFolderId, token, opts||{});
@@ -354,16 +363,15 @@ function findOrCreateLociMyuSpreadsheet(parentFolderId, token, opts){
     });
 }
 
-/* ---------------- Index / ensure row ---------------- */
+// ---------- Index / ensure row ----------
 function ensureIndex(){
   captionsIndex.clear();
   const token = getAccessToken(); if(!token||!currentSpreadsheetId||!currentSheetTitle) return Promise.resolve(false);
   return getValues(currentSpreadsheetId, "'"+currentSheetTitle+"'!A1:Z9999", token).then(values=>{
     if(!values.length) return false;
-    currentHeaders = values[0].map(v=> textOrEmpty(v).trim());
-    currentHeaderIdx = {};
-    currentHeaders.forEach((h,i)=> currentHeaderIdx[h.toLowerCase()] = i);
-    const iId = (currentHeaderIdx['id']!=null) ? currentHeaderIdx['id'] : -1;
+    const headers = values[0].map(v=> textOrEmpty(v).trim());
+    const idx = {}; headers.forEach((h,i)=> idx[h.toLowerCase()] = i);
+    const iId = (idx['id']!=null) ? idx['id'] : -1;
     for(let r=1;r<values.length;r++){
       const row=values[r]||[]; const id=row[iId];
       if(!id) continue;
@@ -379,7 +387,7 @@ function ensureIndex(){
 function sheetsAppendRow(spreadsheetId, sheetTitle, obj){
   const token=getAccessToken(); if(!token) return Promise.resolve();
   const now=new Date().toISOString();
-  const vals=[[ obj.id, obj.title||'', obj.body||'', obj.color||currentPinColor, obj.x||0, obj.y||0, obj.z||0, obj.imageFileId||'', obj.createdAt||now, obj.updatedAt||now ]];
+  const vals=[[ obj.id, obj.title||'', obj.body||'', obj.color||window.currentPinColor, obj.x||0, obj.y||0, obj.z||0, obj.imageFileId||'', obj.createdAt||now, obj.updatedAt||now ]];
   return appendValues(spreadsheetId, "'"+sheetTitle+"'!A:Z", vals, token).then(()=> ensureIndex());
 }
 
@@ -398,7 +406,7 @@ function ensureRow(id, seed){
     }
     const sheetTitle=currentSheetTitle||'シート1';
     const row=Object.assign({
-      id, title:'', body:'', color:currentPinColor,
+      id, title:'', body:'', color:window.currentPinColor,
       x:0,y:0,z:0, imageFileId:'',
       createdAt:new Date().toISOString(),
       updatedAt:new Date().toISOString()
@@ -409,7 +417,7 @@ function ensureRow(id, seed){
   });
 }
 
-/* ---------------- Caption list UI ---------------- */
+// ---------- Caption list UI ----------
 function clearCaptionList(){
   const host=$('caption-list'); if(host) host.innerHTML='';
   captionDomById.clear();
@@ -418,36 +426,15 @@ function appendCaptionItem(row){
   const host=$('caption-list'); if(!host||!row) return;
   const div=document.createElement('div'); div.className='caption-item'; div.dataset.id=row.id;
   if(row.color) div.style.borderLeft='3px solid '+row.color;
-  const safeTitle=(row.title||'').trim()||'(untitled)';
-  const safeBody =(row.body ||'').trim()||'(no description)';
-
-  let img;
-  if(row.imageUrl){
-    img=document.createElement('img'); img.src=row.imageUrl; img.alt=''; div.appendChild(img);
-  }
-  const txt=document.createElement('div'); txt.className='cap-txt';
-  const t=document.createElement('div'); t.className='cap-title'; t.textContent=safeTitle;
-  const b=document.createElement('div'); b.className='cap-body hint'; b.textContent=safeBody;
-  txt.appendChild(t); txt.appendChild(b); div.appendChild(txt);
-
-  // detach ×
-  const detach=document.createElement('button'); detach.className='c-del'; detach.title='Detach image'; detach.textContent='×';
-  detach.addEventListener('click', (e)=>{ e.stopPropagation(); updateImageForPin(row.id, null); });
-  div.appendChild(detach);
-
+  const wrap=document.createElement('div'); wrap.className='cap-wrap';
+  const t=document.createElement('div'); t.className='cap-title'; t.textContent=(row.title||'').trim()||'(untitled)';
+  const b=document.createElement('div'); b.className='cap-body hint'; b.textContent=(row.body||'').trim()||'(no description)';
+  const del=document.createElement('button'); del.className='cap-del'; del.textContent='×'; del.title='Delete this pin';
+  del.addEventListener('click', (ev)=>{ ev.stopPropagation(); try{ removePinMarker(row.id); }catch(_){ } try{ removeCaptionOverlay(row.id);}catch(_){ } const el=host.querySelector('[data-id=\"'+row.id+'\"]'); if(el) el.remove(); rowCache.delete(row.id); captionsIndex.delete(row.id); });
+  wrap.append(t,b); div.append(wrap,del);
   div.addEventListener('click', ()=> selectCaption(row.id));
-  host.appendChild(div); captionDomById.set(row.id, div);
-}
-function enrichRow(row){
-  const token=getAccessToken(); let p=Promise.resolve('');
-  if(row.imageFileId){
-    p = getFileThumbUrl(row.imageFileId, token, 256).catch(()=> '');
-  }
-  return p.then(imageUrl=>{
-    const enriched=Object.assign({}, row, { imageUrl });
-    rowCache.set(row.id, enriched);
-    return enriched;
-  });
+  host.appendChild(div);
+  captionDomById.set(row.id, div);
 }
 
 function reflectRowToUI(id){
@@ -456,26 +443,28 @@ function reflectRowToUI(id){
     const t=$('caption-title'), b=$('caption-body');
     if(t && document.activeElement!==t) t.value=row.title||'';
     if(b && document.activeElement!==b) b.value=row.body||'';
-    /* PREVIEW_SYNC_MARKER */
-    (function(){ const box=$('currentImageThumb'); if(!box) return; const pv=box.querySelector('.preview'); const ph=box.querySelector('.placeholder'); if(pv) pv.innerHTML=''; if(row.imageFileId){ const token=getAccessToken(); getFileThumbUrl(row.imageFileId, token, 256).then(url=>{ const img=document.createElement('img'); img.src=url; pv && pv.appendChild(img); if(ph) ph.style.display='none'; ensureSinglePreview(); }).catch(()=>{ if(ph) ph.style.display=''; }); } else { if(ph) ph.style.display=''; } })();
     const col=$('pinColor'); if(col && row.color) col.value=row.color;
+    renderCurrentImageThumb();
   }
   const host=$('caption-list'); if(!host) return;
   let div=captionDomById.get(id);
   if(!div){ appendCaptionItem(Object.assign({id}, row)); div=captionDomById.get(id); }
   if(!div) return;
   if(row.color) div.style.borderLeft='3px solid '+row.color;
-  let img=div.querySelector('img');
-  if(row.imageFileId){
-    if(!img){ img=document.createElement('img'); img.alt=''; div.insertBefore(img, div.firstChild); }
-    const token=getAccessToken();
-    getFileThumbUrl(row.imageFileId, token, 256).then(url=>{ img.src=url; }).catch(()=>{ if(img) img.remove(); });
-  }else{
-    if(img) img.remove();
-  }
 }
 
-/* ---------------- Save / Update / Delete ---------------- */
+// ---------- Save / Update / Delete ----------
+function putRowToSheet(seed, meta){
+  const token = ensureToken();
+  const headers = LOCIMYU_HEADERS;
+  const rowIndex = meta ? meta.rowIndex : 2;
+  const values = headers.map(h=>{
+    if(h==='updatedAt') return new Date().toISOString();
+    const v = seed[h]; return (v==null?'':String(v));
+  });
+  const rangeA1 = `'${currentSheetTitle||'シート1'}'!A${rowIndex}:`+String(colA1(headers.length-1))+String(rowIndex);
+  return putValues(currentSpreadsheetId, rangeA1, [values], token);
+}
 function updateCaptionForPin(id, fields){
   const cached=rowCache.get(id)||{id};
   const seed=Object.assign({}, cached, fields||{});
@@ -487,25 +476,14 @@ function updateCaptionForPin(id, fields){
         id,
         title:seed.title||'',
         body:seed.body||'',
-        color:seed.color||currentPinColor,
+        color:seed.color||window.currentPinColor,
         x:seed.x||0, y:seed.y||0, z:seed.z||0,
         imageFileId:seed.imageFileId||'',
         createdAt:seed.createdAt||new Date().toISOString(),
         updatedAt:new Date().toISOString()
       }).then(()=>{ rowCache.set(id, seed); reflectRowToUI(id); refreshPinMarkerFromRow(id); });
     }else{
-      const token = ensureToken();
-      const rowIndex = meta ? meta.rowIndex : 2;
-      const headers = LOCIMYU_HEADERS;
-      const values = headers.map(h=>{
-        const key = h;
-        if(key==='updatedAt') return new Date().toISOString();
-        const v = seed[key]; return (v==null?'':String(v));
-      });
-      const rangeA1 = `'${currentSheetTitle||'シート1'}'!A${rowIndex}:`+String(colA1(headers.length-1))+String(rowIndex);
-      return putValues(currentSpreadsheetId, rangeA1, [values], token)
-        .then(()=>{ rowCache.set(id, seed); reflectRowToUI(id); refreshPinMarkerFromRow(id); })
-        .catch(e=>{ console.error('[values.update] failed', e); throw e; });
+      return putRowToSheet(seed, meta).then(()=>{ rowCache.set(id, seed); reflectRowToUI(id); refreshPinMarkerFromRow(id); }).catch(e=>{ console.error('[values.update] failed', e); throw e; });
     }
   });
 }
@@ -513,29 +491,39 @@ function updateCaptionForPin(id, fields){
 function refreshPinMarkerFromRow(id){
   const row=rowCache.get(id); if(!row) return;
   removePinMarker(id);
-  addPinMarker({ id, x:row.x||0, y:row.y||0, z:row.z||0, color:row.color||currentPinColor });
+  addPinMarker({ id, x:row.x||0, y:row.y||0, z:row.z||0, color:row.color||window.currentPinColor });
 }
 
-/* ---------------- Image attach/detach ---------------- */
+// ---------- Image attach/detach (right pane) ----------
+function renderCurrentImageThumb(){
+  const box = $('currentImageThumb'); if(!box) return;
+  box.innerHTML='';
+  const hostRow = document.getElementById('caption-image-row');
+  if(hostRow){ hostRow.querySelectorAll('.current-image-wrap').forEach(n=>n.remove()); }
+  const row = selectedPinId ? (rowCache.get(selectedPinId)||{}) : null;
+  if(!row || !row.imageFileId){
+    box.innerHTML='<div class="placeholder">No Image</div>';
+    return;
+  }
+  const token = getAccessToken();
+  getFileThumbUrl(row.imageFileId, token, 512).then(url=>{
+    const wrap=document.createElement('div'); wrap.className='current-image-wrap'; wrap.style.position='relative'; wrap.style.display='inline-block';
+    const img=document.createElement('img'); img.src=url; img.alt=''; img.style.borderRadius='12px'; img.style.maxWidth='100%';
+    const x=document.createElement('button'); x.textContent='×'; x.title='Detach image';
+    x.style.position='absolute'; x.style.right='6px'; x.style.top='6px';
+    x.style.border='none'; x.style.width='28px'; x.style.height='28px';
+    x.style.borderRadius='999px'; x.style.background='#000a'; x.style.color='#fff'; x.style.cursor='pointer';
+    x.addEventListener('click', (e)=>{ e.stopPropagation(); updateImageForPin(selectedPinId, null).then(renderCurrentImageThumb); });
+    wrap.appendChild(img); wrap.appendChild(x); box.appendChild(wrap);
+  }).catch(()=>{ box.innerHTML='<div class="placeholder">No Image</div>'; });
+}
 function updateImageForPin(id, fileIdOrNull){
-  const token = ensureToken();
+  const token = ensureToken(); // also acts as auth guard
   const patch = { imageFileId: fileIdOrNull ? String(fileIdOrNull) : '' };
-  return updateCaptionForPin(id, patch).then(()=>{
-    // right-pane preview
-    const box=$('currentImageThumb'); if(box){
-  const pv=box.querySelector('.preview'); const ph=box.querySelector('.placeholder');
-  if(pv) pv.innerHTML='';
-  if(patch.imageFileId){
-    getFileThumbUrl(patch.imageFileId, token, 256).then(url=>{
-      const img=document.createElement('img'); img.src=url; pv && pv.appendChild(img);
-      if(ph) ph.style.display='none';
-    }).catch(()=>{ if(ph){ ph.style.display=''; } });
-  }else{ if(ph){ ph.style.display=''; } }
-}
-  });
+  return updateCaptionForPin(id, patch).then(()=> renderCurrentImageThumb());
 }
 
-/* ---------------- Load captions from sheet ---------------- */
+// ---------- Load captions from sheet ----------
 function loadCaptionsFromSheet(){
   const token = getAccessToken(); if(!token||!currentSpreadsheetId||!currentSheetTitle) return;
   const range = `'${currentSheetTitle}'!A1:Z9999`;
@@ -553,30 +541,30 @@ function loadCaptionsFromSheet(){
         id,
         title: textOrEmpty(row[map['title']||1]),
         body : textOrEmpty(row[map['body'] ||2]),
-        color: textOrEmpty(row[map['color']||3]) || currentPinColor,
+        color: textOrEmpty(row[map['color']||3]) || window.currentPinColor,
         x: Number(row[map['x']||4]||0), y: Number(row[map['y']||5]||0), z: Number(row[map['z']||6]||0),
         imageFileId: textOrEmpty(row[map['imagefileid']||7]),
         createdAt: textOrEmpty(row[map['createdat']||8]),
-        updatedAt: textOrEmpty(row[map['updatedat']||9]),
+        updatedAt: textOrEmpty(row[map['updatedat']||9])
       };
       rowCache.set(id, obj);
       captionsIndex.set(id, { rowIndex: r+1 });
-      enrichRow(obj).then(appendCaptionItem);
-      addPinMarker({ id, x:obj.x, y:obj.y, z:obj.z, color:obj.color||currentPinColor });
+      appendCaptionItem(obj);
+      addPinMarker({ id, x:obj.x, y:obj.y, z:obj.z, color:obj.color||window.currentPinColor });
     }
-    applyFilter(); // reflect current filter mode
+    applyFilter();
   }).catch(e=> console.warn('[loadCaptionsFromSheet] failed', e));
 }
 
-/* ---------------- Right-pane images grid (attach on click) ---------------- */
+// ---------- Right-pane images grid (attach on click) ----------
 (function wireImagesGrid(){
   const grid = $('images-grid'); if(!grid) return;
   grid.addEventListener('click', (e)=>{
     const cell = e.target.closest('.thumb'); if(!cell) return;
     if(!selectedPinId) { alert('先にキャプションを選択してください。'); return; }
     const fileId = cell.dataset.fileId;
-    updateImageForPin(selectedPinId, fileId).catch(e=>{
-      console.error('attach failed', e);
+    updateImageForPin(selectedPinId, fileId).catch(err=>{
+      console.error('attach failed', err);
       alert('画像の添付に失敗しました。サインイン状態と権限を確認してください。');
     });
   });
@@ -594,126 +582,160 @@ function refreshImagesGrid(){
     }
     const q = encodeURIComponent(`'${parent}' in parents and mimeType contains 'image/' and trashed=false`);
     const url = `https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name,mimeType,thumbnailLink)&orderBy=modifiedTime desc&pageSize=200&supportsAllDrives=true`;
-    return fetch(url, { headers:{ Authorization:'Bearer '+token } }).then(r=>r.json()).then(d=>{
-      const grid = $('images-grid'); const stat = $('images-status');
-      if(grid) grid.innerHTML = '';
-      const files = d.files||[];
-      files.forEach(f=>{
-        const div = document.createElement('div');
-        div.className = 'thumb';
-        div.dataset.fileId = f.id;
-        const thumb = (f.thumbnailLink ? (f.thumbnailLink + (f.thumbnailLink.includes('?')?'&':'?') + 'sz=s256') : '');
-        if(thumb) div.style.backgroundImage = `url("${thumb}")`;
-        if(grid) grid.appendChild(div);
+    return fetch(url, { headers:{ Authorization:'Bearer '+token } })
+      .then(r=>r.json())
+      .then(d=>{
+        const grid = $('images-grid'); const stat = $('images-status');
+        if(grid) grid.innerHTML = '';
+        const files = d.files||[];
+        files.forEach(f=>{
+          const div = document.createElement('div');
+          div.className = 'thumb';
+          div.dataset.fileId = f.id;
+          const thumb = (f.thumbnailLink ? (f.thumbnailLink + (f.thumbnailLink.includes('?')?'&':'?') + 'sz=s256') : '');
+          if(thumb) div.style.backgroundImage = `url("${thumb}")`;
+          if(grid) grid.appendChild(div);
+        });
+        if(stat) stat.textContent = `${files.length} images`;
       });
-      if(stat) stat.textContent = `${files.length} images`;
-    });
   });
 }
 
-/* ---------------- Form autosave ---------------- */
+// ---------- Form autosave (with immediate overlay reflect) ----------
 (function wireForm(){
   const t=$('caption-title'), b=$('caption-body');
   let timer=null;
+  function reflectOverlayImmediate(){
+    if(!selectedPinId) return;
+    const o = overlays.get(selectedPinId);
+    if(!o) return;
+    const tEl = o.root.querySelector('.cap-title');
+    const bEl = o.root.querySelector('.cap-body');
+    if(tEl && t) tEl.textContent = (t.value||'(untitled)');
+    if(bEl && b) bEl.textContent = (b.value||'(no description)');
+  }
   function schedule(){
     if(!selectedPinId) return;
     clearTimeout(timer);
-    timer=setTimeout(()=>{
-      updateCaptionForPin(selectedPinId, { title: t ? t.value||'' : '', body: b ? b.value||'' : '' })
-        .catch(e=> console.warn('[caption autosave failed]', e));
+    const title = t ? (t.value||'') : '';
+    const body  = b ? (b.value||'') : '';
+    reflectOverlayImmediate();
+    timer=setTimeout(function(){
+      updateCaptionForPin(selectedPinId, { title, body }).catch(function(e){ console.warn('[caption autosave failed]', e); });
     }, 600);
   }
   if(t) t.addEventListener('input', schedule);
   if(b) b.addEventListener('input', schedule);
 })();
 
-/* ---------------- Pin color input ---------------- */
-(function wirePinColor(){
-  const inp = $('pinColor'); if(!inp) return;
-  inp.addEventListener('change', ()=>{
-    if(!selectedPinId) return;
-    const color = String(inp.value||'').trim();
-    updateCaptionForPin(selectedPinId, { color })
-      .then(()=> refreshPinMarkerFromRow(selectedPinId))
-      .catch(e=> console.warn('[color update failed]', e));
-  });
-})();
-
-/* ---------------- Filter UI ---------------- */
-function applyFilter(){
-  const host = $('caption-list'); if(!host) return;
-  // List
-  host.querySelectorAll('.caption-item').forEach(div=>{
-    const id = div.dataset.id;
-    const row = rowCache.get(id)||{};
-    let visible = true;
-    if(filterMode==='selected') visible = (id===selectedPinId);
-    else if(filterMode.startsWith('color:')) visible = (row.color && row.color.toLowerCase() === filterMode.slice(6).toLowerCase());
-    div.classList.toggle('is-hidden', !visible);
-  });
-  // 3D
-  clearPins();
-  rowCache.forEach((row, id)=>{
-    let visible = true;
-    if(filterMode==='selected') visible = (id===selectedPinId);
-    else if(filterMode.startsWith('color:')) visible = (row.color && row.color.toLowerCase() === filterMode.slice(6).toLowerCase());
-    if(visible) addPinMarker({ id, x:row.x, y:row.y, z:row.z, color:row.color||currentPinColor });
+// ---------- Pin color chips & filter chips ----------
+function setPinColor(hex){
+  window.currentPinColor = hex;
+  const host=document.getElementById('pinColorChips')||document.getElementById('pinColorChips');
+  if(host){
+    host.querySelectorAll('.chip-color').forEach(el=>{
+      const v = getComputedStyle(el).getPropertyValue('--chip').trim();
+      el.classList.toggle('is-active', v===hex);
+    });
+  }
+  if(selectedPinId){
+    const row=rowCache.get(selectedPinId)||{id:selectedPinId};
+    row.color=hex; rowCache.set(selectedPinId,row);
+    try{ refreshPinMarkerFromRow(selectedPinId); }catch(_){}
+    try{ updateCaptionForPin(selectedPinId,{ color:hex }); }catch(_){}
+  }
+}
+function renderColorChips(){
+  const host = document.getElementById('pinColorChips') || document.getElementById('pinColorChips'); if(!host) return;
+  host.innerHTML = '';
+  window.LM_PALETTE.forEach(function(hex){
+    const b=document.createElement('button');
+    b.className='chip chip-color'; b.style.setProperty('--chip', hex); b.title=hex;
+    if(window.nearestPalette(window.currentPinColor)===hex) b.classList.add('is-active');
+    b.addEventListener('click', function(){ setPinColor(hex); });
+    host.appendChild(b);
   });
 }
-(function wireFilter(){
-  $('btnShowAll')      && $('btnShowAll').addEventListener('click', ()=>{ filterMode='all'; applyFilter(); });
-  $('btnShowSelected') && $('btnShowSelected').addEventListener('click', ()=>{ filterMode='selected'; applyFilter(); });
-  $('btnFilterColor')  && $('btnFilterColor').addEventListener('click', ()=>{
-    const v = $('pinColor') && $('pinColor').value || '';
-    if(!v) return;
-    filterMode = 'color:'+v;
-    applyFilter();
-  });
-})();
 
-/* ---------------- GLB load ---------------- */
+let lmFilterSet = (function(){ try{ const s=JSON.parse(localStorage.getItem('lmFilterColors')||'[]'); return new Set(s.length?s:window.LM_PALETTE); }catch(_){ return new Set(window.LM_PALETTE);} })();
+function saveFilter(){ try{ localStorage.setItem('lmFilterColors', JSON.stringify(Array.from(lmFilterSet))); }catch(_){ } }
+function rowPassesColorFilter(row){
+  if(!row) return false; if(lmFilterSet.size===0) return true;
+  return lmFilterSet.has(window.nearestPalette(row.color||window.LM_PALETTE[0]));
+}
+function applyColorFilter(){
+  const listHost=document.getElementById('caption-list');
+  if(listHost){
+    listHost.querySelectorAll('.caption-item').forEach(function(div){
+      const id=div.dataset.id; const row=rowCache.get(id);
+      const ok=rowPassesColorFilter(row||{});
+      div.classList.toggle('is-hidden', !ok);
+    });
+  }
+  // notify 3D viewer (optional)
+  try{ document.dispatchEvent(new CustomEvent('pinFilterChange',{ detail:{ selected:Array.from(lmFilterSet) } })); }catch(_){}
+}
+function renderFilterChips(){
+  const host = document.getElementById('pinFilterChips') || document.getElementById('pinFilterChips'); if(!host) return;
+  if(!host.previousElementSibling || !host.previousElementSibling.classList || !host.previousElementSibling.classList.contains('chip-actions')){
+    const bar=document.createElement('div'); bar.className='chip-actions';
+    const a=document.createElement('button'); a.id='filterAll'; a.className='chip-action'; a.textContent='All';
+    const n=document.createElement('button'); n.id='filterNone'; n.className='chip-action'; n.textContent='None';
+    a.addEventListener('click', function(){ lmFilterSet=new Set(window.LM_PALETTE); saveFilter(); applyColorFilter(); renderFilterChips(); });
+    n.addEventListener('click', function(){ lmFilterSet=new Set(); saveFilter(); applyColorFilter(); renderFilterChips(); });
+    host.parentNode.insertBefore(bar, host); bar.appendChild(a); bar.appendChild(n);
+  }
+  host.innerHTML='';
+  window.LM_PALETTE.forEach(function(hex){
+    const b=document.createElement('button');
+    b.className='chip chip-filter'; b.style.setProperty('--chip', hex); b.title='filter '+hex;
+    const mark=document.createElement('span'); mark.className='mark'; mark.textContent='✓'; b.appendChild(mark);
+    if(lmFilterSet.has(hex)) b.classList.add('is-on');
+    b.addEventListener('click', function(){ if(lmFilterSet.has(hex)) lmFilterSet.delete(hex); else lmFilterSet.add(hex); saveFilter(); applyColorFilter(); renderFilterChips(); });
+    host.appendChild(b);
+  });
+}
+
+// ---------- GLB load ----------
 function doLoad(){
   try{
     const token = ensureToken();
     const raw = ($('glbUrl') && $('glbUrl').value) || '';
     const fileId = extractDriveId(raw);
-    if(!fileId){ console.warn('[GLB] missing token or fileId'); return; }
-    $('btnGlb') && ($('btnGlb').disabled = true);
+    if(!fileId){ console.warn('[GLB] missing fileId'); return; }
+    if($('btnGlb')) $('btnGlb').disabled = true;
 
-    return loadGlbFromDrive(fileId, { token }).then(()=>{
+    return loadGlbFromDrive(fileId, { token }).then(function(){
       lastGlbFileId = fileId;
-      return getParentFolderId(fileId, token)
-        .then(parent => findOrCreateLociMyuSpreadsheet(parent, token, { glbId:fileId }))
-        .then(spreadsheetId=>{
-          currentSpreadsheetId = spreadsheetId;
-          return populateSheetTabs(spreadsheetId, token).then(()=> loadCaptionsFromSheet());
-        })
-        .then(()=> refreshImagesGrid());
-    }).catch(e=>{
+      return getParentFolderId(fileId, token).then(function(parent){
+        return findOrCreateLociMyuSpreadsheet(parent, token, { glbId:fileId });
+      }).then(function(spreadsheetId){
+        currentSpreadsheetId = spreadsheetId;
+        return populateSheetTabs(spreadsheetId, token).then(function(){ loadCaptionsFromSheet(); });
+      }).then(function(){ refreshImagesGrid(); });
+    }).catch(function(e){
       console.error('[GLB] load error', e);
       if(String(e).includes('401')){
         alert('認可が必要です。右上の「Sign in」を押して権限を付与してください。');
       }
-    }).finally(()=>{
-      $('btnGlb') && ($('btnGlb').disabled = false);
+    }).finally(function(){
+      if($('btnGlb')) $('btnGlb').disabled = false;
     });
   }catch(e){
     console.warn('[GLB] token missing or other error', e);
   }
 }
-$('btnGlb') && $('btnGlb').addEventListener('click', doLoad);
-$('glbUrl') && $('glbUrl').addEventListener('keydown', (e)=>{ if(e.key==='Enter') doLoad(); });
+if($('btnGlb')) $('btnGlb').addEventListener('click', doLoad);
+if($('glbUrl')) $('glbUrl').addEventListener('keydown', function(e){ if(e.key==='Enter') doLoad(); });
 
-/* ---------------- Sheet tabs & rename ---------------- */
+// ---------- Sheet tabs & rename ----------
 function populateSheetTabs(spreadsheetId, token){
   const sel = $('save-target-sheet'); if(!sel||!spreadsheetId) return Promise.resolve();
   sel.innerHTML = '<option value="">Loading…</option>';
   const url=`https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}?fields=sheets(properties(title,sheetId,index))`;
-  return fetch(url, { headers:{ Authorization:'Bearer '+token } })
-    .then(r=> r.ok ? r.json() : null)
-    .then(data=>{
+  return fetch(url, { headers:{ Authorization:'Bearer '+token } }).then(function(r){ return r.ok ? r.json() : null; }).then(function(data){
       if(!data) { sel.innerHTML='<option value="">(error)</option>'; return; }
-      const sheets = (data.sheets||[]).map(s=>s.properties).sort((a,b)=> a.index-b.index);
+      const sheets = (data.sheets||[]).map(function(s){ return s.properties; }).sort(function(a,b){ return a.index-b.index; });
       sel.innerHTML='';
       for(const p of sheets){
         const opt = document.createElement('option');
@@ -730,42 +752,62 @@ function populateSheetTabs(spreadsheetId, token){
 }
 const sheetSel = $('save-target-sheet');
 if(sheetSel){
-  sheetSel.addEventListener('change', (e)=>{
+  sheetSel.addEventListener('change', function(e){
     const sel = e.target;
     const opt = sel && sel.selectedOptions && sel.selectedOptions[0];
     currentSheetId = (opt && opt.value) ? Number(opt.value) : null;
     currentSheetTitle = (opt && opt.dataset && opt.dataset.title) ? opt.dataset.title : null;
+    // full reset
+    clearPins(); overlays.forEach(function(_,id){ removeCaptionOverlay(id); }); overlays.clear();
+    clearCaptionList(); rowCache.clear(); captionsIndex.clear(); selectedPinId=null;
     loadCaptionsFromSheet();
   });
 }
 const btnCreate = $('save-target-create');
 if(btnCreate){
-  btnCreate.addEventListener('click', ()=>{
+  btnCreate.addEventListener('click', function(){
     const token = ensureToken(); if(!currentSpreadsheetId) return;
     const title='Sheet_'+new Date().toISOString().slice(0,19).replace(/[:T]/g,'-');
     const url=`https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(currentSpreadsheetId)}:batchUpdate`;
     const body={ requests:[{ addSheet:{ properties:{ title } } }] };
     fetch(url,{ method:'POST', headers:{ Authorization:'Bearer '+token, 'Content-Type':'application/json' }, body: JSON.stringify(body) })
-      .then(r=>{ if(!r.ok) throw new Error(String(r.status)); })
-      .then(()=> populateSheetTabs(currentSpreadsheetId, token))
-      .then(()=> loadCaptionsFromSheet())
-      .catch(e=> console.error('[Sheets addSheet] failed', e));
+      .then(function(r){ if(!r.ok) throw new Error(String(r.status)); })
+      .then(function(){ return populateSheetTabs(currentSpreadsheetId, token); })
+      .then(function(){ loadCaptionsFromSheet(); })
+      .catch(function(e){ console.error('[Sheets addSheet] failed', e); });
   });
 }
 const btnRename = $('save-target-rename');
 if(btnRename){
-  btnRename.addEventListener('click', ()=>{
+  btnRename.addEventListener('click', function(){
     const token = ensureToken(); if(!currentSpreadsheetId||!currentSheetId) return;
     const input=$('rename-input'); const newTitle = input && input.value ? String(input.value).trim() : '';
     if(!newTitle) return;
     const url=`https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(currentSpreadsheetId)}:batchUpdate`;
     const body={ requests:[{ updateSheetProperties:{ properties:{ sheetId: currentSheetId, title: newTitle }, fields: 'title' } }] };
     fetch(url,{ method:'POST', headers:{ Authorization:'Bearer '+token, 'Content-Type':'application/json' }, body: JSON.stringify(body) })
-      .then(r=>{ if(!r.ok) throw new Error(String(r.status)); })
-      .then(()=> populateSheetTabs(currentSpreadsheetId, token))
-      .then(()=> loadCaptionsFromSheet())
-      .catch(e=> console.error('[Sheets rename] failed', e));
+      .then(function(r){ if(!r.ok) throw new Error(String(r.status)); })
+      .then(function(){ return populateSheetTabs(currentSpreadsheetId, token); })
+      .then(function(){ loadCaptionsFromSheet(); })
+      .catch(function(e){ console.error('[Sheets rename] failed', e); });
   });
 }
 
-console.log('[LociMyu ESM/CDN] boot overlay-edit+fixed-zoom build loaded (A–E)');
+console.log('[LociMyu ESM/CDN] boot clean full build loaded');
+
+// ---------- Chips init on DOM ready ----------
+document.addEventListener('DOMContentLoaded', function(){
+  try{ renderColorChips(); renderFilterChips(); applyColorFilter(); }catch(e){ console.warn('[chips init]', e); }
+});
+
+// ---------- Shift+click add pin (delegated to viewer) ----------
+onCanvasShiftPick(function(pos){
+  const id = 'pin_'+Date.now();
+  const color = lmCanonicalColor(window.currentPinColor);
+  const row = { id, title:'', body:'', color, x:pos.x, y:pos.y, z:pos.z, imageFileId:'', createdAt:new Date().toISOString(), updatedAt:new Date().toISOString() };
+  rowCache.set(id, row);
+  appendCaptionItem(row);
+  addPinMarker({ id, x:pos.x, y:pos.y, z:pos.z, color });
+  selectCaption(id);
+  ensureRow(id, row).then(function(){ updateCaptionForPin(id, row); });
+});
