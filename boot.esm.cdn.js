@@ -473,41 +473,41 @@ function appendCaptionItem(row){
   const b=document.createElement('div'); b.className='cap-body hint'; b.textContent=safeBody;
   txt.appendChild(t); txt.appendChild(b);
   const del=document.createElement('button'); del.className='cap-del'; del.textContent='×'; del.title='Delete pin';
-  del.addEventListener('click', async (ev)=>{
-    ev.stopPropagation();
-    if(!confirm('このキャプションを削除しますか？')) return;
-    const id=row.id;
-    // 最新の rowIndex を得るために先に再インデックス
-    await ensureIndex();
-    const meta = captionsIndex.get(id);
-    if (currentSpreadsheetId && currentSheetId && meta && meta.rowIndex){
-      let token;
-      try{
-        token = ensureToken();
-      }catch(e){
-        console.warn('[delete] token error', e);
-        alert('サインインが必要です。右上の「Sign in」を押してください。');
-        return;
-      }
-      const ok = await deleteCaptionRowFromSheet(currentSpreadsheetId, currentSheetId, meta.rowIndex, token);
-      if(!ok){
-        alert('スプレッドシートからの削除に失敗しました。再試行してください。');
-        return;
-      }
+  del.addEventListener('click', async (ev)=>{  ev.stopPropagation();
+  if(!confirm('このキャプションを削除しますか？')) return;
+
+  const id = row.id;
+
+  try{ removePinMarker(id); }catch(_){}
+  try{ removeCaptionOverlay && removeCaptionOverlay(id); }catch(_){}
+
+  const meta = captionsIndex.get(id);
+  let ok = true;
+  if (currentSpreadsheetId && currentSheetId && meta && meta.rowIndex){
+    try{
+      const token = ensureToken();
+      ok = await deleteCaptionRowFromSheet(currentSpreadsheetId, currentSheetId, meta.rowIndex, token);
+      if(!ok) throw new Error('Sheets API returned non-ok');
+      await ensureIndex();
+    }catch(e){
+      console.error('[delete row failed]', e);
+      alert('スプレッドシートからの削除に失敗しました: ' + (e && e.message || 'unknown'));
+      ok = false;
     }
-    try{ removePinMarker(id); }catch(_){}
-    try{ removeCaptionOverlay(id); }catch(_){}
-    const el = host.querySelector('.caption-item[data-id="'+CSS.escape(id)+'"]');
-    if(el) el.remove();
-    captionsIndex.delete(id);
-    rowCache.delete(id);
-    if(selectedPinId===id){
-      selectedPinId=null;
-      const t=$('caption-title'), b=$('caption-body');
-      if(t) t.value=''; if(b) b.value='';
-      renderCurrentImageThumb();
-    }
-  });
+  }
+  if(!ok){ return; }
+
+  const el = host.querySelector('[data-id="'+CSS.escape(id)+'"]');
+  if(el) el.remove();
+  captionsIndex.delete(id);
+  rowCache.delete(id);
+  if(selectedPinId === id){
+    selectedPinId = null;
+    const t=document.getElementById('caption-title'), b=document.getElementById('caption-body');
+    if(t) t.value='';
+    if(b) b.value='';
+    renderCurrentImageThumb();
+  }});
   div.appendChild(txt); div.appendChild(del);
   div.addEventListener('click', ()=> selectCaption(row.id));
   host.appendChild(div); captionDomById.set(row.id, div);
@@ -573,31 +573,64 @@ function updateCaptionForPin(id, fields){
 // ---------- Image attach/detach (right pane) ----------
 let _thumbReq = 0;
 function renderCurrentImageThumb(){
-  const box = $('currentImageThumb'); if(!box) return;
-  const myReq = ++_thumbReq;
-  box.innerHTML='';
+  const box = document.getElementById('currentImageThumb');
+  if(!box) return;
+
+  box.innerHTML = '';
+
   const row = selectedPinId ? (rowCache.get(selectedPinId)||{}) : null;
   if(!row || !row.imageFileId){
-    box.innerHTML='<div class="placeholder">No Image</div>';
+    box.innerHTML = '<div class="placeholder">No Image</div>';
     return;
   }
-  const token = getAccessToken();
+
+  const token = (typeof getAccessToken === 'function') ? getAccessToken() : null;
   if(!token){
-    box.innerHTML='<div class="placeholder">No Image</div>';
+    box.innerHTML = '<div class="placeholder">No Image</div>';
     return;
   }
+
   getFileThumbUrl(row.imageFileId, token, 512).then((url)=>{
-    if(myReq!==_thumbReq) return;
-    box.innerHTML='';
-    const wrap=document.createElement('div'); wrap.className='current-image-wrap'; wrap.style.position='relative'; wrap.style.display='inline-block';
-    const img=document.createElement('img'); img.src=url; img.alt=''; img.style.borderRadius='12px'; img.style.maxWidth='100%';
-    const x=document.createElement('button'); x.textContent='×'; x.title='Detach image';
-    x.style.position='absolute'; x.style.right='6px'; x.style.top='6px';
-    x.style.border='none'; x.style.width='28px'; x.style.height='28px';
-    x.style.borderRadius='999px'; x.style.background='#000a'; x.style.color='#fff'; x.style.cursor='pointer';
-    x.addEventListener('click', (e)=>{ e.stopPropagation(); updateImageForPin(selectedPinId, null).then(()=>{ renderCurrentImageThumb(); refreshOverlayImage(selectedPinId); }); });
-    wrap.appendChild(img); wrap.appendChild(x); box.appendChild(wrap);
-  }).catch(()=>{ box.innerHTML='<div class="placeholder">No Image</div>'; });
+    box.innerHTML = '';
+
+    const wrap=document.createElement('div');
+    wrap.className='current-image-wrap';
+    wrap.style.position='relative';
+    wrap.style.display='inline-block';
+
+    const img=document.createElement('img');
+    img.src=url; img.alt='';
+    img.style.borderRadius='12px';
+    img.style.maxWidth='100%';
+    img.style.display='block';
+
+    const x=document.createElement('button');
+    x.textContent='×';
+    x.title='Detach image';
+    x.style.position='absolute';
+    x.style.right='6px';
+    x.style.top='6px';
+    x.style.border='none';
+    x.style.width='28px';
+    x.style.height='28px';
+    x.style.borderRadius='999px';
+    x.style.background='#000a';
+    x.style.color='#fff';
+    x.style.cursor='pointer';
+
+    x.addEventListener('click', (e)=>{
+      e.stopPropagation();
+      Promise.resolve(updateImageForPin(selectedPinId, null))
+        .then(renderCurrentImageThumb)
+        .catch(()=>{});
+    });
+
+    wrap.appendChild(img);
+    wrap.appendChild(x);
+    box.appendChild(wrap);
+  }).catch(()=>{
+    box.innerHTML = '<div class="placeholder">No Image</div>';
+  });
 }
 function updateImageForPin(id, fileIdOrNull){
   const token = ensureToken();
