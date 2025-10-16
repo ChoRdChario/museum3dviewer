@@ -308,6 +308,90 @@ onPinSelect((id)=> selectCaption(id));
 // ---------- Sheets I/O ----------
 const LOCIMYU_HEADERS = ['id','title','body','color','x','y','z','imageFileId','createdAt','updatedAt'];
 
+
+/* === Sheets schema & migration helpers (verticalize) === */
+async function ensureVerticalSheet(spreadsheetId, sheetTitle, token){
+  try{
+    if(!spreadsheetId || !sheetTitle || !token) return { migrated:false };
+    const range = `'${sheetTitle}'!A1:ZZ1000`;
+    const url = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(range)}`;
+    const res = await fetch(url, { headers:{ Authorization:'Bearer '+token } });
+    if(!res.ok) return { migrated:false };
+    const data = await res.json();
+    const values = data.values || [];
+    if(!values.length) return { migrated:false };
+
+    function looksVertical(values){
+      const h = (values[0]||[]).map(v => String(v||'').trim().toLowerCase());
+      const need = new Set(['id','title','body','color']);
+      let hit=0; h.forEach(k=>{ if(need.has(k)) hit++; });
+      return hit>=3;
+    }
+    function looksHorizontal(values){
+      const col0 = values.map(r => String((r && r[0])||'').trim().toLowerCase()).filter(Boolean);
+      const need = new Set(['id','title','body','color']);
+      let hit=0; col0.forEach(k=>{ if(need.has(k)) hit++; });
+      return hit>=3;
+    }
+
+    if(looksVertical(values)) return { migrated:false };
+    if(!looksHorizontal(values)) return { migrated:false };
+
+    // transpose: first column headers, columns are pins
+    const headerCol = values.map(r => String((r && r[0]) || '').trim());
+    const maxCols = Math.max(...values.map(r => r.length));
+    const pins = [];
+    for(let c=1;c<maxCols;c++){
+      const obj = {};
+      for(let r=0;r<headerCol.length;r++){
+        const k = headerCol[r]; if(!k) continue;
+        const v = (values[r] && values[r][c]!=null) ? String(values[r][c]) : '';
+        obj[k] = v;
+      }
+      if(obj.id) pins.push(obj);
+    }
+
+    const rows = [LOCIMYU_HEADERS.slice()];
+    for(const p of pins){
+      rows.push([
+        p.id || '',
+        p.title || '',
+        p.body || '',
+        p.color || '',
+        p.x || '', p.y || '', p.z || '',
+        p.imageFileId || p.imagefileid || '',
+        p.createdAt || p.createdat || '',
+        p.updatedAt || p.updatedat || ''
+      ]);
+    }
+
+    // clear then write back
+    const clearUrl = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent('\''+sheetTitle+'\'')}:clear`;
+    await fetch(clearUrl, { method:'POST', headers:{ Authorization:'Bearer '+token } });
+    const putUrl = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent('\''+sheetTitle+'\'!A1')}` + `?valueInputOption=RAW`;
+    const res2 = await fetch(putUrl, { method:'PUT', headers:{ Authorization:'Bearer '+token, 'Content-Type':'application/json' }, body: json.dumps({'values': rows}) });
+    if(!res2.ok) return { migrated:false };
+    return { migrated:true, count:pins.length };
+  }catch(_){ return { migrated:false }; }
+}
+
+/* === Delete a row from the active sheet (persist pin delete) === */
+async function deleteCaptionRowFromSheet(spreadsheetId, sheetId, rowIndex1based, token){
+  try{
+    if(!spreadsheetId || !sheetId || !rowIndex1based || !token) return false;
+    const body = {
+      requests: [{
+        deleteDimension: {
+          range: { sheetId: Number(sheetId), dimension: "ROWS", startIndex: rowIndex1based-1, endIndex: rowIndex1based }
+        }
+      }]
+    };
+    const url = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}:batchUpdate`;
+    const r = await fetch(url, { method:'POST', headers:{ Authorization:'Bearer '+token, 'Content-Type':'application/json' }, body: JSON.stringify(body) });
+    return r.ok;
+  }catch(_){ return false; }
+}
+
 function colA1(i0){ let n=i0+1,s=''; while(n){ n--; s=String.fromCharCode(65+(n%26))+s; n=(n/26)|0; } return s; }
 function putValues(spreadsheetId, rangeA1, values, token){
   const url = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(rangeA1)}?valueInputOption=RAW`;
@@ -430,7 +514,23 @@ function appendCaptionItem(row){
   const t=document.createElement('div'); t.className='cap-title'; t.textContent=(row.title||'').trim()||'(untitled)';
   const b=document.createElement('div'); b.className='cap-body hint'; b.textContent=(row.body||'').trim()||'(no description)';
   const del=document.createElement('button'); del.className='cap-del'; del.textContent='×'; del.title='Delete this pin';
-  del.addEventListener('click', (ev)=>{ ev.stopPropagation(); try{ removePinMarker(row.id); }catch(_){ } try{ removeCaptionOverlay(row.id);}catch(_){ } const el=host.querySelector('[data-id=\"'+row.id+'\"]'); if(el) el.remove(); rowCache.delete(row.id); captionsIndex.delete(row.id); });
+  
+del.addEventListener('click', async (ev)=>{
+  ev.stopPropagation();
+  try { removePinMarker(row.id); } catch(_){}
+  try { removeCaptionOverlay(row.id); } catch(_){}
+  const meta = captionsIndex.get(row.id);
+  if (currentSpreadsheetId && currentSheetId && meta && meta.rowIndex){
+    try{
+      const token = ensureToken();
+      await deleteCaptionRowFromSheet(currentSpreadsheetId, currentSheetId, meta.rowIndex, token);
+    }catch(e){ console.warn('[delete row failed]', e); }
+  }
+  const el = host.querySelector('[data-id="'+row.id+'"]'); if(el) el.remove();
+  captionsIndex.delete(row.id);
+  rowCache.delete(row.id);
+});
+
   wrap.append(t,b); div.append(wrap,del);
   div.addEventListener('click', ()=> selectCaption(row.id));
   host.appendChild(div);
@@ -714,7 +814,9 @@ function doLoad(){
         return findOrCreateLociMyuSpreadsheet(parent, token, { glbId:fileId });
       }).then(function(spreadsheetId){
         currentSpreadsheetId = spreadsheetId;
-        return populateSheetTabs(spreadsheetId, token).then(function(){ loadCaptionsFromSheet(); });
+        return populateSheetTabs(spreadsheetId, token)
+      .then(function(){ return ensureVerticalSheet(currentSpreadsheetId, currentSheetTitle, token); })
+      .then(function(){ loadCaptionsFromSheet(); });
       }).then(function(){ refreshImagesGrid(); });
     }).catch(function(e){
       console.error('[GLB] load error', e);
