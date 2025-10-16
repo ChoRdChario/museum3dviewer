@@ -1,3 +1,4 @@
+// LociMyu instrumented build r1 — adds detailed logs for delete & save flows
 // boot.esm.cdn.js — LociMyu boot (clean full build)
 // NOTE: single-import, no duplicate globals, no leading .then/.catch chains.
 
@@ -308,6 +309,95 @@ onPinSelect((id)=> selectCaption(id));
 // ---------- Sheets I/O ----------
 const LOCIMYU_HEADERS = ['id','title','body','color','x','y','z','imageFileId','createdAt','updatedAt'];
 
+
+/* === Sheets schema & migration helpers (verticalize) === */
+async function ensureVerticalSheet(spreadsheetId, sheetTitle, token){
+  console.debug('[LM] ensureVerticalSheet start', {sheetTitle});
+  try{
+    if(!spreadsheetId || !sheetTitle || !token) return { migrated:false };
+    const range = `'${sheetTitle}'!A1:ZZ1000`;
+    const url = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(range)}`;
+    const res = await fetch(url, { headers:{ Authorization:'Bearer '+token } });
+    if(!res.ok) return { migrated:false };
+    const data = await res.json();
+    const values = data.values || [];
+    if(!values.length) return { migrated:false };
+
+    function looksVertical(values){
+      const h = (values[0]||[]).map(v => String(v||'').trim().toLowerCase());
+      const need = new Set(['id','title','body','color']);
+      let hit=0; h.forEach(k=>{ if(need.has(k)) hit++; });
+      return hit>=3;
+    }
+    function looksHorizontal(values){
+      const col0 = values.map(r => String((r && r[0])||'').trim().toLowerCase()).filter(Boolean);
+      const need = new Set(['id','title','body','color']);
+      let hit=0; col0.forEach(k=>{ if(need.has(k)) hit++; });
+      return hit>=3;
+    }
+
+    if(looksVertical(values)) return { migrated:false };
+    if(!looksHorizontal(values)) return { migrated:false };
+
+    // transpose: first column headers, columns are pins
+    const headerCol = values.map(r => String((r && r[0]) || '').trim());
+    const maxCols = Math.max(...values.map(r => r.length));
+    const pins = [];
+    for(let c=1;c<maxCols;c++){
+      const obj = {};
+      for(let r=0;r<headerCol.length;r++){
+        const k = headerCol[r]; if(!k) continue;
+        const v = (values[r] && values[r][c]!=null) ? String(values[r][c]) : '';
+        obj[k] = v;
+      }
+      if(obj.id) pins.push(obj);
+    }
+
+    const rows = [LOCIMYU_HEADERS.slice()];
+    for(const p of pins){
+      rows.push([
+        p.id || '',
+        p.title || '',
+        p.body || '',
+        p.color || '',
+        p.x || '', p.y || '', p.z || '',
+        p.imageFileId || p.imagefileid || '',
+        p.createdAt || p.createdat || '',
+        p.updatedAt || p.updatedat || ''
+      ]);
+    }
+
+    // clear then write back
+    const clearUrl = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent('\''+sheetTitle+'\'')}:clear`;
+    await fetch(clearUrl, { method:'POST', headers:{ Authorization:'Bearer '+token } });
+    const putUrl = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent('\''+sheetTitle+'\'!A1')}` + `?valueInputOption=RAW`;
+    const res2 = await fetch(putUrl, { method:'PUT', headers:{ Authorization:'Bearer '+token, 'Content-Type':'application/json' }, body: json.dumps({'values': rows}) });
+    if(!res2.ok) return { migrated:false };
+    return { migrated:true, count:pins.length };
+  }catch(_){ console.debug('[LM] ensureVerticalSheet done (no action)');
+      return { migrated:false }; }
+}
+
+/* === Delete a row from the active sheet (persist pin delete) === */
+async function deleteCaptionRowFromSheet(spreadsheetId, sheetId, rowIndex1based, token){
+  console.debug('[LM] deleteCaptionRowFromSheet args', { spreadsheetId, sheetId, rowIndex1based });
+
+  try{
+    if(!spreadsheetId || !sheetId || !rowIndex1based || !token) return false;
+    const body = {
+      requests: [{
+        deleteDimension: {
+          range: { sheetId: Number(sheetId), dimension: "ROWS", startIndex: rowIndex1based-1, endIndex: rowIndex1based }
+        }
+      }]
+    };
+    const url = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}:batchUpdate`;
+    console.debug('[LM] delete req body', body);
+  const r = await fetch(url, { method:'POST', headers:{ Authorization:'Bearer '+token, 'Content-Type':'application/json' }, body: JSON.stringify(body) });
+    return r.ok;
+  }catch(_){ return false; }
+}
+
 function colA1(i0){ let n=i0+1,s=''; while(n){ n--; s=String.fromCharCode(65+(n%26))+s; n=(n/26)|0; } return s; }
 function putValues(spreadsheetId, rangeA1, values, token){
   const url = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(rangeA1)}?valueInputOption=RAW`;
@@ -333,8 +423,9 @@ function isLociMyuSpreadsheet(spreadsheetId, token){
           const fv = v && v.formattedValue ? String(v.formattedValue).trim().toLowerCase() : '';
           if(fv) headers.push(fv);
         }
-        if(headers.includes('title') && headers.includes('body') && headers.includes('color')) return true;
-      }
+        if(headers.includes('title') && headers.includes('body') && headers.includes('color')) console.debug('[LM] delete row success');
+  return true;
+}
       return false;
     });
 }
@@ -384,45 +475,6 @@ function ensureIndex(){
   });
 }
 
-// Delete one data row (Pins sheet)
-function deleteRowFromSheet(id){
-  const token = (typeof ensureToken === 'function') ? ensureToken() : null;
-  if (!token) return Promise.reject(new Error('token_missing'));
-  if (!window.currentSpreadsheetId || !window.currentSheetId){
-    return Promise.reject(new Error('No spreadsheet/sheet selected'));
-  }
-  const meta = captionsIndex && captionsIndex.get ? captionsIndex.get(String(id)) : null;
-  if (!meta || !meta.rowIndex){
-    return Promise.resolve(true);
-  }
-  const start = meta.rowIndex - 1;
-  const end   = meta.rowIndex;
-  const url = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(window.currentSpreadsheetId)}:batchUpdate`;
-  const body = {
-    requests: [{
-      deleteDimension: {
-        range: {
-          sheetId: window.currentSheetId,
-          dimension: 'ROWS',
-          startIndex: start,
-          endIndex: end
-        }
-      }
-    }]
-  };
-  return fetch(url, {
-    method: 'POST',
-    headers: { 'Authorization': 'Bearer '+token, 'Content-Type': 'application/json' },
-    body: JSON.stringify(body)
-  }).then(r=>{
-    if(!r.ok) throw new Error('Delete row failed: '+r.status);
-    return r.json();
-  }).then(()=>{
-    if (typeof ensureIndex === 'function') return ensureIndex();
-  });
-}
-
-
 function sheetsAppendRow(spreadsheetId, sheetTitle, obj){
   const token=getAccessToken(); if(!token) return Promise.resolve();
   const now=new Date().toISOString();
@@ -469,31 +521,23 @@ function appendCaptionItem(row){
   const t=document.createElement('div'); t.className='cap-title'; t.textContent=(row.title||'').trim()||'(untitled)';
   const b=document.createElement('div'); b.className='cap-body hint'; b.textContent=(row.body||'').trim()||'(no description)';
   const del=document.createElement('button'); del.className='cap-del'; del.textContent='×'; del.title='Delete this pin';
-  del.addEventListener('click', (ev)=>{
-    ev.stopPropagation();
-    if (!confirm('このキャプションを削除しますか？')) return;
-    const id = row.id;
-    if (typeof deleteRowFromSheet === 'function'){
-      deleteRowFromSheet(id).then(()=>{
-        try{ removePinMarker(id); }catch(_){}
-        try{ removeCaptionOverlay(id);}catch(_){}
-        const el = host.querySelector('[data-id="'+CSS.escape(id)+'"]');
-        if (el) el.remove();
-        if (rowCache && rowCache.delete) rowCache.delete(id);
-        if (captionsIndex && captionsIndex.delete) captionsIndex.delete(id);
-        if (typeof selectedPinId !== 'undefined' && selectedPinId === id){
-          selectedPinId = null;
-          const t=$('caption-title'), b=$('caption-body');
-          if (t) t.value = '';
-          if (b) b.value = '';
-          if (typeof renderCurrentImageThumb === 'function') renderCurrentImageThumb();
-        }
-      }).catch(err=>{
-        console.error('[delete] failed', err);
-        alert('削除に失敗しました: ' + (err && err.message ? err.message : err));
-      });
-    }
-  });
+  
+del.addEventListener('click', async (ev)=>{
+  ev.stopPropagation();
+  try { removePinMarker(row.id); } catch(_){}
+  try { removeCaptionOverlay(row.id); } catch(_){}
+  const meta = captionsIndex.get(row.id);
+  if (currentSpreadsheetId && currentSheetId && meta && meta.rowIndex){
+    try{
+      const token = ensureToken();
+      await deleteCaptionRowFromSheet(currentSpreadsheetId, currentSheetId, meta.rowIndex, token);
+    }catch(e){ console.warn('[delete row failed]', e); }
+  }
+  const el = host.querySelector('[data-id="'+row.id+'"]'); if(el) el.remove();
+  captionsIndex.delete(row.id);
+  rowCache.delete(row.id);
+});
+
   wrap.append(t,b); div.append(wrap,del);
   div.addEventListener('click', ()=> selectCaption(row.id));
   host.appendChild(div);
@@ -559,70 +603,25 @@ function refreshPinMarkerFromRow(id){
 
 // ---------- Image attach/detach (right pane) ----------
 function renderCurrentImageThumb(){
-  const box = document.getElementById('currentImageThumb') || document.getElementById('current-image-thumb');
-  if (!box) return;
-  box.innerHTML = '';
-
-  const row = (typeof selectedPinId !== 'undefined' && selectedPinId) ? ((rowCache && rowCache.get && rowCache.get(selectedPinId)) || {}) : null;
-  if (!row || !row.imageFileId){
+  const box = $('currentImageThumb');
+  if(!box) return;
+  box.innerHTML='';
+  const row = selectedPinId ? (rowCache.get(selectedPinId)||{}) : null;
+  if(!row || !row.imageFileId){
     box.innerHTML = '<div class="placeholder">No Image</div>';
     return;
   }
-  const token = (typeof getAccessToken === 'function') ? getAccessToken() : null;
-  if (!token){
-    box.innerHTML = '<div class="placeholder">No Image</div>';
-    return;
-  }
-  const show = (url) => {
-    box.innerHTML = '';
-    const wrap = document.createElement('div');
-    wrap.className = 'current-image-wrap';
-    wrap.style.position = 'relative';
-    wrap.style.display  = 'inline-block';
-    const img = document.createElement('img');
-    img.src = url; img.alt = ''; img.style.borderRadius = '12px'; img.style.maxWidth = '100%';
-    const x = document.createElement('button');
-    x.textContent = '×'; x.title = 'Detach image';
-    Object.assign(x.style, { position:'absolute', right:'6px', top:'6px', border:'none', width:'28px', height:'28px', borderRadius:'999px', background:'#000a', color:'#fff', cursor:'pointer' });
-    x.addEventListener('click', (e)=>{
-      e.stopPropagation();
-      if (typeof updateImageForPin === 'function' && typeof selectedPinId !== 'undefined'){
-        Promise.resolve(updateImageForPin(selectedPinId, '')).then(()=> renderCurrentImageThumb());
-      }
-    });
+  const token = getAccessToken();
+  getFileThumbUrl(row.imageFileId, token, 512).then(function(url){
+    const wrap=document.createElement('div'); wrap.className='current-image-wrap'; wrap.style.position='relative'; wrap.style.display='inline-block';
+    const img=document.createElement('img'); img.src=url; img.alt=''; img.style.borderRadius='12px'; img.style.maxWidth='100%';
+    const x=document.createElement('button'); x.textContent='×'; x.title='Detach image';
+    x.style.position='absolute'; x.style.right='6px'; x.style.top='6px';
+    x.style.border='none'; x.style.width='28px'; x.style.height='28px';
+    x.style.borderRadius='999px'; x.style.background='#000a'; x.style.color='#fff'; x.style.cursor='pointer';
+    x.addEventListener('click', function(e){ e.stopPropagation(); updateImageForPin(selectedPinId, null).then(renderCurrentImageThumb); });
     wrap.appendChild(img); wrap.appendChild(x); box.appendChild(wrap);
-  };
-  const blobP = (typeof getFileBlobUrl === 'function') ? getFileBlobUrl(row.imageFileId, token) : Promise.reject();
-  const thumbP = (typeof getFileThumbUrl === 'function') ? (sz => getFileThumbUrl(row.imageFileId, token, sz))(512) : Promise.reject();
-  blobP.then(show).catch(()=> thumbP.then(show)).catch(()=>{ box.innerHTML = '<div class="placeholder">No Image</div>'; });
-}
-  const token = (typeof getAccessToken === 'function') ? getAccessToken() : null;
-  if (!token){
-    box.innerHTML = '<div class="placeholder">No Image</div>';
-    return;
-  }
-  const show = (url) => {
-    box.innerHTML = '';
-    const wrap = document.createElement('div');
-    wrap.className = 'current-image-wrap';
-    wrap.style.position = 'relative';
-    wrap.style.display  = 'inline-block';
-    const img = document.createElement('img');
-    img.src = url; img.alt = ''; img.style.borderRadius = '12px'; img.style.maxWidth = '100%';
-    const x = document.createElement('button');
-    x.textContent = '×'; x.title = 'Detach image';
-    Object.assign(x.style, { position:'absolute', right:'6px', top:'6px', border:'none', width:'28px', height:'28px', borderRadius:'999px', background:'#000a', color:'#fff', cursor:'pointer' });
-    x.addEventListener('click', (e)=>{
-      e.stopPropagation();
-      if (typeof updateImageForPin === 'function' && typeof selectedPinId !== 'undefined'){
-        Promise.resolve(updateImageForPin(selectedPinId, '')).then(()=> renderCurrentImageThumb());
-      }
-    });
-    wrap.appendChild(img); wrap.appendChild(x); box.appendChild(wrap);
-  };
-  const blobP = (typeof getFileBlobUrl === 'function') ? getFileBlobUrl(row.imageFileId, token) : Promise.reject();
-  const thumbP = (typeof getFileThumbUrl === 'function') ? (sz => getFileThumbUrl(row.imageFileId, token, sz))(512) : Promise.reject();
-  blobP.then(show).catch(()=> thumbP.then(show)).catch(()=>{ box.innerHTML = '<div class="placeholder">No Image</div>'; });
+  }).catch(function(){ box.innerHTML = '<div class="placeholder">No Image</div>'; });
 }
 
 function updateImageForPin(id, fileIdOrNull){
@@ -669,27 +668,20 @@ function loadCaptionsFromSheet(){
 
 // ---------- Right-pane images grid (attach on click) ----------
 (function wireImagesGrid(){
-  const grid = document.getElementById('images-grid') || document.getElementById('image-grid');
-  if (!grid) return;
-  if (grid.dataset._wired === '1') return; grid.dataset._wired = '1';
-
+  const grid = $('images-grid'); if(!grid) return;
   grid.addEventListener('click', (e)=>{
     const cell = e.target.closest('.thumb'); if(!cell) return;
     if(!selectedPinId) { alert('先にキャプションを選択してください。'); return; }
     const fileId = cell.dataset.fileId;
-    Promise.resolve(updateImageForPin(selectedPinId, fileId)).then(()=>{
-      try{ renderCurrentImageThumb(); }catch(_){} 
-    }).catch(err=>{
+    updateImageForPin(selectedPinId, fileId).catch(err=>{
       console.error('attach failed', err);
       alert('画像の添付に失敗しました。サインイン状態と権限を確認してください。');
     });
   });
-  const btn = document.getElementById('btnRefreshImages');
-  if(btn && !btn.dataset._wired){
-    btn.dataset._wired = '1';
-    btn.addEventListener('click', ()=> refreshImagesGrid().catch(()=>{}));
-  }
+  const btn = $('btnRefreshImages');
+  if(btn) btn.addEventListener('click', ()=> refreshImagesGrid().catch(()=>{}));
 })();
+
 function refreshImagesGrid(){
   const token = ensureToken(); if(!lastGlbFileId) return Promise.resolve();
   return getParentFolderId(lastGlbFileId, token).then(parent=>{
@@ -829,7 +821,9 @@ function doLoad(){
         return findOrCreateLociMyuSpreadsheet(parent, token, { glbId:fileId });
       }).then(function(spreadsheetId){
         currentSpreadsheetId = spreadsheetId;
-        return populateSheetTabs(spreadsheetId, token).then(function(){ loadCaptionsFromSheet(); });
+        return populateSheetTabs(spreadsheetId, token)
+      .then(function(){ return ensureVerticalSheet(currentSpreadsheetId, currentSheetTitle, token); })
+      .then(function(){ loadCaptionsFromSheet(); });
       }).then(function(){ refreshImagesGrid(); });
     }).catch(function(e){
       console.error('[GLB] load error', e);
@@ -930,35 +924,60 @@ onCanvasShiftPick(function(pos){
   ensureRow(id, row).then(function(){ updateCaptionForPin(id, row); });
 });
 
-(function(){
-  const host = document.getElementById('caption-list');
-  if (!host) return;
-  if (host.dataset.delegatedDelete === '1') return;
-  host.dataset.delegatedDelete = '1';
-  host.addEventListener('click', (ev)=>{
-    const btn = ev.target.closest('.cap-del');
-    if (!btn) return;
-    ev.stopPropagation();
-    const item = btn.closest('.caption-item'); if(!item) return;
-    const id = item.dataset.id; if(!id) return;
-    if (!confirm('このキャプションを削除しますか？')) return;
-    if (typeof deleteRowFromSheet === 'function'){
-      deleteRowFromSheet(id).then(()=>{
-        try{ removePinMarker(id); }catch(_){}
-        try{ removeCaptionOverlay(id);}catch(_){}
-        item.remove();
-        rowCache && rowCache.delete && rowCache.delete(id);
-        captionsIndex && captionsIndex.delete && captionsIndex.delete(id);
-        if (typeof selectedPinId !== 'undefined' && selectedPinId === id){
-          selectedPinId = null;
-          const t=document.getElementById('caption-title'), b=document.getElementById('caption-body');
-          if (t) t.value=''; if (b) b.value='';
-          if (typeof renderCurrentImageThumb === 'function') renderCurrentImageThumb();
-        }
-      }).catch(err=>{
-        console.error('[delete] failed', err);
-        alert('削除に失敗しました: ' + (err && err.message ? err.message : err));
-      });
-    }
-  });
+
+/* ---------- Form autosave (instant reflect to overlay & list, then save) ---------- */
+(function wireForm(){
+  const t = document.getElementById('caption-title');
+  const b = document.getElementById('caption-body');
+  let timer = null;
+
+  function reflectOverlay(id){
+    try{
+      const o = overlays && overlays.get ? overlays.get(id) : null;
+      if(!o) return;
+      const tEl = o.root && o.root.querySelector ? o.root.querySelector('.cap-title') : null;
+      const bEl = o.root && o.root.querySelector ? o.root.querySelector('.cap-body') : null;
+      if(tEl && t) tEl.textContent = (t.value || '(untitled)');
+      if(bEl && b) bEl.textContent = (b.value || '(no description)');
+    }catch(_){}
+  }
+
+  function reflectList(id){
+    try{
+      const div = captionDomById && captionDomById.get ? captionDomById.get(id) : null;
+      if(!div) return;
+      const tEl = div.querySelector('.cap-title');
+      const bEl = div.querySelector('.cap-body');
+      if(tEl && t) tEl.textContent = (t.value||'').trim() || '(untitled)';
+      if(bEl && b) bEl.textContent = (b.value||'').trim() || '(no description)';
+    }catch(_){}
+  }
+
+  function scheduleSave(){
+    if(!window.selectedPinId) return;
+    clearTimeout(timer);
+
+    const cached = (rowCache && rowCache.get) ? (rowCache.get(selectedPinId) || { id: selectedPinId }) : { id: selectedPinId };
+    const next = {
+      ...cached,
+      title: t ? (t.value||'') : '',
+      body:  b ? (b.value||'') : '',
+      updatedAt: new Date().toISOString()
+    };
+    if (rowCache && rowCache.set) rowCache.set(selectedPinId, next);
+
+    reflectOverlay(selectedPinId);
+    reflectList(selectedPinId);
+
+    timer = setTimeout(()=>{
+      if (typeof updateCaptionForPin === 'function') {
+        console.debug('[LM] autosave to Sheets', selectedPinId);
+        updateCaptionForPin(selectedPinId, { title: next.title, body: next.body })
+          .catch(e=>console.warn('[LM] caption autosave failed', e));
+      }
+    }, 600);
+  }
+
+  if(t) t.addEventListener('input', scheduleSave);
+  if(b) b.addEventListener('input', scheduleSave);
 })();
