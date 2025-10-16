@@ -1,10 +1,4 @@
-// boot.esm.cdn.js — LociMyu boot (clean full build, fixes applied)
-// NOTE: single-import, no duplicate globals, no leading .then/.catch chains.
-// Fixes included:
-// - Right-pane image preview de-dup & proper detach button (renderCurrentImageThumb)
-// - Caption delete propagates to Sheets (deleteCaptionRowFromSheet + ensureIndex)
-// - Avoid ReferenceError: applyFilter -> applyColorFilter
-// - Remove duplicate wireForm definition, minor logging tidy
+// boot.esm.cdn.js — LociMyu boot (clean full build, overlay image + Sheets delete fixes)
 
 // ---------- Globals (palette & helpers) ----------
 window.LM_PALETTE = window.LM_PALETTE || ["#ef9368","#e9df5d","#a8e063","#8bb6ff","#b38bff","#86d2c4","#d58cc1","#9aa1a6"];
@@ -26,7 +20,7 @@ function lmCanonicalColor(hex){
   catch(_){ return hex||window.LM_PALETTE[0]; }
 }
 
-// ---------- Imports (single) ----------
+// ---------- Imports ----------
 import {
   ensureViewer, onCanvasShiftPick, addPinMarker, setPinSelected, onPinSelect,
   loadGlbFromDrive, onRenderTick, projectPoint, clearPins, removePinMarker
@@ -126,7 +120,7 @@ const rowCache = new Map();       // id -> row
 const overlays = new Map();       // id -> { root, imgEl, zoom }
 let  filterMode = 'all';          // 'all' | 'selected' | 'color:#rrggbb'
 
-// ---------- Quick styles for chips/overlay ----------
+// ---------- Quick styles ----------
 (()=>{
   const st=document.createElement('style');
   st.textContent = `
@@ -135,21 +129,21 @@ let  filterMode = 'all';          // 'all' | 'selected' | 'color:#rrggbb'
   .caption-item.is-hidden{display:none}
   .cap-overlay{user-select:none}
   .cap-overlay button{font:inherit}
+  .thumb{width:64px;height:64px;background-size:cover;background-position:center;border-radius:8px;cursor:pointer;margin:4px;display:inline-block}
+  .cap-title{font-weight:700}
+  .cap-body.hint{opacity:.8;font-size:12px}
+  .cap-del{margin-left:auto;background:transparent;border:1px solid #334155;color:#eee;border-radius:6px;padding:0 .5rem;cursor:pointer}
   .chip{--chip:#ccc; inline-size:28px; block-size:20px; border-radius:999px; border:1px solid #0006; background:var(--chip); cursor:pointer; margin:2px}
   .chip-color.is-active{outline:2px solid #fff; outline-offset:1px}
   .chip-actions{display:flex; gap:.5rem; margin:.25rem 0}
   .chip-action{padding:.25rem .5rem; border-radius:8px; border:1px solid #334155; background:#0b0f14; color:#e5e7eb; cursor:pointer}
   .chip-filter .mark{display:none; font-weight:700}
   .chip-filter.is-on .mark{display:inline}
-  .thumb{width:64px;height:64px;background-size:cover;background-position:center;border-radius:8px;cursor:pointer;margin:4px;display:inline-block}
-  .cap-title{font-weight:700}
-  .cap-body.hint{opacity:.8;font-size:12px}
-  .cap-del{margin-left:auto;background:transparent;border:1px solid #334155;color:#eee;border-radius:6px;padding:0 .5rem;cursor:pointer}
   `;
   document.head.appendChild(st);
 })();
 
-// ---------- Overlay (drag, close, fixed zoom) ----------
+// ---------- Overlay helpers ----------
 let lineLayer = null;
 function ensureLineLayer(){
   if(lineLayer) return lineLayer;
@@ -184,6 +178,7 @@ function removeCaptionOverlay(id){
   overlays.delete(id);
   removeLine(id);
 }
+
 function createCaptionOverlay(id, data){
   removeCaptionOverlay(id);
   const root = document.createElement('div'); root.className='cap-overlay';
@@ -191,15 +186,15 @@ function createCaptionOverlay(id, data){
   root.style.background='#0b0f14ef'; root.style.color='#e5e7eb';
   root.style.padding='10px 12px'; root.style.borderRadius='10px';
   root.style.boxShadow='0 8px 24px #000a'; root.style.minWidth='200px'; root.style.maxWidth='300px';
-  root.style.paddingTop = '40px'; // keep controls fixed top-left
+  root.style.paddingTop = '40px'; // fixed control area
 
   // controls
   const ctrl = document.createElement('div');
   ctrl.style.position='absolute'; ctrl.style.left='10px'; ctrl.style.top='8px';
   ctrl.style.display='flex'; ctrl.style.gap='8px';
   const bZoomOut = document.createElement('button'); bZoomOut.textContent='–';
-  const bZoomIn  = document.createElement('button'); bZoomIn.textContent = '+';
-  const bClose   = document.createElement('button'); bClose.textContent  = '×';
+  const bZoomIn  = document.createElement('button'); bZoomIn .textContent='+';
+  const bClose   = document.createElement('button'); bClose  .textContent='×';
   [bZoomOut,bZoomIn,bClose].forEach(b=>{
     b.style.border='none'; b.style.background='transparent'; b.style.color='#ddd'; b.style.cursor='pointer';
     b.style.fontWeight='700';
@@ -235,37 +230,23 @@ function createCaptionOverlay(id, data){
   });
   window.addEventListener('pointerup', ()=>{ dragging=false; });
 
-  // image
-  (function(){
-    try{
-      const token = getAccessToken();
-      const row = rowCache.get(id);
-      if(token && row && row.imageFileId){
-        getFileBlobUrl(row.imageFileId, token).then((url)=>{
-          img.src=url; img.style.display='block';
-        }).catch(()=>{
-          return getFileThumbUrl(row.imageFileId, token, 1024).then((url)=>{
-            img.src=url; img.style.display='block';
-          }).catch(()=>{});
-        });
-      }
-    }catch(_){}
-  })();
+  // image fill now & on changes
+  overlays.set(id, { root, imgEl:img, zoom:1.0 });
+  document.body.appendChild(root);
+  applyOverlayZoom(id, 1.0);
+  updateOverlayPosition(id, true);
+  refreshOverlayImage(id); // ← 初期表示時に反映
 
-  // zoom
-  let zoom = 1.0;
-  bZoomIn .addEventListener('click', (e)=>{ e.stopPropagation(); zoom = Math.min(2.0, zoom+0.1); applyOverlayZoom(id, zoom); });
-  bZoomOut.addEventListener('click', (e)=>{ e.stopPropagation(); zoom = Math.max(0.6, zoom-0.1); applyOverlayZoom(id, zoom); });
+  // zoom & close
+  bZoomIn .addEventListener('click', (e)=>{ e.stopPropagation(); applyOverlayZoom(id, Math.min(2.0, (overlays.get(id)?.zoom||1)+0.1)); });
+  bZoomOut.addEventListener('click', (e)=>{ e.stopPropagation(); applyOverlayZoom(id, Math.max(0.6, (overlays.get(id)?.zoom||1)-0.1)); });
   bClose  .addEventListener('click', (e)=>{ e.stopPropagation(); removeCaptionOverlay(id); });
 
   root.append(t, body, img);
-  document.body.appendChild(root);
-  overlays.set(id, { root, imgEl:img, zoom });
-  applyOverlayZoom(id, zoom);
-  updateOverlayPosition(id, true);
 }
 function applyOverlayZoom(id, z){
   const o = overlays.get(id); if(!o) return;
+  o.zoom = z;
   const BASE=260;
   o.root.style.maxWidth = (BASE*z)+'px';
   o.root.style.minWidth = (200*z)+'px';
@@ -290,6 +271,22 @@ function updateOverlayPosition(id, initial){
   line.setAttribute('y2', String(p.y));
 }
 onRenderTick(()=>{ overlays.forEach((_,id)=> updateOverlayPosition(id,false)); });
+
+function refreshOverlayImage(id){
+  const o = overlays.get(id); if(!o) return;
+  const row = rowCache.get(id)||{};
+  const token = getAccessToken();
+  const img = o.imgEl;
+  if(!img) return;
+  img.style.display='none';
+  if(!row.imageFileId || !token){ img.removeAttribute('src'); return; }
+  // try blob first, then thumb
+  getFileBlobUrl(row.imageFileId, token).then((url)=>{
+    img.src=url; img.style.display='block';
+  }).catch(()=>{
+    return getFileThumbUrl(row.imageFileId, token, 1024).then((url)=>{ img.src=url; img.style.display='block'; }).catch(()=>{});
+  });
+}
 
 // ---------- Selection helpers ----------
 function markListSelected(id){
@@ -442,8 +439,8 @@ async function deleteCaptionRowFromSheet(spreadsheetId, sheetId, rowIndex1based,
           range: {
             sheetId: Number(sheetId),
             dimension: "ROWS",
-            startIndex: rowIndex1based-1, // 0-based inclusive
-            endIndex: rowIndex1based      // 0-based exclusive
+            startIndex: rowIndex1based-1,
+            endIndex: rowIndex1based
           }
         }
       }]
@@ -454,8 +451,11 @@ async function deleteCaptionRowFromSheet(spreadsheetId, sheetId, rowIndex1based,
       headers:{ Authorization:'Bearer '+token, 'Content-Type':'application/json' },
       body: JSON.stringify(body)
     });
-    if(!r.ok) return false;
-    await ensureIndex(); // IMPORTANT: re-index after deletion
+    if(!r.ok){
+      console.error('[Sheets deleteDimension] HTTP', r.status);
+      return false;
+    }
+    await ensureIndex();
     return true;
   }catch(e){
     console.error('[Sheets deleteDimension] failed', e);
@@ -477,17 +477,26 @@ function appendCaptionItem(row){
     ev.stopPropagation();
     if(!confirm('このキャプションを削除しますか？')) return;
     const id=row.id;
-    try{ removePinMarker(id); }catch(_){}
-    try{ removeCaptionOverlay(id); }catch(_){}
+    // 最新の rowIndex を得るために先に再インデックス
+    await ensureIndex();
     const meta = captionsIndex.get(id);
     if (currentSpreadsheetId && currentSheetId && meta && meta.rowIndex){
-      const token = ensureToken();
+      let token;
+      try{
+        token = ensureToken();
+      }catch(e){
+        console.warn('[delete] token error', e);
+        alert('サインインが必要です。右上の「Sign in」を押してください。');
+        return;
+      }
       const ok = await deleteCaptionRowFromSheet(currentSpreadsheetId, currentSheetId, meta.rowIndex, token);
       if(!ok){
         alert('スプレッドシートからの削除に失敗しました。再試行してください。');
-        return; // abort UI removal if Sheets failed
+        return;
       }
     }
+    try{ removePinMarker(id); }catch(_){}
+    try{ removeCaptionOverlay(id); }catch(_){}
     const el = host.querySelector('.caption-item[data-id="'+CSS.escape(id)+'"]');
     if(el) el.remove();
     captionsIndex.delete(id);
@@ -512,6 +521,7 @@ function reflectRowToUI(id){
     if(b && document.activeElement!==b) b.value=row.body||'';
     const col=$('pinColor'); if(col && row.color) col.value=row.color;
     renderCurrentImageThumb();
+    refreshOverlayImage(id); // ← オーバーレイにも反映
   }
   const host=$('caption-list'); if(!host) return;
   let div=captionDomById.get(id);
@@ -565,7 +575,6 @@ let _thumbReq = 0;
 function renderCurrentImageThumb(){
   const box = $('currentImageThumb'); if(!box) return;
   const myReq = ++_thumbReq;
-  // clear previous preview (coalesce concurrent calls)
   box.innerHTML='';
   const row = selectedPinId ? (rowCache.get(selectedPinId)||{}) : null;
   if(!row || !row.imageFileId){
@@ -578,22 +587,22 @@ function renderCurrentImageThumb(){
     return;
   }
   getFileThumbUrl(row.imageFileId, token, 512).then((url)=>{
-    if(myReq!==_thumbReq) return; // outdated
-    box.innerHTML=''; // clear again just in case
+    if(myReq!==_thumbReq) return;
+    box.innerHTML='';
     const wrap=document.createElement('div'); wrap.className='current-image-wrap'; wrap.style.position='relative'; wrap.style.display='inline-block';
     const img=document.createElement('img'); img.src=url; img.alt=''; img.style.borderRadius='12px'; img.style.maxWidth='100%';
     const x=document.createElement('button'); x.textContent='×'; x.title='Detach image';
     x.style.position='absolute'; x.style.right='6px'; x.style.top='6px';
     x.style.border='none'; x.style.width='28px'; x.style.height='28px';
     x.style.borderRadius='999px'; x.style.background='#000a'; x.style.color='#fff'; x.style.cursor='pointer';
-    x.addEventListener('click', (e)=>{ e.stopPropagation(); updateImageForPin(selectedPinId, null).then(renderCurrentImageThumb); });
+    x.addEventListener('click', (e)=>{ e.stopPropagation(); updateImageForPin(selectedPinId, null).then(()=>{ renderCurrentImageThumb(); refreshOverlayImage(selectedPinId); }); });
     wrap.appendChild(img); wrap.appendChild(x); box.appendChild(wrap);
   }).catch(()=>{ box.innerHTML='<div class="placeholder">No Image</div>'; });
 }
 function updateImageForPin(id, fileIdOrNull){
-  const token = ensureToken(); // also acts as auth guard
+  const token = ensureToken();
   const patch = { imageFileId: fileIdOrNull ? String(fileIdOrNull) : '' };
-  return updateCaptionForPin(id, patch).then(()=> renderCurrentImageThumb());
+  return updateCaptionForPin(id, patch).then(()=>{ renderCurrentImageThumb(); refreshOverlayImage(id); });
 }
 
 // ---------- Load captions from sheet ----------
@@ -625,11 +634,11 @@ function loadCaptionsFromSheet(){
       appendCaptionItem(obj);
       addPinMarker({ id, x:obj.x, y:obj.y, z:obj.z, color:obj.color||window.currentPinColor });
     }
-    applyColorFilter(); // fixed: was applyFilter()
+    applyColorFilter();
   }).catch(e=> console.warn('[loadCaptionsFromSheet] failed', e));
 }
 
-// ---------- Right-pane images grid (attach on click) ----------
+// ---------- Right-pane images grid ----------
 (function wireImagesGrid(){
   const grid = $('images-grid'); if(!grid) return;
   grid.addEventListener('click', (e)=>{
@@ -643,7 +652,6 @@ function loadCaptionsFromSheet(){
   const btn = $('btnRefreshImages');
   if(btn) btn.addEventListener('click', ()=> refreshImagesGrid().catch(()=>{}));
 })();
-
 function refreshImagesGrid(){
   const token = ensureToken(); if(!lastGlbFileId) return Promise.resolve();
   return getParentFolderId(lastGlbFileId, token).then(parent=>{
@@ -673,7 +681,7 @@ function refreshImagesGrid(){
   });
 }
 
-// ---------- Form autosave (with immediate overlay reflect) ----------
+// ---------- Form autosave ----------
 (function wireForm(){
   const t=$('caption-title'), b=$('caption-body');
   let timer=null;
@@ -700,10 +708,10 @@ function refreshImagesGrid(){
   if(b) b.addEventListener('input', schedule);
 })();
 
-// ---------- Pin color chips & filter chips ----------
+// ---------- Color chips & filters ----------
 function setPinColor(hex){
   window.currentPinColor = hex;
-  const host=document.getElementById('pinColorChips')||document.getElementById('pinColorChips');
+  const host=document.getElementById('pinColorChips');
   if(host){
     host.querySelectorAll('.chip-color').forEach(el=>{
       const v = getComputedStyle(el).getPropertyValue('--chip').trim();
@@ -718,7 +726,7 @@ function setPinColor(hex){
   }
 }
 function renderColorChips(){
-  const host = document.getElementById('pinColorChips') || document.getElementById('pinColorChips'); if(!host) return;
+  const host = document.getElementById('pinColorChips'); if(!host) return;
   host.innerHTML = '';
   window.LM_PALETTE.forEach(function(hex){
     const b=document.createElement('button');
@@ -744,11 +752,10 @@ function applyColorFilter(){
       div.classList.toggle('is-hidden', !ok);
     });
   }
-  // notify 3D viewer (optional)
   try{ document.dispatchEvent(new CustomEvent('pinFilterChange',{ detail:{ selected:Array.from(lmFilterSet) } })); }catch(_){}
 }
 function renderFilterChips(){
-  const host = document.getElementById('pinFilterChips') || document.getElementById('pinFilterChips'); if(!host) return;
+  const host = document.getElementById('pinFilterChips'); if(!host) return;
   if(!host.previousElementSibling || !host.previousElementSibling.classList || !host.previousElementSibling.classList.contains('chip-actions')){
     const bar=document.createElement('div'); bar.className='chip-actions';
     const a=document.createElement('button'); a.id='filterAll'; a.className='chip-action'; a.textContent='All';
@@ -829,7 +836,6 @@ if(sheetSel){
     const opt = sel && sel.selectedOptions && sel.selectedOptions[0];
     currentSheetId = (opt && opt.value) ? Number(opt.value) : null;
     currentSheetTitle = (opt && opt.dataset && opt.dataset.title) ? opt.dataset.title : null;
-    // full reset
     clearPins(); overlays.forEach(function(_,id){ removeCaptionOverlay(id); }); overlays.clear();
     clearCaptionList(); rowCache.clear(); captionsIndex.clear(); selectedPinId=null;
     loadCaptionsFromSheet();
@@ -872,7 +878,7 @@ document.addEventListener('DOMContentLoaded', function(){
   try{ renderColorChips(); renderFilterChips(); applyColorFilter(); }catch(e){ console.warn('[chips init]', e); }
 });
 
-// ---------- Shift+click add pin (delegated to viewer) ----------
+// ---------- Shift+click add pin ----------
 onCanvasShiftPick(function(pos){
   const id = 'pin_'+Date.now();
   const color = lmCanonicalColor(window.currentPinColor);
