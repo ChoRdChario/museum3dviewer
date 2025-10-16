@@ -292,7 +292,7 @@ function refreshOverlayImage(id){
 function markListSelected(id){
   const host = $('caption-list'); if(!host) return;
   host.querySelectorAll('.caption-item.is-selected').forEach(n=>n.classList.remove('is-selected'));
-  const el = host.querySelector('.caption-item[data-id="'+CSS.escape(id)+'"]');
+  const el = host.querySelector('.caption-item[data-id="'+(window.CSS&&CSS.escape?CSS.escape(id):id)+'"]');
   if(el) el.classList.add('is-selected');
 }
 function fillFormFromCaption(id){
@@ -352,14 +352,14 @@ function createLociMyuSpreadsheet(parentFolderId, token, opts){
   const url = 'https://www.googleapis.com/drive/v3/files';
   const body = { name, mimeType:'application/vnd.google-apps.spreadsheet' };
   if(parentFolderId) body.parents = [ parentFolderId ];
-  return fetch(url, { method:'POST', headers:{ Authorization:'Bearer '+token, 'Content-Type':'application/json' }, body: JSON.stringify(body) }).then(r=>{ if(!r.ok) throw new Error('Drive files.create '+r.status); return r.json(); }).then(file=>{
+  return fetch(url, { method:'POST', headers: { Authorization:'Bearer '+token, 'Content-Type':'application/json' }, body: JSON.stringify(body) }).then(r=>{ if(!r.ok) throw new Error('Drive files.create '+r.status); return r.json(); }).then(file=>{
       const spreadsheetId = file.id;
       return putValues(spreadsheetId, 'A1:Z1', [LOCIMYU_HEADERS], token).then(()=> spreadsheetId);
     });
 }
 function findOrCreateLociMyuSpreadsheet(parentFolderId, token, opts){
   if(!parentFolderId) return Promise.reject(new Error('parentFolderId required'));
-  const q = encodeURIComponent(`'${parentFolderId}' in parents and mimeType='application/vnd.google-apps.spreadsheet' and trashed=false`);
+  const q = encodeURIComponent(`'${parentFolderId}' in parents && mimeType='application/vnd.google-apps.spreadsheet' && trashed=false`);
   const url=`https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name,modifiedTime)&orderBy=modifiedTime desc&pageSize=10&supportsAllDrives=true`;
   return fetch(url, { headers:{ Authorization:'Bearer '+token } }).then(r=>{ if(!r.ok) throw new Error('Drive list spreadsheets '+r.status); return r.json(); }).then(d=>{
       const files = d.files || [];
@@ -430,7 +430,7 @@ function clearCaptionList(){
   const host=$('caption-list'); if(host) host.innerHTML='';
   captionDomById.clear();
 }
-async async function deleteCaptionRowFromSheet(spreadsheetId, sheetId, rowIndex1based, token){
+async function deleteCaptionRowFromSheet(spreadsheetId, sheetId, rowIndex1based, token){
   console.debug('[LM][deleteCaptionRowFromSheet] args', { spreadsheetId, sheetId, rowIndex1based });
   try{
     if(!spreadsheetId || !sheetId || !rowIndex1based || !token){
@@ -482,51 +482,52 @@ function appendCaptionItem(row){
   txt.appendChild(t); txt.appendChild(b);
   const del=document.createElement('button'); del.className='cap-del'; del.textContent='×'; del.title='Delete pin';
   
-del.addEventListener('click', async (ev)=>{
-  ev.stopPropagation();
-  if(!confirm('このキャプションを削除しますか？')) return;
-  const id = row.id;
-  // remove in viewer/overlay first (optimistic UI)
-  try{ removePinMarker(id); }catch(_){}
-  try{ removeCaptionOverlay(id); }catch(_){}
-  // sheets delete
-  try{
-    const meta = captionsIndex ? captionsIndex.get(id) : null;
-    const token = ensureToken();
-    let success = true;
-    if (currentSpreadsheetId && currentSheetId && meta && meta.rowIndex){
-      success = await deleteCaptionRowFromSheet(currentSpreadsheetId, currentSheetId, meta.rowIndex, token);
-    }else{
-      console.warn('[LM] delete: missing meta or sheet ids', { currentSpreadsheetId, currentSheetId, meta });
+  del.addEventListener('click', async (ev)=>{
+    ev.stopPropagation();
+    if(!confirm('このキャプションを削除しますか？')) return;
+    const id = row.id;
+    // remove in viewer/overlay first (optimistic UI)
+    try{ removePinMarker(id); }catch(_){}
+    try{ removeCaptionOverlay(id); }catch(_){}
+    // sheets delete
+    try{
+      const meta = captionsIndex ? captionsIndex.get(id) : null;
+      const token = ensureToken();
+      let success = true;
+      if (currentSpreadsheetId && currentSheetId && meta && meta.rowIndex){
+        success = await deleteCaptionRowFromSheet(currentSpreadsheetId, currentSheetId, meta.rowIndex, token);
+      }else{
+        console.warn('[LM] delete: missing meta or sheet ids', { currentSpreadsheetId, currentSheetId, meta });
+      }
+      if(!success){
+        alert('シートからの削除に失敗しました。コンソールログをご確認ください。');
+        return;
+      }
+      // reindex after delete
+      if (typeof ensureIndex === 'function') {
+        await ensureIndex();
+      }
+    }catch(err){
+      console.error('[LM] delete handler error', err);
     }
-    if(!success){
-      alert('シートからの削除に失敗しました。コンソールログをご確認ください。');
-      return;
+    // UI remove + cache cleanup
+    try{
+      const el = host.querySelector('[data-id="'+ (window.CSS && CSS.escape ? CSS.escape(id) : id) +'"]');
+      if(el) el.remove();
+    }catch(_){}
+    if (rowCache && rowCache.delete) rowCache.delete(id);
+    if (captionsIndex && captionsIndex.delete) captionsIndex.delete(id);
+    if (typeof selectedPinId !== 'undefined' && selectedPinId === id){
+      selectedPinId = null;
+      const t=$('caption-title'), b=$('caption-body');
+      if(t) t.value='';
+      if(b) b.value='';
+      renderCurrentImageThumb();
     }
-    // reindex after delete
-    if (typeof ensureIndex === 'function') {
-      await ensureIndex();
-    }
-  }catch(err){
-    console.error('[LM] delete handler error', err);
-  }
-  // UI remove + cache cleanup
-  try{
-    const el = host.querySelector('[data-id="'+ (window.CSS && CSS.escape ? CSS.escape(id) : id) +'"]');
-    if(el) el.remove();
-  }catch(_){}
-  if (rowCache && rowCache.delete) rowCache.delete(id);
-  if (captionsIndex && captionsIndex.delete) captionsIndex.delete(id);
-  if (typeof selectedPinId !== 'undefined' && selectedPinId === id){
-    selectedPinId = null;
-    const t=$('caption-title'), b=$('caption-body');
-    if(t) t.value='';
-    if(b) b.value='';
-    renderCurrentImageThumb();
-  }
-});
-);
-  div.appendChild(txt); div.appendChild(del);
+  });
+
+  div.appendChild(txt); 
+  div.appendChild(del);
   div.addEventListener('click', ()=> selectCaption(row.id));
   host.appendChild(div); captionDomById.set(row.id, div);
 }
@@ -719,7 +720,7 @@ function refreshImagesGrid(){
       if(stat) stat.textContent='親フォルダが見つかりません';
       return;
     }
-    const q = encodeURIComponent(`'${parent}' in parents and mimeType contains 'image/' and trashed=false`);
+    const q = encodeURIComponent(`'${parent}' in parents && mimeType contains 'image/' && trashed=false`);
     const url = `https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name,mimeType,thumbnailLink)&orderBy=modifiedTime desc&pageSize=200&supportsAllDrives=true`;
     return fetch(url, { headers:{ Authorization:'Bearer '+token } })
       .then(r=>r.json())
@@ -838,7 +839,7 @@ function renderFilterChips(){
 function doLoad(){
   try{
     const token = ensureToken();
-    const raw = ($('glbUrl') && $('glbUrl').value) || '';
+    const raw = ($('glbUrl') && $('glbUrl').value) || '';  // <- ensure safe access
     const fileId = extractDriveId(raw);
     if(!fileId){ console.warn('[GLB] missing fileId'); return; }
     if($('btnGlb')) $('btnGlb').disabled = true;
