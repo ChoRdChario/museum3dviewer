@@ -1,3 +1,4 @@
+// LociMyu instrumented build r1 — adds detailed logs for delete & save flows
 // boot.esm.cdn.js — LociMyu boot (clean full build)
 // NOTE: single-import, no duplicate globals, no leading .then/.catch chains.
 
@@ -311,6 +312,7 @@ const LOCIMYU_HEADERS = ['id','title','body','color','x','y','z','imageFileId','
 
 /* === Sheets schema & migration helpers (verticalize) === */
 async function ensureVerticalSheet(spreadsheetId, sheetTitle, token){
+  console.debug('[LM] ensureVerticalSheet start', {sheetTitle});
   try{
     if(!spreadsheetId || !sheetTitle || !token) return { migrated:false };
     const range = `'${sheetTitle}'!A1:ZZ1000`;
@@ -372,11 +374,14 @@ async function ensureVerticalSheet(spreadsheetId, sheetTitle, token){
     const res2 = await fetch(putUrl, { method:'PUT', headers:{ Authorization:'Bearer '+token, 'Content-Type':'application/json' }, body: json.dumps({'values': rows}) });
     if(!res2.ok) return { migrated:false };
     return { migrated:true, count:pins.length };
-  }catch(_){ return { migrated:false }; }
+  }catch(_){ console.debug('[LM] ensureVerticalSheet done (no action)');
+      return { migrated:false }; }
 }
 
 /* === Delete a row from the active sheet (persist pin delete) === */
 async function deleteCaptionRowFromSheet(spreadsheetId, sheetId, rowIndex1based, token){
+  console.debug('[LM] deleteCaptionRowFromSheet args', { spreadsheetId, sheetId, rowIndex1based });
+
   try{
     if(!spreadsheetId || !sheetId || !rowIndex1based || !token) return false;
     const body = {
@@ -387,7 +392,8 @@ async function deleteCaptionRowFromSheet(spreadsheetId, sheetId, rowIndex1based,
       }]
     };
     const url = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}:batchUpdate`;
-    const r = await fetch(url, { method:'POST', headers:{ Authorization:'Bearer '+token, 'Content-Type':'application/json' }, body: JSON.stringify(body) });
+    console.debug('[LM] delete req body', body);
+  const r = await fetch(url, { method:'POST', headers:{ Authorization:'Bearer '+token, 'Content-Type':'application/json' }, body: JSON.stringify(body) });
     return r.ok;
   }catch(_){ return false; }
 }
@@ -417,8 +423,9 @@ function isLociMyuSpreadsheet(spreadsheetId, token){
           const fv = v && v.formattedValue ? String(v.formattedValue).trim().toLowerCase() : '';
           if(fv) headers.push(fv);
         }
-        if(headers.includes('title') && headers.includes('body') && headers.includes('color')) return true;
-      }
+        if(headers.includes('title') && headers.includes('body') && headers.includes('color')) console.debug('[LM] delete row success');
+  return true;
+}
       return false;
     });
 }
@@ -916,3 +923,61 @@ onCanvasShiftPick(function(pos){
   selectCaption(id);
   ensureRow(id, row).then(function(){ updateCaptionForPin(id, row); });
 });
+
+
+/* ---------- Form autosave (instant reflect to overlay & list, then save) ---------- */
+(function wireForm(){
+  const t = document.getElementById('caption-title');
+  const b = document.getElementById('caption-body');
+  let timer = null;
+
+  function reflectOverlay(id){
+    try{
+      const o = overlays && overlays.get ? overlays.get(id) : null;
+      if(!o) return;
+      const tEl = o.root && o.root.querySelector ? o.root.querySelector('.cap-title') : null;
+      const bEl = o.root && o.root.querySelector ? o.root.querySelector('.cap-body') : null;
+      if(tEl && t) tEl.textContent = (t.value || '(untitled)');
+      if(bEl && b) bEl.textContent = (b.value || '(no description)');
+    }catch(_){}
+  }
+
+  function reflectList(id){
+    try{
+      const div = captionDomById && captionDomById.get ? captionDomById.get(id) : null;
+      if(!div) return;
+      const tEl = div.querySelector('.cap-title');
+      const bEl = div.querySelector('.cap-body');
+      if(tEl && t) tEl.textContent = (t.value||'').trim() || '(untitled)';
+      if(bEl && b) bEl.textContent = (b.value||'').trim() || '(no description)';
+    }catch(_){}
+  }
+
+  function scheduleSave(){
+    if(!window.selectedPinId) return;
+    clearTimeout(timer);
+
+    const cached = (rowCache && rowCache.get) ? (rowCache.get(selectedPinId) || { id: selectedPinId }) : { id: selectedPinId };
+    const next = {
+      ...cached,
+      title: t ? (t.value||'') : '',
+      body:  b ? (b.value||'') : '',
+      updatedAt: new Date().toISOString()
+    };
+    if (rowCache && rowCache.set) rowCache.set(selectedPinId, next);
+
+    reflectOverlay(selectedPinId);
+    reflectList(selectedPinId);
+
+    timer = setTimeout(()=>{
+      if (typeof updateCaptionForPin === 'function') {
+        console.debug('[LM] autosave to Sheets', selectedPinId);
+        updateCaptionForPin(selectedPinId, { title: next.title, body: next.body })
+          .catch(e=>console.warn('[LM] caption autosave failed', e));
+      }
+    }, 600);
+  }
+
+  if(t) t.addEventListener('input', scheduleSave);
+  if(b) b.addEventListener('input', scheduleSave);
+})();
