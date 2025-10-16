@@ -462,6 +462,57 @@ async function deleteCaptionRowFromSheet(spreadsheetId, sheetId, rowIndex1based,
     return false;
   }
 }
+
+function valuesClear(spreadsheetId, rangeA1, token){
+  const url = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(rangeA1)}:clear`;
+  return fetch(url, { method:'POST', headers:{ Authorization:'Bearer '+token, 'Content-Type':'application/json' }, body: JSON.stringify({}) })
+    .then(r=>{ if(!r.ok) throw new Error('values.clear '+r.status); });
+}
+
+async function resolveRowIndexByIdLive(spreadsheetId, sheetTitle, id, token){
+  if(!spreadsheetId || !sheetTitle || !id) return null;
+  const range = `'${sheetTitle}'!A2:A99999`;
+  const values = await getValues(spreadsheetId, range, token);
+  for(let i=0;i<values.length;i++){
+    const v = (values[i] && values[i][0]) ? String(values[i][0]).trim() : '';
+    if (v === String(id)) return 2 + i; // 1-based
+  }
+  return null;
+}
+
+// free rows pool
+let freeRows = [];
+async function scanFreeRows(spreadsheetId, sheetTitle, token){
+  freeRows = [];
+  const range = `'${sheetTitle}'!A2:A99999`;
+  const values = await getValues(spreadsheetId, range, token);
+  for(let i=0;i<values.length;i++){
+    const v = (values[i] && values[i][0]) ? String(values[i][0]).trim() : '';
+    if (!v) freeRows.push(2 + i);
+  }
+  return freeRows;
+}
+
+async function claimRow(spreadsheetId, sheetTitle, id, token){
+  for(let tries=0; tries<3; tries++){
+    if (!freeRows.length){
+      await scanFreeRows(spreadsheetId, sheetTitle, token);
+      if (!freeRows.length){
+        // fallback: use next available row (append style)
+        const vals = await getValues(spreadsheetId, `'${sheetTitle}'!A1:A99999`, token);
+        freeRows.push(vals.length+1);
+      }
+    }
+    const r = freeRows.shift();
+    try{
+      await putValues(spreadsheetId, `'${sheetTitle}'!A${r}:A${r}`, [[String(id)]], token);
+      const got = await getValues(spreadsheetId, `'${sheetTitle}'!A${r}:A${r}`, token);
+      const val = (got && got[0] && got[0][0]) ? String(got[0][0]).trim() : '';
+      if (val === String(id)) return r;
+    }catch(_){}
+  }
+  throw new Error('claimRow failed');
+}
 function appendCaptionItem(row){
   const host=$('caption-list'); if(!host||!row) return;
   const div=document.createElement('div'); div.className='caption-item'; div.dataset.id=row.id;
@@ -481,14 +532,16 @@ function appendCaptionItem(row){
   try{ removePinMarker(id); }catch(_){}
   try{ removeCaptionOverlay && removeCaptionOverlay(id); }catch(_){}
 
-  const meta = captionsIndex.get(id);
   let ok = true;
-  if (currentSpreadsheetId && currentSheetId && meta && meta.rowIndex){
+  if (currentSpreadsheetId && currentSheetTitle){
     try{
       const token = ensureToken();
-      ok = await deleteCaptionRowFromSheet(currentSpreadsheetId, currentSheetId, meta.rowIndex, token);
-      if(!ok) throw new Error('Sheets API returned non-ok');
-      await ensureIndex();
+      const liveRow = await resolveRowIndexByIdLive(currentSpreadsheetId, currentSheetTitle, id, token);
+      if (liveRow){
+        await valuesClear(currentSpreadsheetId, `'${currentSheetTitle}'!A${liveRow}:Z${liveRow}`, token);
+        freeRows.push(liveRow);
+        await ensureIndex();
+      }
     }catch(e){
       console.error('[delete row failed]', e);
       alert('スプレッドシートからの削除に失敗しました: ' + (e && e.message || 'unknown'));
@@ -554,16 +607,20 @@ function updateCaptionForPin(id, fields){
     const meta=captionsIndex.get(id);
     if(!meta && currentSpreadsheetId){
       const sheetTitle=currentSheetTitle||'シート1';
-      return sheetsAppendRow(currentSpreadsheetId, sheetTitle, {
-        id,
-        title:seed.title||'',
-        body:seed.body||'',
-        color:seed.color||window.currentPinColor,
-        x:seed.x||0, y:seed.y||0, z:seed.z||0,
-        imageFileId:seed.imageFileId||'',
-        createdAt:seed.createdAt||new Date().toISOString(),
-        updatedAt:new Date().toISOString()
-      }).then(()=>{ rowCache.set(id, seed); reflectRowToUI(id); refreshPinMarkerFromRow(id); });
+      return (async ()=>{
+        const token = ensureToken();
+        const r = await claimRow(currentSpreadsheetId, sheetTitle, id, token);
+        const headers = LOCIMYU_HEADERS;
+        const now = new Date().toISOString();
+        const seedRow = Object.assign({
+          id, title:'', body:'', color:window.currentPinColor, x:0, y:0, z:0, imageFileId:'', createdAt: now, updatedAt: now
+        }, seed||{});
+        const values = headers.map(h=> (h==='updatedAt'? new Date().toISOString() : (seedRow[h]==null?'':String(seedRow[h]))));
+        await putValues(currentSpreadsheetId, `'${sheetTitle}'!A${r}:`+String(colA1(headers.length-1))+String(r), [values], token);
+        captionsIndex.set(id, { rowIndex: r });
+        rowCache.set(id, seedRow);
+        reflectRowToUI(id); refreshPinMarkerFromRow(id);
+      })();
     }else{
       return putRowToSheet(seed, meta).then(()=>{ rowCache.set(id, seed); reflectRowToUI(id); refreshPinMarkerFromRow(id); }).catch(e=>{ console.error('[values.update] failed', e); throw e; });
     }
