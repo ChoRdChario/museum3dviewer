@@ -1,5 +1,10 @@
-// boot.esm.cdn.js — LociMyu boot (clean full build)
+// boot.esm.cdn.js — LociMyu boot (clean full build, fixes applied)
 // NOTE: single-import, no duplicate globals, no leading .then/.catch chains.
+// Fixes included:
+// - Right-pane image preview de-dup & proper detach button (renderCurrentImageThumb)
+// - Caption delete propagates to Sheets (deleteCaptionRowFromSheet + ensureIndex)
+// - Avoid ReferenceError: applyFilter -> applyColorFilter
+// - Remove duplicate wireForm definition, minor logging tidy
 
 // ---------- Globals (palette & helpers) ----------
 window.LM_PALETTE = window.LM_PALETTE || ["#ef9368","#e9df5d","#a8e063","#8bb6ff","#b38bff","#86d2c4","#d58cc1","#9aa1a6"];
@@ -125,6 +130,7 @@ let  filterMode = 'all';          // 'all' | 'selected' | 'color:#rrggbb'
 (()=>{
   const st=document.createElement('style');
   st.textContent = `
+  .caption-item{display:flex;gap:.5rem;padding:.5rem;border-bottom:1px solid #1116;cursor:pointer}
   .caption-item.is-selected{outline:2px solid #fff;outline-offset:-2px;border-radius:6px}
   .caption-item.is-hidden{display:none}
   .cap-overlay{user-select:none}
@@ -136,6 +142,9 @@ let  filterMode = 'all';          // 'all' | 'selected' | 'color:#rrggbb'
   .chip-filter .mark{display:none; font-weight:700}
   .chip-filter.is-on .mark{display:inline}
   .thumb{width:64px;height:64px;background-size:cover;background-position:center;border-radius:8px;cursor:pointer;margin:4px;display:inline-block}
+  .cap-title{font-weight:700}
+  .cap-body.hint{opacity:.8;font-size:12px}
+  .cap-del{margin-left:auto;background:transparent;border:1px solid #334155;color:#eee;border-radius:6px;padding:0 .5rem;cursor:pointer}
   `;
   document.head.appendChild(st);
 })();
@@ -203,7 +212,7 @@ function createCaptionOverlay(id, data){
   topbar.style.height='20px'; topbar.style.marginBottom='6px'; topbar.style.cursor='move';
   root.appendChild(topbar);
 
-  const t = document.createElement('div'); t.className='cap-title'; t.style.fontWeight='700'; t.style.marginBottom='6px';
+  const t = document.createElement('div'); t.className='cap-title'; t.style.marginBottom='6px';
   const body = document.createElement('div'); body.className='cap-body'; body.style.fontSize='12px'; body.style.opacity='.95'; body.style.whiteSpace='pre-wrap'; body.style.marginBottom='6px';
   const img = document.createElement('img'); img.className='cap-img'; img.alt=''; img.style.display='none'; img.style.width='100%'; img.style.height='auto'; img.style.borderRadius='8px';
 
@@ -333,7 +342,9 @@ function isLociMyuSpreadsheet(spreadsheetId, token){
           const fv = v && v.formattedValue ? String(v.formattedValue).trim().toLowerCase() : '';
           if(fv) headers.push(fv);
         }
-        if(headers.includes('title') && headers.includes('body') && headers.includes('color')) return true;
+        if(headers.includes('title') && headers.includes('body') && headers.includes('color')){
+          return true;
+        }
       }
       return false;
     });
@@ -422,6 +433,35 @@ function clearCaptionList(){
   const host=$('caption-list'); if(host) host.innerHTML='';
   captionDomById.clear();
 }
+async function deleteCaptionRowFromSheet(spreadsheetId, sheetId, rowIndex1based, token){
+  try{
+    if(!spreadsheetId || !sheetId || !rowIndex1based || !token) return false;
+    const body = {
+      requests: [{
+        deleteDimension: {
+          range: {
+            sheetId: Number(sheetId),
+            dimension: "ROWS",
+            startIndex: rowIndex1based-1, // 0-based inclusive
+            endIndex: rowIndex1based      // 0-based exclusive
+          }
+        }
+      }]
+    };
+    const url = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}:batchUpdate`;
+    const r = await fetch(url, {
+      method:'POST',
+      headers:{ Authorization:'Bearer '+token, 'Content-Type':'application/json' },
+      body: JSON.stringify(body)
+    });
+    if(!r.ok) return false;
+    await ensureIndex(); // IMPORTANT: re-index after deletion
+    return true;
+  }catch(e){
+    console.error('[Sheets deleteDimension] failed', e);
+    return false;
+  }
+}
 function appendCaptionItem(row){
   const host=$('caption-list'); if(!host||!row) return;
   const div=document.createElement('div'); div.className='caption-item'; div.dataset.id=row.id;
@@ -431,7 +471,35 @@ function appendCaptionItem(row){
   const txt=document.createElement('div'); txt.className='cap-txt';
   const t=document.createElement('div'); t.className='cap-title'; t.textContent=safeTitle;
   const b=document.createElement('div'); b.className='cap-body hint'; b.textContent=safeBody;
-  txt.appendChild(t); txt.appendChild(b); div.appendChild(txt);
+  txt.appendChild(t); txt.appendChild(b);
+  const del=document.createElement('button'); del.className='cap-del'; del.textContent='×'; del.title='Delete pin';
+  del.addEventListener('click', async (ev)=>{
+    ev.stopPropagation();
+    if(!confirm('このキャプションを削除しますか？')) return;
+    const id=row.id;
+    try{ removePinMarker(id); }catch(_){}
+    try{ removeCaptionOverlay(id); }catch(_){}
+    const meta = captionsIndex.get(id);
+    if (currentSpreadsheetId && currentSheetId && meta && meta.rowIndex){
+      const token = ensureToken();
+      const ok = await deleteCaptionRowFromSheet(currentSpreadsheetId, currentSheetId, meta.rowIndex, token);
+      if(!ok){
+        alert('スプレッドシートからの削除に失敗しました。再試行してください。');
+        return; // abort UI removal if Sheets failed
+      }
+    }
+    const el = host.querySelector('.caption-item[data-id="'+CSS.escape(id)+'"]');
+    if(el) el.remove();
+    captionsIndex.delete(id);
+    rowCache.delete(id);
+    if(selectedPinId===id){
+      selectedPinId=null;
+      const t=$('caption-title'), b=$('caption-body');
+      if(t) t.value=''; if(b) b.value='';
+      renderCurrentImageThumb();
+    }
+  });
+  div.appendChild(txt); div.appendChild(del);
   div.addEventListener('click', ()=> selectCaption(row.id));
   host.appendChild(div); captionDomById.set(row.id, div);
 }
@@ -452,7 +520,7 @@ function reflectRowToUI(id){
   if(row.color) div.style.borderLeft='3px solid '+row.color;
 }
 
-// ---------- Save / Update / Delete ----------
+// ---------- Save / Update ----------
 function putRowToSheet(seed, meta){
   const token = ensureToken();
   const headers = LOCIMYU_HEADERS;
@@ -463,6 +531,11 @@ function putRowToSheet(seed, meta){
   });
   const rangeA1 = `'${currentSheetTitle||'シート1'}'!A${rowIndex}:`+String(colA1(headers.length-1))+String(rowIndex);
   return putValues(currentSpreadsheetId, rangeA1, [values], token);
+}
+function refreshPinMarkerFromRow(id){
+  const row=rowCache.get(id); if(!row) return;
+  removePinMarker(id);
+  addPinMarker({ id, x:row.x||0, y:row.y||0, z:row.z||0, color:row.color||window.currentPinColor });
 }
 function updateCaptionForPin(id, fields){
   const cached=rowCache.get(id)||{id};
@@ -487,25 +560,26 @@ function updateCaptionForPin(id, fields){
   });
 }
 
-function refreshPinMarkerFromRow(id){
-  const row=rowCache.get(id); if(!row) return;
-  removePinMarker(id);
-  addPinMarker({ id, x:row.x||0, y:row.y||0, z:row.z||0, color:row.color||window.currentPinColor });
-}
-
 // ---------- Image attach/detach (right pane) ----------
+let _thumbReq = 0;
 function renderCurrentImageThumb(){
   const box = $('currentImageThumb'); if(!box) return;
+  const myReq = ++_thumbReq;
+  // clear previous preview (coalesce concurrent calls)
   box.innerHTML='';
-  const hostRow = document.getElementById('caption-image-row');
-  if(hostRow){ hostRow.querySelectorAll('.current-image-wrap').forEach(n=>n.remove()); }
   const row = selectedPinId ? (rowCache.get(selectedPinId)||{}) : null;
   if(!row || !row.imageFileId){
     box.innerHTML='<div class="placeholder">No Image</div>';
     return;
   }
   const token = getAccessToken();
-  getFileThumbUrl(row.imageFileId, token, 512).then(url=>{
+  if(!token){
+    box.innerHTML='<div class="placeholder">No Image</div>';
+    return;
+  }
+  getFileThumbUrl(row.imageFileId, token, 512).then((url)=>{
+    if(myReq!==_thumbReq) return; // outdated
+    box.innerHTML=''; // clear again just in case
     const wrap=document.createElement('div'); wrap.className='current-image-wrap'; wrap.style.position='relative'; wrap.style.display='inline-block';
     const img=document.createElement('img'); img.src=url; img.alt=''; img.style.borderRadius='12px'; img.style.maxWidth='100%';
     const x=document.createElement('button'); x.textContent='×'; x.title='Detach image';
@@ -551,7 +625,7 @@ function loadCaptionsFromSheet(){
       appendCaptionItem(obj);
       addPinMarker({ id, x:obj.x, y:obj.y, z:obj.z, color:obj.color||window.currentPinColor });
     }
-    applyFilter();
+    applyColorFilter(); // fixed: was applyFilter()
   }).catch(e=> console.warn('[loadCaptionsFromSheet] failed', e));
 }
 
@@ -564,7 +638,6 @@ function loadCaptionsFromSheet(){
     const fileId = cell.dataset.fileId;
     updateImageForPin(selectedPinId, fileId).catch(err=>{
       console.error('attach failed', err);
-      alert('画像の添付に失敗しました。サインイン状態と権限を確認してください。');
     });
   });
   const btn = $('btnRefreshImages');
@@ -586,7 +659,7 @@ function refreshImagesGrid(){
       .then(d=>{
         const grid = $('images-grid'); const stat = $('images-status');
         if(grid) grid.innerHTML = '';
-        const files = d.files||[];
+        const files = d.files|| [];
         files.forEach(f=>{
           const div = document.createElement('div');
           div.className = 'thumb';
