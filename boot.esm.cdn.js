@@ -292,7 +292,7 @@ function refreshOverlayImage(id){
 function markListSelected(id){
   const host = $('caption-list'); if(!host) return;
   host.querySelectorAll('.caption-item.is-selected').forEach(n=>n.classList.remove('is-selected'));
-  const el = host.querySelector('.caption-item[data-id="'+(window.CSS&&CSS.escape?CSS.escape(id):id)+'"]');
+  const el = host.querySelector('.caption-item[data-id="'+CSS.escape(id)+'"]');
   if(el) el.classList.add('is-selected');
 }
 function fillFormFromCaption(id){
@@ -352,14 +352,14 @@ function createLociMyuSpreadsheet(parentFolderId, token, opts){
   const url = 'https://www.googleapis.com/drive/v3/files';
   const body = { name, mimeType:'application/vnd.google-apps.spreadsheet' };
   if(parentFolderId) body.parents = [ parentFolderId ];
-  return fetch(url, { method:'POST', headers: { Authorization:'Bearer '+token, 'Content-Type':'application/json' }, body: JSON.stringify(body) }).then(r=>{ if(!r.ok) throw new Error('Drive files.create '+r.status); return r.json(); }).then(file=>{
+  return fetch(url, { method:'POST', headers:{ Authorization:'Bearer '+token, 'Content-Type':'application/json' }, body: JSON.stringify(body) }).then(r=>{ if(!r.ok) throw new Error('Drive files.create '+r.status); return r.json(); }).then(file=>{
       const spreadsheetId = file.id;
       return putValues(spreadsheetId, 'A1:Z1', [LOCIMYU_HEADERS], token).then(()=> spreadsheetId);
     });
 }
 function findOrCreateLociMyuSpreadsheet(parentFolderId, token, opts){
   if(!parentFolderId) return Promise.reject(new Error('parentFolderId required'));
-  const q = encodeURIComponent(`'${parentFolderId}' in parents && mimeType='application/vnd.google-apps.spreadsheet' && trashed=false`);
+  const q = encodeURIComponent(`'${parentFolderId}' in parents and mimeType='application/vnd.google-apps.spreadsheet' and trashed=false`);
   const url=`https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name,modifiedTime)&orderBy=modifiedTime desc&pageSize=10&supportsAllDrives=true`;
   return fetch(url, { headers:{ Authorization:'Bearer '+token } }).then(r=>{ if(!r.ok) throw new Error('Drive list spreadsheets '+r.status); return r.json(); }).then(d=>{
       const files = d.files || [];
@@ -431,42 +431,34 @@ function clearCaptionList(){
   captionDomById.clear();
 }
 async function deleteCaptionRowFromSheet(spreadsheetId, sheetId, rowIndex1based, token){
-  console.debug('[LM][deleteCaptionRowFromSheet] args', { spreadsheetId, sheetId, rowIndex1based });
   try{
-    if(!spreadsheetId || !sheetId || !rowIndex1based || !token){
-      console.warn('[LM][deleteCaptionRowFromSheet] missing args');
-      return false;
-    }
+    if(!spreadsheetId || !sheetId || !rowIndex1based || !token) return false;
     const body = {
       requests: [{
         deleteDimension: {
           range: {
             sheetId: Number(sheetId),
             dimension: "ROWS",
-            startIndex: Number(rowIndex1based) - 1,
-            endIndex: Number(rowIndex1based)
+            startIndex: rowIndex1based-1,
+            endIndex: rowIndex1based
           }
         }
       }]
     };
     const url = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}:batchUpdate`;
-    console.debug('[LM][deleteCaptionRowFromSheet] request', body);
     const r = await fetch(url, {
-      method: 'POST',
-      headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
+      method:'POST',
+      headers:{ Authorization:'Bearer '+token, 'Content-Type':'application/json' },
       body: JSON.stringify(body)
     });
-    const txt = await r.text();
     if(!r.ok){
-      console.error('[LM][deleteCaptionRowFromSheet] HTTP', r.status, txt);
+      console.error('[Sheets deleteDimension] HTTP', r.status);
       return false;
     }
-    let json;
-    try{ json = txt ? JSON.parse(txt) : null; }catch(_){ json = null; }
-    console.debug('[LM][deleteCaptionRowFromSheet] ok', json);
+    await ensureIndex();
     return true;
-  }catch(err){
-    console.error('[LM][deleteCaptionRowFromSheet] exception', err);
+  }catch(e){
+    console.error('[Sheets deleteDimension] failed', e);
     return false;
   }
 }
@@ -481,53 +473,42 @@ function appendCaptionItem(row){
   const b=document.createElement('div'); b.className='cap-body hint'; b.textContent=safeBody;
   txt.appendChild(t); txt.appendChild(b);
   const del=document.createElement('button'); del.className='cap-del'; del.textContent='×'; del.title='Delete pin';
-  
-  del.addEventListener('click', async (ev)=>{
-    ev.stopPropagation();
-    if(!confirm('このキャプションを削除しますか？')) return;
-    const id = row.id;
-    // remove in viewer/overlay first (optimistic UI)
-    try{ removePinMarker(id); }catch(_){}
-    try{ removeCaptionOverlay(id); }catch(_){}
-    // sheets delete
-    try{
-      const meta = captionsIndex ? captionsIndex.get(id) : null;
-      const token = ensureToken();
-      let success = true;
-      if (currentSpreadsheetId && currentSheetId && meta && meta.rowIndex){
-        success = await deleteCaptionRowFromSheet(currentSpreadsheetId, currentSheetId, meta.rowIndex, token);
-      }else{
-        console.warn('[LM] delete: missing meta or sheet ids', { currentSpreadsheetId, currentSheetId, meta });
-      }
-      if(!success){
-        alert('シートからの削除に失敗しました。コンソールログをご確認ください。');
-        return;
-      }
-      // reindex after delete
-      if (typeof ensureIndex === 'function') {
-        await ensureIndex();
-      }
-    }catch(err){
-      console.error('[LM] delete handler error', err);
-    }
-    // UI remove + cache cleanup
-    try{
-      const el = host.querySelector('[data-id="'+ (window.CSS && CSS.escape ? CSS.escape(id) : id) +'"]');
-      if(el) el.remove();
-    }catch(_){}
-    if (rowCache && rowCache.delete) rowCache.delete(id);
-    if (captionsIndex && captionsIndex.delete) captionsIndex.delete(id);
-    if (typeof selectedPinId !== 'undefined' && selectedPinId === id){
-      selectedPinId = null;
-      const t=$('caption-title'), b=$('caption-body');
-      if(t) t.value='';
-      if(b) b.value='';
-      renderCurrentImageThumb();
-    }
-  });
+  del.addEventListener('click', async (ev)=>{  ev.stopPropagation();
+  if(!confirm('このキャプションを削除しますか？')) return;
 
-  div.appendChild(txt); 
-  div.appendChild(del);
+  const id = row.id;
+
+  try{ removePinMarker(id); }catch(_){}
+  try{ removeCaptionOverlay && removeCaptionOverlay(id); }catch(_){}
+
+  const meta = captionsIndex.get(id);
+  let ok = true;
+  if (currentSpreadsheetId && currentSheetId && meta && meta.rowIndex){
+    try{
+      const token = ensureToken();
+      ok = await deleteCaptionRowFromSheet(currentSpreadsheetId, currentSheetId, meta.rowIndex, token);
+      if(!ok) throw new Error('Sheets API returned non-ok');
+      await ensureIndex();
+    }catch(e){
+      console.error('[delete row failed]', e);
+      alert('スプレッドシートからの削除に失敗しました: ' + (e && e.message || 'unknown'));
+      ok = false;
+    }
+  }
+  if(!ok){ return; }
+
+  const el = host.querySelector('[data-id="'+CSS.escape(id)+'"]');
+  if(el) el.remove();
+  captionsIndex.delete(id);
+  rowCache.delete(id);
+  if(selectedPinId === id){
+    selectedPinId = null;
+    const t=document.getElementById('caption-title'), b=document.getElementById('caption-body');
+    if(t) t.value='';
+    if(b) b.value='';
+    renderCurrentImageThumb();
+  }});
+  div.appendChild(txt); div.appendChild(del);
   div.addEventListener('click', ()=> selectCaption(row.id));
   host.appendChild(div); captionDomById.set(row.id, div);
 }
@@ -592,72 +573,64 @@ function updateCaptionForPin(id, fields){
 // ---------- Image attach/detach (right pane) ----------
 let _thumbReq = 0;
 function renderCurrentImageThumb(){
-  const box = typeof $ === 'function' ? $('currentImageThumb') : document.getElementById('currentImageThumb');
-  if(!box){ console.debug('[LM] renderCurrentImageThumb: no box'); return; }
-  // Clear immediately
+  const box = document.getElementById('currentImageThumb');
+  if(!box) return;
+
   box.innerHTML = '';
-  try{
-    const row = (typeof selectedPinId !== 'undefined' && selectedPinId) ? ((rowCache && rowCache.get) ? (rowCache.get(selectedPinId)||{}) : {}) : null;
-    if(!row || !row.imageFileId){
-      box.innerHTML = '<div class="placeholder">No Image</div>';
-      return;
-    }
-    const token = (typeof getAccessToken === 'function') ? getAccessToken() : null;
-    if(!token){
-      console.warn('[LM] renderCurrentImageThumb: no token');
-      box.innerHTML = '<div class="placeholder">No Image</div>';
-      return;
-    }
-    getFileThumbUrl(row.imageFileId, token, 512).then(function(url){
-      // Clear again to avoid duplicate preview if a prior async finished later
-      box.innerHTML = '';
-      const wrap = document.createElement('div');
-      wrap.className = 'current-image-wrap';
-      wrap.style.position = 'relative';
-      wrap.style.display = 'inline-block';
-      
-      const img = document.createElement('img');
-      img.src = url;
-      img.alt = '';
-      img.style.borderRadius = '12px';
-      img.style.maxWidth = '100%';
-      
-      const x = document.createElement('button');
-      x.textContent = '×';
-      x.title = 'Detach image';
-      x.style.position = 'absolute';
-      x.style.right = '6px';
-      x.style.top = '6px';
-      x.style.border = 'none';
-      x.style.width = '28px';
-      x.style.height = '28px';
-      x.style.borderRadius = '999px';
-      x.style.background = '#000a';
-      x.style.color = '#fff';
-      x.style.cursor = 'pointer';
-      
-      x.addEventListener('click', function(e){
-        try{ e.stopPropagation(); }catch(_){}
-        try{
-          if (typeof updateImageForPin === 'function') {
-            Promise.resolve(updateImageForPin(selectedPinId, null)).then(renderCurrentImageThumb);
-          }
-        }catch(err){
-          console.error('[LM] detach click failed', err);
-        }
-      });
-      
-      wrap.appendChild(img);
-      wrap.appendChild(x);
-      box.appendChild(wrap);
-    }).catch(function(err){
-      console.warn('[LM] renderCurrentImageThumb: thumb error', err);
-      box.innerHTML = '<div class="placeholder">No Image</div>';
-    });
-  }catch(err){
-    console.error('[LM] renderCurrentImageThumb fatal', err);
+
+  const row = selectedPinId ? (rowCache.get(selectedPinId)||{}) : null;
+  if(!row || !row.imageFileId){
     box.innerHTML = '<div class="placeholder">No Image</div>';
+    return;
   }
+
+  const token = (typeof getAccessToken === 'function') ? getAccessToken() : null;
+  if(!token){
+    box.innerHTML = '<div class="placeholder">No Image</div>';
+    return;
+  }
+
+  getFileThumbUrl(row.imageFileId, token, 512).then((url)=>{
+    box.innerHTML = '';
+
+    const wrap=document.createElement('div');
+    wrap.className='current-image-wrap';
+    wrap.style.position='relative';
+    wrap.style.display='inline-block';
+
+    const img=document.createElement('img');
+    img.src=url; img.alt='';
+    img.style.borderRadius='12px';
+    img.style.maxWidth='100%';
+    img.style.display='block';
+
+    const x=document.createElement('button');
+    x.textContent='×';
+    x.title='Detach image';
+    x.style.position='absolute';
+    x.style.right='6px';
+    x.style.top='6px';
+    x.style.border='none';
+    x.style.width='28px';
+    x.style.height='28px';
+    x.style.borderRadius='999px';
+    x.style.background='#000a';
+    x.style.color='#fff';
+    x.style.cursor='pointer';
+
+    x.addEventListener('click', (e)=>{
+      e.stopPropagation();
+      Promise.resolve(updateImageForPin(selectedPinId, null))
+        .then(renderCurrentImageThumb)
+        .catch(()=>{});
+    });
+
+    wrap.appendChild(img);
+    wrap.appendChild(x);
+    box.appendChild(wrap);
+  }).catch(()=>{
+    box.innerHTML = '<div class="placeholder">No Image</div>';
+  });
 }
 function updateImageForPin(id, fileIdOrNull){
   const token = ensureToken();
@@ -720,7 +693,7 @@ function refreshImagesGrid(){
       if(stat) stat.textContent='親フォルダが見つかりません';
       return;
     }
-    const q = encodeURIComponent(`'${parent}' in parents && mimeType contains 'image/' && trashed=false`);
+    const q = encodeURIComponent(`'${parent}' in parents and mimeType contains 'image/' and trashed=false`);
     const url = `https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name,mimeType,thumbnailLink)&orderBy=modifiedTime desc&pageSize=200&supportsAllDrives=true`;
     return fetch(url, { headers:{ Authorization:'Bearer '+token } })
       .then(r=>r.json())
@@ -839,7 +812,7 @@ function renderFilterChips(){
 function doLoad(){
   try{
     const token = ensureToken();
-    const raw = ($('glbUrl') && $('glbUrl').value) || '';  // <- ensure safe access
+    const raw = ($('glbUrl') && $('glbUrl').value) || '';
     const fileId = extractDriveId(raw);
     if(!fileId){ console.warn('[GLB] missing fileId'); return; }
     if($('btnGlb')) $('btnGlb').disabled = true;
