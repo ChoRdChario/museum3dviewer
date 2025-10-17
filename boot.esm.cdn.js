@@ -468,7 +468,6 @@ function appendCaptionItem(row){
   if(row.color) div.style.borderLeft='3px solid '+row.color;
   const safeTitle=(row.title||'').trim()||'(untitled)';
   const safeBody =(row.body ||'').trim()||'(no description)';
-  const thumb=document.createElement('img'); thumb.className='cap-thumb'; thumb.alt=''; thumb.decoding='async'; thumb.loading='lazy';
   const txt=document.createElement('div'); txt.className='cap-txt';
   const t=document.createElement('div'); t.className='cap-title'; t.textContent=safeTitle;
   const b=document.createElement('div'); b.className='cap-body hint'; b.textContent=safeBody;
@@ -509,10 +508,9 @@ function appendCaptionItem(row){
     if(b) b.value='';
     renderCurrentImageThumb();
   }});
-  div.appendChild(thumb); div.appendChild(txt); div.appendChild(del);
+  div.appendChild(txt); div.appendChild(del);
   div.addEventListener('click', ()=> selectCaption(row.id));
   host.appendChild(div); captionDomById.set(row.id, div);
-  refreshListThumb(row.id);
 }
 
 function reflectRowToUI(id){
@@ -524,13 +522,22 @@ function reflectRowToUI(id){
     const col=$('pinColor'); if(col && row.color) col.value=row.color;
     renderCurrentImageThumb();
     refreshOverlayImage(id); // ← オーバーレイにも反映
-    refreshListThumb(id);
   }
   const host=$('caption-list'); if(!host) return;
   let div=captionDomById.get(id);
   if(!div){ appendCaptionItem(Object.assign({id}, row)); div=captionDomById.get(id); }
   if(!div) return;
+  // update visible title/body in list item
+  const tEl = div.querySelector('.cap-title');
+  const bEl = div.querySelector('.cap-body');
+  const safeTitle = ((row.title||'').trim()) || '(untitled)';
+  const safeBody  = ((row.body ||'').trim()) || '(no description)';
+  if(tEl && tEl.textContent !== safeTitle) tEl.textContent = safeTitle;
+  if(bEl && bEl.textContent !== safeBody)  bEl.textContent = safeBody;
+  // border accent by pin color
   if(row.color) div.style.borderLeft='3px solid '+row.color;
+  // refresh small list thumb if helper exists
+  if (typeof refreshListThumb === 'function') { try{ refreshListThumb(id); }catch(_){ } }
 }
 
 // ---------- Save / Update ----------
@@ -575,37 +582,6 @@ function updateCaptionForPin(id, fields){
 
 // ---------- Image attach/detach (right pane) ----------
 let _thumbReq = 0;
-
-function refreshListThumb(id){
-  const row = rowCache.get(id) || {};
-  const host = $('caption-list'); if(!host) return;
-  const el = host.querySelector('.caption-item[data-id="'+CSS.escape(id)+'"]'); if(!el) return;
-  const img = el.querySelector('.cap-thumb'); if(!img) return;
-
-  // default: plain colored placeholder (no icon/text)
-  img.classList.remove('tx-only','tx-chip','tx-quote','tx-grid','ph-sticker');
-  img.classList.add('is-empty','ph-blank');
-  img.src = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==';
-  img.srcset = '';
-  img.alt = '';
-  img.removeAttribute('data-emoji');
-  if (row.color) { img.style.background = row.color; img.style.filter = 'saturate(.95) brightness(.95)'; }
-  else { img.style.background = ''; img.style.filter = ''; }
-
-  if(!row.imageFileId){
-    return;
-  }
-  const token = (typeof getAccessToken === 'function') ? getAccessToken() : null;
-  if(!token){
-    return;
-  }
-  getFileThumbUrl(row.imageFileId, token, 96).then(function(url){
-    img.src = url;
-    img.alt = 'thumb';
-    img.classList.remove('is-empty','ph-blank');
-  }).catch(function(_){ /* keep placeholder */ });
-}
-
 function renderCurrentImageThumb(){
   const box = document.getElementById('currentImageThumb');
   if(!box) return;
