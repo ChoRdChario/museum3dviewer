@@ -129,3 +129,29 @@ body{
 #caption-list .caption-item .cap-body{
   white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
 }
+
+
+/* Cute emoji sticker placeholder (no text inside list tile) */
+#caption-list .caption-item .cap-thumb.ph-sticker{
+  position:relative;
+  background: var(--panel);
+  border:1px solid var(--border);
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,.04);
+}
+#caption-list .caption-item .cap-thumb.ph-sticker::after{
+  content: attr(data-emoji);
+  position:absolute; inset:0;
+  display:grid; place-items:center;
+  font-size:14px; line-height:1; opacity:.9;
+  transform: translateY(0);
+}
+/* subtle shimmer on hover (respects reduced motion) */
+@media (prefers-reduced-motion: no-preference){
+  #caption-list .caption-item:hover .cap-thumb.ph-sticker::after{
+    animation: lm_twink 1.2s ease-in-out 1;
+  }
+  @keyframes lm_twink {
+    0%,100% { transform: translateY(0); filter:none; }
+    40% { transform: translateY(-1px); filter: brightness(1.05); }
+  }
+}
