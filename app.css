@@ -151,3 +151,16 @@ body{
   }
   @keyframes lm_twink { 0%,100% { transform:none; filter:none; } 50% { transform:translateY(-1px); filter:brightness(1.05); } }
 }
+
+
+/* Plain colored placeholder (no icon/text) */
+#caption-list .caption-item .cap-thumb.ph-blank{
+  position:relative;
+  background: var(--panel);
+  border:1px solid var(--border);
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,.04);
+}
+#caption-list .caption-item .cap-thumb.ph-blank::before,
+#caption-list .caption-item .cap-thumb.ph-blank::after{
+  content:none;
+}

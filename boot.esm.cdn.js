@@ -587,11 +587,12 @@ function refreshListThumb(id){
   img.src = '';
   img.alt = 'placeholder';
   img.classList.remove('tx-only','tx-chip','tx-quote','tx-grid');
-  img.classList.add('is-empty','ph-sticker');
-
-  if(!row.imageFileId){
-    img.dataset.emoji = '📃';
-    if (row.color) { img.style.background = row.color; img.style.filter = 'saturate(.95) brightness(.95)'; }
+  img.classList.add('is-empty','ph-blank');
+    img.src = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==';
+    img.srcset='';
+    img.alt='';
+    img.removeAttribute('data-emoji');
+    if (row.color) { img.style.background = row.color; img.style.filter = 'saturate(.95) brightness(.95)'; } else { img.style.background=''; img.style.filter=''; }
     return;
   }
   const token = (typeof getAccessToken === 'function') ? getAccessToken() : null;
