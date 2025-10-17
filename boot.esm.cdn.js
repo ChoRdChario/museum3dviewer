@@ -576,10 +576,6 @@ function updateCaptionForPin(id, fields){
 // ---------- Image attach/detach (right pane) ----------
 let _thumbReq = 0;
 
-
-function pickPlaceholderEmoji(id){ return '📃'; }
-  return set[s % set.length];
-}
 function refreshListThumb(id){
   const row = rowCache.get(id) || {};
   const host = $('caption-list'); if(!host) return;
@@ -587,19 +583,15 @@ function refreshListThumb(id){
   if(!el) return;
   const img = el.querySelector('.cap-thumb');
   if(!img) return;
-  // reset
+  // default placeholder
   img.src = '';
   img.alt = 'placeholder';
   img.classList.remove('tx-only','tx-chip','tx-quote','tx-grid');
   img.classList.add('is-empty','ph-sticker');
 
-  // If no image, set cute emoji sticker placeholder and tint
   if(!row.imageFileId){
-    const emoji = pickPlaceholderEmoji(id);
-    img.dataset.emoji = emoji;
-    // tint by pin color if available, else fallback
-    img.style.background = row.color || 'var(--panel)';
-    img.style.filter = row.color ? 'saturate(.95) brightness(.95)' : '';
+    img.dataset.emoji = '📃';
+    if (row.color) { img.style.background = row.color; img.style.filter = 'saturate(.95) brightness(.95)'; }
     return;
   }
   const token = (typeof getAccessToken === 'function') ? getAccessToken() : null;
