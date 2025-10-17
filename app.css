@@ -107,3 +107,25 @@ body{
 .cap-del{margin-left:auto;border:0;background:#0b0f14;color:#e5e7eb;cursor:pointer;border-radius:6px;width:24px;height:24px;}
 .cap-del:hover{background:#111827}
 
+
+
+/* Caption list thumbnail */
+#caption-list .caption-item{
+  display:flex; align-items:center; gap:10px;
+}
+#caption-list .caption-item .cap-thumb{
+  width:36px; height:36px; border-radius:8px; object-fit:cover; flex:0 0 auto;
+  background:#222; border:1px solid var(--border);
+}
+#caption-list .caption-item .cap-thumb.is-empty{
+  opacity:0.35;
+}
+#caption-list .caption-item .cap-txt{
+  flex:1 1 auto; min-width:0;
+}
+#caption-list .caption-item .cap-title{
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+}
+#caption-list .caption-item .cap-body{
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+}

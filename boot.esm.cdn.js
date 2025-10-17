@@ -468,6 +468,7 @@ function appendCaptionItem(row){
   if(row.color) div.style.borderLeft='3px solid '+row.color;
   const safeTitle=(row.title||'').trim()||'(untitled)';
   const safeBody =(row.body ||'').trim()||'(no description)';
+  const thumb=document.createElement('img'); thumb.className='cap-thumb'; thumb.alt=''; thumb.decoding='async'; thumb.loading='lazy';
   const txt=document.createElement('div'); txt.className='cap-txt';
   const t=document.createElement('div'); t.className='cap-title'; t.textContent=safeTitle;
   const b=document.createElement('div'); b.className='cap-body hint'; b.textContent=safeBody;
@@ -508,9 +509,10 @@ function appendCaptionItem(row){
     if(b) b.value='';
     renderCurrentImageThumb();
   }});
-  div.appendChild(txt); div.appendChild(del);
+  div.appendChild(thumb); div.appendChild(txt); div.appendChild(del);
   div.addEventListener('click', ()=> selectCaption(row.id));
   host.appendChild(div); captionDomById.set(row.id, div);
+  refreshListThumb(row.id);
 }
 
 function reflectRowToUI(id){
@@ -522,6 +524,7 @@ function reflectRowToUI(id){
     const col=$('pinColor'); if(col && row.color) col.value=row.color;
     renderCurrentImageThumb();
     refreshOverlayImage(id); // ← オーバーレイにも反映
+    refreshListThumb(id);
   }
   const host=$('caption-list'); if(!host) return;
   let div=captionDomById.get(id);
@@ -572,6 +575,33 @@ function updateCaptionForPin(id, fields){
 
 // ---------- Image attach/detach (right pane) ----------
 let _thumbReq = 0;
+
+function refreshListThumb(id){
+  const row = rowCache.get(id) || {};
+  const host = $('caption-list'); if(!host) return;
+  const el = host.querySelector('.caption-item[data-id="'+CSS.escape(id)+'"]');
+  if(!el) return;
+  const img = el.querySelector('.cap-thumb');
+  if(!img) return;
+  // default placeholder
+  img.src = '';
+  img.alt = 'no-image';
+  img.classList.toggle('is-empty', true);
+
+  if(!row.imageFileId){
+    return;
+  }
+  const token = (typeof getAccessToken === 'function') ? getAccessToken() : null;
+  if(!token){
+    return;
+  }
+  // Use Drive thumbnail (small)
+  getFileThumbUrl(row.imageFileId, token, 96).then(function(url){
+    img.src = url;
+    img.alt = 'thumb';
+    img.classList.remove('is-empty');
+  }).catch(function(_){ /* keep empty */ });
+}
 function renderCurrentImageThumb(){
   const box = document.getElementById('currentImageThumb');
   if(!box) return;
@@ -921,23 +951,4 @@ onCanvasShiftPick(function(pos){
   addPinMarker({ id, x:pos.x, y:pos.y, z:pos.z, color });
   selectCaption(id);
   ensureRow(id, row).then(function(){ updateCaptionForPin(id, row); });
-});
-
-
-// ---------- UX: Delete key to remove selected caption (when not typing) ----------
-document.addEventListener('keydown', function(e){
-  const tag = (document.activeElement && document.activeElement.tagName || '').toLowerCase();
-  const typing = tag==='input' || tag==='textarea' || document.activeElement.isContentEditable;
-  if(typing) return;
-  if(e.key === 'Delete' || (e.key === 'Backspace' && (e.ctrlKey||e.metaKey))){
-    if(typeof selectedPinId === 'string' && selectedPinId){
-      const host = $('caption-list');
-      const el = host && host.querySelector('.caption-item[data-id="'+CSS.escape(selectedPinId)+'"]');
-      const delBtn = el && el.querySelector('.cap-del');
-      if(delBtn){
-        delBtn.click();
-        e.preventDefault();
-      }
-    }
-  }
 });
