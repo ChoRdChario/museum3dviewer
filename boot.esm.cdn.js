@@ -579,33 +579,33 @@ let _thumbReq = 0;
 function refreshListThumb(id){
   const row = rowCache.get(id) || {};
   const host = $('caption-list'); if(!host) return;
-  const el = host.querySelector('.caption-item[data-id="'+CSS.escape(id)+'"]');
-  if(!el) return;
-  const img = el.querySelector('.cap-thumb');
-  if(!img) return;
-  // default placeholder
-  img.src = '';
-  img.alt = 'placeholder';
-  img.classList.remove('tx-only','tx-chip','tx-quote','tx-grid');
+  const el = host.querySelector('.caption-item[data-id="'+CSS.escape(id)+'"]'); if(!el) return;
+  const img = el.querySelector('.cap-thumb'); if(!img) return;
+
+  // default: plain colored placeholder (no icon/text)
+  img.classList.remove('tx-only','tx-chip','tx-quote','tx-grid','ph-sticker');
   img.classList.add('is-empty','ph-blank');
-    img.src = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==';
-    img.srcset='';
-    img.alt='';
-    img.removeAttribute('data-emoji');
-    if (row.color) { img.style.background = row.color; img.style.filter = 'saturate(.95) brightness(.95)'; } else { img.style.background=''; img.style.filter=''; }
+  img.src = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==';
+  img.srcset = '';
+  img.alt = '';
+  img.removeAttribute('data-emoji');
+  if (row.color) { img.style.background = row.color; img.style.filter = 'saturate(.95) brightness(.95)'; }
+  else { img.style.background = ''; img.style.filter = ''; }
+
+  if(!row.imageFileId){
     return;
   }
   const token = (typeof getAccessToken === 'function') ? getAccessToken() : null;
   if(!token){
     return;
   }
-  // Use Drive thumbnail (small)
   getFileThumbUrl(row.imageFileId, token, 96).then(function(url){
     img.src = url;
     img.alt = 'thumb';
-    img.classList.remove('is-empty');
-  }).catch(function(_){ /* keep empty */ });
+    img.classList.remove('is-empty','ph-blank');
+  }).catch(function(_){ /* keep placeholder */ });
 }
+
 function renderCurrentImageThumb(){
   const box = document.getElementById('currentImageThumb');
   if(!box) return;
