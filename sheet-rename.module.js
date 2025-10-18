@@ -1,5 +1,5 @@
 
-/*! sheet-rename.module.js — inline rename UI (robust, no hint text, resilient select sync) */
+/*! sheet-rename.module.js — inline rename UI (robust token fetch & minimal UI) */
 (function(){
   const DEBUG = /\bdebug=1\b/.test(location.search) || window.SHEET_RENAME_DEBUG;
   const log = (...a)=>{ if(DEBUG) console.log('[renameUI]', ...a); };
@@ -30,6 +30,30 @@
       out.push({ sheetId:id, title:(opt.textContent||'').trim() });
     });
     return out;
+  }
+
+  // ---- token helper (awaits both sync/async impls) ----
+  async function getTokenRobust(){
+    try{
+      if (typeof ensureToken === 'function'){
+        const maybe = ensureToken();
+        if (maybe && typeof maybe.then === 'function'){
+          await maybe; // wait if it returns a Promise
+        }
+      }
+    }catch(_){}
+    try{
+      if (typeof getAccessToken === 'function'){
+        const t = getAccessToken();
+        if (t && typeof t.then === 'function'){
+          return await t;
+        }
+        return t || null;
+      }
+    }catch(_){}
+    // fallback: try to click Sign-in button once
+    try{ document.getElementById('auth-signin')?.click(); }catch(_){}
+    return null;
   }
 
   // ---- mount ----
@@ -71,8 +95,6 @@
     if (Array.isArray(window.allSheets) && window.allSheets.length) return window.allSheets;
     return [];
   }
-
-  // keep globals in sync with <select>
   function wireSelectChange(){
     const sel = findSheetSelect();
     if (!sel) return;
@@ -82,17 +104,14 @@
       const id = (opt && opt.value) ? Number(opt.value) : null;
       if (id != null) window.currentSheetId = id;
       if (title) window.currentSheetTitle = title;
-      sel.title = title; // tooltip full text
+      sel.title = title;
       const label = document.getElementById('sheet-rename-label');
       const edit  = document.getElementById('sheet-rename-edit');
       if (label) label.textContent = title || '(no sheet)';
-      if (edit)  edit.disabled = !(window.currentSheetId!=null); // ここを緩める（sheetIdだけでOK）
+      if (edit)  edit.disabled = !(window.currentSheetId!=null);
     };
-    // 初期同期
     syncFromSelect();
-    // changeイベント（ユーザー操作）
     sel.addEventListener('change', syncFromSelect, { passive:true });
-    // option増減（プログラム更新）を拾う
     const mo = new MutationObserver(syncFromSelect);
     mo.observe(sel, { childList:true, subtree:true });
   }
@@ -115,7 +134,7 @@
       ok.style.display=cancel.style.display='inline-block';
       edit.style.display='none';
       spin.style.display='none';
-      hint.textContent=''; // ヒントは表示しない方針
+      hint.textContent='';
       input.value = title;
       setTimeout(()=>{ input.focus(); input.select(); },0);
     } else {
@@ -125,9 +144,8 @@
       ok.style.display=cancel.style.display='none';
       edit.style.display='inline-block';
       spin.style.display='none';
-      // ✎ボタンの活性条件は sheetId のみ
       edit.disabled = !(window.currentSheetId!=null);
-      hint.textContent=''; // 常に空にしてスペース節約
+      hint.textContent='';
     }
   }
 
@@ -154,48 +172,33 @@
   // ---- apply ----
   async function applySheetRename(){
     const input  = document.getElementById('sheet-rename-input');
-    const hint   = document.getElementById('sheet-rename-hint');
     const spin   = document.getElementById('sheet-rename-spin');
     const ok     = document.getElementById('sheet-rename-ok');
     const cancel = document.getElementById('sheet-rename-cancel');
     const label  = document.getElementById('sheet-rename-label');
     const sel    = findSheetSelect();
 
-    // 最小限の前提：sheetId があればOK。spreadsheetId が欠けていても select のデータから同期を再試行。
-    if (window.currentSheetId==null){
-      wireSelectChange();
-      if (window.currentSheetId==null){
-        return; // 無言で抜ける（UIスペース節約のためメッセージは出さない）
-      }
-    }
+    if (window.currentSheetId==null){ wireSelectChange(); if(window.currentSheetId==null){ return; } }
 
     const before = window.currentSheetTitle||'';
     let newTitle = (input.value||'').trim();
     const sheets = currentSheets();
     const currentId = window.currentSheetId;
+    if(!newTitle || newTitle===before || newTitle.length>100 || sheets.some(s=>(s.title||'')===newTitle)){ updateSheetRenameView('view'); return; }
 
-    if(!newTitle){ return; } // 空は確定しない（無言で戻る）
-    if(newTitle===before){ updateSheetRenameView('view'); wireSelectChange(); return; }
-    if(newTitle.length>100){ return; }
-    if(sheets.some(s => (s.title||'') === newTitle)){ return; }
-
-    // 楽観更新
+    // Optimistic UI
     if(label) label.textContent = newTitle;
-    try{
-      const opt = sel && sel.querySelector(`option[value="${currentId}"]`);
-      if(opt) opt.textContent = newTitle;
-    }catch(_){}
+    try{ const opt = sel && sel.querySelector(`option[value="${currentId}"]`); if(opt) opt.textContent = newTitle; }catch(_){}
     updateSheetRenameView('view');
-    wireSelectChange();
+
+    // Ensure token (supports sync/async)
+    let token = await getTokenRobust();
+    if(!token){ log('rename failed','no token'); return; }
 
     try{
-      input.disabled=ok.disabled=cancel.disabled=true;
-      spin.style.display='inline-block';
-      const token = (typeof ensureToken==='function') ? ensureToken()
-                 : (typeof getAccessToken==='function' ? getAccessToken() : null);
-      if(!token) throw new Error('auth token not available');
+      input.disabled=ok.disabled=cancel.disabled=true; spin.style.display='inline-block';
       const spreadsheetId = window.currentSpreadsheetId;
-      if(!spreadsheetId) throw new Error('spreadsheetId missing');
+      if(!spreadsheetId){ log('rename failed','no spreadsheetId'); throw new Error('spreadsheetId missing'); }
       await sheetsUpdateTitle(spreadsheetId, currentId, newTitle, token);
       window.currentSheetTitle = newTitle;
       if (Array.isArray(window.allSheets)){
@@ -205,16 +208,11 @@
     }catch(e){
       // rollback
       if(label) label.textContent = before;
-      try{
-        const opt = sel && sel.querySelector(`option[value="${currentId}"]`);
-        if(opt) opt.textContent = before;
-      }catch(_){}
+      try{ const opt = sel && sel.querySelector(`option[value="${currentId}"]`); if(opt) opt.textContent = before; }catch(_){}
       window.currentSheetTitle = before;
-      // メッセージは出さない（UIを狭く保つ）。デバッグ時のみログ。
       log('rename failed', e);
     }finally{
-      input.disabled=ok.disabled=cancel.disabled=false;
-      spin.style.display='none';
+      input.disabled=ok.disabled=cancel.disabled=false; spin.style.display='none';
     }
   }
 
@@ -228,13 +226,12 @@
     }
   }
 
-  // auto mount + re-try
+  // auto
   (function autoMount(){
     if (mountSheetRenameUI()) return;
-    const mo = new MutationObserver(()=>{ if (mountSheetRenameUI()) mo.disconnect(); });
-    mo.observe(document.documentElement || document.body, { childList:true, subtree:true });
-    let tries=30; const timer=setInterval(()=>{ if(mountSheetRenameUI()||--tries<=0) clearInterval(timer); },200);
+    const mo=new MutationObserver(()=>{ if(mountSheetRenameUI()) mo.disconnect(); });
+    mo.observe(document.documentElement||document.body,{childList:true,subtree:true});
+    let tries=30; const tm=setInterval(()=>{ if(mountSheetRenameUI()||--tries<=0) clearInterval(tm); },200);
   })();
-
   window.mountSheetRenameUI = mountSheetRenameUI;
 })();
