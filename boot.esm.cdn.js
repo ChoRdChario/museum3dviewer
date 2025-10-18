@@ -24,7 +24,7 @@ function lmCanonicalColor(hex){
 import {
   ensureViewer, onCanvasShiftPick, addPinMarker, setPinSelected, onPinSelect,
   loadGlbFromDrive, onRenderTick, projectPoint, clearPins, removePinMarker
-, listMaterials, applyMaterialProps, resetMaterial, resetAllMaterials, setCurrentGlbId} from './viewer.module.cdn.js';
+} from './viewer.module.cdn.js';
 import { setupAuth, getAccessToken, getLastAuthError } from './gauth.module.js';
 
 // ---------- DOM helpers ----------
@@ -828,7 +828,7 @@ function doLoad(){
     if($('btnGlb')) $('btnGlb').disabled = true;
 
     return loadGlbFromDrive(fileId, { token }).then(function(){
-      lastGlbFileId = fileId; try{ setCurrentGlbId(String(fileId||'')); }catch(_){} try{ lmInitMaterialTab(); }catch(_){}
+      lastGlbFileId = fileId;
       return getParentFolderId(fileId, token).then(function(parent){
         return findOrCreateLociMyuSpreadsheet(parent, token, { glbId:fileId });
       }).then(function(spreadsheetId){
@@ -934,72 +934,31 @@ onCanvasShiftPick(function(pos){
 });
 
 
-
-// === Material Tab wiring (WIP) ===
-function lmInitMaterialTab(){
-  const sel = document.getElementById('mat-target');
-  const unlit = document.getElementById('mat-unlit');
-  const dbl = document.getElementById('mat-doubleside');
-  const op = document.getElementById('mat-opacity');
-  const w2a = document.getElementById('mat-white2alpha');
-  const wthr = document.getElementById('mat-white-thr');
-  const wthrv = document.getElementById('mat-white-thr-val');
-  const b2a = document.getElementById('mat-black2alpha');
-  const bthr = document.getElementById('mat-black-thr');
-  const bthrv = document.getElementById('mat-black-thr-val');
-  const r1 = document.getElementById('mat-reset-one');
-  const rAll = document.getElementById('mat-reset-all');
-  if(!sel) return;
-
-  // populate list
-  sel.innerHTML = "";
-  const mats = listMaterials();
-  for(const m of mats){
-    const opt = document.createElement('option');
-    opt.value = m.materialKey; opt.textContent = `${m.name} (${m.index})`;
-    sel.appendChild(opt);
-  }
-
-  const getKey = ()=> sel.value;
-
-  function applyPartial(){
-    const key = getKey(); if(!key) return;
-    applyMaterialProps(key, {
-      unlit: !!unlit?.checked,
-      doubleSide: !!dbl?.checked,
-      opacity: op? Number(op.value): undefined,
-      whiteToTransparent: !!w2a?.checked,
-      whiteThreshold: wthr? Number(wthr.value): undefined,
-      blackToTransparent: !!b2a?.checked,
-      blackThreshold: bthr? Number(bthr.value): undefined,
-    });
-  }
-
-  unlit && unlit.addEventListener('change', applyPartial);
-  dbl && dbl.addEventListener('change', applyPartial);
-  op && op.addEventListener('input', applyPartial);
-  w2a && w2a.addEventListener('change', applyPartial);
-  wthr && wthr.addEventListener('input', ()=>{ if(wthrv) wthrv.textContent = wthr.value; applyPartial(); });
-  b2a && b2a.addEventListener('change', applyPartial);
-  bthr && bthr.addEventListener('input', ()=>{ if(bthrv) bthrv.textContent = bthr.value; applyPartial(); });
-
-  r1 && r1.addEventListener('click', ()=>{ const key=getKey(); if(key) resetMaterial(key); });
-  rAll && rAll.addEventListener('click', ()=> resetAllMaterials());
-}
-
-// after GLB load, refresh material list and set glbId
+// === Tabs wiring (Caption / Material / Views) ===
 (function(){
-  const origLoad = window.loadGlbFromDrive;
-  if(typeof origLoad === 'function'){
-    window.loadGlbFromDrive = async function(fileId, opts){
-      const r = await origLoad.apply(this, arguments);
-      try{ setCurrentGlbId(String(fileId||'')); }catch(_){}
-      try{ lmInitMaterialTab(); }catch(_){}
-      return r;
-    };
-  } else {
-    // fallback init in case wrapper name differs
-    document.addEventListener('DOMContentLoaded', ()=> setTimeout(lmInitMaterialTab, 300));
+  function setActive(tab){
+    const name = tab?.getAttribute('data-tab');
+    if(!name) return;
+    document.querySelectorAll('nav.tabs [role="tab"]').forEach(btn=>{
+      btn.setAttribute('aria-selected', String(btn===tab));
+    });
+    document.querySelectorAll('.pane').forEach(p=>{
+      p.removeAttribute('data-active');
+    });
+    const pane = document.querySelector(`#pane-${name}`);
+    if(pane) pane.setAttribute('data-active','true');
   }
+  function initTabs(){
+    const nav = document.querySelector('nav.tabs');
+    if(!nav) return;
+    nav.addEventListener('click', (ev)=>{
+      const btn = ev.target.closest('[role="tab"][data-tab]');
+      if(!btn) return;
+      ev.preventDefault();
+      setActive(btn);
+    }, { passive:false });
+  }
+  if(document.readyState === 'loading'){
+    document.addEventListener('DOMContentLoaded', initTabs, { once:true });
+  } else { initTabs(); }
 })();
-
