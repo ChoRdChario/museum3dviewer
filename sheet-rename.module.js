@@ -1,16 +1,21 @@
 
-/*! sheet-rename.module.js - inline rename UI for Google Sheets tab (A-plan) */
+/*! sheet-rename.module.js - robust inline rename UI for Google Sheets tab (A-plan, auto-detect) */
 (function(){
-  const $ = (id) => document.getElementById(id);
+  const DEBUG = /\bdebug=1\b/.test(location.search) || window.SHEET_RENAME_DEBUG;
+  const log = (...a)=>{ if(DEBUG) console.log('[renameUI]', ...a); };
 
-  function findSheetSelectWrapper(){
-    // Try known wrapper ids
-    let host = $('sheet-select-wrapper') || $('save-target-sheet-wrapper');
+  function findSheetSelect(){
+    let sel = document.getElementById('sheet-select') || document.getElementById('save-target-sheet');
+    if (sel) return sel;
+    sel = document.querySelector('#tab-captions select, #captions select, .right-panel select');
+    if (sel) return sel;
+    sel = Array.from(document.querySelectorAll('select')).find(s=>!s.multiple && s.options);
+    return sel || null;
+  }
+
+  function ensureWrapperForSelect(sel){
+    let host = document.getElementById('sheet-select-wrapper') || document.getElementById('save-target-sheet-wrapper');
     if (host) return host;
-    // Find select element (support both ids)
-    const sel = document.getElementById('sheet-select') || document.getElementById('save-target-sheet');
-    if (!sel) return null;
-    // Create wrapper next to the select we found
     host = document.createElement('div');
     host.id = (sel.id === 'save-target-sheet') ? 'save-target-sheet-wrapper' : 'sheet-select-wrapper';
     sel.parentNode.insertBefore(host, sel);
@@ -18,20 +23,21 @@
     return host;
   }
 
-  function listSheetsFromDOM(){
-    const sel = document.getElementById('sheet-select') || document.getElementById('save-target-sheet');
+  function listSheetsFromDOM(sel){
     const out = [];
-    if (sel) {
-      Array.from(sel.options).forEach(opt=>{
-        out.push({ sheetId: opt.value? Number(opt.value) : null, title: opt.textContent.trim() });
-      });
-    }
+    if (!sel) return out;
+    Array.from(sel.options || []).forEach(opt=>{
+      const id = opt.value ? Number(opt.value) : null;
+      out.push({ sheetId: id, title: (opt.textContent||'').trim() });
+    });
     return out;
   }
 
   function mountSheetRenameUI(){
-    const anchor = findSheetSelectWrapper();
-    if(!anchor) return;
+    const sel = findSheetSelect();
+    if(!sel){ log('no select found yet'); return false; }
+    const anchor = ensureWrapperForSelect(sel);
+    if(!anchor){ log('no anchor'); return false; }
 
     let host = document.getElementById('sheet-rename');
     if (!host){
@@ -49,44 +55,51 @@
         '</div>'
       ].join('');
       anchor.insertAdjacentElement('afterend', host);
+      wireSheetRenameEvents();
     }
     updateSheetRenameView('view');
-    wireSheetRenameEvents();
+    log('mounted UI');
+    return true;
   }
 
   function currentSheets(){
-    if (Array.isArray(window.allSheets) && window.allSheets.length) return window.allSheets;
-    const dom = listSheetsFromDOM();
+    const sel = findSheetSelect();
+    const dom = listSheetsFromDOM(sel);
     if (dom.length) return dom;
+    if (Array.isArray(window.allSheets) && window.allSheets.length) return window.allSheets;
     return [];
   }
 
   function updateSheetRenameView(mode){
-    const label = $('sheet-rename-label');
-    const input = $('sheet-rename-input');
-    const ok = $('sheet-rename-ok'), cancel = $('sheet-rename-cancel');
-    const edit = $('sheet-rename-edit');
-    const spin = $('sheet-rename-spin'); const hint = $('sheet-rename-hint');
+    const label = document.getElementById('sheet-rename-label');
+    const input = document.getElementById('sheet-rename-input');
+    const ok = document.getElementById('sheet-rename-ok'), cancel = document.getElementById('sheet-rename-cancel');
+    const edit = document.getElementById('sheet-rename-edit');
+    const spin = document.getElementById('sheet-rename-spin'); const hint = document.getElementById('sheet-rename-hint');
     if(!label||!input||!ok||!cancel||!edit||!spin||!hint) return;
+    const title = (window.currentSheetTitle||'').trim();
     if(mode==='edit'){
       label.style.display='none';
       input.style.display='inline-block';
       ok.style.display=cancel.style.display='inline-block';
       edit.style.display='none'; spin.style.display='none';
       hint.textContent='';
-      input.value = (window.currentSheetTitle||'').trim();
+      input.value = title;
       setTimeout(()=>{ input.focus(); input.select(); }, 0);
     }else{
-      label.textContent = window.currentSheetTitle || '(no sheet)';
+      label.textContent = title || '(no sheet)';
       label.style.display='inline';
       input.style.display='none';
       ok.style.display=cancel.style.display='none';
       edit.style.display='inline-block'; spin.style.display='none';
+      const ready = !!(window.currentSpreadsheetId && window.currentSheetId!=null);
+      edit.disabled = !ready;
+      if(!ready) hint.textContent='シートを選択すると名前を変更できます';
     }
   }
 
   function wireSheetRenameEvents(){
-    const edit=$('sheet-rename-edit'), cancel=$('sheet-rename-cancel'), ok=$('sheet-rename-ok'), input=$('sheet-rename-input');
+    const edit=document.getElementById('sheet-rename-edit'), cancel=document.getElementById('sheet-rename-cancel'), ok=document.getElementById('sheet-rename-ok'), input=document.getElementById('sheet-rename-input');
     if(!edit||!cancel||!ok||!input) return;
     edit.onclick = ()=>updateSheetRenameView('edit');
     cancel.onclick = ()=>updateSheetRenameView('view');
@@ -98,9 +111,15 @@
   }
 
   async function applySheetRename(){
-    const input = $('sheet-rename-input'); const hint=$('sheet-rename-hint');
-    const spin = $('sheet-rename-spin'); const ok=$('sheet-rename-ok'); const cancel=$('sheet-rename-cancel');
-    const label = $('sheet-rename-label');
+    const input = document.getElementById('sheet-rename-input'); const hint=document.getElementById('sheet-rename-hint');
+    const spin = document.getElementById('sheet-rename-spin'); const ok=document.getElementById('sheet-rename-ok'); const cancel=document.getElementById('sheet-rename-cancel');
+    const label = document.getElementById('sheet-rename-label');
+    const sel = findSheetSelect();
+
+    if(!window.currentSpreadsheetId || window.currentSheetId==null){
+      hint.textContent = '先にシートを選択してください';
+      return;
+    }
 
     let newTitle = (input.value||'').trim();
     const sheets = currentSheets();
@@ -115,7 +134,7 @@
     if(label) label.textContent = newTitle;
     updateSheetRenameView('view');
     try{
-      const opt = (document.querySelector(`#sheet-select option[value="${currentId}"]`) || document.querySelector(`#save-target-sheet option[value="${currentId}"]`));
+      const opt = sel && sel.querySelector(`option[value="${currentId}"]`);
       if(opt) opt.textContent = newTitle;
     }catch(_){}
 
@@ -128,14 +147,16 @@
       if (Array.isArray(window.allSheets)){
         window.allSheets = window.allSheets.map(s => (s.sheetId===currentId ? Object.assign({}, s, {title:newTitle}) : s));
       }
+      log('rename success', newTitle);
     }catch(e){
       if(label) label.textContent = before;
       try{
-        const opt = (document.querySelector(`#sheet-select option[value="${currentId}"]`) || document.querySelector(`#save-target-sheet option[value="${currentId}"]`));
+        const opt = sel && sel.querySelector(`option[value="${currentId}"]`);
         if(opt) opt.textContent = before;
       }catch(_){}
       window.currentSheetTitle = before;
-      $('sheet-rename-hint').textContent = (e && e.message) ? String(e.message) : 'シート名の変更に失敗しました';
+      hint.textContent = (e && e.message) ? String(e.message) : 'シート名の変更に失敗しました';
+      log('rename failed', e);
     }finally{
       input.disabled=false; ok.disabled=cancel.disabled=false; spin.style.display='none';
     }
@@ -152,16 +173,21 @@
     }
   }
 
-  function tryMount(times=20){
-    if (document.readyState === 'complete' || document.readyState === 'interactive'){
-      const sel = document.getElementById('sheet-select') || document.getElementById('save-target-sheet');
-      if(sel && (window.currentSheetId!=null)){
-        mountSheetRenameUI(); return;
-      }
-    }
-    if(times>0) setTimeout(()=>tryMount(times-1), 100);
+  function autoMount(){
+    let mounted = mountSheetRenameUI();
+    if (mounted) return;
+    const obs = new MutationObserver(()=>{
+      const ok = mountSheetRenameUI();
+      if (ok) { obs.disconnect(); }
+    });
+    obs.observe(document.documentElement || document.body, { childList:true, subtree:true });
+    let tries = 30;
+    const timer = setInterval(()=>{
+      if (mountSheetRenameUI()) { clearInterval(timer); }
+      if (--tries<=0) clearInterval(timer);
+    }, 200);
   }
-  tryMount();
 
+  autoMount();
   window.mountSheetRenameUI = mountSheetRenameUI;
 })();
