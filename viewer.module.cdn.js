@@ -1,4 +1,166 @@
 // viewer.module.cdn.js — Three.js viewer with pins & picking/filters
+
+// ===== Materials API (WIP) =====
+const __matList = []; // {index, name, material, key}
+const __origMat = new WeakMap(); // Mesh -> snapshot
+let __glbId = null;
+
+export function setCurrentGlbId(glbId){
+  __glbId = glbId || null;
+}
+
+// traverse scene and build unique material list
+function __rebuildMaterialList(){
+  __matList.length = 0;
+  if(!scene) return;
+  const matSet = new Map(); // key -> record
+  let idx = 0;
+  scene.traverse(obj => {
+    if(obj.isMesh){
+      const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+      for (const mat of mats){
+        if(!mat) continue;
+        const key = `${__glbId||'glb'}::${idx}::${mat.name||''}`;
+        if(!matSet.has(mat)){
+          const rec = { index: idx, name: mat.name||`#${idx}`, material: mat, key };
+          matSet.set(mat, rec);
+          __matList.push(rec);
+          idx++;
+        }
+      }
+    }
+  });
+}
+
+export function listMaterials(){
+  __rebuildMaterialList();
+  return __matList.map(({index,name,key})=>({index,name,materialKey:key}));
+}
+
+function __snapshotIfNeeded(mesh){
+  if(!__origMat.has(mesh)){
+    __origMat.set(mesh, {
+      material: mesh.material,
+      onBeforeCompile: mesh.material?.onBeforeCompile,
+      transparent: mesh.material?.transparent,
+      side: mesh.material?.side,
+      alphaTest: mesh.material?.alphaTest
+    });
+  }
+}
+
+function __hookMaterial(mat){
+  if (!mat || mat.__lmHooked) return;
+  mat.__lmHooked = true;
+  mat.userData.__lmUniforms = {
+    uWhiteThr: { value: 0.92 },
+    uBlackThr: { value: 0.08 },
+    uWhiteToAlpha: { value: false },
+    uBlackToAlpha: { value: false },
+    uUnlit: { value: false },
+  };
+  const u = mat.userData.__lmUniforms;
+  mat.onBeforeCompile = (shader)=>{
+    shader.uniforms = { ...shader.uniforms, ...u };
+    // Inject at alpha computation
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <dithering_fragment>', `
+        // LociMyu material hook
+        vec3 lmColor = diffuseColor.rgb;
+        float lmLuma = dot(lmColor, vec3(0.299, 0.587, 0.114));
+        if (uWhiteToAlpha && lmLuma >= uWhiteThr) diffuseColor.a = 0.0;
+        if (uBlackToAlpha && lmLuma <= uBlackThr) diffuseColor.a = 0.0;
+        #include <dithering_fragment>
+      `)
+      .replace('#include <lights_fragment_begin>', `
+        // Unlit toggle
+        if (!uUnlit) {
+          #include <lights_fragment_begin>
+        }
+      `);
+  };
+  mat.needsUpdate = true;
+}
+
+function __allMeshes(){
+  const arr=[]; if(!scene) return arr;
+  scene.traverse(o=>{ if(o.isMesh) arr.push(o); });
+  return arr;
+}
+
+function __materialsByKey(materialKey){
+  // match by key prefix without index part to avoid instability if needed
+  // here we match full key
+  const out=[];
+  for(const {material, key} of __matList){
+    if(key === materialKey) out.push(material);
+  }
+  return out;
+}
+
+export function applyMaterialProps(materialKey, props={}){
+  __rebuildMaterialList();
+  const mats = __materialsByKey(materialKey);
+  for(const mat of mats){
+    __hookMaterial(mat);
+    if('unlit' in props){
+      mat.userData.__lmUniforms.uUnlit.value = !!props.unlit;
+    }
+    if('opacity' in props){
+      const v = Math.max(0, Math.min(1, Number(props.opacity)));
+      mat.opacity = v;
+      mat.transparent = v < 1 || mat.userData.__lmUniforms.uWhiteToAlpha.value || mat.userData.__lmUniforms.uBlackToAlpha.value;
+      mat.alphaTest = (v < 1 ? 0.003 : 0.0);
+      mat.needsUpdate = true;
+    }
+    if('doubleSide' in props){
+      mat.side = props.doubleSide ? THREE.DoubleSide : THREE.FrontSide;
+      mat.needsUpdate = true;
+    }
+    if('whiteToTransparent' in props){
+      mat.userData.__lmUniforms.uWhiteToAlpha.value = !!props.whiteToTransparent;
+      mat.transparent = mat.transparent || !!props.whiteToTransparent;
+      mat.needsUpdate = true;
+    }
+    if('whiteThreshold' in props){
+      mat.userData.__lmUniforms.uWhiteThr.value = Number(props.whiteThreshold);
+    }
+    if('blackToTransparent' in props){
+      mat.userData.__lmUniforms.uBlackToAlpha.value = !!props.blackToTransparent;
+      mat.transparent = mat.transparent || !!props.blackToTransparent;
+      mat.needsUpdate = true;
+    }
+    if('blackThreshold' in props){
+      mat.userData.__lmUniforms.uBlackThr.value = Number(props.blackThreshold);
+    }
+  }
+}
+
+export function resetMaterial(materialKey){
+  __rebuildMaterialList();
+  const mats = __materialsByKey(materialKey);
+  for(const mat of mats){
+    if(!mat) continue;
+    // remove hook flags
+    if(mat.userData && mat.userData.__lmUniforms){
+      delete mat.userData.__lmUniforms;
+    }
+    mat.__lmHooked = false;
+    mat.onBeforeCompile = null;
+    mat.transparent = false;
+    mat.alphaTest = 0.0;
+    mat.side = THREE.FrontSide;
+    mat.needsUpdate = true;
+  }
+}
+
+export function resetAllMaterials(){
+  __rebuildMaterialList();
+  for(const rec of __matList){
+    resetMaterial(rec.key);
+  }
+}
+
 import * as THREE from 'https://unpkg.com/three@0.159.0/build/three.module.js';
 import { OrbitControls } from 'https://unpkg.com/three@0.159.0/examples/jsm/controls/OrbitControls.js';
 import { GLTFLoader } from 'https://unpkg.com/three@0.159.0/examples/jsm/loaders/GLTFLoader.js';
