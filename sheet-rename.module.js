@@ -4,19 +4,22 @@
   const $ = (id) => document.getElementById(id);
 
   function findSheetSelectWrapper(){
-    let host = $('sheet-select-wrapper');
+    // Try known wrapper ids
+    let host = $('sheet-select-wrapper') || $('save-target-sheet-wrapper');
     if (host) return host;
-    const sel = document.getElementById('sheet-select');
+    // Find select element (support both ids)
+    const sel = document.getElementById('sheet-select') || document.getElementById('save-target-sheet');
     if (!sel) return null;
+    // Create wrapper next to the select we found
     host = document.createElement('div');
-    host.id = 'sheet-select-wrapper';
+    host.id = (sel.id === 'save-target-sheet') ? 'save-target-sheet-wrapper' : 'sheet-select-wrapper';
     sel.parentNode.insertBefore(host, sel);
     host.appendChild(sel);
     return host;
   }
 
   function listSheetsFromDOM(){
-    const sel = document.getElementById('sheet-select');
+    const sel = document.getElementById('sheet-select') || document.getElementById('save-target-sheet');
     const out = [];
     if (sel) {
       Array.from(sel.options).forEach(opt=>{
@@ -112,7 +115,7 @@
     if(label) label.textContent = newTitle;
     updateSheetRenameView('view');
     try{
-      const opt = document.querySelector(`#sheet-select option[value="${currentId}"]`);
+      const opt = (document.querySelector(`#sheet-select option[value="${currentId}"]`) || document.querySelector(`#save-target-sheet option[value="${currentId}"]`));
       if(opt) opt.textContent = newTitle;
     }catch(_){}
 
@@ -128,7 +131,7 @@
     }catch(e){
       if(label) label.textContent = before;
       try{
-        const opt = document.querySelector(`#sheet-select option[value="${currentId}"]`);
+        const opt = (document.querySelector(`#sheet-select option[value="${currentId}"]`) || document.querySelector(`#save-target-sheet option[value="${currentId}"]`));
         if(opt) opt.textContent = before;
       }catch(_){}
       window.currentSheetTitle = before;
@@ -151,7 +154,7 @@
 
   function tryMount(times=20){
     if (document.readyState === 'complete' || document.readyState === 'interactive'){
-      const sel = document.getElementById('sheet-select');
+      const sel = document.getElementById('sheet-select') || document.getElementById('save-target-sheet');
       if(sel && (window.currentSheetId!=null)){
         mountSheetRenameUI(); return;
       }
