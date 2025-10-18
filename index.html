@@ -154,14 +154,7 @@
     </aside>
   </div>
 
-  <script>
-    const tabs = document.querySelectorAll('[role="tab"]');
-    const panes = document.querySelectorAll('.pane');
-    tabs.forEach(t => t.addEventListener('click', () => {
-      tabs.forEach(x => x.setAttribute('aria-selected', String(x===t)));
-      panes.forEach(p => p.dataset.active = String(p.dataset.pane===t.dataset.tab));
-    }));
-  </script>
+  
 
   <script type="importmap">
   {
