@@ -1,8 +1,31 @@
 
-/*! sheet-rename.module.js — robust token flow + minimal UI */
+/*! sheet-rename.module.js — adds spreadsheetId sniffer + robust token flow */
 (function(){
   const DEBUG = /\bdebug=1\b/.test(location.search) || window.SHEET_RENAME_DEBUG;
   const log = (...a)=>{ if(DEBUG) console.log('[renameUI]', ...a); };
+
+  // --- Sniff spreadsheetId from Sheets API calls (no boot change needed) ---
+  (function installSpreadsheetIdSniffer(){
+    if (window.__LM_FETCH_SNIFFER_INSTALLED__) return;
+    const orig = window.fetch;
+    if (typeof orig !== 'function') return;
+    window.fetch = function(input, init){
+      try{
+        let url = null;
+        if (typeof input === 'string') url = input;
+        else if (input && typeof input.url === 'string') url = input.url;
+        if (url && url.indexOf('https://sheets.googleapis.com/v4/spreadsheets/') === 0){
+          const m = url.match(/spreadsheets\/([^:\/?]+)/);
+          if (m && m[1]){
+            const sid = decodeURIComponent(m[1]);
+            if (sid) { window.currentSpreadsheetId = sid; if (DEBUG) console.log('[renameUI] sniffed spreadsheetId', sid); }
+          }
+        }
+      }catch(_){}
+      return orig.apply(this, arguments);
+    };
+    window.__LM_FETCH_SNIFFER_INSTALLED__ = true;
+  })();
 
   function $(id){ return document.getElementById(id); }
   function findSheetSelect(){ return $('save-target-sheet') || $('sheet-select') || null; }
@@ -105,11 +128,21 @@
     }
     if (!token){ log('rename failed','no token'); label.textContent=before; if(opt) opt.textContent=before; return; }
 
+    // spreadsheet id may be sniffed late; brief wait if still missing
+    if (!window.currentSpreadsheetId){
+      for (let t=0;t<5 && !window.currentSpreadsheetId;t++){
+        await new Promise(r=>setTimeout(r,60));
+      }
+    }
+    if (!window.currentSpreadsheetId){
+      log('rename failed', new Error('spreadsheetId missing'));
+      label.textContent=before; if(opt) opt.textContent=before; return;
+    }
+
     // call API
     try{
       input.disabled=ok.disabled=cancel.disabled=true; spin.style.display='inline-block';
       const spreadsheetId = window.currentSpreadsheetId;
-      if(!spreadsheetId) throw new Error('spreadsheetId missing');
       await updateTitle(spreadsheetId, window.currentSheetId, newTitle, token);
       window.currentSheetTitle = newTitle;
       log('rename success', newTitle);
