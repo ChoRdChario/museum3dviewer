@@ -1,31 +1,23 @@
 
-/*! sheet-rename.module.js — robust inline rename UI (auto-detect, delayed mount)
-    - Finds the sheet <select> (id=save-target-sheet or sheet-select, or fallback in Caption pane)
-    - Mounts a small row just under the select: [✎] <label> [input][✓][×]
-    - Label/✎ click => edit mode. Enter/✓ => apply, Esc/× => cancel.
-    - Keeps window.currentSheetId/currentSheetTitle in sync with <select>.
-*/
+/*! sheet-rename.module.js — inline rename UI (robust, no hint text, resilient select sync) */
 (function(){
   const DEBUG = /\bdebug=1\b/.test(location.search) || window.SHEET_RENAME_DEBUG;
   const log = (...a)=>{ if(DEBUG) console.log('[renameUI]', ...a); };
 
-  // --- DOM helpers ---
+  // ---- helpers ----
   function findSheetSelect(){
-    // Known ids first
-    let sel = document.getElementById('sheet-select') || document.getElementById('save-target-sheet');
+    let sel = document.getElementById('save-target-sheet') || document.getElementById('sheet-select');
     if (sel) return sel;
-    // Caption pane / right panel
-    sel = document.querySelector('#pane-caption select, #tab-caption ~ * select, .right-panel select');
+    sel = document.querySelector('#tab-captions select, #captions select, .right-panel select');
     if (sel) return sel;
-    // Fallback: first single-select
-    sel = Array.from(document.querySelectorAll('select')).find(s => !s.multiple && s.options);
+    sel = Array.from(document.querySelectorAll('select')).find(s=>!s.multiple && s.options);
     return sel || null;
   }
   function ensureWrapperForSelect(sel){
-    let host = document.getElementById('sheet-select-wrapper') || document.getElementById('save-target-sheet-wrapper');
+    let host = document.getElementById('save-target-sheet-wrapper') || document.getElementById('sheet-select-wrapper');
     if (host) return host;
     host = document.createElement('div');
-    host.id = (sel.id === 'save-target-sheet') ? 'save-target-sheet-wrapper' : 'sheet-select-wrapper';
+    host.id = (sel.id==='save-target-sheet') ? 'save-target-sheet-wrapper' : 'sheet-select-wrapper';
     sel.parentNode.insertBefore(host, sel);
     host.appendChild(sel);
     return host;
@@ -33,19 +25,19 @@
   function listSheetsFromDOM(sel){
     const out = [];
     if (!sel) return out;
-    Array.from(sel.options || []).forEach(opt=>{
+    Array.from(sel.options||[]).forEach(opt=>{
       const id = opt.value ? Number(opt.value) : null;
       out.push({ sheetId:id, title:(opt.textContent||'').trim() });
     });
     return out;
   }
 
-  // --- UI mount ---
+  // ---- mount ----
   function mountSheetRenameUI(){
     const sel = findSheetSelect();
-    if (!sel){ log('no select yet'); return false; }
+    if(!sel){ return false; }
     const anchor = ensureWrapperForSelect(sel);
-    if (!anchor){ log('no anchor'); return false; }
+    if(!anchor){ return false; }
 
     let root = document.getElementById('sheet-rename');
     if (!root){
@@ -66,12 +58,12 @@
       wireSheetRenameEvents();
     }
     updateSheetRenameView('view');
-    wireSelectChange();
+    wireSelectChange();     // initial sync + listeners
     log('UI mounted');
     return true;
   }
 
-  // --- State helpers ---
+  // ---- state ----
   function currentSheets(){
     const sel = findSheetSelect();
     const dom = listSheetsFromDOM(sel);
@@ -80,7 +72,7 @@
     return [];
   }
 
-  // Keep globals & label synced with <select>; also sets title tooltip for full view
+  // keep globals in sync with <select>
   function wireSelectChange(){
     const sel = findSheetSelect();
     if (!sel) return;
@@ -90,19 +82,22 @@
       const id = (opt && opt.value) ? Number(opt.value) : null;
       if (id != null) window.currentSheetId = id;
       if (title) window.currentSheetTitle = title;
-      sel.title = title;
+      sel.title = title; // tooltip full text
       const label = document.getElementById('sheet-rename-label');
-      const edit = document.getElementById('sheet-rename-edit');
+      const edit  = document.getElementById('sheet-rename-edit');
       if (label) label.textContent = title || '(no sheet)';
-      if (edit)  edit.disabled = !(window.currentSpreadsheetId && window.currentSheetId!=null);
+      if (edit)  edit.disabled = !(window.currentSheetId!=null); // ここを緩める（sheetIdだけでOK）
     };
-    // Initial sync + listener
+    // 初期同期
     syncFromSelect();
-    sel.removeEventListener('change', syncFromSelect);
+    // changeイベント（ユーザー操作）
     sel.addEventListener('change', syncFromSelect, { passive:true });
+    // option増減（プログラム更新）を拾う
+    const mo = new MutationObserver(syncFromSelect);
+    mo.observe(sel, { childList:true, subtree:true });
   }
 
-  // --- View switching ---
+  // ---- view ----
   function updateSheetRenameView(mode){
     const label = document.getElementById('sheet-rename-label');
     const input = document.getElementById('sheet-rename-input');
@@ -111,39 +106,39 @@
     const edit = document.getElementById('sheet-rename-edit');
     const spin = document.getElementById('sheet-rename-spin');
     const hint = document.getElementById('sheet-rename-hint');
-    if (!label || !input || !ok || !cancel || !edit || !spin || !hint) return;
+    if(!label||!input||!ok||!cancel||!edit||!spin||!hint) return;
 
     const title = (window.currentSheetTitle||'').trim();
     if (mode === 'edit'){
       label.style.display='none';
       input.style.display='inline-block';
-      ok.style.display = cancel.style.display = 'inline-block';
+      ok.style.display=cancel.style.display='inline-block';
       edit.style.display='none';
       spin.style.display='none';
-      hint.textContent='';
+      hint.textContent=''; // ヒントは表示しない方針
       input.value = title;
-      setTimeout(()=>{ input.focus(); input.select(); }, 0);
+      setTimeout(()=>{ input.focus(); input.select(); },0);
     } else {
       label.textContent = title || '(no sheet)';
       label.style.display='inline';
       input.style.display='none';
-      ok.style.display = cancel.style.display = 'none';
+      ok.style.display=cancel.style.display='none';
       edit.style.display='inline-block';
       spin.style.display='none';
-      const ready = !!(window.currentSpreadsheetId && window.currentSheetId!=null);
-      edit.disabled = !ready;
-      if (!ready) hint.textContent='シートを選択すると名前を変更できます';
+      // ✎ボタンの活性条件は sheetId のみ
+      edit.disabled = !(window.currentSheetId!=null);
+      hint.textContent=''; // 常に空にしてスペース節約
     }
   }
 
-  // --- Wire events ---
+  // ---- events ----
   function wireSheetRenameEvents(){
     const edit   = document.getElementById('sheet-rename-edit');
     const cancel = document.getElementById('sheet-rename-cancel');
     const ok     = document.getElementById('sheet-rename-ok');
     const input  = document.getElementById('sheet-rename-input');
     const label  = document.getElementById('sheet-rename-label');
-    if (!edit || !cancel || !ok || !input || !label) return;
+    if(!edit||!cancel||!ok||!input||!label) return;
 
     edit.onclick = ()=> updateSheetRenameView('edit');
     label.onclick = ()=> updateSheetRenameView('edit');
@@ -151,23 +146,27 @@
     cancel.onclick = ()=> updateSheetRenameView('view');
     ok.onclick = applySheetRename;
     input.onkeydown = (e)=>{
-      if (e.key === 'Enter') applySheetRename();
-      else if (e.key === 'Escape') updateSheetRenameView('view');
+      if(e.key==='Enter'){ applySheetRename(); }
+      else if(e.key==='Escape'){ updateSheetRenameView('view'); }
     };
   }
 
-  // --- Apply rename ---
+  // ---- apply ----
   async function applySheetRename(){
-    const input = document.getElementById('sheet-rename-input');
-    const hint  = document.getElementById('sheet-rename-hint');
-    const spin  = document.getElementById('sheet-rename-spin');
-    const ok    = document.getElementById('sheet-rename-ok');
-    const cancel= document.getElementById('sheet-rename-cancel');
-    const label = document.getElementById('sheet-rename-label');
-    const sel   = findSheetSelect();
-    if (!window.currentSpreadsheetId || window.currentSheetId==null){
-      hint.textContent = '先にシートを選択してください';
-      return;
+    const input  = document.getElementById('sheet-rename-input');
+    const hint   = document.getElementById('sheet-rename-hint');
+    const spin   = document.getElementById('sheet-rename-spin');
+    const ok     = document.getElementById('sheet-rename-ok');
+    const cancel = document.getElementById('sheet-rename-cancel');
+    const label  = document.getElementById('sheet-rename-label');
+    const sel    = findSheetSelect();
+
+    // 最小限の前提：sheetId があればOK。spreadsheetId が欠けていても select のデータから同期を再試行。
+    if (window.currentSheetId==null){
+      wireSelectChange();
+      if (window.currentSheetId==null){
+        return; // 無言で抜ける（UIスペース節約のためメッセージは出さない）
+      }
     }
 
     const before = window.currentSheetTitle||'';
@@ -175,50 +174,51 @@
     const sheets = currentSheets();
     const currentId = window.currentSheetId;
 
-    if (!newTitle){ hint.textContent='空の名前は使えません'; return; }
-    if (newTitle === before){ updateSheetRenameView('view'); wireSelectChange(); return; }
-    if (newTitle.length > 100){ hint.textContent='100文字以内で指定してください'; return; }
-    if (sheets.some(s => (s.title||'') === newTitle)){ hint.textContent='同名のシートが既にあります'; return; }
+    if(!newTitle){ return; } // 空は確定しない（無言で戻る）
+    if(newTitle===before){ updateSheetRenameView('view'); wireSelectChange(); return; }
+    if(newTitle.length>100){ return; }
+    if(sheets.some(s => (s.title||'') === newTitle)){ return; }
 
-    // Optimistic update
-    if (label) label.textContent = newTitle;
+    // 楽観更新
+    if(label) label.textContent = newTitle;
     try{
       const opt = sel && sel.querySelector(`option[value="${currentId}"]`);
-      if (opt) opt.textContent = newTitle;
+      if(opt) opt.textContent = newTitle;
     }catch(_){}
     updateSheetRenameView('view');
     wireSelectChange();
 
     try{
-      input.disabled = ok.disabled = cancel.disabled = true;
+      input.disabled=ok.disabled=cancel.disabled=true;
       spin.style.display='inline-block';
       const token = (typeof ensureToken==='function') ? ensureToken()
-                   : (typeof getAccessToken==='function' ? getAccessToken() : null);
+                 : (typeof getAccessToken==='function' ? getAccessToken() : null);
       if(!token) throw new Error('auth token not available');
-      await sheetsUpdateTitle(window.currentSpreadsheetId, currentId, newTitle, token);
+      const spreadsheetId = window.currentSpreadsheetId;
+      if(!spreadsheetId) throw new Error('spreadsheetId missing');
+      await sheetsUpdateTitle(spreadsheetId, currentId, newTitle, token);
       window.currentSheetTitle = newTitle;
       if (Array.isArray(window.allSheets)){
-        window.allSheets = window.allSheets.map(s => (s.sheetId===currentId ? Object.assign({}, s, { title:newTitle }) : s));
+        window.allSheets = window.allSheets.map(s => (s.sheetId===currentId ? Object.assign({}, s, {title:newTitle}) : s));
       }
       log('rename success', newTitle);
     }catch(e){
       // rollback
-      if (label) label.textContent = before;
+      if(label) label.textContent = before;
       try{
         const opt = sel && sel.querySelector(`option[value="${currentId}"]`);
-        if (opt) opt.textContent = before;
+        if(opt) opt.textContent = before;
       }catch(_){}
       window.currentSheetTitle = before;
-      hint.textContent = (e && e.message) ? String(e.message) : 'シート名の変更に失敗しました';
+      // メッセージは出さない（UIを狭く保つ）。デバッグ時のみログ。
       log('rename failed', e);
     }finally{
-      input.disabled = ok.disabled = cancel.disabled = false;
+      input.disabled=ok.disabled=cancel.disabled=false;
       spin.style.display='none';
     }
   }
 
   async function sheetsUpdateTitle(spreadsheetId, sheetId, newTitle, token){
-    if(!spreadsheetId || !sheetId) throw new Error('missing spreadsheetId/sheetId');
     const url = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}:batchUpdate`;
     const body = { requests: [ { updateSheetProperties: { properties: { sheetId: Number(sheetId), title: newTitle }, fields: 'title' } } ] };
     const res = await fetch(url, { method:'POST', headers:{ 'Authorization':'Bearer '+token, 'Content-Type':'application/json' }, body: JSON.stringify(body) });
@@ -228,15 +228,13 @@
     }
   }
 
-  // --- Auto mount ---
-  function autoMount(){
+  // auto mount + re-try
+  (function autoMount(){
     if (mountSheetRenameUI()) return;
     const mo = new MutationObserver(()=>{ if (mountSheetRenameUI()) mo.disconnect(); });
     mo.observe(document.documentElement || document.body, { childList:true, subtree:true });
-    let tries = 30;
-    const timer = setInterval(()=>{ if (mountSheetRenameUI() || --tries<=0) clearInterval(timer); }, 200);
-  }
+    let tries=30; const timer=setInterval(()=>{ if(mountSheetRenameUI()||--tries<=0) clearInterval(timer); },200);
+  })();
 
-  autoMount();
-  window.mountSheetRenameUI = mountSheetRenameUI; // manual hook
+  window.mountSheetRenameUI = mountSheetRenameUI;
 })();

@@ -1,38 +1,4 @@
 
-/* app.sheet-rename.css - minimal styles for robust inline sheet rename (A-plan) */
-#sheet-rename { margin-top:8px; }
-#sheet-rename .sheet-rename-row{ display:flex; align-items:center; gap:8px; font-size:12px; }
-#sheet-rename .sr-label{ max-width:180px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-#sheet-rename .sr-input{
-  display:none; width:180px; padding:6px 8px; border-radius:8px;
-  border:1px solid var(--border); background:var(--panel); color:var(--text);
-}
-#sheet-rename .sr-btn{ border:1px solid var(--border); background:var(--panel); color:var(--muted); padding:4px 6px; border-radius:8px; cursor:pointer; }
-#sheet-rename .sr-btn:hover{ filter:brightness(1.05); }
-#sheet-rename .sr-ok{ color:var(--text); }
-#sheet-rename .sr-hint{ color:var(--muted); font-size:11px; margin-left:auto; min-height:12px; }
-#sheet-rename .sr-spin{
-  width:14px; height:14px; border-radius:50%;
-  border:2px solid var(--border); border-top-color:var(--text);
-  display:none; animation: sheetrn_spin .8s linear infinite;
-}
-#sheet-rename .sr-edit:disabled{ opacity:.5; cursor:not-allowed; }
-@keyframes sheetrn_spin { to { transform: rotate(360deg); } }
-
-
-/* Constrain sheet dropdown width; show full text only when opened (native behavior) */
-#sheet-select-wrapper, #save-target-sheet-wrapper{
-  width: 240px; /* adjust as needed */
-  max-width: 100%;
-  display: inline-block;
-  vertical-align: middle;
-}
-#sheet-select, #save-target-sheet{
-  width: 100%;
-  max-width: 100%;
-}
-
-
-/* Keep sheet dropdown width fixed; show full label on hover via title attribute */
+/* Keep sheet dropdown width fixed */
 #sheet-select-wrapper, #save-target-sheet-wrapper{ width:240px; max-width:100%; display:inline-block; vertical-align:middle; }
 #sheet-select, #save-target-sheet{ width:100%; max-width:100%; }
