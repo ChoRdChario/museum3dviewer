@@ -18,3 +18,16 @@
 }
 #sheet-rename .sr-edit:disabled{ opacity:.5; cursor:not-allowed; }
 @keyframes sheetrn_spin { to { transform: rotate(360deg); } }
+
+
+/* Constrain sheet dropdown width; show full text only when opened (native behavior) */
+#sheet-select-wrapper, #save-target-sheet-wrapper{
+  width: 240px; /* adjust as needed */
+  max-width: 100%;
+  display: inline-block;
+  vertical-align: middle;
+}
+#sheet-select, #save-target-sheet{
+  width: 100%;
+  max-width: 100%;
+}

@@ -58,6 +58,7 @@
       wireSheetRenameEvents();
     }
     updateSheetRenameView('view');
+    wireSelectChange();
     log('mounted UI');
     return true;
   }
@@ -102,11 +103,16 @@
     const edit=document.getElementById('sheet-rename-edit'), cancel=document.getElementById('sheet-rename-cancel'), ok=document.getElementById('sheet-rename-ok'), input=document.getElementById('sheet-rename-input');
     if(!edit||!cancel||!ok||!input) return;
     edit.onclick = ()=>updateSheetRenameView('edit');
+    const labelEl = document.getElementById('sheet-rename-label');
+    if(labelEl){ labelEl.onclick = ()=>updateSheetRenameView('edit'); labelEl.ondblclick = ()=>updateSheetRenameView('edit'); }
+
     cancel.onclick = ()=>updateSheetRenameView('view');
+    wireSelectChange();
     ok.onclick = applySheetRename;
     input.onkeydown = (e)=>{
       if(e.key==='Enter'){ applySheetRename(); }
-      else if(e.key==='Escape'){ updateSheetRenameView('view'); }
+      else if(e.key==='Escape'){ updateSheetRenameView('view');
+    wireSelectChange(); }
     };
   }
 
@@ -127,12 +133,14 @@
     const before = window.currentSheetTitle||'';
 
     if(!newTitle){ hint.textContent='空の名前は使えません'; return; }
-    if(newTitle===before){ updateSheetRenameView('view'); return; }
+    if(newTitle===before){ updateSheetRenameView('view');
+    wireSelectChange(); return; }
     if(newTitle.length>100){ hint.textContent='100文字以内で指定してください'; return; }
     if(sheets.some(s => (s.title||'') === newTitle)){ hint.textContent='同名のシートが既にあります'; return; }
 
     if(label) label.textContent = newTitle;
     updateSheetRenameView('view');
+    wireSelectChange();
     try{
       const opt = sel && sel.querySelector(`option[value="${currentId}"]`);
       if(opt) opt.textContent = newTitle;
@@ -175,6 +183,7 @@
 
   function autoMount(){
     let mounted = mountSheetRenameUI();
+    wireSelectChange();
     if (mounted) return;
     const obs = new MutationObserver(()=>{
       const ok = mountSheetRenameUI();
@@ -191,3 +200,32 @@
   autoMount();
   window.mountSheetRenameUI = mountSheetRenameUI;
 })();
+
+  function wireSelectChange(){
+    const sel = findSheetSelect && findSheetSelect();
+    if(!sel) return;
+    // Set initial tooltip and sync globals if available
+    try {
+      const opt = sel.selectedOptions && sel.selectedOptions[0];
+      if (opt) {
+        sel.title = (opt.textContent||'').trim();
+        if (window.currentSheetId == null) window.currentSheetId = Number(opt.value);
+        if (!window.currentSheetTitle) window.currentSheetTitle = sel.title;
+      }
+    }catch(_){}
+    sel.addEventListener('change', ()=>{
+      const opt = sel.selectedOptions && sel.selectedOptions[0];
+      const title = (opt && opt.textContent) ? opt.textContent.trim() : '';
+      const id = (opt && opt.value) ? Number(opt.value) : null;
+      window.currentSheetId = id;
+      window.currentSheetTitle = title;
+      sel.title = title;
+      // Reflect to inline label if exists
+      try{
+        const label = document.getElementById('sheet-rename-label');
+        if(label) label.textContent = title || '(no sheet)';
+        const edit = document.getElementById('sheet-rename-edit');
+        if (edit) edit.disabled = !(window.currentSpreadsheetId && window.currentSheetId!=null);
+      }catch(_){}
+    }, { passive:true });
+  }
