@@ -108,41 +108,46 @@
       </section>
 
       <section id="pane-material" class="pane" data-pane="material">
-        <div class="grp">
-          <label>Target
-            <select id="mat-target"></select>
-          </label>
-        </div>
-    
-        <div class="grp">
-          <label>White Threshold <input type="range" id="mat-white-thr" min="0.8" max="1" step="0.01" value="0.92"/></label>
-          <output id="mat-white-thr-val">0.92</output>
-        </div>
-    
-        <div class="grp">
-          <label><input type="checkbox" id="mat-black2alpha" /> Black → Alpha</label>
-        </div>
-        <div class="grp">
-          <label>Black Threshold <input type="range" id="mat-black-thr" min="0" max="0.2" step="0.01" value="0.08"/></label>
-          <output id="mat-black-thr-val">0.08</output>
-        </div>
-    
-        <div class="grp">
-          <button id="mat-reset-one">Reset (Selected)</button>
-          <button id="mat-reset-all">Reset All</button>
-        </div>
-    
-        <div class="grp">
-          <label><input type="checkbox" id="mat-unlit" /> Unlit</label>
-          <label><input type="checkbox" id="mat-doubleside" /> Double-sided</label>
-        </div>
-        <div class="grp">
-          <label>Opacity <input type="range" id="mat-opacity" min="0" max="1" step="0.01" value="1"/></label>
-        </div>
-        <div class="grp">
-          <label><input type="checkbox" id="mat-white2alpha" /> White → Alpha</label>
-        </div>
-      </section>
+<div class="grp">
+  <label>Target
+    <select id="mat-target"></select>
+  </label>
+</div>
+
+<div class="grp">
+  <div class="row">
+    <label><input type="checkbox" id="mat-unlit"> Unlit</label>
+    <label style="margin-left:12px"><input type="checkbox" id="mat-doubleside"> Double-sided</label>
+  </div>
+  <div class="row">
+    <label style="width:100%">Opacity
+      <input type="range" id="mat-opacity" min="0" max="1" step="0.01" value="1" style="width:100%">
+    </label>
+  </div>
+</div>
+
+<div class="grp">
+  <div class="row">
+    <label><input type="checkbox" id="mat-white2alpha"> White → Alpha</label>
+    <label style="margin-left:12px">White Threshold
+      <input type="range" id="mat-white-thr" min="0.8" max="1" step="0.01" value="0.92">
+      <output id="mat-white-thr-val">0.92</output>
+    </label>
+  </div>
+  <div class="row" style="margin-top:6px">
+    <label><input type="checkbox" id="mat-black2alpha"> Black → Alpha</</label>
+    <label style="margin-left:12px">Black Threshold
+      <input type="range" id="mat-black-thr" min="0" max="0.2" step="0.01" value="0.08">
+      <output id="mat-black-thr-val">0.08</output>
+    </label>
+  </div>
+</div>
+
+<div class="grp">
+  <button id="mat-reset-one">Reset (Selected)</button>
+  <button id="mat-reset-all">Reset All</button>
+</div>
+</section>
 
       <section id="pane-views" class="pane" data-pane="views">
         <div class="grp">
