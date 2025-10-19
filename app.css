@@ -164,3 +164,8 @@ body{
 #caption-list .caption-item .cap-thumb.ph-blank::after{
   content:none;
 }
+
+
+/* --- Tabs: only active pane is visible --- */
+.pane{ display:none; padding:12px; overflow:auto; }
+.pane[data-active="true"]{ display:block; }
