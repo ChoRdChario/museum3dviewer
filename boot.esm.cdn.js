@@ -962,3 +962,52 @@ onCanvasShiftPick(function(pos){
     document.addEventListener('DOMContentLoaded', initTabs, { once:true });
   } else { initTabs(); }
 })();
+
+
+
+// === Material Pane Mount Fix & Caption-only rows toggle ===
+(function(){
+  function ensureMaterialPaneMounted(){
+    const pane = document.getElementById('pane-material');
+    const aside = document.querySelector('aside#ui');
+    if (!pane || !aside) return;
+    if (!aside.contains(pane)) aside.appendChild(pane);
+    if (!pane.classList.contains('pane')) pane.classList.add('pane');
+  }
+  function toggleCaptionOnlyRows(activeName){
+    const isCaption = activeName === 'caption';
+    const ids = ['caption-image-row', 'images-status'];
+    ids.forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.style.display = isCaption ? '' : 'none';
+    });
+    const refreshBtn = Array.from(document.querySelectorAll('button, a')).find(b => /refresh images/i.test(b.textContent||''));
+    if (refreshBtn){
+      const row = refreshBtn.closest('.row') || refreshBtn.parentElement;
+      if (row) row.style.display = isCaption ? '' : 'none';
+    }
+  }
+  function setActivePaneByTab(tabEl){
+    const name = tabEl?.getAttribute('data-tab'); if(!name) return;
+    document.querySelectorAll('nav.tabs [role="tab"]').forEach(btn=>btn.setAttribute('aria-selected', String(btn===tabEl)));
+    document.querySelectorAll('.pane').forEach(p=>p.removeAttribute('data-active'));
+    const pane = document.querySelector(`#pane-${name}`);
+    if(pane) pane.setAttribute('data-active','true');
+    ensureMaterialPaneMounted();
+    toggleCaptionOnlyRows(name);
+  }
+  function wireTabsOnce(){
+    const nav = document.querySelector('nav.tabs'); if(!nav || nav.__lmWired) return;
+    nav.__lmWired = true;
+    nav.addEventListener('click', (ev)=>{
+      const btn = ev.target.closest('[role="tab"][data-tab]'); if(!btn) return;
+      ev.preventDefault(); setActivePaneByTab(btn);
+    }, { passive:false });
+    const initial = nav.querySelector('[role="tab"][aria-selected="true"]') || nav.querySelector('[role="tab"][data-tab="caption"]');
+    if (initial) setActivePaneByTab(initial); else ensureMaterialPaneMounted();
+  }
+  if(document.readyState === 'loading'){ document.addEventListener('DOMContentLoaded', wireTabsOnce, { once:true }); }
+  else { wireTabsOnce(); }
+  const mo = new MutationObserver(()=>ensureMaterialPaneMounted());
+  mo.observe(document.body, { childList:true, subtree:true });
+})();
