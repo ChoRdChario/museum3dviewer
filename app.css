@@ -176,17 +176,12 @@ body{
 .caption-bar--disabled { filter: grayscale(60%); }
 
 
-/* --- Caption image bar policy: hide when not on Caption tab --- */
-body:not([data-active-tab="caption"]) #caption-image-row,
-body:not([data-active-tab="caption"]) #images-status{
+/* --- Force-hide Caption pane when Caption tab is not active --- */
+/* Primary (robust): use :has() to check aria-selected state */
+:root:not(:has(nav.tabs [role="tab"][data-tab="caption"][aria-selected="true"])) #pane-caption{
   display: none !important;
 }
-
-/* To keep it visible but non-interactive instead, replace the block above with:
-body:not([data-active-tab="caption"]) #caption-image-row,
-body:not([data-active-tab="caption"]) #images-status{
-  pointer-events: none !important;
-  opacity: .4 !important;
-  filter: grayscale(60%);
+/* Fallback for older browsers: rely on body[data-active-tab] */
+body:not([data-active-tab="caption"]) #pane-caption{
+  display: none !important;
 }
-*/
