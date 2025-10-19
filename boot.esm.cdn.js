@@ -965,49 +965,73 @@ onCanvasShiftPick(function(pos){
 
 
 
-// === Material Pane Mount Fix & Caption-only rows toggle ===
+// === Active Tab state + caption-only bar control ===
 (function(){
-  function ensureMaterialPaneMounted(){
-    const pane = document.getElementById('pane-material');
-    const aside = document.querySelector('aside#ui');
-    if (!pane || !aside) return;
-    if (!aside.contains(pane)) aside.appendChild(pane);
-    if (!pane.classList.contains('pane')) pane.classList.add('pane');
+  function setBodyActiveTab(name){
+    try{ document.body.setAttribute('data-active-tab', String(name||'')); }catch(_){}
   }
-  function toggleCaptionOnlyRows(activeName){
-    const isCaption = activeName === 'caption';
+  function findCaptionBars(){
+    const list = [];
     const ids = ['caption-image-row', 'images-status'];
-    ids.forEach(id => {
-      const el = document.getElementById(id);
-      if (el) el.style.display = isCaption ? '' : 'none';
-    });
-    const refreshBtn = Array.from(document.querySelectorAll('button, a')).find(b => /refresh images/i.test(b.textContent||''));
-    if (refreshBtn){
-      const row = refreshBtn.closest('.row') || refreshBtn.parentElement;
-      if (row) row.style.display = isCaption ? '' : 'none';
+    ids.forEach(id => { const el = document.getElementById(id); if (el) list.push(el); });
+    // Also include a row that contains a "Refresh images" label/button
+    const ref = Array.from(document.querySelectorAll('.row, button, a')).find(n => /refresh images/i.test(n.textContent||''));
+    if (ref){
+      const row = ref.closest('.row') || ref.parentElement;
+      if (row) list.push(row);
     }
+    return Array.from(new Set(list));
   }
-  function setActivePaneByTab(tabEl){
-    const name = tabEl?.getAttribute('data-tab'); if(!name) return;
-    document.querySelectorAll('nav.tabs [role="tab"]').forEach(btn=>btn.setAttribute('aria-selected', String(btn===tabEl)));
-    document.querySelectorAll('.pane').forEach(p=>p.removeAttribute('data-active'));
-    const pane = document.querySelector(`#pane-${name}`);
-    if(pane) pane.setAttribute('data-active','true');
-    ensureMaterialPaneMounted();
-    toggleCaptionOnlyRows(name);
+  function applyCaptionBarPolicy(activeTab){
+    const bars = findCaptionBars();
+    const isCaption = activeTab === 'caption';
+    const mode = (window.UI_IMAGE_BAR_MODE || 'hide'); // 'hide' | 'disable'
+    bars.forEach(el => {
+      if (isCaption){
+        el.style.display = '';
+        el.style.pointerEvents = '';
+        el.style.opacity = '';
+        el.classList.remove('caption-bar--disabled');
+      } else {
+        if (mode === 'hide'){
+          el.style.display = 'none';
+        } else {
+          // disable but keep layout
+          el.style.display = '';
+          el.style.pointerEvents = 'none';
+          el.style.opacity = '0.4';
+          el.classList.add('caption-bar--disabled');
+        }
+      }
+    });
   }
-  function wireTabsOnce(){
-    const nav = document.querySelector('nav.tabs'); if(!nav || nav.__lmWired) return;
-    nav.__lmWired = true;
+
+  // Hook into existing tab wiring if present
+  const NAV_SEL = 'nav.tabs';
+  function wireActiveTab(){
+    const nav = document.querySelector(NAV_SEL);
+    if(!nav || nav.__lmActiveTabWired) return;
+    nav.__lmActiveTabWired = true;
     nav.addEventListener('click', (ev)=>{
-      const btn = ev.target.closest('[role="tab"][data-tab]'); if(!btn) return;
-      ev.preventDefault(); setActivePaneByTab(btn);
-    }, { passive:false });
-    const initial = nav.querySelector('[role="tab"][aria-selected="true"]') || nav.querySelector('[role="tab"][data-tab="caption"]');
-    if (initial) setActivePaneByTab(initial); else ensureMaterialPaneMounted();
+      const btn = ev.target.closest('[role="tab"][data-tab]');
+      if(!btn) return;
+      const name = btn.getAttribute('data-tab');
+      setBodyActiveTab(name);
+      applyCaptionBarPolicy(name);
+    }, { passive:true });
+
+    // initialize from current aria-selected tab
+    const current = nav.querySelector('[role="tab"][aria-selected="true"]') || nav.querySelector('[role="tab"][data-tab="caption"]');
+    const name = current ? current.getAttribute('data-tab') : 'caption';
+    setBodyActiveTab(name);
+    applyCaptionBarPolicy(name);
   }
-  if(document.readyState === 'loading'){ document.addEventListener('DOMContentLoaded', wireTabsOnce, { once:true }); }
-  else { wireTabsOnce(); }
-  const mo = new MutationObserver(()=>ensureMaterialPaneMounted());
+
+  if (document.readyState === 'loading'){
+    document.addEventListener('DOMContentLoaded', wireActiveTab, { once:true });
+  } else { wireActiveTab(); }
+
+  // Re-apply policy on DOM mutations (images list loads async)
+  const mo = new MutationObserver(()=>applyCaptionBarPolicy(document.body.getAttribute('data-active-tab')));
   mo.observe(document.body, { childList:true, subtree:true });
 })();

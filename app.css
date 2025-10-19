@@ -166,6 +166,11 @@ body{
 }
 
 
-/* --- Tabs: only active pane is visible --- */
+
+/* Only active pane is visible */
 .pane{ display:none; padding:12px; overflow:auto; }
 .pane[data-active="true"]{ display:block; }
+
+
+/* Caption image bar disabled look (when not on Caption tab and mode='disable') */
+.caption-bar--disabled { filter: grayscale(60%); }
