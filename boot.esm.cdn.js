@@ -1065,20 +1065,3 @@ onCanvasShiftPick(function(pos){
   mo.observe(document.body, { childList:true, subtree:true });
   window.relocateCaptionBar = relocateCaptionBar;
 })();
-
-// ---- helper: robust active sheetId(gid) detection ----
-function getActiveSheetId(){
-  const g = window;
-  const cand = [
-    g.currentSheetId, g.activeSheetId, g.sheetId, g.currentGid, g.currentSheetGid
-  ].find(v => (typeof v === 'number' && isFinite(v)) || (typeof v === 'string' && /^\d+$/.test(v)));
-  if(cand!=null){
-      return Number(cand);
-  try{
-    const sel = document.querySelector('nav select, #sheet-select, select[name="sheet"], select[data-role="sheet"]');
-    if(sel && sel.value && /^\d+$/.test(sel.value)) return Number(sel.value);
-    const any = document.querySelector('select option:checked');
-    if(any && /^\d+$/.test(any.value)) return Number(any.value);
-  }catch(e){}
-  return 0;
-}
