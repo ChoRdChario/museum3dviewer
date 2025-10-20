@@ -1066,218 +1066,39 @@ onCanvasShiftPick(function(pos){
   window.relocateCaptionBar = relocateCaptionBar;
 })();
 
-// ===== LociMyu Materials: Self-contained module (GV/PV/AV fallbacks, robust init, strong gid/scene detection) =====
+// ===== LociMyu Materials: overlay logger & GLOBAL fallback (non-destructive) =====
 (function(){
-  const MATERIALS_SHEET_TITLE = 'materials';
-  const DEFAULTS = { unlit:false, doubleSided:false, opacity:1, white2alpha:false, whiteThr:0.92, black2alpha:false, blackThr:0.08 };
-
-  function detectGidFromDOM(){
-    const candSel = [
-      'nav select', '#sheet-select', 'select[name="sheet"]', 'select[data-role="sheet"]',
-      'aside#ui select', 'aside#ui input', 'input[name*="sheet"]', 'input[id*="sheet"]', 'input[data-role*="sheet"]'
-    ];
-    for(const sel of candSel){
-      const nodes = document.querySelectorAll(sel);
-      for(const el of nodes){
-        const v = (el.value || el.getAttribute('value') || '').trim();
-        if(/^\d+$/.test(v)) return Number(v);
-        const ds = el.dataset || {};
-        for(const k of Object.keys(ds||{})){
-          const dv = String(ds[k]||'').trim();
-          if(/^\d+$/.test(dv)) return Number(dv);
-        }
-      }
+  function ensureGlobalTarget(){
+    const sel = document.getElementById('mat-target');
+    if(!sel) return;
+    if(!sel.options || !sel.options.length){
+      const opt = document.createElement('option');
+      opt.value = 'GLOBAL'; opt.textContent = 'GLOBAL (all)';
+      sel.appendChild(opt); sel.value = 'GLOBAL';
+      console.log('[materials/overlay] injected GLOBAL option');
+      sel.dispatchEvent(new Event('change'));
     }
-    return 0;
   }
-  function getActiveSheetId(){
-    const g = window;
-    const cand = [g.currentSheetId, g.activeSheetId, g.sheetId, g.currentGid, g.currentSheetGid]
-      .find(v => (typeof v === 'number' && isFinite(v)) || (typeof v === 'string' && /^\d+$/.test(v)));
-    if(cand!=null) return Number(cand);
-    const domGid = detectGidFromDOM();
-    if(domGid) return domGid;
-    return 0;
-  }
-
-  async function ensureAuth(){
-    if(typeof window.ensureToken === 'function'){ try{ await window.ensureToken(); }catch(e){ console.warn('[materials] ensureToken fail', e);} }
-    if(typeof window.getAccessToken === 'function') return window.getAccessToken();
-    return null;
-  }
-
-  const GV = (typeof window.getValues === 'function') ? window.getValues : async function(ssid, range, token){
-    const url = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(ssid)}/values/${encodeURIComponent(range)}?majorDimension=ROWS`;
-    const r = await fetch(url, { headers:{ Authorization: `Bearer ${token}` } }); if(!r.ok) throw new Error(`getValues ${r.status}`);
-    const j = await r.json(); return j.values || [];
-  };
-  const PV = (typeof window.putValues === 'function') ? window.putValues : async function(ssid, range, rows, token){
-    const url = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(ssid)}/values/${encodeURIComponent(range)}?valueInputOption=RAW`;
-    const body = { range, majorDimension: "ROWS", values: rows };
-    const r = await fetch(url, { method:"PUT", headers:{ Authorization:`Bearer ${token}`, "Content-Type":"application/json" }, body: JSON.stringify(body) });
-    if(!r.ok){ const t = await r.text().catch(()=> ''); throw new Error(`putValues ${r.status} ${t}`); }
-  };
-  const AV = (typeof window.appendValues === 'function') ? window.appendValues : async function(ssid, range, rows, token){
-    const url = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(ssid)}/values/${encodeURIComponent(range)}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`;
-    const body = { range, majorDimension: "ROWS", values: rows };
-    const r = await fetch(url, { method:"POST", headers:{ Authorization:`Bearer ${token}`, "Content-Type":"application/json" }, body: JSON.stringify(body) });
-    if(!r.ok){ const t = await r.text().catch(()=> ''); throw new Error(`appendValues ${r.status} ${t}`); }
-  };
-
-  const materialsIndex = new Map(); const materialsCache = new Map();
-  function keyOf(sheetId, materialKey){ return `${sheetId}::${materialKey}`; }
-
-  async function ensureMaterialsSheet(token){
-    const ssid = window.currentSpreadsheetId; if(!ssid){ console.log('[materials] no spreadsheetId'); return false; }
-    const headers = ['sheetId','materialKey','unlit','doubleSided','opacity','white2alpha','whiteThr','black2alpha','blackThr','updatedAt','updatedBy'];
-    try{
-      try{
-        const vals = await GV(ssid, "'materials'!A1:K1", token);
-        if(!vals || !vals.length || !(vals[0]||[]).length){ await PV(ssid, "'materials'!A1:K1", [headers], token); }
-      }catch(e){
-        const body = { requests:[{ addSheet:{ properties:{ title: 'materials' } } }] };
-        const url = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(ssid)}:batchUpdate`;
-        const r = await fetch(url, { method:'POST', headers:{ Authorization:'Bearer '+token, 'Content-Type':'application/json' }, body: JSON.stringify(body) });
-        if(!r.ok){ const t = await r.text().catch(()=> ''); console.warn('[materials] addSheet fail', r.status, t); throw new Error('addSheet '+r.status); }
-        await PV(ssid, "'materials'!A1:K1", [headers], token);
-      }
-      return true;
-    }catch(err){ console.warn('[materials] ensureMaterialsSheet error', err); return false; }
-  }
-
-  async function ensureMaterialsIndex(){
-    materialsIndex.clear(); materialsCache.clear();
-    const token = await ensureAuth(); const ssid = window.currentSpreadsheetId; const sid = getActiveSheetId();
-    console.log('[materials] ensureMaterialsIndex', {ssid, sid, hasToken: !!token});
-    if(!token || !ssid || !sid) return false;
-    const ok = await ensureMaterialsSheet(token); if(!ok) return false;
-    try{
-      const values = await GV(ssid, "'materials'!A1:K9999", token);
-      if(!values || !values.length) return true;
-      const headers = values[0].map(v => (v||'').toString().trim()); const idx = {}; headers.forEach((h,i)=> idx[h.toLowerCase()] = i);
-      const iSheetId = idx['sheetid'], iKey = idx['materialkey'];
-      for(let r=1;r<values.length;r++){
-        const row = values[r]||[]; const s = Number(row[iSheetId]||0); const mkey = (row[iKey]||'').toString();
-        if(!s || !mkey) continue; const k = keyOf(s, mkey); materialsIndex.set(k, { rowIndex: r+1 });
-        const getN = (name, def)=>{ const i = idx[name]; if(i==null) return def; const v = row[i];
-          if(name.endsWith('alpha') || name.endsWith('sided') || name==='unlit'){ return (String(v).trim()==='1' || String(v).toLowerCase()==='true'); }
-          const n = Number(v); return (isFinite(n)? n : def);
-        };
-        materialsCache.set(k, { unlit:getN('unlit',false), doubleSided:getN('doublesided',false), opacity:getN('opacity',1),
-          white2alpha:getN('white2alpha',false), whiteThr:getN('whitethr',0.92), black2alpha:getN('black2alpha',false), blackThr:getN('blackthr',0.08) });
-      }
-      return true;
-    }catch(e){ console.warn('[materials] ensureMaterialsIndex read error', e); return false; }
-  }
-
-  async function upsertMaterialRow(sheetId, materialKey, s){
-    const token = await ensureAuth(); if(!token) return false; const ssid = window.currentSpreadsheetId; const key = keyOf(sheetId, materialKey);
-    const now = new Date().toISOString(); const user = (window.gapiUserEmail || 'unknown');
-    const row = [ sheetId, materialKey, s.unlit?1:0, s.doubleSided?1:0, s.opacity, s.white2alpha?1:0, s.whiteThr, s.black2alpha?1:0, s.blackThr, now, user ];
-    const idxEntry = materialsIndex.get(key);
-    if(idxEntry && idxEntry.rowIndex){ const range = `'materials'!A${idxEntry.rowIndex}:K${idxEntry.rowIndex}`; await PV(ssid, range, [row], token); }
-    else { await AV(ssid, "'materials'!A2:K9999", [row], token); await ensureMaterialsIndex(); }
-    materialsCache.set(key, { ...s }); return true;
-  }
-
-  function notifyApply(materialKey, settings){
-    try{ const detail = { materialKey, settings, sheetId: getActiveSheetId() };
-      window.dispatchEvent(new CustomEvent('materials:apply', { detail }));
-      if(typeof window.materialsApplyHook === 'function'){ window.materialsApplyHook(detail); }
-    }catch(e){}
-  }
-
-  function readUI(){
-    const target = document.getElementById('mat-target'); const materialKey = target?.value || '';
-    return { materialKey,
-      unlit: !!document.getElementById('mat-unlit')?.checked,
-      doubleSided: !!document.getElementById('mat-doubleside')?.checked,
-      opacity: Number(document.getElementById('mat-opacity')?.value ?? 1),
-      white2alpha: !!document.getElementById('mat-white2alpha')?.checked,
-      whiteThr: Number(document.getElementById('mat-white-thr')?.value ?? 0.92),
-      black2alpha: !!document.getElementById('mat-black2alpha')?.checked,
-      blackThr: Number(document.getElementById('mat-black-thr')?.value ?? 0.08),
-    };
-  }
-  function writeUI(s){
-    const set = (id, fn)=>{ const el=document.getElementById(id); if(el) fn(el); };
-    set('mat-unlit', el=> el.checked = !!s.unlit);
-    set('mat-doubleside', el=> el.checked = !!s.doubleSided);
-    set('mat-opacity', el=> el.value = (s.opacity ?? 1));
-    set('mat-white2alpha', el=> el.checked = !!s.white2alpha);
-    set('mat-white-thr', el=> el.value = (s.whiteThr ?? 0.92));
-    set('mat-black2alpha', el=> el.checked = !!s.black2alpha);
-    set('mat-black-thr', el=> el.value = (s.blackThr ?? 0.08));
-    const wOut = document.getElementById('mat-white-thr-val'); if(wOut) wOut.textContent = String((s.whiteThr ?? 0.92).toFixed(2));
-    const bOut = document.getElementById('mat-black-thr-val'); if(bOut) bOut.textContent = String((s.blackThr ?? 0.08).toFixed(2));
-  }
-  function onUIChanged(){
-    const s = readUI(); if(!s.materialKey) return; const merged = { ...DEFAULTS, ...s };
-    materialsCache.set(keyOf(getActiveSheetId(), s.materialKey), merged); notifyApply(s.materialKey, merged);
-    if(onUIChanged._t) clearTimeout(onUIChanged._t);
-    onUIChanged._t = setTimeout(()=> upsertMaterialRow(getActiveSheetId(), s.materialKey, merged).catch(()=>{}), 200);
-  }
-  function wireUI(){
+  function boostHandlers(){
     const ids = ['mat-target','mat-unlit','mat-doubleside','mat-opacity','mat-white2alpha','mat-white-thr','mat-black2alpha','mat-black-thr'];
-    ids.forEach(id=>{ const el = document.getElementById(id); if(!el) return; const ev = (el.tagName==='SELECT') ? 'change' : 'input'; el.addEventListener(ev, onUIChanged); });
-    const r1 = document.getElementById('mat-reset-one'); const r2 = document.getElementById('mat-reset-all');
-    if(r1) r1.addEventListener('click', ()=>{ writeUI(DEFAULTS); onUIChanged(); });
-    if(r2) r2.addEventListener('click', ()=>{ writeUI(DEFAULTS); onUIChanged(); });
+    ids.forEach(id=>{
+      const el = document.getElementById(id);
+      if(!el) return;
+      const handler = ()=>{
+        ensureGlobalTarget();
+        console.log('[materials/overlay] UI change', id);
+        window.dispatchEvent(new Event('materials:refresh')); // re-drive module debounce/save
+      };
+      el.addEventListener('input', handler);
+      el.addEventListener('change', handler);
+    });
   }
-
-  function detectScene(){
-    const direct = window.gltfScene || window.scene || (window.viewer && (window.viewer.scene || window.viewer.gltfScene));
-    if(direct) return direct;
-    const roots = [window.viewer, window.app, window.engine, window.renderer, window];
-    for(const r of roots){
-      try{
-        if(!r) continue;
-        for(const k of Object.keys(r)){
-          const v = r[k];
-          if(v && typeof v === 'object' && (v.isScene || v.type === 'Scene')) return v;
-        }
-      }catch(e){}
-    }
-    return null;
-  }
-
-  function populateMatTarget(cands){
-    const sel = document.getElementById('mat-target'); if(!sel) return false; const prev = sel.value; sel.innerHTML = '';
-    cands.forEach(c=>{ const opt = document.createElement('option'); opt.value = c.key; opt.textContent = c.label; sel.appendChild(opt); });
-    if(prev && cands.some(c=>c.key===prev)) sel.value = prev; else if (cands.length) sel.value = cands[0].key;
-    sel.dispatchEvent(new Event('change')); return true;
-  }
-
-  function collectMaterialsFromScene(scene){
-    const out = []; if(!scene || !scene.traverse) return out;
-    scene.traverse(obj=>{ try{
-      if(obj && obj.isMesh){ const meshName = obj.name || 'Mesh';
-        const pushOne = (mat)=>{ if(!mat) return; const mName = mat.name || 'Material'; const key = `${meshName}/${mName}`; const label = `${mName} — ${meshName}`; out.push({ key, label }); };
-        if(Array.isArray(obj.material)) obj.material.forEach(m=> pushOne(m)); else pushOne(obj.material);
-      }}catch(e){} });
-    const uniq = new Map(); out.forEach(o=>{ if(o.key) uniq.set(o.key, o); }); return Array.from(uniq.values());
-  }
-
-  async function bootOnce(){
-    if(bootOnce._done) return; bootOnce._done = true;
-    console.log('[materials] bootOnce');
-    let tries = 0;
-    while((!window.currentSpreadsheetId || !getActiveSheetId()) && tries < 60){
-      await new Promise(r=> setTimeout(r, 250)); tries++;
-    }
-    console.log('[materials] ids', { spreadsheet: window.currentSpreadsheetId, sheetId: getActiveSheetId(), waited: tries });
-    await ensureMaterialsIndex();
-    let sTries = 0;
-    while(true){
-      const sc = detectScene(); if(sc){ const c = collectMaterialsFromScene(sc); if(c && c.length){ populateMatTarget(c); break; } }
-      if(sTries++ > 60) break; await new Promise(r=> setTimeout(r, 250));
-    }
-    wireUI();
-    const target = document.getElementById('mat-target'); const mk = target?.value || '';
-    const s = materialsCache.get(keyOf(getActiveSheetId(), mk)) || DEFAULTS; writeUI(s); notifyApply(mk, s);
-  }
-
-  if(document.readyState === 'loading'){ document.addEventListener('DOMContentLoaded', bootOnce, { once:true }); } else { setTimeout(bootOnce, 0); }
-  window.addEventListener('materials:refresh', ()=>{ bootOnce(); });
+  document.addEventListener('DOMContentLoaded', ()=>{
+    setTimeout(()=>{ ensureGlobalTarget(); boostHandlers(); }, 1200);
+  }, { once:true });
+  // also retry when switching tabs manually
+  window.addEventListener('materials:refresh', ()=>{
+    setTimeout(()=>{ ensureGlobalTarget(); boostHandlers(); }, 300);
+  });
 })();
-// ===== end LociMyu Materials =====
+// ===== end overlay =====
