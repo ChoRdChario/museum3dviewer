@@ -164,52 +164,10 @@
   }
   </script>
 
-  <script type="module" src="./boot.esm.cdn.js"></script>
+  \1
+  <script src="./lm-materials-rate-limit.patch.js"></script>
 <link rel="stylesheet" href="app.sheet-rename.css" />
 <script type="module" src="sheet-rename.module.js"></script>
-
-
-<script type="module">
-// === LociMyu: Material pane UI reorder (DOM-safe, no event rewire) ===
-(function(){
-  function grpOf(id){
-    const el = document.getElementById(id);
-    return el ? el.closest('.grp') : null;
-  }
-  function uniq(arr){ const out=[]; const seen=new Set(); arr.forEach(n=>{ if(n && !seen.has(n)){ seen.add(n); out.push(n);} }); return out; }
-  function reorder(){
-    const pane = document.getElementById('pane-material');
-    if(!pane) return;
-    const target  = grpOf('mat-target');
-    const unlit   = grpOf('mat-unlit') || grpOf('mat-doubleside');
-    const opacity = grpOf('mat-opacity');
-    const wAlpha  = grpOf('mat-white2alpha');
-    const wThr    = grpOf('mat-white-thr');
-    const bAlpha  = grpOf('mat-black2alpha');
-    const bThr    = grpOf('mat-black-thr');
-    const reset   = grpOf('mat-reset-one') || grpOf('mat-reset-all');
-
-    const order = uniq([ target, unlit, opacity, wAlpha, wThr, bAlpha, bThr, reset ]);
-    order.forEach(g=>{ try{ pane.appendChild(g); }catch(_){ } });
-  }
-
-  function onTabClick(ev){
-    const btn = ev.target && ev.target.closest && ev.target.closest('[role="tab"][data-tab="material"]');
-    if(btn){ setTimeout(reorder, 0); }
-  }
-
-  function boot(){
-    reorder();
-    const nav = document.querySelector('nav.tabs');
-    if(nav && !nav.__lmReorderWired){
-      nav.__lmReorderWired = true;
-      nav.addEventListener('click', onTabClick, { passive:true });
-    }
-  }
-  if(document.readyState === 'loading'){ document.addEventListener('DOMContentLoaded', boot, { once:true }); }
-  else { boot(); }
-})();
-</script>
 
 </body>
 </html>
