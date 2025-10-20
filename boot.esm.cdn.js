@@ -947,7 +947,9 @@ onCanvasShiftPick(function(pos){
     });
     const pane = document.querySelector(`#pane-${name}`);
     if(pane) pane.setAttribute('data-active','true');
-  }
+  try{ window.relocateCaptionBar && window.relocateCaptionBar(); }catch(_){}
+  try{ window.applyCaptionBarPolicy && window.applyCaptionBarPolicy(name); }catch(_){}
+}
   function initTabs(){
     const nav = document.querySelector('nav.tabs');
     if(!nav) return;
@@ -1034,4 +1036,32 @@ onCanvasShiftPick(function(pos){
   // Re-apply policy on DOM mutations (images list loads async)
   const mo = new MutationObserver(()=>applyCaptionBarPolicy(document.body.getAttribute('data-active-tab')));
   mo.observe(document.body, { childList:true, subtree:true });
+})();
+
+
+// === Safety pin: ensure caption image bar stays under #pane-caption ===
+(function(){
+  function relocateCaptionBar(){
+    const pane = document.getElementById('pane-caption');
+    if(!pane) return;
+    const ids = ['images-grid-wrapper','images-status','caption-image-row','btnRefreshImages'];
+    ids.forEach(id=>{
+      const el = document.getElementById(id);
+      if (el && !pane.contains(el)){
+        if(id === 'images-grid-wrapper'){
+          let grp = el.closest('.grp');
+          if(!grp){ grp = document.createElement('div'); grp.className = 'grp'; grp.appendChild(el); }
+          pane.appendChild(grp);
+        } else {
+          pane.appendChild(el);
+        }
+      }
+    });
+  }
+  if (document.readyState === 'loading'){
+    document.addEventListener('DOMContentLoaded', relocateCaptionBar, { once:true });
+  } else { relocateCaptionBar(); }
+  const mo = new MutationObserver(relocateCaptionBar);
+  mo.observe(document.body, { childList:true, subtree:true });
+  window.relocateCaptionBar = relocateCaptionBar;
 })();
