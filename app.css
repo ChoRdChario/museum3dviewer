@@ -185,3 +185,17 @@ body{
 body:not([data-active-tab="caption"]) #pane-caption{
   display: none !important;
 }
+
+
+/* ==== Material pane: order only by CSS, no DOM edits ==== */
+#pane-material .grp { order: 100; }
+#pane-material .grp:has(#mat-target) { order: 10; }
+#pane-material .grp:has(#mat-unlit),
+#pane-material .grp:has(#mat-doubleside) { order: 20; }
+#pane-material .grp:has(#mat-opacity) { order: 30; }
+#pane-material .grp:has(#mat-white2alpha),
+#pane-material .grp:has(#mat-black2alpha),
+#pane-material .grp:has(#mat-white-thr),
+#pane-material .grp:has(#mat-black-thr) { order: 40; }
+#pane-material .row + .row { margin-top: 6px; }
+#pane-material label + label { margin-left: 12px; }
