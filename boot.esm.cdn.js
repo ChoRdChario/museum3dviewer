@@ -1065,3 +1065,345 @@ onCanvasShiftPick(function(pos){
   mo.observe(document.body, { childList:true, subtree:true });
   window.relocateCaptionBar = relocateCaptionBar;
 })();
+
+// ===== LociMyu Materials Module =====
+(function(){
+  const MATERIALS_SHEET_TITLE = 'materials';
+  const DEFAULTS = {
+    unlit:false, doubleSided:false, opacity:1,
+    white2alpha:false, whiteThr:0.92,
+    black2alpha:false, blackThr:0.08
+  };
+  const materialsIndex = new Map();
+  const materialsCache = new Map();
+  let currentMaterialsSheetReady = false;
+
+  function keyOf(sheetId, materialKey){ return `${sheetId}::${materialKey}`; }
+  function readUI(){
+    const target = document.getElementById('mat-target');
+    const materialKey = target?.value || '';
+    return {
+      materialKey,
+      unlit: !!document.getElementById('mat-unlit')?.checked,
+      doubleSided: !!document.getElementById('mat-doubleside')?.checked,
+      opacity: Number(document.getElementById('mat-opacity')?.value ?? 1),
+      white2alpha: !!document.getElementById('mat-white2alpha')?.checked,
+      whiteThr: Number(document.getElementById('mat-white-thr')?.value ?? 0.92),
+      black2alpha: !!document.getElementById('mat-black2alpha')?.checked,
+      blackThr: Number(document.getElementById('mat-black-thr')?.value ?? 0.08),
+    };
+  }
+  function writeUI(s){
+    const set = (id, fn)=>{ const el=document.getElementById(id); if(el) fn(el); };
+    set('mat-unlit', el=> el.checked = !!s.unlit);
+    set('mat-doubleside', el=> el.checked = !!s.doubleSided);
+    set('mat-opacity', el=> el.value = (s.opacity ?? 1));
+    set('mat-white2alpha', el=> el.checked = !!s.white2alpha);
+    set('mat-white-thr', el=> el.value = (s.whiteThr ?? 0.92));
+    set('mat-black2alpha', el=> el.checked = !!s.black2alpha);
+    set('mat-black-thr', el=> el.value = (s.blackThr ?? 0.08));
+    const wOut = document.getElementById('mat-white-thr-val'); if(wOut) wOut.textContent = String((s.whiteThr ?? 0.92).toFixed(2));
+    const bOut = document.getElementById('mat-black-thr-val'); if(bOut) bOut.textContent = String((s.blackThr ?? 0.08).toFixed(2));
+  }
+
+  // Robust gid getter
+  function getActiveSheetId(){
+    const g = window;
+    const cand = [g.currentSheetId, g.activeSheetId, g.sheetId, g.currentGid, g.currentSheetGid]
+      .find(v => (typeof v === 'number' && isFinite(v)) || (typeof v === 'string' && /^\d+$/.test(v)));
+    if(cand!=null) return Number(cand);
+    try{
+      const sel = document.querySelector('nav select, #sheet-select, select[name="sheet"], select[data-role="sheet"]');
+      if(sel && sel.value && /^\d+$/.test(sel.value)) return Number(sel.value);
+      const any = document.querySelector('select option:checked');
+      if(any && /^\d+$/.test(any.value)) return Number(any.value);
+    }catch(e){}
+    return 0;
+  }
+
+  // Sheets helpers
+  async function ensureMaterialsSheet(token){
+    console.debug('[materials] ensureMaterialsSheet:start', {spreadsheet: window.currentSpreadsheetId, sheetId: getActiveSheetId(), hasToken: !!token});
+    if(!window.currentSpreadsheetId) return false;
+    const headers = ['sheetId','materialKey','unlit','doubleSided','opacity','white2alpha','whiteThr','black2alpha','blackThr','updatedAt','updatedBy'];
+    try{
+      try{
+        console.debug('[materials] getValues call');
+        const vals = await getValues(window.currentSpreadsheetId, "'" + MATERIALS_SHEET_TITLE + "'!A1:K1", token);
+        if(!vals || !vals.length || !(vals[0]||[]).length){
+          console.debug('[materials] putValues call (headers)');
+          await putValues(window.currentSpreadsheetId, MATERIALS_SHEET_TITLE+"!A1:K1", [headers], token);
+        }
+      }catch(e){
+        // create sheet
+        const body = { requests:[{ addSheet:{ properties:{ title: MATERIALS_SHEET_TITLE } } }] };
+        const url = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(window.currentSpreadsheetId)}:batchUpdate`;
+        console.debug('[materials] batchUpdate addSheet POST', {url, body});
+        const r = await fetch(url, { method:'POST', headers:{ Authorization:'Bearer '+token, 'Content-Type':'application/json' }, body: JSON.stringify(body) });
+        console.debug('[materials] batchUpdate response', r.status);
+        if(!r.ok){ const t = await r.text().catch(()=> ''); console.warn('[materials] batchUpdate error', r.status, t); throw new Error('addSheet '+r.status); }
+        console.debug('[materials] putValues call (headers after create)');
+        await putValues(window.currentSpreadsheetId, MATERIALS_SHEET_TITLE+"!A1:K1", [headers], token);
+      }
+      return true;
+    }catch(e){
+      console.warn('[materials] ensureMaterialsSheet failed', e);
+      return false;
+    }
+  }
+
+  async function ensureMaterialsIndex(){
+    console.debug('[materials] ensureMaterialsIndex:start', {spreadsheet: window.currentSpreadsheetId, sheetId: getActiveSheetId()});
+    materialsIndex.clear();
+    materialsCache.clear();
+    console.debug('[materials] ensureToken call');
+    await ensureToken();
+    const token = getAccessToken();
+    if(!token || !window.currentSpreadsheetId || !getActiveSheetId()) return false;
+    console.debug('[materials] ensureMaterialsIndex:ensureSheet');
+    const ok = await ensureMaterialsSheet(token);
+    if(!ok) return false;
+    try{
+      console.debug('[materials] getValues call (read all)');
+      const values = await getValues(window.currentSpreadsheetId, "'" + MATERIALS_SHEET_TITLE + "'!A1:K9999", token);
+      if(!values || !values.length) return true;
+      const headers = values[0].map(v => (v||'').toString().trim());
+      const idx = {}; headers.forEach((h,i)=> idx[h.toLowerCase()] = i);
+      const iSheetId = idx['sheetid'], iKey = idx['materialkey'];
+      for(let r=1;r<values.length;r++){
+        const row = values[r]||[];
+        const sid = Number(row[iSheetId]||0);
+        const mkey = (row[iKey]||'').toString();
+        if(!sid || !mkey) continue;
+        const key = `${sid}::${mkey}`;
+        materialsIndex.set(key, { rowIndex: r+1 });
+        const getN = (name, def)=>{
+          const i = idx[name]; if(i==null) return def;
+          const v = row[i];
+          if(name.endsWith('alpha') || name.endsWith('sided') || name==='unlit'){
+            return (String(v).trim()==='1' || String(v).toLowerCase()==='true');
+          }
+          const n = Number(v); return (isFinite(n)? n : def);
+        };
+        materialsCache.set(key, {
+          unlit: getN('unlit', false),
+          doubleSided: getN('doublesided', false),
+          opacity: getN('opacity', 1),
+          white2alpha: getN('white2alpha', false),
+          whiteThr: getN('whitethr', 0.92),
+          black2alpha: getN('black2alpha', false),
+          blackThr: getN('blackthr', 0.08),
+        });
+      }
+      return true;
+    }catch(e){
+      console.warn('[materials] ensureMaterialsIndex failed', e);
+      return false;
+    }
+  }
+
+  async function upsertMaterialRow(sheetId, materialKey, s){
+    const token = getAccessToken(); if(!token) return false;
+    const key = `${sheetId}::${materialKey}`;
+    const now = new Date().toISOString();
+    const user = (window.gapiUserEmail || 'unknown');
+    const row = [
+      sheetId, materialKey,
+      s.unlit?1:0, s.doubleSided?1:0, s.opacity,
+      s.white2alpha?1:0, s.whiteThr,
+      s.black2alpha?1:0, s.blackThr,
+      now, user
+    ];
+    const idxEntry = materialsIndex.get(key);
+    if(idxEntry && idxEntry.rowIndex){
+      const range = `materials!A${idxEntry.rowIndex}:K${idxEntry.rowIndex}`;
+      console.debug('[materials] putValues call (update row)', range);
+      await putValues(window.currentSpreadsheetId, range, [row], token);
+    }else{
+      console.debug('[materials] appendValues call (append row)');
+      await appendValues(window.currentSpreadsheetId, "materials!A2:K9999", [row], token);
+      await ensureMaterialsIndex();
+    }
+    materialsCache.set(key, { ...s });
+    return true;
+  }
+
+  function applyToRuntime(materialKey, settings){
+    try{
+      const detail = { materialKey, settings, sheetId: getActiveSheetId() };
+      window.dispatchEvent(new CustomEvent('materials:apply', { detail }));
+      if(typeof window.materialsApplyHook === 'function'){
+        window.materialsApplyHook(detail);
+      }
+    }catch(e){ console.warn('[materials] applyToRuntime failed', e); }
+  }
+
+  function onUIChanged(){
+    const s = readUI();
+    if(!s.materialKey) return;
+    const key = `${getActiveSheetId()}::${s.materialKey}`;
+    const merged = { ...DEFAULTS, ...s };
+    materialsCache.set(key, merged);
+    applyToRuntime(s.materialKey, merged);
+    if(onUIChanged._t) clearTimeout(onUIChanged._t);
+    onUIChanged._t = setTimeout(async ()=>{
+      console.debug('[materials] ensureToken call (save)');
+      await ensureToken();
+      try{ await upsertMaterialRow(getActiveSheetId(), s.materialKey, merged); }catch(e){ console.warn('[materials] save failed', e); }
+    }, 200);
+    const wOut = document.getElementById('mat-white-thr-val'); if(wOut) wOut.textContent = String((s.whiteThr ?? 0.92).toFixed(2));
+    const bOut = document.getElementById('mat-black-thr-val'); if(bOut) bOut.textContent = String((s.blackThr ?? 0.08).toFixed(2));
+  }
+
+  function resetSelected(){
+    const target = document.getElementById('mat-target');
+    const materialKey = target?.value || '';
+    if(!materialKey) return;
+    writeUI(DEFAULTS);
+    onUIChanged();
+  }
+  function resetAll(){
+    writeUI(DEFAULTS);
+    onUIChanged();
+  }
+
+  async function loadForCurrentSheet(){
+    console.debug('[materials] loadForCurrentSheet');
+    await ensureMaterialsIndex();
+    const target = document.getElementById('mat-target');
+    const materialKey = target?.value || '';
+    if(!materialKey) return;
+    const s = materialsCache.get(`${getActiveSheetId()}::${materialKey}`) || DEFAULTS;
+    writeUI(s);
+    applyToRuntime(materialKey, s);
+  }
+
+  function wireUI(){
+    const ids = ['mat-target','mat-unlit','mat-doubleside','mat-opacity','mat-white2alpha','mat-white-thr','mat-black2alpha','mat-black-thr'];
+    ids.forEach(id=>{
+      const el = document.getElementById(id);
+      if(!el) return;
+      const ev = (el.tagName==='SELECT') ? 'change' : 'input';
+      el.addEventListener(ev, onUIChanged);
+    });
+    const r1 = document.getElementById('mat-reset-one');
+    const r2 = document.getElementById('mat-reset-all');
+    if(r1) r1.addEventListener('click', resetSelected);
+    if(r2) r2.addEventListener('click', resetAll);
+  }
+
+  async function materialsEarlyInit(){
+    try{
+      console.debug('[materials] earlyInit:enter');
+      let tries = 0;
+      while((!window.currentSpreadsheetId || !getActiveSheetId()) && tries < 40){
+        await new Promise(r=> setTimeout(r, 250)); tries++;
+      }
+      console.debug('[materials] earlyInit:ids', {spreadsheet: window.currentSpreadsheetId, sheetId: getActiveSheetId()});
+      console.debug('[materials] ensureToken call (earlyInit)');
+      await ensureToken();
+      await ensureMaterialsIndex();
+      setTimeout(()=>{ wireUI(); loadForCurrentSheet(); }, 0);
+    }catch(e){ console.warn('[materials] early init failed', e); }
+  }
+
+  const mo = new MutationObserver(()=>{
+    const tab = document.body.getAttribute('data-active-tab');
+    if(tab==='material'){ materialsEarlyInit(); }
+  });
+  mo.observe(document.body, { attributes:true, attributeFilter:['data-active-tab'] });
+
+  if(document.readyState === 'loading'){
+    document.addEventListener('DOMContentLoaded', ()=>{ if(document.body.getAttribute('data-active-tab')==='material') materialsEarlyInit(); }, { once:true });
+  } else {
+    if(document.body.getAttribute('data-active-tab')==='material') materialsEarlyInit();
+  }
+})();
+// ===== end Materials Module =====
+
+
+// ===== LociMyu Materials: mat-target population & scene discovery =====
+(function(){
+  function collectMaterialsFromScene(scene){
+    const out = [];
+    if(!scene || !scene.traverse) return out;
+    scene.traverse(obj=>{
+      try{
+        if(obj && obj.isMesh){
+          const meshName = obj.name || 'Mesh';
+          const pushOne = (mat)=>{
+            if(!mat) return;
+            const mName = mat.name || 'Material';
+            const key = `${meshName}/${mName}`;
+            const label = `${mName} — ${meshName}`;
+            out.push({ key, label });
+          };
+          if(Array.isArray(obj.material)){
+            obj.material.forEach(m=> pushOne(m));
+          }else{
+            pushOne(obj.material);
+          }
+        }
+      }catch(e){}
+    });
+    const uniq = new Map();
+    out.forEach(o=>{ if(o.key) uniq.set(o.key, o); });
+    return Array.from(uniq.values());
+  }
+  function populateMatTarget(cands){
+    console.debug('[materials] populateMatTarget', cands?.length||0);
+    const sel = document.getElementById('mat-target');
+    if(!sel) return false;
+    const prev = sel.value;
+    sel.innerHTML = '';
+    cands.forEach(c=>{
+      const opt = document.createElement('option');
+      opt.value = c.key;
+      opt.textContent = c.label;
+      sel.appendChild(opt);
+    });
+    if(prev && cands.some(c=>c.key===prev)) sel.value = prev;
+    else if (cands.length) sel.value = cands[0].key;
+    sel.dispatchEvent(new Event('change'));
+    return true;
+  }
+  function detectScene(){
+    const g = window;
+    return g.gltfScene || g.scene || (g.viewer && (g.viewer.scene || g.viewer.gltfScene)) || null;
+  }
+  window.materialsDiscoverFromScene = function(scene){
+    const c = collectMaterialsFromScene(scene);
+    if(c && c.length) populateMatTarget(c);
+  };
+  let pollCount = 0;
+  function pollPopulate(){
+    const scene = detectScene();
+    if(scene){
+      const c = collectMaterialsFromScene(scene);
+      if(c && c.length){
+        populateMatTarget(c);
+        pollCount = 0;
+        return;
+      }
+    }
+    if(pollCount++ < 60){ setTimeout(pollPopulate, 250); } else { pollCount = 0; }
+  }
+  window.addEventListener('viewer:gltf-loaded', (ev)=>{
+    const scene = ev?.detail?.scene || ev?.detail?.gltfScene || detectScene();
+    if(scene){
+      const c = collectMaterialsFromScene(scene);
+      if(c && c.length) populateMatTarget(c);
+    }
+  });
+  const mo = new MutationObserver(()=>{
+    const tab = document.body.getAttribute('data-active-tab');
+    if(tab==='material'){ pollCount = 0; pollPopulate(); }
+  });
+  mo.observe(document.body, { attributes:true, attributeFilter:['data-active-tab'] });
+  if(document.readyState === 'loading'){
+    document.addEventListener('DOMContentLoaded', ()=>{ if(document.body.getAttribute('data-active-tab')==='material') pollPopulate(); }, { once:true });
+  } else {
+    if(document.body.getAttribute('data-active-tab')==='material') pollPopulate();
+  }
+})();
+// ===== end mat-target population =====
