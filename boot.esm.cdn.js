@@ -1065,27 +1065,47 @@ onCanvasShiftPick(function(pos){
   mo.observe(document.body, { childList:true, subtree:true });
   window.relocateCaptionBar = relocateCaptionBar;
 })();
-// ===== LociMyu Materials: Self-contained module (GV/PV/AV fallbacks, robust init) =====
+
+// ===== LociMyu Materials: Self-contained module (GV/PV/AV fallbacks, robust init, strong gid/scene detection) =====
 (function(){
   const MATERIALS_SHEET_TITLE = 'materials';
   const DEFAULTS = { unlit:false, doubleSided:false, opacity:1, white2alpha:false, whiteThr:0.92, black2alpha:false, blackThr:0.08 };
+
+  function detectGidFromDOM(){
+    const candSel = [
+      'nav select', '#sheet-select', 'select[name="sheet"]', 'select[data-role="sheet"]',
+      'aside#ui select', 'aside#ui input', 'input[name*="sheet"]', 'input[id*="sheet"]', 'input[data-role*="sheet"]'
+    ];
+    for(const sel of candSel){
+      const nodes = document.querySelectorAll(sel);
+      for(const el of nodes){
+        const v = (el.value || el.getAttribute('value') || '').trim();
+        if(/^\d+$/.test(v)) return Number(v);
+        const ds = el.dataset || {};
+        for(const k of Object.keys(ds||{})){
+          const dv = String(ds[k]||'').trim();
+          if(/^\d+$/.test(dv)) return Number(dv);
+        }
+      }
+    }
+    return 0;
+  }
   function getActiveSheetId(){
     const g = window;
     const cand = [g.currentSheetId, g.activeSheetId, g.sheetId, g.currentGid, g.currentSheetGid]
       .find(v => (typeof v === 'number' && isFinite(v)) || (typeof v === 'string' && /^\d+$/.test(v)));
     if(cand!=null) return Number(cand);
-    try{
-      const sel = document.querySelector('nav select, #sheet-select, select[name="sheet"], select[data-role="sheet"]');
-      if(sel && sel.value && /^\d+$/.test(sel.value)) return Number(sel.value);
-      const any = document.querySelector('select option:checked');
-      if(any && /^\d+$/.test(any.value)) return Number(any.value);
-    }catch(e){} return 0;
+    const domGid = detectGidFromDOM();
+    if(domGid) return domGid;
+    return 0;
   }
+
   async function ensureAuth(){
-    if(typeof window.ensureToken === 'function'){ try{ await window.ensureToken(); }catch(e){} }
+    if(typeof window.ensureToken === 'function'){ try{ await window.ensureToken(); }catch(e){ console.warn('[materials] ensureToken fail', e);} }
     if(typeof window.getAccessToken === 'function') return window.getAccessToken();
     return null;
   }
+
   const GV = (typeof window.getValues === 'function') ? window.getValues : async function(ssid, range, token){
     const url = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(ssid)}/values/${encodeURIComponent(range)}?majorDimension=ROWS`;
     const r = await fetch(url, { headers:{ Authorization: `Bearer ${token}` } }); if(!r.ok) throw new Error(`getValues ${r.status}`);
@@ -1103,10 +1123,12 @@ onCanvasShiftPick(function(pos){
     const r = await fetch(url, { method:"POST", headers:{ Authorization:`Bearer ${token}`, "Content-Type":"application/json" }, body: JSON.stringify(body) });
     if(!r.ok){ const t = await r.text().catch(()=> ''); throw new Error(`appendValues ${r.status} ${t}`); }
   };
+
   const materialsIndex = new Map(); const materialsCache = new Map();
   function keyOf(sheetId, materialKey){ return `${sheetId}::${materialKey}`; }
+
   async function ensureMaterialsSheet(token){
-    const ssid = window.currentSpreadsheetId; if(!ssid) return false;
+    const ssid = window.currentSpreadsheetId; if(!ssid){ console.log('[materials] no spreadsheetId'); return false; }
     const headers = ['sheetId','materialKey','unlit','doubleSided','opacity','white2alpha','whiteThr','black2alpha','blackThr','updatedAt','updatedBy'];
     try{
       try{
@@ -1116,15 +1138,17 @@ onCanvasShiftPick(function(pos){
         const body = { requests:[{ addSheet:{ properties:{ title: 'materials' } } }] };
         const url = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(ssid)}:batchUpdate`;
         const r = await fetch(url, { method:'POST', headers:{ Authorization:'Bearer '+token, 'Content-Type':'application/json' }, body: JSON.stringify(body) });
-        if(!r.ok){ const t = await r.text().catch(()=> ''); throw new Error('addSheet '+r.status+' '+t); }
+        if(!r.ok){ const t = await r.text().catch(()=> ''); console.warn('[materials] addSheet fail', r.status, t); throw new Error('addSheet '+r.status); }
         await PV(ssid, "'materials'!A1:K1", [headers], token);
       }
       return true;
     }catch(err){ console.warn('[materials] ensureMaterialsSheet error', err); return false; }
   }
+
   async function ensureMaterialsIndex(){
     materialsIndex.clear(); materialsCache.clear();
     const token = await ensureAuth(); const ssid = window.currentSpreadsheetId; const sid = getActiveSheetId();
+    console.log('[materials] ensureMaterialsIndex', {ssid, sid, hasToken: !!token});
     if(!token || !ssid || !sid) return false;
     const ok = await ensureMaterialsSheet(token); if(!ok) return false;
     try{
@@ -1145,6 +1169,7 @@ onCanvasShiftPick(function(pos){
       return true;
     }catch(e){ console.warn('[materials] ensureMaterialsIndex read error', e); return false; }
   }
+
   async function upsertMaterialRow(sheetId, materialKey, s){
     const token = await ensureAuth(); if(!token) return false; const ssid = window.currentSpreadsheetId; const key = keyOf(sheetId, materialKey);
     const now = new Date().toISOString(); const user = (window.gapiUserEmail || 'unknown');
@@ -1154,12 +1179,14 @@ onCanvasShiftPick(function(pos){
     else { await AV(ssid, "'materials'!A2:K9999", [row], token); await ensureMaterialsIndex(); }
     materialsCache.set(key, { ...s }); return true;
   }
+
   function notifyApply(materialKey, settings){
     try{ const detail = { materialKey, settings, sheetId: getActiveSheetId() };
       window.dispatchEvent(new CustomEvent('materials:apply', { detail }));
       if(typeof window.materialsApplyHook === 'function'){ window.materialsApplyHook(detail); }
     }catch(e){}
   }
+
   function readUI(){
     const target = document.getElementById('mat-target'); const materialKey = target?.value || '';
     return { materialKey,
@@ -1197,6 +1224,30 @@ onCanvasShiftPick(function(pos){
     if(r1) r1.addEventListener('click', ()=>{ writeUI(DEFAULTS); onUIChanged(); });
     if(r2) r2.addEventListener('click', ()=>{ writeUI(DEFAULTS); onUIChanged(); });
   }
+
+  function detectScene(){
+    const direct = window.gltfScene || window.scene || (window.viewer && (window.viewer.scene || window.viewer.gltfScene));
+    if(direct) return direct;
+    const roots = [window.viewer, window.app, window.engine, window.renderer, window];
+    for(const r of roots){
+      try{
+        if(!r) continue;
+        for(const k of Object.keys(r)){
+          const v = r[k];
+          if(v && typeof v === 'object' && (v.isScene || v.type === 'Scene')) return v;
+        }
+      }catch(e){}
+    }
+    return null;
+  }
+
+  function populateMatTarget(cands){
+    const sel = document.getElementById('mat-target'); if(!sel) return false; const prev = sel.value; sel.innerHTML = '';
+    cands.forEach(c=>{ const opt = document.createElement('option'); opt.value = c.key; opt.textContent = c.label; sel.appendChild(opt); });
+    if(prev && cands.some(c=>c.key===prev)) sel.value = prev; else if (cands.length) sel.value = cands[0].key;
+    sel.dispatchEvent(new Event('change')); return true;
+  }
+
   function collectMaterialsFromScene(scene){
     const out = []; if(!scene || !scene.traverse) return out;
     scene.traverse(obj=>{ try{
@@ -1206,19 +1257,18 @@ onCanvasShiftPick(function(pos){
       }}catch(e){} });
     const uniq = new Map(); out.forEach(o=>{ if(o.key) uniq.set(o.key, o); }); return Array.from(uniq.values());
   }
-  function populateMatTarget(cands){
-    const sel = document.getElementById('mat-target'); if(!sel) return false; const prev = sel.value; sel.innerHTML = '';
-    cands.forEach(c=>{ const opt = document.createElement('option'); opt.value = c.key; opt.textContent = c.label; sel.appendChild(opt); });
-    if(prev && cands.some(c=>c.key===prev)) sel.value = prev; else if (cands.length) sel.value = cands[0].key;
-    sel.dispatchEvent(new Event('change')); return true;
-  }
-  function detectScene(){ const g = window; return g.gltfScene || g.scene || (g.viewer && (g.viewer.scene || g.viewer.gltfScene)) || null; }
+
   async function bootOnce(){
     if(bootOnce._done) return; bootOnce._done = true;
-    let tries = 0; while((!window.currentSpreadsheetId || !getActiveSheetId()) && tries < 60){ await new Promise(r=> setTimeout(r, 250)); tries++; }
+    console.log('[materials] bootOnce');
+    let tries = 0;
+    while((!window.currentSpreadsheetId || !getActiveSheetId()) && tries < 60){
+      await new Promise(r=> setTimeout(r, 250)); tries++;
+    }
+    console.log('[materials] ids', { spreadsheet: window.currentSpreadsheetId, sheetId: getActiveSheetId(), waited: tries });
     await ensureMaterialsIndex();
-    // populate target
-    let sTries = 0; while(true){
+    let sTries = 0;
+    while(true){
       const sc = detectScene(); if(sc){ const c = collectMaterialsFromScene(sc); if(c && c.length){ populateMatTarget(c); break; } }
       if(sTries++ > 60) break; await new Promise(r=> setTimeout(r, 250));
     }
@@ -1226,6 +1276,7 @@ onCanvasShiftPick(function(pos){
     const target = document.getElementById('mat-target'); const mk = target?.value || '';
     const s = materialsCache.get(keyOf(getActiveSheetId(), mk)) || DEFAULTS; writeUI(s); notifyApply(mk, s);
   }
+
   if(document.readyState === 'loading'){ document.addEventListener('DOMContentLoaded', bootOnce, { once:true }); } else { setTimeout(bootOnce, 0); }
   window.addEventListener('materials:refresh', ()=>{ bootOnce(); });
 })();
