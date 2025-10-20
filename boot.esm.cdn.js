@@ -1349,3 +1349,308 @@ onCanvasShiftPick(function(pos){
   log('overlay applied', window.__LM_MATERIALS_PATCH_APPLIED);
 })();
 // ===== end LM-PATCH-A6 =====
+
+// ===== LM-PATCH-A7 :: Materials module + live apply =====
+(function(){
+  if (window.__LM_MATERIALS_PATCH_APPLIED === 'LM-PATCH-A7') { console.log('[materials] already A7'); return; }
+  window.__LM_MATERIALS_PATCH_APPLIED = 'LM-PATCH-A7';
+
+  const MATERIALS_TITLE = 'materials';
+  const DEFAULTS = { unlit:false, doubleSided:false, opacity:1, white2alpha:false, whiteThr:0.92, black2alpha:false, blackThr:0.08 };
+  function log(...a){ try{ console.log('[materials]', ...a);}catch(_){} }
+  function warn(...a){ try{ console.warn('[materials]', ...a);}catch(_){} }
+
+  // ---- gid detection (very defensive) ----
+  function parseGidFromURL(){
+    try{
+      const u = new URL(location.href);
+      const g = u.searchParams.get('gid');
+      if(g && /^\d+$/.test(g)) return Number(g);
+    }catch(_){}
+    return 0;
+  }
+  function scanDOMForGid(){
+    const selectors = [
+      'nav select', '#save-target-sheet', '#sheet-select',
+      'select[name="sheet"]', 'select[data-role="sheet"]',
+      '[data-gid]', '[data-sheet-id]', '[data-sheetid]', '[data-id]',
+      'option[data-gid]:checked', 'option[data-sheet-id]:checked'
+    ];
+    for(const sel of selectors){
+      const nodes = document.querySelectorAll(sel);
+      for(const el of nodes){
+        // direct value
+        const v = (el.value || '').trim();
+        if(/^\d+$/.test(v)) return Number(v);
+        // scan dataset
+        const ds = el.dataset || {};
+        for(const k of Object.keys(ds)){
+          const dv = String(ds[k]||'').trim();
+          if(/^\d+$/.test(dv)) return Number(dv);
+        }
+        // inner text like "... (gid:123)"
+        const txt = (el.textContent || '').trim();
+        const m = txt.match(/\bgid[:=]\s*(\d+)\b/i);
+        if(m) return Number(m[1]);
+      }
+    }
+    return 0;
+  }
+  function getActiveSheetId(){
+    const g = window;
+    const urlGid = parseGidFromURL();
+    if(urlGid) return urlGid;
+    const cand = [g.currentSheetId, g.activeSheetId, g.sheetId, g.currentGid, g.currentSheetGid]
+      .find(v => (typeof v === 'number' && isFinite(v)) || (typeof v === 'string' && /^\d+$/.test(v)));
+    if(cand!=null) return Number(cand);
+    const dom = scanDOMForGid();
+    if(dom) return dom;
+    return 0; // fallback: spreadsheet-global
+  }
+
+  // ---- auth + sheets helpers ----
+  async function ensureAuth(){
+    try{ if(typeof window.ensureToken==='function'){ await window.ensureToken(); } }catch(e){ warn('ensureToken failed', e); }
+    if(typeof window.getAccessToken==='function'){ const t = await window.getAccessToken(); if(t) return t; }
+    warn('no token'); return null;
+  }
+  async function GV(ssid, range, token){
+    const r = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(ssid)}/values/${encodeURIComponent(range)}?majorDimension=ROWS`, {headers:{Authorization:'Bearer '+token}});
+    if(!r.ok) throw new Error('GV '+r.status);
+    const j = await r.json(); return j.values || [];
+  }
+  async function PV(ssid, range, rows, token){
+    const r = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(ssid)}/values/${encodeURIComponent(range)}?valueInputOption=RAW`, {
+      method:'PUT', headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'}, body: JSON.stringify({range,majorDimension:'ROWS',values:rows})
+    });
+    if(!r.ok){ const t=await r.text().catch(()=> ''); throw new Error('PV '+r.status+' '+t); }
+  }
+  async function AV(ssid, range, rows, token){
+    const r = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(ssid)}/values/${encodeURIComponent(range)}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`, {
+      method:'POST', headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'}, body: JSON.stringify({range,majorDimension:'ROWS',values:rows})
+    });
+    if(!r.ok){ const t=await r.text().catch(()=> ''); throw new Error('AV '+r.status+' '+t); }
+  }
+  async function ensureMaterialsSheet(ssid, token){
+    const headers = ['sheetId','materialKey','unlit','doubleSided','opacity','white2alpha','whiteThr','black2alpha','blackThr','updatedAt','updatedBy'];
+    try{
+      const v = await GV(ssid, "materials!A1:K1", token);
+      if(!v || !v.length || !(v[0]||[]).length){
+        await PV(ssid, "materials!A1:K1", [headers], token);
+      }
+    }catch(_){
+      const body = { requests:[{ addSheet:{ properties:{ title: 'materials' } } }] };
+      const url  = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(ssid)}:batchUpdate`;
+      const r    = await fetch(url, { method:'POST', headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'}, body: JSON.stringify(body)});
+      if(!r.ok){ const t=await r.text().catch(()=> ''); warn('addSheet fail', r.status, t); return false; }
+      await PV(ssid, "materials!A1:K1", [headers], token);
+    }
+    return true;
+  }
+
+  // ---- live apply to three.js ----
+  function getScene(){
+    return window.gltfScene || window.scene || (window.viewer && (window.viewer.scene || window.viewer.gltfScene)) || null;
+  }
+  function findTargets(materialKey){
+    const scene = getScene(); if(!scene || !scene.traverse) return [];
+    const targets=[];
+    scene.traverse(obj=>{
+      if(!obj || !obj.isMesh) return;
+      const meshName = obj.name || 'Mesh';
+      const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+      mats.forEach(mat=>{
+        const mName = mat?.name || 'Material';
+        const key = `${meshName}/${mName}`;
+        if(materialKey === 'GLOBAL' || key === materialKey){
+          targets.push({mesh: obj, mat});
+        }
+      });
+    });
+    return targets;
+  }
+  function toUnlit(mat){
+    const THREE = window.THREE; if(!THREE) return mat;
+    if(mat.userData && mat.userData._orig) return mat; // already swapped
+    const basic = new THREE.MeshBasicMaterial();
+    // copy essentials
+    ['map','color','alphaMap','transparent','opacity','side','name'].forEach(k=>{ if(mat[k] != null) basic[k]=mat[k]; });
+    mat.userData = mat.userData || {};
+    mat.userData._orig = mat;
+    return basic;
+  }
+  function fromUnlit(mat){
+    return (mat && mat.userData && mat.userData._orig) ? mat.userData._orig : mat;
+  }
+  function applyDiscardShader(mat, opts){
+    // shader patch: discard extreme white/black
+    mat.onBeforeCompile = (shader)=>{
+      let hdr = '';
+      if(opts.white2alpha){ hdr += `#define WHITE2ALPHA 1\n#define WHITE_THR ${Number(opts.whiteThr||0.92).toFixed(3)}\n`; }
+      if(opts.black2alpha){ hdr += `#define BLACK2ALPHA 1\n#define BLACK_THR ${Number(opts.blackThr||0.08).toFixed(3)}\n`; }
+      const frag = `
+        #ifdef WHITE2ALPHA
+        if(diffuseColor.r > WHITE_THR && diffuseColor.g > WHITE_THR && diffuseColor.b > WHITE_THR) discard;
+        #endif
+        #ifdef BLACK2ALPHA
+        if(diffuseColor.r < BLACK_THR && diffuseColor.g < BLACK_THR && diffuseColor.b < BLACK_THR) discard;
+        #endif
+      `;
+      shader.fragmentShader = hdr + shader.fragmentShader.replace('#include <dithering_fragment>', `${frag}\n#include <dithering_fragment>`);
+    };
+    mat.needsUpdate = true;
+  }
+  function applyTo(materialKey, settings){
+    const targets = findTargets(materialKey);
+    const THREE = window.THREE;
+    targets.forEach(({mesh, mat})=>{
+      let use = mat;
+      if(settings.unlit){
+        const u = toUnlit(mat);
+        if(u !== mat){
+          if(Array.isArray(mesh.material)){
+            const i = mesh.material.indexOf(mat); if(i>=0) mesh.material[i] = u;
+          }else { mesh.material = u; }
+          use = u;
+        }
+      }else{
+        const back = fromUnlit(mat);
+        if(back !== mat){
+          if(Array.isArray(mesh.material)){
+            const i = mesh.material.indexOf(mat); if(i>=0) mesh.material[i] = back;
+          }else { mesh.material = back; }
+          use = back;
+        }
+      }
+      use.transparent = (settings.opacity < 1);
+      use.opacity = Number(settings.opacity||1);
+      use.depthWrite = (use.opacity >= 1);
+      use.side = settings.doubleSided ? (THREE && THREE.DoubleSide || 2) : (THREE && THREE.FrontSide || 0);
+      applyDiscardShader(use, settings);
+    });
+  }
+
+  // ---- UI & save ----
+  function getVal(id){ return document.getElementById(id); }
+  function readUI(){
+    return {
+      materialKey: (getVal('mat-target')?.value || 'GLOBAL'),
+      unlit: !!getVal('mat-unlit')?.checked,
+      doubleSided: !!getVal('mat-doubleside')?.checked,
+      opacity: Number(getVal('mat-opacity')?.value ?? 1),
+      white2alpha: !!getVal('mat-white2alpha')?.checked,
+      whiteThr: Number(getVal('mat-white-thr')?.value ?? 0.92),
+      black2alpha: !!getVal('mat-black2alpha')?.checked,
+      blackThr: Number(getVal('mat-black-thr')?.value ?? 0.08),
+    };
+  }
+  async function saveNow(){
+    const ssid = window.currentSpreadsheetId || null;
+    const gid  = getActiveSheetId(); // may be 0 (spreadsheet-global)
+    if(!ssid){ warn('no spreadsheetId'); return; }
+    const token = await ensureAuth(); if(!token) return;
+    await ensureMaterialsSheet(ssid, token);
+    const s = readUI();
+    const now = new Date().toISOString();
+    const by  = (window.gapiUserEmail || 'unknown');
+    const row = [ gid||0, s.materialKey, s.unlit?1:0, s.doubleSided?1:0, s.opacity, s.white2alpha?1:0, s.whiteThr, s.black2alpha?1:0, s.blackThr, now, by ];
+    // simple upsert
+    let vals=[]; try{ vals = await GV(ssid, "materials!A1:K9999", token); }catch(e){}
+    const headers = (vals[0]||[]).map(x=> (x||'').toString().toLowerCase());
+    const iSheet = headers.indexOf('sheetid');
+    const iKey   = headers.indexOf('materialkey');
+    let updated=false;
+    for(let r=1;r<vals.length;r++){
+      const rr = vals[r]||[];
+      const s0 = Number(rr[iSheet]||0);
+      const k0 = String(rr[iKey]||'');
+      if(s0===(gid||0) && k0===s.materialKey){
+        const range = `materials!A${r+1}:K${r+1}`;
+        console.log('[materials] PV update', range, row);
+        await PV(ssid, range, [row], token);
+        updated=true; break;
+      }
+    }
+    if(!updated){
+      console.log('[materials] AV append', row);
+      await AV(ssid, "materials!A2:K9999", [row], token);
+    }
+    // live apply
+    applyTo(s.materialKey, s);
+    log('saved', {sheetId: gid||0, materialKey: s.materialKey});
+  }
+
+  function ensureMatTarget(){
+    const sel = document.getElementById('mat-target');
+    if(!sel) return false;
+    if(!sel.options || !sel.options.length){
+      const scene = getScene();
+      const cands=[];
+      if(scene && scene.traverse){
+        const set = new Map();
+        scene.traverse(obj=>{
+          if(!obj || !obj.isMesh) return;
+          const meshName = obj.name || 'Mesh';
+          const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+          mats.forEach(mat=>{
+            const mName = mat?.name || 'Material';
+            const key = `${meshName}/${mName}`;
+            if(!set.has(key)){ set.set(key, 1); cands.push({key, label:`${mName} — ${meshName}`}); }
+          });
+        });
+      }
+      // always include GLOBAL
+      cands.unshift({key:'GLOBAL', label:'GLOBAL (all materials)'});
+      sel.innerHTML = '';
+      cands.forEach(c=>{ const o=document.createElement('option'); o.value=c.key; o.textContent=c.label; sel.appendChild(o); });
+      sel.value = cands[0].key;
+      sel.dispatchEvent(new Event('change'));
+      console.log('[materials] mat-target populated', cands.length);
+    }
+    return true;
+  }
+
+  // wire events (poll until elements exist)
+  function wireOnce(){
+    if(wireOnce._done) return;
+    const ids = ['mat-target','mat-unlit','mat-doubleside','mat-opacity','mat-white2alpha','mat-white-thr','mat-black2alpha','mat-black-thr'];
+    let ok=0;
+    ids.forEach(id=>{
+      const el = document.getElementById(id);
+      if(!el) return;
+      el.addEventListener('input', ()=> saveNow());
+      el.addEventListener('change', ()=> saveNow());
+      ok++;
+    });
+    if(ok){ wireOnce._done = true; console.log('[materials] wired', ok); }
+  }
+  function boot(){
+    console.log('[materials] bootOnce');
+    // wait for spreadsheet & gid (but don't block forever)
+    let tries = 0;
+    const waitId = setInterval(()=>{
+      const gid = getActiveSheetId();
+      const ss  = window.currentSpreadsheetId || null;
+      tries++;
+      if(ss || tries>20){
+        clearInterval(waitId);
+        console.log('[materials] ids', { spreadsheet:ss, sheetId: gid, waited: tries });
+        // ensure target & wire
+        let t=0;
+        const poll = setInterval(()=>{
+          ensureMatTarget();
+          wireOnce();
+          if(wireOnce._done || t++>20) clearInterval(poll);
+        }, 250);
+      }
+    }, 250);
+  }
+
+  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded', boot, {once:true});
+  else setTimeout(boot, 0);
+
+  // external refresh
+  window.addEventListener('materials:refresh', ()=> setTimeout(()=>{ wireOnce._done=false; boot(); }, 50));
+
+})(); // end A7
+// ===== end LM-PATCH-A7 =====
