@@ -1065,104 +1065,18 @@ onCanvasShiftPick(function(pos){
   mo.observe(document.body, { childList:true, subtree:true });
   window.relocateCaptionBar = relocateCaptionBar;
 })();
-
-// ===== LociMyu Materials: mat-target population & scene discovery =====
-(function(){
-  function collectMaterialsFromScene(scene){
-    const out = [];
-    if(!scene || !scene.traverse) return out;
-    scene.traverse(obj=>{
-      try{
-        if(obj && obj.isMesh){
-          const meshName = obj.name || 'Mesh';
-          const pushOne = (mat)=>{
-            if(!mat) return;
-            const mName = mat.name || 'Material';
-            const key = `${meshName}/${mName}`;
-            const label = `${mName} — ${meshName}`;
-            out.push({ key, label });
-          };
-          if(Array.isArray(obj.material)){
-            obj.material.forEach(m=> pushOne(m));
-          }else{
-            pushOne(obj.material);
-          }
-        }
-      }catch(e){}
-    });
-    const uniq = new Map();
-    out.forEach(o=>{ if(o.key) uniq.set(o.key, o); });
-    return Array.from(uniq.values());
-  }
-  function populateMatTarget(cands){
-    const sel = document.getElementById('mat-target');
-    if(!sel) return false;
-    const prev = sel.value;
-    sel.innerHTML = '';
-    cands.forEach(c=>{
-      const opt = document.createElement('option');
-      opt.value = c.key;
-      opt.textContent = c.label;
-      sel.appendChild(opt);
-    });
-    if(prev && cands.some(c=>c.key===prev)) sel.value = prev;
-    else if (cands.length) sel.value = cands[0].key;
-    sel.dispatchEvent(new Event('change'));
-    return true;
-  }
-  function detectScene(){
-    const g = window;
-    return g.gltfScene || g.scene || (g.viewer && (g.viewer.scene || g.viewer.gltfScene)) || null;
-  }
-  window.materialsDiscoverFromScene = function(scene){
-    const c = collectMaterialsFromScene(scene);
-    if(c && c.length) populateMatTarget(c);
-  };
-  let pollCount = 0;
-  function pollPopulate(){
-    const scene = detectScene();
-    if(scene){
-      const c = collectMaterialsFromScene(scene);
-      if(c && c.length){
-        populateMatTarget(c);
-        pollCount = 0;
-        return;
-      }
-    }
-    if(pollCount++ < 20){ setTimeout(pollPopulate, 250); } else { pollCount = 0; }
-  }
-  window.addEventListener('viewer:gltf-loaded', (ev)=>{
-    const scene = ev?.detail?.scene || ev?.detail?.gltfScene || detectScene();
-    if(scene){
-      const c = collectMaterialsFromScene(scene);
-      if(c && c.length) populateMatTarget(c);
-    }
-  });
-  const mo = new MutationObserver(()=>{
-    const tab = document.body.getAttribute('data-active-tab');
-    if(tab==='material'){ pollCount = 0; pollPopulate(); }
-  });
-  mo.observe(document.body, { attributes:true, attributeFilter:['data-active-tab'] });
-  if(document.readyState === 'loading'){
-    document.addEventListener('DOMContentLoaded', ()=>{ if(document.body.getAttribute('data-active-tab')==='material') pollPopulate(); }, { once:true });
-  } else {
-    if(document.body.getAttribute('data-active-tab')==='material') pollPopulate();
-  }
-})();
-// ===== end mat-target population =====
-
-(function(){
-  async function materialsEarlyInit(){
-    try{
-      if(typeof ensureMaterialsIndex === 'function'){
-        await ensureToken();
-        await ensureMaterialsIndex();
-      }
-    }catch(e){ console.warn('[materials] early init failed', e); }
-  }
-  const mo = new MutationObserver(()=>{
-    const tab = document.body.getAttribute('data-active-tab');
-    if(tab==='material'){ materialsEarlyInit(); }
-  });
-  mo.observe(document.body, { attributes:true, attributeFilter:['data-active-tab'] });
-})();
+// ---- helper: robust active sheetId(gid) detection ----
+function getActiveSheetId(){
+  const g = window;
+  const cand = [
+    g.currentSheetId, g.activeSheetId, g.sheetId, g.currentGid, g.currentSheetGid
+  ].find(v => (typeof v === 'number' && isFinite(v)) || (typeof v === 'string' && /^\d+$/.test(v)));
+  if(cand!=null) return Number(cand);
+  try{
+    const sel = document.querySelector('nav select, #sheet-select, select[name="sheet"], select[data-role="sheet"]');
+    if(sel && sel.value && /^\d+$/.test(sel.value)) return Number(sel.value);
+    const any = document.querySelector('select option:checked');
+    if(any && /^\d+$/.test(any.value)) return Number(any.value);
+  }catch(e){}
+  return 0;
+}
