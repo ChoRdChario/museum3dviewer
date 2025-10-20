@@ -1065,3 +1065,287 @@ onCanvasShiftPick(function(pos){
   mo.observe(document.body, { childList:true, subtree:true });
   window.relocateCaptionBar = relocateCaptionBar;
 })();
+
+// ===== LM-PATCH-A6 :: Materials module appended =====
+// Self-contained: creates/reads 'materials' sheet, populates #mat-target, saves UI changes.
+// Does not depend on top-level functions being on window; uses fetch fallbacks.
+// Safe to include multiple times (boot guard).
+
+(function(){
+  if (window.__LM_MATERIALS_PATCH_APPLIED) {
+    console.debug('[materials] overlay already applied');
+    return;
+  }
+  window.__LM_MATERIALS_PATCH_APPLIED = 'LM-PATCH-A6';
+
+  const MATERIALS_TITLE = 'materials';
+  const DEFAULTS = { unlit:false, doubleSided:false, opacity:1, white2alpha:false, whiteThr:0.92, black2alpha:false, blackThr:0.08 };
+
+  // --- helpers ---
+  function log(...a){ try{ console.log('[materials]', ...a); }catch(_){} }
+  function warn(...a){ try{ console.warn('[materials]', ...a); }catch(_){} }
+
+  // spreadsheet id & active sheet id detection (works with existing tabs UI)
+  function getActiveSheetId(){
+    const g = window;
+    const cand = [g.currentSheetId, g.activeSheetId, g.sheetId, g.currentGid, g.currentSheetGid]
+      .find(v => (typeof v === 'number' && isFinite(v)) || (typeof v === 'string' && /^\d+$/.test(v)));
+    if(cand!=null) return Number(cand);
+    try{
+      const sel = document.querySelector('nav select, #save-target-sheet, #sheet-select, select[name="sheet"], select[data-role="sheet"]');
+      if(sel && sel.value && /^\d+$/.test(sel.value)) return Number(sel.value);
+      const any = document.querySelector('select option:checked');
+      if(any && /^\d+$/.test(any.value)) return Number(any.value);
+    }catch(e){}
+    return 0;
+  }
+  async function ensureAuth(){
+    try{
+      // our boot defines ensureToken() that throws when missing
+      if (typeof window.ensureToken === 'function'){ window.ensureToken(); }
+    }catch(e){ throw e; }
+    if (typeof window.getAccessToken === 'function'){
+      const t = window.getAccessToken();
+      if (t && typeof t === 'string') return t;
+    }
+    throw new Error('no_token');
+  }
+  async function GV(ssid, rangeA1, token){
+    const url = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(ssid)}/values/${encodeURIComponent(rangeA1)}?majorDimension=ROWS`;
+    const r = await fetch(url, { headers:{ Authorization:'Bearer '+token } });
+    if(!r.ok) throw new Error('values.get '+r.status);
+    const j = await r.json(); return j.values||[];
+  }
+  async function PV(ssid, rangeA1, rows, token){
+    const url = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(ssid)}/values/${encodeURIComponent(rangeA1)}?valueInputOption=RAW`;
+    const body = { range: rangeA1, majorDimension:'ROWS', values: rows };
+    const r = await fetch(url, { method:'PUT', headers:{ Authorization:'Bearer '+token, 'Content-Type':'application/json' }, body: JSON.stringify(body) });
+    if(!r.ok){ const t = await r.text().catch(()=> ''); throw new Error('values.update '+r.status+' '+t); }
+  }
+  async function AV(ssid, rangeA1, rows, token){
+    const url = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(ssid)}/values/${encodeURIComponent(rangeA1)}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`;
+    const body = { range: rangeA1, majorDimension:'ROWS', values: rows };
+    const r = await fetch(url, { method:'POST', headers:{ Authorization:'Bearer '+token, 'Content-Type':'application/json' }, body: JSON.stringify(body) });
+    if(!r.ok){ const t = await r.text().catch(()=> ''); throw new Error('values.append '+r.status+' '+t); }
+  }
+
+  const idxMap = new Map();  // "sheetId::matKey" -> { rowIndex }
+  const cache  = new Map();  // same key -> settings object
+  const K = (sid, key)=> `${sid}::${key}`;
+
+  async function ensureMaterialsSheet(token){
+    const ssid = window.currentSpreadsheetId;
+    if(!ssid) return false;
+    const headers = ['sheetId','materialKey','unlit','doubleSided','opacity','white2alpha','whiteThr','black2alpha','blackThr','updatedAt','updatedBy'];
+    try{
+      // try read header
+      const vals = await GV(ssid, `'${MATERIALS_TITLE}'!A1:K1`, token);
+      if(!vals || !vals.length || !(vals[0]||[]).length){
+        await PV(ssid, `'${MATERIALS_TITLE}'!A1:K1`, [headers], token);
+      }
+      return true;
+    }catch(_e){
+      // create sheet then write header
+      const body = { requests:[{ addSheet:{ properties:{ title: MATERIALS_TITLE } } }] };
+      const url  = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(ssid)}:batchUpdate`;
+      const r = await fetch(url, { method:'POST', headers:{ Authorization:'Bearer '+token, 'Content-Type':'application/json' }, body: JSON.stringify(body) });
+      if(!r.ok){ const t = await r.text().catch(()=> ''); warn('addSheet failed', r.status, t); return false; }
+      await PV(ssid, `'${MATERIALS_TITLE}'!A1:K1`, [headers], token);
+      return true;
+    }
+  }
+
+  async function ensureIndex(){
+    idxMap.clear(); cache.clear();
+    const token = await ensureAuth().catch(()=>null);
+    const ssid  = window.currentSpreadsheetId;
+    const sid   = getActiveSheetId();
+    if(!token || !ssid || !sid) return false;
+    const ok = await ensureMaterialsSheet(token);
+    if(!ok) return false;
+    const values = await GV(ssid, `'${MATERIALS_TITLE}'!A1:K9999`, token).catch(e=>{ warn('GV failed', e); return []; });
+    if(!values || !values.length) return true;
+    const headers = values[0].map(v => (v||'').toString().trim());
+    const idx = {}; headers.forEach((h,i)=> idx[h.toLowerCase()] = i);
+    const iSheetId = idx['sheetid'], iKey = idx['materialkey'];
+    for(let r=1;r<values.length;r++){
+      const row = values[r]||[]; const s = Number(row[iSheetId]||0); const mkey = (row[iKey]||'').toString();
+      if(!s || !mkey) continue;
+      const key = K(s, mkey);
+      idxMap.set(key, { rowIndex: r+1 });
+      function getB(name, def){ const i=idx[name]; if(i==null) return def; const v=row[i]; return (String(v).trim()==='1'||String(v).toLowerCase()==='true'); }
+      function getN(name, def){ const i=idx[name]; if(i==null) return def; const n=Number(row[i]); return isFinite(n)?n:def; }
+      cache.set(key, {
+        unlit: getB('unlit', false),
+        doubleSided: getB('doublesided', false),
+        opacity: getN('opacity', 1),
+        white2alpha: getB('white2alpha', false),
+        whiteThr: getN('whitethr', 0.92),
+        black2alpha: getB('black2alpha', false),
+        blackThr: getN('blackthr', 0.08),
+      });
+    }
+    return true;
+  }
+
+  async function upsertSheetRow(sheetId, materialKey, settings){
+    const token = await ensureAuth();
+    const ssid  = window.currentSpreadsheetId;
+    const key = K(sheetId, materialKey);
+    const now = new Date().toISOString();
+    const by  = (window.gapiUserEmail || 'unknown');
+    const row = [ sheetId, materialKey,
+      settings.unlit?1:0, settings.doubleSided?1:0, settings.opacity,
+      settings.white2alpha?1:0, settings.whiteThr, settings.black2alpha?1:0, settings.blackThr,
+      now, by
+    ];
+    const hit = idxMap.get(key);
+    if(hit && hit.rowIndex){
+      const range = `'${MATERIALS_TITLE}'!A${hit.rowIndex}:K${hit.rowIndex}`;
+      await PV(ssid, range, [row], token);
+    }else{
+      await AV(ssid, `'${MATERIALS_TITLE}'!A2:K9999`, [row], token);
+      await ensureIndex();
+    }
+    cache.set(key, { ...settings });
+    log('saved', { sheetId, materialKey });
+  }
+
+  // scene/materials discovery
+  function detectScene(){ return window.gltfScene || window.scene || (window.viewer && (window.viewer.scene || window.viewer.gltfScene)) || null; }
+  function collectCands(scene){
+    const out=[]; if(!scene||!scene.traverse) return out;
+    scene.traverse(obj=>{
+      try{
+        if(obj && obj.isMesh){
+          const meshName = obj.name || 'Mesh';
+          const pushOne = (mat)=>{
+            if(!mat) return;
+            const mName = mat.name || 'Material';
+            const key   = `${meshName}/${mName}`;
+            const label = `${mName} — ${meshName}`;
+            out.push({ key, label });
+          };
+          if(Array.isArray(obj.material)) obj.material.forEach(pushOne); else pushOne(obj.material);
+        }
+      }catch(_){}
+    });
+    const uniq = new Map(); out.forEach(o=> uniq.set(o.key, o));
+    const arr = Array.from(uniq.values());
+    if(!arr.length) arr.push({ key:'GLOBAL', label:'GLOBAL (all materials)' });
+    return arr;
+  }
+  function populateTarget(cands){
+    const sel = document.getElementById('mat-target'); if(!sel) return false;
+    const prev = sel.value; sel.innerHTML='';
+    cands.forEach(c=>{ const opt=document.createElement('option'); opt.value=c.key; opt.textContent=c.label; sel.appendChild(opt); });
+    if(prev && cands.some(c=>c.key===prev)) sel.value=prev; else if(cands.length) sel.value=cands[0].key;
+    sel.dispatchEvent(new Event('change'));
+    return true;
+  }
+
+  function readUI(){
+    const get = (id)=> document.getElementById(id);
+    const v = {
+      materialKey: (get('mat-target')?.value || ''),
+      unlit: !!get('mat-unlit')?.checked,
+      doubleSided: !!get('mat-doubleside')?.checked,
+      opacity: Number(get('mat-opacity')?.value ?? 1),
+      white2alpha: !!get('mat-white2alpha')?.checked,
+      whiteThr: Number(get('mat-white-thr')?.value ?? 0.92),
+      black2alpha: !!get('mat-black2alpha')?.checked,
+      blackThr: Number(get('mat-black-thr')?.value ?? 0.08),
+    };
+    return v;
+  }
+  function writeUI(s){
+    const set=(id,fn)=>{ const el=document.getElementById(id); if(el) fn(el); };
+    set('mat-unlit', el=> el.checked = !!s.unlit);
+    set('mat-doubleside', el=> el.checked = !!s.doubleSided);
+    set('mat-opacity', el=> el.value = Number(s.opacity ?? 1));
+    set('mat-white2alpha', el=> el.checked = !!s.white2alpha);
+    set('mat-white-thr', el=> el.value = Number(s.whiteThr ?? 0.92));
+    set('mat-black2alpha', el=> el.checked = !!s.black2alpha);
+    set('mat-black-thr', el=> el.value = Number(s.blackThr ?? 0.08));
+    const wOut = document.getElementById('mat-white-thr-val'); if(wOut) wOut.textContent = String((s.whiteThr ?? 0.92).toFixed(2));
+    const bOut = document.getElementById('mat-black-thr-val'); if(bOut) bOut.textContent = String((s.blackThr ?? 0.08).toFixed(2));
+  }
+
+  function notifyApply(materialKey, settings){
+    try{
+      const detail = { materialKey, settings, sheetId: getActiveSheetId() };
+      window.dispatchEvent(new CustomEvent('materials:apply', { detail }));
+      if(typeof window.materialsApplyHook === 'function'){ window.materialsApplyHook(detail); }
+    }catch(_){}
+  }
+
+  function onUIChanged(){
+    const s = readUI();
+    if(!s.materialKey) return;
+    const merged = Object.assign({}, DEFAULTS, s);
+    const key = K(getActiveSheetId(), s.materialKey);
+    cache.set(key, merged);
+    notifyApply(s.materialKey, merged);
+    if(onUIChanged._t) clearTimeout(onUIChanged._t);
+    onUIChanged._t = setTimeout(()=>{
+      upsertSheetRow(getActiveSheetId(), s.materialKey, merged).catch(e=> warn('save failed', e));
+    }, 220);
+  }
+  function wireUI(){
+    const ids = ['mat-target','mat-unlit','mat-doubleside','mat-opacity','mat-white2alpha','mat-white-thr','mat-black2alpha','mat-black-thr'];
+    ids.forEach(id=>{
+      const el = document.getElementById(id); if(!el) return;
+      el.addEventListener(el.tagName==='SELECT'?'change':'input', onUIChanged);
+    });
+    const r1 = document.getElementById('mat-reset-one');
+    const rAll = document.getElementById('mat-reset-all');
+    if(r1) r1.addEventListener('click', ()=>{ writeUI(DEFAULTS); onUIChanged(); });
+    if(rAll) rAll.addEventListener('click', ()=>{ writeUI(DEFAULTS); onUIChanged(); });
+  }
+
+  async function bootOnce(){
+    if(bootOnce._done) return;
+    bootOnce._done = true;
+    log('bootOnce');
+
+    // wait spreadsheet & active gid
+    let tries=0;
+    while((!window.currentSpreadsheetId || !getActiveSheetId()) && tries<60){
+      await new Promise(r=> setTimeout(r, 250)); tries++;
+    }
+    log('ids', { spreadsheet: window.currentSpreadsheetId||null, sheetId: getActiveSheetId(), waited: tries });
+
+    await ensureIndex();
+
+    // collect materials after GLB is attached
+    let sTries=0;
+    while(true){
+      const sc = detectScene();
+      const cands = collectCands(sc);
+      if(cands && cands.length){
+        populateTarget(cands);
+        break;
+      }
+      if(sTries++ > 60) { populateTarget([{ key:'GLOBAL', label:'GLOBAL (all materials)' }]); break; }
+      await new Promise(r=> setTimeout(r, 250));
+    }
+
+    wireUI();
+
+    // set UI from cache if exists
+    const mk = (document.getElementById('mat-target')?.value || 'GLOBAL');
+    const key = K(getActiveSheetId(), mk);
+    writeUI(cache.get(key) || DEFAULTS);
+    notifyApply(mk, cache.get(key) || DEFAULTS);
+  }
+
+  // bootstrap
+  if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', bootOnce, { once:true });
+  else setTimeout(bootOnce, 0);
+
+  // external trigger
+  window.addEventListener('materials:refresh', ()=> setTimeout(bootOnce, 0));
+
+  log('overlay applied', window.__LM_MATERIALS_PATCH_APPLIED);
+})();
+// ===== end LM-PATCH-A6 =====
