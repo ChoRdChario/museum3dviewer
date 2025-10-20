@@ -1065,17 +1065,10 @@ onCanvasShiftPick(function(pos){
   mo.observe(document.body, { childList:true, subtree:true });
   window.relocateCaptionBar = relocateCaptionBar;
 })();
-
-/* LM-PATCH-B1 materials */
+// ===== LociMyu Materials: Self-contained module (GV/PV/AV fallbacks, robust init) =====
 (function(){
-  const LOGTAG = '[materials]';
   const MATERIALS_SHEET_TITLE = 'materials';
   const DEFAULTS = { unlit:false, doubleSided:false, opacity:1, white2alpha:false, whiteThr:0.92, black2alpha:false, blackThr:0.08 };
-  const mark = 'LM-PATCH-B1';
-  try{ console.log(LOGTAG, 'overlay applied', mark); }catch(e){}
-
-  // ---- small helpers ----
-  const sleep = (ms)=> new Promise(r=> setTimeout(r, ms));
   function getActiveSheetId(){
     const g = window;
     const cand = [g.currentSheetId, g.activeSheetId, g.sheetId, g.currentGid, g.currentSheetGid]
@@ -1093,109 +1086,55 @@ onCanvasShiftPick(function(pos){
     if(typeof window.getAccessToken === 'function') return window.getAccessToken();
     return null;
   }
-
-  // ---- Rate-limited fetch wrappers (queue + backoff) ----
-  const q = [];
-  let inflight = 0;
-  const MIN_INTERVAL = 250;
-  let lastAt = 0;
-  async function runTask(fn, label){
-    for(let attempt=0; attempt<5; attempt++){
-      // gate by single-flight and min interval
-      while(inflight>0 || (Date.now()-lastAt)<MIN_INTERVAL){ await sleep(50); }
-      inflight++; try{
-        const r = await fn();
-        lastAt = Date.now();
-        return r;
-      }catch(e){
-        const status = (e && e.status) || (e && e.code) || 0;
-        const text = (e && e.message) || (e && e.toString());
-        if((status===429) || (text && /quota|exhausted|Too Many Requests/i.test(text))){
-          const backoff = Math.min(2000, 200 * (attempt+1));
-          console.warn(LOGTAG, 'rate-limit, backoff', backoff, 'ms');
-          await sleep(backoff);
-          continue;
-        }
-        throw e;
-      } finally { inflight = 0; }
-    }
-    throw new Error('rate limit retries exceeded');
-  }
-  async function GET(url, token){
-    return runTask(async ()=>{
-      const r = await fetch(url, { headers:{ Authorization: 'Bearer '+token }});
-      if(!r.ok){ const t = await r.text().catch(()=> ''); const err = new Error(t||('HTTP '+r.status)); err.status=r.status; throw err; }
-      return r.json();
-    }, 'GET');
-  }
-  async function PUT(url, body, token){
-    return runTask(async ()=>{
-      const r = await fetch(url, { method:'PUT', headers:{ Authorization: 'Bearer '+token, 'Content-Type':'application/json' }, body: JSON.stringify(body)});
-      if(!r.ok){ const t = await r.text().catch(()=> ''); const err = new Error(t||('HTTP '+r.status)); err.status=r.status; throw err; }
-      return r.json().catch(()=> ({}));
-    }, 'PUT');
-  }
-  async function POST(url, body, token){
-    return runTask(async ()=>{
-      const r = await fetch(url, { method:'POST', headers:{ Authorization: 'Bearer '+token, 'Content-Type':'application/json' }, body: JSON.stringify(body)});
-      if(!r.ok){ const t = await r.text().catch(()=> ''); const err = new Error(t||('HTTP '+r.status)); err.status=r.status; throw err; }
-      return r.json().catch(()=> ({}));
-    }, 'POST');
-  }
-
-  // ---- Sheets helpers (GV / PV / AV) ----
-  const GV = async (ssid, range, token)=> {
+  const GV = (typeof window.getValues === 'function') ? window.getValues : async function(ssid, range, token){
     const url = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(ssid)}/values/${encodeURIComponent(range)}?majorDimension=ROWS`;
-    return GET(url, token).then(j => j.values || []);
+    const r = await fetch(url, { headers:{ Authorization: `Bearer ${token}` } }); if(!r.ok) throw new Error(`getValues ${r.status}`);
+    const j = await r.json(); return j.values || [];
   };
-  const PV = async (ssid, range, rows, token)=> {
+  const PV = (typeof window.putValues === 'function') ? window.putValues : async function(ssid, range, rows, token){
     const url = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(ssid)}/values/${encodeURIComponent(range)}?valueInputOption=RAW`;
-    const body = { range, majorDimension:'ROWS', values: rows };
-    return PUT(url, body, token);
+    const body = { range, majorDimension: "ROWS", values: rows };
+    const r = await fetch(url, { method:"PUT", headers:{ Authorization:`Bearer ${token}`, "Content-Type":"application/json" }, body: JSON.stringify(body) });
+    if(!r.ok){ const t = await r.text().catch(()=> ''); throw new Error(`putValues ${r.status} ${t}`); }
   };
-  const AV = async (ssid, range, rows, token)=> {
+  const AV = (typeof window.appendValues === 'function') ? window.appendValues : async function(ssid, range, rows, token){
     const url = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(ssid)}/values/${encodeURIComponent(range)}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`;
-    const body = { range, majorDimension:'ROWS', values: rows };
-    return POST(url, body, token);
+    const body = { range, majorDimension: "ROWS", values: rows };
+    const r = await fetch(url, { method:"POST", headers:{ Authorization:`Bearer ${token}`, "Content-Type":"application/json" }, body: JSON.stringify(body) });
+    if(!r.ok){ const t = await r.text().catch(()=> ''); throw new Error(`appendValues ${r.status} ${t}`); }
   };
-
-  const materialsIndex = new Map();
-  const materialsCache = new Map();
-  const keyOf = (sid, key)=> `${sid}::${key}`;
-
+  const materialsIndex = new Map(); const materialsCache = new Map();
+  function keyOf(sheetId, materialKey){ return `${sheetId}::${materialKey}`; }
   async function ensureMaterialsSheet(token){
     const ssid = window.currentSpreadsheetId; if(!ssid) return false;
     const headers = ['sheetId','materialKey','unlit','doubleSided','opacity','white2alpha','whiteThr','black2alpha','blackThr','updatedAt','updatedBy'];
     try{
-      // If header row is missing, write; if 400, create then write
-      const vals = await GV(ssid, `${MATERIALS_SHEET_TITLE}!A1:K1`, token).catch(async (e)=>{
-        const body = { requests:[{ addSheet:{ properties:{ title: MATERIALS_SHEET_TITLE } } }] };
-        const url  = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(ssid)}:batchUpdate`;
-        try { await POST(url, body, token); } catch(err){ /* ignore if already exists or rate-limited */ }
-        return GV(ssid, `${MATERIALS_SHEET_TITLE}!A1:K1`, token).catch(()=> []);
-      });
-      if(!vals || !vals.length || !(vals[0]||[]).length){
-        await PV(ssid, `${MATERIALS_SHEET_TITLE}!A1:K1`, [headers], token);
+      try{
+        const vals = await GV(ssid, "'materials'!A1:K1", token);
+        if(!vals || !vals.length || !(vals[0]||[]).length){ await PV(ssid, "'materials'!A1:K1", [headers], token); }
+      }catch(e){
+        const body = { requests:[{ addSheet:{ properties:{ title: 'materials' } } }] };
+        const url = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(ssid)}:batchUpdate`;
+        const r = await fetch(url, { method:'POST', headers:{ Authorization:'Bearer '+token, 'Content-Type':'application/json' }, body: JSON.stringify(body) });
+        if(!r.ok){ const t = await r.text().catch(()=> ''); throw new Error('addSheet '+r.status+' '+t); }
+        await PV(ssid, "'materials'!A1:K1", [headers], token);
       }
       return true;
-    }catch(err){ console.warn(LOGTAG, 'ensureMaterialsSheet error', err); return false; }
+    }catch(err){ console.warn('[materials] ensureMaterialsSheet error', err); return false; }
   }
-
   async function ensureMaterialsIndex(){
     materialsIndex.clear(); materialsCache.clear();
     const token = await ensureAuth(); const ssid = window.currentSpreadsheetId; const sid = getActiveSheetId();
     if(!token || !ssid || !sid) return false;
     const ok = await ensureMaterialsSheet(token); if(!ok) return false;
     try{
-      const values = await GV(ssid, `${MATERIALS_SHEET_TITLE}!A1:K9999`, token);
+      const values = await GV(ssid, "'materials'!A1:K9999", token);
       if(!values || !values.length) return true;
       const headers = values[0].map(v => (v||'').toString().trim()); const idx = {}; headers.forEach((h,i)=> idx[h.toLowerCase()] = i);
       const iSheetId = idx['sheetid'], iKey = idx['materialkey'];
       for(let r=1;r<values.length;r++){
         const row = values[r]||[]; const s = Number(row[iSheetId]||0); const mkey = (row[iKey]||'').toString();
-        if(!s && s!==0) continue; if(!mkey) continue;
-        const k = keyOf(s, mkey);
-        materialsIndex.set(k, { rowIndex: r+1 });
+        if(!s || !mkey) continue; const k = keyOf(s, mkey); materialsIndex.set(k, { rowIndex: r+1 });
         const getN = (name, def)=>{ const i = idx[name]; if(i==null) return def; const v = row[i];
           if(name.endsWith('alpha') || name.endsWith('sided') || name==='unlit'){ return (String(v).trim()==='1' || String(v).toLowerCase()==='true'); }
           const n = Number(v); return (isFinite(n)? n : def);
@@ -1204,28 +1143,25 @@ onCanvasShiftPick(function(pos){
           white2alpha:getN('white2alpha',false), whiteThr:getN('whitethr',0.92), black2alpha:getN('black2alpha',false), blackThr:getN('blackthr',0.08) });
       }
       return true;
-    }catch(e){ console.warn(LOGTAG, 'ensureMaterialsIndex read error', e); return false; }
+    }catch(e){ console.warn('[materials] ensureMaterialsIndex read error', e); return false; }
   }
-
   async function upsertMaterialRow(sheetId, materialKey, s){
     const token = await ensureAuth(); if(!token) return false; const ssid = window.currentSpreadsheetId; const key = keyOf(sheetId, materialKey);
     const now = new Date().toISOString(); const user = (window.gapiUserEmail || 'unknown');
     const row = [ sheetId, materialKey, s.unlit?1:0, s.doubleSided?1:0, s.opacity, s.white2alpha?1:0, s.whiteThr, s.black2alpha?1:0, s.blackThr, now, user ];
-    const idx = materialsIndex.get(key);
-    if(idx && idx.rowIndex){ const range = `${MATERIALS_SHEET_TITLE}!A${idx.rowIndex}:K${idx.rowIndex}`; await PV(ssid, range, [row], token); }
-    else { await AV(ssid, `${MATERIALS_SHEET_TITLE}!A2:K9999`, [row], token); await ensureMaterialsIndex(); }
+    const idxEntry = materialsIndex.get(key);
+    if(idxEntry && idxEntry.rowIndex){ const range = `'materials'!A${idxEntry.rowIndex}:K${idxEntry.rowIndex}`; await PV(ssid, range, [row], token); }
+    else { await AV(ssid, "'materials'!A2:K9999", [row], token); await ensureMaterialsIndex(); }
     materialsCache.set(key, { ...s }); return true;
   }
-
   function notifyApply(materialKey, settings){
     try{ const detail = { materialKey, settings, sheetId: getActiveSheetId() };
       window.dispatchEvent(new CustomEvent('materials:apply', { detail }));
       if(typeof window.materialsApplyHook === 'function'){ window.materialsApplyHook(detail); }
     }catch(e){}
   }
-
   function readUI(){
-    const target = document.getElementById('mat-target'); const materialKey = target?.value || 'GLOBAL';
+    const target = document.getElementById('mat-target'); const materialKey = target?.value || '';
     return { materialKey,
       unlit: !!document.getElementById('mat-unlit')?.checked,
       doubleSided: !!document.getElementById('mat-doubleside')?.checked,
@@ -1248,24 +1184,11 @@ onCanvasShiftPick(function(pos){
     const wOut = document.getElementById('mat-white-thr-val'); if(wOut) wOut.textContent = String((s.whiteThr ?? 0.92).toFixed(2));
     const bOut = document.getElementById('mat-black-thr-val'); if(bOut) bOut.textContent = String((s.blackThr ?? 0.08).toFixed(2));
   }
-
-  // Debounced saver
-  let saveTimer = null;
-  function scheduleSave(){
-    if(saveTimer) clearTimeout(saveTimer);
-    saveTimer = setTimeout(async ()=>{
-      const s = readUI(); if(!s.materialKey) return;
-      const merged = { ...DEFAULTS, ...s };
-      await upsertMaterialRow(getActiveSheetId(), s.materialKey, merged).catch(()=>{});
-      console.log(LOGTAG, 'saved', {sheetId:getActiveSheetId(), materialKey:s.materialKey});
-    }, 600);
-  }
-
   function onUIChanged(){
     const s = readUI(); if(!s.materialKey) return; const merged = { ...DEFAULTS, ...s };
-    materialsCache.set(keyOf(getActiveSheetId(), s.materialKey), merged);
-    notifyApply(s.materialKey, merged);
-    scheduleSave();
+    materialsCache.set(keyOf(getActiveSheetId(), s.materialKey), merged); notifyApply(s.materialKey, merged);
+    if(onUIChanged._t) clearTimeout(onUIChanged._t);
+    onUIChanged._t = setTimeout(()=> upsertMaterialRow(getActiveSheetId(), s.materialKey, merged).catch(()=>{}), 200);
   }
   function wireUI(){
     const ids = ['mat-target','mat-unlit','mat-doubleside','mat-opacity','mat-white2alpha','mat-white-thr','mat-black2alpha','mat-black-thr'];
@@ -1274,10 +1197,8 @@ onCanvasShiftPick(function(pos){
     if(r1) r1.addEventListener('click', ()=>{ writeUI(DEFAULTS); onUIChanged(); });
     if(r2) r2.addEventListener('click', ()=>{ writeUI(DEFAULTS); onUIChanged(); });
   }
-
   function collectMaterialsFromScene(scene){
-    const out = [{ key:'GLOBAL', label:'GLOBAL — (all materials)'}];
-    if(!scene || !scene.traverse) return out;
+    const out = []; if(!scene || !scene.traverse) return out;
     scene.traverse(obj=>{ try{
       if(obj && obj.isMesh){ const meshName = obj.name || 'Mesh';
         const pushOne = (mat)=>{ if(!mat) return; const mName = mat.name || 'Material'; const key = `${meshName}/${mName}`; const label = `${mName} — ${meshName}`; out.push({ key, label }); };
@@ -1285,30 +1206,27 @@ onCanvasShiftPick(function(pos){
       }}catch(e){} });
     const uniq = new Map(); out.forEach(o=>{ if(o.key) uniq.set(o.key, o); }); return Array.from(uniq.values());
   }
-  function detectScene(){ const g = window; return g.gltfScene || g.scene || (g.viewer && (g.viewer.scene || g.viewer.gltfScene)) || null; }
-
-  function populateTarget(){
-    const sel = document.getElementById('mat-target'); if(!sel) return;
-    const sc = detectScene(); const list = collectMaterialsFromScene(sc);
-    sel.innerHTML = '';
-    list.forEach(c=>{ const opt = document.createElement('option'); opt.value = c.key; opt.textContent = c.label; sel.appendChild(opt); });
-    sel.value = 'GLOBAL';
+  function populateMatTarget(cands){
+    const sel = document.getElementById('mat-target'); if(!sel) return false; const prev = sel.value; sel.innerHTML = '';
+    cands.forEach(c=>{ const opt = document.createElement('option'); opt.value = c.key; opt.textContent = c.label; sel.appendChild(opt); });
+    if(prev && cands.some(c=>c.key===prev)) sel.value = prev; else if (cands.length) sel.value = cands[0].key;
+    sel.dispatchEvent(new Event('change')); return true;
   }
-
+  function detectScene(){ const g = window; return g.gltfScene || g.scene || (g.viewer && (g.viewer.scene || g.viewer.gltfScene)) || null; }
   async function bootOnce(){
     if(bootOnce._done) return; bootOnce._done = true;
-    console.log(LOGTAG, 'bootOnce');
-    // Wait spreadsheetId & gid
-    let tries = 0; while((!window.currentSpreadsheetId || getActiveSheetId()===0) && tries < 60){ await sleep(250); tries++; }
-    console.log(LOGTAG, 'ids', { spreadsheet: window.currentSpreadsheetId, sheetId: getActiveSheetId(), waited: tries });
+    let tries = 0; while((!window.currentSpreadsheetId || !getActiveSheetId()) && tries < 60){ await new Promise(r=> setTimeout(r, 250)); tries++; }
     await ensureMaterialsIndex();
-    populateTarget();
+    // populate target
+    let sTries = 0; while(true){
+      const sc = detectScene(); if(sc){ const c = collectMaterialsFromScene(sc); if(c && c.length){ populateMatTarget(c); break; } }
+      if(sTries++ > 60) break; await new Promise(r=> setTimeout(r, 250));
+    }
     wireUI();
-    const target = document.getElementById('mat-target'); const mk = target?.value || 'GLOBAL';
+    const target = document.getElementById('mat-target'); const mk = target?.value || '';
     const s = materialsCache.get(keyOf(getActiveSheetId(), mk)) || DEFAULTS; writeUI(s); notifyApply(mk, s);
   }
-
   if(document.readyState === 'loading'){ document.addEventListener('DOMContentLoaded', bootOnce, { once:true }); } else { setTimeout(bootOnce, 0); }
   window.addEventListener('materials:refresh', ()=>{ bootOnce(); });
 })();
-/* end LM-PATCH-B1 */
+// ===== end LociMyu Materials =====
