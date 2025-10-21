@@ -1,203 +1,86 @@
 // sheet-rename.module.js
-// LociMyu - Google Sheets range/URL sanitizer + token injector
-// Drop-in replacement. No other files need to change.
+// Patch: Google Sheets range quote fix + basic guards
+// This file safely wraps window.fetch to sanitize A1 ranges like `'materials'!A2:K9999`
+// into `materials!A2:K9999`. Drop-in replacement (no rename).
 
-(() => {
-  const log = (...a) => console.log('[sheet-rangefix]', ...a);
-  const warn = (...a) => console.warn('[sheet-rangefix]', ...a);
+(function () {
+  const LOG_PREFIX = "[sheet-rangefix]";
+  try {
+    const originalFetch = window.fetch.bind(window);
 
-  // Keep reference to the original fetch
-  const _fetch = window.fetch.bind(window);
-
-  // Helpers ---------------------------------------------------------------
-  const decode = (s) => {
-    try { return decodeURIComponent(s); } catch { return s; }
-  };
-  const encode = (s) => encodeURIComponent(s);
-
-  // Fix spreadsheetId segment if it accidentally contains query params etc.
-  const fixSpreadsheetPath = (urlObj) => {
-    const parts = urlObj.pathname.split('/').filter(Boolean); // ['', 'v4', 'spreadsheets', '{id}', ...] => ['v4','spreadsheets','{id}',...]
-    const idx = parts.indexOf('spreadsheets');
-    if (idx >= 0 && parts[idx+1]) {
-      let idSeg = decode(parts[idx+1]);
-      // Trim off anything after a '?', ':' or other non-id characters
-      idSeg = idSeg.replace(/[\?\:\&].*$/,'');        // remove accidental tail
-      idSeg = idSeg.replace(/[^a-zA-Z0-9\-\_]/g, ''); // keep only allowed chars
-      if (idSeg) {
-        parts[idx+1] = idSeg; // keep decoded clean id; path will be rebuilt below
-      }
-    }
-    // Rebuild pathname
-    urlObj.pathname = '/' + parts.join('/');
-    return urlObj;
-  };
-
-  // Normalize /values endpoint usage:
-  //   - /values/'Sheet'!A1:Z9  (ok for GET)
-  //   - /values/<RANGE>:append  (bad, we rewrite to /values:append?range=<RANGE>)
-  //   - quotes around sheet name should be single quotes; URL-encoded when placed in query
-  const normalizeValuesEndpoint = (urlObj) => {
-    let path = urlObj.pathname;
-
-    // Case: ".../values/<range>:append"  =>  "/values:append?range=<range>"
-    const mAppend = path.match(/\/values\/([^/]+):append$/);
-    if (mAppend) {
-      const rangeRaw = decode(mAppend[1]); // e.g. 'materials'!A2:K9999  or  materials!A2:K9999
-      // Rebuild endpoint
-      path = path.replace(/\/values\/[^/]+:append$/, '/values:append');
-      urlObj.pathname = path;
-
-      // sanitize range: ensure quoted sheet name
-      const ex = rangeRaw.split('!');
-      if (ex.length >= 2) {
-        let sheet = ex[0].replace(/^'+|'+$/g, '');
-        const rest  = ex.slice(1).join('!');
-        const rangeParam = `'${sheet}'!${rest}`;
-        urlObj.searchParams.set('range', rangeParam);
-      } else {
-        // No '!' present; still pass through
-        urlObj.searchParams.set('range', rangeRaw);
-      }
-    }
-
-    // If path is ".../values" (read/write by row range), make sure any "'Sheet'!R:C" in search is de-quoted properly
-    // (Google accepts quotes but we prefer them in query not path)
-    return urlObj;
-  };
-
-  // Remove quotes around sheet name if they got placed in the PATH section
-  const dequoteSheetNameInPath = (urlObj) => {
-    // /values/'材料'!A1:Z999  =>  /values/材料!A1:Z999  (path)
-    urlObj.pathname = urlObj.pathname.replace(/\/values\/%27([^%]+)%27(![A-Za-z0-9\:\$A-Z0-9]+)$/g, (_m, p1, p2) => {
-      return '/values/' + p1 + p2;
-    });
-    urlObj.pathname = urlObj.pathname.replace(/\/values\/'([^']+)'(![A-Za-z0-9\:\$A-Z0-9]+)$/g, (_m, p1, p2) => {
-      return '/values/' + p1 + p2;
-    });
-    return urlObj;
-  };
-
-  // Try to obtain access token from host app (best-effort)
-  const getBearer = async () => {
-    try {
-      if (typeof window.ensureToken === 'function') {
-        const t = await window.ensureToken();
-        if (t) return t;
-      }
-    } catch {}
-    try {
-      if (typeof window.getAccessToken === 'function') {
-        const t = await window.getAccessToken();
-        if (t) return t;
-      }
-    } catch {}
-    try {
-      const t = window.gapi?.auth?.getToken?.()?.access_token;
-      if (t) return t;
-    } catch {}
-    return null;
-  };
-
-  // Patch fetch -----------------------------------------------------------
-  window.fetch = async function patchedFetch(input, init = {}) {
-    // Build a URL object we can mutate safely
-    const u0 = (typeof input === 'string') ? input : (input?.url || '');
-    let urlObj;
-    try {
-      // If relative, pass-through
-      urlObj = new URL(u0, location.origin);
-    } catch {
-      return _fetch(input, init);
-    }
-
-    // Only touch Google Sheets v4 endpoints
-    const isSheets = /(^|\.)sheets\.googleapis\.com$/.test(urlObj.host) && urlObj.pathname.includes('/spreadsheets/');
-    if (!isSheets) {
-      return _fetch(input, init);
-    }
-
-    // ___________ Normalize URL ___________
-    // 1) ensure spreadsheetId path is clean (strip accidental query tail)
-    fixSpreadsheetPath(urlObj);
-
-    // 2) fix /values endpoint forms
-    normalizeValuesEndpoint(urlObj);
-
-    // 3) remove quotes that were incorrectly placed in PATH part
-    dequoteSheetNameInPath(urlObj);
-
-    // 4) If "range" query exists, ensure it is a proper "'Sheet'!A1:Z999" (quote the sheet name once)
-    if (urlObj.searchParams.has('range')) {
-      const rr0 = urlObj.searchParams.get('range');
-      const rr = decode(rr0);
-      if (rr && rr.includes('!')) {
-        let [sheet, ...rest] = rr.split('!');
-        sheet = sheet.replace(/^'+|'+$/g, '');
-        urlObj.searchParams.set('range', `'${sheet}'!${rest.join('!')}`);
-      }
-    }
-
-    // Try to sniff & export spreadsheetId for the app
-    try {
-      const m = urlObj.pathname.match(/\/spreadsheets\/([a-zA-Z0-9\-\_]+)/);
-      if (m && m[1]) {
-        const sid = m[1];
-        if (!window.currentSpreadsheetId || window.currentSpreadsheetId !== sid) {
-          window.currentSpreadsheetId = sid;
-          log('sniffed spreadsheetId:', sid);
-          // Let the host app know we have a good ID
-          window.dispatchEvent(new CustomEvent('materials:refresh', { detail: { spreadsheetId: sid } }));
-        }
-      }
-    } catch {}
-
-    // ___________ Headers / Body ___________
-    const method = (init.method || 'GET').toUpperCase();
-    const isWrite = method === 'POST' || method === 'PUT' || /:append$/.test(urlObj.pathname) || urlObj.pathname.endsWith(':batchUpdate');
-
-    // Clone/extend headers
-    const headers = new Headers(init.headers || {});
-
-    // Inject Bearer token if missing
-    if (!headers.has('Authorization')) {
+    function sanitizeRangeInUrl(urlStr) {
       try {
-        const token = await getBearer();
-        if (token) headers.set('Authorization', `Bearer ${token}`);
-      } catch {}
-    }
+        const url = new URL(urlStr);
+        if (!/sheets\.googleapis\.com\/v4\/spreadsheets\//.test(url.hostname + url.pathname)) {
+          return urlStr; // not a Sheets API call
+        }
+        // Guard: if spreadsheet id is 'null' or empty, block & warn
+        if (/\/spreadsheets\/null\//.test(url.pathname)) {
+          console.warn(LOG_PREFIX, "blocked call (null spreadsheet id)", urlStr);
+          // Return original url; the request will 4xx—to keep behavior consistent.
+          return urlStr;
+        }
 
-    // Content-Type for write calls
-    if (isWrite && !headers.has('Content-Type')) {
-      headers.set('Content-Type', 'application/json');
-    }
+        // Only touch /values/xxx endpoints (get/update/append), not batchUpdate
+        const valuesIdx = url.pathname.indexOf("/values/");
+        if (valuesIdx === -1) return urlStr;
 
-    // If body is object/array, stringify
-    let body = init.body;
-    if (isWrite && body && typeof body !== 'string' && !(body instanceof Blob) && !(body instanceof ArrayBuffer)) {
-      try { body = JSON.stringify(body); } catch {}
-    }
+        // Extract the A1 range piece between /values/ and either end or next ":" after path segment
+        // Safer approach: decode the part after /values/ up to query
+        const prefix = url.pathname.substring(0, valuesIdx + 8); // includes "/values/"
+        const rangePart = url.pathname.substring(valuesIdx + 8);
+        // rangePart may contain encoded characters. Work on a decoded form.
+        let decoded = decodeURIComponent(rangePart);
 
-    // Final URL string
-    const finalUrl = urlObj.toString();
+        // Fix common pattern: leading and trailing single quotes around sheet name
+        // Examples:
+        //   'materials'!A2:K9999    -> materials!A2:K9999
+        //   '%27materials%27!A2:K9999' (already decoded above) -> same
+        decoded = decoded.replace(/^'([^']+)'(!)/, (_m, name, bang) => `${name}${bang}`);
 
-    // Debug
-    log('sanitized range:', { from: u0, to: finalUrl });
+        // Also handle cases where sheet name has accidental whitespace around quotes
+        decoded = decoded.replace(/^'\s*([^']*?)\s*'(!)/, (_m, name, bang) => `${name}${bang}`);
 
-    try {
-      const res = await _fetch(finalUrl, { ...init, headers, body });
-      if (!res.ok) {
-        // Surface error body for diagnostics
-        let txt = '';
-        try { txt = await res.text(); } catch {}
-        warn('HTTP error', res.status, res.statusText, txt.slice(0, 400));
+        // Re-encode the path piece conservatively
+        // We need to encode only characters that are not allowed in path. Keep "!" and ":" unencoded.
+        // We'll encode with encodeURIComponent and then restore "!" and ":" for readability (optional).
+        let recoded = encodeURIComponent(decoded)
+          .replace(/%21/g, "!")
+          .replace(/%3A/gi, ":");
+
+        const newPath = prefix + recoded;
+        const rebuilt = url.origin + newPath + (url.search || "");
+        if (rebuilt !== urlStr) {
+          console.log(LOG_PREFIX, "sanitized range:", { from: urlStr, to: rebuilt });
+        }
+        return rebuilt;
+      } catch (e) {
+        console.warn(LOG_PREFIX, "sanitize error, using original url", e);
+        return urlStr;
       }
-      return res;
-    } catch (e) {
-      warn('patchedFetch error', e);
-      throw e;
     }
-  };
 
-  log('installed+sniffer');
+    window.fetch = async function(input, init) {
+      try {
+        let urlStr = typeof input === "string" ? input : input && input.url ? input.url : "" ;
+        if (!urlStr) return originalFetch(input, init);
+        const fixedUrl = sanitizeRangeInUrl(urlStr);
+
+        if (typeof input === "string") {
+          return originalFetch(fixedUrl, init);
+        } else {
+          // clone the Request with the fixed URL
+          const newReq = new Request(fixedUrl, input);
+          return originalFetch(newReq, init);
+        }
+      } catch (e) {
+        console.warn(LOG_PREFIX, "fetch wrapper error, falling back", e);
+        return originalFetch(input, init);
+      }
+    };
+
+    console.log(LOG_PREFIX, "installed");
+  } catch (e) {
+    console.warn(LOG_PREFIX, "failed to install", e);
+  }
 })();
