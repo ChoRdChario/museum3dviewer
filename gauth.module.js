@@ -1,214 +1,281 @@
-/* gauth.module.js — full module (named exports) */
-/* Minimal GIS-based token helper for Google Sheets REST (fetch direct)
-   - No auto popups on page load
-   - Keeps token in sessionStorage.__LM_TOK
-   - Exports:
-       getAccessToken, getLastAuthError, ensureToken, signIn, signOut,
-       onAuthState, getClient, loadGIS
-*/
 
-const TOK_KEY = '__LM_TOK';
+// gauth.module.js — GIS-based OAuth helper (full file, drop-in)
+//
+// Exports:
+//   setupAuth, loadGIS, getClient, getAccessToken, ensureToken,
+//   getLastAuthError, signIn, signOut, onAuthState
+//
+// Behavior:
+// - Lazy-loads Google Identity Services (GIS) if needed
+// - Manages an access token in sessionStorage (__LM_TOK)
+// - Provides silent token acquisition first, falls back to interactive on signIn()
+// - Not coupled to gapi.client; uses fetch in other modules
+//
+// Minimal host requirements:
+// - Provide a Google OAuth Client ID via either:
+//     window.__LM_CLIENT_ID  (preferred)
+//   or <meta name="google-signin-client_id" content="...">
+// - Optionally include in HTML:
+//     <script src="https://accounts.google.com/gsi/client" async defer></script>
+
+// -------------------- Internal state --------------------
+let _gisLoaded = false;
 let _tokenClient = null;
-let _lastError = null;
-let _listeners = new Set();
-let _inflight = null;
+let _lastAuthError = null;
+let _authListeners = []; // functions receiving ({ signedIn, access_token, expires_at })
 
-/** Notify subscribers */
-function _emit() {
-  for (const fn of _listeners) {
-    try { fn(getAccessToken()); } catch {}
+// Retrieve token record from sessionStorage or window.__LM_OAUTH
+function _readToken() {
+  try {
+    const s = sessionStorage.getItem("__LM_TOK");
+    if (s) return JSON.parse(s);
+  } catch (e) {}
+  // Back-compat: also accept window.__LM_OAUTH if present
+  if (typeof window !== "undefined" && window.__LM_OAUTH && window.__LM_OAUTH.access_token) {
+    return {
+      access_token: window.__LM_OAUTH.access_token,
+      expires_at: window.__LM_OAUTH.expires_at || 0
+    };
   }
-}
-
-/** Read client_id from window or <meta> */
-function _getClientId() {
-  if (window.__LM_CLIENT_ID) return window.__LM_CLIENT_ID;
-  if (window.__LM_OAUTH?.client_id) return window.__LM_OAUTH.client_id;
-  const meta = document.querySelector('meta[name="google-signin-client_id"]');
-  if (meta?.content) return meta.content.trim();
   return null;
 }
 
-/** Persist & read tokens */
-function _loadSaved() {
+function _writeToken(tok) {
   try {
-    const raw = sessionStorage.getItem(TOK_KEY);
-    if (!raw) return null;
-    const obj = JSON.parse(raw);
-    if (!obj?.access_token) return null;
-    return obj;
-  } catch { return null; }
-}
-function _save(tok) {
-  if (tok) {
-    sessionStorage.setItem(TOK_KEY, JSON.stringify(tok));
-  } else {
-    sessionStorage.removeItem(TOK_KEY);
-  }
-  _emit();
+    if (tok) sessionStorage.setItem("__LM_TOK", JSON.stringify(tok));
+    else sessionStorage.removeItem("__LM_TOK");
+  } catch (e) {}
 }
 
-/** Check expiry (allow small clock skew) */
-function _isExpired(tok) {
-  if (!tok?.access_token) return true;
-  const now = Date.now();
-  const exp = Number(tok.expires_at || 0);
-  // If expires_at missing, treat as not expired for safety (some flows don't provide it).
-  if (!exp) return false;
-  return now >= (exp - 10_000); // 10s skew
+function _now() {
+  return Math.floor(Date.now() / 1000);
 }
 
-/** Load GIS script once */
-export async function loadGIS() {
-  if (window.google?.accounts?.oauth2) return;
-  await new Promise((resolve, reject) => {
-    const id = 'gis-sdk';
-    if (document.getElementById(id)) {
-      // If script tag exists, wait a tick
-      return setTimeout(resolve, 0);
+function _isValidToken(tok) {
+  if (!tok || !tok.access_token) return false;
+  // 60s skew to be safe
+  return typeof tok.expires_at === "number" ? tok.expires_at - 60 > _now() : true;
+}
+
+function _emitAuthState() {
+  const tok = _readToken();
+  const payload = {
+    signedIn: _isValidToken(tok),
+    access_token: tok && tok.access_token || null,
+    expires_at: tok && tok.expires_at || 0
+  };
+  _authListeners.forEach(fn => { try { fn(payload); } catch (e) {} });
+}
+
+// -------------------- GIS loader --------------------
+export function loadGIS() {
+  return new Promise((resolve, reject) => {
+    if (_gisLoaded && window.google && window.google.accounts && window.google.accounts.oauth2) {
+      resolve();
+      return;
     }
-    const s = document.createElement('script');
-    s.id = id;
-    s.src = 'https://accounts.google.com/gsi/client';
+    const onReady = () => {
+      _gisLoaded = true;
+      resolve();
+    };
+    // If script tag already present, wait
+    if (window.google && window.google.accounts && window.google.accounts.oauth2) {
+      _gisLoaded = true;
+      resolve();
+      return;
+    }
+    const existing = document.querySelector('script[src^="https://accounts.google.com/gsi/client"]');
+    if (existing) {
+      existing.addEventListener("load", onReady, { once: true });
+      existing.addEventListener("error", () => reject(new Error("GIS script failed to load")), { once: true });
+      return;
+    }
+    // Inject script
+    const s = document.createElement("script");
+    s.src = "https://accounts.google.com/gsi/client";
     s.async = true;
     s.defer = true;
-    s.onload = () => resolve();
-    s.onerror = () => reject(new Error('Failed to load GIS client'));
+    s.onload = onReady;
+    s.onerror = () => reject(new Error("GIS script failed to load"));
     document.head.appendChild(s);
   });
 }
 
-/** Create or return the GIS token client */
-export async function getClient(scopes = 'https://www.googleapis.com/auth/spreadsheets') {
-  await loadGIS();
-  const client_id = _getClientId();
-  if (!client_id) {
-    _lastError = 'Missing Google OAuth client_id. Set window.__LM_CLIENT_ID or <meta name="google-signin-client_id">.';
-    throw new Error(_lastError);
-  }
+// -------------------- Client init --------------------
+function _getClientId() {
+  if (typeof window !== "undefined" && window.__LM_CLIENT_ID) return window.__LM_CLIENT_ID;
+  const meta = document.querySelector('meta[name="google-signin-client_id"]');
+  if (meta && meta.content) return meta.content.trim();
+  return null;
+}
+
+function _initTokenClient(scopes) {
   if (_tokenClient) return _tokenClient;
-  _tokenClient = google.accounts.oauth2.initTokenClient({
-    client_id,
-    scope: scopes,
+  const clientId = _getClientId();
+  if (!clientId) throw new Error("[gauth] client_id not set (window.__LM_CLIENT_ID or <meta name='google-signin-client_id'>)");
+  if (!window.google || !window.google.accounts || !window.google.accounts.oauth2) {
+    throw new Error("[gauth] GIS not loaded");
+  }
+  _tokenClient = window.google.accounts.oauth2.initTokenClient({
+    client_id: clientId,
+    scope: scopes || "https://www.googleapis.com/auth/spreadsheets",
+    prompt: "", // default silent; change per request
     callback: (resp) => {
-      if (resp?.error) {
-        _lastError = resp.error;
-        return;
-      }
-      if (resp?.access_token) {
-        // expires_in seconds → expires_at ms
-        const now = Date.now();
-        const expires_at = resp.expires_in ? now + Number(resp.expires_in) * 1000 : 0;
-        _save({ access_token: resp.access_token, expires_at });
-        _lastError = null;
+      if (resp && resp.access_token) {
+        // 3600s is common default; prefer resp.expires_in if provided
+        const expiresIn = typeof resp.expires_in === "number" ? resp.expires_in : 3600;
+        const tok = {
+          access_token: resp.access_token,
+          expires_at: _now() + expiresIn
+        };
+        _writeToken(tok);
+        _lastAuthError = null;
+        _emitAuthState();
+      } else if (resp && resp.error) {
+        _lastAuthError = resp.error_description || resp.error || "unknown_auth_error";
+        _emitAuthState();
       }
     }
   });
   return _tokenClient;
 }
 
-/** Ensure a valid token exists; interactive=false won't popup */
-export async function ensureToken({ interactive = false, scopes = 'https://www.googleapis.com/auth/spreadsheets' } = {}) {
-  // Coalesce concurrent calls
-  if (_inflight) { return _inflight; }
-  _inflight = (async () => {
-    // 1) Prefer already-saved token
-    let tok = _loadSaved();
-    if (!tok?.access_token && window.__LM_OAUTH?.access_token) {
-      // Allow host page to pre-inject
-      tok = { access_token: window.__LM_OAUTH.access_token, expires_at: window.__LM_OAUTH.expires_at || 0 };
-      _save(tok);
-    }
-    if (tok && !_isExpired(tok)) return tok;
-
-    // 2) Try silent refresh via GIS
-    const client = await getClient(scopes);
-    await new Promise((resolve) => {
-      try {
-        client.requestAccessToken({ prompt: '' });
-        // callback will store token; wait a short time
-        setTimeout(resolve, 50);
-      } catch (e) {
-        _lastError = String(e?.message || e);
-        resolve();
-      }
-    });
-    tok = _loadSaved();
-    if (tok && !_isExpired(tok)) return tok;
-
-    // 3) If still missing/expired and interactive allowed, show consent
-    if (interactive) {
+// -------------------- Public API --------------------
+export async function setupAuth(scopes) {
+  await loadGIS();
+  _initTokenClient(scopes);
+  // try silent refresh once if no valid token
+  const tok = _readToken();
+  if (!_isValidToken(tok)) {
+    try {
       await new Promise((resolve) => {
-        try {
-          client.requestAccessToken({ prompt: 'consent' });
-          setTimeout(resolve, 50);
-        } catch (e) {
-          _lastError = String(e?.message || e);
+        const c = _initTokenClient(scopes);
+        c.callback = (resp) => {
+          if (resp && resp.access_token) {
+            const expiresIn = typeof resp.expires_in === "number" ? resp.expires_in : 3600;
+            _writeToken({ access_token: resp.access_token, expires_at: _now() + expiresIn });
+            _lastAuthError = null;
+          } else if (resp && resp.error) {
+            _lastAuthError = resp.error_description || resp.error;
+          }
+          _emitAuthState();
           resolve();
-        }
+        };
+        c.requestAccessToken({ prompt: "" }); // silent
       });
-      tok = _loadSaved();
-      if (tok && !_isExpired(tok)) return tok;
+    } catch (e) {
+      _lastAuthError = String(e && e.message || e);
+      _emitAuthState();
     }
-
-    // 4) Failed
-    return null;
-  })();
-  try {
-    const r = await _inflight;
-    return r;
-  } finally {
-    _inflight = null;
+  } else {
+    _emitAuthState();
   }
-}
-
-/** Return access_token string or null (no popup) */
-export function getAccessToken() {
-  const tok = _loadSaved();
-  if (tok && !_isExpired(tok)) return tok.access_token;
-  return null;
-}
-
-/** Return last auth error message (string|null) */
-export function getLastAuthError() {
-  return _lastError;
-}
-
-/** Force interactive sign-in (may show consent) */
-export async function signIn(scopes = 'https://www.googleapis.com/auth/spreadsheets') {
-  const tok = await ensureToken({ interactive: true, scopes });
-  return !!(tok && tok.access_token);
-}
-
-/** Revoke & clear token */
-export async function signOut() {
-  const tok = _loadSaved();
-  _save(null);
-  try {
-    if (window.google?.accounts?.oauth2?.revoke && tok?.access_token) {
-      await new Promise((resolve) => {
-        window.google.accounts.oauth2.revoke(tok.access_token, () => resolve());
-      });
-    }
-  } catch {}
-  _lastError = null;
   return true;
 }
 
-/** Subscribe to token changes. Returns unsubscribe fn. */
+export function getClient() {
+  return _tokenClient;
+}
+
+export function getLastAuthError() {
+  return _lastAuthError;
+}
+
+export async function getAccessToken({ interactive = false, scopes } = {}) {
+  // return cached if valid
+  const tok = _readToken();
+  if (_isValidToken(tok)) return tok.access_token;
+
+  await loadGIS();
+  const c = _initTokenClient(scopes);
+  return new Promise((resolve, reject) => {
+    c.callback = (resp) => {
+      if (resp && resp.access_token) {
+        const expiresIn = typeof resp.expires_in === "number" ? resp.expires_in : 3600;
+        _writeToken({ access_token: resp.access_token, expires_at: _now() + expiresIn });
+        _lastAuthError = null;
+        _emitAuthState();
+        resolve(resp.access_token);
+      } else if (resp && resp.error) {
+        _lastAuthError = resp.error_description || resp.error;
+        _emitAuthState();
+        reject(new Error(_lastAuthError));
+      } else {
+        _lastAuthError = "unknown_auth_error";
+        _emitAuthState();
+        reject(new Error(_lastAuthError));
+      }
+    };
+    c.requestAccessToken({ prompt: interactive ? "consent" : "" });
+  });
+}
+
+export async function ensureToken(opts = {}) {
+  try {
+    const t = await getAccessToken(opts);
+    return t;
+  } catch (e) {
+    return null;
+  }
+}
+
+export async function signIn(scopes) {
+  await loadGIS();
+  const c = _initTokenClient(scopes);
+  return new Promise((resolve, reject) => {
+    c.callback = (resp) => {
+      if (resp && resp.access_token) {
+        const expiresIn = typeof resp.expires_in === "number" ? resp.expires_in : 3600;
+        _writeToken({ access_token: resp.access_token, expires_at: _now() + expiresIn });
+        _lastAuthError = null;
+        _emitAuthState();
+        resolve(true);
+      } else if (resp && resp.error) {
+        _lastAuthError = resp.error_description || resp.error;
+        _emitAuthState();
+        reject(new Error(_lastAuthError));
+      } else {
+        _lastAuthError = "unknown_auth_error";
+        _emitAuthState();
+        reject(new Error(_lastAuthError));
+      }
+    };
+    c.requestAccessToken({ prompt: "consent" });
+  });
+}
+
+export function signOut() {
+  _writeToken(null);
+  if (typeof window !== "undefined" && window.__LM_OAUTH) {
+    try { delete window.__LM_OAUTH.access_token; } catch (e) {}
+  }
+  _emitAuthState();
+  return true;
+}
+
 export function onAuthState(fn) {
-  if (typeof fn === 'function') {
-    _listeners.add(fn);
-    // Emit current once
-    try { fn(getAccessToken()); } catch {}
-    return () => _listeners.delete(fn);
+  if (typeof fn === "function") {
+    _authListeners.push(fn);
+    // Give current state immediately
+    try { fn({ signedIn: _isValidToken(_readToken()), access_token: _readToken()?.access_token || null, expires_at: _readToken()?.expires_at || 0 }); } catch (e) {}
+    return () => {
+      _authListeners = _authListeners.filter(x => x !== fn);
+    };
   }
   return () => {};
 }
 
-// Expose for debugging (optional)
-if (!window.__LM_AUTH_DEBUG__) {
-  window.__LM_AUTH_DEBUG__ = {
-    getAccessToken, getLastAuthError, ensureToken, signIn, signOut, onAuthState, getClient, loadGIS
-  };
-}
+// Default export for convenience (optional for consumers)
+const api = {
+  setupAuth,
+  loadGIS,
+  getClient,
+  getAccessToken,
+  ensureToken,
+  getLastAuthError,
+  signIn,
+  signOut,
+  onAuthState
+};
+
+export default api;
