@@ -1,146 +1,176 @@
-// gauth.module.js — GIS auth helper (ESM, no UI injection)
-// Exposes: setupAuth, ensureToken, getAccessToken, getLastAuthError, signIn, bindSignInButton, onToken
 
-let _gisLoaded = false;
-let _gisLoading = null;
+/**
+ * gauth.module.js — GIS OAuth helper (no DOM injection)
+ * - Reads client_id from: window.__LM_CLIENT_ID, <meta name="google-signin-client_id">,
+ *   <script id="locimyu-config" type="application/json">, or window.locimyuConfig
+ * - Loads GIS if necessary
+ * - Exports: setupAuth, ensureToken, getAccessToken, getLastAuthError, bindSignInButton, signIn (compat)
+ * - Does NOT create any buttons; only binds to existing one(s)
+ */
+const GIS_SRC = "https://accounts.google.com/gsi/client";
+
+let _clientId = null;
 let _tokenClient = null;
 let _lastError = null;
-let _accessToken = null;
-let _scopes = 'https://www.googleapis.com/auth/spreadsheets';
+let _gisLoaded = false;
+let _readyPromise = null;
 
-function readClientIdFromMeta() {
-  const meta = document.querySelector("meta[name='google-signin-client_id']");
-  return meta?.content?.trim() || '';
-}
-function readClientIdFromConfigScript() {
-  const el = document.getElementById('locimyu-config');
-  if (!el) return '';
-  try {
-    const json = JSON.parse(el.textContent || '{}');
-    return (json.client_id || json.clientId || '').trim();
-  } catch { return ''; }
-}
-function getClientId() {
-  return (window.__LM_CLIENT_ID?.trim?.() || readClientIdFromMeta() || readClientIdFromConfigScript() || '');
-}
+function _log(...args){ try{ console.log("[gauth]", ...args);}catch{} }
+function _warn(...args){ try{ console.warn("[gauth]", ...args);}catch{} }
 
-function ensureWindowStore() {
-  if (!window.__LM_OAUTH) window.__LM_OAUTH = {};
-  return window.__LM_OAUTH;
-}
-
-function loadGIS() {
-  if (_gisLoaded) return Promise.resolve();
-  if (_gisLoading) return _gisLoading;
-  _gisLoading = new Promise((resolve, reject) => {
-    const existing = document.querySelector("script[src^='https://accounts.google.com/gsi/client']");
-    if (existing) {
-      existing.addEventListener('load', () => { _gisLoaded = true; resolve(); }, {once:true});
-      existing.addEventListener('error', e => reject(e), {once:true});
-      return;
+function _readClientIdFromDOM(){
+  if (typeof window !== "undefined"){
+    if (window.__LM_CLIENT_ID && typeof window.__LM_CLIENT_ID === "string"){
+      return window.__LM_CLIENT_ID.trim();
     }
-    const s = document.createElement('script');
-    s.src = 'https://accounts.google.com/gsi/client';
+    const meta = document.querySelector("meta[name='google-signin-client_id']");
+    if (meta && meta.content) return meta.content.trim();
+    // JSON config script
+    const cfgEl = document.getElementById("locimyu-config");
+    if (cfgEl){
+      try{
+        const j = JSON.parse(cfgEl.textContent || cfgEl.innerText || "{}");
+        if (j.client_id) return String(j.client_id).trim();
+      }catch{ /* ignore */ }
+    }
+    if (window.locimyuConfig && window.locimyuConfig.client_id){
+      return String(window.locimyuConfig.client_id).trim();
+    }
+  }
+  return null;
+}
+
+function _ensureGIS(){
+  if (_gisLoaded) return Promise.resolve();
+  if (typeof window === "undefined") return Promise.reject(new Error("[gauth] window missing"));
+  if (window.google && window.google.accounts && window.google.accounts.oauth2){
+    _gisLoaded = true;
+    return Promise.resolve();
+  }
+  return new Promise((resolve, reject)=>{
+    const id = "__gauth_gis";
+    if (document.getElementById(id)){
+      // already loading
+      const check = ()=>{
+        if (window.google?.accounts?.oauth2){ _gisLoaded = true; resolve(); }
+        else setTimeout(check, 50);
+      };
+      return check();
+    }
+    const s = document.createElement("script");
+    s.id = id;
+    s.src = GIS_SRC;
     s.async = true;
     s.defer = true;
-    s.onload = () => { _gisLoaded = true; resolve(); };
-    s.onerror = (e) => reject(e);
+    s.onload = ()=>{ _gisLoaded = true; resolve(); };
+    s.onerror = (e)=> reject(new Error("[gauth] failed to load GIS"));
     document.head.appendChild(s);
   });
-  return _gisLoading;
 }
 
-export async function setupAuth(scopes = _scopes) {
-  _scopes = scopes || _scopes;
-  ensureWindowStore();
-  const client_id = getClientId();
-  if (!client_id) {
-    console.warn('[gauth] client_id not found at load; waiting for runtime setup');
-    return false;
+function _initTokenClient(){
+  if (_tokenClient) return _tokenClient;
+  _clientId = _clientId || _readClientIdFromDOM();
+  if (!_clientId){
+    _warn("client_id not found at load; waiting for runtime setup");
+    return null;
   }
-  await loadGIS();
-  // eslint-disable-next-line no-undef
-  _tokenClient = google.accounts.oauth2.initTokenClient({
-    client_id,
-    scope: _scopes,
-    callback: (resp) => {
-      if (resp && resp.access_token) {
-        _accessToken = resp.access_token;
-        window.__LM_OAUTH.access_token = _accessToken;
-        window.dispatchEvent(new CustomEvent('gauth:token', { detail: { access_token: _accessToken } }));
-      } else if (resp && resp.error) {
-        _lastError = resp.error;
-        window.dispatchEvent(new CustomEvent('gauth:error', { detail: resp }));
+  const oauth2 = window.google?.accounts?.oauth2;
+  if (!oauth2){ _lastError = new Error("[gauth] GIS not loaded"); return null; }
+  _tokenClient = oauth2.initTokenClient({
+    client_id: _clientId,
+    scope: "https://www.googleapis.com/auth/spreadsheets",
+    callback: (resp)=>{
+      if (resp && resp.access_token){
+        window.__LM_OAUTH = Object.assign(window.__LM_OAUTH||{}, {
+          access_token: resp.access_token,
+          expires_in: Date.now() + (Number(resp.expires_in||0)*1000)
+        });
+        window.dispatchEvent(new CustomEvent("gauth:token", {detail: resp}));
+      }else if (resp && resp.error){
+        _lastError = new Error(String(resp.error));
+        _warn("token error", resp.error);
       }
-    },
+    }
   });
-  return true;
+  window.dispatchEvent(new CustomEvent("gauth:ready", {detail:{client_id:_clientId}}));
+  return _tokenClient;
 }
 
-export async function ensureToken(interactive = false) {
+/**
+ * Public: ensure the auth system is ready. Returns a promise that resolves when ready.
+ */
+export function setupAuth(){
+  if (_readyPromise) return _readyPromise;
+  _readyPromise = (async ()=>{
+    await _ensureGIS();
+    // small wait loop for client_id from DOM (up to 3s)
+    const t0 = Date.now();
+    while(!_clientId){
+      _clientId = _readClientIdFromDOM();
+      if (_clientId) break;
+      if (Date.now() - t0 > 3000) break;
+      await new Promise(r=>setTimeout(r,100));
+    }
+    const ok = _initTokenClient();
+    if (!ok) throw new Error("[gauth] tokenClient not ready (no client_id?)");
+  })();
+  return _readyPromise;
+}
+
+export function getLastAuthError(){ return _lastError; }
+export function getAccessToken(){ return window.__LM_OAUTH?.access_token || null; }
+
+export async function ensureToken(interactive=false){
   await setupAuth();
-  if (!_tokenClient) {
-    throw new Error('[gauth] tokenClient not ready (no client_id?)');
-  }
-  _lastError = null;
-  return new Promise((resolve, reject) => {
-    const onToken = (e) => { cleanup(); resolve(e.detail.access_token); };
-    const onErr = (e) => { cleanup(); reject(e.detail || new Error('gauth error')); };
-    const cleanup = () => {
-      window.removeEventListener('gauth:token', onToken);
-      window.removeEventListener('gauth:error', onErr);
-    };
-    window.addEventListener('gauth:token', onToken, { once: true });
-    window.addEventListener('gauth:error', onErr, { once: true });
-    try {
-      // eslint-disable-next-line no-undef
-      _tokenClient.requestAccessToken({ prompt: interactive ? 'consent' : '' });
-    } catch (e) {
-      cleanup();
+  const tok = getAccessToken();
+  const notExpired = tok && window.__LM_OAUTH?.expires_in && window.__LM_OAUTH.expires_in - Date.now() > 30000;
+  if (tok && notExpired) return tok;
+  return new Promise((resolve, reject)=>{
+    try{
+      _tokenClient.requestAccessToken({ prompt: interactive ? "consent" : "" });
+      const check=()=>{
+        const t = getAccessToken();
+        if (t) return resolve(t);
+        setTimeout(check, 50);
+      };
+      check();
+    }catch(e){
+      _lastError = e;
       reject(e);
     }
   });
 }
 
-export async function signIn() {
-  // Backward-compat wrapper expected by boot.esm.cdn.js
-  return ensureToken(true);
+/**
+ * Compatibility helper: signIn() -> ensureToken(true)
+ */
+export async function signIn(){
+  try{
+    const t = await ensureToken(true);
+    return t;
+  }catch(e){
+    _warn("signIn failed", e?.message||e);
+    throw e;
+  }
 }
 
-export function getAccessToken() {
-  return _accessToken || window.__LM_OAUTH?.access_token || null;
-}
-
-export function getLastAuthError() {
-  return _lastError;
-}
-
-export function onToken() {
-  if (getAccessToken()) return Promise.resolve(getAccessToken());
-  return new Promise((resolve) => {
-    const h = (e) => {
-      window.removeEventListener('gauth:token', h);
-      resolve(e.detail.access_token);
-    };
-    window.addEventListener('gauth:token', h, { once: true });
-  });
-}
-
-export function bindSignInButton(selectorList = ['#signin','[data-role=\"signin\"]','.g-signin','#google-signin']) {
-  const selector = Array.isArray(selectorList) ? selectorList.join(',') : String(selectorList || '');
-  if (!selector) return false;
-  const btn = document.querySelector(selector);
-  if (!btn) { console.warn('[gauth] sign-in button not found'); return false; }
-  if (btn.__lm_bound) return true;
-  btn.addEventListener('click', async (e) => {
-    e.preventDefault();
-    try { await ensureToken(true); } catch (err) { console.warn('[gauth] sign-in failed', err); }
-  });
-  btn.__lm_bound = true;
+/**
+ * Bind existing sign-in buttons (does not insert DOM).
+ */
+export function bindSignInButton(sel = "#signin, [data-role='signin'], .g-signin, #google-signin"){
+  const btn = document.querySelector(sel);
+  if (!btn) return false;
+  btn.addEventListener("click", async (ev)=>{
+    ev.preventDefault();
+    try{
+      await signIn();
+    }catch(e){
+      _warn("bindSignInButton click failed", e?.message||e);
+    }
+  }, { once:false });
   return true;
 }
 
-// For consumers that expect a default export (harmless)
-export default {
-  setupAuth, ensureToken, signIn, getAccessToken, getLastAuthError, bindSignInButton, onToken,
-};
+// default export for older import styles
+export default { setupAuth, ensureToken, getAccessToken, getLastAuthError, bindSignInButton, signIn };

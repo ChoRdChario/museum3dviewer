@@ -1,15 +1,17 @@
-// signin.module.js — bind GIS sign-in to an existing button (no DOM injection)
-import { setupAuth, bindSignInButton } from './gauth.module.js';
 
-function tryBind() {
-  setupAuth().then(() => {
-    const ok = bindSignInButton();
-    if (!ok) console.warn('[signin] no existing sign-in button to bind');
-  }).catch(e => console.warn('[signin] setupAuth failed', e));
-}
+/**
+ * signin.module.js — bind to existing sign-in button only (no DOM injection)
+ */
+import { bindSignInButton } from "./gauth.module.js";
 
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', tryBind, { once: true });
-} else {
-  tryBind();
-}
+(function(){
+  // Try immediately
+  if (!bindSignInButton()) {
+    // If button not yet in DOM, retry a few times
+    let tries = 0;
+    const t = setInterval(()=>{
+      if (bindSignInButton()){ clearInterval(t); return; }
+      if (++tries > 50) clearInterval(t);
+    }, 100);
+  }
+})();
