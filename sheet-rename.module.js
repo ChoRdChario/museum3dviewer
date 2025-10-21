@@ -1,244 +1,199 @@
-/* eslint-disable no-undef */
-/*
- * sheet-rename.module.js
- * Purpose:
- *  - Normalize Google Sheets "append" endpoint to `values:append?range=` (avoid `/values/'name'!A1:Z1:append`)
- *  - Inject Authorization: Bearer <token> into requests to sheets.googleapis.com
- *  - Sniff and expose spreadsheetId in a robust way
- *  - On boot, idempotently ensure a 'materials' sheet with headers exists once token+id are available
- *  - Keep logs minimal: "[sheet-rangefix] ..."
- *
- * Safe to include multiple times; installs once.
+
+/* sheet-rename.module.js
+ * Robust spreadsheetId sniffer + optional ensure(materials) helper
+ * - No rename required. Drop-in replacement.
+ * - Does NOT break existing logic; only augments.
  */
 (() => {
   const TAG = "[sheet-rangefix]";
-  if (window.__sheetFix?.installed) {
-    console.log(TAG, "already installed");
-    return;
-  }
-  window.__sheetFix = window.__sheetFix || { installed: true, lastId: null };
-
-  const SHEETS_ORIGIN = "https://sheets.googleapis.com";
-  const API_ROOT = "/v4/spreadsheets/";
-  const MATERIALS_TITLE = "materials";
-  const MATERIALS_HEADER = [
-    "rowId","materialKey","unlit","doubleSided","opacity",
-    "white2alpha","whiteThr","black2alpha","blackThr","timestamp","user"
-  ];
-
   const log = (...a) => console.log(TAG, ...a);
   const warn = (...a) => console.warn(TAG, ...a);
 
-  // --- Token helpers --------------------------------------------------------
-  const readToken = () => {
+  // =============== Utilities ===============
+  const isSheetsApi = (u) => {
+    try { const x = new URL(u, location.href); return (x.hostname === "sheets.googleapis.com" && x.pathname.includes("/v4/spreadsheets/")); }
+    catch { return false; }
+  };
+  const extractIdFromSheetsApi = (u) => {
     try {
-      const t1 = (window.gapi && window.gapi.auth && window.gapi.auth.getToken && window.gapi.auth.getToken()) || null;
-      if (t1 && (t1.access_token || t1.accessToken)) return t1;
-    } catch {}
+      const x = new URL(u, location.href);
+      // /v4/spreadsheets/{ID}/...
+      const m = x.pathname.match(/\/v4\/spreadsheets\/([^/]+)/);
+      return m ? decodeURIComponent(m[1]) : null;
+    } catch { return null; }
+  };
+  const extractIdFromDocsUrl = (u) => {
     try {
-      const t2 = (window.google && window.google.accounts && window.google.accounts.oauth2 && window.google.accounts.oauth2.getToken && window.google.accounts.oauth2.getToken()) || null;
-      if (t2 && (t2.access_token || t2.accessToken)) return t2;
-    } catch {}
+      const x = new URL(u, location.href);
+      // https://docs.google.com/spreadsheets/d/{ID}/...
+      if (!/docs\.google\.com$/.test(x.hostname)) return null;
+      const m = x.pathname.match(/\/spreadsheets\/d\/([^/]+)/);
+      return m ? decodeURIComponent(m[1]) : null;
+    } catch { return null; }
+  };
+  const extractIdFromText = (s) => {
+    if (!s) return null;
+    // 30-80 chars of allowed base64url-ish
+    const m = s.match(/[A-Za-z0-9_\-]{20,}/g);
+    if (!m) return null;
+    // heuristic: prefer IDs that appear next to "spreadsheets"
+    const cand = m.find(t => /[A-Za-z0-9_\-]{30,}/.test(t)) || m[0];
+    return cand || null;
+  };
+  const parseFromLocation = () => {
+    const tryKeys = ["sheet","spreadsheet","sheetId","spreadsheetId","sid","id"];
+    const all = [location.search, location.hash].join("&");
+    const usp = new URLSearchParams(all.replace(/^#/, "&"));
+    for (const k of tryKeys) {
+      const v = usp.get(k);
+      const id = extractIdFromText(v);
+      if (id) return id;
+    }
+    // Try raw URL pattern in the hash
+    const id2 = extractIdFromDocsUrl(location.hash.replace(/^#/, ""));
+    if (id2) return id2;
     return null;
   };
-  const readAccessToken = () => {
-    const t = readToken();
-    return t && (t.access_token || t.accessToken) || null;
-  };
-
-  // --- SpreadsheetId sniff --------------------------------------------------
-  const parseIdFromUrl = (url) => {
-    // Accept both raw id and id with accidental query suffixes; strip queries
+  const setFoundId = (id) => {
+    if (!id) return;
+    if (window.__LM_SPREADSHEET_ID === id) return;
+    window.__LM_SPREADSHEET_ID = id;
+    try { localStorage.setItem("lm.spreadsheet", id); } catch {}
+    log("sniffed spreadsheetId:", id);
+    // Broadcast to app
     try {
-      // If full URL like https://.../spreadsheets/{id}/... -> extract
-      const m = url.match(/spreadsheets\/([a-zA-Z0-9-_]+)/);
-      if (m) return m[1];
+      window.dispatchEvent(new CustomEvent("materials:spreadsheet", { detail: { spreadsheetId: id }}));
+      window.dispatchEvent(new Event("materials:refresh"));
     } catch {}
-    // Fallback: if looks like an id + query string, split by ?
-    return (url || "").split("?")[0];
   };
 
-  const guessSpreadsheetId = () => {
-    // Sources to probe without throwing
-    const cands = [
-      window.currentSpreadsheetId,
-      window.__sheetFix.lastId,
-      (window.__sheetConfig && window.__sheetConfig.spreadsheetId),
-      (window.__materials && window.__materials.spreadsheetId),
-      // Sometimes kept on a global viewer config
-      (window.viewer && window.viewer.sheet && window.viewer.sheet.id),
-      (window.LM && window.LM.sheetId),
-    ].filter(Boolean);
-
-    for (const c of cands) {
-      const id = parseIdFromUrl(String(c));
-      if (id && id.length > 20) return id;
-    }
-
-    // Inspect last successful Sheets request if available
-    try {
-      const last = window.__lastSheetsUrl;
-      if (last) {
-        const id = parseIdFromUrl(String(last));
-        if (id && id.length > 20) return id;
-      }
-    } catch {}
-
-    // As a last resort, scan <a href> links that look like sheets URLs
-    try {
-      const links = Array.from(document.querySelectorAll('a[href*="spreadsheets/"]'));
-      for (const a of links) {
-        const id = parseIdFromUrl(a.href);
-        if (id && id.length > 20) return id;
-      }
-    } catch {}
-
-    return null;
-  };
-
-  // --- Range/URL normalization ----------------------------------------------
-  const normalizeAppendUrl = (u) => {
-    // Input examples to normalize:
-    //  1) https://.../values/'materials'!A2:K9999:append?valueInputOption=RAW
-    //  2) https://.../values/%27materials%27!A2%3AK9999:append?valueInputOption=RAW
-    //  3) https://.../values:append?range='materials'!A2:K9999&valueInputOption=RAW  (OK)
-    try {
-      const url = new URL(u);
-      if (!url.origin.startsWith(SHEETS_ORIGIN)) return u;
-      if (!url.pathname.startsWith(API_ROOT)) return u;
-
-      // Already the good form?
-      if (url.pathname.endsWith("/values:append")) return u;
-
-      // Path form: /values/<range>:append -> convert to /values:append?range=<range>
-      const m = url.pathname.match(/\/values\/([^/]+):append$/);
-      if (!m) return u;
-
-      const encodedRange = m[1]; // may include %27
-      // Build new URL: move range into query param
-      const newPath = url.pathname.replace(/\/values\/[^/]+:append$/, "/values:append");
-      url.pathname = newPath;
-
-      // Preserve existing query and add normalized range
-      // If there is already a range param, we will overwrite it.
-      url.searchParams.set("range", encodedRange);
-
-      return url.toString();
-    } catch {
-      return u;
-    }
-  };
-
-  // --- Ensure materials sheet + header (idempotent) -------------------------
-  const ensureMaterialsSheet = async (spreadsheetId, accessToken) => {
-    const base = `${SHEETS_ORIGIN}${API_ROOT}${encodeURIComponent(spreadsheetId)}`;
-    const headers = {
-      "Authorization": `Bearer ${accessToken}`,
-      "Content-Type": "application/json",
-    };
-
-    // 1) Try reading header
-    const hdrRes = await fetch(`${base}/values/${encodeURIComponent("'materials'!A1:K1")}?majorDimension=ROWS`, { headers });
-    if (hdrRes.status === 200) {
-      const data = await hdrRes.json();
-      const row = (data && data.values && data.values[0]) || null;
-      const ok = Array.isArray(row) && row.length === MATERIALS_HEADER.length && row[0] === "rowId";
-      if (!ok) {
-        // header mismatch -> write header
-        const put = await fetch(`${base}/values/${encodeURIComponent("'materials'!A1:K1")}?valueInputOption=RAW`, {
-          method: "PUT", headers,
-          body: JSON.stringify({ range: "'materials'!A1:K1", majorDimension: "ROWS", values: [MATERIALS_HEADER] }),
-        });
-        if (!put.ok) throw new Error(`header PUT failed ${put.status}`);
-      }
-      return true;
-    }
-
-    if (hdrRes.status === 404) {
-      // 2) Not found -> addSheet then header
-      const add = await fetch(`${base}:batchUpdate`, {
-        method: "POST", headers,
-        body: JSON.stringify({ requests: [{ addSheet: { properties: { title: MATERIALS_TITLE } } }] }),
-      });
-      // 409 conflict means sheet already exists -> ignore
-      if (!(add.status === 200 || add.status === 409)) {
-        const t = await add.text();
-        throw new Error(`addSheet failed ${add.status} ${t}`);
-      }
-      const put = await fetch(`${base}/values/${encodeURIComponent("'materials'!A1:K1")}?valueInputOption=RAW`, {
-        method: "PUT", headers,
-        body: JSON.stringify({ range: "'materials'!A1:K1", majorDimension: "ROWS", values: [MATERIALS_HEADER] }),
-      });
-      if (!put.ok) throw new Error(`header PUT after add failed ${put.status}`);
-      return true;
-    }
-
-    // Other error – try to read body for hints
-    const txt = await hdrRes.text();
-    throw new Error(`header GET failed ${hdrRes.status} ${txt}`);
-  };
-
-  // --- Install fetch patch ---------------------------------------------------
-  const rawFetch = window.fetch.bind(window);
-  window.fetch = async (input, init = {}) => {
-    let url = typeof input === "string" ? input : (input && input.url) || "";
-    if (url.startsWith(SHEETS_ORIGIN)) {
-      window.__lastSheetsUrl = url;
-
-      // Normalize append URL form
-      const normalized = normalizeAppendUrl(url);
-      if (normalized !== url) url = normalized;
-
-      // Inject Authorization header if token available
-      const token = readAccessToken();
-      if (token) {
-        init.headers = new Headers(init.headers || {});
-        if (!init.headers.has("Authorization")) {
-          init.headers.set("Authorization", `Bearer ${token}`);
-        }
-      }
-      // Replace Request if original was a Request object
-      if (typeof input !== "string") {
-        input = new Request(url, input);
-      } else {
-        input = url;
-      }
-    }
-    try {
-      return await rawFetch(input, init);
-    } catch (e) {
-      warn("patchedFetch error", e);
-      throw e;
-    }
-  };
-
+  // =============== 1) Early sniff ===============
   log("installed+sniffer");
+  const early = parseFromLocation() || ( () => { try { return localStorage.getItem("lm.spreadsheet") || null; } catch { return null; } })();
+  if (early) setFoundId(early);
+  else warn("spreadsheetId not found (non-fatal)");
 
-  // --- Background task: find id + ensure materials once ready ---------------
-  (async () => {
-    // Probe few times for id/token, then attempt ensure
-    let tries = 0;
-    const max = 40; // ~10s at 250ms
-    while (tries++ < max) {
-      const id = guessSpreadsheetId();
-      const tok = readAccessToken();
-      if (id) window.__sheetFix.lastId = id;
-      if (id && tok) {
-        log("sniffed spreadsheetId:", id);
-        try {
-          await ensureMaterialsSheet(id, tok);
-          log("materials sheet ensured");
-          // Notify app code that materials is ready/fresh
-          window.dispatchEvent(new CustomEvent("materials:refresh", { detail: { id } }));
-        } catch (e) {
-          warn("ensureMaterialsSheet error", e);
+  // =============== 2) Observe DOM for Google Sheets links ===============
+  const mo = new MutationObserver((muts) => {
+    for (const m of muts) {
+      for (const n of m.addedNodes) {
+        if (n && n.nodeType === 1) {
+          const a = n.matches?.("a[href]") ? [n] : Array.from(n.querySelectorAll?.("a[href]") || []);
+          for (const el of a) {
+            const id = extractIdFromDocsUrl(el.href);
+            if (id) { setFoundId(id); return; }
+          }
         }
-        break;
       }
-      await new Promise(r => setTimeout(r, 250));
     }
-    if (!window.__sheetFix.lastId) {
-      warn("spreadsheetId not found (non-fatal)");
+  });
+  mo.observe(document.documentElement, { subtree:true, childList:true });
+
+  // =============== 3) Patch fetch: normalize append URL; capture ID ===============
+  const nativeFetch = window.fetch.bind(window);
+  window.fetch = async function patchedFetch(input, init = {}) {
+    let url = (typeof input === "string") ? input : (input?.url || "");
+    if (isSheetsApi(url)) {
+      // Capture spreadsheetId from outgoing calls
+      const sid = extractIdFromSheetsApi(url);
+      if (sid) setFoundId(sid);
+
+      // Normalize append endpoint format: /values:append?range=....
+      // Handle both legacy ".../values/'sheet'!A2:K9999:append?..." and wrong-encoded variants
+      try {
+        const u = new URL(url, location.href);
+        // If path ends with /values/<range>:append  → convert to /values:append?range=<range>
+        const m = u.pathname.match(/\/values\/(.+):append$/);
+        if (m) {
+          const range = m[1];
+          u.pathname = u.pathname.replace(/\/values\/.+:append$/, "/values:append");
+          // keep existing query params but set range=
+          u.searchParams.set("range", range);
+          url = u.toString();
+          if (typeof input !== "string") input = new Request(url, input);
+          else input = url;
+          // Optional: log once
+          if (!window.__LM_ONCE_APPEND_LOGGED) {
+            window.__LM_ONCE_APPEND_LOGGED = true;
+            log("normalized append URL →", url);
+          }
+        }
+      } catch {}
     }
-  })();
+    return nativeFetch(input, init);
+  };
+
+  // =============== 4) Optional: ensure 'materials' sheet once we have id + token ===============
+  const getAccessToken = () => {
+    try {
+      // Prefer gapi if available
+      if (window.gapi?.auth?.getToken) {
+        const t = window.gapi.auth.getToken();
+        if (t?.access_token) return t.access_token;
+      }
+      if (window.gapi?.client?.getToken) {
+        const t = window.gapi.client.getToken();
+        if (t?.access_token) return t.access_token;
+      }
+    } catch {}
+    // Fallback: some apps stick token here
+    try { const t = localStorage.getItem("google_access_token"); if (t) return t; } catch {}
+    return null;
+  };
+
+  const HEADERS = ["index","materialKey","unlit","doubleSided","opacity","white2alpha","whiteThr","black2alpha","blackThr","ts","source"];
+
+  const GV = async (spreadsheetId, rangeA1, token) => {
+    const u = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(rangeA1)}?majorDimension=ROWS`;
+    const r = await fetch(u, { headers: { "Authorization": `Bearer ${token}` }});
+    if (!r.ok) throw new Error(`GV ${r.status}`);
+    return r.json();
+  };
+  const PV = async (spreadsheetId, rangeA1, values, token) => {
+    const u = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(rangeA1)}?valueInputOption=RAW`;
+    const body = JSON.stringify({ range: rangeA1, values: [values] });
+    const r = await fetch(u, { method:"PUT", headers: { "Authorization": `Bearer ${token}`, "Content-Type":"application/json" }, body });
+    if (!r.ok) throw new Error(`PV ${r.status}`);
+    return r.json();
+  };
+  const batchUpdate = async (spreadsheetId, body, token) => {
+    const u = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}:batchUpdate`;
+    const r = await fetch(u, { method:"POST", headers: { "Authorization": `Bearer ${token}`, "Content-Type":"application/json" }, body: JSON.stringify(body) });
+    if (!r.ok) throw new Error(`batchUpdate ${r.status}`);
+    return r.json();
+  };
+
+  let ensured = false;
+  const ensureMaterialsSheet = async () => {
+    if (ensured) return;
+    const sid = window.__LM_SPREADSHEET_ID;
+    const token = getAccessToken();
+    if (!sid || !token) return;
+
+    // Try header read; if not exists, add sheet, then header PUT.
+    try {
+      await GV(sid, "'materials'!A1:K1", token);
+      // If came here OK, still write headers to be safe when empty/different
+      await PV(sid, "'materials'!A1:K1", HEADERS, token);
+      ensured = true;
+      log("materials sheet ensured (header write)");
+      return;
+    } catch (e) {
+      // Likely not found → addSheet then header
+      try {
+        await batchUpdate(sid, { requests: [{ addSheet: { properties: { title: "materials" } } }] }, token);
+      } catch(_e) { /* ignore 400/409 */ }
+      await PV(sid, "'materials'!A1:K1", HEADERS, token);
+      ensured = true;
+      log("materials sheet ensured (created+header)");
+      return;
+    }
+  };
+
+  // Kick: try a few times to allow token/UI to settle
+  let tries = 0;
+  const t = setInterval(() => {
+    ensureMaterialsSheet().catch(err => warn("ensureMaterialsSheet error", err?.message || err));
+    if (++tries > 40 || ensured) clearInterval(t);
+  }, 500);
 })();
