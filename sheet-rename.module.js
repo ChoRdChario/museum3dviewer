@@ -1,158 +1,160 @@
-
-/*! sheet-rename.module.js — LM range sanitizer + spreadsheetId sniffer + id publisher (full) */
+// sheet-rename.module.js
+// Robust spreadsheetId bridge + Sheets API range/append normalizer + URL fix for /spreadsheets/undefined
 (() => {
-  const MODTAG = '[sheet-rangefix]';
-  const log  = (...a) => console.log(MODTAG, ...a);
-  const warn = (...a) => console.warn(MODTAG, ...a);
+  const LOG_PREFIX = '[sheet-rangefix]';
+  const SHEETS_HOST = 'sheets.googleapis.com';
+  let detectedId = null;
 
-  // ---- helpers ------------------------------------------------------------
-  const qs = (s, r = document) => r.querySelector(s);
-  const qsa = (s, r = document) => Array.from(r.querySelectorAll(s));
+  const log = (...a) => console.log(LOG_PREFIX, ...a);
+  const warn = (...a) => console.warn(LOG_PREFIX, ...a);
 
-  // Publish the spreadsheetId everywhere common implementations might read
+  // --- Utilities ------------------------------------------------------------
+  const tryGetStored = () =>
+    (window.__LM_SPREADSHEET_ID)
+    || localStorage.getItem('lm.spreadsheet')
+    || localStorage.getItem('materials.spreadsheet')
+    || sessionStorage.getItem('lm.spreadsheet')
+    || (document.cookie.match(/(?:^|;)\s*lm_spreadsheet=([^;]+)/)?.[1] || null);
+
   const publishId = (id) => {
-    if (!id) return;
-    try {
-      window.__LM_SPREADSHEET_ID = id;
-      // popular local/session keys
-      try { localStorage.setItem('lm.spreadsheet', id); } catch {}
-      try { localStorage.setItem('materials.spreadsheet', id); } catch {}
-      try { sessionStorage.setItem('lm.spreadsheet', id); } catch {}
-      // cookie fallback
-      try { document.cookie = `lm_spreadsheet=${encodeURIComponent(id)}; path=/; max-age=31536000`; } catch {}
-
-      // callable helpers (pull-style)
-      window.lmGetSpreadsheetId = () => id;
-      window.__materialsProvideSpreadsheet = () => id;
-
-      // push-style events (fire a few times to pass race windows)
-      const detail = { spreadsheet: id };
-      const fire = () => {
-        window.dispatchEvent(new CustomEvent('materials:spreadsheet', { detail }));
-        window.dispatchEvent(new CustomEvent('materials:refresh', { detail }));
-        document.dispatchEvent(new CustomEvent('materials:spreadsheet', { detail }));
-        document.dispatchEvent(new CustomEvent('materials:refresh', { detail }));
-      };
-      fire();
-      setTimeout(fire, 60);
-      setTimeout(fire, 300);
-      setTimeout(fire, 1200);
-
-      // call-through if consumer exposes a setter
-      if (typeof window.__materialsSetSpreadsheet === 'function') {
-        try { window.__materialsSetSpreadsheet(id); } catch {}
-      }
-      // periodic nudge for 10s
-      let n = 0;
-      const t = setInterval(() => {
-        if (++n > 20) { clearInterval(t); return; }
-        if (typeof window.__materialsSetSpreadsheet === 'function') {
-          try { window.__materialsSetSpreadsheet(id); } catch {}
-        }
-        fire();
-      }, 500);
-
-      log('published spreadsheetId:', id);
-    } catch (e) {
-      warn('publishId error', e);
-    }
+    if (!id || typeof id !== 'string') return;
+    if (detectedId === id) return;
+    detectedId = id;
+    // globals
+    window.__LM_SPREADSHEET_ID = id;
+    window.lmGetSpreadsheetId = () => detectedId;
+    window.__materialsProvideSpreadsheet = () => detectedId;
+    // storage
+    try { localStorage.setItem('lm.spreadsheet', id); } catch {}
+    try { localStorage.setItem('materials.spreadsheet', id); } catch {}
+    try { sessionStorage.setItem('lm.spreadsheet', id); } catch {}
+    try { document.cookie = `lm_spreadsheet=${id}; path=/; samesite=lax`; } catch {}
+    // events
+    const dispatchAll = () => {
+      try { window.dispatchEvent(new CustomEvent('materials:spreadsheet', { detail: { spreadsheet: id }})); } catch {}
+      try { document.dispatchEvent(new CustomEvent('materials:spreadsheet', { detail: { spreadsheet: id }})); } catch {}
+      try { window.dispatchEvent(new CustomEvent('materials:refresh', { detail: { spreadsheet: id }})); } catch {}
+      try { document.dispatchEvent(new CustomEvent('materials:refresh', { detail: { spreadsheet: id }})); } catch {}
+      // direct bridge if available
+      try { window.__materialsSetSpreadsheet && window.__materialsSetSpreadsheet(id); } catch {}
+    };
+    dispatchAll();
+    setTimeout(dispatchAll, 60);
+    setTimeout(dispatchAll, 300);
+    setTimeout(dispatchAll, 1200);
+    log('published spreadsheetId:', id);
   };
 
-  // ---- sniffers -----------------------------------------------------------
-  const extractFromUrl = (u) => {
+  const sniffFromUrl = (url) => {
     try {
-      const url = new URL(u);
-      const q = url.searchParams;
-      // explicit ?sheet= / ?spreadsheet=
-      const cand = q.get('sheet') || q.get('spreadsheet');
-      if (cand) return cand;
-      // /d/<id>/ pattern (Google Sheets link)
-      const m = url.pathname.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
-      if (m) return m[1];
-      return null;
+      // /v4/spreadsheets/{ID}/...
+      const m = url.match(/\/spreadsheets\/([a-zA-Z0-9-_]{20,})\b/);
+      return m ? m[1] : null;
     } catch { return null; }
   };
 
-  const sniffInitial = () => {
-    // 1) from location (search & hash)
-    const fromLoc = extractFromUrl(location.href) || extractFromUrl(location.hash.replace(/^#/, location.origin + location.pathname + '?'));
-    if (fromLoc) return fromLoc;
-    // 2) from DOM (links to sheets)
-    const link = qsa('a[href*="docs.google.com/spreadsheets/"], a[href*="sheets.googleapis.com/v4/spreadsheets/"]').map(a => extractFromUrl(a.href)).find(Boolean);
-    if (link) return link;
-    // 3) from prior storage
-    try {
-      return localStorage.getItem('lm.spreadsheet') ||
-             localStorage.getItem('materials.spreadsheet') ||
-             sessionStorage.getItem('lm.spreadsheet') ||
-             window.__LM_SPREADSHEET_ID ||
-             null;
-    } catch { /* no-op */ }
-    return null;
-  };
+  // --- Initial attempt: reuse stored id -------------------------------------
+  const stored = tryGetStored();
+  if (stored) publishId(stored);
 
-  // Observe new anchors added later (SPA)
-  const observeLinks = () => {
-    const mo = new MutationObserver(() => {
-      const id = sniffInitial();
-      if (id && !window.__LM_SPREADSHEET_ID) publishId(id);
+  // --- Observe DOM to catch Sheets URLs (links/embed) -----------------------
+  try {
+    const mo = new MutationObserver((muts) => {
+      for (const mut of muts) {
+        const nodes = [...mut.addedNodes];
+        for (const n of nodes) {
+          if (n && n.nodeType === 1) {
+            const el = /** @type {HTMLElement} */ (n);
+            const href = (el.getAttribute && el.getAttribute('href')) || '';
+            const src  = (el.getAttribute && el.getAttribute('src'))  || '';
+            const text = el.textContent || '';
+            const found = sniffFromUrl(href) || sniffFromUrl(src) || sniffFromUrl(text);
+            if (found) publishId(found);
+          }
+        }
+      }
     });
     mo.observe(document.documentElement, { subtree: true, childList: true });
-  };
+  } catch {}
 
-  // ---- fetch patch (range normalization + token injection passthrough) ----
-  const originalFetch = window.fetch.bind(window);
-  window.fetch = async function patchedFetch(input, init = {}) {
+  // --- Also scan existing anchors/scripts once ------------------------------
+  (() => {
+    const els = [...document.querySelectorAll('a,link,script,iframe')];
+    for (const el of els) {
+      const href = el.getAttribute('href') || '';
+      const src  = el.getAttribute('src')  || '';
+      const found = sniffFromUrl(href) || sniffFromUrl(src);
+      if (found) { publishId(found); break; }
+    }
+  })();
+
+  // --- Fetch patch -----------------------------------------------------------
+  const _fetch = window.fetch;
+  window.fetch = async function patchedFetch(input, init) {
+    let url = typeof input === 'string' ? input : (input && input.url) || '';
     try {
-      let url = typeof input === 'string' ? input : input.url;
+      // Learn ID from outgoing URL too
+      const found = sniffFromUrl(url);
+      if (found) publishId(found);
 
-      // Normalize append endpoint format for Sheets API
-      // NG: /values/'シート'!A2:K9999:append?... → OK: /values:append?range='シート'!A2:K9999
-      if (/https:\/\/sheets\.googleapis\.com\/v4\/spreadsheets\/[^/]+\/values\/.+:append/i.test(url)) {
-        const m = url.match(/\/values\/(.+):append(.*)$/i);
-        if (m) {
-          const range = m[1]; // may contain quotes / URL-encoded
-          const tail = m[2] || '';
-          const base = url.replace(/\/values\/.+:append.*$/i, '/values:append');
-          const params = new URLSearchParams(tail.replace(/^\?/, ''));
-          // ensure proper 'range' query
-          params.set('range', decodeURIComponent(range));
-          url = `${base}?${params.toString()}`;
-          log('sanitized range:', { from: (typeof input === 'string' ? input : input.url), to: url });
-          if (typeof input !== 'string') input = new Request(url, input);
-          else input = url;
+      // Only touch Sheets API calls
+      const isSheets = url.includes(SHEETS_HOST + '/v4/spreadsheets/');
+      if (isSheets) {
+        // Fix when path accidentally contains 'undefined' as ID
+        if (/\/spreadsheets\/undefined\//.test(url) && detectedId) {
+          url = url.replace('/spreadsheets/undefined/', `/spreadsheets/${encodeURIComponent(detectedId)}/`);
+        }
+
+        // Normalize append form: /values:append?...&range=encoded
+        if (/\/values\/.+:append(\?|$)/.test(url)) {
+          // move the range to query param
+          const u = new URL(url);
+          const pathRange = decodeURIComponent(u.pathname.split('/values/')[1]).replace(/:append$/,''); // "'materials'!A2:K9999"
+          // ensure proper encoding for query
+          if (!u.searchParams.get('range')) {
+            u.searchParams.set('range', pathRange);
+          }
+          u.pathname = u.pathname.replace(/\/values\/.+:append$/, '/values:append');
+          url = u.toString();
+        }
+
+        // If still no ID in URL path, but we know it, inject it
+        if (/\/spreadsheets\/(?![a-zA-Z0-9-_]{20,})/.test(url) && detectedId) {
+          // try to insert after '/spreadsheets/'
+          url = url.replace(/\/spreadsheets\/(?![a-zA-Z0-9-_]{20,})/, `/spreadsheets/${encodeURIComponent(detectedId)}/`);
         }
       }
-
-      // Try to learn spreadsheetId from Sheets URLs
-      if (/https:\/\/sheets\.googleapis\.com\/v4\/spreadsheets\//i.test(url)) {
-        const idm = url.match(/\/spreadsheets\/([^/?#]+)/i);
-        if (idm && idm[1]) {
-          publishId(idm[1]);
-        }
-      }
-
-      return await originalFetch(input, init);
     } catch (e) {
       warn('patchedFetch error', e);
-      throw e;
+    }
+
+    if (typeof input === 'string') {
+      return _fetch.call(this, url, init);
+    } else {
+      // Request object
+      try {
+        const req = new Request(url, input);
+        return _fetch.call(this, req);
+      } catch {
+        return _fetch.call(this, url, init);
+      }
     }
   };
 
-  // ---- boot ---------------------------------------------------------------
-  log('installed+sniffer');
+  // --- Public helpers for other modules -------------------------------------
+  window.__materialsProvideSpreadsheet = () => detectedId || tryGetStored() || null;
+  window.__materialsSetSpreadsheet = (id) => publishId(id);
+  window.__materialsGetSpreadsheet = () => detectedId;
 
-  const id0 = sniffInitial();
-  if (id0) {
-    publishId(id0);
-  } else {
-    warn('spreadsheetId not found (non-fatal)');
-    observeLinks();
-  }
-
-  // In case consumer wants an explicit refresh trigger
-  window.addEventListener('materials:refresh:request', () => {
-    const id = sniffInitial();
-    if (id) publishId(id);
-  });
+  // --- Final: try to sniff from any visible Sheets link text -----------------
+  setTimeout(() => {
+    try {
+      const bodyText = document.body ? document.body.innerHTML : '';
+      const found = sniffFromUrl(bodyText);
+      if (found) publishId(found);
+      else log('installed+sniffer');
+    } catch {
+      log('installed+sniffer');
+    }
+  }, 0);
 })();
