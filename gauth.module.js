@@ -1,104 +1,130 @@
 
-// gauth.module.js — GIS auth (compat): accepts opts.clientId or opts.client_id; uses meta/window if needed; caches token; silent refresh.
-let accessToken = null;
-let tokenClient = null;
-let lastError = null;
+// gauth.module.js
+// Minimal GIS-based token manager for Sheets API (fetch direct).
+// - Loads Google Identity Services (GIS) script
+// - Exposes window.__LM_OAUTH with ensureToken/getToken/clearToken
+// - Publishes 'lm:oauth-ready' when a valid token is available
+// - Stores token in sessionStorage ('__LM_TOK') until page unload
 
-const DEFAULT_SCOPES = [
-  'https://www.googleapis.com/auth/drive.file',
-  'https://www.googleapis.com/auth/spreadsheets',
-  'https://www.googleapis.com/auth/drive.readonly'
-].join(' ');
+(() => {
+  const NS = '__LM_OAUTH';
+  if (window[NS]?.__installed) return;
 
-function ensureGisScript(){
-  return new Promise((resolve)=>{
-    if (window.google?.accounts?.oauth2){ resolve(); return; }
-    const s = document.createElement('script');
-    s.src = 'https://accounts.google.com/gsi/client';
-    s.async = true; s.defer = true;
-    s.onload = ()=> resolve();
-    s.onerror = ()=> resolve(); // fail-soft
-    document.head.appendChild(s);
-  });
-}
+  const STATE = {
+    token: null,
+    clientId: null,
+    scope: 'https://www.googleapis.com/auth/spreadsheets',
+    tokenClient: null,
+  };
 
-function meta(name){
-  try{ return document.querySelector(`meta[name="${name}"]`)?.content || null; }catch(_){ return null; }
-}
-
-/**
- * setupAuth(buttonEl, onSignedChange, opts)
- * - opts.clientId / opts.client_id / window.GIS_CLIENT_ID / <meta name="google-oauth-client_id">
- * - opts.scopes / opts.scope / window.GIS_SCOPES / DEFAULT_SCOPES
- */
-export async function setupAuth(buttonEl, onSignedChange, opts = {}){
-  await ensureGisScript();
-  if (!window.google?.accounts?.oauth2){
-    console.warn('[auth] GIS not available');
-    return;
-  }
-  const clientId = opts.clientId || opts.client_id || window.GIS_CLIENT_ID || meta('google-oauth-client_id');
-  if (!clientId){
-    lastError = { error: 'missing_client_id' };
-    console.error('[auth] Missing client_id');
-    return;
-  }
-  const scope = opts.scope || opts.scopes || window.GIS_SCOPES || DEFAULT_SCOPES;
-
-  tokenClient = window.google.accounts.oauth2.initTokenClient({
-    client_id: clientId,
-    scope,
-    include_granted_scopes: true,
-    prompt: ''
-  });
-  tokenClient.callback = (resp)=>{
-    if (resp?.access_token){
-      accessToken = resp.access_token;
-      lastError = null;
-      onSignedChange?.(true);
-    }else if(resp?.error){
-      lastError = resp;
-      onSignedChange?.(false);
+  const saveToken = (tok) => {
+    STATE.token = tok || null;
+    try {
+      if (tok) sessionStorage.setItem('__LM_TOK', tok);
+      else sessionStorage.removeItem('__LM_TOK');
+    } catch {}
+    if (tok) {
+      window.dispatchEvent(new CustomEvent('lm:oauth-ready', { detail: { access_token: tok } }));
     }
   };
 
-  if (buttonEl){
-    buttonEl.addEventListener('click', async ()=>{
-      try{ await ensureToken({ interactive:true }); }
-      catch(e){ console.warn('[auth] interactive failed', e); }
-    });
-  }
-}
+  const loadSaved = () => {
+    try {
+      const t = sessionStorage.getItem('__LM_TOK');
+      if (t) STATE.token = t;
+    } catch {}
+  };
 
-export function getLastAuthError(){ return lastError; }
-export function getAccessToken(){ return accessToken; }
+  const inferClientId = () => {
+    // Priority: window.GOOGLE_CLIENT_ID → <meta name="google-signin-client_id"> → localStorage
+    if (typeof window.GOOGLE_CLIENT_ID === 'string' && window.GOOGLE_CLIENT_ID.includes('.apps.googleusercontent.com')) {
+      return window.GOOGLE_CLIENT_ID;
+    }
+    const meta = document.querySelector('meta[name="google-signin-client_id"]');
+    if (meta && meta.content && meta.content.includes('.apps.googleusercontent.com')) {
+      return meta.content;
+    }
+    try {
+      const fromLS = localStorage.getItem('__LM_GOOGLE_CLIENT_ID');
+      if (fromLS && fromLS.includes('.apps.googleusercontent.com')) return fromLS;
+    } catch {}
+    return null;
+  };
 
-export async function ensureToken({ interactive=false } = {}){
-  if (accessToken) return accessToken;
-  if (!tokenClient){
-    lastError = { error: 'token_client_uninitialized' };
-    throw lastError;
-  }
-  // silent first
-  try{
-    await new Promise((resolve, reject)=>{
-      tokenClient.callback = (resp)=> resp?.access_token ? (accessToken = resp.access_token, resolve(resp)) : reject(resp);
-      tokenClient.requestAccessToken({ prompt: '' });
-    });
-    return accessToken;
-  }catch(_){}
-  if (!interactive) throw lastError || new Error('silent_failed');
-  // interactive
-  await new Promise((resolve, reject)=>{
-    tokenClient.callback = (resp)=> resp?.access_token ? (accessToken = resp.access_token, resolve(resp)) : reject(resp);
-    tokenClient.requestAccessToken({ prompt: 'consent' });
+  const loadGIS = () => new Promise((resolve, reject) => {
+    if (window.google?.accounts?.oauth2) { resolve(); return; }
+    const s = document.createElement('script');
+    s.src = 'https://accounts.google.com/gsi/client';
+    s.async = true;
+    s.onload = () => resolve();
+    s.onerror = () => reject(new Error('Failed to load GIS'));
+    document.head.appendChild(s);
   });
-  return accessToken;
-}
 
-// Expose for other modules
-try{
-  if (!window.ensureToken) window.ensureToken = ensureToken;
-  if (!window.getAccessToken) window.getAccessToken = getAccessToken;
-  if (!window.getLastAuthError) window.getLastAuthError = getLastAuthError;
-}catch(_){}
+  const initTokenClient = async () => {
+    if (STATE.tokenClient) return;
+    await loadGIS();
+    STATE.clientId = inferClientId();
+    if (!STATE.clientId) {
+      console.warn('[gauth] GOOGLE_CLIENT_ID not found. Set window.GOOGLE_CLIENT_ID or a <meta name="google-signin-client_id">.');
+      return;
+    }
+    STATE.tokenClient = google.accounts.oauth2.initTokenClient({
+      client_id: STATE.clientId,
+      scope: STATE.scope,
+      callback: (resp) => {
+        if (resp && resp.access_token) {
+          saveToken(resp.access_token);
+        } else {
+          console.warn('[gauth] token callback without token', resp);
+        }
+      }
+    });
+  };
+
+  // Public API
+  const api = {
+    __installed: true,
+    getToken() {
+      return STATE.token || null;
+    },
+    async ensureToken({ interactive = false } = {}) {
+      loadSaved();
+      if (STATE.token) {
+        return STATE.token;
+      }
+      await initTokenClient();
+      if (!STATE.tokenClient) {
+        // no client id → cannot proceed
+        return null;
+      }
+      try {
+        // Try silent first, unless explicitly interactive requested
+        await new Promise((resolve) => {
+          STATE.tokenClient.callback = (resp) => {
+            if (resp && resp.access_token) saveToken(resp.access_token);
+            resolve();
+          };
+          STATE.tokenClient.requestAccessToken({ prompt: interactive ? 'consent' : '' });
+        });
+      } catch (e) {
+        console.warn('[gauth] ensureToken error', e);
+        return null;
+      }
+      return STATE.token || null;
+    },
+    clearToken() {
+      saveToken(null);
+    }
+  };
+
+  // Attach
+  window[NS] = api;
+
+  // Early silent attempt on boot
+  (async () => {
+    await api.ensureToken({ interactive: false });
+  })().catch(() => {});
+
+  console.log('[gauth] installed');
+})();
