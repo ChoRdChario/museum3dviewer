@@ -1,130 +1,122 @@
+// gauth.module.js (LM stable)
+// Provides named export `getAccessToken` expected by boot.esm.cdn.js.
+// Also exposes ensureToken/signIn/signOut helpers, but does NOT force an
+// interactive consent flow on page load (UI側のボタンから呼べる前提).
 
-// gauth.module.js
-// Minimal GIS-based token manager for Sheets API (fetch direct).
-// - Loads Google Identity Services (GIS) script
-// - Exposes window.__LM_OAUTH with ensureToken/getToken/clearToken
-// - Publishes 'lm:oauth-ready' when a valid token is available
-// - Stores token in sessionStorage ('__LM_TOK') until page unload
+const TOKEN_KEY = '__LM_TOK';
+const SCOPE = 'https://www.googleapis.com/auth/spreadsheets';
 
-(() => {
-  const NS = '__LM_OAUTH';
-  if (window[NS]?.__installed) return;
+function readStoredToken() {
+  try { return sessionStorage.getItem(TOKEN_KEY); } catch { return null; }
+}
 
-  const STATE = {
-    token: null,
-    clientId: null,
-    scope: 'https://www.googleapis.com/auth/spreadsheets',
-    tokenClient: null,
-  };
+function writeStoredToken(tok) {
+  try { 
+    if (tok) sessionStorage.setItem(TOKEN_KEY, tok);
+    else sessionStorage.removeItem(TOKEN_KEY);
+  } catch {}
+  if (!window.__LM_OAUTH) window.__LM_OAUTH = {};
+  window.__LM_OAUTH.access_token = tok || null;
+}
 
-  const saveToken = (tok) => {
-    STATE.token = tok || null;
-    try {
-      if (tok) sessionStorage.setItem('__LM_TOK', tok);
-      else sessionStorage.removeItem('__LM_TOK');
-    } catch {}
-    if (tok) {
-      window.dispatchEvent(new CustomEvent('lm:oauth-ready', { detail: { access_token: tok } }));
-    }
-  };
-
-  const loadSaved = () => {
-    try {
-      const t = sessionStorage.getItem('__LM_TOK');
-      if (t) STATE.token = t;
-    } catch {}
-  };
-
-  const inferClientId = () => {
-    // Priority: window.GOOGLE_CLIENT_ID → <meta name="google-signin-client_id"> → localStorage
-    if (typeof window.GOOGLE_CLIENT_ID === 'string' && window.GOOGLE_CLIENT_ID.includes('.apps.googleusercontent.com')) {
-      return window.GOOGLE_CLIENT_ID;
-    }
-    const meta = document.querySelector('meta[name="google-signin-client_id"]');
-    if (meta && meta.content && meta.content.includes('.apps.googleusercontent.com')) {
-      return meta.content;
-    }
-    try {
-      const fromLS = localStorage.getItem('__LM_GOOGLE_CLIENT_ID');
-      if (fromLS && fromLS.includes('.apps.googleusercontent.com')) return fromLS;
-    } catch {}
-    return null;
-  };
-
-  const loadGIS = () => new Promise((resolve, reject) => {
-    if (window.google?.accounts?.oauth2) { resolve(); return; }
-    const s = document.createElement('script');
-    s.src = 'https://accounts.google.com/gsi/client';
-    s.async = true;
-    s.onload = () => resolve();
-    s.onerror = () => reject(new Error('Failed to load GIS'));
-    document.head.appendChild(s);
-  });
-
-  const initTokenClient = async () => {
-    if (STATE.tokenClient) return;
-    await loadGIS();
-    STATE.clientId = inferClientId();
-    if (!STATE.clientId) {
-      console.warn('[gauth] GOOGLE_CLIENT_ID not found. Set window.GOOGLE_CLIENT_ID or a <meta name="google-signin-client_id">.');
+/** Load GIS script lazily */
+function loadGIS() {
+  if (window.google?.accounts?.oauth2) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    const id = 'lm-gis-script';
+    if (document.getElementById(id)) {
+      // wait until available
+      const t = setInterval(() => {
+        if (window.google?.accounts?.oauth2) { clearInterval(t); resolve(); }
+      }, 50);
+      setTimeout(() => { clearInterval(t); resolve(); }, 2000);
       return;
     }
-    STATE.tokenClient = google.accounts.oauth2.initTokenClient({
-      client_id: STATE.clientId,
-      scope: STATE.scope,
-      callback: (resp) => {
-        if (resp && resp.access_token) {
-          saveToken(resp.access_token);
-        } else {
-          console.warn('[gauth] token callback without token', resp);
-        }
-      }
-    });
-  };
+    const s = document.createElement('script');
+    s.id = id;
+    s.src = 'https://accounts.google.com/gsi/client';
+    s.async = true;
+    s.defer = true;
+    s.onload = () => {
+      // small wait for global to settle
+      const t = setInterval(() => {
+        if (window.google?.accounts?.oauth2) { clearInterval(t); resolve(); }
+      }, 50);
+      setTimeout(() => { clearInterval(t); resolve(); }, 2000);
+    };
+    s.onerror = () => reject(new Error('GIS_LOAD_FAILED'));
+    document.head.appendChild(s);
+  });
+}
 
-  // Public API
-  const api = {
-    __installed: true,
-    getToken() {
-      return STATE.token || null;
-    },
-    async ensureToken({ interactive = false } = {}) {
-      loadSaved();
-      if (STATE.token) {
-        return STATE.token;
-      }
-      await initTokenClient();
-      if (!STATE.tokenClient) {
-        // no client id → cannot proceed
-        return null;
-      }
-      try {
-        // Try silent first, unless explicitly interactive requested
-        await new Promise((resolve) => {
-          STATE.tokenClient.callback = (resp) => {
-            if (resp && resp.access_token) saveToken(resp.access_token);
-            resolve();
-          };
-          STATE.tokenClient.requestAccessToken({ prompt: interactive ? 'consent' : '' });
-        });
-      } catch (e) {
-        console.warn('[gauth] ensureToken error', e);
-        return null;
-      }
-      return STATE.token || null;
-    },
-    clearToken() {
-      saveToken(null);
+/** Try to infer client_id from window or meta tag (do not hardcode here) */
+function inferClientId() {
+  return (
+    window.__LM_CLIENT_ID ||
+    (window.__LM_OAUTH && window.__LM_OAUTH.client_id) ||
+    document.querySelector('meta[name="google-signin-client_id"]')?.content ||
+    null
+  );
+}
+
+/** Ensure token; interactive=false by default to avoid surprise prompts */
+export async function ensureToken({ interactive = false, scope = SCOPE } = {}) {
+  // 1) already in memory or storage
+  const memTok = window.__LM_OAUTH?.access_token || readStoredToken();
+  if (memTok) return memTok;
+
+  if (!interactive) return null; // caller may switch to interactive later
+
+  // 2) interactive flow via GIS
+  await loadGIS();
+  const client_id = inferClientId();
+  if (!client_id) throw new Error('NO_CLIENT_ID');
+
+  const token = await new Promise((resolve, reject) => {
+    try {
+      const tokenClient = window.google.accounts.oauth2.initTokenClient({
+        client_id,
+        scope,
+        callback: (resp) => {
+          if (resp && resp.access_token) resolve(resp.access_token);
+          else reject(new Error('NO_TOKEN'));
+        },
+      });
+      tokenClient.requestAccessToken({ prompt: 'consent' });
+    } catch (e) {
+      reject(e);
     }
-  };
+  });
 
-  // Attach
-  window[NS] = api;
+  writeStoredToken(token);
+  return token;
+}
 
-  // Early silent attempt on boot
-  (async () => {
-    await api.ensureToken({ interactive: false });
-  })().catch(() => {});
+/** Named export expected by boot.esm.cdn.js */
+export function getAccessToken() {
+  // Do NOT trigger interactive flow here; return current token if any.
+  const tok = window.__LM_OAUTH?.access_token || readStoredToken();
+  return tok || null;
+}
 
-  console.log('[gauth] installed');
-})();
+/** Optional helpers for UI buttons */
+export async function signIn() {
+  const tok = await ensureToken({ interactive: true });
+  return tok;
+}
+
+export function signOut() {
+  const tok = readStoredToken();
+  writeStoredToken(null);
+  try {
+    // Optional: revoke is not strictly necessary for Sheets usage
+    if (tok && window.google?.accounts?.oauth2?.revoke) {
+      window.google.accounts.oauth2.revoke(tok, () => {});
+    }
+  } catch {}
+}
+
+export const __LM_AUTH = { ensureToken, getAccessToken, signIn, signOut };
+
+// Initialize in-memory mirror from storage on module load
+writeStoredToken(readStoredToken());
