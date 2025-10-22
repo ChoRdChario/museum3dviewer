@@ -25,7 +25,7 @@ import {
   ensureViewer, onCanvasShiftPick, addPinMarker, setPinSelected, onPinSelect,
   loadGlbFromDrive, onRenderTick, projectPoint, clearPins, removePinMarker
 } from './viewer.module.cdn.js';
-import { setupAuth, getAccessToken, getLastAuthError , ensureToken as ensureTokenGis} from './gauth.module.js';
+import { setupAuth, getAccessToken, getLastAuthError } from './gauth.module.js';
 
 // ---------- DOM helpers ----------
 const $ = (id)=>document.getElementById(id);
