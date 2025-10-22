@@ -11,14 +11,21 @@
 
   <!-- Google Identity Services -->
   <script src="https://accounts.google.com/gsi/client" async defer></script>
+
+  <!-- Import map for ESM 'three' (viewer.module.cdn.js expects bare specifiers) -->
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://unpkg.com/three@0.156.1/build/three.module.js",
+      "three/addons/": "https://unpkg.com/three@0.156.1/examples/jsm/"
+    }
+  }
+  </script>
 </head>
 <body>
-  <!-- 既存DOMはあなたのものをそのまま使ってください。 -->
-
-  <!-- boot より前：設定と Viewer -->
+  <!-- boot より前：設定と Viewer（viewer は ESM で読み込む） -->
   <script src="locimyu.config.js"></script>
-  <!-- ★ viewer は非moduleで読み込む（'three' の bare import エラー回避） -->
-  <script src="viewer.module.cdn.js"></script>
+  <script type="module" src="viewer.module.cdn.js"></script>
 
   <!-- client_id ブリッジ -->
   <script>window.__LM_CLIENT_ID = window.GIS_CLIENT_ID || window.__LM_CLIENT_ID || "";</script>
