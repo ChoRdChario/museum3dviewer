@@ -1,3 +1,13 @@
+
+// --- LM auth resolver without dynamic import (classic-safe) ---
+function __lm_getAuth() {
+  return {
+    ensureToken: (window.__LM_auth && window.__LM_auth.ensureToken) || (window.ensureToken) || (async function(){ return window.__LM_TOK; }),
+    getAccessToken: (window.__LM_auth && window.__LM_auth.getAccessToken) || (window.getAccessToken) || (function(){ return window.__LM_TOK; })
+  };
+}
+// --- end resolver ---
+
 // viewer.module.cdn.js — Three.js viewer with pins & picking/filters
 
 // ===== Materials API (WIP) =====
@@ -296,20 +306,20 @@ export function setPinSelected(id, on){
 export async function loadGlbFromDrive(fileId, { token }) {
   // Build Drive media URL
   const url = `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?alt=media&supportsAllDrives=true`;
-// Normalize token: support Promise-like tokens and auto-resolve if missing
+// Normalize/resolve token (support Promise; acquire silently if missing)
 try {
   if (token && typeof token.then === 'function') {
     token = await token.catch(()=>null);
   }
   if (!token) {
-    const g = await import('./gauth.module.js');
+    const g = __lm_getAuth();
     token = (g.getAccessToken && g.getAccessToken()) || window.__LM_TOK || null;
-    if (!token) {
-      try { token = await g.ensureToken({ prompt: undefined }); } catch(_) {}
+    if (!token && g.ensureToken) {
+      try { token = await g.ensureToken({ prompt: undefined }); } catch {}
       if (!token && g.getAccessToken) token = g.getAccessToken();
     }
   }
-} catch(_) {}
+} catch {}
 
 
   // Resolve token if not provided

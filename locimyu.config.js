@@ -9,3 +9,6 @@ window.GIS_SCOPES = [
 ].join(' ');
 // Optional: window.GIS_PROMPT = "consent";
 // Optional: window.GIS_HINT = "<youremail@example.com>";
+
+window.LM_PARENT_FOLDER_ID = window.LM_PARENT_FOLDER_ID || ""; // ← 必要ならDriveのフォルダIDを設定
+window.currentSpreadsheetId = null; try{ localStorage.removeItem('lm:ssid'); }catch(e){}

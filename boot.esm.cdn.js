@@ -1,6 +1,5 @@
 // boot.esm.cdn.js — LociMyu boot (clean full build, overlay image + Sheets delete fixes)
 
-
 // --- LM auth resolver without dynamic import (classic-safe) ---
 function __lm_getAuth() {
   return {
@@ -190,10 +189,48 @@ function getFileBlobUrl(fileId, token){
     .then(blob => URL.createObjectURL(blob));
 }
 function getParentFolderId(fileId, token){
-  const url = 'https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(fileId)+'?fields=parents&supportsAllDrives=true';
-  return fetch(url, { headers: { Authorization:'Bearer '+token } })
-    .then(r => r.ok ? r.json() : null)
-    .then(j => (j && j.parents && j.parents[0]) ? j.parents[0] : null);
+const url = 'https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(fileId)+'?fields=parents&supportsAllDrives=true';
+return (async () => {
+  try {
+    // resolve token if it's a Promise
+    try {
+      if (token && typeof token.then === 'function') {
+        try { token = await token; } catch (e) { token = null; }
+      }
+    } catch (e) {}
+
+    // acquire token if missing (silent preferred)
+    try {
+      const g = __lm_getAuth();
+      if (!token) {
+        token = (g.getAccessToken && g.getAccessToken()) || window.__LM_TOK || null;
+        if (!token && g.ensureToken) {
+          try { token = await g.ensureToken({ prompt: undefined }); } catch (e) {}
+          if (!token && g.getAccessToken) token = g.getAccessToken();
+        }
+      }
+    } catch (e) {}
+
+    async function req(t) {
+      const headers = t ? { Authorization: 'Bearer ' + t } : undefined;
+      return fetch(url, { headers });
+    }
+
+    let r = await req(token);
+    if (r.status === 401) {
+      try {
+        const g = __lm_getAuth();
+        const fresh = g.ensureToken ? await g.ensureToken({ prompt: undefined }) : null;
+        if (fresh) r = await req(fresh);
+      } catch (e) {}
+    }
+
+    if (!r.ok) return null;
+    const j = await r.json().catch(() => null);
+    return (j && j.parents && j.parents[0]) ? j.parents[0] : null;
+  } catch (e) { return null; }
+})();
+
 }
 
 // ---------- Global state ----------
