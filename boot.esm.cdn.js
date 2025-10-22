@@ -1,5 +1,48 @@
 // boot.esm.cdn.js — LociMyu boot (clean full build, overlay image + Sheets delete fixes)
 
+// === LM helpers injected (auth + drive fetch) ===
+function __lm_getAuth() {
+  return {
+    ensureToken: (window.__LM_auth && window.__LM_auth.ensureToken) || (window.ensureToken) || (async () => window.__LM_TOK),
+    getAccessToken: (window.__LM_auth && window.__LM_auth.getAccessToken) || (window.getAccessToken) || (() => window.__LM_TOK)
+  };
+}
+
+/**
+ * Drive-safe fetch: adds Authorization, retries once on 401, preserves caller's headers.
+ * Accepts same signature as fetch(url, init).
+ */
+async function __lm_fetchDrive(url, init) {
+  init = init || {};
+  // Resolve token (sync first, silent ensure as fallback)
+  const g = __lm_getAuth();
+  let tok = (g.getAccessToken && g.getAccessToken()) || window.__LM_TOK || null;
+  if (!tok && g.ensureToken) {
+    try { tok = await g.ensureToken({ prompt: undefined }); } catch (e) {}
+    if (!tok && g.getAccessToken) tok = g.getAccessToken();
+  }
+  // Merge headers
+  const baseHeaders = new Headers(init.headers || {});
+  if (tok && !baseHeaders.has('Authorization')) {
+    baseHeaders.set('Authorization', 'Bearer ' + tok);
+  }
+  async function doFetch() {
+    return fetch(url, Object.assign({}, init, { headers: baseHeaders }));
+  }
+  let res = await doFetch();
+  if (res.status === 401 && g.ensureToken) {
+    try {
+      const fresh = await g.ensureToken({ prompt: undefined });
+      if (fresh) {
+        baseHeaders.set('Authorization', 'Bearer ' + fresh);
+        res = await doFetch();
+      }
+    } catch (e) {}
+  }
+  return res;
+}
+// === end injected helpers ===
+
 // --- LM auth resolver without dynamic import (classic-safe) ---
 function __lm_getAuth() {
   return {
