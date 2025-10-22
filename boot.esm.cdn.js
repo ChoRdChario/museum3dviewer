@@ -1,52 +1,4 @@
 // boot.esm.cdn.js — LociMyu boot (clean full build, overlay image + Sheets delete fixes)
-// === LM helpers injected (auth + drive fetch) ===
-;(function(){
-  if (typeof window === 'undefined') return;
-  if (window.__lm_fetchDrive) return; // already defined
-
-  window.__lm_getAuth = window.__lm_getAuth || function __lm_getAuth() {
-    return {
-      ensureToken: (window.__LM_auth && window.__LM_auth.ensureToken) || (window.ensureToken) || (async () => window.__LM_TOK),
-      getAccessToken: (window.__LM_auth && window.__LM_auth.getAccessToken) || (window.getAccessToken) || (() => window.__LM_TOK)
-    };
-  };
-
-  window.__lm_fetchDrive = async function __lm_fetchDrive(url, init) {
-    init = init || {};
-    const g = window.__lm_getAuth();
-    let tok = (g.getAccessToken && g.getAccessToken()) || window.__LM_TOK || null;
-    if (!tok && g.ensureToken) {
-      try { tok = await g.ensureToken({ prompt: undefined }); } catch (e) {}
-      if (!tok && g.getAccessToken) tok = g.getAccessToken();
-    }
-    const baseHeaders = new Headers(init.headers || {});
-    if (tok && !baseHeaders.has('Authorization')) {
-      baseHeaders.set('Authorization', 'Bearer ' + tok);
-    }
-    async function doFetch() { return fetch(url, Object.assign({}, init, { headers: baseHeaders })); }
-    let res = await doFetch();
-    if (res.status === 401 && g.ensureToken) {
-      try {
-        const fresh = await g.ensureToken({ prompt: undefined });
-        if (fresh) {
-          baseHeaders.set('Authorization', 'Bearer ' + fresh);
-          res = await doFetch();
-        }
-      } catch (e) {}
-    }
-    return res;
-  };
-})(); 
-// === end injected helpers ===
-
-// --- LM auth resolver without dynamic import (classic-safe) ---
-function __lm_getAuth() {
-  return {
-    ensureToken: (window.__LM_auth && window.__LM_auth.ensureToken) || (window.ensureToken) || (async function(){ return window.__LM_TOK; }),
-    getAccessToken: (window.__LM_auth && window.__LM_auth.getAccessToken) || (window.getAccessToken) || (function(){ return window.__LM_TOK; })
-  };
-}
-// --- end resolver ---
 
 // ---------- Globals (palette & helpers) ----------
 window.LM_PALETTE = window.LM_PALETTE || ["#ef9368","#e9df5d","#a8e063","#8bb6ff","#b38bff","#86d2c4","#d58cc1","#9aa1a6"];
@@ -99,36 +51,14 @@ function onSigned(signed){
     const cid  = window.GIS_CLIENT_ID || window.__LM_CLIENT_ID || (meta && meta.content) || "";
     if (cid){
       window.__LM_CLIENT_ID = cid;
-      if (window.__LM_auth && typeof window.__LM_auth.setupClientId === 'function') {
-  // (disabled to avoid popup before user gesture)
-  // window.__LM_auth.setupClientId(cid);
-}
+      if (window.__LM_auth && typeof window.__LM_auth.setupClientId === 'function'){
+        try { window.// __LM_auth.setupClientId(cid); // (disabled to avoid popup before user gesture)
+ } catch(_){}
+      }
     }
   }catch(_) {}
 })();
 // --- end bridge ---
-
-// --- LM scopes union (ensure Drive Readonly is included) ---
-(function __lm_union_scopes(){
-  try{
-    const NEED = [
-      "https://www.googleapis.com/auth/spreadsheets",
-      "https://www.googleapis.com/auth/drive.readonly"
-    ];
-    // prefer window.__LM_SCOPES, then <meta data-lm-scopes>, else default spreadsheets only
-    let scopes = window.__LM_SCOPES
-      || (document.querySelector('meta[name="lm-scopes"]')?.content)
-      || "https://www.googleapis.com/auth/spreadsheets";
-    const set = new Set(String(scopes).split(/\s+/).filter(Boolean));
-    for (const s of NEED) set.add(s);
-    window.__LM_SCOPES = Array.from(set).join(" ");
-    // optional: expose for gauth implementations that look here
-    if (!window.GIS_SCOPES) window.GIS_SCOPES = window.__LM_SCOPES;
-    console.log("[auth] scopes:", window.__LM_SCOPES);
-  }catch(e){ console.warn("[auth] scopes union warn:", e); }
-})();
-// --- end scopes union ---
-
 setupAuth($('auth-signin'), onSigned, { clientId: __LM_CLIENT_ID, apiKey: __LM_API_KEY, scopes: __LM_SCOPES });
 
 
@@ -156,7 +86,7 @@ setupAuth($('auth-signin'), onSigned, { clientId: __LM_CLIENT_ID, apiKey: __LM_A
           }
         }
         // dynamically import to ensure module is ready
-        const g = __lm_getAuth();
+        const g = await import('./gauth.module.js');
         // prefer '{prompt:\"consent\"}' then fallbacks
         let tok;
         try { tok = await g.ensureToken({ prompt: 'consent' }); }
@@ -206,7 +136,7 @@ function extractDriveId(input){
 function getFileThumbUrl(fileId, token, size){
   size = size|0; if(!size) size=1024;
   const url = 'https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(fileId)+'?fields=thumbnailLink&supportsAllDrives=true';
-  return fetch(url, { headers: { Authorization: 'Bearer '+token } })
+  return __lm_backoffFetch(url, { headers:{ Authorization:'Bearer '+token } })
     .then(r => { if(!r.ok) throw new Error('thumb meta '+r.status); return r.json(); })
     .then(j => {
       if(!j.thumbnailLink) throw new Error('no thumbnailLink');
@@ -218,7 +148,7 @@ function getFileThumbUrl(fileId, token, size){
 function getFileBlobUrl(fileId, token){
   if(!fileId || !token) return Promise.reject(new Error('missing fileId/token'));
   const url = 'https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(fileId)+'?alt=media&supportsAllDrives=true';
-  return fetch(url, { headers: { Authorization: 'Bearer '+token } })
+  return __lm_backoffFetch(url, { headers:{ Authorization:'Bearer '+token } })
     .then(r => {
       if(!r.ok) throw new Error('media '+r.status);
       const ct = (r.headers.get('Content-Type')||'').toLowerCase();
@@ -228,48 +158,10 @@ function getFileBlobUrl(fileId, token){
     .then(blob => URL.createObjectURL(blob));
 }
 function getParentFolderId(fileId, token){
-const url = 'https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(fileId)+'?fields=parents&supportsAllDrives=true';
-return (async () => {
-  try {
-    // resolve token if it's a Promise
-    try {
-      if (token && typeof token.then === 'function') {
-        try { token = await token; } catch (e) { token = null; }
-      }
-    } catch (e) {}
-
-    // acquire token if missing (silent preferred)
-    try {
-      const g = __lm_getAuth();
-      if (!token) {
-        token = (g.getAccessToken && g.getAccessToken()) || window.__LM_TOK || null;
-        if (!token && g.ensureToken) {
-          try { token = await g.ensureToken({ prompt: undefined }); } catch (e) {}
-          if (!token && g.getAccessToken) token = g.getAccessToken();
-        }
-      }
-    } catch (e) {}
-
-    async function req(t) {
-      const headers = t ? { Authorization: 'Bearer ' + t } : undefined;
-      return fetch(url, { headers });
-    }
-
-    let r = await req(token);
-    if (r.status === 401) {
-      try {
-        const g = __lm_getAuth();
-        const fresh = g.ensureToken ? await g.ensureToken({ prompt: undefined }) : null;
-        if (fresh) r = await req(fresh);
-      } catch (e) {}
-    }
-
-    if (!r.ok) return null;
-    const j = await r.json().catch(() => null);
-    return (j && j.parents && j.parents[0]) ? j.parents[0] : null;
-  } catch (e) { return null; }
-})();
-
+  const url = 'https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(fileId)+'?fields=parents&supportsAllDrives=true';
+  return __lm_backoffFetch(url, { headers:{ Authorization:'Bearer '+token } })
+    .then(r => r.ok ? r.json() : null)
+    .then(j => (j && j.parents && j.parents[0]) ? j.parents[0] : null);
 }
 
 // ---------- Global state ----------
@@ -486,15 +378,15 @@ function putValues(spreadsheetId, rangeA1, values, token){
 }
 function appendValues(spreadsheetId, rangeA1, values, token){
   const url = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(rangeA1)}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`;
-  return fetch(url, { method:'POST', headers:{ Authorization:'Bearer '+token, 'Content-Type':'application/json' }, body: JSON.stringify({ values }) }).then(r=>{ if(!r.ok) throw new Error('values.append '+r.status); });
+  return __lm_backoffFetch(url, { method:'POST', headers:{ Authorization:'Bearer '+token, 'Content-Type':'application/json' }, body:JSON.stringify({ values }) }).then(r=>{ if(!r.ok) throw new Error('values.append '+r.status); });
 }
 function getValues(spreadsheetId, rangeA1, token){
   const url = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(rangeA1)}`;
-  return fetch(url, { headers:{ Authorization:'Bearer '+token } }).then(r=>{ if(!r.ok) throw new Error('values.get '+r.status); return r.json(); }).then(d=> d.values||[]);
+  return __lm_backoffFetch(url, { headers:{ Authorization:'Bearer '+token } }).then(r=>{ if(!r.ok) throw new Error('values.get '+r.status); return r.json(); }).then(d=> d.values||[]);
 }
 function isLociMyuSpreadsheet(spreadsheetId, token){
   const url=`https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}?includeGridData=true&ranges=A1:Z1&fields=sheets(properties(title,sheetId),data(rowData(values(formattedValue))))`;
-  return fetch(url, { headers:{ Authorization:'Bearer '+token } }).then(res=> res.ok ? res.json() : false).then(data=>{
+  return __lm_backoffFetch(url, { headers:{ Authorization:'Bearer '+token } }).then(res=> res.ok ? res.json() : false).then(data=>{
       if(!data || !Array.isArray(data.sheets)) return false;
       for(const s of data.sheets){
         const d = s && s.data || []; if(!d[0]) continue;
@@ -517,7 +409,7 @@ function createLociMyuSpreadsheet(parentFolderId, token, opts){
   const url = 'https://www.googleapis.com/drive/v3/files';
   const body = { name, mimeType:'application/vnd.google-apps.spreadsheet' };
   if(parentFolderId) body.parents = [ parentFolderId ];
-  return fetch(url, { method:'POST', headers:{ Authorization:'Bearer '+token, 'Content-Type':'application/json' }, body: JSON.stringify(body) }).then(r=>{ if(!r.ok) throw new Error('Drive files.create '+r.status); return r.json(); }).then(file=>{
+  return __lm_backoffFetch(url, { method:'POST', headers:{ Authorization:'Bearer '+token, 'Content-Type':'application/json' }, body:JSON.stringify(body) }).then(r=>{ if(!r.ok) throw new Error('Drive files.create '+r.status); return r.json(); }).then(file=>{
       const spreadsheetId = file.id;
       return putValues(spreadsheetId, 'A1:Z1', [LOCIMYU_HEADERS], token).then(()=> spreadsheetId);
     });
@@ -526,7 +418,7 @@ function findOrCreateLociMyuSpreadsheet(parentFolderId, token, opts){
   if(!parentFolderId) return Promise.reject(new Error('parentFolderId required'));
   const q = encodeURIComponent(`'${parentFolderId}' in parents and mimeType='application/vnd.google-apps.spreadsheet' and trashed=false`);
   const url=`https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name,modifiedTime)&orderBy=modifiedTime desc&pageSize=10&supportsAllDrives=true`;
-  return fetch(url, { headers:{ Authorization:'Bearer '+token } }).then(r=>{ if(!r.ok) throw new Error('Drive list spreadsheets '+r.status); return r.json(); }).then(d=>{
+  return __lm_backoffFetch(url, { headers:{ Authorization:'Bearer '+token } }).then(r=>{ if(!r.ok) throw new Error('Drive list spreadsheets '+r.status); return r.json(); }).then(d=>{
       const files = d.files || [];
       function next(i){
         if(i>=files.length) return createLociMyuSpreadsheet(parentFolderId, token, opts||{});
@@ -611,10 +503,7 @@ async function deleteCaptionRowFromSheet(spreadsheetId, sheetId, rowIndex1based,
       }]
     };
     const url = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}:batchUpdate`;
-    const r = await fetch(url, {
-      method:'POST',
-      headers:{ Authorization:'Bearer '+token, 'Content-Type':'application/json' },
-      body: JSON.stringify(body)
+    const r = await __lm_backoffFetch(url, { method:'POST', headers:{ Authorization:'Bearer '+token, 'Content-Type':'application/json' }, body:JSON.stringify(body)
     });
     if(!r.ok){
       console.error('[Sheets deleteDimension] HTTP', r.status);
@@ -870,7 +759,7 @@ function refreshImagesGrid(){
     }
     const q = encodeURIComponent(`'${parent}' in parents and mimeType contains 'image/' and trashed=false`);
     const url = `https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name,mimeType,thumbnailLink)&orderBy=modifiedTime desc&pageSize=200&supportsAllDrives=true`;
-    return fetch(url, { headers:{ Authorization:'Bearer '+token } })
+    return __lm_backoffFetch(url, { headers:{ Authorization:'Bearer '+token } })
       .then(r=>r.json())
       .then(d=>{
         const grid = $('images-grid'); const stat = $('images-status');
@@ -985,6 +874,7 @@ function renderFilterChips(){
 
 // ---------- GLB load ----------
 function doLoad(){
+  console.log('[GLB] click');
   try{
     const token = ensureToken();
     const raw = ($('glbUrl') && $('glbUrl').value) || '';
@@ -1020,7 +910,7 @@ function populateSheetTabs(spreadsheetId, token){
   const sel = $('save-target-sheet'); if(!sel||!spreadsheetId) return Promise.resolve();
   sel.innerHTML = '<option value="">Loading…</option>';
   const url=`https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}?fields=sheets(properties(title,sheetId,index))`;
-  return fetch(url, { headers:{ Authorization:'Bearer '+token } }).then(function(r){ return r.ok ? r.json() : null; }).then(function(data){
+  return __lm_backoffFetch(url, { headers:{ Authorization:'Bearer '+token } }).then(function(r){ return r.ok ? r.json() : null; }).then(function(data){
       if(!data) { sel.innerHTML='<option value="">(error)</option>'; return; }
       const sheets = (data.sheets||[]).map(function(s){ return s.properties; }).sort(function(a,b){ return a.index-b.index; });
       sel.innerHTML='';
@@ -1056,7 +946,7 @@ if(btnCreate){
     const title='Sheet_'+new Date().toISOString().slice(0,19).replace(/[:T]/g,'-');
     const url=`https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(currentSpreadsheetId)}:batchUpdate`;
     const body={ requests:[{ addSheet:{ properties:{ title } } }] };
-    fetch(url,{ method:'POST', headers:{ Authorization:'Bearer '+token, 'Content-Type':'application/json' }, body: JSON.stringify(body) })
+    __lm_backoffFetch(url, { method:'POST', headers:{ Authorization:'Bearer '+token, 'Content-Type':'application/json' }, body:JSON.stringify(body) })
       .then(function(r){ if(!r.ok) throw new Error(String(r.status)); })
       .then(function(){ return populateSheetTabs(currentSpreadsheetId, token); })
       .then(function(){ loadCaptionsFromSheet(); })
@@ -1071,7 +961,7 @@ if(btnRename){
     if(!newTitle) return;
     const url=`https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(currentSpreadsheetId)}:batchUpdate`;
     const body={ requests:[{ updateSheetProperties:{ properties:{ sheetId: currentSheetId, title: newTitle }, fields: 'title' } }] };
-    fetch(url,{ method:'POST', headers:{ Authorization:'Bearer '+token, 'Content-Type':'application/json' }, body: JSON.stringify(body) })
+    __lm_backoffFetch(url, { method:'POST', headers:{ Authorization:'Bearer '+token, 'Content-Type':'application/json' }, body:JSON.stringify(body) })
       .then(function(r){ if(!r.ok) throw new Error(String(r.status)); })
       .then(function(){ return populateSheetTabs(currentSpreadsheetId, token); })
       .then(function(){ loadCaptionsFromSheet(); })
@@ -1277,7 +1167,7 @@ onCanvasShiftPick(function(pos){
   }
   async function GV(ssid, rangeA1, token){
     const url = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(ssid)}/values/${encodeURIComponent(rangeA1)}?majorDimension=ROWS`;
-    const r = await fetch(url, { headers:{ Authorization:'Bearer '+token } });
+    const r = await __lm_backoffFetch(url, { headers:{ Authorization:'Bearer '+token } });
     if(!r.ok) throw new Error('values.get '+r.status);
     const j = await r.json(); return j.values||[];
   }
@@ -1290,7 +1180,7 @@ onCanvasShiftPick(function(pos){
   async function AV(ssid, rangeA1, rows, token){
     const url = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(ssid)}/values/${encodeURIComponent(rangeA1)}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`;
     const body = { range: rangeA1, majorDimension:'ROWS', values: rows };
-    const r = await fetch(url, { method:'POST', headers:{ Authorization:'Bearer '+token, 'Content-Type':'application/json' }, body: JSON.stringify(body) });
+    const r = await __lm_backoffFetch(url, { method:'POST', headers:{ Authorization:'Bearer '+token, 'Content-Type':'application/json' }, body:JSON.stringify(body) });
     if(!r.ok){ const t = await r.text().catch(()=> ''); throw new Error('values.append '+r.status+' '+t); }
   }
 
@@ -1313,7 +1203,7 @@ onCanvasShiftPick(function(pos){
       // create sheet then write header
       const body = { requests:[{ addSheet:{ properties:{ title: MATERIALS_TITLE } } }] };
       const url  = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(ssid)}:batchUpdate`;
-      const r = await fetch(url, { method:'POST', headers:{ Authorization:'Bearer '+token, 'Content-Type':'application/json' }, body: JSON.stringify(body) });
+      const r = await __lm_backoffFetch(url, { method:'POST', headers:{ Authorization:'Bearer '+token, 'Content-Type':'application/json' }, body:JSON.stringify(body) });
       if(!r.ok){ const t = await r.text().catch(()=> ''); warn('addSheet failed', r.status, t); return false; }
       await PV(ssid, `'${MATERIALS_TITLE}'!A1:K1`, [headers], token);
       return true;
@@ -1514,3 +1404,20 @@ onCanvasShiftPick(function(pos){
   log('overlay applied', window.__LM_MATERIALS_PATCH_APPLIED);
 })();
 // ===== end LM-PATCH-A6 =====
+
+
+// Re-wire #btnGlb on DOM mutations (in case UI is re-rendered)
+(function(){
+  const root = document.body || document.documentElement;
+  if (!root) return;
+  if (window.__lm_btnGlbMo) return;
+  window.__lm_btnGlbMo = new MutationObserver(()=>{
+    const b = document.getElementById('btnGlb');
+    if (b && !b.__lm_wired){
+      b.__lm_wired = true;
+      b.addEventListener('click', doLoad, { passive:false });
+      console.log('[GLB] button re-wired');
+    }
+  });
+  window.__lm_btnGlbMo.observe(root, { childList:true, subtree:true });
+})();
