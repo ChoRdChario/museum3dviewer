@@ -1,15 +1,16 @@
 // boot.esm.cdn.js — LociMyu boot (clean full build, overlay image + Sheets delete fixes)
-
 // === LM helpers injected (auth + drive fetch) ===
 ;(function(){
   if (typeof window === 'undefined') return;
   if (window.__lm_fetchDrive) return; // already defined
+
   window.__lm_getAuth = window.__lm_getAuth || function __lm_getAuth() {
     return {
       ensureToken: (window.__LM_auth && window.__LM_auth.ensureToken) || (window.ensureToken) || (async () => window.__LM_TOK),
       getAccessToken: (window.__LM_auth && window.__LM_auth.getAccessToken) || (window.getAccessToken) || (() => window.__LM_TOK)
     };
   };
+
   window.__lm_fetchDrive = async function __lm_fetchDrive(url, init) {
     init = init || {};
     const g = window.__lm_getAuth();
@@ -37,7 +38,6 @@
   };
 })(); 
 // === end injected helpers ===
-
 
 // --- LM auth resolver without dynamic import (classic-safe) ---
 function __lm_getAuth() {
