@@ -1,42 +1,218 @@
 <!doctype html>
 <html lang="ja">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>LociMyu v6.6</title>
-
-  <!-- Styles -->
-  <link rel="stylesheet" href="app.css">
-  <link rel="stylesheet" href="app.sheet-rename.css">
-
-  <!-- Google Identity Services -->
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>LociMyu v6.6 (ESM/CDN)</title>
+  <link rel="icon" href="data:," />
+  <meta name="google-oauth-client_id" content="595200751510-ncahnf7edci6b9925becn5to49r6cguv.apps.googleusercontent.com">
+  <meta name="google-api-key" content="AIzaSyCUnTCr5yWUWPdEXST9bKP1LpgawU5rIbI">
   <script src="https://accounts.google.com/gsi/client" async defer></script>
+  <style>
+    :root{--bg:#0f1115;--panel:#0b0d11;--line:#1f2937;--acc:#94a3b8;--text:#cbd5e1;--sel:#60a5fa;}
+    html,body{height:100%;margin:0;background:var(--bg);color:var(--text);font:14px/1.4 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;}
+    #app{display:flex;height:100%;}
+    #stage{flex:1;position:relative;background:var(--panel);}
+    #ui{width:360px;border-left:1px solid var(--line);display:flex;flex-direction:column;}
+    header#topbar{display:flex;justify-content:space-between;align-items:center;padding:8px 12px;border-bottom:1px solid var(--line);}
+    header #brand{font-weight:600;opacity:.8}
+    button,select,input{background:#111827;border:1px solid var(--line);color:var(--text);border-radius:6px;padding:6px 8px}
+    input[type="text"]{width:100%;box-sizing:border-box}
+    .row{display:flex;gap:8px;align-items:center}
+    .row > *{flex:1}
+    .tabs{display:flex;border-bottom:1px solid var(--line)}
+    .tabs button{flex:1;border:0;border-bottom:2px solid transparent;padding:8px 12px;background:transparent;color:var(--acc)}
+    .tabs button[aria-selected="true"]{color:var(--text);border-bottom-color:#64748b}
+    .pane{display:none;padding:12px;overflow:auto}
+    .pane[data-active="true"]{display:block}
+    #gl{width:100%;height:100%;display:block}
+    .pad{padding:12px}
+    .grp{margin:8px 0}
+    .chips{display:flex;flex-wrap:wrap;gap:6px}
+    .chip{width:18px;height:18px;border-radius:50%;border:1px solid #0003;cursor:pointer;box-shadow:0 0 0 1px #0004 inset}
+    #caption-list{height:160px;overflow:auto;border:1px solid var(--line);border-radius:6px}
+    .caption-item{display:flex;gap:8px;align-items:flex-start;padding:6px;border-bottom:1px solid #0003}
+    .caption-item img{width:40px;height:40px;object-fit:cover;border-radius:6px;border:1px solid #0004}
+    .hint{opacity:.7;font-size:12px}
+    /* thumbnails grid */
+    #images-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(64px,1fr));gap:8px}
+    .thumb{width:100%;aspect-ratio:1/1;border-radius:8px;border:1px solid #0005;background-size:cover;background-position:center;cursor:pointer}
+    .thumb[data-selected="true"]{outline:2px solid var(--sel);outline-offset:2px}
+  </style>
+  <link rel="stylesheet" href="app.css"/>
+</head>
+<body>
+  <div id="app">
+    <div id="stage"><canvas id="gl"></canvas></div>
+    <aside id="ui">
+      <header id="topbar">
+        <div id="brand">LociMyu v6.6</div>
+        <div class="row" style="gap:6px;flex:0 0 auto">
+          <button id="auth-signin">Sign in</button>
+        </div>
+      </header>
 
-  <!-- Import map for ESM 'three' (viewer.module.cdn.js expects bare specifiers) -->
+      <div class="pad" style="border-bottom:1px solid var(--line)">
+        <div class="row">
+          <input id="glbUrl" type="text" placeholder="Drive fileId / GLB URL" />
+          <button id="btnGlb">Load</button>
+        </div>
+        <div class="row" style="margin-top:8px">
+          <select id="save-target-sheet"><option value="">Select sheet…</option></select>
+          <button id="save-target-create">Create</button>
+        </div>
+      </div>
+
+      <nav class="tabs" role="tablist">
+        <button id="tab-caption" role="tab" aria-selected="true" data-tab="caption">Caption</button>
+        <button id="tab-material" role="tab" aria-selected="false" data-tab="material">Material</button>
+        <button id="tab-views" role="tab" aria-selected="false" data-tab="views">Views</button>
+      </nav>
+
+      <section id="pane-caption" class="pane" data-pane="caption" data-active="true">
+  <div class="grp">
+    <div class="hint">Pin color</div>
+    <div id="pinColorChips" class="chips"></div>
+  </div>
+  <div class="grp">
+    <div class="hint">Filter</div>
+    <div id="pinFilterChips" class="chips"></div>
+  </div>
+
+  <div class="grp">
+    <div class="hint">Caption list</div>
+    <div id="caption-list"></div>
+  </div>
+
+  <div class="grp">
+    <div class="hint">Title / Body</div>
+    <input id="caption-title" placeholder="Title" />
+    <input id="caption-body"  placeholder="Body" />
+    <div class="row" id="caption-image-row">
+      <div id="currentImageThumb" aria-label="attached image preview">
+        <div class="placeholder">No Image</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="grp">
+    <div class="hint">Images (auto from GLB folder)</div>
+    <div id="images-grid-wrapper">
+      <div id="images-grid"></div>
+      <div class="row" style="margin-top:8px">
+        <button id="btnRefreshImages" style="width:100%">Refresh images</button>
+      </div>
+      <div id="images-status" class="hint" style="margin-top:6px"></div>
+    </div>
+  </div>
+</section>
+
+      <section id="pane-material" class="pane" data-pane="material">
+        <div class="grp">
+          <label>Target
+            <select id="mat-target"></select>
+          </label>
+        </div>
+    
+        <div class="grp">
+          <label>White Threshold <input type="range" id="mat-white-thr" min="0.8" max="1" step="0.01" value="0.92"/></label>
+          <output id="mat-white-thr-val">0.92</output>
+        </div>
+    
+        <div class="grp">
+          <label><input type="checkbox" id="mat-black2alpha" /> Black → Alpha</label>
+        </div>
+        <div class="grp">
+          <label>Black Threshold <input type="range" id="mat-black-thr" min="0" max="0.2" step="0.01" value="0.08"/></label>
+          <output id="mat-black-thr-val">0.08</output>
+        </div>
+    
+        <div class="grp">
+          <button id="mat-reset-one">Reset (Selected)</button>
+          <button id="mat-reset-all">Reset All</button>
+        </div>
+    
+        <div class="grp">
+          <label><input type="checkbox" id="mat-unlit" /> Unlit</label>
+          <label><input type="checkbox" id="mat-doubleside" /> Double-sided</label>
+        </div>
+        <div class="grp">
+          <label>Opacity <input type="range" id="mat-opacity" min="0" max="1" step="0.01" value="1"/></label>
+        </div>
+        <div class="grp">
+          <label><input type="checkbox" id="mat-white2alpha" /> White → Alpha</label>
+        </div>
+      </section>
+
+      <section id="pane-views" class="pane" data-pane="views">
+        <div class="grp">
+          <button id="view-save">Save view</button>
+          <div class="row"><label><input type="checkbox" id="proj-ortho" /> Orthographic</label></div>
+        </div>
+        <div id="views-preset-list"></div>
+      </section>
+    </aside>
+  </div>
+
+  
+
   <script type="importmap">
   {
     "imports": {
-      "three": "https://unpkg.com/three@0.156.1/build/three.module.js",
-      "three/addons/": "https://unpkg.com/three@0.156.1/examples/jsm/"
+      "three": "https://unpkg.com/three@0.155.0/build/three.module.js",
+      "three/examples/jsm/": "https://unpkg.com/three@0.155.0/examples/jsm/"
     }
   }
   </script>
-</head>
-<body>
-  <!-- boot より前：設定と Viewer（viewer は ESM で読み込む） -->
+
   <script src="locimyu.config.js"></script>
-  <script type="module" src="viewer.module.cdn.js"></script>
+<script type="module" src="viewer.module.cdn.js"></script>
+<script type="module" src="./boot.esm.cdn.js"></script>
+<link rel="stylesheet" href="app.sheet-rename.css" />
+<script type="module" src="sheet-rename.module.js"></script>
 
-  <!-- client_id ブリッジ -->
-  <script>window.__LM_CLIENT_ID = window.GIS_CLIENT_ID || window.__LM_CLIENT_ID || "";</script>
 
-  <!-- P0モジュール -->
-  <script src="gauth.module.js"></script>
-  <script src="signin.module.js"></script>
-  <script src="materials.module.js"></script>
-  <script src="sheet-rename.module.js"></script>
+<script type="module">
+// === LociMyu: Material pane UI reorder (DOM-safe, no event rewire) ===
+(function(){
+  function grpOf(id){
+    const el = document.getElementById(id);
+    return el ? el.closest('.grp') : null;
+  }
+  function uniq(arr){ const out=[]; const seen=new Set(); arr.forEach(n=>{ if(n && !seen.has(n)){ seen.add(n); out.push(n);} }); return out; }
+  function reorder(){
+    const pane = document.getElementById('pane-material');
+    if(!pane) return;
+    const target  = grpOf('mat-target');
+    const unlit   = grpOf('mat-unlit') || grpOf('mat-doubleside');
+    const opacity = grpOf('mat-opacity');
+    const wAlpha  = grpOf('mat-white2alpha');
+    const wThr    = grpOf('mat-white-thr');
+    const bAlpha  = grpOf('mat-black2alpha');
+    const bThr    = grpOf('mat-black-thr');
+    const reset   = grpOf('mat-reset-one') || grpOf('mat-reset-all');
 
-  <!-- 起動ハブは最後 -->
-  <script src="boot.esm.cdn.js"></script>
+    const order = uniq([ target, unlit, opacity, wAlpha, wThr, bAlpha, bThr, reset ]);
+    order.forEach(g=>{ try{ pane.appendChild(g); }catch(_){ } });
+  }
+
+  function onTabClick(ev){
+    const btn = ev.target && ev.target.closest && ev.target.closest('[role="tab"][data-tab="material"]');
+    if(btn){ setTimeout(reorder, 0); }
+  }
+
+  function boot(){
+    reorder();
+    const nav = document.querySelector('nav.tabs');
+    if(nav && !nav.__lmReorderWired){
+      nav.__lmReorderWired = true;
+      nav.addEventListener('click', onTabClick, { passive:true });
+    }
+  }
+  if(document.readyState === 'loading'){ document.addEventListener('DOMContentLoaded', boot, { once:true }); }
+  else { boot(); }
+})();
+</script>
+
 </body>
 </html>

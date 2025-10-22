@@ -1,28 +1,25 @@
-/* signin.module.js — simplified IIFE */
+/* signin.module.js — attach to existing Sign in button only */
 (function(){
   function findBtn(){
-    return document.querySelector('[data-lm-signin], #auth-signin, #signin, #sign-in, .btn-signin, button.signin');
-  }
-  function attachOnce(btn){
-    if (!btn || btn.__lm_bound) return;
-    btn.__lm_bound = true;
-    btn.addEventListener('click', async function(ev){
-      ev.preventDefault();
-      try{
-        if (window.LM_GAuth && LM_GAuth.ensureToken){
-          await LM_GAuth.ensureToken(true);
-          console.log('[signin] token ok');
-        } else {
-          console.error('[signin] LM_GAuth missing');
-        }
-      }catch(e){ console.error('[signin] ensureToken failed', e); }
-    }, {passive:false});
-    console.log('[signin] attached to', btn);
+    return document.querySelector('[data-lm-signin]') ||
+           document.getElementById('btnSignIn') ||
+           document.getElementById('signin') ||
+           document.getElementById('sign-in') ||
+           document.querySelector('.btn-signin, button.signin');
   }
   function attach(){
-    const btn = findBtn(); if (btn) attachOnce(btn);
-    const mo = new MutationObserver(function(){ const b = findBtn(); if (b) attachOnce(b); });
-    mo.observe(document.documentElement, {subtree:true, childList:true});
+    const btn = findBtn();
+    if (!btn){ console.warn("[signin] Sign in button not found"); return; }
+    if (btn.__lm_bound) return;
+    btn.__lm_bound = true;
+    btn.addEventListener("click", async (ev)=>{
+      ev.preventDefault();
+      try{
+        if (window.LM_GAuth && LM_GAuth.ensureToken) { await LM_GAuth.ensureToken(true); console.log("[signin] token ok"); }
+        else { console.error("[signin] LM_GAuth missing"); }
+      }catch(e){ console.error("[signin] ensureToken failed", e); }
+    }, {passive:false});
+    console.log("[signin] attached to", btn);
   }
-  window.LM_SignIn = Object.assign(window.LM_SignIn||{}, { attach });
+  window.LM_SignIn = { attach };
 })();
