@@ -293,10 +293,46 @@ export function setPinSelected(id, on){
   });
 }
 
-export async function loadGlbFromDrive(fileId, { token }){
+export async function loadGlbFromDrive(fileId, { token }) {
+  // Build Drive media URL
   const url = `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?alt=media&supportsAllDrives=true`;
-  const r = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+
+  // Resolve token if not provided
+  let useToken = token;
+  try {
+    if (!useToken) {
+      const g = await import('./gauth.module.js');
+      useToken = (g.getAccessToken && g.getAccessToken()) || window.__LM_TOK || null;
+      if (!useToken) {
+        // try interactive/silent fetch (without forcing consent) to avoid popup unless necessary
+        try { useToken = await g.ensureToken({ prompt: undefined }); } catch(_) {}
+        if (!useToken && g.getAccessToken) useToken = g.getAccessToken();
+      }
+    }
+  } catch (_) { /* keep going; we'll try without token (will 401) and handle below */ }
+
+  async function fetchWith(tok) {
+    const headers = tok ? { Authorization: `Bearer ${tok}` } : undefined;
+    return await fetch(url, { headers });
+  }
+
+  // First attempt
+  let r = await fetchWith(useToken);
+
+  // If unauthorized, try to (re)acquire token once and retry
+  if (r.status === 401) {
+    try {
+      const g = await import('./gauth.module.js');
+      const fresh = await (g.ensureToken ? g.ensureToken({ prompt: undefined }) : Promise.resolve(window.__LM_TOK));
+      if (fresh) {
+        useToken = fresh;
+        r = await fetchWith(useToken);
+      }
+    } catch(_) {}
+  }
+
   if (!r.ok) throw new Error(`GLB fetch failed ${r.status}`);
+
   const blob = await r.blob();
   const objectURL = URL.createObjectURL(blob);
   try {
@@ -320,4 +356,5 @@ export async function loadGlbFromDrive(fileId, { token }){
   } finally {
     URL.revokeObjectURL(objectURL);
   }
+
 }
