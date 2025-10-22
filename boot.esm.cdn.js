@@ -52,7 +52,8 @@ function onSigned(signed){
     if (cid){
       window.__LM_CLIENT_ID = cid;
       if (window.__LM_auth && typeof window.__LM_auth.setupClientId === 'function'){
-        try { window.__LM_auth.setupClientId(cid); } catch(_){}
+        try { window.// __LM_auth.setupClientId(cid); // (disabled to avoid popup before user gesture)
+ } catch(_){}
       }
     }
   }catch(_) {}
@@ -60,6 +61,48 @@ function onSigned(signed){
 // --- end bridge ---
 setupAuth($('auth-signin'), onSigned, { clientId: __LM_CLIENT_ID, apiKey: __LM_API_KEY, scopes: __LM_SCOPES });
 
+
+
+// === LM signin click patch (popup-safe): run setupClientId & ensureToken on user gesture ===
+(function lm_click_patch_popup_safe(){
+  try{
+    const btn = document.getElementById('auth-signin') || document.querySelector('[data-lm-signin]');
+    if (!btn || btn.__lm_clickPatch2) return;
+    btn.__lm_clickPatch2 = true;
+    btn.addEventListener('click', async (e) => {
+      // we must stay within the user gesture to avoid popup blocking
+      // don't cancel existing handlers: only early-return if already prevented
+      if (e.defaultPrevented) return;
+      try {
+        const meta = document.querySelector('meta[name=\"google-signin-client_id\"],meta[name=\"google-oauth-client_id\"]');
+        const cid  = window.GIS_CLIENT_ID || window.__LM_CLIENT_ID || (meta && meta.content) || "";
+        if (cid) {
+          // initialize gauth only now (under user gesture) if implementation exposes it
+          if (window.__LM_auth && typeof window.__LM_auth.setupClientId === 'function') {
+            try { window.__LM_auth.setupClientId(cid); } catch(_) {}
+          } else {
+            // at least mirror to the global
+            window.__LM_CLIENT_ID = cid;
+          }
+        }
+        // dynamically import to ensure module is ready
+        const g = await import('./gauth.module.js');
+        // prefer '{prompt:\"consent\"}' then fallbacks
+        let tok;
+        try { tok = await g.ensureToken({ prompt: 'consent' }); }
+        catch { try { tok = await g.ensureToken(true); } catch { tok = await g.ensureToken(); } }
+        if (tok) {
+          console.log('[signin] token ok (popup-safe)');
+          document.documentElement.classList.add('signed-in','lm-signed');
+          if (document.body) document.body.classList.add('signed-in');
+          window.dispatchEvent(new CustomEvent('lm:signed', { detail: { signed: true } }));
+        }
+      } catch (err) {
+        console.error('[signin] popup-safe ensureToken failed', err);
+      }
+    }, { passive: true });
+  }catch(e){ console.error('[signin] click patch install failed', e); }
+})();
 function ensureToken() {
   const t = getAccessToken();
   if (!t) {
