@@ -5,9 +5,24 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>LociMyu v6.6 (ESM/CDN)</title>
   <link rel="icon" href="data:," />
-  <meta name="google-oauth-client_id" content="595200751510-ncahnf7edci6b9925becn5to49r6cguv.apps.googleusercontent.com">
+
+  <!-- ★ GIS クライアントID / APIキー（ユーザー提供値を埋め込み済み：編集不要） -->
+  <meta name="google-signin-client_id" content="595200751510-ncahnf7edci6b9925becn5to49r6cguv.apps.googleusercontent.com">
   <meta name="google-api-key" content="AIzaSyCUnTCr5yWUWPdEXST9bKP1LpgawU5rIbI">
+
+  <!-- GIS 本体 -->
   <script src="https://accounts.google.com/gsi/client" async defer></script>
+
+  <!-- three.js (ESM) import map：既存の挙動を維持 -->
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://unpkg.com/three@0.155.0/build/three.module.js",
+      "three/examples/jsm/": "https://unpkg.com/three@0.155.0/examples/jsm/"
+    }
+  }
+  </script>
+
   <style>
     :root{--bg:#0f1115;--panel:#0b0d11;--line:#1f2937;--acc:#94a3b8;--text:#cbd5e1;--sel:#60a5fa;}
     html,body{height:100%;margin:0;background:var(--bg);color:var(--text);font:14px/1.4 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;}
@@ -34,7 +49,6 @@
     .caption-item{display:flex;gap:8px;align-items:flex-start;padding:6px;border-bottom:1px solid #0003}
     .caption-item img{width:40px;height:40px;object-fit:cover;border-radius:6px;border:1px solid #0004}
     .hint{opacity:.7;font-size:12px}
-    /* thumbnails grid */
     #images-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(64px,1fr));gap:8px}
     .thumb{width:100%;aspect-ratio:1/1;border-radius:8px;border:1px solid #0005;background-size:cover;background-position:center;cursor:pointer}
     .thumb[data-selected="true"]{outline:2px solid var(--sel);outline-offset:2px}
@@ -47,7 +61,8 @@
       <header id="topbar">
         <div id="brand">LociMyu v6.6</div>
         <div class="row" style="gap:6px;flex:0 0 auto">
-          <button id="auth-signin">Sign in</button>
+          <!-- 既存のSign inボタン（idは任意、data-lm-signinのみ付与） -->
+          <button id="auth-signin" data-lm-signin>Sign in</button>
         </div>
       </header>
 
@@ -69,42 +84,42 @@
       </nav>
 
       <section id="pane-caption" class="pane" data-pane="caption" data-active="true">
-  <div class="grp">
-    <div class="hint">Pin color</div>
-    <div id="pinColorChips" class="chips"></div>
-  </div>
-  <div class="grp">
-    <div class="hint">Filter</div>
-    <div id="pinFilterChips" class="chips"></div>
-  </div>
+        <div class="grp">
+          <div class="hint">Pin color</div>
+          <div id="pinColorChips" class="chips"></div>
+        </div>
+        <div class="grp">
+          <div class="hint">Filter</div>
+          <div id="pinFilterChips" class="chips"></div>
+        </div>
 
-  <div class="grp">
-    <div class="hint">Caption list</div>
-    <div id="caption-list"></div>
-  </div>
+        <div class="grp">
+          <div class="hint">Caption list</div>
+          <div id="caption-list"></div>
+        </div>
 
-  <div class="grp">
-    <div class="hint">Title / Body</div>
-    <input id="caption-title" placeholder="Title" />
-    <input id="caption-body"  placeholder="Body" />
-    <div class="row" id="caption-image-row">
-      <div id="currentImageThumb" aria-label="attached image preview">
-        <div class="placeholder">No Image</div>
-      </div>
-    </div>
-  </div>
+        <div class="grp">
+          <div class="hint">Title / Body</div>
+          <input id="caption-title" placeholder="Title" />
+          <input id="caption-body"  placeholder="Body" />
+          <div class="row" id="caption-image-row">
+            <div id="currentImageThumb" aria-label="attached image preview">
+              <div class="placeholder">No Image</div>
+            </div>
+          </div>
+        </div>
 
-  <div class="grp">
-    <div class="hint">Images (auto from GLB folder)</div>
-    <div id="images-grid-wrapper">
-      <div id="images-grid"></div>
-      <div class="row" style="margin-top:8px">
-        <button id="btnRefreshImages" style="width:100%">Refresh images</button>
-      </div>
-      <div id="images-status" class="hint" style="margin-top:6px"></div>
-    </div>
-  </div>
-</section>
+        <div class="grp">
+          <div class="hint">Images (auto from GLB folder)</div>
+          <div id="images-grid-wrapper">
+            <div id="images-grid"></div>
+            <div class="row" style="margin-top:8px">
+              <button id="btnRefreshImages" style="width:100%">Refresh images</button>
+            </div>
+            <div id="images-status" class="hint" style="margin-top:6px"></div>
+          </div>
+        </div>
+      </section>
 
       <section id="pane-material" class="pane" data-pane="material">
         <div class="grp">
@@ -112,12 +127,12 @@
             <select id="mat-target"></select>
           </label>
         </div>
-    
+
         <div class="grp">
           <label>White Threshold <input type="range" id="mat-white-thr" min="0.8" max="1" step="0.01" value="0.92"/></label>
           <output id="mat-white-thr-val">0.92</output>
         </div>
-    
+
         <div class="grp">
           <label><input type="checkbox" id="mat-black2alpha" /> Black → Alpha</label>
         </div>
@@ -125,12 +140,12 @@
           <label>Black Threshold <input type="range" id="mat-black-thr" min="0" max="0.2" step="0.01" value="0.08"/></label>
           <output id="mat-black-thr-val">0.08</output>
         </div>
-    
+
         <div class="grp">
           <button id="mat-reset-one">Reset (Selected)</button>
           <button id="mat-reset-all">Reset All</button>
         </div>
-    
+
         <div class="grp">
           <label><input type="checkbox" id="mat-unlit" /> Unlit</label>
           <label><input type="checkbox" id="mat-doubleside" /> Double-sided</label>
@@ -153,63 +168,16 @@
     </aside>
   </div>
 
-  
+  <!-- ★ P0モジュール群: グローバルIIFE（順序重要） -->
+  <script src="./gauth.module.js"></script>
+  <script src="./signin.module.js"></script>
+  <script src="./sheet-rename.module.js"></script>
+  <script src="./materials.module.js"></script>
 
-  <script type="importmap">
-  {
-    "imports": {
-      "three": "https://unpkg.com/three@0.155.0/build/three.module.js",
-      "three/examples/jsm/": "https://unpkg.com/three@0.155.0/examples/jsm/"
-    }
-  }
-  </script>
+  <!-- 既存の UI/Viewer スクリプト（そのまま） -->
+  <!-- 例: <script type="module" src="./viewer.module.cdn.js"></script> / <script src="./ui.js"></script> など -->
 
-  <script type="module" src="./boot.esm.cdn.js"></script>
-<link rel="stylesheet" href="app.sheet-rename.css" />
-<script type="module" src="sheet-rename.module.js"></script>
-
-
-<script type="module">
-// === LociMyu: Material pane UI reorder (DOM-safe, no event rewire) ===
-(function(){
-  function grpOf(id){
-    const el = document.getElementById(id);
-    return el ? el.closest('.grp') : null;
-  }
-  function uniq(arr){ const out=[]; const seen=new Set(); arr.forEach(n=>{ if(n && !seen.has(n)){ seen.add(n); out.push(n);} }); return out; }
-  function reorder(){
-    const pane = document.getElementById('pane-material');
-    if(!pane) return;
-    const target  = grpOf('mat-target');
-    const unlit   = grpOf('mat-unlit') || grpOf('mat-doubleside');
-    const opacity = grpOf('mat-opacity');
-    const wAlpha  = grpOf('mat-white2alpha');
-    const wThr    = grpOf('mat-white-thr');
-    const bAlpha  = grpOf('mat-black2alpha');
-    const bThr    = grpOf('mat-black-thr');
-    const reset   = grpOf('mat-reset-one') || grpOf('mat-reset-all');
-
-    const order = uniq([ target, unlit, opacity, wAlpha, wThr, bAlpha, bThr, reset ]);
-    order.forEach(g=>{ try{ pane.appendChild(g); }catch(_){ } });
-  }
-
-  function onTabClick(ev){
-    const btn = ev.target && ev.target.closest && ev.target.closest('[role="tab"][data-tab="material"]');
-    if(btn){ setTimeout(reorder, 0); }
-  }
-
-  function boot(){
-    reorder();
-    const nav = document.querySelector('nav.tabs');
-    if(nav && !nav.__lmReorderWired){
-      nav.__lmReorderWired = true;
-      nav.addEventListener('click', onTabClick, { passive:true });
-    }
-  }
-  if(document.readyState === 'loading'){ document.addEventListener('DOMContentLoaded', boot, { once:true }); }
-  else { boot(); }
-})();
-</script>
-
+  <!-- ★ boot（fix版） -->
+  <script src="./boot.esm.cdn.js"></script>
 </body>
 </html>
