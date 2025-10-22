@@ -44,6 +44,20 @@ function onSigned(signed){
   document.documentElement.classList.toggle('signed-in', !!signed);
   setEnabled(!!signed, $('btnGlb'), $('glbUrl'), $('save-target-sheet'), $('save-target-create'), $('save-target-rename'), $('rename-input'));
 }
+// --- LM client_id bridge (minimal, non-destructive) ---
+(function __lm_bridge_client_id(){
+  try{
+    const meta = document.querySelector('meta[name="google-signin-client_id"],meta[name="google-oauth-client_id"]');
+    const cid  = window.GIS_CLIENT_ID || window.__LM_CLIENT_ID || (meta && meta.content) || "";
+    if (cid){
+      window.__LM_CLIENT_ID = cid;
+      if (window.__LM_auth && typeof window.__LM_auth.setupClientId === 'function'){
+        try { window.__LM_auth.setupClientId(cid); } catch(_){}
+      }
+    }
+  }catch(_) {}
+})();
+// --- end bridge ---
 setupAuth($('auth-signin'), onSigned, { clientId: __LM_CLIENT_ID, apiKey: __LM_API_KEY, scopes: __LM_SCOPES });
 
 function ensureToken() {
