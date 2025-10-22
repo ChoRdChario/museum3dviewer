@@ -59,6 +59,28 @@ function onSigned(signed){
   }catch(_) {}
 })();
 // --- end bridge ---
+
+// --- LM scopes union (ensure Drive Readonly is included) ---
+(function __lm_union_scopes(){
+  try{
+    const NEED = [
+      "https://www.googleapis.com/auth/spreadsheets",
+      "https://www.googleapis.com/auth/drive.readonly"
+    ];
+    // prefer window.__LM_SCOPES, then <meta data-lm-scopes>, else default spreadsheets only
+    let scopes = window.__LM_SCOPES
+      || (document.querySelector('meta[name="lm-scopes"]')?.content)
+      || "https://www.googleapis.com/auth/spreadsheets";
+    const set = new Set(String(scopes).split(/\s+/).filter(Boolean));
+    for (const s of NEED) set.add(s);
+    window.__LM_SCOPES = Array.from(set).join(" ");
+    // optional: expose for gauth implementations that look here
+    if (!window.GIS_SCOPES) window.GIS_SCOPES = window.__LM_SCOPES;
+    console.log("[auth] scopes:", window.__LM_SCOPES);
+  }catch(e){ console.warn("[auth] scopes union warn:", e); }
+})();
+// --- end scopes union ---
+
 setupAuth($('auth-signin'), onSigned, { clientId: __LM_CLIENT_ID, apiKey: __LM_API_KEY, scopes: __LM_SCOPES });
 
 
