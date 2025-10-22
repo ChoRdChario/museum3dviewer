@@ -13,22 +13,23 @@
   <script src="https://accounts.google.com/gsi/client" async defer></script>
 </head>
 <body>
-  <!-- 既存のDOMはそのままでOK（UIは viewer.module.cdn.js が強化します） -->
+  <!-- 既存DOMはあなたのものをそのまま使ってください。 -->
 
   <!-- boot より前：設定と Viewer -->
   <script src="locimyu.config.js"></script>
-  <script type="module" src="viewer.module.cdn.js"></script>
+  <!-- ★ viewer は非moduleで読み込む（'three' の bare import エラー回避） -->
+  <script src="viewer.module.cdn.js"></script>
 
-  <!-- client_id ブリッジ（config → __LM_CLIENT_ID）-->
+  <!-- client_id ブリッジ -->
   <script>window.__LM_CLIENT_ID = window.GIS_CLIENT_ID || window.__LM_CLIENT_ID || "";</script>
 
-  <!-- P0モジュール（UIを増やさず配線のみ） -->
+  <!-- P0モジュール -->
   <script src="gauth.module.js"></script>
   <script src="signin.module.js"></script>
   <script src="materials.module.js"></script>
   <script src="sheet-rename.module.js"></script>
 
-  <!-- 最後に起動ハブ -->
+  <!-- 起動ハブは最後 -->
   <script src="boot.esm.cdn.js"></script>
 </body>
 </html>
