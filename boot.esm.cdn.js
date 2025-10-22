@@ -51,10 +51,10 @@ function onSigned(signed){
     const cid  = window.GIS_CLIENT_ID || window.__LM_CLIENT_ID || (meta && meta.content) || "";
     if (cid){
       window.__LM_CLIENT_ID = cid;
-      if (window.__LM_auth && typeof window.__LM_auth.setupClientId === 'function'){
-        try { window.// __LM_auth.setupClientId(cid); // (disabled to avoid popup before user gesture)
- } catch(_){}
-      }
+      if (window.__LM_auth && typeof window.__LM_auth.setupClientId === 'function') {
+  // (disabled to avoid popup before user gesture)
+  // window.__LM_auth.setupClientId(cid);
+}
     }
   }catch(_) {}
 })();
