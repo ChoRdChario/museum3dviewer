@@ -179,11 +179,35 @@ function getFileBlobUrl(fileId, token){
     })
     .then(blob => URL.createObjectURL(blob));
 }
-function getParentFolderId(fileId, token){
-  const url = 'https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(fileId)+'?fields=parents&supportsAllDrives=true';
-  return fetch(url, { headers: { Authorization:'Bearer '+token } })
-    .then(r => r.ok ? r.json() : null)
-    .then(j => (j && j.parents && j.parents[0]) ? j.parents[0] : null);
+function getParentFolderId(fileId, token){const url = 'https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(fileId)+'?fields=parents&supportsAllDrives=true';
+return (async () => {
+  try {
+    const g = await import('./gauth.module.js');
+    // normalize token (Promise or missing)
+    if (token && typeof token.then === 'function') {
+      try { token = await token; } catch(_) { token = null; }
+    }
+    if (!token) {
+      token = (g.getAccessToken && g.getAccessToken()) || window.__LM_TOK || null;
+      if (!token) {
+        try { token = await g.ensureToken({ prompt: undefined }); } catch(_) {}
+        if (!token && g.getAccessToken) token = g.getAccessToken();
+      }
+    }
+    async function req(t) {
+      const headers = t ? { Authorization: 'Bearer '+t } : undefined;
+      return await fetch(url, { headers });
+    }
+    let r = await req(token);
+    if (r.status === 401) {
+      try { const t2 = await (g.ensureToken ? g.ensureToken({ prompt: undefined }) : null); if (t2) { token = t2; r = await req(token); } } catch(_) {}
+    }
+    if (!r.ok) return null;
+    const j = await r.json();
+    return (j && j.parents && j.parents[0]) ? j.parents[0] : null;
+  } catch(_) { return null; }
+})();
+
 }
 
 // ---------- Global state ----------
@@ -564,7 +588,8 @@ function appendCaptionItem(row){
   let ok = true;
   if (currentSpreadsheetId && currentSheetId && meta && meta.rowIndex){
     try{
-      const token = ensureToken();
+      const g = await import('./gauth.module.js');
+  const token = (g.getAccessToken && g.getAccessToken()) || window.__LM_TOK || await g.ensureToken({prompt: undefined});
       ok = await deleteCaptionRowFromSheet(currentSpreadsheetId, currentSheetId, meta.rowIndex, token);
       if(!ok) throw new Error('Sheets API returned non-ok');
       await ensureIndex();
@@ -621,7 +646,8 @@ function reflectRowToUI(id){
 
 // ---------- Save / Update ----------
 function putRowToSheet(seed, meta){
-  const token = ensureToken();
+  const g = await import('./gauth.module.js');
+  const token = (g.getAccessToken && g.getAccessToken()) || window.__LM_TOK || await g.ensureToken({prompt: undefined});
   const headers = LOCIMYU_HEADERS;
   const rowIndex = meta ? meta.rowIndex : 2;
   const values = headers.map(h=>{
@@ -722,7 +748,8 @@ function renderCurrentImageThumb(){
   });
 }
 function updateImageForPin(id, fileIdOrNull){
-  const token = ensureToken();
+  const g = await import('./gauth.module.js');
+  const token = (g.getAccessToken && g.getAccessToken()) || window.__LM_TOK || await g.ensureToken({prompt: undefined});
   const patch = { imageFileId: fileIdOrNull ? String(fileIdOrNull) : '' };
   return updateCaptionForPin(id, patch).then(()=>{ renderCurrentImageThumb(); refreshOverlayImage(id); });
 }
@@ -774,8 +801,9 @@ function loadCaptionsFromSheet(){
   const btn = $('btnRefreshImages');
   if(btn) btn.addEventListener('click', ()=> refreshImagesGrid().catch(()=>{}));
 })();
-function refreshImagesGrid(){
-  const token = ensureToken(); if(!lastGlbFileId) return Promise.resolve();
+async function refreshImagesGrid(){
+  const g = await import('./gauth.module.js');
+  const token = (g.getAccessToken && g.getAccessToken()) || window.__LM_TOK || await g.ensureToken({prompt: undefined}); if(!lastGlbFileId) return Promise.resolve();
   return getParentFolderId(lastGlbFileId, token).then(parent=>{
     if(!parent){
       const stat=$('images-status');
@@ -900,7 +928,8 @@ function renderFilterChips(){
 // ---------- GLB load ----------
 function doLoad(){
   try{
-    const token = ensureToken();
+    const g = await import('./gauth.module.js');
+  const token = (g.getAccessToken && g.getAccessToken()) || window.__LM_TOK || await g.ensureToken({prompt: undefined});
     const raw = ($('glbUrl') && $('glbUrl').value) || '';
     const fileId = extractDriveId(raw);
     if(!fileId){ console.warn('[GLB] missing fileId'); return; }
@@ -966,7 +995,8 @@ if(sheetSel){
 const btnCreate = $('save-target-create');
 if(btnCreate){
   btnCreate.addEventListener('click', function(){
-    const token = ensureToken(); if(!currentSpreadsheetId) return;
+    const g = await import('./gauth.module.js');
+  const token = (g.getAccessToken && g.getAccessToken()) || window.__LM_TOK || await g.ensureToken({prompt: undefined}); if(!currentSpreadsheetId) return;
     const title='Sheet_'+new Date().toISOString().slice(0,19).replace(/[:T]/g,'-');
     const url=`https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(currentSpreadsheetId)}:batchUpdate`;
     const body={ requests:[{ addSheet:{ properties:{ title } } }] };
@@ -980,7 +1010,8 @@ if(btnCreate){
 const btnRename = $('save-target-rename');
 if(btnRename){
   btnRename.addEventListener('click', function(){
-    const token = ensureToken(); if(!currentSpreadsheetId||!currentSheetId) return;
+    const g = await import('./gauth.module.js');
+  const token = (g.getAccessToken && g.getAccessToken()) || window.__LM_TOK || await g.ensureToken({prompt: undefined}); if(!currentSpreadsheetId||!currentSheetId) return;
     const input=$('rename-input'); const newTitle = input && input.value ? String(input.value).trim() : '';
     if(!newTitle) return;
     const url=`https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(currentSpreadsheetId)}:batchUpdate`;

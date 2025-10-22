@@ -296,6 +296,21 @@ export function setPinSelected(id, on){
 export async function loadGlbFromDrive(fileId, { token }) {
   // Build Drive media URL
   const url = `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?alt=media&supportsAllDrives=true`;
+// Normalize token: support Promise-like tokens and auto-resolve if missing
+try {
+  if (token && typeof token.then === 'function') {
+    token = await token.catch(()=>null);
+  }
+  if (!token) {
+    const g = await import('./gauth.module.js');
+    token = (g.getAccessToken && g.getAccessToken()) || window.__LM_TOK || null;
+    if (!token) {
+      try { token = await g.ensureToken({ prompt: undefined }); } catch(_) {}
+      if (!token && g.getAccessToken) token = g.getAccessToken();
+    }
+  }
+} catch(_) {}
+
 
   // Resolve token if not provided
   let useToken = token;
