@@ -1,3 +1,4 @@
+
 // gauth.module.js — GIS auth helper (runtime client_id injectable)
 // Public API (named exports):
 //   setupAuth(), getAccessToken(), ensureToken(), getLastAuthError(), signIn(), signOut(), onAuthState()
@@ -6,12 +7,12 @@
 //
 // Defers initialization until a client_id is provided via:
 //   1) window.__LM_CLIENT_ID
-//   2) <meta name="google-signin-client_id" content="...">
+//   2) <meta name="google-signin_client_id" content="...">
 //   3) runtime: window.__LM_auth.setupClientId('...')
 //   4) runtime event: window.dispatchEvent(new CustomEvent('materials:clientId', {detail:{client_id:'...'}}))
 //
 const GIS_SRC = 'https://accounts.google.com/gsi/client';
-const SCOPES = (window.GIS_SCOPES || 'https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive.readonly').trim();
+const SCOPES = (window.GIS_SCOPES || 'https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive.readonly https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/drive.metadata.readonly').trim();
 const STORAGE_KEY = '__LM_TOK';
 const SKEW_SEC = 60;
 
@@ -46,7 +47,7 @@ function _loadGIS() {
 
 function _saveToken(tok) {
   try {
-    const expSec = _nowSec() + (tok.expires_in ? Number(tok.expires_in) : 3600);
+    const expSec = Math.floor(Date.now()/1000) + (tok.expires_in ? Number(tok.expires_in) : 3600);
     const data = { access_token: tok.access_token, expires_at: expSec };
     sessionStorage.setItem(STORAGE_KEY, JSON.stringify(data));
     window.__LM_TOK = tok.access_token; // mirror for quick debug
@@ -59,14 +60,21 @@ function _getStoredToken() {
     if (!raw) return null;
     const obj = JSON.parse(raw);
     if (!obj || !obj.access_token) return null;
-    if ((_nowSec() + SKEW_SEC) >= (obj.expires_at || 0)) return null;
+    if ((Math.floor(Date.now()/1000) + SKEW_SEC) >= (obj.expires_at || 0)) return null;
     return obj;
   } catch { return null; }
+}
+
+function _dispatchAuthState(authed) {
+  try {
+    window.dispatchEvent(new CustomEvent('materials:auth', { detail: { authed } }));
+  } catch {}
 }
 
 function _initTokenClient() {
   if (!_clientId) _clientId = _readClientIdFromDOM();
   if (!_clientId) throw new Error("[gauth] client_id not set (window.__LM_CLIENT_ID or <meta name='google-signin-client_id'> or __LM_auth.setupClientId())");
+  // eslint-disable-next-line no-undef
   _tokenClient = google.accounts.oauth2.initTokenClient({
     client_id: _clientId,
     scope: SCOPES,
@@ -82,12 +90,6 @@ function _initTokenClient() {
     }
   });
   return _tokenClient;
-}
-
-function _dispatchAuthState(authed) {
-  try {
-    window.dispatchEvent(new CustomEvent('materials:auth', { detail: { authed } }));
-  } catch {}
 }
 
 export async function setupAuth() {

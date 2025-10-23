@@ -1514,3 +1514,123 @@ onCanvasShiftPick(function(pos){
   log('overlay applied', window.__LM_MATERIALS_PATCH_APPLIED);
 })();
 // ===== end LM-PATCH-A6 =====
+/* === LM HOTFIX APPEND-ONLY (do not edit above) ============================ */
+(async function LM_HOTFIX_APPEND_ONLY(){
+  // 1) client_id をメタと __LM_CLIENT_ID にバインド（既に入っていても上書きしない）
+  try {
+    const meta = document.querySelector("meta[name='google-signin-client_id']");
+    const cid  = (window.GIS_CLIENT_ID || window.__LM_CLIENT_ID || (meta && meta.content) || "").trim();
+    if (cid) {
+      if (!meta) {
+        const m = document.createElement('meta');
+        m.setAttribute('name','google-signin-client_id');
+        m.setAttribute('content', cid);
+        document.head.appendChild(m);
+      } else if (!meta.getAttribute('content')) {
+        meta.setAttribute('content', cid);
+      }
+      window.__LM_CLIENT_ID = window.__LM_CLIENT_ID || cid;
+      // gauth に通知
+      try { window.dispatchEvent(new CustomEvent('materials:clientId',{detail:{client_id:cid}})); } catch {}
+      console.log('[boot.hotfix] client_id bridged');
+    }
+  } catch(e) { console.warn('[boot.hotfix] bind client_id failed', e); }
+
+  // 2) Sign in ボタンをポップアップ・セーフに結線（既存ハンドラはそのまま・重複防止）
+  try {
+    const btn = document.getElementById('auth-signin') || document.querySelector('[data-lm-signin]');
+    if (btn && !btn.__lm_clickPatch2) {
+      btn.__lm_clickPatch2 = true;
+      btn.addEventListener('click', async (ev)=>{
+        try {
+          const g = await import('./gauth.module.js');
+          await g.signIn(); // prompt:'consent'
+          console.log('[signin] token ok (popup-safe)');
+          window.dispatchEvent(new CustomEvent('materials:auth',{detail:{authed:true}}));
+        } catch(err) {
+          console.warn('[signin] failed', err);
+          alert('Google サインインに失敗しました。ポップアップを許可してください。');
+        }
+      }, { passive:true });
+      console.log('[boot.hotfix] signin wired');
+    }
+  } catch(e) { console.warn('[boot.hotfix] signin wire failed', e); }
+
+  // 3) 認可付き fetch ヘルパ（既存コードは変更せず、必要箇所のみこれを呼べるように export）
+  if (!window.__lm_fetchJSONAuth) {
+    window.__lm_fetchJSONAuth = async function(url, init={}){
+      const g = await import('./gauth.module.js');
+      const tok = await g.getAccessToken();
+      if (!tok) throw new Error('no_token');
+      const headers = new Headers(init.headers || {});
+      headers.set('Authorization', `Bearer ${tok}`);
+      headers.set('Accept', 'application/json');
+      const res = await fetch(url, { ...init, headers });
+      if (!res.ok) {
+        const t = await res.text().catch(()=> '');
+        console.warn('[boot.hotfix] fetchJSONAuth fail', res.status, url, t.slice(0,200));
+        throw new Error(`HTTP ${res.status}`);
+      }
+      const ct = res.headers.get('content-type') || '';
+      return ct.includes('application/json') ? res.json() : res;
+    };
+    console.log('[boot.hotfix] __lm_fetchJSONAuth ready');
+  }
+
+  // 4) GLB→親フォルダ→スプレッドシート検索/作成の“補助ライン”
+  //    既存実装が失敗した時だけ働く。成功時は何もしない（materials:spreadsheetId 未発火の場合の保険）
+  let spreadsheetSignaled = false;
+  window.addEventListener('materials:spreadsheetId', ()=> { spreadsheetSignaled = true; }, { once:true });
+
+  window.addEventListener('viewer:glbLoaded', async (ev)=>{
+    if (spreadsheetSignaled) return; // 既存が成功していれば何もしない
+    try {
+      const glbId = ev?.detail?.fileId || ev?.detail?.driveFileId;
+      const fetchJSONAuth = window.__lm_fetchJSONAuth;
+
+      // LM_PARENT_FOLDER_ID があればそれを、無ければ GLB の親を取得
+      let parentId = (window.LM_PARENT_FOLDER_ID || '').trim();
+      if (!parentId && glbId) {
+        const json = await fetchJSONAuth(
+          `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(glbId)}?fields=parents&supportsAllDrives=true`
+        );
+        parentId = json?.parents?.[0] || '';
+      }
+      if (!parentId) throw new Error('parentFolderId required');
+
+      // 同フォルダのスプレッドシート検索
+      const q = encodeURIComponent(`'${parentId}' in parents and mimeType='application/vnd.google-apps.spreadsheet' and trashed=false`);
+      const urlList = `https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name,modifiedTime)&orderBy=modifiedTime desc&pageSize=10&supportsAllDrives=true`;
+      const list = await fetchJSONAuth(urlList);
+      let ssid = list?.files?.[0]?.id || '';
+
+      // 無ければ作成 → 親へ移動
+      if (!ssid) {
+        const created = await fetchJSONAuth('https://sheets.googleapis.com/v4/spreadsheets', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ properties:{ title:'LociMyu Captions' } })
+        });
+        ssid = created?.spreadsheetId || '';
+        if (ssid) {
+          try {
+            const moveUrl = `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(ssid)}?addParents=${encodeURIComponent(parentId)}&supportsAllDrives=true`;
+            await fetchJSONAuth(moveUrl, { method:'PATCH' });
+          } catch(e) { console.warn('[boot.hotfix] move spreadsheet failed (non-fatal)', e); }
+        }
+      }
+
+      if (ssid) {
+        try { localStorage.setItem('lm:ssid', ssid); } catch {}
+        window.currentSpreadsheetId = ssid;
+        window.dispatchEvent(new CustomEvent('materials:spreadsheetId', { detail:{ id: ssid } }));
+        console.log('[boot.hotfix] spreadsheet ensured', ssid);
+      }
+    } catch(e) {
+      console.warn('[boot.hotfix] spreadsheet ensure fallback failed', e);
+    }
+  });
+
+  console.log('[boot.hotfix] append-only patch active');
+})();
+
