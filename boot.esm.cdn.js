@@ -507,22 +507,44 @@ function isLociMyuSpreadsheet(spreadsheetId, token){
       return false;
     });
 }
+
 function createLociMyuSpreadsheet(parentFolderId, token, opts){
-  const glbId = (opts && opts.glbId) ? opts.glbId : '';
-  const name = ('LociMyu_Save_'+glbId).replace(/_+$/,'');
-  const url = 'https://www.googleapis.com/drive/v3/files';
-  const body = { name, mimeType:'application/vnd.google-apps.spreadsheet' };
-  if(parentFolderId) body.parents = [ parentFolderId ];
-  return fetch(url, { method:'POST', headers:{ Authorization:'Bearer '+token, 'Content-Type':'application/json' }, body: JSON.stringify(body) }).then(r=>{ if(!r.ok) throw new Error('Drive files.create '+r.status); return r.json(); }).then(file=>{
-      const spreadsheetId = file.id;
-      return putValues(spreadsheetId, 'A1:Z1', [LOCIMYU_HEADERS], token).then(()=> spreadsheetId);
+  // token is ignored; we always resolve inside __lm_fetchJSONAuth
+  const title = `LociMyu_${new Date().toISOString().slice(0,19).replace(/[:T]/g,'-')}`;
+  // 1) Create via Sheets API
+  return __lm_fetchJSONAuth('https://sheets.googleapis.com/v4/spreadsheets', {
+    method:'POST',
+    body: JSON.stringify({ properties: { title } })
+  }).then(async mk => {
+    const ssid = mk && mk.spreadsheetId;
+    if(!ssid) throw new Error('no_spreadsheetId');
+    // 2) Move to parent folder if provided
+    if (parentFolderId) {
+      const cur = await __lm_fetchJSONAuth(`https://www.googleapis.com/drive/v3/files/${ssid}?fields=parents&supportsAllDrives=true`);
+      const oldParents = (cur.parents||[]).join(',');
+      const mvUrl = `https://www.googleapis.com/drive/v3/files/${ssid}?addParents=${encodeURIComponent(parentFolderId)}${oldParents?`&removeParents=${encodeURIComponent(oldParents)}`:''}&supportsAllDrives=true`;
+      await __lm_fetchJSONAuth(mvUrl, { method:'PATCH', body: JSON.stringify({}) });
+    }
+    // 3) Ensure 'materials' sheet with headers
+    try {
+      await __lm_fetchJSONAuth(`https://sheets.googleapis.com/v4/spreadsheets/${ssid}:batchUpdate`, {
+        method:'POST',
+        body: JSON.stringify({ requests: [{ addSheet: { properties: { title:'materials' } } }] })
+      });
+    } catch(e) { /* sheet may exist; ignore */ }
+    await __lm_fetchJSONAuth(`https://sheets.googleapis.com/v4/spreadsheets/${ssid}/values/${encodeURIComponent("'materials'!A1:K1")}?valueInputOption=RAW`, {
+      method:'PUT',
+      body: JSON.stringify({ values: [['id','name','mat','unlit','doubleSided','opacity','alphaTest','color','metal','rough','note']] })
     });
+    return ssid;
+  });
 }
+
 function findOrCreateLociMyuSpreadsheet(parentFolderId, token, opts){
   if(!parentFolderId) return Promise.reject(new Error('parentFolderId required'));
   const q = encodeURIComponent(`'${parentFolderId}' in parents and mimeType='application/vnd.google-apps.spreadsheet' and trashed=false`);
-  const url=`https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name,modifiedTime)&orderBy=modifiedTime%20desc&pageSize=10&supportsAllDrives=true&includeItemsFromAllDrives=true`;
-  return __lm_fetchJSONAuth(url).then(d=>{
+  const url=`https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name,modifiedTime)&orderBy=modifiedTime%20desc%20desc&includeItemsFromAllDrives=true&pageSize=10&supportsAllDrives=true`;
+  return fetch(url, { headers:{ Authorization:'Bearer '+token } }).then(r=>{ if(!r.ok) throw new Error('Drive list spreadsheets '+r.status); return r.json(); }).then(d=>{
       const files = d.files || [];
       function next(i){
         if(i>=files.length) return createLociMyuSpreadsheet(parentFolderId, token, opts||{});
@@ -865,7 +887,7 @@ function refreshImagesGrid(){
       return;
     }
     const q = encodeURIComponent(`'${parent}' in parents and mimeType contains 'image/' and trashed=false`);
-    const url = `https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name,mimeType,thumbnailLink)&orderBy=modifiedTime&includeItemsFromAllDrives=true desc&pageSize=200&supportsAllDrives=true`;
+    const url = `https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name,mimeType,thumbnailLink)&orderBy=modifiedTime%20desc%20desc&includeItemsFromAllDrives=true&pageSize=200&supportsAllDrives=true`;
     return fetch(url, { headers:{ Authorization:'Bearer '+token } })
       .then(r=>r.json())
       .then(d=>{
@@ -1596,7 +1618,7 @@ onCanvasShiftPick(function(pos){
 
       // 同フォルダのスプレッドシート検索
       const q = encodeURIComponent(`'${parentId}' in parents and mimeType='application/vnd.google-apps.spreadsheet' and trashed=false`);
-      const urlList = `https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name,modifiedTime)&orderBy=modifiedTime%20desc&pageSize=10&supportsAllDrives=true&includeItemsFromAllDrives=true`;
+      const urlList = `https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name,modifiedTime)&orderBy=modifiedTime%20desc%20desc&includeItemsFromAllDrives=true&pageSize=10&supportsAllDrives=true`;
       const list = await fetchJSONAuth(urlList);
       let ssid = list?.files?.[0]?.id || '';
 
