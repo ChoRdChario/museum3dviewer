@@ -545,6 +545,22 @@ async function findOrCreateLociMyuSpreadsheet(parentFolderId, token, opts){
   }
   return next(0);
 }
+catch(_) {}
+  }
+  if (!tok) throw new Error('token_missing');
+
+  const q = encodeURIComponent(`'${parentFolderId}' in parents and mimeType='application/vnd.google-apps.spreadsheet' and trashed=false`);
+  const url = `https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name,modifiedTime)&orderBy=modifiedTime%20desc&pageSize=10&supportsAllDrives=true&includeItemsFromAllDrives=true`;
+
+  const d = await __lm_fetchJSONAuth(url);
+  const files = d.files || [];
+  async function next(i){
+    if(i>=files.length) return createLociMyuSpreadsheet(parentFolderId, tok, opts||{});
+    const ok = await isLociMyuSpreadsheet(files[i].id, tok);
+    return ok ? files[i].id : next(i+1);
+  }
+  return next(0);
+}
 ' in parents and mimeType='application/vnd.google-apps.spreadsheet' and trashed=false`);
   const url=`https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name,modifiedTime)&orderBy=modifiedTime&includeItemsFromAllDrives=true desc&pageSize=10&supportsAllDrives=true`;
   return fetch(url, { headers:{ Authorization:'Bearer '+token } }).then(r=>{ if(!r.ok) throw new Error('Drive list spreadsheets '+r.status); return r.json(); }).then(d=>{
