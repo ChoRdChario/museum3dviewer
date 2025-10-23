@@ -130,22 +130,6 @@ function onSigned(signed){
 // --- end scopes union ---
 
 setupAuth($('auth-signin'), onSigned, { clientId: __LM_CLIENT_ID, apiKey: __LM_API_KEY, scopes: __LM_SCOPES });
-// === LM token bridge: normalize getAccessToken to return a string (cache resolved token) ===
-;(async function __lm_token_bridge(){
-  try {
-    const v = (typeof getAccessToken === 'function') ? getAccessToken() : null;
-    const t = (v && typeof v.then === 'function') ? await v : v;
-    if (t) { window.__LM_TOK = t; }
-    window.getAccessToken = function(){ return window.__LM_TOK || ''; };
-    window.addEventListener('lm:signed', async () => {
-      try {
-        const v2 = (typeof getAccessToken === 'function') ? getAccessToken() : null;
-        const t2 = (v2 && typeof v2.then === 'function') ? await v2 : v2;
-        if (t2) window.__LM_TOK = t2;
-      } catch(_) {}
-    });
-  } catch(_) {}
-})();
 
 
 // === Sign-in hint visibility control ===
@@ -198,7 +182,9 @@ document.addEventListener('DOMContentLoaded', refreshSigninHint, { once: true })
         let tok;
         try { tok = await g.ensureToken({ prompt: 'consent' }); }
         catch { try { tok = await g.ensureToken(true); } catch { tok = await g.ensureToken(); } }
-        if (tok) { window.__LM_TOK = tok; window.getAccessToken = function(){ return window.__LM_TOK || ''; }; console.log('[signin] token ok (popup-safe)'); document.documentElement.classList.add('signed-in','lm-signed');
+        if (tok) {
+          console.log('[signin] token ok (popup-safe)');
+          document.documentElement.classList.add('signed-in','lm-signed');
           if (document.body) document.body.classList.add('signed-in');
           window.dispatchEvent(new CustomEvent('lm:signed', { detail: { signed: true } }));
         }
@@ -535,7 +521,7 @@ function createLociMyuSpreadsheet(parentFolderId, token, opts){
 function findOrCreateLociMyuSpreadsheet(parentFolderId, token, opts){
   if(!parentFolderId) return Promise.reject(new Error('parentFolderId required'));
   const q = encodeURIComponent(`'${parentFolderId}' in parents and mimeType='application/vnd.google-apps.spreadsheet' and trashed=false`);
-  const url=`https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name,modifiedTime)&orderBy=modifiedTime%20desc&pageSize=10&supportsAllDrives=true&includeItemsFromAllDrives=true`;
+  const url=`https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name,modifiedTime)&orderBy=modifiedTime&includeItemsFromAllDrives=true desc&pageSize=10&supportsAllDrives=true`;
   return fetch(url, { headers:{ Authorization:'Bearer '+token } }).then(r=>{ if(!r.ok) throw new Error('Drive list spreadsheets '+r.status); return r.json(); }).then(d=>{
       const files = d.files || [];
       function next(i){
@@ -824,7 +810,10 @@ function updateImageForPin(id, fileIdOrNull){
 }
 
 // ---------- Load captions from sheet ----------
-function loadCaptionsFromSheet(){
+async function loadCaptionsFromSheet(){
+  // token guard
+  const __lm_token_guard_loadCaptionsFromSheet = (await (async ()=>{try{const g=await import('./gauth.module.js');let v=g.getAccessToken?.();return (v&&typeof v.then==='function')?await v:v;}catch(e){return null}})());
+
   const token = getAccessToken(); if(!token||!currentSpreadsheetId||!currentSheetTitle) return;
   const range = `'${currentSheetTitle}'!A1:Z9999`;
   getValues(currentSpreadsheetId, range, token).then(values=>{
@@ -870,7 +859,10 @@ function loadCaptionsFromSheet(){
   const btn = $('btnRefreshImages');
   if(btn) btn.addEventListener('click', ()=> refreshImagesGrid().catch(()=>{}));
 })();
-function refreshImagesGrid(){
+async function refreshImagesGrid(){
+  // token guard
+  const __lm_token_guard_refreshImagesGrid = (await (async ()=>{try{const g=await import('./gauth.module.js');let v=g.getAccessToken?.();return (v&&typeof v.then==='function')?await v:v;}catch(e){return null}})());
+
   const token = ensureToken(); if(!lastGlbFileId) return Promise.resolve();
   return getParentFolderId(lastGlbFileId, token).then(parent=>{
     if(!parent){
@@ -879,7 +871,7 @@ function refreshImagesGrid(){
       return;
     }
     const q = encodeURIComponent(`'${parent}' in parents and mimeType contains 'image/' and trashed=false`);
-    const url = `https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name,mimeType,thumbnailLink)&orderBy=modifiedTime%20desc&pageSize=200&supportsAllDrives=true&includeItemsFromAllDrives=true`;
+    const url = `https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name,mimeType,thumbnailLink)&orderBy=modifiedTime&includeItemsFromAllDrives=true desc&pageSize=200&supportsAllDrives=true`;
     return fetch(url, { headers:{ Authorization:'Bearer '+token } })
       .then(r=>r.json())
       .then(d=>{
@@ -994,7 +986,10 @@ function renderFilterChips(){
 }
 
 // ---------- GLB load ----------
-function doLoad(){
+async function doLoad(){
+  // token guard
+  const __lm_token_guard_doLoad = (await (async ()=>{try{const g=await import('./gauth.module.js');let v=g.getAccessToken?.();return (v&&typeof v.then==='function')?await v:v;}catch(e){return null}})());
+
   try{
     const token = ensureToken();
     const raw = ($('glbUrl') && $('glbUrl').value) || '';
@@ -1610,7 +1605,7 @@ onCanvasShiftPick(function(pos){
 
       // 同フォルダのスプレッドシート検索
       const q = encodeURIComponent(`'${parentId}' in parents and mimeType='application/vnd.google-apps.spreadsheet' and trashed=false`);
-      const urlList = `https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name,modifiedTime)&orderBy=modifiedTime%20desc&pageSize=10&supportsAllDrives=true&includeItemsFromAllDrives=true`;
+      const urlList = `https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name,modifiedTime)&orderBy=modifiedTime&includeItemsFromAllDrives=true desc&pageSize=10&supportsAllDrives=true`;
       const list = await fetchJSONAuth(urlList);
       let ssid = list?.files?.[0]?.id || '';
 
