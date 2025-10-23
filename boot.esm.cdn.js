@@ -518,50 +518,9 @@ function createLociMyuSpreadsheet(parentFolderId, token, opts){
       return putValues(spreadsheetId, 'A1:Z1', [LOCIMYU_HEADERS], token).then(()=> spreadsheetId);
     });
 }
-
-async function findOrCreateLociMyuSpreadsheet(parentFolderId, token, opts){
-  if(!parentFolderId) throw new Error('parentFolderId required');
-  // Resolve token if a Promise was passed
-  let tok = token;
-  if (tok && typeof tok.then === 'function') tok = await tok;
-  if (!tok) {
-    try {
-      const g = await import('./gauth.module.js');
-      let v = g.getAccessToken?.();
-      tok = (v && typeof v.then === 'function') ? await v : v;
-    } catch(_) {}
-  }
-  if (!tok) throw new Error('token_missing');
-
+function findOrCreateLociMyuSpreadsheet(parentFolderId, token, opts){
+  if(!parentFolderId) return Promise.reject(new Error('parentFolderId required'));
   const q = encodeURIComponent(`'${parentFolderId}' in parents and mimeType='application/vnd.google-apps.spreadsheet' and trashed=false`);
-  const url = `https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name,modifiedTime)&orderBy=modifiedTime%20desc&pageSize=10&supportsAllDrives=true&includeItemsFromAllDrives=true`;
-
-  const d = await __lm_fetchJSONAuth(url);
-  const files = d.files || [];
-  async function next(i){
-    if(i>=files.length) return createLociMyuSpreadsheet(parentFolderId, tok, opts||{});
-    const ok = await isLociMyuSpreadsheet(files[i].id, tok);
-    return ok ? files[i].id : next(i+1);
-  }
-  return next(0);
-}
-catch(_) {}
-  }
-  if (!tok) throw new Error('token_missing');
-
-  const q = encodeURIComponent(`'${parentFolderId}' in parents and mimeType='application/vnd.google-apps.spreadsheet' and trashed=false`);
-  const url = `https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name,modifiedTime)&orderBy=modifiedTime%20desc&pageSize=10&supportsAllDrives=true&includeItemsFromAllDrives=true`;
-
-  const d = await __lm_fetchJSONAuth(url);
-  const files = d.files || [];
-  async function next(i){
-    if(i>=files.length) return createLociMyuSpreadsheet(parentFolderId, tok, opts||{});
-    const ok = await isLociMyuSpreadsheet(files[i].id, tok);
-    return ok ? files[i].id : next(i+1);
-  }
-  return next(0);
-}
-' in parents and mimeType='application/vnd.google-apps.spreadsheet' and trashed=false`);
   const url=`https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name,modifiedTime)&orderBy=modifiedTime&includeItemsFromAllDrives=true desc&pageSize=10&supportsAllDrives=true`;
   return fetch(url, { headers:{ Authorization:'Bearer '+token } }).then(r=>{ if(!r.ok) throw new Error('Drive list spreadsheets '+r.status); return r.json(); }).then(d=>{
       const files = d.files || [];
@@ -1671,3 +1630,44 @@ onCanvasShiftPick(function(pos){
   console.log('[boot.hotfix] append-only patch active');
 })();
 
+
+
+/* === LM SAFE APPEND PATCH: override only findOrCreateLociMyuSpreadsheet (no UI change) === */
+;(function(){
+  try {
+    const _orig_create = (typeof createLociMyuSpreadsheet === 'function') ? createLociMyuSpreadsheet : null;
+    const _orig_check  = (typeof isLociMyuSpreadsheet === 'function') ? isLociMyuSpreadsheet : null;
+    const _authFetch   = (typeof __lm_fetchJSONAuth === 'function') ? __lm_fetchJSONAuth : null;
+    if (!_orig_create || !_orig_check || !_authFetch) { console.warn('[LM-PATCH] prerequisites missing; skip override'); return; }
+
+    window.findOrCreateLociMyuSpreadsheet = async function(parentFolderId, token, opts){
+      if (!parentFolderId) throw new Error('parentFolderId required');
+      // resolve token if Promise
+      let tok = token;
+      if (tok && typeof tok.then === 'function') tok = await tok;
+      if (!tok) {
+        try {
+          const g = await import('./gauth.module.js');
+          let v = g.getAccessToken?.();
+          tok = (v && typeof v.then === 'function') ? await v : v;
+        } catch(_) {}
+      }
+      if (!tok) throw new Error('token_missing');
+
+      const q = encodeURIComponent(`'${parentFolderId}' in parents and mimeType='application/vnd.google-apps.spreadsheet' and trashed=false`);
+      const url = `https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name,modifiedTime)&orderBy=modifiedTime%20desc&pageSize=10&supportsAllDrives=true&includeItemsFromAllDrives=true`;
+
+      const data = await _authFetch(url);
+      const files = (data && data.files) || [];
+
+      for (let i=0; i<files.length; i++) {
+        if (await _orig_check(files[i].id, tok)) return files[i].id;
+      }
+      return _orig_create(parentFolderId, tok, opts||{});
+    };
+
+    console.log('[LM-PATCH] findOrCreateLociMyuSpreadsheet overridden (safe auth)');
+  } catch (e) {
+    console.warn('[LM-PATCH] override failed', e);
+  }
+})();
