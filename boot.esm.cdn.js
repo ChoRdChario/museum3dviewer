@@ -521,7 +521,7 @@ function createLociMyuSpreadsheet(parentFolderId, token, opts){
 function findOrCreateLociMyuSpreadsheet(parentFolderId, token, opts){
   if(!parentFolderId) return Promise.reject(new Error('parentFolderId required'));
   const q = encodeURIComponent(`'${parentFolderId}' in parents and mimeType='application/vnd.google-apps.spreadsheet' and trashed=false`);
-  const url=`https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name,modifiedTime)&orderBy=modifiedTime desc&pageSize=10&supportsAllDrives=true`;
+  const url=`https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name,modifiedTime)&orderBy=modifiedTime&includeItemsFromAllDrives=true desc&pageSize=10&supportsAllDrives=true`;
   return fetch(url, { headers:{ Authorization:'Bearer '+token } }).then(r=>{ if(!r.ok) throw new Error('Drive list spreadsheets '+r.status); return r.json(); }).then(d=>{
       const files = d.files || [];
       function next(i){
@@ -865,7 +865,7 @@ function refreshImagesGrid(){
       return;
     }
     const q = encodeURIComponent(`'${parent}' in parents and mimeType contains 'image/' and trashed=false`);
-    const url = `https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name,mimeType,thumbnailLink)&orderBy=modifiedTime desc&pageSize=200&supportsAllDrives=true`;
+    const url = `https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name,mimeType,thumbnailLink)&orderBy=modifiedTime&includeItemsFromAllDrives=true desc&pageSize=200&supportsAllDrives=true`;
     return fetch(url, { headers:{ Authorization:'Bearer '+token } })
       .then(r=>r.json())
       .then(d=>{
@@ -1596,7 +1596,7 @@ onCanvasShiftPick(function(pos){
 
       // 同フォルダのスプレッドシート検索
       const q = encodeURIComponent(`'${parentId}' in parents and mimeType='application/vnd.google-apps.spreadsheet' and trashed=false`);
-      const urlList = `https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name,modifiedTime)&orderBy=modifiedTime desc&pageSize=10&supportsAllDrives=true`;
+      const urlList = `https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name,modifiedTime)&orderBy=modifiedTime&includeItemsFromAllDrives=true desc&pageSize=10&supportsAllDrives=true`;
       const list = await fetchJSONAuth(urlList);
       let ssid = list?.files?.[0]?.id || '';
 
