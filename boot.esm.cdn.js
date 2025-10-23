@@ -132,6 +132,27 @@ function onSigned(signed){
 setupAuth($('auth-signin'), onSigned, { clientId: __LM_CLIENT_ID, apiKey: __LM_API_KEY, scopes: __LM_SCOPES });
 
 
+// === Sign-in hint visibility control ===
+function setSigninHint(visible) {
+  const el = document.getElementById('auth-hint');
+  if (!el) return;
+  el.style.display = visible ? '' : 'none';
+}
+async function refreshSigninHint() {
+  try {
+    const g = await import('./gauth.module.js');
+    const tok = await g.getAccessToken();
+    setSigninHint(!tok); // hide when token exists
+  } catch {
+    setSigninHint(true);
+  }
+}
+// Keep UI in sync with auth state and on boot
+window.addEventListener('materials:authstate', refreshSigninHint);
+document.addEventListener('DOMContentLoaded', refreshSigninHint, { once: true });
+
+
+
 
 // === LM signin click patch (popup-safe): run setupClientId & ensureToken on user gesture ===
 (function lm_click_patch_popup_safe(){
@@ -228,48 +249,23 @@ function getFileBlobUrl(fileId, token){
     .then(blob => URL.createObjectURL(blob));
 }
 function getParentFolderId(fileId, token){
-const url = 'https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(fileId)+'?fields=parents&supportsAllDrives=true';
-return (async () => {
-  try {
-    // resolve token if it's a Promise
+  const url = 'https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(fileId)+'?fields=parents&supportsAllDrives=true';
+  return (async () => {
     try {
-      if (token && typeof token.then === 'function') {
-        try { token = await token; } catch (e) { token = null; }
-      }
-    } catch (e) {}
-
-    // acquire token if missing (silent preferred)
-    try {
-      const g = __lm_getAuth();
-      if (!token) {
-        token = (g.getAccessToken && g.getAccessToken()) || window.__LM_TOK || null;
-        if (!token && g.ensureToken) {
-          try { token = await g.ensureToken({ prompt: undefined }); } catch (e) {}
-          if (!token && g.getAccessToken) token = g.getAccessToken();
-        }
-      }
-    } catch (e) {}
-
-    async function req(t) {
-      const headers = t ? { Authorization: 'Bearer ' + t } : undefined;
-      return fetch(url, { headers });
-    }
-
-    let r = await req(token);
-    if (r.status === 401) {
+      const j = await (window.__lm_fetchJSONAuth ? window.__lm_fetchJSONAuth(url) : fetch(url).then(r=>r.json()));
+      return (j && j.parents && j.parents[0]) ? j.parents[0] : null;
+    } catch (e) {
+      // fallback (non-auth) just in case
       try {
-        const g = __lm_getAuth();
-        const fresh = g.ensureToken ? await g.ensureToken({ prompt: undefined }) : null;
-        if (fresh) r = await req(fresh);
-      } catch (e) {}
+        const r = await fetch(url);
+        if (!r.ok) return null;
+        const j = await r.json().catch(()=>null);
+        return (j && j.parents && j.parents[0]) ? j.parents[0] : null;
+      } catch {
+        return null;
+      }
     }
-
-    if (!r.ok) return null;
-    const j = await r.json().catch(() => null);
-    return (j && j.parents && j.parents[0]) ? j.parents[0] : null;
-  } catch (e) { return null; }
-})();
-
+  })();
 }
 
 // ---------- Global state ----------
