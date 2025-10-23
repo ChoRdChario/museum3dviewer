@@ -1652,3 +1652,203 @@ onCanvasShiftPick(function(pos){
   console.log('[boot.hotfix] append-only patch active');
 })();
 
+
+
+
+/* ==========================================================================
+ * LociMyu runtime overlay fix (embedded) — v5 compact
+ * Purpose:
+ *  - Kill 401/no_token/null spreadsheet writes without touching UI/UX
+ *  - Normalize Drive list URLs (`orderBy=modifiedTime%20desc` once)
+ *  - Force Sheets writes to use real token & 'materials' sheet
+ *  - Resolve spreadsheetId from GLB parent (list/create+move) when null
+ *  - Works append-only; original code paths remain intact
+ * ========================================================================== */
+(function(){
+  if (window.__LM_OVERLAY_V5_INSTALLED) return;
+  window.__LM_OVERLAY_V5_INSTALLED = true;
+  const enc = (s)=>encodeURIComponent(s);
+
+  // ---- token helpers ------------------------------------------------------
+  async function getToken(){
+    try {
+      const g = await import('./gauth.module.js');
+      let t = g.getAccessToken?.();
+      t = (t && typeof t.then === 'function') ? await t : t;
+      if (!t) throw new Error('no_token');
+      return t;
+    } catch(e){ const er = new Error('no_token'); er.status = 401; throw er; }
+  }
+  async function authJSON(url, init={}){
+    try {
+      if (typeof window.__lm_fetchJSONAuth === 'function') {
+        return await window.__lm_fetchJSONAuth(url, init);
+      }
+      const h = new Headers(init.headers||{});
+      if (!h.get('Authorization')) h.set('Authorization','Bearer '+ await getToken());
+      if (!h.get('Content-Type')) h.set('Content-Type','application/json');
+      const res = await fetch(url, {...init, headers:h});
+      const ct = res.headers.get('content-type')||'';
+      const body = ct.includes('json') ? await res.json() : await res.text();
+      if (!res.ok){ const e = new Error('HTTP '+res.status); e.status = res.status; e.body=body; throw e; }
+      return body;
+    } catch(e){ throw e; }
+  }
+
+  // ---- spreadsheet resolution --------------------------------------------
+  async function getGLBParentId(){
+    const raw = (document.getElementById('glbUrl')?.value || location.search || '').trim();
+    const glbId = (raw.match(/[A-Za-z0-9_-]{25,}/)||[])[0];
+    if (!glbId) return null;
+    const j = await authJSON(`https://www.googleapis.com/drive/v3/files/${glbId}?fields=parents&supportsAllDrives=true`);
+    return j?.parents?.[0] || null;
+  }
+  async function listSiblingSheets(parentId){
+    const q = enc(`'${parentId}' in parents and mimeType='application/vnd.google-apps.spreadsheet' and trashed=false`);
+    const url = `https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name,modifiedTime)&orderBy=modifiedTime%20desc&pageSize=10&supportsAllDrives=true&includeItemsFromAllDrives=true`;
+    const r = await authJSON(url);
+    return r?.files || [];
+  }
+  async function isLociMyuSpreadsheet(ssid){
+    try {
+      const r = await authJSON(
+        `https://sheets.googleapis.com/v4/spreadsheets/${ssid}`+
+        `?includeGridData=true&ranges=${enc('A1:K1')}`+
+        `&fields=sheets(properties(title,sheetId),data(rowData(values(formattedValue))))`
+      );
+      const first = (r?.sheets?.[0]?.data?.[0]?.rowData?.[0]?.values||[]).map(v=>v.formattedValue||'');
+      const s = first.join(',').toLowerCase();
+      return s.includes('id') && s.includes('name');
+    } catch(e){ return false; }
+  }
+  async function createAndMoveSheet(parentId){
+    const mk = await authJSON(`https://sheets.googleapis.com/v4/spreadsheets`, {
+      method:'POST', body: JSON.stringify({ properties:{ title:`LociMyu_${new Date().toISOString().slice(0,19).replace(/[:T]/g,'-')}` } })
+    });
+    const ssid = mk?.spreadsheetId;
+    if (!ssid) throw new Error('no_spreadsheetId');
+    const cur = await authJSON(`https://www.googleapis.com/drive/v3/files/${ssid}?fields=parents&supportsAllDrives=true`);
+    const oldParents = (cur?.parents||[]).join(',');
+    await authJSON(
+      `https://www.googleapis.com/drive/v3/files/${ssid}?addParents=${enc(parentId)}${oldParents?`&removeParents=${enc(oldParents)}`:''}&supportsAllDrives=true`,
+      { method:'PATCH', body: JSON.stringify({}) }
+    );
+    // ensure materials header
+    await authJSON(`https://sheets.googleapis.com/v4/spreadsheets/${ssid}:batchUpdate`, {
+      method:'POST', body: JSON.stringify({ requests:[{ addSheet:{ properties:{ title:'materials' } } }] })
+    }).catch(()=>{});
+    await authJSON(`https://sheets.googleapis.com/v4/spreadsheets/${ssid}/values/${enc(`'materials'!A1:K1`)}?valueInputOption=RAW`, {
+      method:'PUT', body: JSON.stringify({ values:[['id','name','mat','unlit','doubleSided','opacity','alphaTest','color','metal','rough','note']] })
+    }).catch(()=>{});
+    return ssid;
+  }
+  async function ensureSpreadsheetId(){
+    let ssid = window.currentSpreadsheetId || window.__LM_SSID || null;
+    if (ssid) return ssid;
+    const parent = await getGLBParentId();
+    if (!parent) return null;
+    const list = await listSiblingSheets(parent);
+    for (const f of list) {
+      if (await isLociMyuSpreadsheet(f.id)) {
+        ssid = f.id; break;
+      }
+    }
+    if (!ssid) ssid = await createAndMoveSheet(parent);
+    if (ssid){
+      window.currentSpreadsheetId = ssid;
+      window.__LM_SSID = ssid;
+      document.dispatchEvent(new CustomEvent('materials:spreadsheetId', { detail:{ spreadsheetId:ssid } }));
+      console.log('[LM-overlay] spreadsheetId =', ssid);
+    }
+    return ssid;
+  }
+
+  // ---- fetch finalizer (URL normalize + auth header) ----------------------
+  if (!window.__LM_FETCH_FINALIZER_V5) {
+    const of = window.fetch;
+    window.fetch = async function(input, init={}){
+      let url = (typeof input === 'string') ? input : (input?.url || '');
+      const isGoogle = /https:\/\/(?:www\.)?googleapis\.com\//.test(url);
+      if (isGoogle) {
+        // Drive list URL glitches
+        if (/https:\/\/www\.googleapis\.com\/drive\/v3\/files\?/.test(url)) {
+          url = url
+            .replace(/orderBy=modifiedTime(&|$)/,'orderBy=modifiedTime%20desc$1')
+            .replace(/orderBy=modifiedTime%20desc%20desc/,'orderBy=modifiedTime%20desc')
+            .replace(/includeItemsFromAllDrives=true%20desc(&|$)/,'includeItemsFromAllDrives=true$1');
+        }
+        // Headers auth patch
+        const headers = new Headers(init?.headers || (typeof input !== 'string' ? input?.headers : undefined) || {});
+        const needAuth = !headers.get('Authorization') || /\[object Promise\]/.test(headers.get('Authorization'));
+        if (needAuth) {
+          headers.set('Authorization','Bearer '+ await getToken());
+          if (!headers.get('Content-Type')) headers.set('Content-Type','application/json');
+          init = { ...(typeof input==='string'? init : { ...input, ...init, headers }), headers };
+        }
+        // If URL changed, rebuild Request
+        const changed = (url !== ((typeof input==='string')? input : (input?.url || '')));
+        if (changed || needAuth) input = new Request(url, init);
+      }
+      return of.call(this, input, init);
+    };
+    window.__LM_FETCH_FINALIZER_V5 = true;
+    console.log('[LM-overlay] fetch finalizer installed');
+  }
+
+  // ---- writer gate (put/append) ------------------------------------------
+  function installWriter(fnName){
+    const orig = window[fnName];
+    if (typeof orig !== 'function' || orig.__overlaySafe) return;
+    window[fnName] = async function(spreadsheetId, rangeA1, values){
+      let ssid = spreadsheetId || window.currentSpreadsheetId || window.__LM_SSID;
+      if (!ssid) ssid = await ensureSpreadsheetId();
+      if (!ssid) throw new Error('ssid_missing');
+
+      // normalize range -> materials
+      let range = rangeA1;
+      if (typeof range !== 'string' || /シート1|%E3%82%B7%E3%83%BC%E3%83%881|%27Sheet1%27/.test(range)) {
+        const tail = (range && /!([A-Z0-9:]+)/.test(range)) ? RegExp.$1 : 'A2:K9999';
+        range = `'materials'!${tail}`;
+      }
+      const base = `https://sheets.googleapis.com/v4/spreadsheets/${ssid}/values/${enc(range)}`;
+      const url = `${base}?valueInputOption=RAW`;
+      const body = JSON.stringify({ values: Array.isArray(values?.[0]) ? values : [values] });
+      return await authJSON(url, { method: 'PUT', body });
+    };
+    window[fnName].__overlaySafe = true;
+    console.log('[LM-overlay] writer patched:', fnName);
+  }
+  installWriter('putValues');
+  installWriter('appendValues');
+  installWriter('putRowToSheet'); // some builds call this directly
+
+  // ---- create/find hardened wrappers (keep signature compatible) ----------
+  if (typeof window.createLociMyuSpreadsheet === 'function' && !window.createLociMyuSpreadsheet.__overlaySafe) {
+    const orig = window.createLociMyuSpreadsheet;
+    window.createLociMyuSpreadsheet = async function(parentFolderId /* token ignored */, token, opts){
+      return await createAndMoveSheet(parentFolderId);
+    };
+    window.createLociMyuSpreadsheet.__overlaySafe = true;
+    console.log('[LM-overlay] createLociMyuSpreadsheet patched');
+  }
+  if (typeof window.findOrCreateLociMyuSpreadsheet === 'function' && !window.findOrCreateLociMyuSpreadsheet.__overlaySafe) {
+    const orig = window.findOrCreateLociMyuSpreadsheet;
+    window.findOrCreateLociMyuSpreadsheet = async function(parentFolderId /* token ignored */, token, opts){
+      // Try resolve with auth path; if it fails, fallback to original
+      try {
+        if (!parentFolderId) return await ensureSpreadsheetId();
+        const list = await listSiblingSheets(parentFolderId);
+        for (const f of list) if (await isLociMyuSpreadsheet(f.id)) return f.id;
+        return await createAndMoveSheet(parentFolderId);
+      } catch(e){
+        try { return await orig.apply(this, arguments); } catch(_){ throw e; }
+      }
+    };
+    window.findOrCreateLociMyuSpreadsheet.__overlaySafe = true;
+    console.log('[LM-overlay] findOrCreateLociMyuSpreadsheet patched');
+  }
+
+  // ---- pre-resolve SS id once --------------------------------------------
+  (async ()=>{ try { await ensureSpreadsheetId(); } catch(_){} })();
+})();
+
