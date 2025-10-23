@@ -518,9 +518,34 @@ function createLociMyuSpreadsheet(parentFolderId, token, opts){
       return putValues(spreadsheetId, 'A1:Z1', [LOCIMYU_HEADERS], token).then(()=> spreadsheetId);
     });
 }
-function findOrCreateLociMyuSpreadsheet(parentFolderId, token, opts){
-  if(!parentFolderId) return Promise.reject(new Error('parentFolderId required'));
+
+async function findOrCreateLociMyuSpreadsheet(parentFolderId, token, opts){
+  if(!parentFolderId) throw new Error('parentFolderId required');
+  // Resolve token if a Promise was passed
+  let tok = token;
+  if (tok && typeof tok.then === 'function') tok = await tok;
+  if (!tok) {
+    try {
+      const g = await import('./gauth.module.js');
+      let v = g.getAccessToken?.();
+      tok = (v && typeof v.then === 'function') ? await v : v;
+    } catch(_) {}
+  }
+  if (!tok) throw new Error('token_missing');
+
   const q = encodeURIComponent(`'${parentFolderId}' in parents and mimeType='application/vnd.google-apps.spreadsheet' and trashed=false`);
+  const url = `https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name,modifiedTime)&orderBy=modifiedTime%20desc&pageSize=10&supportsAllDrives=true&includeItemsFromAllDrives=true`;
+
+  const d = await __lm_fetchJSONAuth(url);
+  const files = d.files || [];
+  async function next(i){
+    if(i>=files.length) return createLociMyuSpreadsheet(parentFolderId, tok, opts||{});
+    const ok = await isLociMyuSpreadsheet(files[i].id, tok);
+    return ok ? files[i].id : next(i+1);
+  }
+  return next(0);
+}
+' in parents and mimeType='application/vnd.google-apps.spreadsheet' and trashed=false`);
   const url=`https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name,modifiedTime)&orderBy=modifiedTime&includeItemsFromAllDrives=true desc&pageSize=10&supportsAllDrives=true`;
   return fetch(url, { headers:{ Authorization:'Bearer '+token } }).then(r=>{ if(!r.ok) throw new Error('Drive list spreadsheets '+r.status); return r.json(); }).then(d=>{
       const files = d.files || [];
@@ -810,10 +835,7 @@ function updateImageForPin(id, fileIdOrNull){
 }
 
 // ---------- Load captions from sheet ----------
-async function loadCaptionsFromSheet(){
-  // token guard
-  const __lm_token_guard_loadCaptionsFromSheet = (await (async ()=>{try{const g=await import('./gauth.module.js');let v=g.getAccessToken?.();return (v&&typeof v.then==='function')?await v:v;}catch(e){return null}})());
-
+function loadCaptionsFromSheet(){
   const token = getAccessToken(); if(!token||!currentSpreadsheetId||!currentSheetTitle) return;
   const range = `'${currentSheetTitle}'!A1:Z9999`;
   getValues(currentSpreadsheetId, range, token).then(values=>{
@@ -859,10 +881,7 @@ async function loadCaptionsFromSheet(){
   const btn = $('btnRefreshImages');
   if(btn) btn.addEventListener('click', ()=> refreshImagesGrid().catch(()=>{}));
 })();
-async function refreshImagesGrid(){
-  // token guard
-  const __lm_token_guard_refreshImagesGrid = (await (async ()=>{try{const g=await import('./gauth.module.js');let v=g.getAccessToken?.();return (v&&typeof v.then==='function')?await v:v;}catch(e){return null}})());
-
+function refreshImagesGrid(){
   const token = ensureToken(); if(!lastGlbFileId) return Promise.resolve();
   return getParentFolderId(lastGlbFileId, token).then(parent=>{
     if(!parent){
@@ -986,10 +1005,7 @@ function renderFilterChips(){
 }
 
 // ---------- GLB load ----------
-async function doLoad(){
-  // token guard
-  const __lm_token_guard_doLoad = (await (async ()=>{try{const g=await import('./gauth.module.js');let v=g.getAccessToken?.();return (v&&typeof v.then==='function')?await v:v;}catch(e){return null}})());
-
+function doLoad(){
   try{
     const token = ensureToken();
     const raw = ($('glbUrl') && $('glbUrl').value) || '';
