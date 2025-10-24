@@ -932,3 +932,207 @@ onCanvasShiftPick(function(pos){
   selectCaption(id);
   ensureRow(id, row).then(function(){ updateCaptionForPin(id, row); });
 });
+
+
+
+// =====================================================
+// == Materials Opacity Module (sheet-scoped, non-breaking)
+// == - Stores per-material opacity per "parent save sheet" (gid = currentSheetId)
+// == - Uses a single sheet named "materials" inside the same spreadsheet
+// == - Columns: gid, material, opacity, updatedAt
+// == - Emits a CustomEvent('materials:apply', {detail:{ opacities: Map<string, number> }})
+// == - No UI assumptions: if #mat-list exists, render sliders; otherwise just persists.
+// =====================================================
+
+(function MaterialsOpacityModule(){
+  const MAT_SHEET_TITLE = 'materials';
+  const MAT_HEADERS = ['gid','material','opacity','updatedAt'];
+
+  // In-memory cache: { materialName: { opacity:number } }
+  let matCache = new Map();
+
+  function matColA1(i0){ let n=i0+1,s=''; while(n){ n--; s=String.fromCharCode(65+(n%26))+s; n=(n/26)|0; } return s; }
+  function matGetValues(spreadsheetId, rangeA1, token){
+    const url = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(rangeA1)}`;
+    return fetch(url, { headers:{ Authorization:'Bearer '+token } }).then(r=>{ if(!r.ok) throw new Error('mat.values.get '+r.status); return r.json(); }).then(d=> d.values||[]);
+  }
+  function matPutValues(spreadsheetId, rangeA1, values, token){
+    const url = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(rangeA1)}?valueInputOption=RAW`;
+    return fetch(url, { method:'PUT', headers:{ Authorization:'Bearer '+token, 'Content-Type':'application/json' }, body: JSON.stringify({ values }) }).then(r=>{ if(!r.ok) throw new Error('mat.values.update '+r.status); });
+  }
+  function matAppend(spreadsheetId, rangeA1, values, token){
+    const url = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(rangeA1)}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`;
+    return fetch(url, { method:'POST', headers:{ Authorization:'Bearer '+token, 'Content-Type':'application/json' }, body: JSON.stringify({ values }) }).then(r=>{ if(!r.ok) throw new Error('mat.values.append '+r.status); });
+  }
+
+  async function ensureMaterialsSheetExists(){
+    if(!currentSpreadsheetId) return false;
+    const token = (typeof getAccessToken==='function') ? getAccessToken() : null;
+    if(!token) return false;
+    // Try fetch header
+    try{
+      const hdr = await matGetValues(currentSpreadsheetId, `'${MAT_SHEET_TITLE}'!A1:D1`, token);
+      const h0 = (hdr && hdr[0]) || [];
+      if(h0.length >= 3) return true;
+    }catch(_){}
+    // Create sheet + header
+    try{
+      const url=`https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(currentSpreadsheetId)}:batchUpdate`;
+      const body={ requests:[{ addSheet:{ properties:{ title: MAT_SHEET_TITLE } } }] };
+      await fetch(url,{ method:'POST', headers:{ Authorization:'Bearer '+token, 'Content-Type':'application/json' }, body: JSON.stringify(body) });
+    }catch(_){ /* already exists */ }
+    try{
+      await matPutValues(currentSpreadsheetId, `'${MAT_SHEET_TITLE}'!A1:D1`, [MAT_HEADERS], token);
+      return true;
+    }catch(e){ console.warn('[materials] ensure header failed', e); return false; }
+  }
+
+  function emitApply(){
+    try{
+      const map = new Map(matCache);
+      document.dispatchEvent(new CustomEvent('materials:apply',{ detail:{ opacities: map, gid: currentSheetId } }));
+    }catch(_){}
+  }
+
+  async function loadMaterialsForCurrentSheet(){
+    matCache.clear();
+    if(!currentSpreadsheetId || !currentSheetId) return;
+    const token = (typeof getAccessToken==='function') ? getAccessToken() : null;
+    if(!token) return;
+    try{
+      await ensureMaterialsSheetExists();
+      const all = await matGetValues(currentSpreadsheetId, `'${MAT_SHEET_TITLE}'!A2:D9999`, token);
+      for(const row of all){
+        const gid = Number(row[0]||0);
+        if(!gid || gid!==Number(currentSheetId)) continue;
+        const name = String(row[1]||'').trim();
+        const op = Math.max(0, Math.min(1, parseFloat(row[2]||'1')));
+        if(name) matCache.set(name, { opacity: op });
+      }
+      renderMaterialsUI();
+      emitApply();
+    }catch(e){
+      console.warn('[materials] load failed', e);
+    }
+  }
+
+  async function upsertMaterialOpacity(name, opacity){
+    if(!name) return;
+    opacity = Math.max(0, Math.min(1, Number(opacity)||0));
+    const token = (typeof getAccessToken==='function') ? getAccessToken() : null;
+    if(!token || !currentSpreadsheetId || !currentSheetId) return;
+
+    // Load all, find row
+    const all = await matGetValues(currentSpreadsheetId, `'${MAT_SHEET_TITLE}'!A1:D9999`, token);
+    const headers = (all[0]||[]).map(v=>String(v||'').trim().toLowerCase());
+    const idx = {}; headers.forEach((h,i)=> idx[h]=i);
+    const records = all.slice(1);
+
+    let foundRow = -1;
+    for(let i=0;i<records.length;i++){
+      const row = records[i]||[];
+      const gid = Number(row[idx['gid']||0]||0);
+      const mat = String(row[idx['material']||1]||'').trim();
+      if(gid===Number(currentSheetId) && mat===name){ foundRow = i+2; break; } // +2 => header + 1-based
+    }
+
+    const now = new Date().toISOString();
+    if(foundRow>0){
+      const range = `'${MAT_SHEET_TITLE}'!A${foundRow}:D${foundRow}`;
+      await matPutValues(currentSpreadsheetId, range, [[ currentSheetId, name, opacity, now ]], token);
+    }else{
+      await matAppend(currentSpreadsheetId, `'${MAT_SHEET_TITLE}'!A:D`, [[ currentSheetId, name, opacity, now ]], token);
+    }
+    matCache.set(name, { opacity });
+    emitApply();
+  }
+
+  // --------- Minimal UI binding (optional) ---------
+  function renderMaterialsUI(){
+    const host = document.getElementById('mat-list');
+    if(!host) return; // no UI present → nothing to render
+    host.innerHTML = '';
+
+    // We don't know model materials; show rows from cache only.
+    // If you want to bootstrap from model, dispatch an event to request names.
+    const names = Array.from(matCache.keys()).sort((a,b)=> a.localeCompare(b));
+    if(!names.length){
+      const div = document.createElement('div');
+      div.style.opacity = '0.8';
+      div.textContent = 'No material entries yet. Adjust in viewer or import list.';
+      host.appendChild(div);
+      return;
+    }
+
+    for(const name of names){
+      const row = matCache.get(name)||{opacity:1};
+      const wrap = document.createElement('div');
+      wrap.className = 'mat-item';
+      wrap.style.display = 'grid';
+      wrap.style.gridTemplateColumns = '1fr 120px 52px';
+      wrap.style.gap = '8px';
+      wrap.style.alignItems = 'center';
+      wrap.style.padding = '6px 0';
+
+      const label = document.createElement('div');
+      label.textContent = name;
+      label.style.overflow='hidden'; label.style.whiteSpace='nowrap'; label.style.textOverflow='ellipsis';
+
+      const slider = document.createElement('input');
+      slider.type='range'; slider.min='0'; slider.max='1'; slider.step='0.01'; slider.value=String(row.opacity ?? 1);
+
+      const val = document.createElement('div');
+      val.style.textAlign='right';
+      val.textContent = String((row.opacity ?? 1).toFixed(2));
+
+      slider.addEventListener('input', (ev)=>{
+        const v = Number(ev.target.value||'1');
+        val.textContent = String(v.toFixed(2));
+        upsertMaterialOpacity(name, v).catch(()=>{});
+      });
+
+      wrap.append(label, slider, val);
+      host.appendChild(wrap);
+    }
+  }
+
+  // Listen external hints to seed material names
+  document.addEventListener('materials:seed', (ev)=>{
+    const list = (ev && ev.detail && ev.detail.names) || [];
+    let changed = false;
+    for(const nm of list){
+      if(!matCache.has(nm)){ matCache.set(nm, { opacity:1 }); changed = true; }
+    }
+    if(changed){ renderMaterialsUI(); emitApply(); }
+  });
+
+  // Hook sheet tab changes and GLB loads
+  document.addEventListener('DOMContentLoaded', ()=>{ loadMaterialsForCurrentSheet(); });
+  // When sheet is changed in the existing code, loadCaptionsFromSheet() is called; hook into that flow:
+  const origLoadCaps = (typeof loadCaptionsFromSheet === 'function') ? loadCaptionsFromSheet : null;
+  if(origLoadCaps){
+    window.loadCaptionsFromSheet = function(...args){
+      const r = origLoadCaps.apply(this, args);
+      try{ loadMaterialsForCurrentSheet(); }catch(_){}
+      return r;
+    };
+  }
+  // When GLB is loaded and spreadsheet / currentSheetId changes (doLoad), load afterwards
+  const origDoLoad = (typeof doLoad === 'function') ? doLoad : null;
+  if(origDoLoad){
+    window.doLoad = function(...args){
+      const p = origDoLoad.apply(this, args);
+      Promise.resolve(p).then(()=>{ try{ loadMaterialsForCurrentSheet(); }catch(_){ } });
+      return p;
+    };
+  }
+
+  // Expose a tiny API (optional)
+  window.LM_Materials = {
+    get cache(){ return new Map(matCache); },
+    get currentGid(){ return currentSheetId; },
+    setOpacity: upsertMaterialOpacity,
+    refreshUI: renderMaterialsUI,
+    reload: loadMaterialsForCurrentSheet
+  };
+})();
