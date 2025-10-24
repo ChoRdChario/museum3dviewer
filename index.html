@@ -144,7 +144,7 @@
 
   <script>
     // Tabs behavior (keep as-is)
-    const tabs = document.querySelectorAll('[role="tab"]");
+    const tabs = document.querySelectorAll('[role="tab"]');
     const panes = document.querySelectorAll('.pane');
     tabs.forEach(t => t.addEventListener('click', () => {
       tabs.forEach(x => x.setAttribute('aria-selected', String(x===t)));
