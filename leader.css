@@ -1,0 +1,6 @@
+
+/* leader + halo styles */
+#leader{ position:absolute; inset:0; pointer-events:none; z-index:5 }
+.halo{ fill:none; stroke:#ffd166; stroke-width:2; opacity:0; }
+@keyframes pulse { 0%{ r:8; opacity:.9 } 70%{ r:18; opacity:0 } 100%{ r:18; opacity:0 } }
+.halo.pulse{ animation:pulse 1.2s ease-out infinite }

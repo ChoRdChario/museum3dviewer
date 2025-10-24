@@ -39,7 +39,6 @@
     .thumb{width:100%;aspect-ratio:1/1;border-radius:8px;border:1px solid #0005;background-size:cover;background-position:center;cursor:pointer}
     .thumb[data-selected="true"]{outline:2px solid var(--sel);outline-offset:2px}
   </style>
-  <link rel="stylesheet" href="app.css"/>
 </head>
 <body>
   <div id="app">
@@ -70,68 +69,45 @@
       </nav>
 
       <section id="pane-caption" class="pane" data-pane="caption" data-active="true">
-  <div class="grp">
-    <div class="hint">Pin color</div>
-    <div id="pinColorChips" class="chips"></div>
-  </div>
-  <div class="grp">
-    <div class="hint">Filter</div>
-    <div id="pinFilterChips" class="chips"></div>
-  </div>
+        <div class="grp">
+          <div class="hint">Pin color</div>
+          <div id="pinColorChips" class="chips"></div>
+        </div>
+        <div class="grp">
+          <div class="hint">Filter</div>
+          <div id="pinFilterChips" class="chips"></div>
+        </div>
 
-  <div class="grp">
-    <div class="hint">Caption list</div>
-    <div id="caption-list"></div>
-  </div>
+        <!-- ▼ 配置入替：先に Caption list、その下に Title/Body -->
+        <div class="grp">
+          <div class="hint">Caption list</div>
+          <div id="caption-list"></div>
+        </div>
 
-  <div class="grp">
-    <div class="hint">Title / Body</div>
-    <input id="caption-title" placeholder="Title" />
-    <input id="caption-body"  placeholder="Body" />
-    <div class="row" id="caption-image-row">
-      <div id="currentImageThumb" aria-label="attached image preview">
-        <div class="placeholder">No Image</div>
-      </div>
-    </div>
-  </div>
+        <div class="grp">
+          <div class="hint">Title / Body</div>
+          <input id="caption-title" placeholder="Title" />
+          <input id="caption-body" placeholder="Body" />
+          </div>
+        <div class="grp">
+          <div class="row" id="caption-image-row"><div id="currentImageThumb" aria-label="attached image preview"><div class="placeholder">No Image</div></div></div>
+</div>
+</div>
+        </div>
 
-  <div class="grp">
-    <div class="hint">Images (auto from GLB folder)</div>
-    <div id="images-grid-wrapper">
-      <div id="images-grid"></div>
-      <div class="row" style="margin-top:8px">
-        <button id="btnRefreshImages" style="width:100%">Refresh images</button>
-      </div>
-      <div id="images-status" class="hint" style="margin-top:6px"></div>
-    </div>
-  </div>
-</section>
+
+
+        <div class="grp">
+          <div class="hint">Images (auto from GLB folder)</div>
+          <div id="images-grid-wrapper"><div id="images-grid"></div>
+          <div class="row" style="margin-top:8px">
+            <button id="btnRefreshImages" style="width:100%">Refresh images</button>
+          </div>
+          <div id="images-status" class="hint" style="margin-top:6px"></div>
+        </div>
+      </section>
 
       <section id="pane-material" class="pane" data-pane="material">
-        <div class="grp">
-          <label>Target
-            <select id="mat-target"></select>
-          </label>
-        </div>
-    
-        <div class="grp">
-          <label>White Threshold <input type="range" id="mat-white-thr" min="0.8" max="1" step="0.01" value="0.92"/></label>
-          <output id="mat-white-thr-val">0.92</output>
-        </div>
-    
-        <div class="grp">
-          <label><input type="checkbox" id="mat-black2alpha" /> Black → Alpha</label>
-        </div>
-        <div class="grp">
-          <label>Black Threshold <input type="range" id="mat-black-thr" min="0" max="0.2" step="0.01" value="0.08"/></label>
-          <output id="mat-black-thr-val">0.08</output>
-        </div>
-    
-        <div class="grp">
-          <button id="mat-reset-one">Reset (Selected)</button>
-          <button id="mat-reset-all">Reset All</button>
-        </div>
-    
         <div class="grp">
           <label><input type="checkbox" id="mat-unlit" /> Unlit</label>
           <label><input type="checkbox" id="mat-doubleside" /> Double-sided</label>
@@ -154,7 +130,14 @@
     </aside>
   </div>
 
-  
+  <script>
+    const tabs = document.querySelectorAll('[role="tab"]');
+    const panes = document.querySelectorAll('.pane');
+    tabs.forEach(t => t.addEventListener('click', () => {
+      tabs.forEach(x => x.setAttribute('aria-selected', String(x===t)));
+      panes.forEach(p => p.dataset.active = String(p.dataset.pane===t.dataset.tab));
+    }));
+  </script>
 
   <script type="importmap">
   {
@@ -165,62 +148,9 @@
   }
   </script>
 
-  <script src="locimyu.config.js"></script>
-<script type="module" src="viewer.module.cdn.js"></script>
-<script type="module" src="./boot.esm.cdn.js"></script>
-<!-- LociMyu overlay (non-module): hardens auth + Sheet writes; safe to remove -->
-<script src="boot.esm.cdn.patched.2.js"></script>
+  <script type="module" src="./boot.esm.cdn.js"></script>
 <link rel="stylesheet" href="app.sheet-rename.css" />
 <script type="module" src="sheet-rename.module.js"></script>
 
-
-<script type="module">
-// === LociMyu: Material pane UI reorder (DOM-safe, no event rewire) ===
-(function(){
-  function grpOf(id){
-    const el = document.getElementById(id);
-    return el ? el.closest('.grp') : null;
-  }
-  function uniq(arr){ const out=[]; const seen=new Set(); arr.forEach(n=>{ if(n && !seen.has(n)){ seen.add(n); out.push(n);} }); return out; }
-  function reorder(){
-    const pane = document.getElementById('pane-material');
-    if(!pane) return;
-    const target  = grpOf('mat-target');
-    const unlit   = grpOf('mat-unlit') || grpOf('mat-doubleside');
-    const opacity = grpOf('mat-opacity');
-    const wAlpha  = grpOf('mat-white2alpha');
-    const wThr    = grpOf('mat-white-thr');
-    const bAlpha  = grpOf('mat-black2alpha');
-    const bThr    = grpOf('mat-black-thr');
-    const reset   = grpOf('mat-reset-one') || grpOf('mat-reset-all');
-
-    const order = uniq([ target, unlit, opacity, wAlpha, wThr, bAlpha, bThr, reset ]);
-    order.forEach(g=>{ try{ pane.appendChild(g); }catch(_){ } });
-  }
-
-  function onTabClick(ev){
-    const btn = ev.target && ev.target.closest && ev.target.closest('[role="tab"][data-tab="material"]');
-    if(btn){ setTimeout(reorder, 0); }
-  }
-
-  function boot(){
-    reorder();
-    const nav = document.querySelector('nav.tabs');
-    if(nav && !nav.__lmReorderWired){
-      nav.__lmReorderWired = true;
-      nav.addEventListener('click', onTabClick, { passive:true });
-    }
-  }
-  if(document.readyState === 'loading'){ document.addEventListener('DOMContentLoaded', boot, { once:true }); }
-  else { boot(); }
-})();
-</script>
-
-
-  <!-- === Added by rebuild: auth + data layer + compat shim (non-destructive) === -->
-  <script type="module" src="./auth-gate.js"></script>
-  <script type="module" src="./data-layer.js"></script>
-  <script type="module" src="./compat-shim.js"></script>
-  <!-- === end added === -->
 </body>
 </html>
