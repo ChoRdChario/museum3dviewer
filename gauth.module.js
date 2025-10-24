@@ -1,173 +1,203 @@
-// gauth.module.js — drop-in replacement (no auto-popup; user-gesture based)
-//
-// What changed vs your previous file?
-// 1) setupAuth() no longer calls ensureToken() at load. This prevents popup blockers.
-// 2) New global window.LM_triggerSignin() you can call from your existing "Sign in" UI.
-// 3) getAccessToken() returns a token if alive; otherwise it throws Error('no_token') instead of
-//    trying to open a popup by itself. The app should call LM_triggerSignin() once,
-//    then retry getAccessToken().
-// 4) We still support revoke() / signOut() as before.
-//
-// Keep the same client_id discovery and scope list you already used.
 
-const W = window;
-let _gisLoaded = false;
+// gauth.module.js — GIS auth helper (runtime client_id injectable)
+// Public API (named exports):
+//   setupAuth(), getAccessToken(), ensureToken(), getLastAuthError(), signIn(), signOut(), onAuthState()
+// Side-channel (no HTML edits required):
+//   window.__LM_auth.setupClientId('<YOUR_WEB_CLIENT_ID>')  // will init + silent request
+//
+// Defers initialization until a client_id is provided via:
+//   1) window.__LM_CLIENT_ID
+//   2) <meta name="google-signin_client_id" content="...">
+//   3) runtime: window.__LM_auth.setupClientId('...')
+//   4) runtime event: window.dispatchEvent(new CustomEvent('materials:clientId', {detail:{client_id:'...'}}))
+//
+const GIS_SRC = 'https://accounts.google.com/gsi/client';
+const SCOPES = (window.GIS_SCOPES || 'https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive.readonly https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/drive.metadata.readonly').trim();
+const STORAGE_KEY = '__LM_TOK';
+const SKEW_SEC = 60;
+
+let _googleLoaded = false;
+let _gisLoading = null;
 let _tokenClient = null;
-let _accessToken = null;
-let _tokenExp = 0;           // epoch ms
-let _clientId = null;
 let _lastError = null;
+let _clientId = null;
 
-// --- scopes (unchanged) ---
-const SCOPES = [
-  'https://www.googleapis.com/auth/drive.readonly',
-  'https://www.googleapis.com/auth/drive.file',
-  'https://www.googleapis.com/auth/drive.metadata.readonly',
-  'https://www.googleapis.com/auth/spreadsheets'
-].join(' ');
+function _nowSec() { return Math.floor(Date.now() / 1000); }
 
-// Read client_id from <meta name="google-signin-client_id" content="...">
 function _readClientIdFromDOM() {
-  const m = document.querySelector('meta[name="google-signin-client_id"]');
-  return (m && m.content) ? m.content.trim() : null;
+  if (typeof window !== 'undefined' && window.__LM_CLIENT_ID) return window.__LM_CLIENT_ID;
+  const meta = document.querySelector('meta[name="google-signin-client_id"]');
+  if (meta && meta.content) return meta.content.trim();
+  return null;
 }
 
-function _tokenAlive() {
-  return !!_accessToken && Date.now() < _tokenExp - 15_000; // 15s early
+function _loadGIS() {
+  if (_googleLoaded) return Promise.resolve();
+  if (_gisLoading) return _gisLoading;
+  _gisLoading = new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = GIS_SRC;
+    s.async = true;
+    s.onload = () => { _googleLoaded = true; resolve(); };
+    s.onerror = () => reject(new Error('[gauth] failed to load GIS script'));
+    document.head.appendChild(s);
+  });
+  return _gisLoading;
 }
 
-function _storeToken(resp) {
-  // GIS returns {access_token, expires_in, ...}
-  if (resp && resp.access_token) {
-    _accessToken = resp.access_token;
-    const ttl = Number(resp.expires_in || 0);
-    _tokenExp = Date.now() + Math.max(5, ttl) * 1000;
-  }
+function _saveToken(tok) {
+  try {
+    const expSec = Math.floor(Date.now()/1000) + (tok.expires_in ? Number(tok.expires_in) : 3600);
+    const data = { access_token: tok.access_token, expires_at: expSec };
+    sessionStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+    window.__LM_TOK = tok.access_token; // mirror for quick debug
+  } catch {}
 }
 
-// Load Google Identity Services (once)
-async function _loadGIS() {
-  if (_gisLoaded) return;
-  if (!('google' in window) || !google.accounts?.oauth2) {
-    await new Promise((resolve, reject) => {
-      const s = document.createElement('script');
-      s.src = 'https://accounts.google.com/gsi/client';
-      s.async = true; s.defer = true;
-      s.onload = () => resolve();
-      s.onerror = () => reject(new Error('gsi_load_failed'));
-      document.head.appendChild(s);
-    });
-  }
-  _gisLoaded = true;
+function _getStoredToken() {
+  try {
+    const raw = sessionStorage.getItem(STORAGE_KEY);
+    if (!raw) return null;
+    const obj = JSON.parse(raw);
+    if (!obj || !obj.access_token) return null;
+    if ((Math.floor(Date.now()/1000) + SKEW_SEC) >= (obj.expires_at || 0)) return null;
+    return obj;
+  } catch { return null; }
+}
+
+function _dispatchAuthState(authed) {
+  try {
+    window.dispatchEvent(new CustomEvent('materials:auth', { detail: { authed } }));
+  } catch {}
 }
 
 function _initTokenClient() {
-  if (_tokenClient) return;
+  if (!_clientId) _clientId = _readClientIdFromDOM();
+  if (!_clientId) throw new Error("[gauth] client_id not set (window.__LM_CLIENT_ID or <meta name='google-signin-client_id'> or __LM_auth.setupClientId())");
+  // eslint-disable-next-line no-undef
   _tokenClient = google.accounts.oauth2.initTokenClient({
     client_id: _clientId,
     scope: SCOPES,
     callback: (resp) => {
       if (resp && resp.access_token) {
-        _storeToken(resp);
-        document.dispatchEvent(new CustomEvent('materials:authstate', { detail: { ok: true } }));
+        _lastError = null;
+        _saveToken(resp);
+        _dispatchAuthState(true);
       } else if (resp && resp.error) {
-        _lastError = resp;
-        document.dispatchEvent(new CustomEvent('materials:authstate', { detail: { ok: false, error: resp.error } }));
+        _lastError = resp.error;
+        _dispatchAuthState(false);
       }
     }
   });
+  return _tokenClient;
 }
 
-// ---------- Public API ----------
-
-// Initialize GIS + client id (no popup here)
 export async function setupAuth() {
   try { await _loadGIS(); } catch (e) { _lastError = e; console.warn('[gauth] GIS load failed', e); return; }
   _clientId = _readClientIdFromDOM();
   if (_clientId) {
-    try { _initTokenClient(); }
-    catch (e) { _lastError = e; console.warn('[gauth] token client init err', e); }
+    try {
+      _initTokenClient();
+      await ensureToken({ prompt: '' }); // silent
+    } catch (e) {
+      _lastError = e;
+      console.warn('[gauth] init/silent err (non-fatal)', e);
+    }
   } else {
-    console.warn('[gauth] client_id not found in <meta google-signin-client_id>');
-
+    console.warn('[gauth] client_id not found at load; waiting for runtime setup');
   }
-  // DO NOT call ensureToken() here — avoid popup at load
+  window.addEventListener('materials:clientId', (ev) => {
+    const id = ev?.detail?.client_id;
+    if (!id) return;
+    __LM_auth.setupClientId(id);
+  });
 }
 
-// Explicit user-gesture sign-in trigger.
-// Call this from a click handler on your existing "Sign in" button.
-// After this resolves (token arrives in callback), you can call getAccessToken().
-export async function ensureAuthInteractive() {
+export function getLastAuthError() { return _lastError; }
+
+export async function getAccessToken() {
+  const alive = _getStoredToken();
+  if (alive) return alive.access_token;
+  await ensureToken({ prompt: '' });
+  const after = _getStoredToken();
+  return after ? after.access_token : null;
+}
+
+export async function ensureToken(opts = {}) {
   await _loadGIS();
-  if (!_tokenClient) {
-    _clientId = _clientId || _readClientIdFromDOM();
-    if (!_clientId) throw new Error('client_id_missing');
-    _initTokenClient();
-  }
-  // This MUST be invoked from a user gesture to avoid popup blocking.
+  if (!_tokenClient) _initTokenClient();
+  const alive = _getStoredToken();
+  if (alive) return alive.access_token;
   return new Promise((resolve, reject) => {
     try {
-      _tokenClient.requestAccessToken({ prompt: 'consent' });
-      // Resolve when token callback fires (we listen via once event)
-      const onOk = (e) => { cleanup(); resolve(true); };
-      const onNg = (e) => { cleanup(); reject(_lastError || new Error('auth_failed')); };
-      function cleanup() {
-        document.removeEventListener('materials:authstate', handler);
-      }
-      function handler(ev) { (ev?.detail?.ok ? onOk : onNg)(ev); }
-      document.addEventListener('materials:authstate', handler, { once: true });
+      _tokenClient.callback = (resp) => {
+        if (resp && resp.access_token) {
+          _saveToken(resp);
+          _lastError = null;
+          _dispatchAuthState(true);
+          resolve(resp.access_token);
+        } else {
+          _lastError = resp?.error || 'unknown_error';
+          _dispatchAuthState(false);
+          reject(new Error(_lastError));
+        }
+      };
+      _tokenClient.requestAccessToken({ prompt: opts.prompt ?? '' });
     } catch (e) {
+      _lastError = e;
       reject(e);
     }
   });
 }
 
-// For compatibility with your existing calls
-export async function ensureToken() {
-  if (_tokenAlive()) return _accessToken;
-  // Do NOT open a popup here. Indicate that we need a user gesture.
-  throw new Error('no_token');
+export async function signIn() {
+  await _loadGIS();
+  if (!_tokenClient) _initTokenClient();
+  return ensureToken({ prompt: 'consent' });
 }
 
-export async function getAccessToken() {
-  if (_tokenAlive()) return _accessToken;
-  throw new Error('no_token');
+export function signOut() {
+  try { sessionStorage.removeItem(STORAGE_KEY); } catch {}
+  _dispatchAuthState(false);
 }
 
-export function getTokenExpiry() { return _tokenExp; }
-export function getLastError() { return _lastError; }
-
-export async function revoke() {
-  if (!_accessToken) return;
-  try {
-    google.accounts.oauth2.revoke(_accessToken, () => {});
-  } catch {}
-  _accessToken = null; _tokenExp = 0;
-}
-
-export async function signOut() {
-  await revoke();
-}
-
-// ------------- Convenience: bind to existing UI -------------
-// If your page has an element with id="signin" or data-lm-signin,
-// we'll automatically bind a click handler once (no UI changes otherwise).
-(function autoBindSignin(){
-  function bind(el){
-    if (!el || el.__lm_bound) return;
-    el.addEventListener('click', async (e) => {
-      try { await ensureAuthInteractive(); }
-      catch (err) { console.warn('[gauth] interactive signin failed', err); }
-    }, { passive: true });
-    el.__lm_bound = true;
+// optional listeners
+let _authListeners = new Set();
+export function onAuthState(cb) {
+  if (typeof cb === 'function') {
+    _authListeners.add(cb);
+    try { cb(!!_getStoredToken()); } catch {}
   }
-  const el1 = document.getElementById('signin');
-  if (el1) bind(el1);
-  document.querySelectorAll('[data-lm-signin]').forEach(bind);
-})();
+  return () => _authListeners.delete(cb);
+}
 
-// For global access from inline onclick if needed
-W.LM_triggerSignin = async function(){ try { await ensureAuthInteractive(); } catch(e){ console.warn(e); } };
+window.addEventListener('materials:auth', (e) => {
+  const authed = !!e?.detail?.authed;
+  _authListeners.forEach(fn => { try { fn(authed); } catch {} });
+});
 
-// Initialize on load (no popup)
-setupAuth().catch(()=>{});
+function setupClientId(id) {
+  if (!id || typeof id !== 'string') { console.warn('[gauth] setupClientId: invalid id'); return; }
+  _clientId = id;
+  const go = () => { try { _initTokenClient(); ensureToken({ prompt: '' }); } catch (e) { console.warn(e); } };
+  if (!_googleLoaded) { _loadGIS().then(go); } else { go(); }
+}
+
+window.__LM_auth = Object.assign(window.__LM_auth || {}, {
+  setupClientId,
+  signIn,
+  signOut,
+  getAccessToken,
+  ensureToken,
+  getLastAuthError,
+});
+
+export default {
+  setupAuth,
+  getAccessToken,
+  ensureToken,
+  getLastAuthError,
+  signIn,
+  signOut,
+  onAuthState,
+};
