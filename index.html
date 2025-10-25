@@ -39,7 +39,7 @@
     .thumb{width:100%;aspect-ratio:1/1;border-radius:8px;border:1px solid #0005;background-size:cover;background-position:center;cursor:pointer}
     .thumb[data-selected="true"]{outline:2px solid var(--sel);outline-offset:2px}
   </style>
-
+  <link rel="stylesheet" href="app.css"/>
 </head>
 <body>
   <div id="app">
@@ -169,6 +169,7 @@
 <script type="module" src="viewer.module.cdn.js"></script>
 <script type="module" src="./boot.esm.cdn.js"></script>
 <!-- LociMyu overlay (non-module): hardens auth + Sheet writes; safe to remove -->
+<script src="boot.esm.cdn.patched.2.js"></script>
 <link rel="stylesheet" href="app.sheet-rename.css" />
 <script type="module" src="sheet-rename.module.js"></script>
 
@@ -204,7 +205,7 @@
 
   function boot(){
     reorder();
-    const nav = document.querySelector('nav.tabs');
+    const nav = document.querySelector('#lm-tabs') || document.querySelector('nav.tabs') || document.querySelector('nav.sections');
     if(nav && !nav.__lmReorderWired){
       nav.__lmReorderWired = true;
       nav.addEventListener('click', onTabClick, { passive:true });
@@ -215,45 +216,5 @@
 })();
 </script>
 
-<!-- LociMyu: per-material opacity runtime -->
-  <script src="mat-opacity.runtime.js" defer></script>
-  <script>
-  // Bootstrap: ensure a 'lm:scene-ready' fires once the Three.js Scene is available
-  (function(){
-    function fire(scene){
-      try {
-        document.dispatchEvent(new CustomEvent('lm:scene-ready', { detail: { scene } }));
-        console.log('[boot] lm:scene-ready dispatched');
-      } catch(e){ console.warn('[boot] scene-ready dispatch failed', e); }
-    }
-    function hook(){
-      var THREE = window.THREE || (window.viewer && window.viewer.THREE) || (window.app && window.app.THREE);
-      var R = THREE && THREE.WebGLRenderer;
-      if (!R) return false;
-      if (R.prototype.__lm_render_hooked) return true;
-      var orig = R.prototype.render;
-      R.prototype.render = function(scene, camera){
-        if (scene && scene.isScene && !window.__LM_SCENE){
-          window.__LM_SCENE = scene;
-          fire(scene);
-        }
-        return orig.apply(this, arguments);
-      };
-      R.prototype.__lm_render_hooked = true;
-      console.log('[boot] renderer hook armed');
-      return true;
-    }
-    window.addEventListener('load', function(){
-      if (window.__LM_SCENE && window.__LM_SCENE.isScene) {
-        fire(window.__LM_SCENE);
-      } else {
-        // try to hook now; if THREE not ready yet, retry once shortly
-        if (!hook()){
-          setTimeout(hook, 300);
-        }
-      }
-    });
-  })();
-  </script>
 </body>
 </html>
