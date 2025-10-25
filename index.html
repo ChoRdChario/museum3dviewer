@@ -211,69 +211,8 @@
       });
     })();
   </script>
-
-  <script type="importmap">
-  {
-    "imports": {
-      "three": "https://unpkg.com/three@0.155.0/build/three.module.js",
-      "three/examples/jsm/": "https://unpkg.com/three@0.155.0/examples/jsm/"
-    }
-  }
-  </script>
-
-  <script type="module" src="./boot.esm.cdn.js"></script>
+<script type="module" src="./boot.esm.cdn.js"></script>
   <link rel="stylesheet" href="app.sheet-rename.css" />
   <script type="module" src="sheet-rename.module.js"></script>
-
-<script>
-/* ====== Per-material opacity wiring (Step1) ====== */
-(function(){
-  const $ = (id)=>document.getElementById(id);
-  const sel = $('pm-material');
-  const rng = $('pm-opacity-range');
-  const out = $('pm-opacity-val');
-
-  if (!sel || !rng || !out) { console.warn('[pm] elements missing'); return; }
-
-  function refreshList(){
-    try{
-      const api = window.LM_viewer;
-      const names = (api && typeof api.listMaterialNames === 'function')
-        ? api.listMaterialNames() : [];
-      const cur = sel.value;
-      sel.innerHTML = '<option value="">— Select material —</option>';
-      names.forEach(n=>{
-        const opt = document.createElement('option');
-        opt.value = n; opt.textContent = n || '(no name)';
-        sel.appendChild(opt);
-      });
-      if (cur && names.includes(cur)) sel.value = cur;
-    }catch(e){ console.warn('[pm] refreshList failed', e); }
-  }
-
-  function applyOpacity(){
-    const name = sel.value;
-    const v = Math.max(0, Math.min(1, Number(rng.value||1)));
-    out.textContent = v.toFixed(2);
-    if (!name) return;
-    try{
-      const api = window.LM_viewer;
-      if (api && typeof api.applyMaterialPropsByName === 'function'){
-        api.applyMaterialPropsByName(name, { opacity: v });
-      }
-    }catch(e){ console.warn('[pm] apply failed', e); }
-  }
-
-  sel.addEventListener('change', applyOpacity, { passive:true });
-  rng.addEventListener('input', applyOpacity, { passive:true });
-
-  document.addEventListener('lm:scene-ready', refreshList);
-  document.querySelector('#tab-material')?.addEventListener('click', refreshList, { passive:true });
-
-  // 初期値表示
-  out.textContent = Number(rng.value||1).toFixed(2);
-})();
-</script>
-
 </body>
 </html>
