@@ -1,276 +1,158 @@
-//
-// LociMyu per-material opacity runtime
-// Drop this file into the same folder as index.html and include it at the end of the body:
-//
-//   <script src="mat-opacity.runtime.js"></script>
-//
-// It does not change your UI structure. It only wires:
-//   - #pm-material  (select)      [fallback: [data-lm="mat-per-select"] ]
-//   - #pm-opacity   (range input) [fallback: [data-lm="mat-per-slider"] ]
-// and persists per-sheet(gid) in localStorage.
-//
 
 (() => {
-  if (window.__LM_PERMAT_INSTALLED) return;
-  window.__LM_PERMAT_INSTALLED = true;
+  const LOG_PREFIX = '[per-mat]';
 
-  const LOG_PREFIX = "[per-mat]";
+  const once = (fn) => { let done=false; return (...args)=>{ if(done) return; done=true; try{ return fn(...args);}catch(e){ console.warn(LOG_PREFIX,e);} }; };
+  const onDOMReady = (cb) => { if (document.readyState==='loading') document.addEventListener('DOMContentLoaded', cb, {once:true}); else queueMicrotask(cb); };
 
-  // ---------- UI finders ----------
-  function findSelect() {
-    return (
-      document.querySelector('[data-lm="mat-per-select"]') ||
-      document.getElementById("pm-material") ||
-      null
-    );
+  function getGid(){
+    const sheetSel = document.querySelector('select[name="sheet"], select[id*="sheet"]');
+    const v = sheetSel?.value || '';
+    const m = v.match(/gid=(\d+)/);
+    return m ? m[1] : (v || '0');
   }
-  function findSlider() {
-    return (
-      document.querySelector('[data-lm="mat-per-slider"]') ||
-      document.getElementById("pm-opacity") ||
-      null
-    );
-  }
-  function ensureValueBadge(slider) {
-    // create a small live value badge after the slider if not exists
-    if (!slider) return null;
-    let badge = slider.nextElementSibling;
-    const isBadge = badge && badge.dataset && badge.dataset.lmValueBadge === "1";
-    if (!isBadge) {
-      badge = document.createElement("span");
-      badge.dataset.lmValueBadge = "1";
-      badge.style.marginLeft = "0.5rem";
-      badge.style.fontSize = "0.85em";
-      badge.style.opacity = "0.8";
-      slider.insertAdjacentElement("afterend", badge);
-    }
-    return badge;
-  }
+  const storeKey = gid => `LM:permat:opacity:${gid}`;
+  const loadMap = () => { try { return JSON.parse(localStorage.getItem(storeKey(getGid())) || '{}'); } catch { return {}; } };
+  const saveMap = (map) => { localStorage.setItem(storeKey(getGid()), JSON.stringify(map)); };
 
-  // ---------- Scene capture ----------
-  function getSceneDirect() {
-    return (
-      window.__LM_SCENE ||
-      window.scene ||
-      window.viewer?.scene ||
-      window.viewer?.three?.scene ||
-      window.app?.scene ||
-      null
-    );
-  }
-  function armRendererHook() {
+  const dispatchSceneReady = once((scene)=>{
+    if (!scene || !scene.isScene) return;
+    window.__LM_SCENE = scene;
+    document.dispatchEvent(new CustomEvent('lm:scene-ready', { detail: { scene } }));
+    console.log('[boot] lm:scene-ready dispatched');
+  });
+
+  function armRendererHook(){
     const THREE = window.THREE || window.viewer?.THREE || window.app?.THREE;
     const R = THREE?.WebGLRenderer;
     if (!R) return false;
     if (R.prototype.__lm_render_hooked) return true;
     const orig = R.prototype.render;
-    R.prototype.render = function (scene, camera) {
-      if (scene?.isScene && !window.__LM_SCENE) {
-        window.__LM_SCENE = scene;
-        console.info(LOG_PREFIX, "captured scene via render hook");
+    R.prototype.render = function(scene, camera){
+      if (scene?.isScene && !window.__LM_SCENE){
+        dispatchSceneReady(scene);
+        try { this.render = orig; } catch {}
+        R.prototype.__lm_render_hooked = true;
       }
       return orig.apply(this, arguments);
     };
-    R.prototype.__lm_render_hooked = true;
-    console.info(LOG_PREFIX, "renderer hook armed (rotate/zoom once to capture scene)");
+    console.log('[boot] renderer hook armed');
     return true;
   }
 
-  // ---------- Materials utilities ----------
-  function collectMaterialMap(scene) {
-    const dict = Object.create(null);
-    if (!scene) return dict;
-    scene.traverse((o) => {
+  function pickMaterialSelect(){
+    return (
+      document.querySelector('[data-lm="mat-per-select"]') ||
+      document.getElementById('pm-material') ||
+      document.querySelector('#panel-materials select') ||
+      [...document.querySelectorAll('select')].find(s => /select material/i.test((s.getAttribute('aria-label')||'') + ' ' + (s.textContent||'')))
+    ) || null;
+  }
+  function pickOpacitySlider(){
+    return (
+      document.querySelector('[data-lm="mat-per-slider"]') ||
+      document.getElementById('pm-opacity') ||
+      document.getElementById('mat-opacity') ||
+      document.querySelector('#panel-materials input[type="range"]') ||
+      [...document.querySelectorAll('input[type="range"]')].find(r => { const min=+r.min, max=+r.max; return min===0 && (max===1 || max===100 || max===1.0); })
+    ) || null;
+  }
+
+  function buildMaterialIndex(scene){
+    const dict = new Map();
+    scene.traverse(o=>{
       if (!o?.isMesh) return;
-      const arr = Array.isArray(o.material) ? o.material : [o.material];
-      for (const m of arr) {
-        if (!m) continue;
-        dict[m.uuid] = m;
-      }
+      (Array.isArray(o.material)?o.material:[o.material]).forEach(m=>{ if(m && !dict.has(m.uuid)) dict.set(m.uuid, m); });
     });
     return dict;
   }
-
-  function materialList(dict) {
-    return Object.values(dict).map((m) => ({
-      uuid: m.uuid,
-      label: (m.name || "").trim() || `${m.type || "Material"}_${m.uuid.slice(-6)}`,
-      opacity: typeof m.opacity === "number" ? m.opacity : 1,
-      transparent: !!m.transparent,
-    }));
+  function makeOptions(dict){
+    return [...dict.values()].map(m=>{
+      const label = (m.name||'').trim() || `${m.type||'Material'}_${m.uuid.slice(-6)}`;
+      return { value:m.uuid, label, opacity:m.opacity ?? 1 };
+    }).sort((a,b)=> a.label.localeCompare(b.label,'en'));
   }
-
-  // ---------- Persistence per gid ----------
-  function currentGid() {
-    // Try known selectors in your UI, fall back to URL ?gid=
-    const sheetSel = document.querySelector('select[name="sheet"], select[id*="sheet"]');
-    const v = sheetSel?.value || "";
-    const m = v.match(/gid=([0-9]+)/);
-    if (m) return m[1];
-    const urlGid = new URLSearchParams(location.search).get("gid");
-    return urlGid || v || "0";
+  function populateSelect(selectEl, options){
+    const CUR = selectEl.value;
+    selectEl.innerHTML='';
+    const ph = document.createElement('option'); ph.value=''; ph.textContent='— Select material —'; selectEl.appendChild(ph);
+    options.forEach(o=>{ const op=document.createElement('option'); op.value=o.value; op.textContent=o.label; selectEl.appendChild(op); });
+    if (CUR && options.some(o=>o.value===CUR)) selectEl.value = CUR;
   }
-  function storeKey(gid) {
-    return `LM:permat:opacity:${gid}`;
-  }
-  function loadMap(gid) {
-    try {
-      return JSON.parse(localStorage.getItem(storeKey(gid)) || "{}");
-    } catch {
-      return {};
-    }
-  }
-  function saveMap(gid, map) {
-    localStorage.setItem(storeKey(gid), JSON.stringify(map));
-  }
-
-  // ---------- Wire-up ----------
-  function populateSelect(selectEl, dict) {
-    if (!selectEl) return 0;
-    const items = materialList(dict).sort((a, b) => a.label.localeCompare(b.label, "en"));
-    const selected = selectEl.value;
-    selectEl.innerHTML = "";
-    const ph = document.createElement("option");
-    ph.value = "";
-    ph.textContent = "— Select material —";
-    selectEl.appendChild(ph);
-    for (const it of items) {
-      const op = document.createElement("option");
-      op.value = it.uuid;
-      op.textContent = it.label;
-      selectEl.appendChild(op);
-    }
-    // try to keep previous selection
-    if (selected) selectEl.value = selected;
-    return items.length;
-  }
-
-  function applySavedOpacities(dict) {
-    const gid = currentGid();
-    const map = loadMap(gid);
-    for (const [uuid, val] of Object.entries(map)) {
-      const m = dict[uuid];
-      if (!m) continue;
-      const v = +val;
-      m.transparent = v < 1 ? true : m.transparent; // leave true if already true
-      m.opacity = v;
+  function applySavedOpacity(dict){
+    const map = loadMap();
+    Object.entries(map).forEach(([uuid,val])=>{
+      const m = dict.get(uuid); if(!m) return;
+      m.transparent = true;
+      m.opacity = +val;
       m.needsUpdate = true;
-    }
-  }
-
-  function clamp01(x) {
-    x = +x;
-    if (!Number.isFinite(x)) return 1;
-    if (x < 0) return 0;
-    if (x > 1) return 1;
-    return x;
-  }
-
-  function wire(selectEl, sliderEl, dict) {
-    if (!selectEl || !sliderEl) return;
-    const badge = ensureValueBadge(sliderEl);
-
-    // support sliders that are 0..1 or 0..100
-    const scale100 = (+sliderEl.max || 1) > 1;
-    const setSliderFromOpacity = (o) => {
-      const val = scale100 ? Math.round(o * 100) : o;
-      sliderEl.value = String(val);
-      if (badge) badge.textContent = scale100 ? `${val}%` : `${(+o).toFixed(2)}`;
-    };
-    const readOpacityFromSlider = () => {
-      const raw = +sliderEl.value;
-      const o = scale100 ? raw / 100 : raw;
-      return clamp01(o);
-    };
-
-    // on selection sync slider to actual value
-    selectEl.addEventListener("change", () => {
-      const m = dict[selectEl.value];
-      if (!m) return;
-      setSliderFromOpacity(typeof m.opacity === "number" ? m.opacity : 1);
     });
+  }
 
-    // on input, apply + persist per gid
-    sliderEl.addEventListener("input", () => {
+  function wire(selectEl, sliderEl, scene){
+    const dict = buildMaterialIndex(scene);
+    const opts = makeOptions(dict);
+    populateSelect(selectEl, opts);
+    applySavedOpacity(dict);
+
+    selectEl.addEventListener('change', ()=>{
+      const m = dict.get(selectEl.value);
+      sliderEl.value = String(m ? (m.opacity ?? 1) : 1);
+    });
+    sliderEl.addEventListener('input', ()=>{
       const uuid = selectEl.value;
-      const m = dict[uuid];
+      const m = dict.get(uuid);
       if (!uuid || !m) return;
-      const gid = currentGid();
-      const map = loadMap(gid);
-
-      const v = readOpacityFromSlider();
-      m.transparent = v < 1 ? true : m.transparent;
+      const v = +sliderEl.value;
+      m.transparent = true;
       m.opacity = v;
       m.needsUpdate = true;
+      const map = loadMap(); map[uuid]=v; saveMap(map);
+    });
+    console.log(LOG_PREFIX, 'ready. materials:', opts.length);
+  }
 
-      map[uuid] = v;
-      saveMap(gid, map);
-      setSliderFromOpacity(v);
+  function bootOnce(){
+    const selectEl = pickMaterialSelect();
+    const sliderEl = pickOpacitySlider();
+    if (!selectEl || !sliderEl){
+      console.warn(LOG_PREFIX, 'UI elements not found (select/slider).');
+      return false;
+    }
+    selectEl.setAttribute('data-lm','mat-per-select');
+    sliderEl.setAttribute('data-lm','mat-per-slider');
+    return true;
+  }
+
+  onDOMReady(()=>{
+    armRendererHook();
+
+    document.addEventListener('lm:scene-ready', (ev)=>{
+      const scene = ev?.detail?.scene || window.__LM_SCENE;
+      const ok = bootOnce();
+      if (!ok || !scene) return;
+      const selectEl = pickMaterialSelect();
+      const sliderEl = pickOpacitySlider();
+      if (selectEl && sliderEl) wire(selectEl, sliderEl, scene);
     });
 
-    // if already selected, reflect right away
-    if (selectEl.value && dict[selectEl.value]) {
-      setSliderFromOpacity(dict[selectEl.value].opacity ?? 1);
-    } else {
-      setSliderFromOpacity(1);
-    }
-  }
-
-  // ---------- Boot sequence ----------
-  async function bootOnce() {
-    const selectEl = findSelect();
-    const sliderEl = findSlider();
-    if (!selectEl || !sliderEl) {
-      console.warn(LOG_PREFIX, "UI elements not found (select/slider).");
-      return;
+    if (window.__LM_SCENE?.isScene){
+      dispatchSceneReady(window.__LM_SCENE);
     }
 
-    // scene capture
-    let scene = getSceneDirect();
-    if (!scene) {
-      armRendererHook();
-      // wait a bit for a first render
-      for (let i = 0; i < 30 && !scene; i++) {
-        await new Promise((r) => setTimeout(r, 200));
-        scene = getSceneDirect();
+    let tries = 0;
+    const timer = setInterval(()=>{
+      tries++;
+      const ok = bootOnce();
+      if (ok && window.__LM_SCENE?.isScene){
+        const selectEl = pickMaterialSelect();
+        const sliderEl = pickOpacitySlider();
+        if (selectEl && sliderEl){
+          wire(selectEl, sliderEl, window.__LM_SCENE);
+          clearInterval(timer);
+        }
       }
-    }
-    if (!scene) {
-      console.warn(LOG_PREFIX, "scene not available yet. Will retry on an interval.");
-      return;
-    }
-
-    // collect materials
-    const dict = collectMaterialMap(scene);
-    const count = populateSelect(selectEl, dict);
-    applySavedOpacities(dict);
-    wire(selectEl, sliderEl, dict);
-    console.info(LOG_PREFIX, `ready. materials=${count}`);
-
-    // Optional: refresh options once later (after textures/GLB settle)
-    setTimeout(() => {
-      const again = collectMaterialMap(scene);
-      const n = populateSelect(selectEl, again);
-      if (n) console.info(LOG_PREFIX, `refreshed options = ${n}`);
-    }, 1000);
-  }
-
-  // start: after DOM ready
-  if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", bootOnce, { once: true });
-  } else {
-    bootOnce();
-  }
-
-  // Fallback periodic retry if scene wasn't ready
-  let retryCount = 0;
-  const retryTimer = setInterval(() => {
-    if (getSceneDirect()) {
-      clearInterval(retryTimer);
-      bootOnce();
-    } else if (++retryCount > 60) {
-      clearInterval(retryTimer);
-      console.warn(LOG_PREFIX, "give up waiting for scene.");
-    }
-  }, 500);
+      if (tries > 60) clearInterval(timer);
+    }, 250);
+  });
 })();
