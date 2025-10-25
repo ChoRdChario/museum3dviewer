@@ -211,7 +211,24 @@
       });
     })();
   </script>
-<script type="module" src="./boot.esm.cdn.js"></script>
+
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://unpkg.com/three@0.159.0/build/three.module.js",
+      "three/examples/jsm/": "https://unpkg.com/three@0.159.0/examples/jsm/"
+    }
+  }
+  </script>
+
+  
+  <script type="module">
+    import * as THREE from 'three';
+    // expose to legacy modules expecting global THREE
+    window.THREE = THREE;
+  </script>
+
+  <script type="module" src="./boot.esm.cdn.js"></script>
   <link rel="stylesheet" href="app.sheet-rename.css" />
   <script type="module" src="sheet-rename.module.js"></script>
 </body>
