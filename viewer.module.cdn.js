@@ -1,3 +1,17 @@
+// === ensure single THREE instance (auto-load if missing) =====================
+export const __ensureThree = (async () => {
+  try {
+    if (!window.THREE) {
+      const mod = await import('https://unpkg.com/three@0.159.0/build/three.module.js');
+      if (!window.THREE) window.THREE = mod;
+    }
+  } catch (e) {
+    console.warn('[viewer] failed to load THREE', e);
+  }
+  return window.THREE;
+})();
+// ============================================================================
+
 
 // --- LM auth resolver without dynamic import (classic-safe) ---
 function __lm_getAuth() {
