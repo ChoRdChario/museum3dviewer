@@ -389,3 +389,58 @@ try {
   }
 
 }
+
+// === [ADD] Step1: 名前で列挙・適用（scene直書き） =================
+export function listMaterialNames() {
+  try {
+    const names = new Set();
+    // 1) viewer 側に listMaterials があれば利用
+    const arr = (typeof listMaterials === 'function') ? listMaterials() : [];
+    arr.forEach(r => r?.name && names.add(r.name));
+    // 2) 生シーンも走査（キャッシュ遅延対策）
+    const scene = (typeof getCurrentScene === 'function' && getCurrentScene()) || window.__LM_SCENE;
+    scene?.traverse(o => {
+      if (!o.isMesh || !o.material) return;
+      (Array.isArray(o.material) ? o.material : [o.material]).forEach(m => m?.name && names.add(m.name));
+    });
+    // 匿名 #0.. は除外
+    return [...names].filter(n => !/^#\d+$/.test(n));
+  } catch (e) {
+    console.warn('[viewer] listMaterialNames failed', e);
+    return [];
+  }
+}
+
+export function applyMaterialPropsByName(materialName, props = {}) {
+  const scene = (typeof getCurrentScene === 'function' && getCurrentScene()) || window.__LM_SCENE;
+  const name = String(materialName || '');
+  if (!scene || !name) return 0;
+  let count = 0;
+  scene.traverse(o => {
+    if (!o.isMesh || !o.material) return;
+    (Array.isArray(o.material) ? o.material : [o.material]).forEach(m => {
+      if ((m?.name || '') === name) {
+        if (Object.prototype.hasOwnProperty.call(props, 'opacity')) {
+          const v = Math.max(0, Math.min(1, Number(props.opacity)));
+          m.transparent = true;
+          m.opacity = v;
+          m.depthWrite = v >= 1; // 透明時の抜け対策
+          m.needsUpdate = true;
+        }
+        // Step2/3 で doubleSided / unlit / chroma をここに拡張
+        count++;
+      }
+    });
+  });
+  return count;
+}
+
+try {
+  // UI が参照するブリッジを公開
+  window.LM_viewer = Object.assign(window.LM_viewer || {}, {
+    listMaterialNames,
+    applyMaterialPropsByName,
+  });
+} catch {}
+// ============================================================
+
