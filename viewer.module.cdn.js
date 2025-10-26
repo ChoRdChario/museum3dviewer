@@ -394,9 +394,22 @@ try {
 export function listMaterialNames() {
   try {
     const arr = (typeof listMaterials === 'function') ? listMaterials() : [];
-    const uniq = new Set(arr.map(r => r && r.name).filter(n => !!n && !/^#\d+$/.test(n)));
-    return [...uniq];
-  } catch (e) { console.warn('[viewer] listMaterialNames failed', e); return []; }
+    const seen = new Set(arr.map(r => r && r.name).filter(n => !!n));
+    const scene = (typeof getCurrentScene === 'function' && getCurrentScene()) || window.__LM_SCENE;
+    if (scene) {
+      scene.traverse(o => {
+        if (o.isMesh && o.material) {
+          (Array.isArray(o.material) ? o.material : [o.material]).forEach(m => {
+            if (m && m.name) seen.add(m.name);
+          });
+        }
+      });
+    }
+    return [...seen].filter(n => !/^#\d+$/.test(n));
+  } catch (e) {
+    console.warn('[viewer] listMaterialNames failed', e);
+    return [];
+  }
 }
 
 export function applyMaterialPropsByName(materialName, props = {}) {
@@ -408,15 +421,14 @@ export function applyMaterialPropsByName(materialName, props = {}) {
     if (!o.isMesh || !o.material) return;
     const mats = Array.isArray(o.material) ? o.material : [o.material];
     mats.forEach(m => {
-      if ((m.name || '') === name) {
-        if ('opacity' in props) {
+      if ((m?.name || '') === name) {
+        if (Object.prototype.hasOwnProperty.call(props, 'opacity')) {
           const v = Math.max(0, Math.min(1, Number(props.opacity)));
           m.transparent = true;
           m.opacity = v;
-          m.depthWrite = v >= 1 ? true : false;
+          m.depthWrite = v >= 1;
           m.needsUpdate = true;
         }
-        // 将来: doubleSide / unlit / chroma は Step2/3 で拡張
         count++;
       }
     });
@@ -429,6 +441,6 @@ try {
     listMaterialNames,
     applyMaterialPropsByName,
   });
-} catch(_) {}
+} catch (_) {}
 // ============================================================================
 
