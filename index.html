@@ -8,67 +8,6 @@
   <meta name="google-oauth-client_id" content="595200751510-ncahnf7edci6b9925becn5to49r6cguv.apps.googleusercontent.com">
   <meta name="google-api-key" content="AIzaSyCUnTCr5yWUWPdEXST9bKP1LpgawU5rIbI">
   <script src="https://accounts.google.com/gsi/client" async defer></script>
-
-<script type="module">
-  /* LM material dropdown auto-refresh */
-  const namesFromScene = () => {
-    const scene = window.__LM_SCENE, set = new Set();
-    scene?.traverse(o=>{
-      if(!o.isMesh || !o.material) return;
-      (Array.isArray(o.material)?o.material:[o.material]).forEach(m=> m?.name && set.add(m.name));
-    });
-    return [...set].filter(n=>!/^#\d+$/.test(n));
-  };
-  const getNames = () => (window.LM_viewer?.listMaterialNames?.() || namesFromScene());
-
-  function refreshMatSelect(){
-    const sel = document.getElementById('pm-material');
-    if(!sel) return;
-    const cur = sel.value;
-    const names = getNames();
-    sel.innerHTML = '<option value="">— Select material —</option>';
-    names.forEach(n=>{ const o=document.createElement('option'); o.value=n; o.textContent=n; sel.appendChild(o); });
-    if(cur && names.includes(cur)) sel.value = cur;
-  }
-
-  // First shot & after scene ready
-  setTimeout(refreshMatSelect, 150);
-  setTimeout(refreshMatSelect, 600);
-  document.addEventListener('lm:scene-ready', refreshMatSelect);
-
-  // Wire the per-material slider to the bridge; fallback to raw scene write
-  (()=>{
-    const sel = document.getElementById('pm-material');
-    const rng = document.getElementById('pm-opacity-range');
-    const out = document.getElementById('pm-opacity-val');
-    if(!(sel && rng && out)) return;
-    const apply = ()=>{
-      const v = Math.max(0, Math.min(1, Number(rng.value || 1)));
-      out.textContent = v.toFixed(2);
-      const n = sel.value;
-      if(!n) return;
-      if(window.LM_viewer?.applyMaterialPropsByName){
-        window.LM_viewer.applyMaterialPropsByName(n, { opacity: v });
-      } else {
-        const scene = window.__LM_SCENE;
-        scene?.traverse(o=>{
-          if(!o.isMesh || !o.material) return;
-          (Array.isArray(o.material)?o.material:[o.material]).forEach(m=>{
-            if(m?.name===n){
-              m.transparent = v < 1;
-              m.opacity = v;
-              m.depthWrite = v >= 1;
-              m.needsUpdate = true;
-            }
-          });
-        });
-      }
-    };
-    rng.addEventListener('input', apply, { passive: true });
-    out.textContent = Number(rng.value||1).toFixed(2);
-  })();
-</script>
-
   <style>
     :root{--bg:#0f1115;--panel:#0b0d11;--line:#1f2937;--acc:#94a3b8;--text:#cbd5e1;--sel:#60a5fa;}
     html,body{height:100%;margin:0;background:var(--bg);color:var(--text);font:14px/1.4 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;}
@@ -283,6 +222,45 @@
   </script>
 
   <script type="module" src="./boot.esm.cdn.js"></script>
+
+  <script type="module">
+    /* LM material dropdown auto-refresh */
+    const namesFromScene = () => {
+      const scene = window.__LM_SCENE, set = new Set();
+      scene?.traverse(o => {
+        if (!o.isMesh || !o.material) return;
+        (Array.isArray(o.material) ? o.material : [o.material]).forEach(m => m?.name && set.add(m.name));
+      });
+      return [...set].filter(n => !/^#\d+$/.test(n));
+    };
+    const getNames = () => (window.LM_viewer?.listMaterialNames?.() || namesFromScene());
+
+    function fillSelect() {
+      const sel = document.getElementById('pm-material');
+      if (!sel) return false;
+      const cur = sel.value;
+      const names = getNames();
+      if (!Array.isArray(names)) return false;
+      sel.innerHTML = '<option value="">— Select material —</option>';
+      names.forEach(n => { const o = document.createElement('option'); o.value=n; o.textContent=n; sel.appendChild(o); });
+      if (cur && names.includes(cur)) sel.value = cur;
+      return names.length > 0;
+    }
+
+    // Run on scene-ready and also poll up to ~5s
+    const tryFill = () => {
+      let tries = 0; const max = 25; // 25 * 200ms = 5s
+      const timer = setInterval(() => {
+        tries++;
+        const ok = fillSelect();
+        if (ok || tries >= max) clearInterval(timer);
+      }, 200);
+    };
+    document.addEventListener('lm:scene-ready', tryFill, { once: true });
+    // also kick once in case scene is already present
+    tryFill();
+  </script>
+
   <link rel="stylesheet" href="app.sheet-rename.css" />
   <script type="module" src="sheet-rename.module.js"></script>
 </body>
