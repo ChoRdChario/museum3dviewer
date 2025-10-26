@@ -390,48 +390,6 @@ try {
 
 }
 
-// === [ADD] Step1 恒久API：名前で列挙・適用（scene直書き） =================
-export function listMaterialNames() {
-  try {
-    const arr = (typeof listMaterials === 'function') ? listMaterials() : [];
-    const uniq = new Set(arr.map(r => r && r.name).filter(n => !!n && !/^#\d+$/.test(n)));
-    return [...uniq];
-  } catch (e) { console.warn('[viewer] listMaterialNames failed', e); return []; }
-}
-
-export function applyMaterialPropsByName(materialName, props = {}) {
-  const scene = (typeof getCurrentScene === 'function' && getCurrentScene()) || window.__LM_SCENE;
-  const name = String(materialName || '');
-  if (!scene || !name) return 0;
-  let count = 0;
-  scene.traverse(o => {
-    if (!o.isMesh || !o.material) return;
-    const mats = Array.isArray(o.material) ? o.material : [o.material];
-    mats.forEach(m => {
-      if ((m.name || '') === name) {
-        if ('opacity' in props) {
-          const v = Math.max(0, Math.min(1, Number(props.opacity)));
-          m.transparent = true;
-          m.opacity = v;
-          m.depthWrite = v >= 1 ? true : false;
-          m.needsUpdate = true;
-        }
-        // 将来: doubleSide / unlit / chroma は Step2/3 で拡張
-        count++;
-      }
-    });
-  });
-  return count;
-}
-
-try {
-  window.LM_viewer = Object.assign(window.LM_viewer || {}, {
-    listMaterialNames,
-    applyMaterialPropsByName,
-  });
-} catch(_) {}
-// ============================================================================
-
 // === Step1: 名前で列挙・適用（scene直書き） ===
 export function listMaterialNames() {
   try {
