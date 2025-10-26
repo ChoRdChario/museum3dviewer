@@ -1,46 +1,37 @@
+// viewer.bridge.module.js
+// Minimal, idempotent bridge: populate material list after lm:scene-ready and wire the opacity slider.
+// Logging is quiet by default; append ?debug=1 to the URL to enable.
+const DEBUG = new URLSearchParams(location.search).has('debug');
+const log = (...a)=>{ if (DEBUG) console.log('[viewer-bridge]', ...a); };
 
-// viewer.bridge.module.js (materials-ready emitter)
-let __fired = false;
-function fireOnce() {
-  if (__fired) return;
-  if (typeof document !== 'undefined' && window.__LM_SCENE) {
-    try {
-      document.dispatchEvent(new CustomEvent('lm:scene-ready', { detail: { scene: window.__LM_SCENE } }));
-      } catch {}
-    __fired = true;
-  }
-}
-export function listMaterials() {
-  const out = [];
+// Safe DOM getter
+const $ = (id)=> document.getElementById(id);
+
+// --- core helpers ---
+function listMaterialNamesFromScene() {
   const s = window.__LM_SCENE;
-  if (!s) return out;
-  s.traverse(o => {
-    if (!o.isMesh || !o.material) return;
-    const mats = Array.isArray(o.material) ? o.material : [o.material];
-    mats.forEach((m, idx) => {
-      out.push({ name: m?.name || '', materialKey: m?.uuid || null, meshUuid: o.uuid, index: idx });
-    });
-  });
-  return out;
-}
-export function listMaterialNames() {
-  const arr = listMaterials();
-  return [...new Set(arr.map(r => r.name).filter(n => n && !/^#\d+$/.test(n)))];
-}
-export function applyMaterialPropsByName(name, props = {}) {
-  const s = window.__LM_SCENE;
-  if (!s) return 0;
-  let count = 0;
-  s.traverse(o => {
+  const set = new Set();
+  s?.traverse(o => {
     if (!o.isMesh || !o.material) return;
     (Array.isArray(o.material) ? o.material : [o.material]).forEach(m => {
-      if ((m?.name || '') === String(name)) {
-        if ('opacity' in props) {
-          const v = Math.max(0, Math.min(1, Number(props.opacity)));
-          m.transparent = v < 1;
-          m.opacity = v;
-          m.depthWrite = v >= 1;
-        }
+      if (m?.name) set.add(m.name);
+    });
+  });
+  // drop anonymous like "#0", "#1"
+  return [...set].filter(n => !/^#\d+$/.test(n));
+}
+
+function applyOpacityByNameRaw(name, v) {
+  // Fallback path: write directly to scene materials
+  const s = window.__LM_SCENE;
+  let count = 0;
+  s?.traverse(o => {
+    if (!o.isMesh || !o.material) return;
+    (Array.isArray(o.material) ? o.material : [o.material]).forEach(m => {
+      if ((m?.name || '') === name) {
+        m.transparent = v < 1;
+        m.opacity = v;
+        m.depthWrite = v >= 1;
         m.needsUpdate = true;
         count++;
       }
@@ -48,92 +39,141 @@ export function applyMaterialPropsByName(name, props = {}) {
   });
   return count;
 }
-// Poll for late publication and materials ready
-const __timer = setInterval(() => {
-  if (window.__LM_SCENE) fireOnce();
-  try {
-    const names = listMaterialNames();
-    if (names.length > 0) {
-      document.dispatchEvent(new CustomEvent('lm:materials-ready', { detail: { names } }));
-    }
-  } catch {}
-}, 250);
 
-
-// === viewer.bridge.module.js : Chroma Key support ===
-function __ensureChromaHook(mat){
-  if (!mat || typeof mat.onBeforeCompile !== 'function') return;
-  if (mat.userData && mat.userData.__lmChromaHooked) return;
-  const prev = mat.onBeforeCompile;
-  mat.onBeforeCompile = function(shader){
-    shader.uniforms.uChromaColor = { value: (mat.userData?.__lmChromaColor || {r:0,g:1,b:0}) };
-    shader.uniforms.uChromaTol = { value: (mat.userData?.__lmChromaTol ?? 0.15) };
-    shader.uniforms.uChromaFeather = { value: (mat.userData?.__lmChromaFeather ?? 0.05) };
-    shader.uniforms.uChromaEnable = { value: (mat.userData?.__lmChromaEnable ? 1 : 0) };
-    const tag = '#include <output_fragment>';
-    if (shader.fragmentShader.indexOf(tag) !== -1) {
-      shader.fragmentShader = shader.fragmentShader.replace(tag, `
-        ${tag}
-        if (uChromaEnable > 0) {
-          vec3 key = vec3(uChromaColor.r, uChromaColor.g, uChromaColor.b);
-          float d = distance(gl_FragColor.rgb, key);
-          float a = smoothstep(uChromaTol, uChromaTol + max(0.0001, uChromaFeather), d);
-          gl_FragColor.a *= a;
-        }
-      `);
-    }
-    if (typeof prev === 'function') prev(shader);
-    mat.userData.__lmChromaUniforms = shader.uniforms;
-  };
-  mat.userData = mat.userData || {};
-  mat.userData.__lmChromaHooked = true;
-  mat.transparent = true;
-  mat.needsUpdate = true;
-}
-function __setChroma(mat, {enabled, color, tolerance, feather}){
-  mat.userData = mat.userData || {};
-  mat.userData.__lmChromaEnable = !!enabled;
-  const c = Array.isArray(color) ? {r:color[0], g:color[1], b:color[2]} : (color||{r:0,g:1,b:0});
-  mat.userData.__lmChromaColor = c;
-  mat.userData.__lmChromaTol = Number(tolerance ?? 0.15);
-  mat.userData.__lmChromaFeather = Number(feather ?? 0.05);
-  const u = mat.userData.__lmChromaUniforms;
-  if (u) {
-    if (u.uChromaEnable) u.uChromaEnable.value = mat.userData.__lmChromaEnable ? 1 : 0;
-    if (u.uChromaColor)  u.uChromaColor.value = c;
-    if (u.uChromaTol)    u.uChromaTol.value = mat.userData.__lmChromaTol;
-    if (u.uChromaFeather)u.uChromaFeather.value = mat.userData.__lmChromaFeather;
-  }
-  mat.transparent = mat.transparent || !!enabled;
-  mat.depthWrite = !(!!enabled);
-  mat.needsUpdate = mat.needsUpdate || !u;
-}
-export function applyChromaByName(name, params = {}){
-  const s = window.__LM_SCENE; if (!s) return 0;
-  let cnt = 0;
-  s.traverse(o => {
+function getOpacityByNameRaw(name) {
+  let val = null;
+  const s = window.__LM_SCENE;
+  s?.traverse(o => {
+    if (val !== null) return;
     if (!o.isMesh || !o.material) return;
-    (Array.isArray(o.material)?o.material:[o.material]).forEach(m => {
-      if ((m?.name||'') === String(name)) {
-        __ensureChromaHook(m);
-        __setChroma(m, params);
-        cnt++;
+    (Array.isArray(o.material) ? o.material : [o.material]).some(m => {
+      if ((m?.name || '') === name) { val = Number(m.opacity ?? 1); return true; }
+      return false;
+    });
+  });
+  return (val == null ? 1 : Math.max(0, Math.min(1, val)));
+}
+
+// idempotent UI wiring
+function wireUI(mod) {
+  const sel = $('pm-material');
+  const rng = $('pm-opacity-range');
+  const out = $('pm-opacity-val');
+  if (!(sel && rng && out)) {
+    log('material UI parts missing');
+    return;
+  }
+
+  // selection -> slider sync
+  const onChange = () => {
+    const n = sel.value;
+    const v = n ? getOpacityByNameRaw(n) : 1;
+    rng.value = v;
+    out.textContent = v.toFixed(2);
+    log('sync', n, v);
+  };
+  sel.removeEventListener?.('__bridge_change', onChange);
+  sel.addEventListener('change', onChange);
+  sel.addEventListener('__bridge_change', onChange);
+
+  // slider -> apply
+  const onInput = () => {
+    const n = sel.value;
+    if (!n) return;
+    const v = Math.max(0, Math.min(1, Number(rng.value || 1)));
+    out.textContent = v.toFixed(2);
+
+    let applied = 0;
+    try {
+      if (typeof mod?.applyMaterialPropsByName === 'function') {
+        applied = mod.applyMaterialPropsByName(n, { opacity: v });
+      } else if (window.LM_viewer?.applyMaterialPropsByName) {
+        applied = window.LM_viewer.applyMaterialPropsByName(n, { opacity: v });
+      } else {
+        applied = applyOpacityByNameRaw(n, v);
       }
-    });
-  });
-  return cnt;
+    } catch (e) {
+      applied = applyOpacityByNameRaw(n, v);
+    }
+    log('apply opacity', n, v, '→', applied);
+  };
+  rng.removeEventListener?.('__bridge_input', onInput);
+  rng.addEventListener('input', onInput, { passive: true });
+  rng.addEventListener('__bridge_input', onInput);
+
+  // initial sync
+  onChange();
 }
-// helper exports (fallback for names)
-export function listMaterials(){
-  const out=[]; const s=window.__LM_SCENE; if(!s) return out;
-  s.traverse(o=>{ if(!o.isMesh||!o.material) return;
-    (Array.isArray(o.material)?o.material:[o.material]).forEach((m,i)=>{
-      out.push({ name: m?.name || '', materialKey: m?.uuid || null, meshUuid: o.uuid, index:i });
-    });
+
+// fill material select
+function fillMaterialSelect(names) {
+  const sel = $('pm-material');
+  if (!sel) return false;
+  const cur = sel.value;
+  const uniq = [...new Set(names)].filter(n => !/^#\d+$/.test(n));
+  sel.innerHTML = '<option value="">— Select material —</option>';
+  uniq.forEach(n => {
+    const o = document.createElement('option');
+    o.value = n; o.textContent = n; sel.appendChild(o);
   });
-  return out;
+  if (cur && uniq.includes(cur)) sel.value = cur;
+  log('filled', uniq.length, uniq);
+  return uniq.length > 0;
 }
-export function listMaterialNames(){
-  const arr = listMaterials();
-  return [...new Set(arr.map(r=>r.name).filter(n=>n && !/^#\d+$/.test(n)))];
+
+async function main() {
+  // Try to import viewer module (optional)
+  let mod = null;
+  try { mod = await import('./viewer.module.cdn.js'); }
+  catch {}
+
+  // Optional window bridge if missing
+  if (!window.LM_viewer) {
+    window.LM_viewer = {
+      listMaterialNames: listMaterialNamesFromScene,
+      applyMaterialPropsByName: (name, {opacity}={}) => {
+        const v = Math.max(0, Math.min(1, Number(opacity)));
+        return applyOpacityByNameRaw(name, v);
+      }
+    };
+    log('LM_viewer shim attached');
+  }
+
+  // Populate on each scene-ready (idempotent)
+  const refresh = () => {
+    const names =
+      (typeof mod?.listMaterialNames === 'function' ? mod.listMaterialNames() : null)
+      || listMaterialNamesFromScene();
+    if (fillMaterialSelect(names)) {
+      wireUI(mod);
+    }
+  };
+
+  // If scene already exists (e.g., cached reload), do an immediate try
+  if (window.__LM_SCENE) refresh();
+
+  // Hook to the formal event
+  document.addEventListener('lm:scene-ready', () => {
+    log('lm:scene-ready received');
+    // slight microtask deferral to ensure materials are committed
+    queueMicrotask(refresh);
+    setTimeout(refresh, 50);
+  });
+
+  // Final safety: poll briefly in case the event is missed by the page
+  let tries = 0;
+  const timer = setInterval(() => {
+    tries++;
+    const ok = fillMaterialSelect(listMaterialNamesFromScene());
+    if (ok || tries >= 40) { // ~8s max
+      clearInterval(timer);
+      if (ok) wireUI(mod);
+    }
+  }, 200);
+}
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', main, { once: true });
+} else {
+  main();
 }

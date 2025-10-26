@@ -225,114 +225,105 @@
   <link rel="stylesheet" href="app.sheet-rename.css" />
   <script type="module" src="sheet-rename.module.js"></script>
 
-
-
-
-
-
-
-<!-- LM-MATERIAL-ORCH v3 (robust fill + poll, quiet) -->
+<!-- LM-ORCHESTRATOR -->
 <script type="module">
-(async () => {
-  const $ = (id) => document.getElementById(id);
-  const sleep = (ms)=>new Promise(r=>setTimeout(r, ms));
+const log = (...a)=>console.log('[lm-orch]', ...a);
+const $ = (sel)=>document.querySelector(sel);
 
-  // Wait for essential DOM (up to 12s)
-  for (let i=0;i<120;i++){
-    if ($('#pm-material') && $('#pm-opacity-range') && $('#pm-opacity-val')) break;
-    await sleep(100);
-  }
-  const sel = $('#pm-material'), rng = $('#pm-opacity-range'), out = $('#pm-opacity-val');
-  if (!(sel && rng && out)) return; // give up silently
+// Wait DOM
+await (document.readyState === 'complete' || document.readyState === 'interactive'
+  ? Promise.resolve() : new Promise(r=>document.addEventListener('DOMContentLoaded', r, {once:true})));
 
-  // Load viewer module if available
-  let viewer = {};
-  try { viewer = await import('./viewer.module.cdn.js'); } catch {}
+// Attach scene-ready listener before imports
+const sceneReady = new Promise((resolve)=>{
+  if (window.__LM_SCENE) return resolve(window.__LM_SCENE);
+  document.addEventListener('lm:scene-ready', e => resolve(e?.detail?.scene || window.__LM_SCENE || null), { once:true });
+});
 
-  // Helpers to collect names
-  const named = (list)=>[...new Set(list)].filter(n=>n && !/^#\d+$/.test(n));
-  const namesFromScene = () => {
-    const s = window.__LM_SCENE, set = new Set();
-    s?.traverse(o=>{
-      if (!o.isMesh || !o.material) return;
-      (Array.isArray(o.material)?o.material:[o.material]).forEach(m=>m?.name && set.add(m.name));
+// Import official viewer and the bridge (in parallel)
+const [viewer, bridge] = await Promise.all([
+  import('./viewer.module.cdn.js'),
+  import('./viewer.bridge.module.js')
+]);
+// Prefer official exports, fallback to bridge
+const API = {
+  listMaterials: (viewer.listMaterials || bridge.listMaterials),
+  listMaterialNames: (viewer.listMaterialNames || bridge.listMaterialNames),
+  applyMaterialPropsByName: (viewer.applyMaterialPropsByName || bridge.applyMaterialPropsByName)
+};
+
+// Wait for UI pieces (up to 12s)
+function waitEl(selector, timeout=12000) {
+  const t0 = performance.now();
+  return new Promise((resolve)=>{
+    (function tick(){
+      const el = document.querySelector(selector);
+      if (el) return resolve(el);
+      if (performance.now()-t0 >= timeout) return resolve(null);
+      requestAnimationFrame(tick);
+    })();
+  });
+}
+const [sel, rng, out] = await Promise.all([
+  waitEl('#pm-material'), waitEl('#pm-opacity-range'), waitEl('#pm-opacity-val')
+]);
+if (!(sel && rng && out)) { console.warn('[lm-orch] material UI parts missing'); }
+
+// Wait scene (with fallback)
+await Promise.race([sceneReady, new Promise(r=>setTimeout(()=>r(window.__LM_SCENE || null), 6000))]);
+
+function getNames(){
+  const fromApi = (API.listMaterials?.() || []).map(r=>r?.name).filter(Boolean);
+  // also augment with scene scan
+  const set = new Set(fromApi);
+  const s = window.__LM_SCENE;
+  s?.traverse(o => { if (!o.isMesh || !o.material) return;
+    (Array.isArray(o.material)?o.material:[o.material]).forEach(m=>m?.name && set.add(m.name)); });
+  return [...set].filter(n=>!/^#\d+$/.test(n));
+}
+function fillSelect(names){
+  const select = document.getElementById('pm-material'); if (!select) return false;
+  const cur = select.value;
+  select.innerHTML = '<option value="">— Select material —</option>';
+  names.forEach(n=>{ const o=document.createElement('option'); o.value=n; o.textContent=n; select.appendChild(o); });
+  if (cur && names.includes(cur)) select.value = cur;
+  log('filled', names.length, names);
+  return names.length>0;
+}
+
+function getOpacityByName(name){
+  let val=null;
+  window.__LM_SCENE?.traverse(o=>{
+    if (val!==null) return;
+    if (!o.isMesh || !o.material) return;
+    (Array.isArray(o.material)?o.material:[o.material]).some(m=>{
+      if ((m?.name||'')===name){ val = Number(m.opacity ?? 1); return true; }
+      return false;
     });
-    return named([...set]);
-  };
-  const namesFromViewer = () => {
-    try {
-      const arr = viewer?.listMaterials?.() || [];
-      return named(arr.map(r=>r?.name).filter(Boolean));
-    } catch { return []; }
-  };
+  });
+  return (val==null?1:Math.max(0,Math.min(1,val)));
+}
 
-  // Fill select once
-  let filledOnce = false;
-  const fill = (names) => {
-    if (filledOnce) return true;
-    if (!names || !names.length) return false;
-    const cur = sel.value;
-    sel.innerHTML = '<option value="">— Select material —</option>';
-    names.forEach(n=>{ const o=document.createElement('option'); o.value=n; o.textContent=n; sel.appendChild(o); });
-    if (cur && names.includes(cur)) sel.value = cur;
-    filledOnce = true;
-    return true;
-  };
-
-  // Wire (idempotent)
-  const applyByName = (name, v) => {
-    v = Math.max(0, Math.min(1, Number(v)));
-    if (typeof viewer?.applyMaterialPropsByName === 'function') {
-      return viewer.applyMaterialPropsByName(name, { opacity: v });
-    }
-    // fallback: raw scene write
-    let cnt=0; const s=window.__LM_SCENE;
-    s?.traverse(o=>{
-      if (!o.isMesh || !o.material) return;
-      (Array.isArray(o.material)?o.material:[o.material]).forEach(m=>{
-        if ((m?.name||'')===name){
-          m.transparent = v < 1; m.opacity = v; m.depthWrite = v >=1; m.needsUpdate = true; cnt++;
-        }
-      });
-    });
-    return cnt;
-  };
-  const onInput = () => {
-    const n = sel.value; if (!n) return;
-    out.textContent = Number(rng.value||1).toFixed(2);
-    applyByName(n, rng.value);
-  };
-  const onChange = () => {
-    const n = sel.value; if (!n) { out.textContent='1.00'; return; }
-    let val = 1;
-    window.__LM_SCENE?.traverse(o=>{
-      if (!o.isMesh || !o.material) return;
-      (Array.isArray(o.material)?o.material:[o.material]).some(m=>{
-        if ((m?.name||'')===n){ val = Number(m.opacity ?? 1); return true; }
-        return false;
-      });
-    });
-    rng.value = val; out.textContent = Number(val).toFixed(2);
-  };
-  rng.addEventListener('input', onInput, { passive:true });
+function wire(){
+  if (!(sel && rng && out)) return;
+  const onChange=()=>{ const n=sel.value; const v=n?getOpacityByName(n):1; rng.value=v; out.textContent=v.toFixed(2); };
+  const onInput=()=>{ const n=sel.value; if(!n) return; const v=Number(rng.value||1); out.textContent=v.toFixed(2);
+    API.applyMaterialPropsByName?.(n, { opacity: v }); };
   sel.addEventListener('change', onChange);
-
-  // Strategy: (1) try now, (2) listen for scene-ready, (3) poll up to 10s
-  if (!fill(namesFromViewer())) fill(namesFromScene());
-
-  const sceneReady = (e)=>{ fill(namesFromViewer()) || fill(namesFromScene()); };
-  document.addEventListener('lm:scene-ready', sceneReady, { once:true });
-
-  // polling (quiet) — 100ms x 100 = 10s max
-  for (let i=0;i<100 && !filledOnce;i++){
-    await sleep(100);
-    if (fill(namesFromViewer()) || fill(namesFromScene())) break;
-  }
-
-  // initial sync
+  rng.addEventListener('input', onInput, {passive:true});
   onChange();
-})();
+}
+
+let names = getNames();
+if (!fillSelect(names)){
+  for (let i=0;i<30 && !names.length;i++){ await new Promise(r=>setTimeout(r,150)); names=getNames(); }
+  fillSelect(names);
+}
+wire();
+// Also re-fill on (next) scene-ready just in case of late publication
+document.addEventListener('lm:scene-ready', ()=>{ const ns=getNames(); fillSelect(ns); }, { once:true });
 </script>
-<!-- /LM-MATERIAL-ORCH v3 -->
+<!-- /LM-ORCHESTRATOR -->
+
 </body>
 </html>
