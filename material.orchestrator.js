@@ -1,123 +1,146 @@
-\
-    // material.orchestrator.js — Step2 safe extension
-    // - One-shot populate material names after lm:scene-ready (no busy loop)
-    // - Preserve opacity application path
-    // - Add listeners for chroma/unlit/double-sided (shader patching comes later)
 
-    const LOG = /[?&]debug=1/.test(location.search);
-    const log = (...a)=>{ if (LOG) console.log("[mat-orch]", ...a); };
+// LociMyu Material Orchestrator (Step2 scaffold, no-BOM)
+// Minimal, safe wiring that does not disturb Step1 behavior.
 
-    let filledOnce = false;
+console.log('[lm-orch] loaded');
 
-    function listNamesFromScene() {
-      const s = window.__LM_SCENE, set = new Set();
-      s?.traverse(o => {
-        if (!o.isMesh || !o.material) return;
-        (Array.isArray(o.material) ? o.material : [o.material]).forEach(m => m?.name && set.add(m.name));
+const VIEWER_MOD = import('./viewer.module.cdn.js').catch(() => ({}));
+
+const $ = (id) => document.getElementById(id);
+
+function namesFromScene() {
+  const s = window.__LM_SCENE;
+  const set = new Set();
+  s?.traverse((o) => {
+    if (!o.isMesh || !o.material) return;
+    (Array.isArray(o.material) ? o.material : [o.material]).forEach((m) => {
+      const n = m?.name;
+      if (n && !/^#\d+$/.test(n)) set.add(n);
+    });
+  });
+  return [...set];
+}
+
+async function namesFromViewer() {
+  const mod = await VIEWER_MOD;
+  try {
+    const arr = mod.listMaterials?.() || [];
+    return [...new Set(arr.map((r) => r?.name).filter((n) => n && !/^#\d+$/.test(n)))];
+  } catch {
+    return [];
+  }
+}
+
+function fillSelect(names) {
+  const sel = $('pm-material');
+  if (!sel) return false;
+  const cur = sel.value;
+  sel.innerHTML = '<option value="">— Select material —</option>';
+  names.forEach((n) => {
+    const o = document.createElement('option');
+    o.value = n;
+    o.textContent = n;
+    sel.appendChild(o);
+  });
+  if (cur && names.includes(cur)) sel.value = cur;
+  console.log('[lm-orch] filled', names.length, names);
+  return names.length > 0;
+}
+
+async function tryFillOnce() {
+  const v = await namesFromViewer();
+  if (fillSelect(v)) return true;
+  return fillSelect(namesFromScene());
+}
+
+function wire() {
+  const sel = $('pm-material');
+  const rng = $('pm-opacity-range');
+  const out = $('pm-opacity-val');
+  if (!(sel && rng && out)) {
+    console.log('[lm-orch] material UI parts missing');
+    return;
+  }
+
+  const applyByName = async (name, v) => {
+    const mod = await VIEWER_MOD;
+    if (typeof mod.applyMaterialPropsByName === 'function') {
+      mod.applyMaterialPropsByName(name, { opacity: v });
+      return;
+    }
+    if (window.LM_viewer?.applyMaterialPropsByName) {
+      window.LM_viewer.applyMaterialPropsByName(name, { opacity: v });
+      return;
+    }
+    // Fallback: raw scene edit
+    const s = window.__LM_SCENE;
+    s?.traverse((o) => {
+      if (!o.isMesh || !o.material) return;
+      (Array.isArray(o.material) ? o.material : [o.material]).forEach((m) => {
+        if ((m?.name || '') === name) {
+          m.transparent = v < 1;
+          m.opacity = v;
+          m.depthWrite = v >= 1;
+          m.needsUpdate = true;
+        }
       });
-      return [...set].filter(n => !/^#\d+$/.test(n));
-    }
+    });
+  };
 
-    function dispatchSetMaterials() {
-      if (filledOnce) return;
-      const names = listNamesFromScene();
-      if (!names.length) return;
-      filledOnce = true;
-      document.dispatchEvent(new CustomEvent('pm:set-materials', { detail: { names } }));
-      log("dispatch pm:set-materials", names);
-    }
+  const onInput = () => {
+    const n = sel.value;
+    if (!n) return;
+    const v = Math.max(0, Math.min(1, Number(rng.value || 1)));
+    out.textContent = v.toFixed(2);
+    applyByName(n, v);
+  };
+  rng.addEventListener('input', onInput, { passive: true });
 
-    // Scene ready → short backoff poll to catch GLB finishing moments later
-    document.addEventListener('lm:scene-ready', () => {
-      let tries = 0;
-      const timer = setInterval(() => {
-        dispatchSetMaterials();
-        if (filledOnce || ++tries > 25) clearInterval(timer); // ~5s max
+  const getOpacity = (name) => {
+    let val = null;
+    window.__LM_SCENE?.traverse((o) => {
+      if (val !== null) return;
+      if (!o.isMesh || !o.material) return;
+      (Array.isArray(o.material) ? o.material : [o.material]).some((m) => {
+        if ((m?.name || '') === name) {
+          val = Number(m.opacity ?? 1);
+          return true;
+        }
+        return false;
+      });
+    });
+    return val == null ? 1 : Math.max(0, Math.min(1, val));
+  };
+
+  const onChange = () => {
+    const n = sel.value;
+    const v = n ? getOpacity(n) : 1;
+    rng.value = v;
+    out.textContent = v.toFixed(2);
+  };
+  sel.addEventListener('change', onChange);
+
+  // Initial sync
+  onChange();
+}
+
+document.addEventListener(
+  'lm:scene-ready',
+  async () => {
+    console.log('[lm-orch] scene-ready');
+    const deadline = Date.now() + 6000;
+    let ok = await tryFillOnce();
+    if (!ok) {
+      const timer = setInterval(async () => {
+        ok = await tryFillOnce();
+        if (ok || Date.now() > deadline) {
+          clearInterval(timer);
+          wire();
+        }
       }, 200);
-    });
-
-    // -------- Opacity (existing behavior) --------
-    document.addEventListener('pm:opacity-change', (e) => {
-      const d = e?.detail || {};
-      const name = d.name || "";
-      if (!name) return;
-      const v = Math.max(0, Math.min(1, Number(d.opacity ?? 1)));
-      let count = 0;
-
-      const modApplyByName = (window.LM_viewer && window.LM_viewer.applyMaterialPropsByName) || null;
-      if (modApplyByName) {
-        try { count = modApplyByName(name, { opacity: v }); } catch {}
-      } else {
-        // fallback: write directly
-        const s = window.__LM_SCENE;
-        s?.traverse(o => {
-          if (!o.isMesh || !o.material) return;
-          (Array.isArray(o.material) ? o.material : [o.material]).forEach(m => {
-            if ((m?.name||"") === name) {
-              m.transparent = v < 1;
-              m.opacity = v;
-              m.depthWrite = v >= 1;
-              m.needsUpdate = true;
-              count++;
-            }
-          });
-        });
-      }
-      log("opacity applied", name, v, "count", count);
-    });
-
-    // -------- Step2 additions: chroma & flags (safe, state in userData) --------
-    document.addEventListener('pm:chroma-change', (e) => {
-      const d = e?.detail || {};
-      const name = d.name || '';
-      if (!name) return;
-      let count = 0;
-      const s = window.__LM_SCENE;
-      s?.traverse(o => {
-        if (!o.isMesh || !o.material) return;
-        (Array.isArray(o.material) ? o.material : [o.material]).forEach(m => {
-          if ((m?.name||'') === name) {
-            m.userData = m.userData || {};
-            m.userData.chroma = {
-              enabled: !!d.enabled,
-              color: String(d.color || '#ffffff'),
-              tolerance: Number(d.tolerance || 0),
-              feather: Number(d.feather || 0),
-            };
-            m.needsUpdate = true;
-            count++;
-          }
-        });
-      });
-      log("chroma saved", name, d, "count", count);
-    });
-
-    document.addEventListener('pm:flag-change', (e) => {
-      const d = e?.detail || {};
-      const name = d.name || '';
-      if (!name) return;
-      let count = 0;
-      const THREE = window.THREE;
-      const s = window.__LM_SCENE;
-      s?.traverse(o => {
-        if (!o.isMesh || !o.material) return;
-        (Array.isArray(o.material) ? o.material : [o.material]).forEach(m => {
-          if ((m?.name||'') === name) {
-            if ('doubleSided' in d && THREE) {
-              m.side = d.doubleSided ? THREE.DoubleSide : THREE.FrontSide;
-            }
-            if ('unlitLike' in d) {
-              m.userData = m.userData || {};
-              m.userData.unlitLike = !!d.unlitLike;
-              if (typeof m.metalness === 'number') m.metalness = d.unlitLike ? 0.0 : m.metalness;
-              if (typeof m.roughness === 'number') m.roughness = d.unlitLike ? 1.0 : m.roughness;
-            }
-            m.needsUpdate = true;
-            count++;
-          }
-        });
-      });
-      log("flags applied", name, d, "count", count);
-    });
-
-    export {};
+    } else {
+      wire();
+    }
+  },
+  { once: true }
+);
