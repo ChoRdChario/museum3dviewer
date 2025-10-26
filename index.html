@@ -222,6 +222,34 @@
   </script>
 
   <script type="module" src="./boot.esm.cdn.js"></script>
+
+  <script type="module">
+    /* LM material dropdown auto-refresh */
+    const namesFromScene = () => {
+      const scene = window.__LM_SCENE, set = new Set();
+      scene?.traverse(o => {
+        if (!o.isMesh || !o.material) return;
+        (Array.isArray(o.material) ? o.material : [o.material]).forEach(m => m?.name && set.add(m.name));
+      });
+      return [...set].filter(n => !/^#\d+$/.test(n));
+    };
+    const getNames = () => (window.LM_viewer?.listMaterialNames?.() || namesFromScene());
+    const refreshMatSelect = () => {
+      const sel = document.getElementById('pm-material');
+      if (!sel) return;
+      const current = sel.value;
+      const names = getNames();
+      sel.innerHTML = '<option value="">— Select material —</option>';
+      names.forEach(n => { const o = document.createElement('option'); o.value=n; o.textContent=n; sel.appendChild(o); });
+      if (current && names.includes(current)) sel.value = current;
+      // console.log('[auto-refresh] material names:', names);
+    };
+    document.addEventListener('lm:scene-ready', refreshMatSelect);
+    setTimeout(refreshMatSelect, 150);
+    setTimeout(refreshMatSelect, 500);
+    setTimeout(refreshMatSelect, 1200);
+  </script>
+
   <link rel="stylesheet" href="app.sheet-rename.css" />
   <script type="module" src="sheet-rename.module.js"></script>
 </body>
