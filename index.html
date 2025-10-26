@@ -222,47 +222,156 @@
   </script>
 
   <script type="module" src="./boot.esm.cdn.js"></script>
+
+  <script type="module">
+    /* LM material dropdown auto-refresh */
+    const namesFromScene = () => {
+      const scene = window.__LM_SCENE, set = new Set();
+      scene?.traverse(o => {
+        if (!o.isMesh || !o.material) return;
+        (Array.isArray(o.material) ? o.material : [o.material]).forEach(m => m?.name && set.add(m.name));
+      });
+      return [...set].filter(n => !/^#\d+$/.test(n));
+    };
+    const getNames = () => (window.LM_viewer?.listMaterialNames?.() || namesFromScene());
+    const refreshMatSelect = () => {
+      const sel = document.getElementById('pm-material');
+      if (!sel) return;
+      const current = sel.value;
+      const names = getNames();
+      sel.innerHTML = '<option value="">— Select material —</option>';
+      names.forEach(n => { const o = document.createElement('option'); o.value=n; o.textContent=n; sel.appendChild(o); });
+      if (current && names.includes(current)) sel.value = current;
+      // console.log('[auto-refresh] material names:', names);
+    };
+    document.addEventListener('lm:scene-ready', refreshMatSelect);
+    setTimeout(refreshMatSelect, 150);
+    setTimeout(refreshMatSelect, 500);
+    setTimeout(refreshMatSelect, 1200);
+  </script>
+
   <link rel="stylesheet" href="app.sheet-rename.css" />
   <script type="module" src="sheet-rename.module.js"></script>
+
+<!-- LM-FORCE-FILL-WIRE -->
+<script type="module">
+// ===== LociMyu FORCE FILL + WIRE (embedded) =====
+(async () => {
+  const mod = await import('./viewer.module.cdn.js').catch(()=> ({}));
+  const $ = id => document.getElementById(id);
+  const log = (...a)=>console.log('[force]', ...a);
+
+  function namesFromScene() {
+    const s = window.__LM_SCENE, set = new Set();
+    s?.traverse(o => {
+      if (!o.isMesh || !o.material) return;
+      (Array.isArray(o.material) ? o.material : [o.material])
+        .forEach(m => m?.name && set.add(m.name));
+    });
+    return [...set];
+  }
+  function namesFromViewer() {
+    try {
+      const arr = mod.listMaterials?.() || [];
+      return arr.map(r => r?.name).filter(Boolean);
+    } catch { return []; }
+  }
+  function getNames() {
+    const v = namesFromViewer();
+    const s = namesFromScene();
+    return [...new Set([...(v||[]), ...(s||[])])].filter(n => !/^#\d+$/.test(n));
+  }
+  function fillSelect(names) {
+    const sel = document.getElementById('pm-material');
+    if (!sel) return false;
+    const cur = sel.value;
+    sel.innerHTML = '<option value="">— Select material —</option>';
+    names.forEach(n => { const o = document.createElement('option'); o.value = n; o.textContent = n; sel.appendChild(o); });
+    if (cur && names.includes(cur)) sel.value = cur;
+    log('filled:', names.length, names);
+    return names.length > 0;
+  }
+  function setOpacityByName(name, v) {
+    v = Math.max(0, Math.min(1, Number(v)));
+    let count = 0;
+    if (typeof mod.applyMaterialPropsByName === 'function') {
+      count = mod.applyMaterialPropsByName(name, { opacity: v });
+    } else if (window.LM_viewer?.applyMaterialPropsByName) {
+      count = window.LM_viewer.applyMaterialPropsByName(name, { opacity: v });
+    } else {
+      const s = window.__LM_SCENE;
+      s?.traverse(o => {
+        if (!o.isMesh || !o.material) return;
+        (Array.isArray(o.material)?o.material:[o.material]).forEach(m => {
+          if ((m?.name||'') === name) {
+            m.transparent = v < 1;
+            m.opacity = v;
+            m.depthWrite = v >= 1;
+            m.needsUpdate = true;
+            count++;
+          }
+        });
+      });
+    }
+    log('apply opacity', name, v, '→', count, 'materials');
+  }
+  function getOpacityByName(name) {
+    let val = null;
+    window.__LM_SCENE?.traverse(o => {
+      if (val !== null) return;
+      if (!o.isMesh || !o.material) return;
+      (Array.isArray(o.material)?o.material:[o.material]).some(m => {
+        if ((m?.name||'') === name) { val = Number(m.opacity ?? 1); return true; }
+        return false;
+      });
+    });
+    return (val == null ? 1 : Math.max(0, Math.min(1, val)));
+  }
+
+  const sel = document.getElementById('pm-material');
+  const rng = document.getElementById('pm-opacity-range');
+  const out = document.getElementById('pm-opacity-val');
+  if (!(sel && rng && out)) return console.warn('[force] material UI parts missing');
+
+  // polling until names appear (max ~8s) + scene-ready kick
+  let tries = 0, ok = false;
+  const poll = setInterval(() => {
+    tries++;
+    const names = getNames();
+    if (names.length && fillSelect(names)) { ok = true; clearInterval(poll); wire(); }
+    if (tries >= 40) { clearInterval(poll); if (!ok) log('names still empty after polling. scene?', !!window.__LM_SCENE); }
+  }, 200);
+  document.addEventListener('lm:scene-ready', () => {
+    const names = getNames();
+    if (names.length) { fillSelect(names); wire(); }
+  }, { once:true });
+
+  function wire() {
+    const onChange = () => {
+      const n = sel.value;
+      const v = n ? getOpacityByName(n) : 1;
+      rng.value = v; out.textContent = v.toFixed(2);
+      log('sync', n, v);
+    };
+    sel.removeEventListener?.('__force_change', onChange);
+    sel.addEventListener('change', onChange);
+    sel.addEventListener('__force_change', onChange);
+
+    const onInput = () => {
+      const n = sel.value; if (!n) return;
+      const v = Number(rng.value || 1); out.textContent = v.toFixed(2);
+      setOpacityByName(n, v);
+    };
+    rng.removeEventListener?.('__force_input', onInput);
+    rng.addEventListener('input', onInput, { passive:true });
+    rng.addEventListener('__force_input', onInput);
+
+    onChange();
+    log('wired.');
+  }
+})();
+</script>
+<!-- /LM-FORCE-FILL-WIRE -->
+
 </body>
 </html>
-
-<!-- LM-AUTOFILL-HARDEN -->
-<script type="module">
-// harden material dropdown fill (runs last)
-const namesFromScene = () => {
-  const scene = window.__LM_SCENE, set = new Set();
-  scene?.traverse(o=>{
-    if(!o.isMesh || !o.material) return;
-    (Array.isArray(o.material)?o.material:[o.material]).forEach(m=> m?.name && set.add(m.name));
-  });
-  return [...set];
-};
-const getNames = () => {
-  try {
-    const viaViewer = (window.LM_viewer?.listMaterialNames?.() || []);
-    return (viaViewer.length ? viaViewer : namesFromScene()).filter(n=>!/^#\d+$/.test(n));
-  } catch { return namesFromScene().filter(n=>!/^#\d+$/.test(n)); }
-};
-function fillOnce(){
-  const sel = document.getElementById('pm-material');
-  if(!sel) return false;
-  const cur = sel.value;
-  const names = getNames();
-  if(!Array.isArray(names)) return false;
-  sel.innerHTML = '<option value="">— Select material —</option>';
-  names.forEach(n=>{ const o=document.createElement('option'); o.value=n; o.textContent=n; sel.appendChild(o); });
-  if(cur && names.includes(cur)) sel.value = cur;
-  return names.length>0;
-}
-// schedule: now, scene-ready, and poll up to 5s
-const scheduleFill = () => {
-  let tries=0; const max=25;
-  const t = setInterval(()=>{ tries++; if(fillOnce()||tries>=max) clearInterval(t); }, 200);
-};
-document.addEventListener('lm:scene-ready', scheduleFill, { once:true });
-// run immediately too (in case scene is already present)
-scheduleFill();
-</script>
-<!-- /LM-AUTOFILL-HARDEN -->
-
