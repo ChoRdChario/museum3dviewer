@@ -224,6 +224,129 @@
   <script type="module" src="./boot.esm.cdn.js"></script>
   <link rel="stylesheet" href="app.sheet-rename.css" />
   <script type="module" src="sheet-rename.module.js"></script>
-  <script type="module" src="./material.ui.orch.js"></script>
+
+
+
+
+
+<!-- LM-ORCHESTRATOR -->
+<script type="module">
+// Minimal, non-spammy orchestrator: populate material list only when scene + GLB are ready.
+const $ = (s)=>document.querySelector(s);
+const once = (el,ev,fn)=>el.addEventListener(ev,fn,{once:true});
+
+// Wait DOM
+if (document.readyState === 'loading') {
+  await new Promise(r=>document.addEventListener('DOMContentLoaded', r, {once:true}));
+}
+
+// Import modules up front (cached by browser)
+const viewer = await import('./viewer.module.cdn.js').catch(()=>({}));
+await import('./viewer.bridge.module.js').catch(()=>{});
+
+// Helpers
+function listFromViewer(){
+  try { return (viewer.listMaterials?.() || []).map(r=>r?.name).filter(Boolean); }
+  catch { return []; }
+}
+function listFromScene(){
+  const names = new Set();
+  const s = window.__LM_SCENE;
+  s?.traverse(o=>{
+    if (!o.isMesh || !o.material) return;
+    (Array.isArray(o.material)?o.material:[o.material]).forEach(m=>m?.name && names.add(m.name));
+  });
+  return [...names];
+}
+function getNames(){ return [...new Set([...listFromViewer(), ...listFromScene()])].filter(n=>!/^#\d+$/.test(n)); }
+
+function fillSelect(names){
+  const sel = $('#pm-material');
+  if (!sel) return false;
+  const cur = sel.value;
+  sel.innerHTML = '<option value="">— Select material —</option>';
+  names.forEach(n=>{ const o=document.createElement('option'); o.value=n; o.textContent=n; sel.appendChild(o); });
+  if (cur && names.includes(cur)) sel.value = cur;
+  return names.length>0;
+}
+
+function setOpacityByName(name, v){
+  v = Math.max(0, Math.min(1, Number(v)));
+  if (typeof viewer.applyMaterialPropsByName === 'function') {
+    viewer.applyMaterialPropsByName(name, { opacity:v });
+    return;
+  }
+  const s = window.__LM_SCENE;
+  s?.traverse(o=>{
+    if (!o.isMesh || !o.material) return;
+    (Array.isArray(o.material)?o.material:[o.material]).forEach(m=>{
+      if ((m?.name||'')===name){ m.transparent=v<1; m.opacity=v; m.depthWrite=v>=1; m.needsUpdate=true; }
+    });
+  });
+}
+
+function getOpacityByName(name){
+  let val=null;
+  const s = window.__LM_SCENE;
+  s?.traverse(o=>{
+    if (val!=null) return;
+    if (!o.isMesh || !o.material) return;
+    (Array.isArray(o.material)?o.material:[o.material]).some(m=>{
+      if ((m?.name||'')===name){ val = Number(m.opacity ?? 1); return true; }
+      return false;
+    });
+  });
+  return (val==null?1:Math.max(0,Math.min(1,val)));
+}
+
+function wire(){
+  const sel = $('#pm-material');
+  const rng = $('#pm-opacity-range');
+  const out = $('#pm-opacity-val');
+  if (!(sel && rng && out)) return; // UI not present
+  const onChange = ()=>{
+    const n = sel.value;
+    const v = n ? getOpacityByName(n) : 1;
+    rng.value = v; out.textContent = Number(v).toFixed(2);
+  };
+  const onInput = ()=>{
+    const n = sel.value; if (!n) return;
+    const v = Number(rng.value||1);
+    out.textContent = v.toFixed(2);
+    setOpacityByName(n, v);
+  };
+  sel.addEventListener('change', onChange);
+  rng.addEventListener('input', onInput, {passive:true});
+  onChange();
+}
+
+// Orchestration: wait for either lm:scene-ready or a visible scene, then populate once.
+async function waitScene(){
+  if (window.__LM_SCENE) return;
+  await new Promise(r=>document.addEventListener('lm:scene-ready', ()=>r(), {once:true}));
+}
+
+(async function run(){
+  await waitScene();
+  // poll up to ~8s for names (handles slow GLB builds); stop once non-empty.
+  let tries=0, names=[];
+  const sel = $('#pm-material');
+  if (!sel) return;
+  const t = setInterval(()=>{
+    tries++;
+    names = getNames();
+    if (names.length){ fillSelect(names); clearInterval(t); }
+    if (tries>=40) clearInterval(t);
+  }, 200);
+  // Also react to materials-ready event if bridge dispatches it
+  once(document, 'lm:materials-ready', ()=>{
+    const n = getNames(); if (n.length) fillSelect(n);
+  });
+  wire();
+})();
+</script>
+<!-- /LM-ORCHESTRATOR -->
+
+
 </body>
 </html>
