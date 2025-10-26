@@ -1,6 +1,5 @@
 
-// viewer.bridge.module.js
-// Bridge exports backed by window.__LM_SCENE, plus a safety scene-ready dispatcher.
+// viewer.bridge.module.js (materials-ready emitter)
 let __fired = false;
 function fireOnce() {
   if (__fired) return;
@@ -12,11 +11,6 @@ function fireOnce() {
     __fired = true;
   }
 }
-// observe periodically for late scene publication
-const __timer = setInterval(() => {
-  if (window.__LM_SCENE) { fireOnce(); clearInterval(__timer); }
-}, 200);
-
 export function listMaterials() {
   const out = [];
   const s = window.__LM_SCENE;
@@ -25,22 +19,15 @@ export function listMaterials() {
     if (!o.isMesh || !o.material) return;
     const mats = Array.isArray(o.material) ? o.material : [o.material];
     mats.forEach((m, idx) => {
-      out.push({
-        name: m?.name || '',
-        materialKey: m?.uuid || null,
-        meshUuid: o.uuid,
-        index: idx
-      });
+      out.push({ name: m?.name || '', materialKey: m?.uuid || null, meshUuid: o.uuid, index: idx });
     });
   });
   return out;
 }
-
 export function listMaterialNames() {
   const arr = listMaterials();
   return [...new Set(arr.map(r => r.name).filter(n => n && !/^#\d+$/.test(n)))];
 }
-
 export function applyMaterialPropsByName(name, props = {}) {
   const s = window.__LM_SCENE;
   if (!s) return 0;
@@ -55,7 +42,6 @@ export function applyMaterialPropsByName(name, props = {}) {
           m.opacity = v;
           m.depthWrite = v >= 1;
         }
-        // future: doubleSided/unlit etc
         m.needsUpdate = true;
         count++;
       }
@@ -63,3 +49,13 @@ export function applyMaterialPropsByName(name, props = {}) {
   });
   return count;
 }
+// Poll for late publication and materials ready
+const __timer = setInterval(() => {
+  if (window.__LM_SCENE) fireOnce();
+  try {
+    const names = listMaterialNames();
+    if (names.length > 0) {
+      document.dispatchEvent(new CustomEvent('lm:materials-ready', { detail: { names } }));
+    }
+  } catch {}
+}, 250);
