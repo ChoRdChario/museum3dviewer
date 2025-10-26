@@ -225,96 +225,133 @@
   <link rel="stylesheet" href="app.sheet-rename.css" />
   <script type="module" src="sheet-rename.module.js"></script>
 
-<!-- LM-CHROMA-UI -->
-<div id="lm-chroma" style="margin-top:12px; padding:10px; border:1px solid #e5e7eb; border-radius:8px;">
-  <div style="display:flex; align-items:center; gap:8px; margin-bottom:8px;">
-    <label style="font-weight:600;">Chroma Key</label>
-    <label style="display:flex; align-items:center; gap:6px;">
-      <input id="pm-chroma-enable" type="checkbox" /> Enable
-    </label>
-  </div>
-  <div style="display:grid; grid-template-columns: 140px 1fr auto; gap:8px; align-items:center; margin-bottom:6px;">
-    <label for="pm-chroma-color">Key Color</label>
-    <input id="pm-chroma-color" type="color" value="#00ff00" />
-    <input id="pm-chroma-hex" type="text" value="#00ff00" style="width:96px;" />
-  </div>
-  <div style="display:grid; grid-template-columns: 140px 1fr auto; gap:8px; align-items:center; margin-bottom:6px;">
-    <label for="pm-chroma-tol">Tolerance</label>
-    <input id="pm-chroma-tol" type="range" min="0" max="1" step="0.01" value="0.15" />
-    <output id="pm-chroma-tol-val">0.15</output>
-  </div>
-  <div style="display:grid; grid-template-columns: 140px 1fr auto; gap:8px; align-items:center;">
-    <label for="pm-chroma-feather">Feather</label>
-    <input id="pm-chroma-feather" type="range" min="0" max="0.5" step="0.005" value="0.05" />
-    <output id="pm-chroma-feather-val">0.05</output>
-  </div>
-</div>
-<!-- /LM-CHROMA-UI -->
 
 
-<!-- LM-CHROMA-WIRE -->
+
+
+
+<!-- LM-MATERIAL-ORCH v2 (no spam) -->
 <script type="module">
+/**
+ * Populate the per-material select once the scene is ready.
+ * Quiet, idempotent, and resilient to load order.
+ */
 (async () => {
-  const wait = (sel, t=12000) => new Promise(res => {
+  const $ = (id) => document.getElementById(id);
+  const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
+  // Wait helpers
+  async function waitFor(elSelector, timeout=12000){
     const t0 = performance.now();
-    (function tick(){
-      const el = document.querySelector(sel);
-      if (el) return res(el);
-      if (performance.now() - t0 >= t) return res(null);
-      requestAnimationFrame(tick);
-    })();
-  });
-  const [viewer, bridge] = await Promise.all([
-    import('./viewer.module.cdn.js').catch(()=>({})),
-    import('./viewer.bridge.module.js').catch(()=>({}))
-  ]);
-  const API = {
-    listMaterialNames: viewer.listMaterialNames || bridge.listMaterialNames,
-    applyMaterialPropsByName: viewer.applyMaterialPropsByName || bridge.applyMaterialPropsByName,
-    applyChromaByName: viewer.applyChromaByName || bridge.applyChromaByName
-  };
-  const sel = await wait('#pm-material');
-  const en  = await wait('#pm-chroma-enable');
-  const col = await wait('#pm-chroma-color');
-  const hex = await wait('#pm-chroma-hex');
-  const tol = await wait('#pm-chroma-tol');
-  const tolV= await wait('#pm-chroma-tol-val');
-  const fea = await wait('#pm-chroma-feather');
-  const feaV= await wait('#pm-chroma-feather-val');
-  if (!(sel && en && col && hex && tol && tolV && fea && feaV)) return;
-  const clamp01 = (v)=>Math.max(0, Math.min(1, Number(v)));
-  const hex2rgb = (h)=>{
-    let s = String(h||'').trim();
-    if (s[0] === '#') s = s.slice(1);
-    if (s.length===3) s = s.split('').map(c=>c+c).join('');
-    const n = parseInt(s,16); 
-    const r = (n>>16)&255, g=(n>>8)&255, b=n&255;
-    return [r/255,g/255,b/255];
-  };
-  const apply = () => {
-    const name = sel.value;
-    if (!name) return;
-    const enabled = !!en.checked;
-    const colorHex = (hex.value || col.value || '#00ff00').toLowerCase();
-    const tolerance = clamp01(tol.value);
-    const feather = Math.max(0, Math.min(0.5, Number(fea.value)));
-    API.applyChromaByName?.(name, {
-      enabled,
-      color: hex2rgb(colorHex),
-      tolerance,
-      feather
+    for(;;){
+      const el = document.querySelector(elSelector);
+      if (el) return el;
+      if (performance.now() - t0 > timeout) return null;
+      await new Promise(r => requestAnimationFrame(r));
+    }
+  }
+  async function waitForScene(timeout=15000){
+    if (window.__LM_SCENE) return window.__LM_SCENE;
+    let resolve; const p = new Promise(r=>resolve=r);
+    const timer = setTimeout(() => resolve(null), timeout);
+    document.addEventListener('lm:scene-ready', (e)=>{
+      clearTimeout(timer);
+      resolve(e.detail?.scene || window.__LM_SCENE || null);
+    }, { once:true });
+    return p;
+  }
+
+  // Get names through viewer bridge or raw scene
+  function namesFromScene(scene){
+    const set = new Set();
+    scene?.traverse(o => {
+      if (!o.isMesh || !o.material) return;
+      (Array.isArray(o.material)?o.material:[o.material]).forEach(m => m?.name && set.add(m.name));
     });
+    return [...set].filter(n => !/^#\d+$/.test(n));
+  }
+  function namesFromViewer(mod){
+    try {
+      const list = mod?.listMaterialNames?.() || [];
+      if (Array.isArray(list) && list.length) return list;
+    } catch {}
+    return [];
+  }
+
+  // Load viewer + optional bridge
+  const viewer = await import('./viewer.module.cdn.js').catch(()=>({}));
+  // Ensure required DOM nodes are present
+  const sel = await waitFor('#pm-material');
+  const rng = await waitFor('#pm-opacity-range');
+  const out = await waitFor('#pm-opacity-val');
+  if (!(sel && rng && out)) { /* silent */ return; }
+
+  // Populate once (with minimal polling fallback)
+  let filled = false;
+  function fill(names){
+    if (!names || !names.length) return false;
+    const cur = sel.value;
+    sel.innerHTML = '<option value="">— Select material —</option>';
+    names.forEach(n => { const o = document.createElement('option'); o.value=n; o.textContent=n; sel.appendChild(o); });
+    if (cur && names.includes(cur)) sel.value = cur;
+    filled = true;
+    return true;
+  }
+
+  // Try immediately with current scene
+  if (window.__LM_SCENE) fill(namesFromScene(window.__LM_SCENE));
+
+  // Also try viewer API if exposed
+  if (!filled) fill(namesFromViewer(viewer));
+
+  // If still empty, wait for scene-ready then fill
+  if (!filled) {
+    const scene = await waitForScene();
+    fill(namesFromViewer(viewer)) || fill(namesFromScene(scene));
+  }
+
+  // Wire slider -> opacity (fallback to raw write if module lacks API)
+  function applyByName(name, v){
+    v = Math.max(0, Math.min(1, Number(v)));
+    if (typeof viewer.applyMaterialPropsByName === 'function') {
+      return viewer.applyMaterialPropsByName(name, { opacity: v });
+    }
+    let cnt = 0; const s = window.__LM_SCENE;
+    s?.traverse(o=>{
+      if (!o.isMesh || !o.material) return;
+      (Array.isArray(o.material)?o.material:[o.material]).forEach(m=>{
+        if ((m?.name||'') === name) {
+          m.transparent = v < 1; m.opacity = v; m.depthWrite = v >= 1; m.needsUpdate = true; cnt++;
+        }
+      });
+    });
+    return cnt;
+    }
+
+  const onInput = () => {
+    const n = sel.value; if (!n) return;
+    out.textContent = Number(rng.value||1).toFixed(2);
+    applyByName(n, rng.value);
   };
-  col.addEventListener('input', ()=>{ hex.value = col.value; apply(); });
-  hex.addEventListener('change', ()=>{ apply(); });
-  en.addEventListener('change', apply);
-  tol.addEventListener('input', ()=>{ tolV.textContent = Number(tol.value).toFixed(2); apply(); });
-  fea.addEventListener('input', ()=>{ feaV.textContent = Number(fea.value).toFixed(2); apply(); });
-  sel.addEventListener('change', apply);
-  apply();
+  const onChange = () => {
+    const n = sel.value; if (!n) { out.textContent = '1.00'; return; }
+    // Read current opacity from first match
+    let val = 1;
+    window.__LM_SCENE?.traverse(o=>{
+      if (!o.isMesh || !o.material) return;
+      (Array.isArray(o.material)?o.material:[o.material]).some(m => {
+        if ((m?.name||'') === n) { val = Number(m.opacity ?? 1); return true; }
+        return false;
+      });
+    });
+    rng.value = val; out.textContent = Number(val).toFixed(2);
+  };
+  rng.addEventListener('input', onInput, { passive:true });
+  sel.addEventListener('change', onChange);
+  // Initial sync
+  onChange();
 })();
 </script>
-<!-- /LM-CHROMA-WIRE -->
-
+<!-- /LM-MATERIAL-ORCH v2 -->
 </body>
 </html>
