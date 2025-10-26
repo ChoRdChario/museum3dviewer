@@ -59,38 +59,56 @@ function __snapshotIfNeeded(mesh){
   }
 }
 
-function __hookMaterial(mat){
-  if (!mat || mat.__lmHooked) return;
-  mat.__lmHooked = true;
-  mat.userData.__lmUniforms = {
-    uWhiteThr: { value: 0.92 },
-    uBlackThr: { value: 0.08 },
-    uWhiteToAlpha: { value: false },
-    uBlackToAlpha: { value: false },
-    uUnlit: { value: false },
+
+function __hookMaterial(mat) {
+  if (!mat || mat.userData?.__lm_hooked) return;
+  mat.userData = mat.userData || {};
+  mat.userData.__lm_hooked = true;
+
+  // uniforms container shared with program
+  const uniforms = {
+    uLMChromaColor: { value: new THREE.Color(0,0,0) },
+    uLMChromaTol:   { value: 0.0 },
+    uLMChromaFeather: { value: 0.0 },
+    uLMUnlit:       { value: 0.0 },
   };
-  const u = mat.userData.__lmUniforms;
-  mat.onBeforeCompile = (shader)=>{
-    shader.uniforms = { ...shader.uniforms, ...u };
-    // Inject at alpha computation
-    shader.fragmentShader = shader.fragmentShader
-      .replace('#include <dithering_fragment>', `
-        // LociMyu material hook
-        vec3 lmColor = diffuseColor.rgb;
-        float lmLuma = dot(lmColor, vec3(0.299, 0.587, 0.114));
-        if (uWhiteToAlpha && lmLuma >= uWhiteThr) diffuseColor.a = 0.0;
-        if (uBlackToAlpha && lmLuma <= uBlackThr) diffuseColor.a = 0.0;
-        #include <dithering_fragment>
-      `)
-      .replace('#include <lights_fragment_begin>', `
-        // Unlit toggle
-        if (!uUnlit) {
-          #include <lights_fragment_begin>
-        }
-      `);
+  mat.userData.__lm_uniforms = uniforms;
+
+  mat.onBeforeCompile = (shader) => {
+    // attach uniforms
+    shader.uniforms.uLMChromaColor = uniforms.uLMChromaColor;
+    shader.uniforms.uLMChromaTol = uniforms.uLMChromaTol;
+    shader.uniforms.uLMChromaFeather = uniforms.uLMChromaFeather;
+    shader.uniforms.uLMUnlit = uniforms.uLMUnlit;
+
+    // inject chroma+unlit
+    const prelude =
+      'uniform vec3 uLMChromaColor;\n' +
+      'uniform float uLMChromaTol;\n' +
+      'uniform float uLMChromaFeather;\n' +
+      'uniform float uLMUnlit;\n';
+
+    shader.fragmentShader = prelude + shader.fragmentShader
+      .replace(
+        'gl_FragColor = vec4( outgoingLight, diffuseColor.a );',
+        [
+          'float lm_d = distance( diffuseColor.rgb, uLMChromaColor );',
+          'float lm_e0 = max(uLMChromaTol - uLMChromaFeather, 0.0);',
+          'float lm_e1 = uLMChromaTol + uLMChromaFeather;',
+          'float lm_alphaK = smoothstep( lm_e0, lm_e1, lm_d );',
+          'vec3 lm_outCol = mix( outgoingLight, diffuseColor.rgb, uLMUnlit );',
+          'gl_FragColor = vec4( lm_outCol, diffuseColor.a * lm_alphaK );'
+        ].join('\n')
+      );
   };
-  mat.needsUpdate = true;
+
+  // ensure recompilation when switching flags
+  mat.customProgramCacheKey = () => {
+    const u = mat.userData.__lm_uniforms;
+    return 'lm1:' + (u?.uLMUnlit?.value||0) + ':' + (u?.uLMChromaTol?.value||0) + ':' + (u?.uLMChromaFeather?.value||0) + ':' + (u?.uLMChromaColor?.value?.getHexString?.()||'');
+  };
 }
+
 
 function __allMeshes(){
   const arr=[]; if(!scene) return arr;
@@ -108,43 +126,62 @@ function __materialsByKey(materialKey){
   return out;
 }
 
-export function applyMaterialProps(materialKey, props={}){
-  __rebuildMaterialList();
-  const mats = __materialsByKey(materialKey);
-  for(const mat of mats){
-    __hookMaterial(mat);
-    if('unlit' in props){
-      mat.userData.__lmUniforms.uUnlit.value = !!props.unlit;
-    }
-    if('opacity' in props){
-      const v = Math.max(0, Math.min(1, Number(props.opacity)));
-      mat.opacity = v;
-      mat.transparent = v < 1 || mat.userData.__lmUniforms.uWhiteToAlpha.value || mat.userData.__lmUniforms.uBlackToAlpha.value;
-      mat.alphaTest = (v < 1 ? 0.003 : 0.0);
-      mat.needsUpdate = true;
-    }
-    if('doubleSide' in props){
-      mat.side = props.doubleSide ? THREE.DoubleSide : THREE.FrontSide;
-      mat.needsUpdate = true;
-    }
-    if('whiteToTransparent' in props){
-      mat.userData.__lmUniforms.uWhiteToAlpha.value = !!props.whiteToTransparent;
-      mat.transparent = mat.transparent || !!props.whiteToTransparent;
-      mat.needsUpdate = true;
-    }
-    if('whiteThreshold' in props){
-      mat.userData.__lmUniforms.uWhiteThr.value = Number(props.whiteThreshold);
-    }
-    if('blackToTransparent' in props){
-      mat.userData.__lmUniforms.uBlackToAlpha.value = !!props.blackToTransparent;
-      mat.transparent = mat.transparent || !!props.blackToTransparent;
-      mat.needsUpdate = true;
-    }
-    if('blackThreshold' in props){
-      mat.userData.__lmUniforms.uBlackThr.value = Number(props.blackThreshold);
-    }
+export 
+function applyMaterialProps(materialKey, props = {}) {
+  const rec = __materialIndex.get(materialKey);
+  if (!rec) return false;
+  const mat = rec.material;
+  if (!mat) return false;
+
+  __hookMaterial(mat);
+
+  // opacity
+  if (typeof props.opacity === 'number') {
+    const v = Math.max(0, Math.min(1, Number(props.opacity)));
+    mat.transparent = v < 1 || (mat.userData.__lm_uniforms?.uLMChromaTol?.value||0) > 0.0;
+    mat.opacity = v;
+    mat.depthWrite = !mat.transparent;
+    mat.needsUpdate = true;
   }
+
+  // double-sided
+  if (typeof props.doubleSided === 'boolean') {
+    mat.side = props.doubleSided ? THREE.DoubleSide : THREE.FrontSide;
+    mat.needsUpdate = true;
+  }
+
+  // unlit-like
+  if (typeof props.unlitLike === 'boolean') {
+    mat.userData.__lm_uniforms.uLMUnlit.value = props.unlitLike ? 1.0 : 0.0;
+    mat.needsUpdate = true;
+  }
+
+  // chroma params
+  const U = mat.userData.__lm_uniforms;
+  if (props.chromaColor) {
+    try {
+      const col = new THREE.Color(props.chromaColor);
+      U.uLMChromaColor.value.copy(col);
+      mat.transparent = true;
+      mat.depthWrite = false;
+      mat.needsUpdate = true;
+    } catch(_){}
+  }
+  if (typeof props.chromaTolerance === 'number') {
+    U.uLMChromaTol.value = Math.max(0, Number(props.chromaTolerance));
+    if (U.uLMChromaTol.value > 0) {
+      mat.transparent = true; mat.depthWrite = false;
+    }
+    mat.needsUpdate = true;
+  }
+  if (typeof props.chromaFeather === 'number') {
+    U.uLMChromaFeather.value = Math.max(0, Number(props.chromaFeather));
+    mat.needsUpdate = true;
+  }
+
+  return true;
 }
+
 
 export function resetMaterial(materialKey){
   __rebuildMaterialList();
