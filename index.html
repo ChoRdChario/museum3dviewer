@@ -225,97 +225,96 @@
   <link rel="stylesheet" href="app.sheet-rename.css" />
   <script type="module" src="sheet-rename.module.js"></script>
 
+<!-- LM-CHROMA-UI -->
+<div id="lm-chroma" style="margin-top:12px; padding:10px; border:1px solid #e5e7eb; border-radius:8px;">
+  <div style="display:flex; align-items:center; gap:8px; margin-bottom:8px;">
+    <label style="font-weight:600;">Chroma Key</label>
+    <label style="display:flex; align-items:center; gap:6px;">
+      <input id="pm-chroma-enable" type="checkbox" /> Enable
+    </label>
+  </div>
+  <div style="display:grid; grid-template-columns: 140px 1fr auto; gap:8px; align-items:center; margin-bottom:6px;">
+    <label for="pm-chroma-color">Key Color</label>
+    <input id="pm-chroma-color" type="color" value="#00ff00" />
+    <input id="pm-chroma-hex" type="text" value="#00ff00" style="width:96px;" />
+  </div>
+  <div style="display:grid; grid-template-columns: 140px 1fr auto; gap:8px; align-items:center; margin-bottom:6px;">
+    <label for="pm-chroma-tol">Tolerance</label>
+    <input id="pm-chroma-tol" type="range" min="0" max="1" step="0.01" value="0.15" />
+    <output id="pm-chroma-tol-val">0.15</output>
+  </div>
+  <div style="display:grid; grid-template-columns: 140px 1fr auto; gap:8px; align-items:center;">
+    <label for="pm-chroma-feather">Feather</label>
+    <input id="pm-chroma-feather" type="range" min="0" max="0.5" step="0.005" value="0.05" />
+    <output id="pm-chroma-feather-val">0.05</output>
+  </div>
+</div>
+<!-- /LM-CHROMA-UI -->
 
 
-
-<!-- LM-ORCHESTRATOR -->
+<!-- LM-CHROMA-WIRE -->
 <script type="module">
-const log = (...a)=>console.log('[lm-orch]', ...a);
-const $ = (s)=>document.querySelector(s);
-await (document.readyState === 'complete' || document.readyState === 'interactive'
-  ? 0 : new Promise(r=>document.addEventListener('DOMContentLoaded', r, {once:true})));
-
-const sceneReady = new Promise((resolve)=>{
-  if (window.__LM_SCENE) return resolve(window.__LM_SCENE);
-  document.addEventListener('lm:scene-ready', e => resolve(e?.detail?.scene || window.__LM_SCENE || null), { once:true });
-});
-
-const [viewer, bridge] = await Promise.all([
-  import('./viewer.module.cdn.js'),
-  import('./viewer.bridge.module.js')
-]);
-const API = {
-  listMaterials: (viewer.listMaterials || bridge.listMaterials),
-  listMaterialNames: (viewer.listMaterialNames || bridge.listMaterialNames),
-  applyMaterialPropsByName: (viewer.applyMaterialPropsByName || bridge.applyMaterialPropsByName)
-};
-
-function waitEl(selector, timeout=15000){
-  const t0 = performance.now();
-  return new Promise((resolve)=>{ (function tick(){
-    const el = document.querySelector(selector);
-    if (el) return resolve(el);
-    if (performance.now()-t0 >= timeout) return resolve(null);
-    requestAnimationFrame(tick);
-  })(); });
-}
-const [sel, rng, out] = await Promise.all([
-  waitEl('#pm-material'), waitEl('#pm-opacity-range'), waitEl('#pm-opacity-val')
-]);
-if (!(sel && rng && out)) console.warn('[lm-orch] material UI parts missing');
-
-await Promise.race([sceneReady, new Promise(r=>setTimeout(()=>r(window.__LM_SCENE||null), 8000))]);
-
-function getNames(){
-  const fromApi = (API.listMaterials?.() || []).map(r=>r?.name).filter(Boolean);
-  const set = new Set(fromApi);
-  const s = window.__LM_SCENE;
-  s?.traverse(o=>{ if(!o.isMesh||!o.material) return;
-    (Array.isArray(o.material)?o.material:[o.material]).forEach(m=>m?.name && set.add(m.name)); });
-  return [...set].filter(n=>!/^#\d+$/.test(n));
-}
-function fillSelect(names){
-  const select = document.getElementById('pm-material'); if(!select) return false;
-  const cur = select.value;
-  select.innerHTML = '<option value="">— Select material —</option>';
-  names.forEach(n=>{ const o=document.createElement('option'); o.value=n; o.textContent=n; select.appendChild(o); });
-  if (cur && names.includes(cur)) select.value = cur;
-  log('filled', names.length, names);
-  return names.length>0;
-}
-function getOpacityByName(name){
-  let val=null;
-  window.__LM_SCENE?.traverse(o=>{
-    if(val!==null) return;
-    if(!o.isMesh||!o.material) return;
-    (Array.isArray(o.material)?o.material:[o.material]).some(m=>{
-      if((m?.name||'')===name){ val=Number(m.opacity??1); return true; } return false; });
+(async () => {
+  const wait = (sel, t=12000) => new Promise(res => {
+    const t0 = performance.now();
+    (function tick(){
+      const el = document.querySelector(sel);
+      if (el) return res(el);
+      if (performance.now() - t0 >= t) return res(null);
+      requestAnimationFrame(tick);
+    })();
   });
-  return (val==null?1:Math.max(0,Math.min(1,val)));
-}
-function wire(){
-  if(!(sel&&rng&&out)) return;
-  const onChange=()=>{ const n=sel.value; const v=n?getOpacityByName(n):1; rng.value=v; out.textContent=v.toFixed(2); };
-  const onInput=()=>{ const n=sel.value; if(!n) return; const v=Number(rng.value||1); out.textContent=v.toFixed(2); API.applyMaterialPropsByName?.(n,{opacity:v}); };
-  sel.addEventListener('change', onChange);
-  rng.addEventListener('input', onInput, {passive:true});
-  onChange();
-}
-
-let names = getNames();
-if (!fillSelect(names)){
-  const deadline = performance.now()+20000;
-  const t = setInterval(()=>{
-    names = getNames();
-    if (fillSelect(names) || performance.now()>=deadline) clearInterval(t);
-  }, 250);
-}
-document.addEventListener('lm:materials-ready', ()=>{
-  const ns=getNames(); fillSelect(ns);
-});
-wire();
+  const [viewer, bridge] = await Promise.all([
+    import('./viewer.module.cdn.js').catch(()=>({})),
+    import('./viewer.bridge.module.js').catch(()=>({}))
+  ]);
+  const API = {
+    listMaterialNames: viewer.listMaterialNames || bridge.listMaterialNames,
+    applyMaterialPropsByName: viewer.applyMaterialPropsByName || bridge.applyMaterialPropsByName,
+    applyChromaByName: viewer.applyChromaByName || bridge.applyChromaByName
+  };
+  const sel = await wait('#pm-material');
+  const en  = await wait('#pm-chroma-enable');
+  const col = await wait('#pm-chroma-color');
+  const hex = await wait('#pm-chroma-hex');
+  const tol = await wait('#pm-chroma-tol');
+  const tolV= await wait('#pm-chroma-tol-val');
+  const fea = await wait('#pm-chroma-feather');
+  const feaV= await wait('#pm-chroma-feather-val');
+  if (!(sel && en && col && hex && tol && tolV && fea && feaV)) return;
+  const clamp01 = (v)=>Math.max(0, Math.min(1, Number(v)));
+  const hex2rgb = (h)=>{
+    let s = String(h||'').trim();
+    if (s[0] === '#') s = s.slice(1);
+    if (s.length===3) s = s.split('').map(c=>c+c).join('');
+    const n = parseInt(s,16); 
+    const r = (n>>16)&255, g=(n>>8)&255, b=n&255;
+    return [r/255,g/255,b/255];
+  };
+  const apply = () => {
+    const name = sel.value;
+    if (!name) return;
+    const enabled = !!en.checked;
+    const colorHex = (hex.value || col.value || '#00ff00').toLowerCase();
+    const tolerance = clamp01(tol.value);
+    const feather = Math.max(0, Math.min(0.5, Number(fea.value)));
+    API.applyChromaByName?.(name, {
+      enabled,
+      color: hex2rgb(colorHex),
+      tolerance,
+      feather
+    });
+  };
+  col.addEventListener('input', ()=>{ hex.value = col.value; apply(); });
+  hex.addEventListener('change', ()=>{ apply(); });
+  en.addEventListener('change', apply);
+  tol.addEventListener('input', ()=>{ tolV.textContent = Number(tol.value).toFixed(2); apply(); });
+  fea.addEventListener('input', ()=>{ feaV.textContent = Number(fea.value).toFixed(2); apply(); });
+  sel.addEventListener('change', apply);
+  apply();
+})();
 </script>
-<!-- /LM-ORCHESTRATOR -->
+<!-- /LM-CHROMA-WIRE -->
 
 </body>
 </html>
