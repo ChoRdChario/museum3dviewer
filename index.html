@@ -211,8 +211,7 @@
       });
     })();
   </script>
-
-  <!-- three.js importmap + bridge (fix for bare 'three') -->
+<!-- canonical three.js importmap -->
   <script type="importmap">
     {
       "imports": {
@@ -225,23 +224,23 @@
     import * as THREE from 'three';
     window.THREE = THREE;
   </script>
-
-  
-  <!-- three.js importmap + bridge -->
-  <script type="importmap">
-    {
-      "imports": {
-        "three": "https://unpkg.com/three@0.159.0/build/three.module.js",
-        "three/addons/": "https://unpkg.com/three@0.159.0/examples/jsm/"
-      }
-    }
-  </script>
-  <script type="module">
-    import * as THREE from 'three';
-    window.THREE = THREE;
-  </script>
-
   <script type="module" src="./boot.esm.cdn.js"></script>
+  <script type="module">
+    /* LM material dropdown auto-refresh */
+    const refreshMatSelect = () => {
+      const sel = document.getElementById('pm-material');
+      if (!sel || !window.LM_viewer?.listMaterialNames) return;
+      const current = sel.value;
+      const names = window.LM_viewer.listMaterialNames();
+      sel.innerHTML = '<option value="">— Select material —</option>';
+      names.forEach(n => { const o = document.createElement('option'); o.value=n; o.textContent=n; sel.appendChild(o); });
+      if (current && names.includes(current)) sel.value = current;
+    };
+    document.addEventListener('lm:scene-ready', refreshMatSelect);
+    // Fallback retries (scene already ready or delayed)
+    setTimeout(refreshMatSelect, 150);
+    setTimeout(refreshMatSelect, 500);
+  </script>
   <link rel="stylesheet" href="app.sheet-rename.css" />
   <script type="module" src="sheet-rename.module.js"></script>
 </body>
