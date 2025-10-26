@@ -222,46 +222,47 @@
   </script>
 
   <script type="module" src="./boot.esm.cdn.js"></script>
-
-  <script type="module">
-    /* LM material dropdown auto-refresh */
-    const namesFromScene = () => {
-      const scene = window.__LM_SCENE, set = new Set();
-      scene?.traverse(o => {
-        if (!o.isMesh || !o.material) return;
-        (Array.isArray(o.material) ? o.material : [o.material]).forEach(m => m?.name && set.add(m.name));
-      });
-      return [...set].filter(n => !/^#\d+$/.test(n));
-    };
-    const getNames = () => (window.LM_viewer?.listMaterialNames?.() || namesFromScene());
-
-    function fillSelect() {
-      const sel = document.getElementById('pm-material');
-      if (!sel) return false;
-      const cur = sel.value;
-      const names = getNames();
-      if (!Array.isArray(names)) return false;
-      sel.innerHTML = '<option value="">— Select material —</option>';
-      names.forEach(n => { const o = document.createElement('option'); o.value=n; o.textContent=n; sel.appendChild(o); });
-      if (cur && names.includes(cur)) sel.value = cur;
-      return names.length > 0;
-    }
-
-    // Run on scene-ready and also poll up to ~5s
-    const tryFill = () => {
-      let tries = 0; const max = 25; // 25 * 200ms = 5s
-      const timer = setInterval(() => {
-        tries++;
-        const ok = fillSelect();
-        if (ok || tries >= max) clearInterval(timer);
-      }, 200);
-    };
-    document.addEventListener('lm:scene-ready', tryFill, { once: true });
-    // also kick once in case scene is already present
-    tryFill();
-  </script>
-
   <link rel="stylesheet" href="app.sheet-rename.css" />
   <script type="module" src="sheet-rename.module.js"></script>
 </body>
 </html>
+
+<!-- LM-AUTOFILL-HARDEN -->
+<script type="module">
+// harden material dropdown fill (runs last)
+const namesFromScene = () => {
+  const scene = window.__LM_SCENE, set = new Set();
+  scene?.traverse(o=>{
+    if(!o.isMesh || !o.material) return;
+    (Array.isArray(o.material)?o.material:[o.material]).forEach(m=> m?.name && set.add(m.name));
+  });
+  return [...set];
+};
+const getNames = () => {
+  try {
+    const viaViewer = (window.LM_viewer?.listMaterialNames?.() || []);
+    return (viaViewer.length ? viaViewer : namesFromScene()).filter(n=>!/^#\d+$/.test(n));
+  } catch { return namesFromScene().filter(n=>!/^#\d+$/.test(n)); }
+};
+function fillOnce(){
+  const sel = document.getElementById('pm-material');
+  if(!sel) return false;
+  const cur = sel.value;
+  const names = getNames();
+  if(!Array.isArray(names)) return false;
+  sel.innerHTML = '<option value="">— Select material —</option>';
+  names.forEach(n=>{ const o=document.createElement('option'); o.value=n; o.textContent=n; sel.appendChild(o); });
+  if(cur && names.includes(cur)) sel.value = cur;
+  return names.length>0;
+}
+// schedule: now, scene-ready, and poll up to 5s
+const scheduleFill = () => {
+  let tries=0; const max=25;
+  const t = setInterval(()=>{ tries++; if(fillOnce()||tries>=max) clearInterval(t); }, 200);
+};
+document.addEventListener('lm:scene-ready', scheduleFill, { once:true });
+// run immediately too (in case scene is already present)
+scheduleFill();
+</script>
+<!-- /LM-AUTOFILL-HARDEN -->
+
