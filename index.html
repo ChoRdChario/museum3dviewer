@@ -1,422 +1,46 @@
-<!doctype html>
-<html lang="ja">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>LociMyu v6.6 (ESM/CDN)</title>
-  <link rel="icon" href="data:," />
-  <meta name="google-oauth-client_id" content="595200751510-ncahnf7edci6b9925becn5to49r6cguv.apps.googleusercontent.com">
-  <meta name="google-api-key" content="AIzaSyCUnTCr5yWUWPdEXST9bKP1LpgawU5rIbI">
-  <script src="https://accounts.google.com/gsi/client" async defer></script>
-  <style>
-    :root{--bg:#0f1115;--panel:#0b0d11;--line:#1f2937;--acc:#94a3b8;--text:#cbd5e1;--sel:#60a5fa;}
-    html,body{height:100%;margin:0;background:var(--bg);color:var(--text);font:14px/1.4 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;}
-    #app{display:flex;height:100%;}
-    #stage{flex:1;position:relative;background:var(--panel);}
-    #ui{width:360px;border-left:1px solid var(--line);display:flex;flex-direction:column;}
-    header#topbar{display:flex;justify-content:space-between;align-items:center;padding:8px 12px;border-bottom:1px solid var(--line);}
-    header #brand{font-weight:600;opacity:.8}
-    button,select,input{background:#111827;border:1px solid var(--line);color:var(--text);border-radius:6px;padding:6px 8px}
-    input[type="text"]{width:100%;box-sizing:border-box}
-    .row{display:flex;gap:8px;align-items:center}
-    .row > *{flex:1}
-    .tabs{display:flex;border-bottom:1px solid var(--line)}
-    .tabs button{flex:1;border:0;border-bottom:2px solid transparent;padding:8px 12px;background:transparent;color:var(--acc)}
-    .tabs button[aria-selected="true"]{color:var(--text);border-bottom-color:#64748b}
-    .pane{display:none;padding:12px;overflow:auto}
-    .pane[data-active="true"]{display:block}
-    #gl{width:100%;height:100%;display:block}
-    .pad{padding:12px}
-    .grp{margin:8px 0}
-    .chips{display:flex;flex-wrap:wrap;gap:6px}
-    .chip{width:18px;height:18px;border-radius:50%;border:1px solid #0003;cursor:pointer;box-shadow:0 0 0 1px #0004 inset}
-    #caption-list{height:160px;overflow:auto;border:1px solid var(--line);border-radius:6px}
-    .caption-item{display:flex;gap:8px;align-items:flex-start;padding:6px;border-bottom:1px solid #0003}
-    .caption-item img{width:40px;height:40px;object-fit:cover;border-radius:6px;border:1px solid #0004}
-    .hint{opacity:.7;font-size:12px}
-    /* thumbnails grid */
-    #images-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(64px,1fr));gap:8px}
-    .thumb{width:100%;aspect-ratio:1/1;border-radius:8px;border:1px solid #0005;background-size:cover;background-position:center;cursor:pointer}
-    .thumb[data-selected="true"]{outline:2px solid var(--sel);outline-offset:2px}
-    /* per-material opacity */
-    #pm-opacity{display:flex;align-items:center;gap:8px}
-    #pm-opacity output{min-width:3ch;text-align:right;opacity:.8}
-  </style>
-</head>
-<body>
-  <div id="app">
-    <div id="stage"><canvas id="gl"></canvas></div>
-    <aside id="ui">
-      <header id="topbar">
-        <div id="brand">LociMyu v6.6</div>
-        <div class="row" style="gap:6px;flex:0 0 auto">
-          <button id="auth-signin">Sign in</button>
-        </div>
-      </header>
 
-      <div class="pad" style="border-bottom:1px solid var(--line)">
-        <div class="row">
-          <input id="glbUrl" type="text" placeholder="Drive fileId / GLB URL" />
-          <button id="btnGlb">Load</button>
-        </div>
-        <div class="row" style="margin-top:8px">
-          <select id="save-target-sheet"><option value="">Select sheet…</option></select>
-          <button id="save-target-create">Create</button>
-        </div>
-      </div>
-
-      <nav class="tabs" role="tablist">
-        <button id="tab-caption" role="tab" aria-selected="true" data-tab="caption">Caption</button>
-        <button id="tab-material" role="tab" aria-selected="false" data-tab="material">Material</button>
-        <button id="tab-views" role="tab" aria-selected="false" data-tab="views">Views</button>
-      </nav>
-
-      <section id="pane-caption" class="pane" data-pane="caption" data-active="true">
-        <div class="grp">
-          <div class="hint">Pin color</div>
-          <div id="pinColorChips" class="chips"></div>
-        </div>
-        <div class="grp">
-          <div class="hint">Filter</div>
-          <div id="pinFilterChips" class="chips"></div>
-        </div>
-
-        <!-- ▼ 配置入替：先に Caption list、その下に Title/Body -->
-        <div class="grp">
-          <div class="hint">Caption list</div>
-          <div id="caption-list"></div>
-        </div>
-
-        <div class="grp">
-          <div class="hint">Title / Body</div>
-          <input id="caption-title" placeholder="Title" />
-          <input id="caption-body" placeholder="Body" />
-        </div>
-        <div class="grp">
-          <div class="row" id="caption-image-row"><div id="currentImageThumb" aria-label="attached image preview"><div class="placeholder">No Image</div></div></div>
-        </div>
-
-        <div class="grp">
-          <div class="hint">Images (auto from GLB folder)</div>
-          <div id="images-grid-wrapper"><div id="images-grid"></div>
-          <div class="row" style="margin-top:8px">
-            <button id="btnRefreshImages" style="width:100%">Refresh images</button>
-          </div>
-          <div id="images-status" class="hint" style="margin-top:6px"></div>
-        </div>
-      </section>
-
-      <section id="pane-material" class="pane" data-pane="material">
-        <div class="grp">
-          <label><input type="checkbox" id="mat-unlit" /> Unlit</label>
-          <label><input type="checkbox" id="mat-doubleside" /> Double-sided</label>
-        </div>
-        <div class="grp">
-          <label>Opacity <input type="range" id="mat-opacity" min="0" max="1" step="0.01" value="1"/></label>
-        </div>
-        <div class="grp">
-          <label><input type="checkbox" id="mat-white2alpha" /> White → Alpha</label>
-        </div>
-
-        <!-- ▼ 追加: マテリアル個別の透明度 -->
-        <div class="grp">
-          <div class="hint">Per‑material opacity (saved per sheet)</div>
-          <div id="pm-opacity">
-            <select id="pm-material">
-              <option value="">— Select material —</option>
-            </select>
-            <input type="range" id="pm-opacity-range" min="0" max="1" step="0.01" value="1" />
-            <output id="pm-opacity-val">1.00</output>
-          </div>
-          <div class="hint">Pick a material, then set its opacity. This does not change global opacity above.</div>
-        </div>
-      </section>
-
-      <section id="pane-views" class="pane" data-pane="views">
-        <div class="grp">
-          <button id="view-save">Save view</button>
-          <div class="row"><label><input type="checkbox" id="proj-ortho" /> Orthographic</label></div>
-        </div>
-        <div id="views-preset-list"></div>
-      </section>
-    </aside>
+<!-- Material panel (Step2) -->
+<div id="material-panel" class="pane">
+  <div class="row row-tight">
+    <label class="chk"><input type="checkbox" id="pm-unlit"> Unlit</label>
+    <label class="chk"><input type="checkbox" id="pm-doublesided"> Double-sided</label>
   </div>
 
-  <script>
-    // Tabs behavior (keep as-is)
-    const tabs = document.querySelectorAll('[role="tab"]');
-    const panes = document.querySelectorAll('.pane');
-    tabs.forEach(t => t.addEventListener('click', () => {
-      tabs.forEach(x => x.setAttribute('aria-selected', String(x===t)));
-      panes.forEach(p => p.dataset.active = String(p.dataset.pane===t.dataset.tab));
-    }));
-
-    // ====== Per‑material opacity wiring (non-invasive) ======
-    (function(){
-      const sel = document.getElementById('pm-material');
-      const range = document.getElementById('pm-opacity-range');
-      const out = document.getElementById('pm-opacity-val');
-
-      function updateOut(){
-        out.textContent = Number(range.value).toFixed(2);
-      }
-      range.addEventListener('input', () => {
-        updateOut();
-        if (!sel.value) return;
-        // Notify app/runtime that one material's opacity changed
-        document.dispatchEvent(new CustomEvent('pm:opacity-change', {
-          detail: { material: sel.value, opacity: Number(range.value) }
-        }));
-      });
-
-      // Ask runtime for the material list when the Material tab is shown
-      function requestList(){
-        document.dispatchEvent(new CustomEvent('pm:request-materials'));
-      }
-      document.getElementById('tab-material').addEventListener('click', requestList);
-      // Also request once after load (small delay so runtime can attach listeners)
-      window.setTimeout(requestList, 500);
-
-      // Runtime should call this with: { materials: string[], values?: Record<string,number> }
-      document.addEventListener('pm:set-materials', (e) => {
-        const { materials = [], values = {} } = e.detail || {};
-        const cur = sel.value;
-        sel.innerHTML = '<option value="">— Select material —</option>' +
-          materials.map(m => `<option value="${m}">${m}</option>`).join('');
-        if (cur && materials.includes(cur)) {
-          sel.value = cur;
-          if (values && values[cur] != null) range.value = values[cur];
-        } else {
-          sel.value = '';
-          range.value = values['*'] != null ? values['*'] : 1;
-        }
-        updateOut();
-      });
-
-      // When a different material is picked, ask runtime for its saved value
-      sel.addEventListener('change', () => {
-        document.dispatchEvent(new CustomEvent('pm:request-value', {
-          detail: { material: sel.value }
-        }));
-      });
-
-      // Runtime can push a single material's value
-      document.addEventListener('pm:set-value', (e) => {
-        const { material, opacity } = e.detail || {};
-        if (!material || sel.value !== material) return;
-        if (typeof opacity === 'number') {
-          range.value = opacity;
-          updateOut();
-        }
-      });
-    })();
-  </script>
-
-  <script type="importmap">
-  {
-    "imports": {
-      "three": "https://unpkg.com/three@0.155.0/build/three.module.js",
-      "three/examples/jsm/": "https://unpkg.com/three@0.155.0/examples/jsm/"
-    }
-  }
-  </script>
-
-  <script type="module" src="./boot.esm.cdn.js"></script>
-  <link rel="stylesheet" href="app.sheet-rename.css" />
-  <script type="module" src="sheet-rename.module.js"></script>
-
-
-
-
-
-<!-- LM-ORCHESTRATOR -->
-<script type="module">
-// Minimal, non-spammy orchestrator: populate material list only when scene + GLB are ready.
-const $ = (s)=>document.querySelector(s);
-const once = (el,ev,fn)=>el.addEventListener(ev,fn,{once:true});
-
-// Wait DOM
-if (document.readyState === 'loading') {
-  await new Promise(r=>document.addEventListener('DOMContentLoaded', r, {once:true}));
-}
-
-// Import modules up front (cached by browser)
-const viewer = await import('./viewer.module.cdn.js').catch(()=>({}));
-await import('./viewer.bridge.module.js').catch(()=>{});
-
-// Helpers
-function listFromViewer(){
-  try { return (viewer.listMaterials?.() || []).map(r=>r?.name).filter(Boolean); }
-  catch { return []; }
-}
-function listFromScene(){
-  const names = new Set();
-  const s = window.__LM_SCENE;
-  s?.traverse(o=>{
-    if (!o.isMesh || !o.material) return;
-    (Array.isArray(o.material)?o.material:[o.material]).forEach(m=>m?.name && names.add(m.name));
-  });
-  return [...names];
-}
-function getNames(){ return [...new Set([...listFromViewer(), ...listFromScene()])].filter(n=>!/^#\d+$/.test(n)); }
-
-function fillSelect(names){
-  const sel = $('#pm-material');
-  if (!sel) return false;
-  const cur = sel.value;
-  sel.innerHTML = '<option value="">— Select material —</option>';
-  names.forEach(n=>{ const o=document.createElement('option'); o.value=n; o.textContent=n; sel.appendChild(o); });
-  if (cur && names.includes(cur)) sel.value = cur;
-  return names.length>0;
-}
-
-function setOpacityByName(name, v){
-  v = Math.max(0, Math.min(1, Number(v)));
-  if (typeof viewer.applyMaterialPropsByName === 'function') {
-    viewer.applyMaterialPropsByName(name, { opacity:v });
-    return;
-  }
-  const s = window.__LM_SCENE;
-  s?.traverse(o=>{
-    if (!o.isMesh || !o.material) return;
-    (Array.isArray(o.material)?o.material:[o.material]).forEach(m=>{
-      if ((m?.name||'')===name){ m.transparent=v<1; m.opacity=v; m.depthWrite=v>=1; m.needsUpdate=true; }
-    });
-  });
-}
-
-function getOpacityByName(name){
-  let val=null;
-  const s = window.__LM_SCENE;
-  s?.traverse(o=>{
-    if (val!=null) return;
-    if (!o.isMesh || !o.material) return;
-    (Array.isArray(o.material)?o.material:[o.material]).some(m=>{
-      if ((m?.name||'')===name){ val = Number(m.opacity ?? 1); return true; }
-      return false;
-    });
-  });
-  return (val==null?1:Math.max(0,Math.min(1,val)));
-}
-
-function wire(){
-  const sel = $('#pm-material');
-  const rng = $('#pm-opacity-range');
-  const out = $('#pm-opacity-val');
-  if (!(sel && rng && out)) return; // UI not present
-  const onChange = ()=>{
-    const n = sel.value;
-    const v = n ? getOpacityByName(n) : 1;
-    rng.value = v; out.textContent = Number(v).toFixed(2);
-  };
-  const onInput = ()=>{
-    const n = sel.value; if (!n) return;
-    const v = Number(rng.value||1);
-    out.textContent = v.toFixed(2);
-    setOpacityByName(n, v);
-  };
-  sel.addEventListener('change', onChange);
-  rng.addEventListener('input', onInput, {passive:true});
-  onChange();
-}
-
-// Orchestration: wait for either lm:scene-ready or a visible scene, then populate once.
-async function waitScene(){
-  if (window.__LM_SCENE) return;
-  await new Promise(r=>document.addEventListener('lm:scene-ready', ()=>r(), {once:true}));
-}
-
-(async function run(){
-  await waitScene();
-  // poll up to ~8s for names (handles slow GLB builds); stop once non-empty.
-  let tries=0, names=[];
-  const sel = $('#pm-material');
-  if (!sel) return;
-  const t = setInterval(()=>{
-    tries++;
-    names = getNames();
-    if (names.length){ fillSelect(names); clearInterval(t); }
-    if (tries>=40) clearInterval(t);
-  }, 200);
-  // Also react to materials-ready event if bridge dispatches it
-  once(document, 'lm:materials-ready', ()=>{
-    const n = getNames(); if (n.length) fillSelect(n);
-  });
-  wire();
-})();
-</script>
-<!-- /LM-ORCHESTRATOR -->
-
-
-<!-- LociMyu step2: orchestrated order -->
-<script type="module" src="./viewer.bridge.module.js"></script>
-<script type="module" src="./material.orchestrator.js"></script>
-<!-- ===== Step2 UI: Per-material advanced controls (keeps panel width safe) ===== -->
-<div id="pm-advanced-ui" class="mt-2" style="padding:0 8px;">
-  <!-- Per-material | Chroma key -->
-  <div class="row mt-2" id="pm-chroma-row">
-    <label class="col-4">Chroma key</label>
-    <div class="col-8" style="display:grid;grid-template-columns:auto 96px 1fr 1fr;gap:8px;align-items:center;">
-      <label class="inline-flex items-center" style="display:flex;gap:6px;"><input id="pm-chroma-enable" type="checkbox"><span>Enable</span></label>
-      <input id="pm-chroma-color" type="color" value="#ffffff" aria-label="Chroma color">
-      <input id="pm-chroma-tol" type="range" min="0" max="1" step="0.01" value="0.10" aria-label="Tolerance">
-      <input id="pm-chroma-feather" type="range" min="0" max="1" step="0.01" value="0.00" aria-label="Feather">
-    </div>
+  <div class="row">
+    <label>Opacity</label>
+    <input id="pm-opacity-range" type="range" min="0" max="1" step="0.01" value="1" />
+    <span id="pm-opacity-val">1.00</span>
   </div>
-  <!-- Per-material | Flags -->
-  <div class="row mt-2" id="pm-flags-row">
-    <label class="col-4">Shading</label>
-    <div class="col-8" style="display:flex;gap:16px;align-items:center;">
-      <label class="inline-flex items-center" style="display:flex;gap:6px;"><input id="pm-flag-doublesided" type="checkbox"><span>Double-sided</span></label>
-      <label class="inline-flex items-center" style="display:flex;gap:6px;"><input id="pm-flag-unlit" type="checkbox"><span>Unlit-like</span></label>
-    </div>
+
+  <div class="row">
+    <small>Per-material opacity (saved per sheet)</small>
+    <select id="pm-material">
+      <option value="">— Select material —</option>
+    </select>
+    <input id="pm-permat-range" type="range" min="0" max="1" step="0.01" value="1" />
+    <span id="pm-permat-val">1.00</span>
+  </div>
+
+  <hr class="sep"/>
+
+  <div class="row">
+    <label class="chk">
+      <input type="checkbox" id="pm-chroma-enable"> Chroma key
+    </label>
+  </div>
+
+  <div class="row row-tight">
+    <label class="stack">
+      <span>Key color</span>
+      <input id="pm-chroma-color" type="color" value="#00ff00" />
+    </label>
+    <label class="stack">
+      <span>Tolerance</span>
+      <input id="pm-chroma-tol" type="range" min="0" max="1" step="0.01" value="0.15" />
+    </label>
+    <label class="stack">
+      <span>Feather</span>
+      <input id="pm-chroma-feather" type="range" min="0" max="0.5" step="0.01" value="0.10" />
+    </label>
   </div>
 </div>
-<script type="module">
-  // ---- Per-material advanced wiring (Step2 safe, idempotent) ----
-  if (!window.__PM_ADV_WIRED__) {
-    window.__PM_ADV_WIRED__ = true;
-    const $ = (id)=>document.getElementById(id);
-    const sel = $('pm-material');
-    const rng = $('pm-opacity-range');
-    const out = $('pm-opacity-val');
-    const ckEn=$('pm-chroma-enable'), ckCol=$('pm-chroma-color'), ckTol=$('pm-chroma-tol'), ckFea=$('pm-chroma-feather');
-    const flDs=$('pm-flag-doublesided'), flUl=$('pm-flag-unlit');
-    const curName = () => sel?.value || '';
-
-    // keep existing opacity path intact → orchestrator listens 'pm:opacity-change'
-    if (rng && out) {
-      const onInput = () => {
-        const name = curName(); if (!name) return;
-        const opacity = Number(rng.value || 1);
-        out.textContent = opacity.toFixed(2);
-        document.dispatchEvent(new CustomEvent('pm:opacity-change', { detail: { name, opacity } }));
-      };
-      rng.addEventListener('input', onInput, { passive:true });
-    }
-
-    function fireChroma() {
-      const name = curName(); if (!name) return;
-      document.dispatchEvent(new CustomEvent('pm:chroma-change', {
-        detail: {
-          name,
-          enabled: !!ckEn?.checked,
-          color: (ckCol?.value || '#ffffff'),
-          tolerance: Number(ckTol?.value || 0),
-          feather: Number(ckFea?.value || 0),
-        }
-      }));
-    }
-    [ckEn, ckCol, ckTol, ckFea].forEach(el => el?.addEventListener('input', fireChroma, { passive:true }));
-
-    function fireFlags() {
-      const name = curName(); if (!name) return;
-      document.dispatchEvent(new CustomEvent('pm:flag-change', {
-        detail: { name, doubleSided: !!flDs?.checked, unlitLike: !!flUl?.checked }
-      }));
-    }
-    [flDs, flUl].forEach(el => el?.addEventListener('change', fireFlags));
-  }
-</script>
-</body>
-</html>
