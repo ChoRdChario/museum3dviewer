@@ -41,7 +41,20 @@
     /* per-material opacity */
     #pm-opacity{display:flex;align-items:center;gap:8px}
     #pm-opacity output{min-width:3ch;text-align:right;opacity:.8}
-  </style>
+  
+/* --- Material panel compact / overflow guard --- */
+#pane-material { overflow-x: hidden; }
+#pane-material .grp { margin: 10px 0; }
+#pane-material .row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+#pm-advanced-ui select, #pm-advanced-ui input[type=range] { width: 100%; max-width: 100%; }
+#pm-opacity { display: grid; grid-template-columns: 1fr; gap: 8px; }
+@media (min-width: 420px) {
+  #pm-opacity { grid-template-columns: 1fr 1fr auto; align-items: center; }
+}
+#pm-flags-row { display:flex; flex-wrap:wrap; gap:12px; align-items:center; }
+#pm-flags-row label { white-space: nowrap; }
+
+</style>
 </head>
 <body>
   <div id="app">
@@ -108,14 +121,7 @@
 
       <section id="pane-material" class="pane" data-pane="material">
         <div class="grp">
-          <label><input type="checkbox" id="mat-unlit" /> Unlit</label>
-          <label><input type="checkbox" id="mat-doubleside" /> Double-sided</label>
-        </div>
-        <div class="grp">
           <label>Opacity <input type="range" id="mat-opacity" min="0" max="1" step="0.01" value="1"/></label>
-        </div>
-        <div class="grp">
-          <label><input type="checkbox" id="mat-white2alpha" /> White → Alpha</label>
         </div>
 
         <!-- ▼ 追加: マテリアル個別の透明度 -->
