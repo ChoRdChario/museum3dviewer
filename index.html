@@ -42,6 +42,16 @@
     #pm-opacity{display:flex;align-items:center;gap:8px}
     #pm-opacity output{min-width:3ch;text-align:right;opacity:.8}
   </style>
+<style>
+/* --- Material panel compact wrap (overflow guard) --- */
+#panel-material, [role="tabpanel"]#tab-material, .lm-tabpanel#tab-material { overflow-x: hidden; }
+#panel-material .row, .lm-tabpanel#tab-material .row { margin-right: 0; }
+#pm-advanced-ui select,
+#pm-advanced-ui input[type=range] { width: 100%; max-width: 100%; }
+#pm-flags-row { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+#pm-flags-row label { white-space: nowrap; }
+#pm-controls-host { display: contents; }
+</style>
 </head>
 <body>
   <div id="app">
@@ -49,69 +59,7 @@
     <aside id="ui">
       <header id="topbar">
         <div id="brand">LociMyu v6.6</div>
-        <div class="row" style="gap:6px;flex:0 0 auto">
-          <button id="auth-signin">Sign in</button>
-        </div>
-      </header>
-
-      <div class="pad" style="border-bottom:1px solid var(--line)">
-        <div class="row">
-          <input id="glbUrl" type="text" placeholder="Drive fileId / GLB URL" />
-          <button id="btnGlb">Load</button>
-        </div>
-        <div class="row" style="margin-top:8px">
-          <select id="save-target-sheet"><option value="">Select sheet…</option></select>
-          <button id="save-target-create">Create</button>
-        </div>
-      </div>
-
-      <nav class="tabs" role="tablist">
-        <button id="tab-caption" role="tab" aria-selected="true" data-tab="caption">Caption</button>
-        <button id="tab-material" role="tab" aria-selected="false" data-tab="material">Material</button>
-        <button id="tab-views" role="tab" aria-selected="false" data-tab="views">Views</button>
-      </nav>
-
-      <section id="pane-caption" class="pane" data-pane="caption" data-active="true">
-        <div class="grp">
-          <div class="hint">Pin color</div>
-          <div id="pinColorChips" class="chips"></div>
-        </div>
-        <div class="grp">
-          <div class="hint">Filter</div>
-          <div id="pinFilterChips" class="chips"></div>
-        </div>
-
-        <!-- ▼ 配置入替：先に Caption list、その下に Title/Body -->
-        <div class="grp">
-          <div class="hint">Caption list</div>
-          <div id="caption-list"></div>
-        </div>
-
-        <div class="grp">
-          <div class="hint">Title / Body</div>
-          <input id="caption-title" placeholder="Title" />
-          <input id="caption-body" placeholder="Body" />
-        </div>
-        <div class="grp">
-          <div class="row" id="caption-image-row"><div id="currentImageThumb" aria-label="attached image preview"><div class="placeholder">No Image</div></div></div>
-        </div>
-
-        <div class="grp">
-          <div class="hint">Images (auto from GLB folder)</div>
-          <div id="images-grid-wrapper"><div id="images-grid"></div>
-          <div class="row" style="margin-top:8px">
-            <button id="btnRefreshImages" style="width:100%">Refresh images</button>
-          </div>
-          <div id="images-status" class="hint" style="margin-top:6px"></div>
-        </div>
-      </section>
-
-      <section id="pane-material" class="pane" data-pane="material">
-        <div class="grp">
-          <label><input type="checkbox" id="mat-unlit" /> Unlit</label>
-          <label><input type="checkbox" id="mat-doubleside" /> Double-sided</label>
-        </div>
-        <div class="grp">
+<div class="grp">
           <label>Opacity <input type="range" id="mat-opacity" min="0" max="1" step="0.01" value="1"/></label>
         </div>
         <div class="grp">
