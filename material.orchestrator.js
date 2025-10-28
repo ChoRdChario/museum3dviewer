@@ -27,6 +27,11 @@
     }[m]));
   }
 
+  function readOpacityFromUI(inputEl){
+    const v = Number.parseFloat(inputEl?.value);
+    return Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : 1; // clamp, but DO NOT coerce 0 to 1
+  }
+
   // ------- viewer / scene helpers -------
   function getSceneRoot(){
     return window.viewer?.getSceneRoot?.() || window.__LM_SCENE || window.scene || null;
@@ -190,15 +195,20 @@
     const targets = state.mapLabelToTargets.get(label) || [];
     const apply = window.viewer?.applyMaterialProps;
 
+    const transparent = (opacity < 1);
+    const depthWrite = (opacity >= 1);
+
     for (const t of targets) {
       if (t.startsWith('key:') && typeof apply === 'function') {
         const key = t.slice(4);
-        apply(key, { opacity });
+        // pass transparent/depthWrite as well to avoid "0 becomes 1" in some implementations
+        apply(key, { opacity, transparent, depthWrite });
       } else if (t.startsWith('uuid:')) {
         const uuid = t.slice(5);
         traverseUnderModelRoot((obj, mat)=>{
           if (mat.uuid !== uuid) return;
-          mat.transparent = (opacity < 1);
+          mat.transparent = transparent;
+          mat.depthWrite = depthWrite;
           mat.opacity = opacity;
           mat.needsUpdate = true;
         });
@@ -239,17 +249,17 @@
     const ui = state.ui;
     ui.sel.addEventListener('change', ()=>{
       state.activeLabel = ui.sel.value || null;
-      const v = +ui.rng.value || 1;
+      const v = readOpacityFromUI(ui.rng);
       raf(()=>applyOpacityToActive(v));
     });
     ui.rng.addEventListener('input', ()=>{
-      const v = +ui.rng.value || 1;
+      const v = readOpacityFromUI(ui.rng);
       ui.val && (ui.val.textContent = v.toFixed(2));
       raf(()=>applyOpacityToActive(v));
     });
     ui.refresh?.addEventListener('click', ()=>{
       enumerateAndFill();
-      const v = +ui.rng.value || 1;
+      const v = readOpacityFromUI(ui.rng);
       raf(()=>applyOpacityToActive(v));
       startPolling();
     });
@@ -271,7 +281,7 @@
     wireHandlers();
     startPolling();
 
-    const initOp = +ui.rng.value || 1;
+    const initOp = readOpacityFromUI(ui.rng);
     ui.val && (ui.val.textContent = initOp.toFixed(2));
     raf(()=>applyOpacityToActive(initOp));
   }
