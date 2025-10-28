@@ -131,8 +131,15 @@
       <input id="pm-chroma-color" type="color" value="#ffffff" aria-label="Chroma color">
       <input id="pm-chroma-tol" type="range" min="0" max="1" step="0.01" value="0.10" aria-label="Tolerance">
       <input id="pm-chroma-feather" type="range" min="0" max="1" step="0.01" value="0.00" aria-label="Feather">
+    
+  <!-- Per-material | Flags (moved into panel) -->
+  <div class="row mt-2" id="pm-flags-row">
+    <label class="col-4">Shading</label>
+    <div class="col-8" style="display:flex;gap:16px;align-items:center;">
+      <label class="inline-flex items-center" style="display:flex;gap:6px;"><input id="pm-flag-doublesided" type="checkbox"><span>Double-sided</span></label>
+      <label class="inline-flex items-center" style="display:flex;gap:6px;"><input id="pm-flag-unlit" type="checkbox"><span>Unlit-like</span></label>
     </div>
-  
+  </div>
 
           <div id="pm-opacity">
             <select id="pm-material">
@@ -364,61 +371,5 @@ async function waitScene(){
 <!-- LociMyu step2: orchestrated order -->
 <script type="module" src="./viewer.bridge.module.js"></script>
 <script type="module" src="./material.orchestrator.js"></script>
-</div>
-  <!-- Per-material | Flags -->
-  <div class="row mt-2" id="pm-flags-row">
-    <label class="col-4">Shading</label>
-    <div class="col-8" style="display:flex;gap:16px;align-items:center;">
-      <label class="inline-flex items-center" style="display:flex;gap:6px;"><input id="pm-flag-doublesided" type="checkbox"><span>Double-sided</span></label>
-      <label class="inline-flex items-center" style="display:flex;gap:6px;"><input id="pm-flag-unlit" type="checkbox"><span>Unlit-like</span></label>
-    </div>
-  </div>
-</div>
-<script type="module">
-  // ---- Per-material advanced wiring (Step2 safe, idempotent) ----
-  if (!window.__PM_ADV_WIRED__) {
-    window.__PM_ADV_WIRED__ = true;
-    const $ = (id)=>document.getElementById(id);
-    const sel = $('pm-material');
-    const rng = $('pm-opacity-range');
-    const out = $('pm-opacity-val');
-    const ckEn=$('pm-chroma-enable'), ckCol=$('pm-chroma-color'), ckTol=$('pm-chroma-tol'), ckFea=$('pm-chroma-feather');
-    const flDs=$('pm-flag-doublesided'), flUl=$('pm-flag-unlit');
-    const curName = () => sel?.value || '';
-
-    // keep existing opacity path intact → orchestrator listens 'pm:opacity-change'
-    if (rng && out) {
-      const onInput = () => {
-        const name = curName(); if (!name) return;
-        const opacity = Number(rng.value || 1);
-        out.textContent = opacity.toFixed(2);
-        document.dispatchEvent(new CustomEvent('pm:opacity-change', { detail: { name, opacity } }));
-      };
-      rng.addEventListener('input', onInput, { passive:true });
-    }
-
-    function fireChroma() {
-      const name = curName(); if (!name) return;
-      document.dispatchEvent(new CustomEvent('pm:chroma-change', {
-        detail: {
-          name,
-          enabled: !!ckEn?.checked,
-          color: (ckCol?.value || '#ffffff'),
-          tolerance: Number(ckTol?.value || 0),
-          feather: Number(ckFea?.value || 0),
-        }
-      }));
-    }
-    [ckEn, ckCol, ckTol, ckFea].forEach(el => el?.addEventListener('input', fireChroma, { passive:true }));
-
-    function fireFlags() {
-      const name = curName(); if (!name) return;
-      document.dispatchEvent(new CustomEvent('pm:flag-change', {
-        detail: { name, doubleSided: !!flDs?.checked, unlitLike: !!flUl?.checked }
-      }));
-    }
-    [flDs, flUl].forEach(el => el?.addEventListener('change', fireFlags));
-  }
-</script>
 </body>
 </html>
