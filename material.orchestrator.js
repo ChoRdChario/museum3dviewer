@@ -1,5 +1,5 @@
 // material.orchestrator.js
-// Step2 robust orchestrator (keys-or-uuid fallback)
+// Enumerate materials ONLY under the GLB model root to avoid caption/overlay layers
 /* eslint-disable */
 (() => {
   const LOG = false;
@@ -7,7 +7,7 @@
 
   const state = {
     inited: false,
-    mode: 'auto',                 // 'key' | 'uuid' (auto decides)
+    mode: 'auto',                 // 'key' | 'uuid'
     mapLabelToTargets: new Map(), // label => [ 'key:<materialKey>' | 'uuid:<material.uuid>' ]
     activeLabel: null,
     rafId: 0,
@@ -28,73 +28,96 @@
   }
 
   // ------- viewer / scene helpers -------
-  function listMaterialsSafe(){
-    try {
-      const arr = (window.viewer?.listMaterials?.() || []).filter(Boolean);
-      return Array.isArray(arr) ? arr : [];
-    } catch { return []; }
-  }
   function getSceneRoot(){
     return window.viewer?.getSceneRoot?.() || window.__LM_SCENE || window.scene || null;
   }
-  function traverseAll(fn){ // visits (obj, material, materialIndex)
+  function getModelRoot(){
+    // 1) Prefer viewer API
+    const viaViewer = window.viewer?.getModelRoot?.();
+    if (viaViewer) return viaViewer;
+
+    // 2) Heuristic: find a direct child marked by GLTFLoader or with many Meshes
     const root = getSceneRoot();
+    if (!root) return null;
+    let best = null;
+    let bestCount = -1;
+    for (const child of root.children || []) {
+      // GLTFLoader marks scene root with userData.gltfAsset
+      if (child?.userData?.gltfAsset) return child;
+      // else score by number of Mesh descendants
+      let count = 0;
+      child.traverse((o)=>{ if (o.isMesh || o.type==='Mesh') count++; });
+      if (count > bestCount) { bestCount = count; best = child; }
+    }
+    return best || root;
+  }
+
+  function traverseUnderModelRoot(fn){ // visits (obj, material, index)
+    const root = getModelRoot();
     if (!root || !root.traverse) return 0;
     let n = 0;
     root.traverse((obj)=>{
       const m = obj && obj.material;
       if (!m) return;
+      if (!(obj.isMesh || obj.type==='Mesh')) return;
       if (Array.isArray(m)) m.forEach((mm,i)=>{ n++; fn(obj, mm, i); });
       else { n++; fn(obj, m, 0); }
     });
     return n;
   }
 
+  function listMaterialsSafe(){
+    try {
+      // If viewer provides listMaterials scoped to model, prefer it
+      const arr = (window.viewer?.listMaterials?.() || []).filter(Boolean);
+      return Array.isArray(arr) ? arr : [];
+    } catch { return []; }
+  }
+
   function enumerateUsingViewer(){
     const vlist = listMaterialsSafe();
     if (vlist.length === 0) return null;
+    const modelRoot = getModelRoot();
+    const modelSet = new Set();
+    // Build a uuid set for materials under model root to filter viewer list
+    traverseUnderModelRoot((obj, mat)=>{ modelSet.add(mat.uuid); });
     const map = new Map();
     for (const it of vlist) {
       const name = it?.name || '';
       const key  = it?.materialKey || '';
-      // ラベルは name があれば name、なければ key の末尾
-      const label = name ? name : `materialKey:${String(key).slice(-6)}`;
+      const uuid = it?.uuid; // in case viewer exposes uuid
+      if (uuid && !modelSet.has(uuid)) continue; // filter non-model materials
+      const label = name ? name : (key ? `materialKey:${String(key).slice(-6)}` : 'material');
       if (!map.has(label)) map.set(label, []);
       if (key) map.get(label).push(`key:${String(key)}`);
     }
-    // すべて key ターゲット
+    if (map.size === 0) return null;
     return { mode: 'key', map };
   }
 
   function enumerateUsingUUID(){
-    // Traverse scene and group by material uuid; labelは name || (obj名+短縮uuid)
-    const byUuid = new Map(); // uuid => { label, uuids:Set, objs:Set }
-    const count = traverseAll((obj, mat)=>{
+    const byUuid = new Map(); // uuid => { label, uuids:Set }
+    traverseUnderModelRoot((obj, mat)=>{
       const uuid = mat.uuid;
       const mname = mat.name || mat.userData?.name || '';
       const oname = obj.name || obj.userData?.name || '';
       const short = uuid ? uuid.slice(0,8) : Math.random().toString(36).slice(2,8);
       const label = mname ? mname : (oname ? `[${oname}] · ${short}` : `material:${short}`);
-      if (!byUuid.has(uuid)) byUuid.set(uuid, { label, uuids: new Set(), objs: new Set() });
-      const rec = byUuid.get(uuid);
-      rec.uuids.add(uuid);
-      if (oname) rec.objs.add(oname);
+      if (!byUuid.has(uuid)) byUuid.set(uuid, { label, uuids: new Set() });
+      byUuid.get(uuid).uuids.add(uuid);
     });
     if (byUuid.size === 0) return null;
     const map = new Map();
     for (const [, rec] of byUuid) {
-      const label = rec.label;
-      if (!map.has(label)) map.set(label, []);
-      rec.uuids.forEach(u => map.get(label).push(`uuid:${u}`));
+      if (!map.has(rec.label)) map.set(rec.label, []);
+      rec.uuids.forEach(u => map.get(rec.label).push(`uuid:${u}`));
     }
     return { mode: 'uuid', map };
   }
 
   function enumerateAuto(){
-    // 1) try viewer keys first
     const viaViewer = enumerateUsingViewer();
     if (viaViewer && viaViewer.map.size > 0) return viaViewer;
-    // 2) fallback to uuid traversal
     const viaUuid = enumerateUsingUUID();
     if (viaUuid && viaUuid.map.size > 0) return viaUuid;
     return { mode: 'uuid', map: new Map() };
@@ -102,7 +125,6 @@
 
   // ------- UI helpers -------
   function ensureUI(){
-    // Use existing controls if present
     let sel = document.getElementById('pm-material') || document.querySelector('#pm-material');
     let rng = document.getElementById('pm-opacity-range') || document.querySelector('#pm-opacity-range');
     let val = document.getElementById('pm-opacity-val') || document.querySelector('#pm-opacity-val');
@@ -137,14 +159,10 @@
       rng = mount.querySelector('#pm-opacity-range');
       val = mount.querySelector('#pm-opacity-val');
     } else {
-      // add refresh button if missing
       const hasRefresh = !!(sel.parentElement && sel.parentElement.querySelector('#pm-refresh'));
       if (!hasRefresh) {
         const btn = document.createElement('button');
-        btn.id = 'pm-refresh';
-        btn.type = 'button';
-        btn.title = 'Refresh materials';
-        btn.textContent = '↻';
+        btn.id = 'pm-refresh'; btn.type = 'button'; btn.title = 'Refresh materials'; btn.textContent = '↻';
         sel.insertAdjacentElement('afterend', btn);
       }
     }
@@ -178,8 +196,7 @@
         apply(key, { opacity });
       } else if (t.startsWith('uuid:')) {
         const uuid = t.slice(5);
-        // traverse and apply to all materials with this uuid
-        traverseAll((obj, mat)=>{
+        traverseUnderModelRoot((obj, mat)=>{
           if (mat.uuid !== uuid) return;
           mat.transparent = (opacity < 1);
           mat.opacity = opacity;
@@ -204,7 +221,6 @@
       state.pollCount++;
       enumerateAndFill();
       if (state.mapLabelToTargets.size > 0 && state.pollCount > 40) {
-        // stop after ~16s once we have something
         stopPolling();
       } else if (state.pollCount > 75) {
         stopPolling();
@@ -248,7 +264,7 @@
     if (state.inited) return;
     state.inited = true;
     const ui = ensureUI();
-    if (!ui) { if (LOG) console.warn('[mat-orch] UI not found'); return; }
+    if (!ui) return;
     state.ui = ui;
 
     enumerateAndFill();
