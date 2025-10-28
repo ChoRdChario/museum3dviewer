@@ -2,25 +2,69 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
   <title>LociMyu v6.6</title>
-  <!-- existing CSS -->
-  <link rel="stylesheet" href="app.sheet-rename.css">
-  <!-- UI overrides come last to avoid unintended regressions -->
-  <link rel="stylesheet" href="ui.overrides.css">
+  <style>
+    :root{
+      --bg:#0c0d10; --panel:#121318; --line:#262833; --text:#e6e8ef; --muted:#a6a8b0; --accent:#4da3ff;
+    }
+    html,body{height:100%;}
+    body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,Segoe UI,Roboto,Helvetica,Arial,sans-serif;}
+    #app{display:grid;grid-template-columns:1fr 360px; height:100vh; gap:0;}
+    #stage{position:relative;background:#0b0c10;}
+    #gl{width:100%;height:100%;display:block}
+    #ui{background:var(--panel);border-left:1px solid var(--line);overflow-y:auto;overflow-x:hidden;}
+    header{display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid var(--line);}
+    #brand{font-weight:600;opacity:.9}
+    .row{display:flex;gap:6px;align-items:center}
+    input[type="text"]{background:#0f1016;color:var(--text);border:1px solid var(--line);border-radius:6px;padding:8px 10px;outline:none;min-width:0}
+    button,select{background:#0f1016;color:var(--text);border:1px solid var(--line);border-radius:8px;padding:8px 10px;cursor:pointer}
+    .tabs{display:flex;border-bottom:1px solid var(--line);}
+    .tabs button{flex:1 1 0;padding:10px 6px;background:transparent;border:none;border-bottom:2px solid transparent;color:var(--muted)}
+    .tabs button[aria-selected="true"]{color:var(--text);border-bottom-color:var(--accent);}
+    .pane{display:none;padding:12px;}
+    .pane[data-active="true"]{display:block}
+    .pad{padding:12px}
+    .hint{color:var(--muted);font-size:.86rem}
+    /* == existing IDs used by material UI == */
+    #pm-opacity{display:flex;align-items:center;gap:8px}
+    #pm-opacity-output{min-width:3ch;text-align:right;opacity:.8}
+    /* === Material panel layout fixes (wrap & no horizontal scroll) === */
+    #ui{overflow-x:hidden;}
+    .pm-row{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin-top:8px;}
+    .pm-row label{display:inline-flex;align-items:center;gap:8px;white-space:nowrap;}
+    .pm-row input[type="range"]{min-width:120px;flex:1 1 140px;}
+    .pm-row input[type="color"]{width:44px;height:28px;padding:0;border:1px solid var(--line);border-radius:6px;background:transparent;}
+    .pm-chroma-controls{margin-top:6px;}
+    .pm-chroma-controls label{flex:1 1 160px;}
+    @media (max-width:420px){
+      #app{grid-template-columns:1fr}
+      .pm-row label{flex:1 1 100%}
+      .pm-row input[type="range"]{min-width:0}
+    }
+  </style>
 </head>
 <body>
   <div id="app">
     <div id="stage"><canvas id="gl"></canvas></div>
     <aside id="ui">
-      <header id="topbar">
-        <div class="row" style="gap:6px;">
-          <input id="glbUrl" type="text" placeholder="Drive fileId / GLB URL">
+      <header>
+        <div id="brand">LociMyu v6.6</div>
+        <div class="row" style="gap:6px;margin-left:auto">
+          <button id="auth-signin">Sign in</button>
+        </div>
+      </header>
+
+      <div class="pad" style="border-bottom:1px solid var(--line)">
+        <div class="row">
+          <input id="glbUrl" type="text" placeholder="Drive fileId / GLB URL" />
           <button id="btnGlb">Load</button>
+        </div>
+        <div class="row" style="margin-top:8px;">
           <select id="save-target-sheet"><option value="">Select sheet...</option></select>
           <button id="save-target-create">Create</button>
         </div>
-      </header>
+      </div>
 
       <nav class="tabs" role="tablist">
         <button id="tab-caption" role="tab" data-tab="caption">Caption</button>
@@ -28,64 +72,62 @@
         <button id="tab-views" role="tab" data-tab="views">Views</button>
       </nav>
 
-      <section class="pane" data-tab="material" data-active="true">
-        <div class="grp">
-          <label><input type="checkbox" id="pm-unlit"> Unlit</label>
-          <label><input type="checkbox" id="pm-doublesided"> Double-sided</label>
+      <!-- MATERIAL PANE -->
+      <section id="pane-material" class="pane" data-active="true">
+        <div class="pm-row">
+          <label><input id="pm-unlit" type="checkbox" /> Unlit</label>
+          <label><input id="pm-double" type="checkbox" /> Double-sided</label>
         </div>
 
-        <div class="grp">
-          <div>Opacity</div>
-          <input id="op-global" type="range" min="0" max="1" step="0.01" value="1">
-          <span id="op-global-val">1.00</span>
-        </div>
-
-        <div class="grp" id="per-mat">
-          <div class="row" style="align-items:center;gap:8px;">
-            <select id="pm-material"><option value="">— Select material —</option></select>
-            <input id="pm-opacity-range" type="range" min="0" max="1" step="0.01" value="1">
-            <span id="pm-opacity-val">1.00</span>
-          </div>
-          <p class="hint">Pick a material, then set its opacity. This does not change global opacity above.</p>
-        </div>
-
-        <hr>
-
-        <div class="grp">
-          <label>
-            <input type="checkbox" id="pm-chroma-enabled">
-            Chroma key
+        <div class="pm-row">
+          <label>Opacity
+            <input id="pm-opaque" type="range" min="0" max="1" step="0.01" value="1.00" />
           </label>
-          <div id="pm-chroma-row">
-            <div class="field">
-              <label for="pm-chroma-color">Key color</label>
-              <input id="pm-chroma-color" type="color" value="#00ff00">
-            </div>
-            <div class="field">
-              <label for="pm-chroma-tol">Tolerance</label>
-              <input id="pm-chroma-tol" type="range" min="0" max="1" step="0.01" value="0">
-              <span id="pm-chroma-tol-val">0.00</span>
-            </div>
-            <div class="field">
-              <label for="pm-chroma-feather">Feather</label>
-              <input id="pm-chroma-feather" type="range" min="0" max="1" step="0.01" value="0">
-              <span id="pm-chroma-feather-val">0.00</span>
-            </div>
-          </div>
+          <output id="pm-opaque-out">1.00</output>
         </div>
+
+        <div class="pm-row">
+          <label><input id="pm-whitealpha" type="checkbox" /> White → Alpha</label>
+        </div>
+
+        <div class="pm-row">
+          <label>Per-material opacity (saved per sheet)</label>
+        </div>
+        <div class="pm-row">
+          <select id="pm-material"><option>— Select material —</option></select>
+          <input id="pm-opacity-range" type="range" min="0" max="1" step="0.01" value="1.00" />
+          <output id="pm-opacity-val">1.00</output>
+        </div>
+        <div class="hint">Pick a material, then set its opacity. This does not change global opacity above.</div>
+
+        <!-- Chroma key -->
+        <div class="pm-row" style="margin-top:12px;">
+          <label><input id="pm-chroma-toggle" type="checkbox" /> Chroma key</label>
+        </div>
+        <div class="pm-row pm-chroma-controls" id="pm-chroma-controls">
+          <label>Key color
+            <input id="pm-chroma-color" type="color" value="#00ff00" />
+          </label>
+          <label>Tolerance
+            <input id="pm-chroma-tol" type="range" min="0" max="1" step="0.01" value="0.30" />
+          </label>
+          <label>Feather
+            <input id="pm-chroma-feather" type="range" min="0" max="1" step="0.01" value="0.00" />
+          </label>
+        </div>
+
       </section>
 
-      <section class="pane" data-tab="caption"></section>
-      <section class="pane" data-tab="views"></section>
+      <!-- CAPTION PANE (placeholder) -->
+      <section id="pane-caption" class="pane" data-active="false"></section>
+      <!-- VIEWS PANE (placeholder) -->
+      <section id="pane-views" class="pane" data-active="false"></section>
     </aside>
   </div>
 
-  <!-- existing boot & viewer bundle -->
-  <script type="module" src="boot.esm.cdn.js"></script>
-  <script type="module" src="viewer.module.cdn.js"></script>
-  <script type="module" src="viewer.bridge.module.js"></script>
-
-  <!-- material UI wiring: waits for scene/model and fills once -->
-  <script src="material.orchestrator.js" defer></script>
+  <!-- boot + modules (paths match your repo files) -->
+  <script type="module" src="./boot.esm.cdn.js"></script>
+  <script type="module" src="./viewer.bridge.module.js"></script>
+  <script type="module" src="./material.ui.orch.js"></script>
 </body>
 </html>

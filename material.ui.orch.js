@@ -1,179 +1,63 @@
 // material.ui.orch.js
-// LociMyu Material UI Orchestrator (V2, one-shot, no polling)
-// - waits for lm:model-ready (or scene-ready fallback) then fills once
-// - idempotent wiring, no noisy logs
+const LOG_PREFIX='[lm-orch]'; const log=(...a)=>console.log(LOG_PREFIX,...a);
+const viewerModPromise = import('./viewer.module.cdn.js').catch(()=> ({}));
+let sceneReady=false, modelReady=false;
 
-if (window.__LM_MAT_UI_ORCH_V2__) {
-  // already installed
-} else {
-  window.__LM_MAT_UI_ORCH_V2__ = true;
-  console.log('[lm-orch] loaded');
-
-  // ---- tiny helpers ----
-  const $ = (id) => document.getElementById(id);
-  const clamp01 = (v) => Math.max(0, Math.min(1, Number(v)));
-
-  // try to import viewer API lazily (doesn't throw if missing)
-  let viewerModPromise = null;
-  const getViewerMod = () => {
-    if (!viewerModPromise) {
-      viewerModPromise = import('./viewer.module.cdn.js').catch(() => ({}));
-    }
-    return viewerModPromise;
-  };
-
-  // list names via viewer API
-  async function namesFromViewer() {
-    try {
-      const mod = await getViewerMod();
-      const arr = (typeof mod.listMaterials === 'function') ? (mod.listMaterials() || []) : [];
-      return arr.map((r) => r?.name).filter(Boolean);
-    } catch {
-      return [];
-    }
-  }
-
-  // list names by traversing scene directly
-  function namesFromScene() {
-    const s = window.__LM_SCENE;
-    const set = new Set();
-    s?.traverse((o) => {
-      if (!o.isMesh || !o.material) return;
-      (Array.isArray(o.material) ? o.material : [o.material]).forEach((m) => {
-        const n = m?.name;
-        if (n && !/^#\d+$/.test(n)) set.add(n);
-      });
-    });
-    return [...set];
-  }
-
-  // fill select (preserve current selection if still valid)
-  function fillSelect(names) {
-    const sel = $('pm-material');
-    if (!sel || !Array.isArray(names)) return false;
-    const uniq = [...new Set(names)];
-    const cur = sel.value;
-    sel.innerHTML = '<option value="">— Select material —</option>';
-    uniq.forEach((n) => {
-      const o = document.createElement('option');
-      o.value = n;
-      o.textContent = n;
-      sel.appendChild(o);
-    });
-    if (cur && uniq.includes(cur)) sel.value = cur;
-    console.log('[lm-orch] filled', uniq.length, uniq);
-    return uniq.length > 0;
-  }
-
-  // apply opacity by material name (viewer API -> fallback)
-  async function setOpacityByName(name, v) {
-    v = clamp01(v);
-    let count = 0;
-    const mod = await getViewerMod();
-
-    if (typeof mod.applyMaterialPropsByName === 'function') {
-      count = mod.applyMaterialPropsByName(name, { opacity: v });
-    } else if (window.LM_viewer?.applyMaterialPropsByName) {
-      count = window.LM_viewer.applyMaterialPropsByName(name, { opacity: v });
-    } else {
-      const s = window.__LM_SCENE;
-      s?.traverse((o) => {
-        if (!o.isMesh || !o.material) return;
-        (Array.isArray(o.material) ? o.material : [o.material]).forEach((m) => {
-          if ((m?.name || '') === name) {
-            m.transparent = v < 1;
-            m.opacity = v;
-            m.depthWrite = v >= 1;
-            m.needsUpdate = true;
-            count++;
-          }
-        });
-      });
-    }
-    return count;
-  }
-
-  // read current opacity for selection (first match)
-  function getOpacityByName(name) {
-    let val = null;
-    const s = window.__LM_SCENE;
-    s?.traverse((o) => {
-      if (val !== null) return;
-      if (!o.isMesh || !o.material) return;
-      (Array.isArray(o.material) ? o.material : [o.material]).some((m) => {
-        if ((m?.name || '') === name) {
-          val = Number(m.opacity ?? 1);
-          return true;
-        }
-        return false;
-      });
-    });
-    return clamp01(val == null ? 1 : val);
-  }
-
-  // idempotent wiring
-  function wire() {
-    const sel = $('pm-material');
-    const rng = $('pm-opacity-range');
-    const out = $('pm-opacity-val');
-    if (!(sel && rng && out)) return;
-
-    const onChange = () => {
-      const n = sel.value;
-      const v = n ? getOpacityByName(n) : 1;
-      rng.value = v;
-      out.textContent = v.toFixed(2);
-    };
-    const onInput = async () => {
-      const n = sel.value;
-      if (!n) return;
-      const v = clamp01(rng.value || 1);
-      out.textContent = v.toFixed(2);
-      await setOpacityByName(n, v);
-    };
-
-    // prevent double binding
-    sel.__lm_orch_bound__ || (sel.addEventListener('change', onChange), sel.__lm_orch_bound__ = true);
-    rng.__lm_orch_bound__ || (rng.addEventListener('input', onInput, { passive: true }), rng.__lm_orch_bound__ = true);
-
-    // initial sync
-    onChange();
-  }
-
-  // one-shot runner when model is ready
-  let ran = false;
-  async function runOnce() {
-    if (ran) return;
-    ran = true;
-
-    // try viewer first, fallback to scene
-    const viaViewer = await namesFromViewer();
-    if (fillSelect(viaViewer)) {
-      wire();
-      return;
-    }
-    const viaScene = namesFromScene();
-    fillSelect(viaScene);
-    wire();
-  }
-
-  // prefer model-ready (bridge dispatches this after GLB attached)
-  document.addEventListener(
-    'lm:model-ready',
-    () => {
-      console.log('[lm-orch] model-ready');
-      runOnce();
-    },
-    { once: true }
-  );
-
-  // fallback: if someone dispatches scene-ready earlier (older flows)
-  document.addEventListener(
-    'lm:scene-ready',
-    () => {
-      console.log('[lm-orch] scene-ready');
-      runOnce();
-    },
-    { once: true }
-  );
+function namesFromScene(){
+  const s=window.__LM_SCENE,set=new Set();
+  s?.traverse(o=>{ if(!o.isMesh||!o.material) return;
+    (Array.isArray(o.material)?o.material:[o.material]).forEach(m=>m?.name&&set.add(m.name));});
+  return [...set].filter(n=>!/^#\d+$/.test(n));
 }
+async function namesFromViewer(){
+  const mod=await viewerModPromise;
+  try{ const arr=mod.listMaterials?.()||[]; return arr.map(r=>r?.name).filter(Boolean).filter(n=>!/^#\d+$/.test(n)); }
+  catch{ return []; }
+}
+function getOpacityByName(name){
+  let val=null;
+  window.__LM_SCENE?.traverse(o=>{
+    if(val!==null) return;
+    if(!o.isMesh||!o.material) return;
+    (Array.isArray(o.material)?o.material:[o.material]).some(m=>{
+      if((m?.name||'')===name){ val=Number(m.opacity??1); return true; }
+      return false;
+    });
+  });
+  return (val==null?1:Math.max(0,Math.min(1,val)));
+}
+async function applyOpacityByName(name,v){
+  const mod=await viewerModPromise;
+  v=Math.max(0,Math.min(1,Number(v)));
+  if(typeof mod.applyMaterialPropsByName==='function'){
+    try{ mod.applyMaterialPropsByName(name,{opacity:v}); return; }catch{}
+  }
+  window.__LM_SCENE?.traverse(o=>{
+    if(!o.isMesh||!o.material) return;
+    (Array.isArray(o.material)?o.material:[o.material]).forEach(m=>{
+      if((m?.name||'')===name){ m.transparent=v<1; m.opacity=v; m.depthWrite=v>=1; m.needsUpdate=true; }
+    });
+  });
+}
+async function emitMaterialList(){
+  if(!modelReady && !sceneReady) return;
+  const vv=await namesFromViewer(); const ss=namesFromScene();
+  const uniq=[...new Set([...(vv||[]),...(ss||[])])];
+  document.dispatchEvent(new CustomEvent('pm:set-materials',{detail:{materials:uniq,values:{'*':1}}}));
+}
+
+(function wire(){
+  log('loaded');
+  document.addEventListener('lm:scene-ready',()=>{ sceneReady=true; log('scene-ready'); },{once:true});
+  document.addEventListener('lm:model-ready',()=>{ modelReady=true; log('model-ready'); emitMaterialList(); });
+  document.addEventListener('pm:request-materials',()=>{ emitMaterialList(); });
+  document.addEventListener('pm:request-value',(e)=>{
+    const name=e.detail?.material; if(!name) return;
+    const v=getOpacityByName(name);
+    document.dispatchEvent(new CustomEvent('pm:set-value',{detail:{material:name,opacity:v}}));
+  });
+  document.addEventListener('pm:opacity-change',(e)=>{
+    const {material,opacity}=e.detail||{}; if(!material||typeof opacity!=='number') return;
+    applyOpacityByName(material,opacity);
+  });
+})();
