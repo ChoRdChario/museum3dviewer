@@ -1,167 +1,176 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1" />
-  <title>LociMyu v6.6</title>
-  <link rel="icon" href="./favicon.ico" />
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>LociMyu v6.6</title>
+<style>
+:root{
+  --bg:#0f1115; --panel:#161a20; --line:#2a2f3a; --text:#e6ebf3; --muted:#aab2c0; --accent:#4c8dff;
+  --pad:10px;
+  font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+}
+*{box-sizing:border-box}
+html,body{height:100%; background:var(--bg); color:var(--text); margin:0}
+#app{display:grid; grid-template-columns: 1fr 380px; height:100%}
+#stage{position:relative; background:#0b0d11}
+#gl{width:100%; height:100%}
+#ui{background:var(--panel); border-left:1px solid var(--line); display:flex; flex-direction:column}
+header{display:flex; gap:8px; align-items:center; padding:10px; border-bottom:1px solid var(--line)}
+header .grow{flex:1}
+input[type="text"]{width:100%; background:#0f131a; color:var(--text); border:1px solid var(--line); padding:8px 10px; border-radius:8px}
+button,select{background:#10151d; color:var(--text); border:1px solid var(--line); padding:8px 10px; border-radius:8px}
+button:hover,select:hover{border-color:#3a4252}
+.tabs{display:flex; gap:8px; padding:0 10px; border-bottom:1px solid var(--line)}
+.tabs button{appearance:none; background:transparent; border:none; color:var(--muted); padding:12px 8px; border-bottom:2px solid transparent; cursor:pointer}
+.tabs button[aria-selected="true"]{color:var(--text); border-bottom-color:var(--accent)}
+.panes{flex:1; overflow:auto; padding:12px}
+.pane{display:none}
+.pane[aria-hidden="false"]{display:block}
+.line{display:flex; align-items:center; gap:10px; padding:8px 0}
+.line .grow{flex:1}
+hr{border:none; border-top:1px solid var(--line); margin:12px 0}
+small.hint{color:var(--muted)}
+/* keep controls from overflowing */
+fieldset{border:none; margin:0; padding:0}
+.colorbox{width:56px; height:28px}
+</style>
 
-  <!-- three の bare import を暫定的に解決（長期はモジュール側で統一する） -->
-  <script type="importmap">
-  {
-    "imports": {
-      "three": "https://unpkg.com/three@0.156.1/build/three.module.js",
-      "three/examples/jsm/": "https://unpkg.com/three@0.156.1/examples/jsm/"
-    }
+<!-- Import map MUST precede any module script -->
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.160.1/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.160.1/examples/jsm/"
   }
-  </script>
-
-  <style>
-    :root{
-      --bg:#0c0d10; --panel:#121318; --line:#262833; --text:#e6e8ef; --muted:#a6a8b0; --accent:#4da3ff;
-    }
-    html,body{height:100%}
-    body{margin:0;background:var(--bg);color:var(--text);
-      font-family:system-ui,Segoe UI,Roboto,Helvetica,Arial,sans-serif}
-    #app{display:grid;grid-template-columns:1fr 360px;height:100vh}
-    #stage{position:relative;background:#0b0c10}
-    #gl{width:100%;height:100%;display:block}
-    #ui{background:var(--panel);border-left:1px solid var(--line);
-      overflow-y:auto;overflow-x:hidden}
-
-    header{display:flex;gap:8px;align-items:center;padding:10px 12px;border-bottom:1px solid var(--line)}
-    #brand{font-weight:600;opacity:.9}
-    .row{display:flex;gap:6px;align-items:center}
-    input[type="text"]{background:#0f1016;color:var(--text);border:1px solid var(--line);
-      border-radius:6px;padding:8px 10px;min-width:0}
-    button,select{background:#0f1016;color:var(--text);border:1px solid var(--line);
-      border-radius:8px;padding:8px 10px;cursor:pointer}
-
-    .tabs{display:flex;border-bottom:1px solid var(--line)}
-    .tabs button{flex:1 1 0;padding:10px 6px;background:transparent;border:none;
-      border-bottom:2px solid transparent;color:var(--muted)}
-    .tabs button[aria-selected="true"]{color:var(--text);border-bottom-color:var(--accent)}
-    .pane{display:none;padding:12px}
-    .pane[data-active="true"]{display:block}
-    .pad{padding:12px}
-    .hint{color:var(--muted);font-size:.86rem}
-
-    /* Material pane layout helpers (wrap nicely, no horizontal scroll) */
-    .pm-row{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin-top:8px}
-    .pm-row label{display:inline-flex;align-items:center;gap:8px;white-space:nowrap}
-    .pm-row input[type="range"]{min-width:140px;flex:1 1 160px}
-    .pm-row input[type="color"]{width:44px;height:28px;padding:0;border:1px solid var(--line);border-radius:6px;background:transparent}
-    .pm-chroma-controls{margin-top:6px}
-    .pm-chroma-controls label{flex:1 1 160px}
-
-    @media (max-width: 420px){
-      #app{grid-template-columns:1fr}
-      .pm-row label{flex:1 1 100%}
-      .pm-row input[type="range"]{min-width:0}
-    }
-  </style>
+}
+</script>
 </head>
 <body>
-  <div id="app">
-    <div id="stage"><canvas id="gl"></canvas></div>
+<div id="app">
+  <div id="stage"><canvas id="gl"></canvas></div>
+  <aside id="ui" role="complementary">
+    <header>
+      <div class="grow"><input id="glbUrl" type="text" placeholder="Drive fileId / GLB URL" /></div>
+      <button id="btnLoad">Load</button>
+      <select id="save-target-sheet" title="Select sheet…"><option value="">Select sheet…</option></select>
+      <button id="btnCreate">Create</button>
+      <button id="auth-signin" style="margin-left:auto">Sign in</button>
+    </header>
 
-    <aside id="ui">
-      <!-- top bar -->
-      <header>
-        <div id="brand">LociMyu v6.6</div>
-        <div class="row" style="margin-left:auto;gap:6px">
-          <button id="auth-signin">Sign in</button>
-        </div>
-      </header>
+    <nav class="tabs" role="tablist">
+      <button id="tab-caption" role="tab" aria-controls="tab-panel-caption" aria-selected="true">Caption</button>
+      <button id="tab-material" role="tab" aria-controls="tab-panel-material" aria-selected="false">Material</button>
+      <button id="tab-views" role="tab" aria-controls="tab-panel-views" aria-selected="false">Views</button>
+    </nav>
 
-      <!-- URL & sheet controls (IDs keep boot wiring intact) -->
-      <div class="pad" style="border-bottom:1px solid var(--line)">
-        <div class="row">
-          <input id="glbUrl" type="text" placeholder="Drive fileId / GLB URL" />
-          <button id="btnGlb">Load</button>
+    <div class="panes">
+      <!-- Caption pane (restored minimal structure; content managed by legacy scripts) -->
+      <section id="tab-panel-caption" class="pane" role="tabpanel" aria-labelledby="tab-caption" aria-hidden="false">
+        <div class="line"><strong>Captions</strong></div>
+        <div id="caption-tools" class="line" aria-label="Caption tools">
+          <button id="btnAddPin">Add pin</button>
+          <button id="btnDeletePin">Delete</button>
         </div>
-        <div class="row" style="margin-top:8px">
-          <select id="save-target-sheet"><option value="">Select sheet...</option></select>
-          <button id="save-target-create">Create</button>
-        </div>
-      </div>
-
-      <!-- tabs -->
-      <nav class="tabs" role="tablist">
-        <button id="tab-caption" role="tab" data-tab="caption" aria-selected="false">Caption</button>
-        <button id="tab-material" role="tab" data-tab="material" aria-selected="true">Material</button>
-        <button id="tab-views" role="tab" data-tab="views" aria-selected="false">Views</button>
-      </nav>
-
-      <!-- MATERIAL -->
-      <section id="pane-material" class="pane" data-active="true">
-        <div class="pm-row">
-          <label><input id="pm-unlit" type="checkbox" /> Unlit</label>
-          <label><input id="pm-double" type="checkbox" /> Double-sided</label>
-        </div>
-
-        <div class="pm-row">
-          <label>Opacity
-            <input id="pm-opaque" type="range" min="0" max="1" step="0.01" value="1.00" />
-          </label>
-          <output id="pm-opaque-out">1.00</output>
-        </div>
-
-        <div class="pm-row">
-          <label><input id="pm-whitealpha" type="checkbox" /> White → Alpha</label>
-        </div>
-
-        <div class="pm-row"><label>Per-material opacity (saved per sheet)</label></div>
-        <div class="pm-row">
-          <select id="pm-material"><option value="">— Select material —</option></select>
-          <input id="pm-opacity-range" type="range" min="0" max="1" step="0.01" value="1.00" />
-          <output id="pm-opacity-val">1.00</output>
-        </div>
-        <div class="hint">Pick a material, then set its opacity. This does not change global opacity above.</div>
-
-        <div class="pm-row" style="margin-top:12px">
-          <label><input id="pm-chroma-toggle" type="checkbox" /> Chroma key</label>
-        </div>
-        <div id="pm-chroma-controls" class="pm-row pm-chroma-controls">
-          <label>Key color
-            <input id="pm-chroma-color" type="color" value="#00ff00" />
-          </label>
-          <label>Tolerance
-            <input id="pm-chroma-tol" type="range" min="0" max="1" step="0.01" value="0.30" />
-          </label>
-          <label>Feather
-            <input id="pm-chroma-feather" type="range" min="0" max="1" step="0.01" value="0.00" />
-          </label>
-        </div>
+        <div id="caption-list" style="min-height:140px; border:1px solid var(--line); border-radius:8px; padding:8px; overflow:auto"></div>
       </section>
 
-      <!-- placeholders -->
-      <section id="pane-caption" class="pane" data-active="false"></section>
-      <section id="pane-views"   class="pane" data-active="false"></section>
-    </aside>
-  </div>
+      <!-- Material pane (orchestrator will enhance/replace the inner UI) -->
+      <section id="tab-panel-material" class="pane" role="tabpanel" aria-labelledby="tab-material" aria-hidden="true">
+        <fieldset>
+          <div class="line">
+            <label><input type="checkbox" id="pm-unlit"> Unlit</label>
+            <label><input type="checkbox" id="pm-doubleside"> Double-sided</label>
+          </div>
 
-  <!-- 既存の起動順は維持 -->
-  <script type="module" src="./boot.esm.cdn.js"></script>
-  <script type="module" src="./viewer.bridge.module.js"></script>
-  <script type="module" src="./material.ui.orch.js"></script>
+          <div class="line">
+            <div class="grow">
+              <div class="line" style="padding-top:0">
+                <label class="grow">Opacity</label>
+                <input id="opacity-range" type="range" min="0" max="1" step="0.01" value="1" class="grow">
+                <output id="opacity-value">1.00</output>
+              </div>
+            </div>
+          </div>
 
-  <!-- タブ切替（最小・他依存なし） -->
-  <script>
-    (function () {
-      const tabs = document.querySelectorAll('[role="tab"]');
-      const panes = {
-        caption: document.getElementById('pane-caption'),
-        material: document.getElementById('pane-material'),
-        views: document.getElementById('pane-views'),
-      };
-      function activate(tabName){
-        tabs.forEach(btn => btn.setAttribute('aria-selected', String(btn.dataset.tab === tabName)));
-        Object.entries(panes).forEach(([name,el]) => el?.setAttribute('data-active', String(name === tabName)));
-      }
-      activate('material');
-      tabs.forEach(btn => btn.addEventListener('click', () => activate(btn.dataset.tab)));
-    })();
-  </script>
+          <div class="line">
+            <label><input type="checkbox" id="mat-white2alpha"> White → Alpha</label>
+          </div>
+
+          <div class="line">
+            <select id="per-material-select" class="grow">
+              <option>— Select material —</option>
+            </select>
+            <input id="per-material-range" type="range" min="0" max="1" step="0.01" value="1" class="grow">
+            <output id="per-material-value">1.00</output>
+          </div>
+
+          <small class="hint">Pick a material, then set its opacity. This does not change global opacity above.</small>
+          <hr>
+          <div id="chroma-block">
+            <div class="line"><label><input type="checkbox" id="ck-enabled"> Chroma key</label></div>
+            <div class="line">
+              <label for="ck-color">Key color</label>
+              <input id="ck-color" type="color" class="colorbox" value="#00ff00">
+            </div>
+            <div class="line">
+              <label class="grow" for="ck-tol">Tolerance</label>
+              <input id="ck-tol" type="range" min="0" max="1" step="0.01" value="0" class="grow">
+              <output id="ck-tol-val">0.00</output>
+            </div>
+            <div class="line">
+              <label class="grow" for="ck-feather">Feather</label>
+              <input id="ck-feather" type="range" min="0" max="1" step="0.01" value="0" class="grow">
+              <output id="ck-feather-val">0.00</output>
+            </div>
+          </div>
+        </fieldset>
+      </section>
+
+      <!-- Views pane -->
+      <section id="tab-panel-views" class="pane" role="tabpanel" aria-labelledby="tab-views" aria-hidden="true">
+        <div class="line"><em>Views panel (placeholder)</em></div>
+      </section>
+    </div>
+  </aside>
+</div>
+
+<script>
+// very small tabs controller (restores correct ARIA + switching)
+(() => {
+  const tabs = [
+    ['tab-caption', 'tab-panel-caption'],
+    ['tab-material', 'tab-panel-material'],
+    ['tab-views', 'tab-panel-views'],
+  ];
+  tabs.forEach(([tabId, panelId]) => {
+    const t = document.getElementById(tabId);
+    const p = document.getElementById(panelId);
+    t?.addEventListener('click', () => {
+      tabs.forEach(([tid, pid]) => {
+        const tt = document.getElementById(tid);
+        const pp = document.getElementById(pid);
+        const on = tid === tabId;
+        tt?.setAttribute('aria-selected', on ? 'true' : 'false');
+        pp?.setAttribute('aria-hidden', on ? 'false' : 'true');
+      });
+    });
+  });
+  // keep inline value readouts in sync (non-blocking, orchestrator can override)
+  const bind = (id, out) => {
+    const el = document.getElementById(id), o = document.getElementById(out);
+    if(el && o){ el.addEventListener('input', ()=>{ o.textContent = (+el.value).toFixed(2); }); }
+  };
+  bind('opacity-range','opacity-value');
+  bind('per-material-range','per-material-value');
+  bind('ck-tol','ck-tol-val');
+  bind('ck-feather','ck-feather-val');
+})();
+</script>
+
+<!-- App bootstrap + modules (order matters) -->
+<script type="module" src="./boot.esm.cdn.js"></script>
+<script type="module" src="./viewer.bridge.module.js"></script>
+<script type="module" src="./material.ui.orch.js"></script>
 </body>
 </html>
