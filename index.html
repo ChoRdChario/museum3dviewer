@@ -5,6 +5,17 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1" />
   <title>LociMyu v6.6</title>
   <link rel="icon" href="./favicon.ico" />
+
+  <!-- three の bare import を暫定的に解決（長期はモジュール側で統一する） -->
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://unpkg.com/three@0.156.1/build/three.module.js",
+      "three/examples/jsm/": "https://unpkg.com/three@0.156.1/examples/jsm/"
+    }
+  }
+  </script>
+
   <style>
     :root{
       --bg:#0c0d10; --panel:#121318; --line:#262833; --text:#e6e8ef; --muted:#a6a8b0; --accent:#4da3ff;
@@ -124,18 +135,18 @@
         </div>
       </section>
 
-      <!-- placeholders (boot & material modules will wire as必要) -->
+      <!-- placeholders -->
       <section id="pane-caption" class="pane" data-active="false"></section>
       <section id="pane-views"   class="pane" data-active="false"></section>
     </aside>
   </div>
 
-  <!-- existing modules: 起動順は変更しない -->
+  <!-- 既存の起動順は維持 -->
   <script type="module" src="./boot.esm.cdn.js"></script>
   <script type="module" src="./viewer.bridge.module.js"></script>
   <script type="module" src="./material.ui.orch.js"></script>
 
-  <!-- lightweight tab wiring (他モジュール非依存) -->
+  <!-- タブ切替（最小・他依存なし） -->
   <script>
     (function () {
       const tabs = document.querySelectorAll('[role="tab"]');
@@ -148,9 +159,7 @@
         tabs.forEach(btn => btn.setAttribute('aria-selected', String(btn.dataset.tab === tabName)));
         Object.entries(panes).forEach(([name,el]) => el?.setAttribute('data-active', String(name === tabName)));
       }
-      // 初期表示（Material）
       activate('material');
-      // クリックで切替
       tabs.forEach(btn => btn.addEventListener('click', () => activate(btn.dataset.tab)));
     })();
   </script>
