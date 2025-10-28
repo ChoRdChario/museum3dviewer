@@ -42,21 +42,6 @@
     #pm-opacity{display:flex;align-items:center;gap:8px}
     #pm-opacity output{min-width:3ch;text-align:right;opacity:.8}
   </style>
-
-  <!-- Diagnostics loader: only loads when ?debug=1 or ?diag is present -->
-  <script>
-    (function(){
-      try{
-        var qp = new URLSearchParams(location.search);
-        if (qp.has('debug') || qp.has('diag')) {
-          var s = document.createElement('script');
-          s.src = (window.__LM_DIAG_PATH__ || './dev/material.debug.diag.js') + '?v=20251029';
-          document.head.appendChild(s);
-        }
-      }catch(e){ console.warn('[diag-loader]', e); }
-    })();
-  </script>
-
 </head>
 <body>
   <div id="app">
