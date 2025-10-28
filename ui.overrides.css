@@ -1,78 +1,19 @@
+/* Keep overrides tiny and targeted to avoid layout regressions */
+:root{--gap:8px}
+#ui{width:360px;min-width:320px}
+.tabs{display:flex;gap:8px;padding:8px;border-bottom:1px solid var(--line,#333)}
+.tabs [role="tab"]{padding:6px 10px;border:1px solid #444;background:#1f1f1f;border-radius:6px;cursor:pointer}
+.tabs [aria-selected="true"]{background:#2a2a2a}
+.pane{display:none}
+.pane[data-active="true"]{display:block}
 
-/* === LociMyu UI overrides: restore native checkboxes & classic tabs === */
+.grp{margin:10px 0}
+.row{display:flex}
+#pm-chroma-row{display:flex;flex-wrap:wrap;gap:12px;align-items:center}
+#pm-chroma-row .field{display:flex;align-items:center;gap:8px;min-width:180px}
 
-/* 1) Checkboxes: remove any "switch" styling and go back to platform-native look */
-#ui input[type="checkbox"] {
-  -webkit-appearance: checkbox;
-  appearance: checkbox;
-  width: 14px;
-  height: 14px;
-  margin-right: 6px;
-  vertical-align: middle;
-  background: initial;
-  border: initial;
-  box-shadow: none;
-  border-radius: 2px;
-}
+/* restore native checkboxes */
+input[type="checkbox"]{appearance:auto !important;-webkit-appearance:checkbox!important;width:auto;height:auto;}
 
-/* Nuke pseudo-elements that some toggle styles add */
-#ui input[type="checkbox"]::before,
-#ui input[type="checkbox"]::after {
-  content: none !important;
-}
-
-/* Keep labels aligned nicely with the box */
-#ui label,
-#ui .chkline {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-
-/* 2) Tabs: restore compact, underline-style tabs and prevent horizontal scroll */
-nav.tabs {
-  display: flex;
-  gap: 0;
-  border-bottom: 1px solid var(--line, #333);
-  overflow-x: hidden;
-}
-nav.tabs [role="tab"] {
-  flex: 1 1 0;
-  padding: 8px 12px;
-  background: transparent;
-  border: none;
-  color: var(--fg-soft, #9aa3ad);
-  font-weight: 600;
-  white-space: nowrap;
-}
-nav.tabs [role="tab"][aria-selected="true"] {
-  color: var(--fg, #e6e6e6);
-  box-shadow: inset 0 -2px 0 var(--acc, #4ea1ff);
-}
-nav.tabs [role="tab"]:focus-visible {
-  outline: 2px solid var(--acc, #4ea1ff);
-  outline-offset: 2px;
-}
-
-/* 3) Material pane: wrap chroma controls so they never overflow horizontally */
-#pm-chroma-wrap, .pm-chroma-grid {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  row-gap: 10px;
-}
-@media (min-width: 720px) {
-  /* On wider panels, use two columns but keep each control wrapped */
-  #pm-chroma-wrap, .pm-chroma-grid {
-    grid-template-columns: 1fr 1fr;
-    column-gap: 16px;
-  }
-}
-#pm-chroma-wrap .field {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  align-items: center;
-  gap: 10px;
-}
-
-/* Ensure the right panel never triggers horizontal scroll from controls */
-.pane { overflow-x: hidden; }
+/* range labels */
+#op-global-val,#pm-opacity-val,#pm-chroma-tol-val,#pm-chroma-feather-val{display:inline-block;min-width:2.5ch;text-align:right;margin-left:4px}
