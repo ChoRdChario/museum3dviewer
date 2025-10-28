@@ -1,14 +1,18 @@
 // material.orchestrator.js
-// Robust Step2 + smarter mounting: find existing per-material controls first, then fall back
+// Robust Step2 with full fallback:
+// - Prefer viewer.listMaterials() -> name -> [materialKey...] map
+// - If unavailable/empty, traverse scene to collect material names
+// - If applyMaterialProps/materialKey is unavailable, fall back to direct material edits by name
 /* eslint-disable */
 (() => {
   const LOG_LEVEL = 'info'; // 'debug' | 'info' | 'silent'
   const logd = (...a)=> (LOG_LEVEL==='debug') && console.debug('[mat-orch]', ...a);
-  const logi = (...a)=> (LOG_LEVEL!=='silent') && console[LOG_LEVEL]('[mat-orch]', ...a);
+  const logi = (...a)=> (LOG_LEVEL!=='silent') && console.info('[mat-orch]', ...a);
 
   const state = {
     inited: false,
-    mapNameToKeys: new Map(),  // name => string[] materialKeys
+    mapNameToKeys: new Map(),  // name => string[] materialKeys (may be empty if using fallback)
+    haveKeys: false,           // true when keys are valid for applyMaterialProps
     activeName: null,
     rafId: 0,
     ui: null
@@ -30,40 +34,66 @@
     try { return (window.viewer?.listMaterials?.() || []).filter(Boolean); }
     catch(e){ return []; }
   }
+  function getSceneRoot(){
+    return window.viewer?.getSceneRoot?.() || window.scene || null;
+  }
+  function traverseAllMaterials(fn){
+    const root = getSceneRoot();
+    if (!root || !root.traverse) return;
+    root.traverse((obj)=>{
+      const m = obj && obj.material;
+      if (!m) return;
+      if (Array.isArray(m)) m.forEach(fn);
+      else fn(m);
+    });
+  }
+  function enumerateMaterialsFromScene(){
+    const names = new Map(); // name => placeholder key list (empty)
+    traverseAllMaterials((mat)=>{
+      const nm = (mat && (mat.name || (mat.userData && mat.userData.name))) || '';
+      if (!nm) return;
+      if (!names.has(nm)) names.set(nm, []);
+    });
+    return [...names.keys()];
+  }
+
   async function waitForMaterials({timeoutMs=6000, pollMs=120}={}){
     const t0 = performance.now();
-    let lastCount = -1;
+    let last = -1;
     while (performance.now() - t0 < timeoutMs) {
       const list = listMaterialsSafe();
-      const ok = list.length>0 && list.every(it=>it?.name && it?.materialKey);
+      const ok = list.length>0 && list.every(it=>it?.name);
       if (ok) return list;
-      if (list.length !== lastCount) {
-        lastCount = list.length;
-        logi('waiting materials…', list.length);
+      // try scene traversal as soon as there are meshes
+      const root = getSceneRoot();
+      if (root) {
+        let found = 0;
+        traverseAllMaterials(()=>{ found++; });
+        if (found>0) return []; // signal to use traversal fallback
       }
+      if (list.length !== last) { last = list.length; logi('waiting materials…', list.length); }
       await new Promise(r=>setTimeout(r, pollMs));
     }
-    return [];
+    return []; // timeout
   }
 
   // --- Mount / UI discovery ---
   function ensureUI(){
-    // 1) 既存のコントロールを最優先で拾う（あなたのDOMを尊重）
+    // 1) 既存のコントロールを最優先で拾う
     let sel = document.getElementById('pm-material') || document.querySelector('#pm-material');
     let rng = document.getElementById('pm-opacity-range') || document.querySelector('#pm-opacity-range');
     let val = document.getElementById('pm-opacity-val') || document.querySelector('#pm-opacity-val');
 
     let rootTab = null;
-    // 2) 既存セレクトが在れば、その祖先からタブパネルらしい要素を特定
     if (sel) {
       rootTab = sel.closest('.lm-tabpanel,[role="tabpanel"]')
              || document.getElementById('tab-material')
              || document.querySelector('[aria-labelledby="tabbtn-material"]')
              || document.querySelector('[data-panel="material"]')
-             || document.body; // 最後の保険
+             || document.body;
     }
 
-    // 3) 既存が見つからない場合のみ、タブパネルを探して最小UIを作成
+    // 既存がなければ作る
     if (!sel || !rng) {
       if (!rootTab) {
         rootTab =
@@ -71,15 +101,13 @@
           document.querySelector('.lm-tabpanel[data-panel="material"]') ||
           document.querySelector('[role="tabpanel"][aria-labelledby="tabbtn-material"]');
       }
-      if (!rootTab) return null; // 見つからない場合は諦める
+      if (!rootTab) return null;
 
       let mount = rootTab.querySelector('#mat-root');
       if (!mount) {
         mount = document.createElement('div');
         mount.id = 'mat-root';
-        mount.style.display='flex';
-        mount.style.flexDirection='column';
-        mount.style.gap='.5rem';
+        mount.style.display='flex'; mount.style.flexDirection='column'; mount.style.gap='.5rem';
         rootTab.appendChild(mount);
       }
       mount.innerHTML = `
@@ -98,14 +126,11 @@
       rng = mount.querySelector('#pm-opacity-range');
       val = mount.querySelector('#pm-opacity-val');
     } else {
-      // 既存UIがある場合、Refreshボタンを隣に差し込む（未設置時のみ）
+      // Refreshボタン（未設置なら追加）
       const hasRefresh = !!(sel.parentElement && sel.parentElement.querySelector('#pm-refresh'));
       if (!hasRefresh) {
         const btn = document.createElement('button');
-        btn.id = 'pm-refresh';
-        btn.type = 'button';
-        btn.title = 'Refresh materials';
-        btn.textContent = '↻';
+        btn.id = 'pm-refresh'; btn.type = 'button'; btn.title = 'Refresh materials'; btn.textContent = '↻';
         sel.insertAdjacentElement('afterend', btn);
       }
     }
@@ -114,20 +139,28 @@
     return (state.ui = { rootTab: rootTab || document.body, sel, rng, val, refresh });
   }
 
-  function buildNameMap(list){
+  function buildNameMapFromViewer(list){
     state.mapNameToKeys.clear();
     for (const it of list) {
       const name = it?.name ?? '';
       const key  = it?.materialKey ?? '';
-      if (!name || !key) continue;
+      if (!name) continue;
       if (!state.mapNameToKeys.has(name)) state.mapNameToKeys.set(name, []);
-      state.mapNameToKeys.get(name).push(String(key));
+      if (key) state.mapNameToKeys.get(name).push(String(key));
     }
-    // アクティブ名が無ければ先頭
+    state.haveKeys = [...state.mapNameToKeys.values()].some(arr => arr.length>0);
     if (!state.activeName) {
       const first = [...state.mapNameToKeys.keys()][0] || null;
       state.activeName = first;
     }
+  }
+
+  function buildNameMapFromScene(){
+    state.mapNameToKeys.clear();
+    const names = enumerateMaterialsFromScene();
+    names.forEach(n => state.mapNameToKeys.set(n, [])); // keys unknown in fallback
+    state.haveKeys = false;
+    if (!state.activeName) state.activeName = names[0] || null;
   }
 
   function fillSelect(){
@@ -136,7 +169,6 @@
     sel.innerHTML = names.map(n=>`<option value="${escapeHtml(n)}">${escapeHtml(n)}</option>`).join('');
     if (state.activeName && names.includes(state.activeName)) sel.value = state.activeName;
     else { sel.selectedIndex = 0; state.activeName = sel.value || null; }
-    // 空の場合はプレースホルダ
     if (!names.length) {
       sel.innerHTML = `<option value="">— Select material —</option>`;
       state.activeName = null;
@@ -144,11 +176,24 @@
   }
 
   function applyOpacityToActive(opacity){
-    if (!state.activeName) return;
-    const keys = state.mapNameToKeys.get(state.activeName) || [];
+    const name = state.activeName;
+    if (!name) return;
+
     const apply = window.viewer?.applyMaterialProps;
-    if (!apply || !keys.length) return;
-    for (const k of keys) apply(k, { opacity });
+    if (state.haveKeys && typeof apply === 'function') {
+      const keys = state.mapNameToKeys.get(name) || [];
+      for (const k of keys) apply(k, { opacity });
+      return;
+    }
+
+    // Fallback: traverse scene and set by name
+    traverseAllMaterials((mat)=>{
+      const nm = (mat && (mat.name || (mat.userData && mat.userData.name))) || '';
+      if (nm !== name) return;
+      mat.transparent = (opacity < 1);
+      mat.opacity = opacity;
+      mat.needsUpdate = true;
+    });
   }
 
   // ---- wiring ----
@@ -159,17 +204,20 @@
     const ui = ensureUI();
     if (!ui) { logi('material UI not found'); return; }
 
-    // 1) materials が 0 の場合でも待つ（最大 6s）
+    // 1) materials を待機（viewer API or scene準備）
     let list = listMaterialsSafe();
     if (!(list.length>0)) list = await waitForMaterials({timeoutMs:6000, pollMs:120});
 
-    if (list.length===0) {
-      // それでも空なら、手動更新の導線を生かす
-      logi('materials still empty (timeout). Use refresh after model is fully ready.');
+    if (list.length>0) {
+      buildNameMapFromViewer(list);
+    } else {
+      // viewer APIが空 or 未準備 -> シーントラバースで列挙
+      buildNameMapFromScene();
+      if (state.mapNameToKeys.size===0) {
+        logi('materials not ready yet; use refresh after model fully ready.');
+      }
     }
 
-    // 2) マップ化 & セレクト反映
-    buildNameMap(list);
     fillSelect();
 
     // 3) ハンドラ
@@ -186,8 +234,10 @@
     });
 
     ui.refresh?.addEventListener('click', ()=>{
+      // 再列挙（viewer優先、無ければscene）
       const l = listMaterialsSafe();
-      buildNameMap(l);
+      if (l.length>0) buildNameMapFromViewer(l);
+      else { buildNameMapFromScene(); }
       fillSelect();
       const v = +ui.rng.value || 1;
       raf(()=>applyOpacityToActive(v));
@@ -202,10 +252,9 @@
     const tabBtn = document.getElementById('tabbtn-material') || document.querySelector('[role="tab"][aria-controls="tab-material"]');
     tabBtn?.addEventListener('click', ()=> setTimeout(()=>{
       const l = listMaterialsSafe();
-      if (l.length) {
-        buildNameMap(l);
-        fillSelect();
-      }
+      if (l.length>0) buildNameMapFromViewer(l);
+      else buildNameMapFromScene();
+      fillSelect();
     }, 0));
   }
 
@@ -213,5 +262,6 @@
     setTimeout(()=> { initOnce(); }, 0);
   }
   window.addEventListener('lm:model-ready', ()=>initOnce(), { once: true });
+  window.addEventListener('lm:scene-ready', ()=>initOnce(), { once: true });
   setTimeout(()=> { initOnce(); }, 1500);
 })();
