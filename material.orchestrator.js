@@ -1,173 +1,293 @@
 // material.orchestrator.js
-// LociMyu Material Orchestrator
-// 役割：GLBが「本当に」載った後に一度だけ名前付きマテをセレクトへ投入し、スライダ配線。
-// - 主要トリガ: lm:model-ready（bridge から）
-// - バックアップ: lm:scene-ready の後に短時間ポーリング
-
+// Enumerate materials ONLY under the GLB model root to avoid caption/overlay layers
+/* eslint-disable */
 (() => {
-  const LOG_TAG = '[lm-orch]';
-  const log = (...a) => console.log(LOG_TAG, ...a);
+  const LOG = false;
+  const log = (...a)=> { if (LOG) console.debug('[mat-orch]', ...a); };
 
-  log('loaded');
+  const state = {
+    inited: false,
+    mode: 'auto',                 // 'key' | 'uuid'
+    mapLabelToTargets: new Map(), // label => [ 'key:<materialKey>' | 'uuid:<material.uuid>' ]
+    activeLabel: null,
+    rafId: 0,
+    ui: null,
+    pollTimer: 0,
+    pollCount: 0,
+  };
 
-  // viewer.module.cdn.js を遅延importし、キャッシュして再利用
-  async function getViewerMod() {
-    if (window.__viewer_mod_cache) return window.__viewer_mod_cache;
-    try {
-      const mod = await import('./viewer.module.cdn.js');
-      window.__viewer_mod_cache = mod;
-      return mod;
-    } catch {
-      return {};
-    }
+  const raf = (fn) => {
+    if (state.rafId) cancelAnimationFrame(state.rafId);
+    state.rafId = requestAnimationFrame(()=>{ state.rafId=0; try{ fn(); }catch{} });
+  };
+
+  function escapeHtml(s){
+    return String(s).replace(/[&<>"']/g, m => ({
+      '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+    }[m]));
   }
 
-  // 名前列挙（viewer API → scene 走査の順で試す）
-  async function collectMaterialNames() {
-    let names = [];
-    try {
-      const mod = await getViewerMod();
-      const arr = mod.listMaterials?.() || [];
-      names = arr.map((r) => r?.name).filter(Boolean);
-    } catch {}
-    if (names.length === 0) {
-      const s = window.__LM_SCENE;
-      const set = new Set();
-      s?.traverse?.((o) => {
-        if (!o.isMesh || !o.material) return;
-        (Array.isArray(o.material) ? o.material : [o.material])
-          .forEach((m) => m?.name && set.add(m.name));
-      });
-      names = [...set];
-    }
-    // #0, #1 ... の匿名は除外 & 重複排除
-    return [...new Set(names)].filter((n) => !/^#\d+$/.test(n));
+  function readOpacityFromUI(inputEl){
+    const v = Number.parseFloat(inputEl?.value);
+    return Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : 1; // clamp, but DO NOT coerce 0 to 1
   }
 
-  // セレクトへ投入（idempotent）
-  function fillSelect(names) {
-    const sel = document.getElementById('pm-material');
-    if (!sel) return false;
-    const cur = sel.value;
-    sel.innerHTML = '<option value="">— Select material —</option>';
-    for (const n of names) {
-      const o = document.createElement('option');
-      o.value = n; o.textContent = n;
-      sel.appendChild(o);
+  // ------- viewer / scene helpers -------
+  function getSceneRoot(){
+    return window.viewer?.getSceneRoot?.() || window.__LM_SCENE || window.scene || null;
+  }
+  function getModelRoot(){
+    // 1) Prefer viewer API
+    const viaViewer = window.viewer?.getModelRoot?.();
+    if (viaViewer) return viaViewer;
+
+    // 2) Heuristic: find a direct child marked by GLTFLoader or with many Meshes
+    const root = getSceneRoot();
+    if (!root) return null;
+    let best = null;
+    let bestCount = -1;
+    for (const child of root.children || []) {
+      // GLTFLoader marks scene root with userData.gltfAsset
+      if (child?.userData?.gltfAsset) return child;
+      // else score by number of Mesh descendants
+      let count = 0;
+      child.traverse((o)=>{ if (o.isMesh || o.type==='Mesh') count++; });
+      if (count > bestCount) { bestCount = count; best = child; }
     }
-    if (cur && names.includes(cur)) sel.value = cur;
-    return names.length > 0;
+    return best || root;
   }
 
-  // 適用：名前一致の全マテに opacity を当てる
-  async function setOpacityByName(name, v) {
-    const val = Math.max(0, Math.min(1, Number(v)));
-    let count = 0;
-    const mod = await getViewerMod();
-    if (typeof mod.applyMaterialPropsByName === 'function') {
-      count = mod.applyMaterialPropsByName(name, { opacity: val }) || 0;
-    } else {
-      const s = window.__LM_SCENE;
-      s?.traverse?.((o) => {
-        if (!o.isMesh || !o.material) return;
-        (Array.isArray(o.material) ? o.material : [o.material]).forEach((m) => {
-          if ((m?.name || '') === name) {
-            m.transparent = val < 1;
-            m.opacity = val;
-            m.depthWrite = val >= 1;
-            m.needsUpdate = true;
-            count++;
-          }
-        });
-      });
-    }
-    return count;
-  }
-
-  // その名前の最初の現在不透明度
-  function getOpacityByName(name) {
-    let out = null;
-    const s = window.__LM_SCENE;
-    s?.traverse?.((o) => {
-      if (out !== null) return;
-      if (!o.isMesh || !o.material) return;
-      (Array.isArray(o.material) ? o.material : [o.material]).some((m) => {
-        if ((m?.name || '') === name) { out = Number(m.opacity ?? 1); return true; }
-        return false;
-      });
+  function traverseUnderModelRoot(fn){ // visits (obj, material, index)
+    const root = getModelRoot();
+    if (!root || !root.traverse) return 0;
+    let n = 0;
+    root.traverse((obj)=>{
+      const m = obj && obj.material;
+      if (!m) return;
+      if (!(obj.isMesh || obj.type==='Mesh')) return;
+      if (Array.isArray(m)) m.forEach((mm,i)=>{ n++; fn(obj, mm, i); });
+      else { n++; fn(obj, m, 0); }
     });
-    return out == null ? 1 : Math.max(0, Math.min(1, out));
+    return n;
   }
 
-  // スライダ/セレクト配線（多重でも害なし）
-  function wireUIOnce() {
-    const sel = document.getElementById('pm-material');
-    const rng = document.getElementById('pm-opacity-range');
-    const out = document.getElementById('pm-opacity-val');
-    if (!(sel && rng && out)) return;
-
-    const onChange = () => {
-      const n = sel.value;
-      const v = n ? getOpacityByName(n) : 1;
-      rng.value = v;
-      out.textContent = v.toFixed(2);
-    };
-    const onInput = () => {
-      const n = sel.value;
-      if (!n) return;
-      const v = Number(rng.value || 1);
-      out.textContent = v.toFixed(2);
-      setOpacityByName(n, v);
-    };
-
-    sel.removeEventListener?.('__orch_change', onChange);
-    rng.removeEventListener?.('__orch_input', onInput);
-
-    sel.addEventListener('change', onChange);
-    rng.addEventListener('input', onInput, { passive: true });
-
-    // “印” を付けて二重配線防止
-    sel.addEventListener('__orch_change', onChange);
-    rng.addEventListener('__orch_input', onInput);
-
-    // 初期同期
-    onChange();
+  function listMaterialsSafe(){
+    try {
+      // If viewer provides listMaterials scoped to model, prefer it
+      const arr = (window.viewer?.listMaterials?.() || []).filter(Boolean);
+      return Array.isArray(arr) ? arr : [];
+    } catch { return []; }
   }
 
-  // 一発実行: 集めて入れて、配線
-  let lastCount = -1;
-  async function fillOnceAndWire() {
-    const names = await collectMaterialNames();
-    const ok = fillSelect(names);
-    if (ok && names.length !== lastCount) {
-      log('filled', names.length, names);
-      lastCount = names.length;
+  function enumerateUsingViewer(){
+    const vlist = listMaterialsSafe();
+    if (vlist.length === 0) return null;
+    const modelRoot = getModelRoot();
+    const modelSet = new Set();
+    // Build a uuid set for materials under model root to filter viewer list
+    traverseUnderModelRoot((obj, mat)=>{ modelSet.add(mat.uuid); });
+    const map = new Map();
+    for (const it of vlist) {
+      const name = it?.name || '';
+      const key  = it?.materialKey || '';
+      const uuid = it?.uuid; // in case viewer exposes uuid
+      if (uuid && !modelSet.has(uuid)) continue; // filter non-model materials
+      const label = name ? name : (key ? `materialKey:${String(key).slice(-6)}` : 'material');
+      if (!map.has(label)) map.set(label, []);
+      if (key) map.get(label).push(`key:${String(key)}`);
     }
-    if (ok) wireUIOnce();
-    return ok;
+    if (map.size === 0) return null;
+    return { mode: 'key', map };
   }
 
-  // --- 起動シーケンス ---
-  // 最優先: モデル実体が載ったら一発
-  document.addEventListener('lm:model-ready', () => {
-    (async () => {
-      if (await fillOnceAndWire()) return;
-      // 念のためのごく短い再試行
-      let tries = 0;
-      const iv = setInterval(async () => {
-        tries++;
-        if (await fillOnceAndWire() || tries >= 20) clearInterval(iv); // 最大 ~4s
-      }, 200);
-    })();
-  }, { once: true });
+  function enumerateUsingUUID(){
+    const byUuid = new Map(); // uuid => { label, uuids:Set }
+    traverseUnderModelRoot((obj, mat)=>{
+      const uuid = mat.uuid;
+      const mname = mat.name || mat.userData?.name || '';
+      const oname = obj.name || obj.userData?.name || '';
+      const short = uuid ? uuid.slice(0,8) : Math.random().toString(36).slice(2,8);
+      const label = mname ? mname : (oname ? `[${oname}] · ${short}` : `material:${short}`);
+      if (!byUuid.has(uuid)) byUuid.set(uuid, { label, uuids: new Set() });
+      byUuid.get(uuid).uuids.add(uuid);
+    });
+    if (byUuid.size === 0) return null;
+    const map = new Map();
+    for (const [, rec] of byUuid) {
+      if (!map.has(rec.label)) map.set(rec.label, []);
+      rec.uuids.forEach(u => map.get(rec.label).push(`uuid:${u}`));
+    }
+    return { mode: 'uuid', map };
+  }
 
-  // 互換: scene-ready 後にもバックアップの短ポーリング
-  document.addEventListener('lm:scene-ready', () => {
-    log('scene-ready');
-    let tries = 0;
-    const iv = setInterval(async () => {
-      tries++;
-      if (await fillOnceAndWire() || tries >= 30) clearInterval(iv); // 最大 ~6s
-    }, 200);
-  }, { once: true });
+  function enumerateAuto(){
+    const viaViewer = enumerateUsingViewer();
+    if (viaViewer && viaViewer.map.size > 0) return viaViewer;
+    const viaUuid = enumerateUsingUUID();
+    if (viaUuid && viaUuid.map.size > 0) return viaUuid;
+    return { mode: 'uuid', map: new Map() };
+  }
+
+  // ------- UI helpers -------
+  function ensureUI(){
+    let sel = document.getElementById('pm-material') || document.querySelector('#pm-material');
+    let rng = document.getElementById('pm-opacity-range') || document.querySelector('#pm-opacity-range');
+    let val = document.getElementById('pm-opacity-val') || document.querySelector('#pm-opacity-val');
+
+    let rootTab = (sel && (sel.closest('.lm-tabpanel,[role="tabpanel"]') || document.getElementById('tab-material')))
+               || document.querySelector('.lm-tabpanel#tab-material, [role="tabpanel"]#tab-material')
+               || document.querySelector('.lm-tabpanel[data-panel="material"]')
+               || document.querySelector('[role="tabpanel"][aria-labelledby="tabbtn-material"]');
+
+    if (!sel || !rng) {
+      if (!rootTab) return null;
+      let mount = rootTab.querySelector('#mat-root');
+      if (!mount) {
+        mount = document.createElement('div');
+        mount.id = 'mat-root';
+        mount.style.display='flex'; mount.style.flexDirection='column'; mount.style.gap='.5rem';
+        rootTab.appendChild(mount);
+      }
+      mount.innerHTML = `
+        <div class="mat-row" style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap">
+          <label for="pm-material">Material</label>
+          <select id="pm-material" aria-label="material name" style="min-width:12rem"></select>
+          <button id="pm-refresh" type="button" title="Refresh materials">↻</button>
+        </div>
+        <div class="mat-row" style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap">
+          <label for="pm-opacity-range">Opacity</label>
+          <input id="pm-opacity-range" type="range" min="0" max="1" step="0.01" value="1"/>
+          <span id="pm-opacity-val" aria-live="polite">1.00</span>
+        </div>
+      `;
+      sel = mount.querySelector('#pm-material');
+      rng = mount.querySelector('#pm-opacity-range');
+      val = mount.querySelector('#pm-opacity-val');
+    } else {
+      const hasRefresh = !!(sel.parentElement && sel.parentElement.querySelector('#pm-refresh'));
+      if (!hasRefresh) {
+        const btn = document.createElement('button');
+        btn.id = 'pm-refresh'; btn.type = 'button'; btn.title = 'Refresh materials'; btn.textContent = '↻';
+        sel.insertAdjacentElement('afterend', btn);
+      }
+    }
+    const refresh = (rootTab || document).querySelector('#pm-refresh');
+    return (state.ui = { rootTab: rootTab || document.body, sel, rng, val, refresh });
+  }
+
+  function fillSelect(){
+    const { sel } = state.ui;
+    const labels = [...state.mapLabelToTargets.keys()].sort((a,b)=>a.localeCompare(b));
+    if (labels.length === 0) {
+      sel.innerHTML = `<option value="">— Select material —</option>`;
+      state.activeLabel = null;
+      return;
+    }
+    const prev = state.activeLabel;
+    sel.innerHTML = labels.map(lb=>`<option value="${escapeHtml(lb)}">${escapeHtml(lb)}</option>`).join('');
+    if (prev && labels.includes(prev)) sel.value = prev;
+    else { sel.selectedIndex = 0; state.activeLabel = sel.value || labels[0] || null; }
+  }
+
+  function applyOpacityToActive(opacity){
+    const label = state.activeLabel;
+    if (!label) return;
+    const targets = state.mapLabelToTargets.get(label) || [];
+    const apply = window.viewer?.applyMaterialProps;
+
+    const transparent = (opacity < 1);
+    const depthWrite = (opacity >= 1);
+
+    for (const t of targets) {
+      if (t.startsWith('key:') && typeof apply === 'function') {
+        const key = t.slice(4);
+        // pass transparent/depthWrite as well to avoid "0 becomes 1" in some implementations
+        apply(key, { opacity, transparent, depthWrite });
+      } else if (t.startsWith('uuid:')) {
+        const uuid = t.slice(5);
+        traverseUnderModelRoot((obj, mat)=>{
+          if (mat.uuid !== uuid) return;
+          mat.transparent = transparent;
+          mat.depthWrite = depthWrite;
+          mat.opacity = opacity;
+          mat.needsUpdate = true;
+        });
+      }
+    }
+  }
+
+  // ------- polling / enumerate -------
+  function enumerateAndFill(){
+    const res = enumerateAuto();
+    state.mode = res.mode;
+    state.mapLabelToTargets = res.map;
+    fillSelect();
+  }
+
+  function startPolling(){
+    stopPolling();
+    state.pollCount = 0;
+    const doPoll = () => {
+      state.pollCount++;
+      enumerateAndFill();
+      if (state.mapLabelToTargets.size > 0 && state.pollCount > 40) {
+        stopPolling();
+      } else if (state.pollCount > 75) {
+        stopPolling();
+      } else {
+        state.pollTimer = setTimeout(doPoll, 400);
+      }
+    };
+    doPoll();
+  }
+  function stopPolling(){
+    if (state.pollTimer) { clearTimeout(state.pollTimer); state.pollTimer = 0; }
+  }
+
+  // ------- init -------
+  function wireHandlers(){
+    const ui = state.ui;
+    ui.sel.addEventListener('change', ()=>{
+      state.activeLabel = ui.sel.value || null;
+      const v = readOpacityFromUI(ui.rng);
+      raf(()=>applyOpacityToActive(v));
+    });
+    ui.rng.addEventListener('input', ()=>{
+      const v = readOpacityFromUI(ui.rng);
+      ui.val && (ui.val.textContent = v.toFixed(2));
+      raf(()=>applyOpacityToActive(v));
+    });
+    ui.refresh?.addEventListener('click', ()=>{
+      enumerateAndFill();
+      const v = readOpacityFromUI(ui.rng);
+      raf(()=>applyOpacityToActive(v));
+      startPolling();
+    });
+
+    const tabBtn = document.getElementById('tabbtn-material') || document.querySelector('[role="tab"][aria-controls="tab-material"]');
+    tabBtn?.addEventListener('click', ()=> setTimeout(()=>{
+      enumerateAndFill();
+    }, 0));
+  }
+
+  function initOnce(){
+    if (state.inited) return;
+    state.inited = true;
+    const ui = ensureUI();
+    if (!ui) return;
+    state.ui = ui;
+
+    enumerateAndFill();
+    wireHandlers();
+    startPolling();
+
+    const initOp = readOpacityFromUI(ui.rng);
+    ui.val && (ui.val.textContent = initOp.toFixed(2));
+    raf(()=>applyOpacityToActive(initOp));
+  }
+
+  if (document.readyState !== 'loading') setTimeout(initOnce, 0);
+  window.addEventListener('lm:model-ready', initOnce, { once: true });
+  window.addEventListener('lm:scene-ready', initOnce, { once: true });
+  setTimeout(initOnce, 1500);
 })();
