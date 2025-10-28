@@ -1,24 +1,21 @@
 // material.orchestrator.js
-// Super-robust Step2 orchestrator
-// - Works with viewer.listMaterials() OR scene traversal fallback
-// - Keeps polling (with backoff) until materials are present (max ~30s)
-// - Adds a small ↻ refresh button next to the select (only once)
-// - rAF-throttled preview; same-name materials are updated in one go
+// Robust Step2 with full fallback:
+// - Prefer viewer.listMaterials() -> name -> [materialKey...] map
+// - If unavailable/empty, traverse scene to collect material names
+// - If applyMaterialProps/materialKey is unavailable, fall back to direct material edits by name
 /* eslint-disable */
 (() => {
-  const LOG = false; // flip to true for verbose console
-  const log = (...a)=> { if (LOG) console.debug('[mat-orch]', ...a); };
+  const LOG_LEVEL = 'info'; // 'debug' | 'info' | 'silent'
+  const logd = (...a)=> (LOG_LEVEL==='debug') && console.debug('[mat-orch]', ...a);
+  const logi = (...a)=> (LOG_LEVEL!=='silent') && console.info('[mat-orch]', ...a);
 
   const state = {
     inited: false,
-    mapNameToKeys: new Map(), // name => [materialKey]
-    haveKeys: false,
+    mapNameToKeys: new Map(),  // name => string[] materialKeys (may be empty if using fallback)
+    haveKeys: false,           // true when keys are valid for applyMaterialProps
     activeName: null,
     rafId: 0,
-    ui: null,
-    pollTimer: 0,
-    pollCount: 0,
-    filledOnce: false,
+    ui: null
   };
 
   const raf = (fn) => {
@@ -26,68 +23,86 @@
     state.rafId = requestAnimationFrame(()=>{ state.rafId=0; try{ fn(); }catch{} });
   };
 
-  // ------- viewer / scene helpers -------
+  function escapeHtml(s){
+    return String(s).replace(/[&<>"']/g, m => ({
+      '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+    }[m]));
+  }
+
+  // ---- viewer helpers ----
   function listMaterialsSafe(){
-    try {
-      const arr = (window.viewer?.listMaterials?.() || []).filter(Boolean);
-      return Array.isArray(arr) ? arr : [];
-    } catch { return []; }
+    try { return (window.viewer?.listMaterials?.() || []).filter(Boolean); }
+    catch(e){ return []; }
   }
   function getSceneRoot(){
-    return window.viewer?.getSceneRoot?.() || window.__LM_SCENE || window.scene || null;
+    return window.viewer?.getSceneRoot?.() || window.scene || null;
   }
   function traverseAllMaterials(fn){
     const root = getSceneRoot();
-    if (!root || !root.traverse) return 0;
-    let n = 0;
+    if (!root || !root.traverse) return;
     root.traverse((obj)=>{
       const m = obj && obj.material;
       if (!m) return;
-      if (Array.isArray(m)) { m.forEach((mm)=>{ n++; fn(mm); }); }
-      else { n++; fn(m); }
+      if (Array.isArray(m)) m.forEach(fn);
+      else fn(m);
     });
-    return n;
   }
-
-  function enumerateOnce(){
-    // 1) Try viewer API first
-    const vlist = listMaterialsSafe();
-    if (vlist.length > 0 && vlist.every(it => it && it.name)) {
-      const map = new Map(); let haveKeys = false;
-      for (const it of vlist) {
-        const name = it.name || '';
-        const key  = it.materialKey || '';
-        if (!name) continue;
-        if (!map.has(name)) map.set(name, []);
-        if (key) { map.get(name).push(String(key)); haveKeys = true; }
-      }
-      return { map, haveKeys };
-    }
-    // 2) Fallback: traverse scene and collect material names
-    const names = new Map();
-    const count = traverseAllMaterials((mat)=>{
-      const nm = mat?.name || mat?.userData?.name || '';
+  function enumerateMaterialsFromScene(){
+    const names = new Map(); // name => placeholder key list (empty)
+    traverseAllMaterials((mat)=>{
+      const nm = (mat && (mat.name || (mat.userData && mat.userData.name))) || '';
       if (!nm) return;
       if (!names.has(nm)) names.set(nm, []);
     });
-    if (names.size > 0) return { map: names, haveKeys: false };
-    return { map: new Map(), haveKeys: false };
+    return [...names.keys()];
   }
 
-  // ------- UI helpers -------
+  async function waitForMaterials({timeoutMs=6000, pollMs=120}={}){
+    const t0 = performance.now();
+    let last = -1;
+    while (performance.now() - t0 < timeoutMs) {
+      const list = listMaterialsSafe();
+      const ok = list.length>0 && list.every(it=>it?.name);
+      if (ok) return list;
+      // try scene traversal as soon as there are meshes
+      const root = getSceneRoot();
+      if (root) {
+        let found = 0;
+        traverseAllMaterials(()=>{ found++; });
+        if (found>0) return []; // signal to use traversal fallback
+      }
+      if (list.length !== last) { last = list.length; logi('waiting materials…', list.length); }
+      await new Promise(r=>setTimeout(r, pollMs));
+    }
+    return []; // timeout
+  }
+
+  // --- Mount / UI discovery ---
   function ensureUI(){
-    // Try to use existing controls first
+    // 1) 既存のコントロールを最優先で拾う
     let sel = document.getElementById('pm-material') || document.querySelector('#pm-material');
     let rng = document.getElementById('pm-opacity-range') || document.querySelector('#pm-opacity-range');
     let val = document.getElementById('pm-opacity-val') || document.querySelector('#pm-opacity-val');
 
-    let rootTab = (sel && (sel.closest('.lm-tabpanel,[role="tabpanel"]') || document.getElementById('tab-material')))
-               || document.querySelector('.lm-tabpanel#tab-material, [role="tabpanel"]#tab-material')
-               || document.querySelector('.lm-tabpanel[data-panel="material"]')
-               || document.querySelector('[role="tabpanel"][aria-labelledby="tabbtn-material"]');
+    let rootTab = null;
+    if (sel) {
+      rootTab = sel.closest('.lm-tabpanel,[role="tabpanel"]')
+             || document.getElementById('tab-material')
+             || document.querySelector('[aria-labelledby="tabbtn-material"]')
+             || document.querySelector('[data-panel="material"]')
+             || document.body;
+    }
 
+    // 既存がなければ作る
     if (!sel || !rng) {
+      if (!rootTab) {
+        rootTab =
+          document.querySelector('.lm-tabpanel#tab-material, [role="tabpanel"]#tab-material') ||
+          document.querySelector('.lm-tabpanel[data-panel="material"]') ||
+          document.querySelector('[role="tabpanel"][aria-labelledby="tabbtn-material"]');
+      }
       if (!rootTab) return null;
+
       let mount = rootTab.querySelector('#mat-root');
       if (!mount) {
         mount = document.createElement('div');
@@ -111,47 +126,69 @@
       rng = mount.querySelector('#pm-opacity-range');
       val = mount.querySelector('#pm-opacity-val');
     } else {
-      // add refresh button if missing
+      // Refreshボタン（未設置なら追加）
       const hasRefresh = !!(sel.parentElement && sel.parentElement.querySelector('#pm-refresh'));
       if (!hasRefresh) {
         const btn = document.createElement('button');
-        btn.id = 'pm-refresh';
-        btn.type = 'button';
-        btn.title = 'Refresh materials';
-        btn.textContent = '↻';
+        btn.id = 'pm-refresh'; btn.type = 'button'; btn.title = 'Refresh materials'; btn.textContent = '↻';
         sel.insertAdjacentElement('afterend', btn);
       }
     }
+
     const refresh = (rootTab || document).querySelector('#pm-refresh');
     return (state.ui = { rootTab: rootTab || document.body, sel, rng, val, refresh });
   }
 
-  function fillSelectFromState(){
+  function buildNameMapFromViewer(list){
+    state.mapNameToKeys.clear();
+    for (const it of list) {
+      const name = it?.name ?? '';
+      const key  = it?.materialKey ?? '';
+      if (!name) continue;
+      if (!state.mapNameToKeys.has(name)) state.mapNameToKeys.set(name, []);
+      if (key) state.mapNameToKeys.get(name).push(String(key));
+    }
+    state.haveKeys = [...state.mapNameToKeys.values()].some(arr => arr.length>0);
+    if (!state.activeName) {
+      const first = [...state.mapNameToKeys.keys()][0] || null;
+      state.activeName = first;
+    }
+  }
+
+  function buildNameMapFromScene(){
+    state.mapNameToKeys.clear();
+    const names = enumerateMaterialsFromScene();
+    names.forEach(n => state.mapNameToKeys.set(n, [])); // keys unknown in fallback
+    state.haveKeys = false;
+    if (!state.activeName) state.activeName = names[0] || null;
+  }
+
+  function fillSelect(){
     const { sel } = state.ui;
     const names = [...state.mapNameToKeys.keys()].sort((a,b)=>a.localeCompare(b));
-    if (names.length === 0) {
+    sel.innerHTML = names.map(n=>`<option value="${escapeHtml(n)}">${escapeHtml(n)}</option>`).join('');
+    if (state.activeName && names.includes(state.activeName)) sel.value = state.activeName;
+    else { sel.selectedIndex = 0; state.activeName = sel.value || null; }
+    if (!names.length) {
       sel.innerHTML = `<option value="">— Select material —</option>`;
       state.activeName = null;
-      return;
     }
-    const prev = state.activeName;
-    sel.innerHTML = names.map(n=>`<option value="${escapeHtml(n)}">${escapeHtml(n)}</option>`).join('');
-    if (prev && names.includes(prev)) sel.value = prev;
-    else { sel.selectedIndex = 0; state.activeName = sel.value || names[0] || null; }
   }
 
   function applyOpacityToActive(opacity){
     const name = state.activeName;
     if (!name) return;
+
     const apply = window.viewer?.applyMaterialProps;
     if (state.haveKeys && typeof apply === 'function') {
       const keys = state.mapNameToKeys.get(name) || [];
       for (const k of keys) apply(k, { opacity });
       return;
     }
-    // fallback by name
+
+    // Fallback: traverse scene and set by name
     traverseAllMaterials((mat)=>{
-      const nm = mat?.name || mat?.userData?.name || '';
+      const nm = (mat && (mat.name || (mat.userData && mat.userData.name))) || '';
       if (nm !== name) return;
       mat.transparent = (opacity < 1);
       mat.opacity = opacity;
@@ -159,100 +196,72 @@
     });
   }
 
-  // ------- polling -------
-  function startPolling(){
-    stopPolling();
-    state.pollCount = 0;
-    const doPoll = () => {
-      state.pollCount++;
-      const { map, haveKeys } = enumerateOnce();
-      const hadEmpty = state.mapNameToKeys.size === 0;
-      if (map.size > 0) {
-        state.mapNameToKeys = map;
-        state.haveKeys = haveKeys;
-        fillSelectFromState();
-        if (!state.filledOnce || hadEmpty) {
-          state.filledOnce = true;
-          // apply current slider value once
-          const v = +state.ui.rng.value || 1;
-          state.ui.val && (state.ui.val.textContent = v.toFixed(2));
-          raf(()=>applyOpacityToActive(v));
-        }
-        // once we have something, we can keep polling a bit longer in case keys arrive later
-        if (state.pollCount > 60) { // ~24s after first fill (assuming 400ms)
-          stopPolling();
-        }
-      } else {
-        // keep polling up to ~30s total
-        if (state.pollCount > 75) stopPolling();
-      }
-      // backoff a little
-      state.pollTimer = setTimeout(doPoll, 400);
-    };
-    doPoll();
-  }
-  function stopPolling(){
-    if (state.pollTimer) { clearTimeout(state.pollTimer); state.pollTimer = 0; }
-  }
+  // ---- wiring ----
+  async function initOnce(){
+    if (state.inited) return;
+    state.inited = true;
 
-  // ------- init -------
-  function wireHandlers(){
-    const ui = state.ui;
+    const ui = ensureUI();
+    if (!ui) { logi('material UI not found'); return; }
+
+    // 1) materials を待機（viewer API or scene準備）
+    let list = listMaterialsSafe();
+    if (!(list.length>0)) list = await waitForMaterials({timeoutMs:6000, pollMs:120});
+
+    if (list.length>0) {
+      buildNameMapFromViewer(list);
+    } else {
+      // viewer APIが空 or 未準備 -> シーントラバースで列挙
+      buildNameMapFromScene();
+      if (state.mapNameToKeys.size===0) {
+        logi('materials not ready yet; use refresh after model fully ready.');
+      }
+    }
+
+    fillSelect();
+
+    // 3) ハンドラ
     ui.sel.addEventListener('change', ()=>{
       state.activeName = ui.sel.value || null;
       const v = +ui.rng.value || 1;
       raf(()=>applyOpacityToActive(v));
     });
+
     ui.rng.addEventListener('input', ()=>{
       const v = +ui.rng.value || 1;
-      ui.val && (ui.val.textContent = v.toFixed(2));
+      if (ui.val) ui.val.textContent = v.toFixed(2);
       raf(()=>applyOpacityToActive(v));
-    });
-    ui.refresh?.addEventListener('click', ()=>{
-      // refresh immediately
-      const { map, haveKeys } = enumerateOnce();
-      state.mapNameToKeys = map; state.haveKeys = haveKeys;
-      fillSelectFromState();
-      const v = +ui.rng.value || 1;
-      raf(()=>applyOpacityToActive(v));
-      // also restart polling to allow late keys
-      startPolling();
     });
 
-    // tab click -> re-enumerate soon after
+    ui.refresh?.addEventListener('click', ()=>{
+      // 再列挙（viewer優先、無ければscene）
+      const l = listMaterialsSafe();
+      if (l.length>0) buildNameMapFromViewer(l);
+      else { buildNameMapFromScene(); }
+      fillSelect();
+      const v = +ui.rng.value || 1;
+      raf(()=>applyOpacityToActive(v));
+    });
+
+    // 4) 初期反映
+    const initOp = +ui.rng.value || 1;
+    if (ui.val) ui.val.textContent = initOp.toFixed(2);
+    raf(()=>applyOpacityToActive(initOp));
+
+    // 5) タブクリック後の再列挙（保険）
     const tabBtn = document.getElementById('tabbtn-material') || document.querySelector('[role="tab"][aria-controls="tab-material"]');
     tabBtn?.addEventListener('click', ()=> setTimeout(()=>{
-      const { map, haveKeys } = enumerateOnce();
-      state.mapNameToKeys = map; state.haveKeys = haveKeys;
-      fillSelectFromState();
+      const l = listMaterialsSafe();
+      if (l.length>0) buildNameMapFromViewer(l);
+      else buildNameMapFromScene();
+      fillSelect();
     }, 0));
   }
 
-  function initOnce(){
-    if (state.inited) return;
-    state.inited = true;
-    const ui = ensureUI();
-    if (!ui) { if (LOG) console.warn('[mat-orch] UI not found'); return; }
-    state.ui = ui;
-
-    // initial fill (might be empty)
-    const first = enumerateOnce();
-    state.mapNameToKeys = first.map; state.haveKeys = first.haveKeys;
-    fillSelectFromState();
-
-    // handlers + polling
-    wireHandlers();
-    startPolling();
-
-    // initial apply
-    const initOp = +ui.rng.value || 1;
-    ui.val && (ui.val.textContent = initOp.toFixed(2));
-    raf(()=>applyOpacityToActive(initOp));
+  if (document.readyState !== 'loading') {
+    setTimeout(()=> { initOnce(); }, 0);
   }
-
-  // kick
-  if (document.readyState !== 'loading') setTimeout(initOnce, 0);
-  window.addEventListener('lm:model-ready', initOnce, { once: true });
-  window.addEventListener('lm:scene-ready', initOnce, { once: true });
-  setTimeout(initOnce, 1500);
+  window.addEventListener('lm:model-ready', ()=>initOnce(), { once: true });
+  window.addEventListener('lm:scene-ready', ()=>initOnce(), { once: true });
+  setTimeout(()=> { initOnce(); }, 1500);
 })();
