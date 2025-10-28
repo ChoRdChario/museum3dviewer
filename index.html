@@ -1,176 +1,155 @@
 <!doctype html>
 <html lang="en">
 <head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>LociMyu v6.6</title>
-<style>
-:root{
-  --bg:#0f1115; --panel:#161a20; --line:#2a2f3a; --text:#e6ebf3; --muted:#aab2c0; --accent:#4c8dff;
-  --pad:10px;
-  font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
-}
-*{box-sizing:border-box}
-html,body{height:100%; background:var(--bg); color:var(--text); margin:0}
-#app{display:grid; grid-template-columns: 1fr 380px; height:100%}
-#stage{position:relative; background:#0b0d11}
-#gl{width:100%; height:100%}
-#ui{background:var(--panel); border-left:1px solid var(--line); display:flex; flex-direction:column}
-header{display:flex; gap:8px; align-items:center; padding:10px; border-bottom:1px solid var(--line)}
-header .grow{flex:1}
-input[type="text"]{width:100%; background:#0f131a; color:var(--text); border:1px solid var(--line); padding:8px 10px; border-radius:8px}
-button,select{background:#10151d; color:var(--text); border:1px solid var(--line); padding:8px 10px; border-radius:8px}
-button:hover,select:hover{border-color:#3a4252}
-.tabs{display:flex; gap:8px; padding:0 10px; border-bottom:1px solid var(--line)}
-.tabs button{appearance:none; background:transparent; border:none; color:var(--muted); padding:12px 8px; border-bottom:2px solid transparent; cursor:pointer}
-.tabs button[aria-selected="true"]{color:var(--text); border-bottom-color:var(--accent)}
-.panes{flex:1; overflow:auto; padding:12px}
-.pane{display:none}
-.pane[aria-hidden="false"]{display:block}
-.line{display:flex; align-items:center; gap:10px; padding:8px 0}
-.line .grow{flex:1}
-hr{border:none; border-top:1px solid var(--line); margin:12px 0}
-small.hint{color:var(--muted)}
-/* keep controls from overflowing */
-fieldset{border:none; margin:0; padding:0}
-.colorbox{width:56px; height:28px}
-</style>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>LociMyu v6.6</title>
+  <link rel="icon" href="./favicon.ico"/>
 
-<!-- Import map MUST precede any module script -->
-<script type="importmap">
-{
-  "imports": {
-    "three": "https://unpkg.com/three@0.160.1/build/three.module.js",
-    "three/addons/": "https://unpkg.com/three@0.160.1/examples/jsm/"
+  <!-- Import map must be defined BEFORE any module that imports 'three' -->
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://unpkg.com/three@0.158.0/build/three.module.js",
+      "three/addons/": "https://unpkg.com/three@0.158.0/examples/jsm/"
+    }
   }
-}
-</script>
+  </script>
+
+  <style>
+    :root{
+      --line:#2a2a2a;
+      --fg:#ddd;
+      --muted:#9aa0a6;
+      --pad:10px;
+      --gap:10px;
+    }
+    html,body{height:100%;}
+    body{margin:0;background:#111;color:var(--fg);font:14px/1.45 system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji","Segoe UI Emoji";}
+    #app{display:grid;grid-template-columns:1fr min(420px, 38vw);height:100vh;}
+    #gl{width:100%;height:100%;display:block;background:#0e0e10;}
+    #ui{border-left:1px solid var(--line);display:flex;flex-direction:column;min-width:300px;}
+
+    header{display:flex;gap:8px;align-items:center;padding:10px;border-bottom:1px solid var(--line);}
+    header #brand{font-weight:600;color:#eaeaea}
+    header .row{display:flex;gap:6px;align-items:center;margin-left:auto}
+
+    .tabs{display:flex;border-bottom:1px solid var(--line);}
+    .tabs button{flex:0 0 auto;padding:10px 14px;background:transparent;border:0;border-right:1px solid var(--line);color:var(--muted);cursor:pointer}
+    .tabs button[data-selected="true"]{color:#fff;background:#191919}
+
+    .pane{display:none;padding:12px;overflow:auto}
+    .pane[data-active="true"]{display:block}
+
+    /* Material section layout */
+    .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+    .row > .grow{flex:1 1 160px}
+    .subtle{color:var(--muted);font-size:12px}
+    .hr{height:1px;background:var(--line);margin:8px 0}
+
+    input[type="range"]{width:240px;max-width:45vw}
+    select{max-width:240px}
+    .kv{display:grid;grid-template-columns:auto 1fr;gap:10px 12px;align-items:center}
+
+    /* Chroma group: prevent horizontal scroll on narrow panes */
+    .chroma-wrap{display:grid;grid-template-columns: minmax(90px,auto) 1fr; gap:10px 12px;align-items:center}
+    .chroma-controls{display:flex;gap:18px;flex-wrap:wrap}
+    .chip{display:inline-flex;gap:6px;align-items:center;padding:4px 8px;border:1px solid var(--line);border-radius:8px;background:#171717}
+    .val{min-width:2.5ch;text-align:right;font-variant-numeric:tabular-nums}
+  </style>
 </head>
 <body>
-<div id="app">
-  <div id="stage"><canvas id="gl"></canvas></div>
-  <aside id="ui" role="complementary">
-    <header>
-      <div class="grow"><input id="glbUrl" type="text" placeholder="Drive fileId / GLB URL" /></div>
-      <button id="btnLoad">Load</button>
-      <select id="save-target-sheet" title="Select sheet…"><option value="">Select sheet…</option></select>
-      <button id="btnCreate">Create</button>
-      <button id="auth-signin" style="margin-left:auto">Sign in</button>
-    </header>
+  <div id="app">
+    <div id="stage"><canvas id="gl"></canvas></div>
 
-    <nav class="tabs" role="tablist">
-      <button id="tab-caption" role="tab" aria-controls="tab-panel-caption" aria-selected="true">Caption</button>
-      <button id="tab-material" role="tab" aria-controls="tab-panel-material" aria-selected="false">Material</button>
-      <button id="tab-views" role="tab" aria-controls="tab-panel-views" aria-selected="false">Views</button>
-    </nav>
-
-    <div class="panes">
-      <!-- Caption pane (restored minimal structure; content managed by legacy scripts) -->
-      <section id="tab-panel-caption" class="pane" role="tabpanel" aria-labelledby="tab-caption" aria-hidden="false">
-        <div class="line"><strong>Captions</strong></div>
-        <div id="caption-tools" class="line" aria-label="Caption tools">
-          <button id="btnAddPin">Add pin</button>
-          <button id="btnDeletePin">Delete</button>
+    <aside id="ui">
+      <header>
+        <div id="brand">LociMyu v6.6</div>
+        <div class="row">
+          <input id="glbUrl" type="text" placeholder="Drive fileId / GLB URL" class="grow"/>
+          <button id="btnLoad">Load</button>
         </div>
-        <div id="caption-list" style="min-height:140px; border:1px solid var(--line); border-radius:8px; padding:8px; overflow:auto"></div>
+        <div class="row">
+          <select id="save-target-sheet"><option value="">Select sheet…</option></select>
+          <button id="save-target-create">Create</button>
+        </div>
+      </header>
+
+      <nav class="tabs" role="tablist">
+        <button id="tab-caption" role="tab" aria-selected="false" data-tab="caption">Caption</button>
+        <button id="tab-material" role="tab" aria-selected="true" data-tab="material">Material</button>
+        <button id="tab-views" role="tab" aria-selected="false" data-tab="views">Views</button>
+      </nav>
+
+      <section id="pane-caption" class="pane" data-tab="caption"></section>
+
+      <section id="pane-material" class="pane" data-tab="material" data-active="true">
+        <div class="row">
+          <label class="chip"><input id="unlit" type="checkbox"/> Unlit</label>
+          <label class="chip"><input id="double" type="checkbox"/> Double-sided</label>
+        </div>
+
+        <div class="row" style="margin-top:6px">
+          <div class="chip">Opacity</div>
+          <input id="opacity-range" type="range" min="0" max="1" step="0.01" value="1" />
+          <div id="opacity-val" class="val">1.00</div>
+        </div>
+
+        <div class="row">
+          <label class="chip"><input id="white-to-alpha" type="checkbox"/> White → Alpha</label>
+        </div>
+
+        <div class="hr"></div>
+
+        <div class="kv">
+          <div class="subtle">Per-material opacity (saved per sheet)</div>
+          <div></div>
+
+          <select id="pm-material" class="grow">
+            <option value="">— Select material —</option>
+          </select>
+          <div class="row">
+            <input id="pm-opacity-range" type="range" min="0" max="1" step="0.01" value="1"/>
+            <div id="pm-opacity-val" class="val">1.00</div>
+          </div>
+        </div>
+
+        <p class="subtle">Pick a material, then set its opacity. This does not change global opacity above.</p>
+
+        <div class="hr"></div>
+
+        <!-- Chroma key group -->
+        <label class="chip" style="margin-bottom:6px;">
+          <input id="ck-enabled" type="checkbox"/> Chroma key
+        </label>
+        <div class="chroma-wrap">
+          <div class="subtle">Key color</div>
+          <div class="chroma-controls">
+            <input id="ck-color" type="color" value="#00FF00" aria-label="Key color"/>
+            <div class="row">
+              <div class="subtle" style="min-width:70px;">Tolerance</div>
+              <input id="ck-tolerance" type="range" min="0" max="1" step="0.01" value="0.00"/>
+              <div id="ck-tolerance-val" class="val">0.00</div>
+            </div>
+            <div class="row">
+              <div class="subtle" style="min-width:70px;">Feather</div>
+              <input id="ck-feather" type="range" min="0" max="1" step="0.01" value="0.00"/>
+              <div id="ck-feather-val" class="val">0.00</div>
+            </div>
+          </div>
+        </div>
+
       </section>
 
-      <!-- Material pane (orchestrator will enhance/replace the inner UI) -->
-      <section id="tab-panel-material" class="pane" role="tabpanel" aria-labelledby="tab-material" aria-hidden="true">
-        <fieldset>
-          <div class="line">
-            <label><input type="checkbox" id="pm-unlit"> Unlit</label>
-            <label><input type="checkbox" id="pm-doubleside"> Double-sided</label>
-          </div>
+      <section id="pane-views" class="pane" data-tab="views"></section>
+    </aside>
+  </div>
 
-          <div class="line">
-            <div class="grow">
-              <div class="line" style="padding-top:0">
-                <label class="grow">Opacity</label>
-                <input id="opacity-range" type="range" min="0" max="1" step="0.01" value="1" class="grow">
-                <output id="opacity-value">1.00</output>
-              </div>
-            </div>
-          </div>
-
-          <div class="line">
-            <label><input type="checkbox" id="mat-white2alpha"> White → Alpha</label>
-          </div>
-
-          <div class="line">
-            <select id="per-material-select" class="grow">
-              <option>— Select material —</option>
-            </select>
-            <input id="per-material-range" type="range" min="0" max="1" step="0.01" value="1" class="grow">
-            <output id="per-material-value">1.00</output>
-          </div>
-
-          <small class="hint">Pick a material, then set its opacity. This does not change global opacity above.</small>
-          <hr>
-          <div id="chroma-block">
-            <div class="line"><label><input type="checkbox" id="ck-enabled"> Chroma key</label></div>
-            <div class="line">
-              <label for="ck-color">Key color</label>
-              <input id="ck-color" type="color" class="colorbox" value="#00ff00">
-            </div>
-            <div class="line">
-              <label class="grow" for="ck-tol">Tolerance</label>
-              <input id="ck-tol" type="range" min="0" max="1" step="0.01" value="0" class="grow">
-              <output id="ck-tol-val">0.00</output>
-            </div>
-            <div class="line">
-              <label class="grow" for="ck-feather">Feather</label>
-              <input id="ck-feather" type="range" min="0" max="1" step="0.01" value="0" class="grow">
-              <output id="ck-feather-val">0.00</output>
-            </div>
-          </div>
-        </fieldset>
-      </section>
-
-      <!-- Views pane -->
-      <section id="tab-panel-views" class="pane" role="tabpanel" aria-labelledby="tab-views" aria-hidden="true">
-        <div class="line"><em>Views panel (placeholder)</em></div>
-      </section>
-    </div>
-  </aside>
-</div>
-
-<script>
-// very small tabs controller (restores correct ARIA + switching)
-(() => {
-  const tabs = [
-    ['tab-caption', 'tab-panel-caption'],
-    ['tab-material', 'tab-panel-material'],
-    ['tab-views', 'tab-panel-views'],
-  ];
-  tabs.forEach(([tabId, panelId]) => {
-    const t = document.getElementById(tabId);
-    const p = document.getElementById(panelId);
-    t?.addEventListener('click', () => {
-      tabs.forEach(([tid, pid]) => {
-        const tt = document.getElementById(tid);
-        const pp = document.getElementById(pid);
-        const on = tid === tabId;
-        tt?.setAttribute('aria-selected', on ? 'true' : 'false');
-        pp?.setAttribute('aria-hidden', on ? 'false' : 'true');
-      });
-    });
-  });
-  // keep inline value readouts in sync (non-blocking, orchestrator can override)
-  const bind = (id, out) => {
-    const el = document.getElementById(id), o = document.getElementById(out);
-    if(el && o){ el.addEventListener('input', ()=>{ o.textContent = (+el.value).toFixed(2); }); }
-  };
-  bind('opacity-range','opacity-value');
-  bind('per-material-range','per-material-value');
-  bind('ck-tol','ck-tol-val');
-  bind('ck-feather','ck-feather-val');
-})();
-</script>
-
-<!-- App bootstrap + modules (order matters) -->
-<script type="module" src="./boot.esm.cdn.js"></script>
-<script type="module" src="./viewer.bridge.module.js"></script>
-<script type="module" src="./material.ui.orch.js"></script>
+  <!-- App boot first -->
+  <script type="module" src="./boot.esm.cdn.js"></script>
+  <!-- Material UI orchestrator (wires controls, listens for events) -->
+  <script type="module" src="./material.ui.orch.js"></script>
+  <!-- Bridge that dispatches lm:scene-ready / lm:model-ready -->
+  <script type="module" src="./viewer.bridge.module.js"></script>
 </body>
 </html>
