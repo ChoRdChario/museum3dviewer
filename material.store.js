@@ -1,136 +1,137 @@
-// material.store.js
-/* eslint-disable */
-(() => {
-  const TAB_TITLE = '__LM_MATERIALS';
-  const COLS = ['sheetGid','matUuid','matName','schemaVer','props','updatedAt'];
+// material.store.js v20251029
+// Step3: Sheets-backed material props store (opacity first).
+// Public API on window.lmMaterials:
+//   - setCurrentSheetContext({ spreadsheetId, sheetGid })
+//   - saveOpacity(matUuid, matName, opacity)
+//   - getCurrentContext()
+//   - ensureSheet()  // creates __LM_MATERIALS with header if missing
+//   - preload()      // fetch cache for current sheet
+(function() {
+  'use strict';
+  const SHEET_NAME = '__LM_MATERIALS';
+  const HEADERS = ['sheetGid','matUuid','matName','schemaVer','props','updatedAt'];
   const SCHEMA_VER = 1;
 
   const state = {
-    spreadsheetId: null,
-    sheetGid: null, // current caption sheet gid
-    cache: new Map(), // key = `${sheetGid}:${matUuid}` -> { matName, props }
-    sheetIdByTitle: new Map(),
+    ctx: null, // { spreadsheetId, sheetGid }
+    cache: new Map(), // key: matUuid -> {row, props, matName}
+    ready: false,
   };
 
-  // ---- Access token helpers ----
+  function log(...a){ console.debug('[lmMaterials]', ...a); }
+  function nowIso(){ return new Date().toISOString(); }
+
   async function getAccessToken(){
-    try {
-      if (window.__lm_getAccessToken) return await window.__lm_getAccessToken();
-      if (window.gauth?.getAccessToken) return await window.gauth.getAccessToken();
-      if (window.getAccessToken) return await window.getAccessToken();
-    } catch(e){}
-    throw new Error('No access token provider found');
+    if (window.__lm_getAccessToken) return await window.__lm_getAccessToken();
+    if (window.gauth?.getAccessToken) return await window.gauth.getAccessToken();
+    throw new Error('No access token provider');
   }
   async function authFetch(url, init={}){
     const token = await getAccessToken();
-    const headers = Object.assign({'Authorization':`Bearer ${token}`,'Content-Type':'application/json'}, init.headers||{});
-    const res = await fetch(url, Object.assign({}, init, { headers }));
-    if (!res.ok) {
-      const txt = await res.text().catch(()=>'');
-      throw new Error(`HTTP ${res.status} ${res.statusText}: ${txt}`);
+    const headers = Object.assign({
+      'Authorization': `Bearer ${token}`,
+      'Content-Type': 'application/json'
+    }, init.headers||{});
+    const res = await fetch(url, Object.assign({ method:'GET' }, init, { headers }));
+    const text = await res.text();
+    let json=null; try{ json = text ? JSON.parse(text) : null; }catch{}
+    return { ok: res.ok, status: res.status, statusText: res.statusText, text, json };
+  }
+
+  async function ensureSheet(){
+    const { spreadsheetId } = state.ctx || {};
+    if (!spreadsheetId) throw new Error('ensureSheet: no spreadsheetId');
+    // List sheets
+    const meta = await authFetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}?fields=sheets(properties(title,sheetId))`);
+    if (!meta.ok) throw new Error('meta failed '+meta.status);
+    const titles = (meta.json?.sheets||[]).map(s=>s.properties?.title);
+    if (!titles.includes(SHEET_NAME)){
+      // add sheet
+      const bu = await authFetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}:batchUpdate`, {
+        method:'POST',
+        body: JSON.stringify({
+          requests:[{ addSheet: { properties: { title:SHEET_NAME, gridProperties: { frozenRowCount:1 } } } }]
+        })
+      });
+      if (!bu.ok) throw new Error('addSheet failed '+bu.status);
+      // header
+      const hdr = await authFetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(SHEET_NAME)}!A1:F1?valueInputOption=RAW`, {
+        method:'PUT',
+        body: JSON.stringify({ values:[HEADERS] })
+      });
+      if (!hdr.ok) throw new Error('header write failed '+hdr.status);
     }
-    return res;
-  }
-
-  // ---- Sheets discovery / creation ----
-  async function getSpreadsheet(){
-    if (!state.spreadsheetId) throw new Error('spreadsheetId not set');
-    const url = `https://sheets.googleapis.com/v4/spreadsheets/${state.spreadsheetId}?fields=sheets(properties(sheetId,title))`;
-    const res = await authFetch(url);
-    const json = await res.json();
-    state.sheetIdByTitle.clear();
-    for (const s of (json.sheets||[])) {
-      const p = s.properties || {};
-      state.sheetIdByTitle.set(p.title, p.sheetId);
-    }
-    return json;
-  }
-  async function ensureMaterialsTab(){
-    await getSpreadsheet();
-    if (state.sheetIdByTitle.has(TAB_TITLE)) return state.sheetIdByTitle.get(TAB_TITLE);
-    // create
-    const url = `https://sheets.googleapis.com/v4/spreadsheets/${state.spreadsheetId}:batchUpdate`;
-    const body = { requests: [{ addSheet: { properties: { title: TAB_TITLE, gridProperties: { frozenRowCount: 1 } } } }] };
-    await authFetch(url, { method: 'POST', body: JSON.stringify(body) });
-    // header row
-    const valuesUrl = `https://sheets.googleapis.com/v4/spreadsheets/${state.spreadsheetId}/values/${encodeURIComponent(TAB_TITLE)}!A1:F1?valueInputOption=RAW`;
-    await authFetch(valuesUrl, { method: 'PUT', body: JSON.stringify({ values: [COLS] }) });
-    await getSpreadsheet();
-    return state.sheetIdByTitle.get(TAB_TITLE);
-  }
-
-  // ---- Public API ----
-  async function setCurrentSheetContext({ spreadsheetId, sheetGid }){
-    if (spreadsheetId) state.spreadsheetId = spreadsheetId;
-    if (sheetGid) state.sheetGid = String(sheetGid);
-    try { await loadAllForCurrentSheet(); } catch(e){}
-  }
-
-  function keyFor(matUuid){ return `${state.sheetGid||''}:${matUuid}`; }
-
-  async function loadAllForCurrentSheet(){
-    if (!state.spreadsheetId || !state.sheetGid) throw new Error('sheet context not set');
-    await ensureMaterialsTab();
-    const url = `https://sheets.googleapis.com/v4/spreadsheets/${state.spreadsheetId}/values/${encodeURIComponent(TAB_TITLE)}!A2:F`;
-    const res = await authFetch(url);
-    const json = await res.json();
-    state.cache.clear();
-    for (const row of (json.values||[])) {
-      const [sheetGid, matUuid, matName, schemaVerStr, propsJSON, updatedAt] = row;
-      if (String(sheetGid) !== String(state.sheetGid)) continue;
-      let props = {};
-      try { props = propsJSON ? JSON.parse(propsJSON) : {}; } catch(e){ props = {}; }
-      state.cache.set(`${sheetGid}:${matUuid}`, { matName, props, updatedAt, schemaVer: Number(schemaVerStr)||1 });
-    }
-    return state.cache;
-  }
-
-  async function upsertMaterial({ matUuid, matName, props }){
-    if (!state.spreadsheetId || !state.sheetGid) throw new Error('sheet context not set');
-    await ensureMaterialsTab();
-    const gid = String(state.sheetGid);
-    const now = new Date().toISOString();
-
-    // read all to find row index
-    const readUrl = `https://sheets.googleapis.com/v4/spreadsheets/${state.spreadsheetId}/values/${encodeURIComponent(TAB_TITLE)}!A2:F`;
-    const res = await authFetch(readUrl);
-    const json = await res.json();
-    let rowIndex = -1;
-    let rowOffset = 2;
-    (json.values||[]).forEach((row, i)=>{
-      if (String(row[0])===gid && String(row[1])===String(matUuid)) rowIndex = rowOffset + i;
-    });
-
-    const record = [ gid, String(matUuid), matName || '', '1', JSON.stringify(props||{}), now ];
-
-    if (rowIndex === -1) {
-      const appendUrl = `https://sheets.googleapis.com/v4/spreadsheets/${state.spreadsheetId}/values/${encodeURIComponent(TAB_TITLE)}!A:F:append?valueInputOption=RAW`;
-      await authFetch(appendUrl, { method:'POST', body: JSON.stringify({ values: [record] }) });
-    } else {
-      const range = `${TAB_TITLE}!A${rowIndex}:F${rowIndex}`;
-      const updateUrl = `https://sheets.googleapis.com/v4/spreadsheets/${state.spreadsheetId}/values/${encodeURIComponent(range)}?valueInputOption=RAW`;
-      await authFetch(updateUrl, { method:'PUT', body: JSON.stringify({ values: [record] }) });
-    }
-    state.cache.set(`${gid}:${matUuid}`, { matName, props, updatedAt: now, schemaVer: 1 });
     return true;
   }
 
-  function getCachedProps(matUuid){
-    const rec = state.cache.get(keyFor(matUuid));
-    return rec?.props || {};
+  function makeKey(sheetGid, matUuid){ return String(sheetGid)+'::'+String(matUuid); }
+
+  async function preload(){
+    state.cache.clear();
+    const { spreadsheetId, sheetGid } = state.ctx || {};
+    if (!spreadsheetId || (sheetGid===undefined)) return false;
+    await ensureSheet();
+    const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(SHEET_NAME)}!A2:F`;
+    const r = await authFetch(url);
+    if (!r.ok) throw new Error('preload failed '+r.status);
+    const rows = r.json?.values || [];
+    rows.forEach((arr, idx)=>{
+      const g = arr[0]; const mu = arr[1]; const mn = arr[2]; const props = arr[4];
+      if (String(g) !== String(sheetGid)) return;
+      let parsed={}; try{ parsed = props ? JSON.parse(props) : {}; }catch{ parsed={}; }
+      state.cache.set(String(mu), { row: idx+2, matName: mn, props: parsed });
+    });
+    state.ready = true;
+    return true;
   }
 
-  window.lmMaterials = window.lmMaterials || {};
-  Object.assign(window.lmMaterials, {
-    setCurrentSheetContext,
-    loadAllForCurrentSheet,
-    upsertMaterial,
-    getCachedProps,
-    TAB_TITLE,
-  });
+  async function upsert(matUuid, matName, nextProps){
+    const { spreadsheetId, sheetGid } = state.ctx || {};
+    if (!spreadsheetId || (sheetGid===undefined)) throw new Error('upsert: context not set');
+    await ensureSheet();
+    if (!state.ready) await preload();
 
-  window.addEventListener('lm:sheet-changed', (ev)=>{
-    const { spreadsheetId, sheetGid } = ev.detail || {};
-    setCurrentSheetContext({ spreadsheetId, sheetGid });
+    const key = String(matUuid);
+    const cached = state.cache.get(key);
+    const merged = Object.assign({}, (cached?.props||{}), nextProps||{});
+    const rowVals = [ String(sheetGid), String(matUuid), String(matName||''), String(SCHEMA_VER), JSON.stringify(merged), nowIso() ];
+
+    if (cached?.row){
+      // update in-place
+      const range = `${SHEET_NAME}!A${cached.row}:F${cached.row}`;
+      const put = await authFetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}?valueInputOption=RAW`, {
+        method:'PUT',
+        body: JSON.stringify({ values:[rowVals] })
+      });
+      if (!put.ok) throw new Error('update failed '+put.status);
+    } else {
+      // append
+      const appendUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(SHEET_NAME)}!A:F:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`;
+      const app = await authFetch(appendUrl, { method:'POST', body: JSON.stringify({ values:[rowVals] }) });
+      if (!app.ok) throw new Error('append failed '+app.status);
+    }
+    // refresh cache entry
+    state.cache.set(key, { row: cached?.row || NaN, matName, props: merged });
+    return true;
+  }
+
+  async function saveOpacity(matUuid, matName, opacity){
+    const v = Number(opacity);
+    const bounded = isFinite(v) ? Math.min(1, Math.max(0, v)) : 1;
+    return await upsert(matUuid, matName, { opacity: bounded });
+  }
+
+  function setCurrentSheetContext(ctx){
+    if (!ctx || !ctx.spreadsheetId || ctx.sheetGid===undefined) throw new Error('bad ctx');
+    state.ctx = { spreadsheetId: ctx.spreadsheetId, sheetGid: ctx.sheetGid };
+    state.ready = false;
+  }
+
+  window.lmMaterials = Object.freeze({
+    setCurrentSheetContext,
+    getCurrentContext: () => state.ctx,
+    ensureSheet,
+    preload,
+    saveOpacity
   });
 })();
