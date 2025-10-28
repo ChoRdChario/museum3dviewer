@@ -1,52 +1,71 @@
 // material.orchestrator.js
-// Step2 満額対応版: name→keys 一括適用 + rAFスロットル + 既存DOM優先/なければ自前UI生成
+// Robust Step2: materials 準備完了まで待機 + リスト更新ボタン + rAF スロットル
 /* eslint-disable */
 (() => {
-  const log = (...a) => console.debug?.('[mat-orch]', ...a);
+  const LOG_LEVEL = 'info'; // 'debug' | 'info' | 'silent'
+  const logd = (...a)=> (LOG_LEVEL==='debug') && console.debug('[mat-orch]', ...a);
+  const logi = (...a)=> (LOG_LEVEL!=='silent') && console[LOG_LEVEL]('[mat-orch]', ...a);
 
-  // ---- state ----
   const state = {
     inited: false,
-    mapNameToKeys: new Map(), // name => string[] materialKeys
+    mapNameToKeys: new Map(),  // name => string[] materialKeys
     activeName: null,
     rafId: 0,
+    ui: null
   };
 
-  // ---- utils ----
   const raf = (fn) => {
     if (state.rafId) cancelAnimationFrame(state.rafId);
-    state.rafId = requestAnimationFrame(() => {
-      state.rafId = 0;
-      try { fn(); } catch (e) { /* no-op */ }
-    });
+    state.rafId = requestAnimationFrame(()=>{ state.rafId=0; try{ fn(); }catch{} });
   };
 
-  const ensureUI = () => {
-    // 既存DOMを優先（index.html に pm-* がある想定）
-    let root = document.getElementById('tab-material') || document.querySelector('#tab-material, [data-tab="material"]');
-    if (!root) return null;
+  function escapeHtml(s){ return String(s).replace(/[&<>"']/g,m=>({ '&':'&','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[m]).replace('&','&amp;')); }
 
-    let sel = root.querySelector('#pm-material');
-    let rng = root.querySelector('#pm-opacity-range');
-    let val = root.querySelector('#pm-opacity-val');
+  // ---- viewer helpers ----
+  function listMaterialsSafe(){
+    try { return (window.viewer?.listMaterials?.() || []).filter(Boolean); }
+    catch(e){ return []; }
+  }
+  async function waitForMaterials({timeoutMs=6000, pollMs=120}={}){
+    const t0 = performance.now();
+    let lastCount = -1;
+    while (performance.now() - t0 < timeoutMs) {
+      const list = listMaterialsSafe();
+      const ok = list.length>0 && list.every(it=>it?.name && it?.materialKey);
+      if (ok) return list;
+      if (list.length !== lastCount) {
+        lastCount = list.length;
+        logi('waiting materials…', list.length);
+      }
+      await new Promise(r=>setTimeout(r, pollMs));
+    }
+    return [];
+  }
 
-    // 無ければ最小UIを自動生成（崩し回避の保険）
+  function ensureUI(){
+    const rootTab = document.getElementById('tab-material') || document.querySelector('#tab-material,[data-tab="material"]');
+    if (!rootTab) return null;
+
+    let sel = rootTab.querySelector('#pm-material');
+    let rng = rootTab.querySelector('#pm-opacity-range');
+    let val = rootTab.querySelector('#pm-opacity-val');
+
+    // 既存が無ければ最小UIを作る（保険）
     if (!sel || !rng) {
-      let mount = root.querySelector('#mat-root');
+      let mount = rootTab.querySelector('#mat-root');
       if (!mount) {
         mount = document.createElement('div');
         mount.id = 'mat-root';
-        mount.style.display = 'flex';
-        mount.style.flexDirection = 'column';
-        mount.style.gap = '.5rem';
-        root.appendChild(mount);
+        mount.style.display='flex'; mount.style.flexDirection='column'; mount.style.gap='.5rem';
+        rootTab.appendChild(mount);
       }
       mount.innerHTML = `
-        <div class="mat-row">
+        <div class="mat-row" style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap">
           <label for="pm-material">Material</label>
-          <select id="pm-material" aria-label="material name"></select>
+          <select id="pm-material" aria-label="material name" style="min-width:12rem"></select>
+          <button id="pm-refresh" type="button" title="Refresh materials">↻</button>
         </div>
-        <div class="mat-row">
+        <div class="mat-row" style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap">
           <label for="pm-opacity-range">Opacity</label>
           <input id="pm-opacity-range" type="range" min="0" max="1" step="0.01" value="1"/>
           <span id="pm-opacity-val" aria-live="polite">1.00</span>
@@ -56,96 +75,105 @@
       rng = mount.querySelector('#pm-opacity-range');
       val = mount.querySelector('#pm-opacity-val');
     }
-    return { root, sel, rng, val };
-  };
 
-  const buildNameToKeysMap = () => {
+    const refresh = rootTab.querySelector('#pm-refresh');
+    return state.ui = { rootTab, sel, rng, val, refresh };
+  }
+
+  function buildNameMap(list){
     state.mapNameToKeys.clear();
-    try {
-      const list = (window.viewer?.listMaterials?.() || []);
-      for (const it of list) {
-        const name = it?.name ?? '';
-        const key  = it?.materialKey ?? '';
-        if (!name || !key) continue;
-        if (!state.mapNameToKeys.has(name)) state.mapNameToKeys.set(name, []);
-        state.mapNameToKeys.get(name).push(String(key));
-      }
-      // 初期選択
-      if (!state.activeName) {
-        const first = list.find(Boolean)?.name;
-        state.activeName = first || null;
-      }
-    } catch (e) {
-      log('listMaterials failed', e);
+    for (const it of list) {
+      const name = it?.name ?? '';
+      const key  = it?.materialKey ?? '';
+      if (!name || !key) continue;
+      if (!state.mapNameToKeys.has(name)) state.mapNameToKeys.set(name, []);
+      state.mapNameToKeys.get(name).push(String(key));
     }
-  };
+    // アクティブ名が無ければ先頭
+    if (!state.activeName) {
+      const first = [...state.mapNameToKeys.keys()][0] || null;
+      state.activeName = first;
+    }
+  }
 
-  const fillSelect = (sel) => {
-    const names = Array.from(state.mapNameToKeys.keys()).sort((a,b)=>a.localeCompare(b));
+  function fillSelect(){
+    const { sel } = state.ui;
+    const names = [...state.mapNameToKeys.keys()].sort((a,b)=>a.localeCompare(b));
     sel.innerHTML = names.map(n=>`<option value="${escapeHtml(n)}">${escapeHtml(n)}</option>`).join('');
-    if (state.activeName && names.includes(state.activeName)) {
-      sel.value = state.activeName;
-    } else {
-      sel.selectedIndex = 0;
-      state.activeName = sel.value || null;
+    if (state.activeName && names.includes(state.activeName)) sel.value = state.activeName;
+    else { sel.selectedIndex = 0; state.activeName = sel.value || null; }
+    // 空の場合はプレースホルダ
+    if (!names.length) {
+      sel.innerHTML = `<option value="">— Select material —</option>`;
+      state.activeName = null;
     }
-  };
+  }
 
-  const escapeHtml = (s) => String(s).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
-
-  const applyOpacityToActive = (opacity) => {
-    const name = state.activeName;
-    if (!name) return;
-    const keys = state.mapNameToKeys.get(name) || [];
-    if (!keys.length) return;
+  function applyOpacityToActive(opacity){
+    if (!state.activeName) return;
+    const keys = state.mapNameToKeys.get(state.activeName) || [];
     const apply = window.viewer?.applyMaterialProps;
-    if (typeof apply !== 'function') return;
+    if (!apply || !keys.length) return;
+    for (const k of keys) apply(k, { opacity });
+  }
 
-    for (const k of keys) {
-      // viewer側が transparent の扱いや needsUpdate を適切に面倒見る前提
-      apply(k, { opacity });
-    }
-  };
-
-  // ---- event handlers ----
-  const onModelReady = () => {
+  // ---- wiring ----
+  async function initOnce(){
     if (state.inited) return;
     state.inited = true;
 
     const ui = ensureUI();
-    if (!ui) { log('UI root not found'); return; }
+    if (!ui) { logi('material tab not found'); return; }
 
-    buildNameToKeysMap();
-    fillSelect(ui.sel);
+    // 1) materials が 0 の場合でも待つ（最大 6s）
+    let list = listMaterialsSafe();
+    if (!(list.length>0)) list = await waitForMaterials({timeoutMs:6000, pollMs:120});
 
-    // 選択変更
-    ui.sel.addEventListener('change', () => {
+    if (list.length===0) {
+      // それでも空なら、手動更新の導線を生かす
+      logi('materials still empty (timeout). Use refresh after model is fully ready.');
+    }
+
+    // 2) マップ化 & セレクト反映
+    buildNameMap(list);
+    fillSelect();
+
+    // 3) ハンドラ
+    ui.sel.addEventListener('change', ()=>{
       state.activeName = ui.sel.value || null;
-      // 選択直後にスライダ値で即反映
-      const op = +ui.rng.value || 1;
-      raf(() => applyOpacityToActive(op));
+      const v = +ui.rng.value || 1;
+      raf(()=>applyOpacityToActive(v));
     });
 
-    // 不透明度スライダ：inputで即時（rAFスロットル）
-    ui.rng.addEventListener('input', () => {
+    ui.rng.addEventListener('input', ()=>{
       const v = +ui.rng.value || 1;
       if (ui.val) ui.val.textContent = v.toFixed(2);
-      raf(() => applyOpacityToActive(v));
+      raf(()=>applyOpacityToActive(v));
     });
 
-    // model-ready直後、現在値で一度反映
+    ui.refresh?.addEventListener('click', ()=>{
+      const l = listMaterialsSafe();
+      buildNameMap(l);
+      fillSelect();
+      // 再選択時に現行のスライダ値で即反映
+      const v = +ui.rng.value || 1;
+      raf(()=>applyOpacityToActive(v));
+    });
+
+    // 4) 初期反映
     const initOp = +ui.rng.value || 1;
     if (ui.val) ui.val.textContent = initOp.toFixed(2);
-    raf(() => applyOpacityToActive(initOp));
-  };
+    raf(()=>applyOpacityToActive(initOp));
+  }
 
-  // ---- wiring ----
-  // 既にsceneが来ていれば即実行、そうでなければイベント待ち
-  if (document.readyState === 'complete' || document.readyState === 'interactive') {
-    // 少し遅延してから（他モジュールの初期化待ち）
-    setTimeout(() => {
-      if (window.__LM_SCENE_READY__ || window.__LM_MODEL_READY__) onModelReady();
+  // 既に読み込み済みなら少し遅らせて初期化、そうでなければイベント待ち
+  if (document.readyState !== 'loading') {
+    setTimeout(()=> {
+      initOnce();
     }, 0);
   }
-  window.addEventListener('lm:model-ready', onModelReady, { once: true });
+  window.addEventListener('lm:model-ready', ()=>initOnce(), { once: true });
+
+  // 万一、bridgeイベントが早すぎた/落ちた場合に備えて保険の遅延初期化
+  setTimeout(()=> { initOnce(); }, 1500);
 })();
