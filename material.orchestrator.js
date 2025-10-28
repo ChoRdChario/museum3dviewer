@@ -1,5 +1,5 @@
 // material.orchestrator.js
-// Robust Step2: materials 準備完了まで待機 + リスト更新ボタン + rAF スロットル
+// Robust Step2 + panel-targeted mounting: materials 準備完了まで待機 + リスト更新 + rAF スロットル
 /* eslint-disable */
 (() => {
   const LOG_LEVEL = 'info'; // 'debug' | 'info' | 'silent'
@@ -19,7 +19,11 @@
     state.rafId = requestAnimationFrame(()=>{ state.rafId=0; try{ fn(); }catch{} });
   };
 
-  function escapeHtml(s){ return String(s).replace(/[&<>"']/g,m=>({ '&':'&','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[m]).replace('&','&amp;')); }
+  function escapeHtml(s){
+    return String(s).replace(/[&<>"']/g, m => ({
+      '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+    }[m]));
+  }
 
   // ---- viewer helpers ----
   function listMaterialsSafe(){
@@ -42,21 +46,30 @@
     return [];
   }
 
+  // Mount strictly into the *panel* (not the tab button)
   function ensureUI(){
-    const rootTab = document.getElementById('tab-material') || document.querySelector('#tab-material,[data-tab="material"]');
-    if (!rootTab) return null;
+    // Prefer a tabpanel container with id #tab-material (div only), or ARIA-linked panel
+    let rootTab =
+      document.querySelector('div.lm-tabpanel#tab-material') ||
+      document.querySelector('div[role="tabpanel"]#tab-material') ||
+      document.querySelector('div.lm-tabpanel[data-panel="material"]') ||
+      document.querySelector('div[role="tabpanel"][aria-labelledby="tabbtn-material"]');
+
+    if (!rootTab) return null; // never mount into tab buttons
 
     let sel = rootTab.querySelector('#pm-material');
     let rng = rootTab.querySelector('#pm-opacity-range');
     let val = rootTab.querySelector('#pm-opacity-val');
 
-    // 既存が無ければ最小UIを作る（保険）
+    // 既存が無ければ最小UIを作成（保険）
     if (!sel || !rng) {
       let mount = rootTab.querySelector('#mat-root');
       if (!mount) {
         mount = document.createElement('div');
         mount.id = 'mat-root';
-        mount.style.display='flex'; mount.style.flexDirection='column'; mount.style.gap='.5rem';
+        mount.style.display='flex';
+        mount.style.flexDirection='column';
+        mount.style.gap='.5rem';
         rootTab.appendChild(mount);
       }
       mount.innerHTML = `
@@ -123,7 +136,7 @@
     state.inited = true;
 
     const ui = ensureUI();
-    if (!ui) { logi('material tab not found'); return; }
+    if (!ui) { logi('material panel not found'); return; }
 
     // 1) materials が 0 の場合でも待つ（最大 6s）
     let list = listMaterialsSafe();
@@ -164,13 +177,22 @@
     const initOp = +ui.rng.value || 1;
     if (ui.val) ui.val.textContent = initOp.toFixed(2);
     raf(()=>applyOpacityToActive(initOp));
+
+    // 5) タブが後から開かれた場合でも再試行（保険）
+    const tabBtn = document.getElementById('tabbtn-material') || document.querySelector('[role="tab"][aria-controls="tab-material"]');
+    tabBtn?.addEventListener('click', ()=> setTimeout(()=>{
+      // DOMは既にある前提だが、materials列挙だけ更新する
+      const l = listMaterialsSafe();
+      if (l.length) {
+        buildNameMap(l);
+        fillSelect();
+      }
+    }, 0));
   }
 
   // 既に読み込み済みなら少し遅らせて初期化、そうでなければイベント待ち
   if (document.readyState !== 'loading') {
-    setTimeout(()=> {
-      initOnce();
-    }, 0);
+    setTimeout(()=> { initOnce(); }, 0);
   }
   window.addEventListener('lm:model-ready', ()=>initOnce(), { once: true });
 
