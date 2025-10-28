@@ -1,267 +1,173 @@
 // material.orchestrator.js
-// Robust Step2 with full fallback:
-// - Prefer viewer.listMaterials() -> name -> [materialKey...] map
-// - If unavailable/empty, traverse scene to collect material names
-// - If applyMaterialProps/materialKey is unavailable, fall back to direct material edits by name
-/* eslint-disable */
+// LociMyu Material Orchestrator
+// 役割：GLBが「本当に」載った後に一度だけ名前付きマテをセレクトへ投入し、スライダ配線。
+// - 主要トリガ: lm:model-ready（bridge から）
+// - バックアップ: lm:scene-ready の後に短時間ポーリング
+
 (() => {
-  const LOG_LEVEL = 'info'; // 'debug' | 'info' | 'silent'
-  const logd = (...a)=> (LOG_LEVEL==='debug') && console.debug('[mat-orch]', ...a);
-  const logi = (...a)=> (LOG_LEVEL!=='silent') && console.info('[mat-orch]', ...a);
+  const LOG_TAG = '[lm-orch]';
+  const log = (...a) => console.log(LOG_TAG, ...a);
 
-  const state = {
-    inited: false,
-    mapNameToKeys: new Map(),  // name => string[] materialKeys (may be empty if using fallback)
-    haveKeys: false,           // true when keys are valid for applyMaterialProps
-    activeName: null,
-    rafId: 0,
-    ui: null
-  };
+  log('loaded');
 
-  const raf = (fn) => {
-    if (state.rafId) cancelAnimationFrame(state.rafId);
-    state.rafId = requestAnimationFrame(()=>{ state.rafId=0; try{ fn(); }catch{} });
-  };
-
-  function escapeHtml(s){
-    return String(s).replace(/[&<>"']/g, m => ({
-      '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
-    }[m]));
-  }
-
-  // ---- viewer helpers ----
-  function listMaterialsSafe(){
-    try { return (window.viewer?.listMaterials?.() || []).filter(Boolean); }
-    catch(e){ return []; }
-  }
-  function getSceneRoot(){
-    return window.viewer?.getSceneRoot?.() || window.scene || null;
-  }
-  function traverseAllMaterials(fn){
-    const root = getSceneRoot();
-    if (!root || !root.traverse) return;
-    root.traverse((obj)=>{
-      const m = obj && obj.material;
-      if (!m) return;
-      if (Array.isArray(m)) m.forEach(fn);
-      else fn(m);
-    });
-  }
-  function enumerateMaterialsFromScene(){
-    const names = new Map(); // name => placeholder key list (empty)
-    traverseAllMaterials((mat)=>{
-      const nm = (mat && (mat.name || (mat.userData && mat.userData.name))) || '';
-      if (!nm) return;
-      if (!names.has(nm)) names.set(nm, []);
-    });
-    return [...names.keys()];
-  }
-
-  async function waitForMaterials({timeoutMs=6000, pollMs=120}={}){
-    const t0 = performance.now();
-    let last = -1;
-    while (performance.now() - t0 < timeoutMs) {
-      const list = listMaterialsSafe();
-      const ok = list.length>0 && list.every(it=>it?.name);
-      if (ok) return list;
-      // try scene traversal as soon as there are meshes
-      const root = getSceneRoot();
-      if (root) {
-        let found = 0;
-        traverseAllMaterials(()=>{ found++; });
-        if (found>0) return []; // signal to use traversal fallback
-      }
-      if (list.length !== last) { last = list.length; logi('waiting materials…', list.length); }
-      await new Promise(r=>setTimeout(r, pollMs));
+  // viewer.module.cdn.js を遅延importし、キャッシュして再利用
+  async function getViewerMod() {
+    if (window.__viewer_mod_cache) return window.__viewer_mod_cache;
+    try {
+      const mod = await import('./viewer.module.cdn.js');
+      window.__viewer_mod_cache = mod;
+      return mod;
+    } catch {
+      return {};
     }
-    return []; // timeout
   }
 
-  // --- Mount / UI discovery ---
-  function ensureUI(){
-    // 1) 既存のコントロールを最優先で拾う
-    let sel = document.getElementById('pm-material') || document.querySelector('#pm-material');
-    let rng = document.getElementById('pm-opacity-range') || document.querySelector('#pm-opacity-range');
-    let val = document.getElementById('pm-opacity-val') || document.querySelector('#pm-opacity-val');
-
-    let rootTab = null;
-    if (sel) {
-      rootTab = sel.closest('.lm-tabpanel,[role="tabpanel"]')
-             || document.getElementById('tab-material')
-             || document.querySelector('[aria-labelledby="tabbtn-material"]')
-             || document.querySelector('[data-panel="material"]')
-             || document.body;
+  // 名前列挙（viewer API → scene 走査の順で試す）
+  async function collectMaterialNames() {
+    let names = [];
+    try {
+      const mod = await getViewerMod();
+      const arr = mod.listMaterials?.() || [];
+      names = arr.map((r) => r?.name).filter(Boolean);
+    } catch {}
+    if (names.length === 0) {
+      const s = window.__LM_SCENE;
+      const set = new Set();
+      s?.traverse?.((o) => {
+        if (!o.isMesh || !o.material) return;
+        (Array.isArray(o.material) ? o.material : [o.material])
+          .forEach((m) => m?.name && set.add(m.name));
+      });
+      names = [...set];
     }
+    // #0, #1 ... の匿名は除外 & 重複排除
+    return [...new Set(names)].filter((n) => !/^#\d+$/.test(n));
+  }
 
-    // 既存がなければ作る
-    if (!sel || !rng) {
-      if (!rootTab) {
-        rootTab =
-          document.querySelector('.lm-tabpanel#tab-material, [role="tabpanel"]#tab-material') ||
-          document.querySelector('.lm-tabpanel[data-panel="material"]') ||
-          document.querySelector('[role="tabpanel"][aria-labelledby="tabbtn-material"]');
-      }
-      if (!rootTab) return null;
+  // セレクトへ投入（idempotent）
+  function fillSelect(names) {
+    const sel = document.getElementById('pm-material');
+    if (!sel) return false;
+    const cur = sel.value;
+    sel.innerHTML = '<option value="">— Select material —</option>';
+    for (const n of names) {
+      const o = document.createElement('option');
+      o.value = n; o.textContent = n;
+      sel.appendChild(o);
+    }
+    if (cur && names.includes(cur)) sel.value = cur;
+    return names.length > 0;
+  }
 
-      let mount = rootTab.querySelector('#mat-root');
-      if (!mount) {
-        mount = document.createElement('div');
-        mount.id = 'mat-root';
-        mount.style.display='flex'; mount.style.flexDirection='column'; mount.style.gap='.5rem';
-        rootTab.appendChild(mount);
-      }
-      mount.innerHTML = `
-        <div class="mat-row" style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap">
-          <label for="pm-material">Material</label>
-          <select id="pm-material" aria-label="material name" style="min-width:12rem"></select>
-          <button id="pm-refresh" type="button" title="Refresh materials">↻</button>
-        </div>
-        <div class="mat-row" style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap">
-          <label for="pm-opacity-range">Opacity</label>
-          <input id="pm-opacity-range" type="range" min="0" max="1" step="0.01" value="1"/>
-          <span id="pm-opacity-val" aria-live="polite">1.00</span>
-        </div>
-      `;
-      sel = mount.querySelector('#pm-material');
-      rng = mount.querySelector('#pm-opacity-range');
-      val = mount.querySelector('#pm-opacity-val');
+  // 適用：名前一致の全マテに opacity を当てる
+  async function setOpacityByName(name, v) {
+    const val = Math.max(0, Math.min(1, Number(v)));
+    let count = 0;
+    const mod = await getViewerMod();
+    if (typeof mod.applyMaterialPropsByName === 'function') {
+      count = mod.applyMaterialPropsByName(name, { opacity: val }) || 0;
     } else {
-      // Refreshボタン（未設置なら追加）
-      const hasRefresh = !!(sel.parentElement && sel.parentElement.querySelector('#pm-refresh'));
-      if (!hasRefresh) {
-        const btn = document.createElement('button');
-        btn.id = 'pm-refresh'; btn.type = 'button'; btn.title = 'Refresh materials'; btn.textContent = '↻';
-        sel.insertAdjacentElement('afterend', btn);
-      }
+      const s = window.__LM_SCENE;
+      s?.traverse?.((o) => {
+        if (!o.isMesh || !o.material) return;
+        (Array.isArray(o.material) ? o.material : [o.material]).forEach((m) => {
+          if ((m?.name || '') === name) {
+            m.transparent = val < 1;
+            m.opacity = val;
+            m.depthWrite = val >= 1;
+            m.needsUpdate = true;
+            count++;
+          }
+        });
+      });
     }
-
-    const refresh = (rootTab || document).querySelector('#pm-refresh');
-    return (state.ui = { rootTab: rootTab || document.body, sel, rng, val, refresh });
+    return count;
   }
 
-  function buildNameMapFromViewer(list){
-    state.mapNameToKeys.clear();
-    for (const it of list) {
-      const name = it?.name ?? '';
-      const key  = it?.materialKey ?? '';
-      if (!name) continue;
-      if (!state.mapNameToKeys.has(name)) state.mapNameToKeys.set(name, []);
-      if (key) state.mapNameToKeys.get(name).push(String(key));
-    }
-    state.haveKeys = [...state.mapNameToKeys.values()].some(arr => arr.length>0);
-    if (!state.activeName) {
-      const first = [...state.mapNameToKeys.keys()][0] || null;
-      state.activeName = first;
-    }
-  }
-
-  function buildNameMapFromScene(){
-    state.mapNameToKeys.clear();
-    const names = enumerateMaterialsFromScene();
-    names.forEach(n => state.mapNameToKeys.set(n, [])); // keys unknown in fallback
-    state.haveKeys = false;
-    if (!state.activeName) state.activeName = names[0] || null;
-  }
-
-  function fillSelect(){
-    const { sel } = state.ui;
-    const names = [...state.mapNameToKeys.keys()].sort((a,b)=>a.localeCompare(b));
-    sel.innerHTML = names.map(n=>`<option value="${escapeHtml(n)}">${escapeHtml(n)}</option>`).join('');
-    if (state.activeName && names.includes(state.activeName)) sel.value = state.activeName;
-    else { sel.selectedIndex = 0; state.activeName = sel.value || null; }
-    if (!names.length) {
-      sel.innerHTML = `<option value="">— Select material —</option>`;
-      state.activeName = null;
-    }
-  }
-
-  function applyOpacityToActive(opacity){
-    const name = state.activeName;
-    if (!name) return;
-
-    const apply = window.viewer?.applyMaterialProps;
-    if (state.haveKeys && typeof apply === 'function') {
-      const keys = state.mapNameToKeys.get(name) || [];
-      for (const k of keys) apply(k, { opacity });
-      return;
-    }
-
-    // Fallback: traverse scene and set by name
-    traverseAllMaterials((mat)=>{
-      const nm = (mat && (mat.name || (mat.userData && mat.userData.name))) || '';
-      if (nm !== name) return;
-      mat.transparent = (opacity < 1);
-      mat.opacity = opacity;
-      mat.needsUpdate = true;
+  // その名前の最初の現在不透明度
+  function getOpacityByName(name) {
+    let out = null;
+    const s = window.__LM_SCENE;
+    s?.traverse?.((o) => {
+      if (out !== null) return;
+      if (!o.isMesh || !o.material) return;
+      (Array.isArray(o.material) ? o.material : [o.material]).some((m) => {
+        if ((m?.name || '') === name) { out = Number(m.opacity ?? 1); return true; }
+        return false;
+      });
     });
+    return out == null ? 1 : Math.max(0, Math.min(1, out));
   }
 
-  // ---- wiring ----
-  async function initOnce(){
-    if (state.inited) return;
-    state.inited = true;
+  // スライダ/セレクト配線（多重でも害なし）
+  function wireUIOnce() {
+    const sel = document.getElementById('pm-material');
+    const rng = document.getElementById('pm-opacity-range');
+    const out = document.getElementById('pm-opacity-val');
+    if (!(sel && rng && out)) return;
 
-    const ui = ensureUI();
-    if (!ui) { logi('material UI not found'); return; }
+    const onChange = () => {
+      const n = sel.value;
+      const v = n ? getOpacityByName(n) : 1;
+      rng.value = v;
+      out.textContent = v.toFixed(2);
+    };
+    const onInput = () => {
+      const n = sel.value;
+      if (!n) return;
+      const v = Number(rng.value || 1);
+      out.textContent = v.toFixed(2);
+      setOpacityByName(n, v);
+    };
 
-    // 1) materials を待機（viewer API or scene準備）
-    let list = listMaterialsSafe();
-    if (!(list.length>0)) list = await waitForMaterials({timeoutMs:6000, pollMs:120});
+    sel.removeEventListener?.('__orch_change', onChange);
+    rng.removeEventListener?.('__orch_input', onInput);
 
-    if (list.length>0) {
-      buildNameMapFromViewer(list);
-    } else {
-      // viewer APIが空 or 未準備 -> シーントラバースで列挙
-      buildNameMapFromScene();
-      if (state.mapNameToKeys.size===0) {
-        logi('materials not ready yet; use refresh after model fully ready.');
-      }
+    sel.addEventListener('change', onChange);
+    rng.addEventListener('input', onInput, { passive: true });
+
+    // “印” を付けて二重配線防止
+    sel.addEventListener('__orch_change', onChange);
+    rng.addEventListener('__orch_input', onInput);
+
+    // 初期同期
+    onChange();
+  }
+
+  // 一発実行: 集めて入れて、配線
+  let lastCount = -1;
+  async function fillOnceAndWire() {
+    const names = await collectMaterialNames();
+    const ok = fillSelect(names);
+    if (ok && names.length !== lastCount) {
+      log('filled', names.length, names);
+      lastCount = names.length;
     }
-
-    fillSelect();
-
-    // 3) ハンドラ
-    ui.sel.addEventListener('change', ()=>{
-      state.activeName = ui.sel.value || null;
-      const v = +ui.rng.value || 1;
-      raf(()=>applyOpacityToActive(v));
-    });
-
-    ui.rng.addEventListener('input', ()=>{
-      const v = +ui.rng.value || 1;
-      if (ui.val) ui.val.textContent = v.toFixed(2);
-      raf(()=>applyOpacityToActive(v));
-    });
-
-    ui.refresh?.addEventListener('click', ()=>{
-      // 再列挙（viewer優先、無ければscene）
-      const l = listMaterialsSafe();
-      if (l.length>0) buildNameMapFromViewer(l);
-      else { buildNameMapFromScene(); }
-      fillSelect();
-      const v = +ui.rng.value || 1;
-      raf(()=>applyOpacityToActive(v));
-    });
-
-    // 4) 初期反映
-    const initOp = +ui.rng.value || 1;
-    if (ui.val) ui.val.textContent = initOp.toFixed(2);
-    raf(()=>applyOpacityToActive(initOp));
-
-    // 5) タブクリック後の再列挙（保険）
-    const tabBtn = document.getElementById('tabbtn-material') || document.querySelector('[role="tab"][aria-controls="tab-material"]');
-    tabBtn?.addEventListener('click', ()=> setTimeout(()=>{
-      const l = listMaterialsSafe();
-      if (l.length>0) buildNameMapFromViewer(l);
-      else buildNameMapFromScene();
-      fillSelect();
-    }, 0));
+    if (ok) wireUIOnce();
+    return ok;
   }
 
-  if (document.readyState !== 'loading') {
-    setTimeout(()=> { initOnce(); }, 0);
-  }
-  window.addEventListener('lm:model-ready', ()=>initOnce(), { once: true });
-  window.addEventListener('lm:scene-ready', ()=>initOnce(), { once: true });
-  setTimeout(()=> { initOnce(); }, 1500);
+  // --- 起動シーケンス ---
+  // 最優先: モデル実体が載ったら一発
+  document.addEventListener('lm:model-ready', () => {
+    (async () => {
+      if (await fillOnceAndWire()) return;
+      // 念のためのごく短い再試行
+      let tries = 0;
+      const iv = setInterval(async () => {
+        tries++;
+        if (await fillOnceAndWire() || tries >= 20) clearInterval(iv); // 最大 ~4s
+      }, 200);
+    })();
+  }, { once: true });
+
+  // 互換: scene-ready 後にもバックアップの短ポーリング
+  document.addEventListener('lm:scene-ready', () => {
+    log('scene-ready');
+    let tries = 0;
+    const iv = setInterval(async () => {
+      tries++;
+      if (await fillOnceAndWire() || tries >= 30) clearInterval(iv); // 最大 ~6s
+    }, 200);
+  }, { once: true });
 })();
