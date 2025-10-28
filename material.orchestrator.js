@@ -1,5 +1,5 @@
 // material.orchestrator.js
-// Robust Step2 + panel-targeted mounting: materials 準備完了まで待機 + リスト更新 + rAF スロットル
+// Robust Step2 + smarter mounting: find existing per-material controls first, then fall back
 /* eslint-disable */
 (() => {
   const LOG_LEVEL = 'info'; // 'debug' | 'info' | 'silent'
@@ -46,23 +46,33 @@
     return [];
   }
 
-  // Mount strictly into the *panel* (not the tab button)
+  // --- Mount / UI discovery ---
   function ensureUI(){
-    // Prefer a tabpanel container with id #tab-material (div only), or ARIA-linked panel
-    let rootTab =
-      document.querySelector('div.lm-tabpanel#tab-material') ||
-      document.querySelector('div[role="tabpanel"]#tab-material') ||
-      document.querySelector('div.lm-tabpanel[data-panel="material"]') ||
-      document.querySelector('div[role="tabpanel"][aria-labelledby="tabbtn-material"]');
+    // 1) 既存のコントロールを最優先で拾う（あなたのDOMを尊重）
+    let sel = document.getElementById('pm-material') || document.querySelector('#pm-material');
+    let rng = document.getElementById('pm-opacity-range') || document.querySelector('#pm-opacity-range');
+    let val = document.getElementById('pm-opacity-val') || document.querySelector('#pm-opacity-val');
 
-    if (!rootTab) return null; // never mount into tab buttons
+    let rootTab = null;
+    // 2) 既存セレクトが在れば、その祖先からタブパネルらしい要素を特定
+    if (sel) {
+      rootTab = sel.closest('.lm-tabpanel,[role="tabpanel"]')
+             || document.getElementById('tab-material')
+             || document.querySelector('[aria-labelledby="tabbtn-material"]')
+             || document.querySelector('[data-panel="material"]')
+             || document.body; // 最後の保険
+    }
 
-    let sel = rootTab.querySelector('#pm-material');
-    let rng = rootTab.querySelector('#pm-opacity-range');
-    let val = rootTab.querySelector('#pm-opacity-val');
-
-    // 既存が無ければ最小UIを作成（保険）
+    // 3) 既存が見つからない場合のみ、タブパネルを探して最小UIを作成
     if (!sel || !rng) {
+      if (!rootTab) {
+        rootTab =
+          document.querySelector('.lm-tabpanel#tab-material, [role="tabpanel"]#tab-material') ||
+          document.querySelector('.lm-tabpanel[data-panel="material"]') ||
+          document.querySelector('[role="tabpanel"][aria-labelledby="tabbtn-material"]');
+      }
+      if (!rootTab) return null; // 見つからない場合は諦める
+
       let mount = rootTab.querySelector('#mat-root');
       if (!mount) {
         mount = document.createElement('div');
@@ -87,10 +97,21 @@
       sel = mount.querySelector('#pm-material');
       rng = mount.querySelector('#pm-opacity-range');
       val = mount.querySelector('#pm-opacity-val');
+    } else {
+      // 既存UIがある場合、Refreshボタンを隣に差し込む（未設置時のみ）
+      const hasRefresh = !!(sel.parentElement && sel.parentElement.querySelector('#pm-refresh'));
+      if (!hasRefresh) {
+        const btn = document.createElement('button');
+        btn.id = 'pm-refresh';
+        btn.type = 'button';
+        btn.title = 'Refresh materials';
+        btn.textContent = '↻';
+        sel.insertAdjacentElement('afterend', btn);
+      }
     }
 
-    const refresh = rootTab.querySelector('#pm-refresh');
-    return state.ui = { rootTab, sel, rng, val, refresh };
+    const refresh = (rootTab || document).querySelector('#pm-refresh');
+    return (state.ui = { rootTab: rootTab || document.body, sel, rng, val, refresh });
   }
 
   function buildNameMap(list){
@@ -136,7 +157,7 @@
     state.inited = true;
 
     const ui = ensureUI();
-    if (!ui) { logi('material panel not found'); return; }
+    if (!ui) { logi('material UI not found'); return; }
 
     // 1) materials が 0 の場合でも待つ（最大 6s）
     let list = listMaterialsSafe();
@@ -168,7 +189,6 @@
       const l = listMaterialsSafe();
       buildNameMap(l);
       fillSelect();
-      // 再選択時に現行のスライダ値で即反映
       const v = +ui.rng.value || 1;
       raf(()=>applyOpacityToActive(v));
     });
@@ -178,10 +198,9 @@
     if (ui.val) ui.val.textContent = initOp.toFixed(2);
     raf(()=>applyOpacityToActive(initOp));
 
-    // 5) タブが後から開かれた場合でも再試行（保険）
+    // 5) タブクリック後の再列挙（保険）
     const tabBtn = document.getElementById('tabbtn-material') || document.querySelector('[role="tab"][aria-controls="tab-material"]');
     tabBtn?.addEventListener('click', ()=> setTimeout(()=>{
-      // DOMは既にある前提だが、materials列挙だけ更新する
       const l = listMaterialsSafe();
       if (l.length) {
         buildNameMap(l);
@@ -190,12 +209,9 @@
     }, 0));
   }
 
-  // 既に読み込み済みなら少し遅らせて初期化、そうでなければイベント待ち
   if (document.readyState !== 'loading') {
     setTimeout(()=> { initOnce(); }, 0);
   }
   window.addEventListener('lm:model-ready', ()=>initOnce(), { once: true });
-
-  // 万一、bridgeイベントが早すぎた/落ちた場合に備えて保険の遅延初期化
   setTimeout(()=> { initOnce(); }, 1500);
 })();
