@@ -5,7 +5,10 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
   <title>LociMyu v6.6</title>
 
-  <!-- ========== Three.js importmap（単一に固定） ========== -->
+  <!-- 404回避用の空ファビコン -->
+  <link rel="icon" href="data:image/x-icon;base64,AA==" />
+
+  <!-- ===== Three.js は importmap で 1 回だけ読み込む（重複禁止） ===== -->
   <script id="lm-importmap-three" type="importmap">
   {
     "imports": {
@@ -19,116 +22,51 @@
     :root{
       --panel-w: 360px;
       --panel-maxw: 40vw;
-      --gap: 10px;
-      --fg: #e8eefc;
-      --bg: #0e1116;
-      --pane: #161b22;
-      --muted: #9fb0c3;
-      --accent: #2f6feb;
-      --border: #243244;
+      --fg: #e8eefc; --bg: #0a0d12; --pane:#161b22; --border:#243244;
+      --muted:#9fb0c3;
     }
     html,body{height:100%}
-    body{
-      margin:0;
-      background:#0a0d12;
-      color:var(--fg);
-      font:14px/1.4 system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial, "Noto Sans JP", "Hiragino Kaku Gothic ProN", Meiryo, sans-serif;
-      overflow:hidden;
-    }
-    /* レイアウト */
-    #root{
-      position:fixed; inset:0;
-      display:grid;
-      grid-template-columns: minmax(0,1fr) minmax(300px, var(--panel-w));
-      grid-template-rows: 48px 1fr;
-      grid-template-areas:
-        "topbar topbar"
-        "stage  side";
-      gap:0;
-    }
-    #topbar{
-      grid-area:topbar;
-      display:flex; align-items:center; gap:8px;
-      padding:8px 10px; border-bottom:1px solid var(--border);
-      background: linear-gradient(180deg,#0f1320,#0a0e16);
-    }
-    #stage{
-      grid-area:stage; position:relative;
-      background:#0a0d12;
-    }
-    #side{
-      grid-area:side;
-      min-width:300px; max-width:var(--panel-maxw);
-      overflow:auto; background:var(--pane);
-      border-left:1px solid var(--border);
-    }
-
-    /* トップバー */
-    .tb-group{display:flex; gap:8px; align-items:center}
-    .tb-input{height:32px; padding:0 10px; border:1px solid var(--border); background:#0e141c; color:var(--fg); border-radius:8px; min-width:260px}
-    .tb-btn{height:32px; padding:0 12px; border:1px solid var(--border); background:#121a26; color:var(--fg); border-radius:8px; cursor:pointer}
-    .tb-btn:hover{background:#162235}
-
-    /* サイドパネル */
-    .tabs{display:flex; gap:6px; padding:8px 10px; border-bottom:1px solid var(--border)}
-    .tab{padding:6px 12px; border-radius:8px; cursor:pointer; color:var(--muted)}
-    .tab.active{background:#111826; color:var(--fg); border:1px solid var(--border)}
-
-    .section{padding:12px 14px 16px; border-bottom:1px solid var(--border)}
-    .section h3{margin:0 0 10px; font-size:13px; color:#cfe2ff}
-    .muted{color:var(--muted); font-size:12px}
-
-    .row{display:flex; align-items:center; gap:8px}
-    .row > *{flex:0 0 auto}
+    body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.4 system-ui, -apple-system, Segoe UI, Roboto, "Noto Sans JP", "Hiragino Kaku Gothic ProN", Meiryo, sans-serif;overflow:hidden}
+    #root{position:fixed;inset:0;display:grid;grid-template-columns:minmax(0,1fr) minmax(300px,var(--panel-w));grid-template-rows:48px 1fr;grid-template-areas:"topbar topbar" "stage side"}
+    #topbar{grid-area:topbar;display:flex;gap:8px;align-items:center;padding:8px 10px;border-bottom:1px solid var(--border);background:#0f1320}
+    #stage{grid-area:stage;position:relative;background:#0a0d12}
+    #side{grid-area:side;min-width:300px;max-width:var(--panel-maxw);overflow:auto;background:#101626;border-left:1px solid var(--border)}
+    .tb-input{height:32px;padding:0 10px;border:1px solid var(--border);background:#0e141c;color:var(--fg);border-radius:8px;min-width:240px}
+    .tb-btn{height:32px;padding:0 12px;border:1px solid var(--border);background:#121a26;color:var(--fg);border-radius:8px;cursor:pointer}
+    .tabs{display:flex;gap:6px;padding:8px 10px;border-bottom:1px solid var(--border)}
+    .tab{padding:6px 12px;border-radius:8px;cursor:pointer;color:#9fb0c3}
+    .tab.active{background:#111826;color:var(--fg);border:1px solid var(--border)}
+    .section{padding:12px 14px 16px;border-bottom:1px solid var(--border)}
+    .section h3{margin:0 0 10px;font-size:13px;color:#cfe2ff}
+    .muted{color:var(--muted);font-size:12px}
+    .row{display:flex;align-items:center;gap:8px}
     .row.stretch > *:first-child{flex:1 1 auto}
-
-    select, input[type="text"]{
-      height:32px; border-radius:8px; border:1px solid var(--border);
-      background:#0e141c; color:var(--fg); padding:0 10px;
-    }
-    input[type="range"]{width:100%; height:4px; cursor:pointer}
-    .pill{height:28px; padding:0 10px; border-radius:999px; border:1px solid var(--border); background:#0f1522; color:var(--fg)}
-
-    .grid{display:grid; grid-template-columns: 1fr; gap:10px}
-    .flag{display:flex; align-items:center; gap:8px}
-    .kvs{display:flex; align-items:center; gap:8px}
-    .pad{padding:10px}
-    .br{border-radius:10px}
-    .box{border:1px solid var(--border); background:#0d1320}
-
-    /* スクロール抑制 */
-    #side::-webkit-scrollbar{width:10px}
-    #side::-webkit-scrollbar-thumb{background:#203048; border-radius:10px}
-    #side::-webkit-scrollbar-track{background:#0f1320}
-    .value{min-width:36px; text-align:right}
-
-    .auth-tip{background:#1f2a3a; border:1px dashed #375a9e; padding:10px; border-radius:8px; color:#c9d7ef}
-    .auth-btn{margin-top:8px; height:32px; padding:0 12px; border:1px solid var(--border); background:#17233a; color:#dbe6ff; border-radius:8px; cursor:pointer}
-    .auth-btn:hover{background:#1b2b47}
+    select,input[type="text"]{height:32px;border-radius:8px;border:1px solid var(--border);background:#0e141c;color:var(--fg);padding:0 10px}
+    input[type="range"]{width:100%;height:4px}
+    .pill{height:28px;padding:0 10px;border-radius:999px;border:1px solid var(--border);background:#0f1522;color:var(--fg)}
+    .value{min-width:36px;text-align:right}
+    .auth-tip{background:#1f2a3a;border:1px dashed #375a9e;padding:10px;border-radius:8px;color:#c9d7ef}
+    .auth-btn{margin-top:8px;height:32px;padding:0 12px;border:1px solid var(--border);background:#17233a;color:#dbe6ff;border-radius:8px;cursor:pointer}
+    #side::-webkit-scrollbar{width:10px}#side::-webkit-scrollbar-thumb{background:#203048;border-radius:10px}#side::-webkit-scrollbar-track{background:#0f1320}
   </style>
 </head>
 <body>
   <div id="root">
-    <!-- トップバー -->
+    <!-- Top bar -->
     <div id="topbar">
-      <div class="tb-group">
-        <input id="drive-url" class="tb-input" placeholder="Drive fileId / GLB URL" />
-        <button id="btn-load" class="tb-btn">Load</button>
-      </div>
-      <div class="tb-group">
-        <select id="sheet-select" class="tb-input" style="min-width:120px"><option>シート1</option></select>
-        <button id="btn-pick" class="tb-btn">Select sheet…</button>
-        <button id="btn-create" class="tb-btn">Create</button>
-      </div>
-      <div style="margin-left:auto" class="tb-group">
-        <button id="btn-signin" class="tb-btn">Sign in</button>
-      </div>
+      <input id="drive-url" class="tb-input" placeholder="Drive fileId / GLB URL" />
+      <button id="btn-load" class="tb-btn">Load</button>
+      <select id="sheet-select" class="tb-input" style="min-width:120px"><option>シート1</option></select>
+      <button id="btn-pick" class="tb-btn">Select sheet…</button>
+      <button id="btn-create" class="tb-btn">Create</button>
+      <div style="margin-left:auto"></div>
+      <button id="btn-signin" class="tb-btn">Sign in</button>
     </div>
 
-    <!-- 3D領域 -->
-    <div id="stage"><!-- three canvas / viewer mounts here --></div>
+    <!-- 3D stage -->
+    <div id="stage"></div>
 
-    <!-- 右パネル -->
+    <!-- Right panel -->
     <aside id="side">
       <div class="tabs">
         <div id="tab-caption"  class="tab">Caption</div>
@@ -136,65 +74,45 @@
         <div id="tab-views"    class="tab">Views</div>
       </div>
 
-      <!-- Material タブ -->
+      <!-- Material pane -->
       <div id="pane-material">
-        <!-- Per-material opacity -->
         <div class="section">
           <h3>Per-material opacity (saved per sheet)</h3>
-          <div class="grid">
-            <div class="row stretch">
-              <select id="pm-material" aria-label="Select material">
-                <option value="">— Select material —</option>
-              </select>
-              <span class="value" id="pm-opacity-val">1.00</span>
-            </div>
-            <input id="pm-opacity-range" type="range" min="0" max="1" step="0.01" value="1" />
-            <div class="muted">Pick a material, then set its opacity. This does not change global opacity above.</div>
+          <div class="row stretch">
+            <select id="pm-material"><option value="">— Select material —</option></select>
+            <span class="value" id="pm-opacity-val">1.00</span>
           </div>
+          <input id="pm-opacity-range" type="range" min="0" max="1" step="0.01" value="1" />
+          <div class="muted">Pick a material, then set its opacity. This does not change global opacity above.</div>
         </div>
 
-        <!-- Shading -->
         <div class="section">
           <h3>Shading</h3>
-          <div class="grid">
-            <label class="flag"><input id="pm-flag-doublesided" type="checkbox" /> Double-sided</label>
-            <label class="flag"><input id="pm-flag-unlit" type="checkbox" /> Unlit-like</label>
-          </div>
+          <label class="row"><input id="pm-flag-doublesided" type="checkbox" /> Double-sided</label>
+          <label class="row"><input id="pm-flag-unlit" type="checkbox" /> Unlit-like</label>
         </div>
 
-        <!-- Chroma key -->
         <div class="section">
           <h3>Chroma key</h3>
-          <div class="grid">
-            <div class="row">
-              <label class="flag"><input id="pm-chroma-enable" type="checkbox" /> Enable</label>
-              <input id="pm-chroma-color" class="pill" type="color" value="#000000" />
-            </div>
-            <div class="row">
-              <span class="muted" style="width:88px">Tolerance</span>
-              <input id="pm-chroma-tol" type="range" min="0" max="1" step="0.01" value="0" />
-            </div>
-            <div class="row">
-              <span class="muted" style="width:88px">Feather</span>
-              <input id="pm-chroma-feather" type="range" min="0" max="1" step="0.01" value="0" />
-            </div>
-          </div>
+          <div class="row"><label class="row"><input id="pm-chroma-enable" type="checkbox" /> Enable</label><input id="pm-chroma-color" class="pill" type="color" value="#000000" /></div>
+          <div class="row"><span class="muted" style="width:88px">Tolerance</span><input id="pm-chroma-tol" type="range" min="0" max="1" step="0.01" value="0" /></div>
+          <div class="row"><span class="muted" style="width:88px">Feather</span><input id="pm-chroma-feather" type="range" min="0" max="1" step="0.01" value="0" /></div>
         </div>
 
-        <!-- 認可UI（必要時のみJSが挿入） -->
-        <div id="material-auth-slot" class="pad"></div>
+        <div id="material-auth-slot" style="padding:10px"></div>
       </div>
     </aside>
   </div>
 
-  <!-- ===== あなたの既存スクリプト群（viewer / bridge / boot など）はこの下にそのまま残してください ===== -->
-  <!-- 例:
+  <!-- ====== 既存のアプリスクリプト群（順序大事） ======
+       ※ ここはリポジトリにある実体ファイルに合わせてください
+       ※ three の <script> 埋め込みはしない（importmap に一本化） -->
   <script type="module" src="./boot.esm.cdn.js"></script>
+  <script type="module" src="./viewer.module.cdn.js"></script>
   <script type="module" src="./viewer.bridge.module.js"></script>
   <script type="module" src="./sheet.ctx.bridge.js"></script>
-  -->
 
-  <!-- Material Orchestrator（この順で最後に） -->
+  <!-- 最後に orchestrator（UI配線・Sheets保存） -->
   <script type="module" src="./material.orchestrator.js"></script>
 </body>
 </html>
