@@ -221,8 +221,8 @@
     function fillSelect(names){
       const sel = $('#pm-material'); if (!sel) return;
       const cur = sel.value;
-      sel.innerHTML = '<option value=\"\">— Select material —</option>' +
-        names.map(n=>`<option value=\"${n}\">${n}</option>`).join('');
+      sel.innerHTML = '<option value="">— Select material —</option>' +
+        names.map(n=>`<option value="${n}">${n}</option>`).join('');
       if (cur && names.includes(cur)) sel.value = cur;
       updateValueDisplay();
     }
@@ -318,7 +318,7 @@
         const sel = document.querySelector('#pm-material');
         if (sel) {
           const cur = sel.value;
-          sel.innerHTML = '<option value=\"\">— Select material —</option>' + names.map(n=>`<option value=\"${n}\">${n}</option>`).join('');
+          sel.innerHTML = '<option value="">— Select material —</option>' + names.map(n=>`<option value="${n}">${n}</option>`).join('');
           if (cur && names.includes(cur)) sel.value = cur;
         }
       } else {
