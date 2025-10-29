@@ -42,33 +42,6 @@
     #pm-opacity{display:flex;align-items:center;gap:8px}
     #pm-opacity output{min-width:3ch;text-align:right;opacity:.8}
   </style>
-<style>
-/* ===== Material UX pass ===== */
-#pane-material { overflow-x:hidden; }
-#pane-material .label { display:block; font-size:12px; opacity:.8; margin-bottom:4px; }
-#pm-global { margin-bottom:14px; }
-#pm-advanced-ui { margin-top:4px; }
-#pm-advanced-ui .hint { margin-bottom:8px; }
-
-#pm-advanced-ui .pm-grid { display:grid; grid-template-columns: 1fr; gap:14px; }
-#pm-advanced-ui .pm-row { background:transparent; }
-#pm-advanced-ui .pm-op-range { display:grid; grid-template-columns: 1fr auto; align-items:center; gap:8px; }
-
-#pm-advanced-ui fieldset { border:1px solid rgba(255,255,255,.08); border-radius:8px; padding:10px 12px; }
-#pm-advanced-ui fieldset legend { padding:0 4px; font-size:12px; opacity:.9; }
-
-#pm-advanced-ui .flag { display:inline-flex; align-items:center; gap:8px; margin-right:14px; }
-#pm-advanced-ui .color, #pm-advanced-ui .range { display:grid; grid-template-columns: 80px 1fr; align-items:center; gap:10px; min-width:0; }
-#pm-advanced-ui input[type="range"] { width:100%; }
-
-@media (min-width: 420px) {
-  #pm-advanced-ui .pm-grid { grid-template-columns: 1fr; }
-}
-@media (min-width: 520px) {
-  /* wider side panel: select+opacity side-by-side, then shading, then chroma */
-  #pm-advanced-ui .pm-grid { grid-template-columns: 1fr; }
-}
-</style>
 </head>
 <body>
   <div id="app">
@@ -133,66 +106,44 @@
         </div>
       </section>
 
-      
-<section id="pane-material" class="pane" data-pane="material">
-  <!-- Global opacity (kept) -->
-  <div class="grp" id="pm-global">
-    <label for="mat-opacity" class="label">Opacity</label>
-    <input type="range" id="mat-opacity" min="0" max="1" step="0.01" value="1"/>
-    <div class="hint">Global opacity (preview only).</div>
-  </div>
-
-  <!-- Per‑material block (saved per sheet) -->
-  <div class="grp" id="pm-advanced-ui">
-    <div class="hint" aria-live="polite">Per‑material opacity (saved per sheet)</div>
-
-    <div class="pm-grid">
-      <!-- Row 1: material select + per‑mat opacity -->
-      <div class="pm-row pm-row-select">
-        <label for="pm-material" class="label">Material</label>
-        <select id="pm-material">
-          <option value="">— Select material —</option>
-        </select>
-      </div>
-
-      <div class="pm-row pm-row-opacity">
-        <label for="pm-opacity-range" class="label">Per‑material opacity</label>
-        <div class="pm-op-range">
-          <input type="range" id="pm-opacity-range" min="0" max="1" step="0.01" value="1" />
-          <output id="pm-opacity-val">1.00</output>
+      <section id="pane-material" class="pane" data-pane="material">
+        <div class="grp">
+          <label><input type="checkbox" id="mat-unlit" /> Unlit</label>
+          <label><input type="checkbox" id="mat-doubleside" /> Double-sided</label>
         </div>
-      </div>
+        <div class="grp">
+          <label>Opacity <input type="range" id="mat-opacity" min="0" max="1" step="0.01" value="1"/></label>
+        </div>
+        <div class="grp">
+          <label><input type="checkbox" id="mat-white2alpha" /> White → Alpha</label>
+        </div>
 
-      <!-- Row 2: shading flags (near material controls) -->
-      <fieldset class="pm-row pm-row-shading">
-        <legend>Shading</legend>
-        <label class="flag"><input id="pm-flag-doublesided" type="checkbox"><span>Double‑sided</span></label>
-        <label class="flag"><input id="pm-flag-unlit" type="checkbox"><span>Unlit‑like</span></label>
-      </fieldset>
-
-      <!-- Row 3: chroma key controls grouped -->
-      <fieldset class="pm-row pm-row-chroma">
-        <legend>Chroma key</legend>
-        <label class="flag"><input id="pm-chroma-enable" type="checkbox"><span>Enable</span></label>
-        <label class="color">
-          <span>Color</span>
-          <input id="pm-chroma-color" type="color" value="#ffffff" aria-label="Chroma color">
-        </label>
-        <label class="range">
-          <span>Tolerance</span>
-          <input id="pm-chroma-tol" type="range" min="0" max="1" step="0.01" value="0.10" aria-label="Tolerance">
-        </label>
-        <label class="range">
-          <span>Feather</span>
-          <input id="pm-chroma-feather" type="range" min="0" max="1" step="0.01" value="0.00" aria-label="Feather">
-        </label>
-      </fieldset>
+        <!-- ▼ 追加: マテリアル個別の透明度 -->
+        <div class="grp">
+          <div class="hint">Per‑material opacity (saved per sheet)</div>
+<!-- ===== Step2 UI: Per-material advanced controls (keeps panel width safe) ===== -->
+<div id="pm-advanced-ui" class="mt-2" style="padding:0 8px;">
+  <!-- Per-material | Chroma key -->
+  <div class="row mt-2" id="pm-chroma-row">
+    <label class="col-4">Chroma key</label>
+    <div class="col-8" style="display:grid;grid-template-columns:auto 96px 1fr 1fr;gap:8px;align-items:center;">
+      <label class="inline-flex items-center" style="display:flex;gap:6px;"><input id="pm-chroma-enable" type="checkbox"><span>Enable</span></label>
+      <input id="pm-chroma-color" type="color" value="#ffffff" aria-label="Chroma color">
+      <input id="pm-chroma-tol" type="range" min="0" max="1" step="0.01" value="0.10" aria-label="Tolerance">
+      <input id="pm-chroma-feather" type="range" min="0" max="1" step="0.01" value="0.00" aria-label="Feather">
     </div>
+  
 
-    <div class="hint">Pick a material, then set its opacity. This does not change global opacity above.</div>
-  </div>
-</section>
-
+          <div id="pm-opacity">
+            <select id="pm-material">
+              <option value="">— Select material —</option>
+            </select>
+            <input type="range" id="pm-opacity-range" min="0" max="1" step="0.01" value="1" />
+            <output id="pm-opacity-val">1.00</output>
+          </div>
+          <div class="hint">Pick a material, then set its opacity. This does not change global opacity above.</div>
+        </div>
+      </section>
 
       <section id="pane-views" class="pane" data-pane="views">
         <div class="grp">
@@ -413,5 +364,61 @@ async function waitScene(){
 <!-- LociMyu step2: orchestrated order -->
 <script type="module" src="./viewer.bridge.module.js"></script>
 <script type="module" src="./material.orchestrator.js"></script>
+</div>
+  <!-- Per-material | Flags -->
+  <div class="row mt-2" id="pm-flags-row">
+    <label class="col-4">Shading</label>
+    <div class="col-8" style="display:flex;gap:16px;align-items:center;">
+      <label class="inline-flex items-center" style="display:flex;gap:6px;"><input id="pm-flag-doublesided" type="checkbox"><span>Double-sided</span></label>
+      <label class="inline-flex items-center" style="display:flex;gap:6px;"><input id="pm-flag-unlit" type="checkbox"><span>Unlit-like</span></label>
+    </div>
+  </div>
+</div>
+<script type="module">
+  // ---- Per-material advanced wiring (Step2 safe, idempotent) ----
+  if (!window.__PM_ADV_WIRED__) {
+    window.__PM_ADV_WIRED__ = true;
+    const $ = (id)=>document.getElementById(id);
+    const sel = $('pm-material');
+    const rng = $('pm-opacity-range');
+    const out = $('pm-opacity-val');
+    const ckEn=$('pm-chroma-enable'), ckCol=$('pm-chroma-color'), ckTol=$('pm-chroma-tol'), ckFea=$('pm-chroma-feather');
+    const flDs=$('pm-flag-doublesided'), flUl=$('pm-flag-unlit');
+    const curName = () => sel?.value || '';
+
+    // keep existing opacity path intact → orchestrator listens 'pm:opacity-change'
+    if (rng && out) {
+      const onInput = () => {
+        const name = curName(); if (!name) return;
+        const opacity = Number(rng.value || 1);
+        out.textContent = opacity.toFixed(2);
+        document.dispatchEvent(new CustomEvent('pm:opacity-change', { detail: { name, opacity } }));
+      };
+      rng.addEventListener('input', onInput, { passive:true });
+    }
+
+    function fireChroma() {
+      const name = curName(); if (!name) return;
+      document.dispatchEvent(new CustomEvent('pm:chroma-change', {
+        detail: {
+          name,
+          enabled: !!ckEn?.checked,
+          color: (ckCol?.value || '#ffffff'),
+          tolerance: Number(ckTol?.value || 0),
+          feather: Number(ckFea?.value || 0),
+        }
+      }));
+    }
+    [ckEn, ckCol, ckTol, ckFea].forEach(el => el?.addEventListener('input', fireChroma, { passive:true }));
+
+    function fireFlags() {
+      const name = curName(); if (!name) return;
+      document.dispatchEvent(new CustomEvent('pm:flag-change', {
+        detail: { name, doubleSided: !!flDs?.checked, unlitLike: !!flUl?.checked }
+      }));
+    }
+    [flDs, flUl].forEach(el => el?.addEventListener('change', fireFlags));
+  }
+</script>
 </body>
 </html>
