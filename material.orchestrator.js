@@ -327,13 +327,7 @@ async function populateWhenReady(){
 
 // --------- Sheet context bridge ---------
 // sheet.ctx.bridge.js から {spreadsheetId, sheetGid} を受け取る
-document.addEventListener('lm:sheet-context', (ev)=>{
-  const { spreadsheetId, sheetGid } = ev.detail || {};
-  if (spreadsheetId) state.spreadsheetId = spreadsheetId;
-  if (sheetGid != null) state.sheetGid = sheetGid;
-  log('sheet context set', { spreadsheetId: state.spreadsheetId, sheetGid: state.sheetGid });
-
-  // トークンが既にあるなら ensure を試みる（無ければスキップして UI へ委ねる）
+// トークンが既にあるなら ensure を試みる（無ければスキップして UI へ委ねる）
   ensureIfCtx().catch(e=>warn('auto-ensure failed', e));
 });
 
@@ -366,11 +360,44 @@ populateWhenReady();
 document.addEventListener('lm:model-ready', populateWhenReady);
 document.getElementById('tab-material')?.addEventListener('click', populateWhenReady);
 
+// ===== Plan A FIX2: extra debug UI =====
+function renderPrepareOnly(){
+  try{
+    const host = document.querySelector('#pane-material .mat-grid');
+    if (!host) return;
+    if (host.querySelector('#pm-prepare-only')) return;
+    const card = document.createElement('div');
+    card.className = 'mat-card';
+    card.innerHTML = `
+      <h4>Debug / Preparation</h4>
+      <div class="inline" style="gap:8px;flex-wrap:wrap">
+        <button id="pm-prepare-only" class="btn">Prepare Only</button>
+        <span class="hint" id="pm-prepare-status">Try ensureMaterialSheet() with current state</span>
+      </div>
+    `;
+    host.appendChild(card);
+    const btn = card.querySelector('#pm-prepare-only');
+    const status = card.querySelector('#pm-prepare-status');
+    btn.addEventListener('click', async ()=>{
+      try{
+        console.log('[mat-orch] DEBUG state before prepare', JSON.parse(JSON.stringify({spreadsheetId: state.spreadsheetId, sheetGid: state.sheetGid})));
+        status.textContent = 'Ensuring...';
+        await ensureMaterialSheet();
+        status.textContent = 'Ready.';
+      }catch(e){
+        console.warn('[mat-orch] prepare-only failed', e);
+        status.textContent = 'Failed: ' + (e && (e.message||e.status)||'unknown');
+      }
+    });
+  }catch(e){ console.warn('[mat-orch] renderPrepareOnly error', e); }
+}
+try{ if (document.readyState==='loading'){ document.addEventListener('DOMContentLoaded', renderPrepareOnly);} else { renderPrepareOnly(); } }catch(_){}
 
-// Plan A: on sheet-context, set state then ensure
+// Plan A FIX2: robust sheet-context handler
 document.addEventListener('lm:sheet-context', async (e)=>{
   try{
-    const det = e && e.detail || {};
+    const det = (e && e.detail) || {};
+    console.log('[mat-orch] sheet-context event detail', det);
     if (det.spreadsheetId){
       state.spreadsheetId = det.spreadsheetId;
       state.sheetGid = det.sheetGid || null;
@@ -383,4 +410,3 @@ document.addEventListener('lm:sheet-context', async (e)=>{
     console.warn('[mat-orch] ensure after sheet-context failed', err);
   }
 });
-
