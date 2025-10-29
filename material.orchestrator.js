@@ -101,55 +101,57 @@ async function batchUpdate(spreadsheetId, body) {
 
 // __LM_MATERIALS の存在保証
 async function ensureMaterialSheet() {
-  if (!state.spreadsheetId) {
-    warn('ensureMaterialSheet: no spreadsheetId');
-    return { ok:false, reason:'no_spreadsheet' };
+  // Plan A: idempotent ensure; requires spreadsheetId, sheetGid, access token
+  const { spreadsheetId, sheetGid } = ctx();
+  if (!spreadsheetId) { warn('ensureMaterialSheet: no spreadsheetId'); return false; }
+  // token check
+  let tok = null;
+  try { tok = await (window.getAccessToken?.()); } catch(_){}
+  if (!tok){ warn('ensureMaterialSheet: token_missing'); throw new Error('token_missing'); }
+  const metaFields = 'sheets.properties,sheets.developerMetadata,developerMetadata';
+  const base = 'https://sheets.googleapis.com/v4/spreadsheets/' + encodeURIComponent(spreadsheetId);
+  // 1) existence check with backoff
+  let info = await withBackoff(()=> lmFetchJSON(base + '?fields=' + encodeURIComponent(metaFields)));
+  // search by developerMetadata first
+  let targetSheetId = null;
+  const dms = (info.developerMetadata||[]);
+  const hitMeta = dms.find(m=> (m.metadataKey==='LM_MATERIALS' && m.metadataValue==='v1'));
+  if (hitMeta && hitMeta.location?.sheetId) {
+    targetSheetId = hitMeta.location.sheetId;
+  } else {
+    // fallback by title
+    const sheets = info.sheets||[];
+    const hit = sheets.find(s=> s.properties?.title === '__LM_MATERIALS');
+    if (hit) targetSheetId = hit.properties.sheetId;
   }
-
-  // token 無ければユーザー操作まで待つ
-  try {
-    await getAccessToken();
-  } catch (e) {
-    if (String(e?.message||e).includes('token_missing')) {
-      warn('auto-ensure skipped (no token). Use __lm_requestSheetsConsent() from a user action.');
-      return { ok:false, reason:'no_token' };
-    }
-    throw e;
+  if (!targetSheetId){
+    // 2) create sheet + developerMetadata
+    const addReq = { addSheet: { properties: { title: '__LM_MATERIALS', gridProperties:{ frozenRowCount:1 } } } };
+    const createMeta = { createDeveloperMetadata: {
+      developerMetadata: {
+        metadataKey: 'LM_MATERIALS',
+        metadataValue: 'v1',
+        visibility: 'DOCUMENT',
+        location: { spreadsheet: true }
+      }
+    }};
+    const resp = await withBackoff(()=> lmFetchJSON(base + ':batchUpdate', {
+      method:'POST',
+      body: JSON.stringify({ requests:[addReq, createMeta] })
+    }));
+    // resolve new sheet id from replies
+    try{
+      const addReply = (resp.replies||[]).find(r=>r.addSheet);
+      targetSheetId = addReply?.addSheet?.properties?.sheetId || null;
+    }catch(_){}
   }
-
-  // 存在チェック
-  try {
-    await spreadsheetGetA1(state.spreadsheetId, '__LM_MATERIALS!A1:F');
-    // すでにある
-    return { ok:true, existed:true };
-  } catch (_) {
-    // 無ければ作成
-    const body = {
-      requests: [
-        { addSheet: { properties: { title: '__LM_MATERIALS' } } },
-        { updateCells: {
-            range: { sheetId: null }, // タイトル指定で updateValues の方が楽
-            fields: 'userEnteredValue'
-        } }
-      ],
-      includeSpreadsheetInResponse: false
-    };
-    // addSheet は sheetId を返すが、ここでは列見出しだけ A1:Fx に書く
-    await batchUpdate(state.spreadsheetId, { requests: [{ addSheet: { properties: { title: '__LM_MATERIALS' } } }] });
-    // ヘッダを書き込み
-    const url = `https://sheets.googleapis.com/v4/spreadsheets/${state.spreadsheetId}/values/${encodeURIComponent('__LM_MATERIALS!A1:F1')}:update?valueInputOption=RAW`;
-    await authFetch(url, {
-      method:'PUT',
-      headers:{ 'Content-Type':'application/json' },
-      body: JSON.stringify({
-        range: '__LM_MATERIALS!A1:F1',
-        majorDimension: 'ROWS',
-        values: [[ 'sheetGid','matUuid','matName','schemaVer','props','updatedAt' ]]
-      })
-    });
-    log('created __LM_MATERIALS');
-    return { ok:true, created:true };
-  }
+  // 3) ensure headers
+  const header = [["key","modelKey","materialKey","materialName","opacity","doubleSided","unlit","chromaEnabled","chromaColor","chromaTol","chromaFeather","updatedAt","updatedBy","sheetGid"]];
+  await withBackoff(()=> lmFetchJSON(base + '/values/' + encodeURIComponent('__LM_MATERIALS!A1:N1') + '?valueInputOption=RAW', {
+    method:'PUT',
+    body: JSON.stringify({ range:'__LM_MATERIALS!A1:N1', majorDimension:'ROWS', values: header })
+  }));
+  return true;
 }
 
 // アップサート（選択中マテリアルの不透明度）
@@ -365,3 +367,76 @@ log('loaded VERSION_TAG:'+VERSION_TAG);
 populateWhenReady();
 document.addEventListener('lm:model-ready', populateWhenReady);
 document.getElementById('tab-material')?.addEventListener('click', populateWhenReady);
+
+
+// ===== Plan A utilities =====
+async function lmFetchJSON(url, opts={}){
+  const token = await (window.getAccessToken?.() || null);
+  const headers = Object.assign({'Content-Type':'application/json'}, opts.headers||{});
+  if (token) headers['Authorization'] = 'Bearer ' + token;
+  const res = await fetch(url, Object.assign({}, opts, { headers }));
+  if (!res.ok) {
+    const text = await res.text();
+    const err = new Error('HTTP '+res.status+' '+res.statusText+' '+text);
+    err.status = res.status;
+    try { err.json = JSON.parse(text); } catch(_){}
+    throw err;
+  }
+  return await res.json();
+}
+async function withBackoff(fn, tries=3, base=200){
+  let last;
+  for (let i=0;i<tries;i++){
+    try{ return await fn(); }catch(e){ last=e; if (i===tries-1) throw e; await new Promise(r=>setTimeout(r, base*(2**i))); }
+  }
+  throw last;
+}
+
+// ===== Plan A: Inline Authorize & Prepare (manual consent path) =====
+function renderAuthorizeUI(){
+  try{
+    const host = document.querySelector('#pane-material .mat-grid');
+    if (!host) return;
+    if (host.querySelector('#pm-authorize-prepare')) return;
+    const card = document.createElement('div');
+    card.className = 'mat-card';
+    card.innerHTML = `
+      <h4>保存許可と準備</h4>
+      <div class="inline">
+        <button id="pm-authorize-prepare" class="btn">Authorize & Prepare</button>
+        <span id="pm-auth-status" class="hint" style="margin-left:8px;opacity:.9">Click to allow saving & create sheet</span>
+      </div>
+    `;
+    host.appendChild(card);
+    const btn = card.querySelector('#pm-authorize-prepare');
+    const status = card.querySelector('#pm-auth-status');
+    btn.addEventListener('click', async ()=>{
+      status.textContent = 'Requesting consent...';
+      try{
+        const tok = await (window.ensureToken ? window.ensureToken({ interactive:true }) : window.getAccessToken?.());
+        if (!tok && window.getAccessToken) {
+          // fallback attempt
+          await window.getAccessToken();
+        }
+        status.textContent = 'Authorized. Preparing sheet...';
+        try{
+          await ensureMaterialSheet(); // retry after consent
+          status.textContent = 'Ready.';
+          document.dispatchEvent(new CustomEvent('lm:auth-ready', {detail:{ token:true }}));
+        }catch(e2){
+          console.warn('[mat-orch] ensureMaterialSheet after consent failed', e2);
+          status.textContent = 'Authorized, but prepare failed. Try again.';
+        }
+      }catch(e){
+        console.warn('[mat-orch] authorize failed', e);
+        status.textContent = 'Failed (popup blocked?)';
+      }
+    });
+  }catch(e){ console.warn('[mat-orch] renderAuthorizeUI error', e); }
+}
+try{ if (document.readyState==='loading'){ document.addEventListener('DOMContentLoaded', renderAuthorizeUI);} else { renderAuthorizeUI(); } }catch(_){}
+
+// Plan A: retry ensure when auth becomes ready
+document.addEventListener('lm:auth-ready', async ()=>{
+  try{ await ensureMaterialSheet(); }catch(e){ console.warn('[mat-orch] ensure after auth failed', e); }
+});

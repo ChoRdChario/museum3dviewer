@@ -74,3 +74,5 @@
   width: 96% !important;
   max-width: 96% !important;
 }
+
+#pane-material input[type="range"]{ max-inline-size: calc(100% - 2px); }
