@@ -1,119 +1,196 @@
-// material.orchestrator.js  — v2025-10-29
-// Purpose: Populate material select *after* GLB load completes and wire opacity preview.
-// Depends on: viewer bridge dispatching lm:scene-ready / lm:model-ready.
+/* material.orchestrator.js
+ * LociMyu – Material Orchestrator (v6.7 SAVE-INTEGRATION)
+ * CHANGE MARKERS:
+ *   - VERSION_TAG:V6_7_SAVE
+ *   - ADDED: ensureMaterialSheet(), upsertProps(), saveCurrentOpacity()
+ *   - ADDED: window.lmMaterials public API (report, setCurrentSheetContext, ...)
+ *   - UI hooks now target #pm-material and #pm-opacity-range explicitly
+ */
 
 (() => {
-  const $ = (s) => document.querySelector(s);
-  const log = (...a) => console.log('[mat-orch]', ...a);
+  const SHEET_NAME = '__LM_MATERIALS';
+  const SCHEMA_VER = '1';
+  const VERSION_TAG = 'VERSION_TAG:V6_7_SAVE';
 
-  let wired = false;
-  let lastNames = [];
-  let populateTimer = null;
+  const log = (...args) => console.log('[mat-orch]', ...args);
+  const warn = (...args) => console.warn('[mat-orch]', ...args);
+  const err = (...args) => console.error('[mat-orch]', ...args);
 
-  // ---- material name collectors ----
-  function listFromViewer() {
+  // ===== Auth helpers =====
+  async function getAccessToken() {
     try {
-      const v = window.__LM_VIEWER || {};
-      const arr = typeof v.listMaterials === 'function' ? v.listMaterials() : [];
-      return (arr || []).map(r => r?.name || r).filter(Boolean);
-    } catch { return []; }
-  }
-  function listFromScene() {
-    const s = window.__LM_SCENE;
-    if (!s) return [];
-    const set = new Set();
-    s.traverse(o => {
-      if (!o.isMesh || !o.material) return;
-      (Array.isArray(o.material) ? o.material : [o.material]).forEach(m => {
-        const n = m?.name;
-        if (n && !/^#\d+$/.test(n)) set.add(n);
-      });
-    });
-    return [...set];
-  }
-  function collectNames() {
-    const names = [...new Set([...listFromViewer(), ...listFromScene()])];
-    return names.sort((a,b)=>a.localeCompare(b));
-  }
-
-  // ---- fill select ----
-  function fillSelect(names) {
-    const sel = $('#pm-material');
-    if (!sel) return;
-    const cur = sel.value;
-    sel.innerHTML = '<option value=\"\">— Select material —</option>' +
-      names.map(n => `<option value=\"${n}\">${n}</option>`).join('');
-    if (cur && names.includes(cur)) sel.value = cur;
-  }
-
-  // ---- populate runner (retry until model is truly ready) ----
-  function schedulePopulate(delay = 0) {
-    clearTimeout(populateTimer);
-    populateTimer = setTimeout(async () => {
-      const deadline = Date.now() + 8000; // up to 8s
-      let names = collectNames();
-      if (!names.length) log('materials empty, will retry until model fully ready…');
-      while (!names.length && Date.now() < deadline) {
-        await new Promise(r => setTimeout(r, 200));
-        names = collectNames();
+      if (typeof window.__lm_getAccessToken === 'function') {
+        const tok = await window.__lm_getAccessToken();
+        if (tok) return tok;
       }
-      if (!names.length) {
-        log('materials still empty after retries (will wait for next model)');
-        return;
+    } catch {}
+    try {
+      if (window.gauth && typeof window.gauth.getAccessToken === 'function') {
+        const tok = await window.gauth.getAccessToken();
+        if (tok) return tok;
       }
-      lastNames = names;
-      fillSelect(names);
-      log('materials populated:', names.length);
-    }, delay);
+    } catch {}
+    throw new Error('token_missing');
+  }
+  async function authFetch(url, init={}) {
+    const tok = await getAccessToken();
+    const headers = new Headers(init.headers || {});
+    headers.set('Authorization', `Bearer ${tok}`);
+    return fetch(url, { ...init, headers });
   }
 
-  // ---- preview handlers ----
-  function setOpacityByName(name, v) {
-    v = Math.max(0, Math.min(1, Number(v)));
-    const s = window.__LM_SCENE;
-    if (!s || !name) return;
-    s.traverse(o => {
-      if (!o.isMesh || !o.material) return;
-      (Array.isArray(o.material) ? o.material : [o.material]).forEach(m => {
-        if ((m?.name || '') === name) {
-          m.transparent = v < 1;
-          m.opacity = v;
-          m.depthWrite = v >= 1;
-          m.needsUpdate = true;
-        }
-      });
-    });
+  // ===== State =====
+  const state = {
+    spreadsheetId: null,
+    sheetGid: null,
+    ui: {
+      dropdown: null,        // #pm-material
+      perMatSlider: null,    // #pm-opacity-range
+    },
+  };
+
+  // ===== Public: set sheet context =====
+  function setCurrentSheetContext({ spreadsheetId, sheetGid }) {
+    state.spreadsheetId = spreadsheetId || null;
+    state.sheetGid = (typeof sheetGid === 'number') ? sheetGid : (
+      typeof sheetGid === 'string' && sheetGid !== '' ? Number(sheetGid) : null
+    );
+    log('sheet context set', { spreadsheetId: state.spreadsheetId, sheetGid: state.sheetGid });
   }
 
-  function wireOnce() {
-    if (wired) return; wired = true;
-
-    $('#tab-material')?.addEventListener('click', () => schedulePopulate(0));
-    document.addEventListener('pm:request-materials', () => schedulePopulate(0));
-
-    document.addEventListener('lm:model-ready', () => schedulePopulate(0), { passive: true });
-    document.addEventListener('lm:scene-ready', () => schedulePopulate(100), { passive: true });
-
-    const sel = $('#pm-material');
-    const rng = $('#pm-opacity-range');
-    const out = $('#pm-opacity-val');
-    if (sel && rng && out) {
-      rng.addEventListener('input', () => {
-        out.textContent = Number(rng.value).toFixed(2);
-        if (sel.value) setOpacityByName(sel.value, Number(rng.value));
-      });
-      sel.addEventListener('change', () => {
-        if (sel.value) setOpacityByName(sel.value, Number(rng.value));
-      });
+  // ===== Ensure __LM_MATERIALS exists (idempotent) =====
+  async function ensureMaterialSheet() {
+    if (!state.spreadsheetId) {
+      warn('ensureMaterialSheet: no spreadsheetId yet');
+      return { ok: false, reason: 'no_spreadsheet' };
     }
+    // 1) list sheets
+    const metaUrl = `https://sheets.googleapis.com/v4/spreadsheets/${state.spreadsheetId}?fields=sheets(properties(title,sheetId))`;
+    const metaRes = await authFetch(metaUrl);
+    if (!metaRes.ok) {
+      return { ok: false, status: metaRes.status, text: await metaRes.text() };
+    }
+    const meta = await metaRes.json();
+    const exists = (meta.sheets || []).some(s => s.properties?.title === SHEET_NAME);
+    if (!exists) {
+      // 2) create sheet
+      const buRes = await authFetch(
+        `https://sheets.googleapis.com/v4/spreadsheets/${state.spreadsheetId}:batchUpdate`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ requests: [{ addSheet: { properties: { title: SHEET_NAME, gridProperties: { frozenRowCount: 1 } } } }] }),
+        }
+      );
+      if (!buRes.ok) return { ok: false, status: buRes.status, text: await buRes.text() };
 
-    // Initial populate (slightly delayed to avoid racing)
-    window.setTimeout(() => schedulePopulate(300), 400);
+      // 3) header row
+      const header = [['sheetGid','matUuid','matName','schemaVer','props','updatedAt']];
+      const upRes = await authFetch(
+        `https://sheets.googleapis.com/v4/spreadsheets/${state.spreadsheetId}/values/${encodeURIComponent(SHEET_NAME)}!A1:F1?valueInputOption=RAW`,
+        {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ values: header }),
+        }
+      );
+      if (!upRes.ok) return { ok: false, status: upRes.status, text: await upRes.text() };
+      log('created', SHEET_NAME);
+    } else {
+      log(SHEET_NAME, 'exists');
+    }
+    return { ok: true };
   }
 
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', wireOnce, { once:true });
-  } else {
-    wireOnce();
+  // ===== Upsert one material row by matUuid =====
+  async function upsertProps({ matUuid, matName, props }) {
+    if (!state.spreadsheetId) throw new Error('no_spreadsheet');
+    await ensureMaterialSheet();
+
+    const payload = [
+      String(state.sheetGid ?? ''),
+      String(matUuid ?? ''),
+      String(matName ?? ''),
+      SCHEMA_VER,
+      JSON.stringify(props ?? {}),
+      new Date().toISOString(),
+    ];
+
+    // read col B (matUuid) to find existing row
+    const readRes = await authFetch(
+      `https://sheets.googleapis.com/v4/spreadsheets/${state.spreadsheetId}/values/${encodeURIComponent(SHEET_NAME)}!B2:B`
+    );
+    const readJson = await readRes.json();
+    const rows = (readJson.values || []).map(r => r[0]);
+    let rowIndex = -1;
+    for (let i = 0; i < rows.length; i++) {
+      if (rows[i] === matUuid) { rowIndex = i + 2; break; }
+    }
+    if (rowIndex > 0) {
+      const range = `${SHEET_NAME}!A${rowIndex}:F${rowIndex}`;
+      const putRes = await authFetch(
+        `https://sheets.googleapis.com/v4/spreadsheets/${state.spreadsheetId}/values/${encodeURIComponent(range)}?valueInputOption=RAW`,
+        {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ values: [payload] }),
+        }
+      );
+      if (!putRes.ok) throw new Error('upsert_update_failed');
+      log('upsert UPDATE', { row: rowIndex, matName });
+    } else {
+      const appRes = await authFetch(
+        `https://sheets.googleapis.com/v4/spreadsheets/${state.spreadsheetId}/values/${encodeURIComponent(SHEET_NAME)}!A2:F:append?valueInputOption=RAW`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ values: [payload] }),
+        }
+      );
+      if (!appRes.ok) throw new Error('upsert_append_failed');
+      log('upsert APPEND', { matName });
+    }
   }
+
+  // ===== UI capture (explicit IDs first) =====
+  function captureUI() {
+    state.ui.dropdown = document.querySelector('#pm-material') || document.querySelector('#lm-material-select');
+    state.ui.perMatSlider = document.querySelector('#pm-opacity-range') || document.querySelector('input[type="range"][data-lm="permat-opacity"]');
+  }
+
+  async function saveCurrentOpacity() {
+    if (!state.ui.dropdown || !state.ui.perMatSlider) return;
+    if (!state.spreadsheetId || state.sheetGid == null) { warn('save skipped: no sheet context'); return; }
+    const opt = state.ui.dropdown.options[state.ui.dropdown.selectedIndex];
+    if (!opt) return;
+    const matUuid = opt.getAttribute('data-uuid') || opt.value || '';
+    const matName = opt.textContent || '';
+    const opacity = Number(state.ui.perMatSlider.value);
+    if (!matUuid || Number.isNaN(opacity)) return;
+    await upsertProps({ matUuid, matName, props: { opacity } });
+    log('saved opacity', { matName, opacity, VERSION_TAG });
+  }
+
+  function wireUIOnce() {
+    captureUI();
+    if (state.ui.perMatSlider) {
+      // 最低限の2イベント（変更確定で保存）
+      state.ui.perMatSlider.addEventListener('change', saveCurrentOpacity, { passive: true });
+      state.ui.perMatSlider.addEventListener('pointerup', saveCurrentOpacity, { passive: true });
+    }
+  }
+
+  // モデル準備完了後にUIを再キャプチャ（Materialタブが描画済みになっている）
+  window.addEventListener('lm:model-ready', wireUIOnce);
+
+  // ===== Public API =====
+  window.lmMaterials = Object.freeze({
+    setCurrentSheetContext,
+    ensureMaterialSheet,
+    upsertProps,
+    saveCurrentOpacity,
+    report() { return { spreadsheetId: state.spreadsheetId, sheetGid: state.sheetGid, ui: { hasSelect: !!state.ui.dropdown, hasSlider: !!state.ui.perMatSlider }, VERSION_TAG }; },
+  });
+
+  log('loaded', VERSION_TAG);
 })();
