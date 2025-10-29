@@ -106,7 +106,7 @@
 #pane-material .btn,
 #pane-material .switch,
 #pane-material .mini {
-  flex: 0 0 auto.
+  flex: 0 0 auto;
 }
 
 #pm-chroma .tol-row { display: flex; flex-wrap: wrap; gap: 8px; }
@@ -177,7 +177,7 @@
         <div class="mat-grid">
 
           <div class="mat-card">
-            <h4>Per-material opacity (saved per sheet)</h4>
+            <h4>Per‑material opacity (saved per sheet)</h4>
             <div id="pm-opacity">
               <select id="pm-material" aria-label="Select material">
                 <option value="">— Select material —</option>
@@ -191,8 +191,8 @@
           <div class="mat-card">
             <h4>Shading</h4>
             <div class="inline">
-              <label class="nowrap"><input id="pm-flag-doublesided" type="checkbox"> Double-sided</label>
-              <label class="nowrap"><input id="pm-flag-unlit" type="checkbox"> Unlit-like</label>
+              <label class="nowrap"><input id="pm-flag-doublesided" type="checkbox"> Double‑sided</label>
+              <label class="nowrap"><input id="pm-flag-unlit" type="checkbox"> Unlit‑like</label>
             </div>
           </div>
 
@@ -250,5 +250,71 @@
   <!-- Keep existing modules (they listen to our custom events if needed) -->
   <script type="module" src="./viewer.bridge.module.js"></script>
   <script type="module" src="./material.orchestrator.js"></script>
+<!-- Hotfix: material dropdown should populate even if auth fails -->
+<script>
+(() => {
+  const $ = s => document.querySelector(s);
+
+  function namesFromScene() {
+    const s = window.__LM_SCENE;
+    if (!s) return [];
+    const set = new Set();
+    s.traverse(o => {
+      if (!o.isMesh || !o.material) return;
+      (Array.isArray(o.material) ? o.material : [o.material]).forEach(m => {
+        const n = (m && m.name) || '';
+        if (n && !/^#\d+$/.test(n)) set.add(n);
+      });
+    });
+    return [...set];
+  }
+
+  async function namesFromViewer() {
+    try {
+      const viewer = await import('./viewer.module.cdn.js');
+      const list = (viewer?.listMaterials?.() || []).map(m => m?.name).filter(Boolean);
+      return [...new Set(list.filter(n => !/^#\d+$/.test(n)))];
+    } catch { return []; }
+  }
+
+  async function discoverNames() {
+    const a = namesFromScene();
+    const b = await namesFromViewer();
+    return [...new Set([...a, ...b])];
+  }
+
+  function fillSelect(names) {
+    const sel = $('#pm-material');
+    if (!sel) return;
+    const cur = sel.value;
+    sel.innerHTML = '<option value=\"\">— Select material —</option>' +
+      names.map(n => `<option value=\"${n}\">${n}</option>`).join('');
+    if (cur && names.includes(cur)) sel.value = cur;
+    // light refresh
+    const rng = $('#pm-opacity-range'), out = $('#pm-opacity-val');
+    if (rng && out) { out.textContent = (Number(rng.value)||1).toFixed(2); }
+  }
+
+  async function populateWhenReady() {
+    if (!window.__LM_SCENE) {
+      await new Promise(r => document.addEventListener('lm:scene-ready', r, { once:true }));
+    }
+    await new Promise(r => setTimeout(r, 50));
+    let tries = 0;
+    while (tries++ < 60) {
+      const names = await discoverNames();
+      if (names.length) { fillSelect(names); return; }
+      await new Promise(r => setTimeout(r, 150));
+    }
+    console.warn('[mat-orch-hotfix] materials still empty after retries (non-fatal)');
+  }
+
+  populateWhenReady();
+  document.addEventListener('lm:model-ready', populateWhenReady);
+  document.getElementById('tab-material')?.addEventListener('click', populateWhenReady);
+})();
+</script>
+
+
 </body>
 </html>
