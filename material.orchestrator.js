@@ -7,7 +7,7 @@
 // - 既存機能を壊さない UI-only 変更
 //
 // VERSION TAG
-const VERSION_TAG = 'V6_10_AUTOCONSENT_FIX5';
+const VERSION_TAG = 'V6_10_AUTOCREATE_FIX6';
 const log  = (...a)=>console.log('[mat-orch]', ...a);
 const warn = (...a)=>console.warn('[mat-orch]', ...a);
 
@@ -101,55 +101,44 @@ async function batchUpdate(spreadsheetId, body) {
 
 // __LM_MATERIALS の存在保証
 async function ensureMaterialSheet() {
-  if (!state.spreadsheetId) {
-    warn('ensureMaterialSheet: no spreadsheetId');
-    return { ok:false, reason:'no_spreadsheet' };
+  console.log('[mat-orch][fix6] ensureMaterialSheet start ctx=', ctx());
+  const { spreadsheetId } = ctx();
+  if (!spreadsheetId){ warn('[fix6] missing spreadsheetId'); return false; }
+  let token = null;
+  try { token = await (window.getAccessToken?.()); } catch(e){ console.warn('[fix6] getAccessToken error', e); }
+  if (!token){
+    try { token = await (window.ensureToken && window.ensureToken({interactive:false})); } catch(_){}
+    console.log('[fix6] token after ensureToken=', !!token);
   }
-
-  // token 無ければユーザー操作まで待つ
-  try {
-    await getAccessToken();
-  } catch (e) {
-    if (String(e?.message||e).includes('token_missing')) {
-      warn('auto-ensure skipped (no token). Use __lm_requestSheetsConsent() from a user action.');
-      return { ok:false, reason:'no_token' };
-    }
-    throw e;
-  }
-
-  // 存在チェック
-  try {
-    await spreadsheetGetA1(state.spreadsheetId, '__LM_MATERIALS!A1:F');
-    // すでにある
-    return { ok:true, existed:true };
-  } catch (_) {
-    // 無ければ作成
-    const body = {
-      requests: [
-        { addSheet: { properties: { title: '__LM_MATERIALS' } } },
-        { updateCells: {
-            range: { sheetId: null }, // タイトル指定で updateValues の方が楽
-            fields: 'userEnteredValue'
-        } }
-      ],
-      includeSpreadsheetInResponse: false
-    };
-    // addSheet は sheetId を返すが、ここでは列見出しだけ A1:Fx に書く
-    await batchUpdate(state.spreadsheetId, { requests: [{ addSheet: { properties: { title: '__LM_MATERIALS' } } }] });
-    // ヘッダを書き込み
-    const url = `https://sheets.googleapis.com/v4/spreadsheets/${state.spreadsheetId}/values/${encodeURIComponent('__LM_MATERIALS!A1:F1')}:update?valueInputOption=RAW`;
-    await authFetch(url, {
-      method:'PUT',
-      headers:{ 'Content-Type':'application/json' },
-      body: JSON.stringify({
-        range: '__LM_MATERIALS!A1:F1',
-        majorDimension: 'ROWS',
-        values: [[ 'sheetGid','matUuid','matName','schemaVer','props','updatedAt' ]]
-      })
+  if (!token){ warn('[fix6] token still missing'); return false; }
+  const base = 'https://sheets.googleapis.com/v4/spreadsheets/' + encodeURIComponent(spreadsheetId);
+  let info=null;
+  try{
+    const r = await fetch(base + '?fields=sheets.properties,developerMetadata', { headers:{'Authorization':'Bearer '+token} });
+    console.log('[fix6] get sheets status=', r.status);
+    info = r.ok ? await r.json() : null;
+  }catch(e){ console.warn('[fix6] get sheets error', e); }
+  let has = false;
+  if (info && info.sheets){ has = !!(info.sheets||[]).find(s=> s.properties?.title==='__LM_MATERIALS'); }
+  console.log('[fix6] exists?', has);
+  if (!has){
+    const body = { requests:[ { addSheet:{ properties:{ title:'__LM_MATERIALS', gridProperties:{ frozenRowCount:1 } } } ] } };
+    const resp = await fetch(base + ':batchUpdate', {
+      method:'POST', headers:{'Authorization':'Bearer '+token,'Content-Type':'application/json'},
+      body: JSON.stringify(body)
     });
-    log('created __LM_MATERIALS');
-    return { ok:true, created:true };
+    const txt = await resp.text();
+    console.log('[fix6] batchUpdate addSheet status=', resp.status, txt);
+    if (!resp.ok){ throw new Error('addSheet failed '+resp.status); }
   }
+  const header = [["key","modelKey","materialKey","materialName","opacity","doubleSided","unlit","chromaEnabled","chromaColor","chromaTol","chromaFeather","updatedAt","updatedBy","sheetGid"]];
+  const r2 = await fetch(base + '/values/' + encodeURIComponent('__LM_MATERIALS!A1:N1') + '?valueInputOption=RAW', {
+    method:'PUT', headers:{'Authorization':'Bearer '+token,'Content-Type':'application/json'},
+    body: JSON.stringify({ range:'__LM_MATERIALS!A1:N1', majorDimension:'ROWS', values: header })
+  });
+  const t2 = await r2.text();
+  console.log('[fix6] header update status=', r2.status, t2);
+  return r2.ok;
 }
 
 // アップサート（選択中マテリアルの不透明度）
@@ -365,3 +354,21 @@ log('loaded VERSION_TAG:'+VERSION_TAG);
 populateWhenReady();
 document.addEventListener('lm:model-ready', populateWhenReady);
 document.getElementById('tab-material')?.addEventListener('click', populateWhenReady);
+
+
+// ===== AUTOCREATE_FIX6 append-only =====
+(function(){
+  try{
+    function run(){ try{ ensureMaterialSheet(); }catch(e){ console.warn('[fix6] ensure call failed', e); } }
+    document.addEventListener('lm:sheet-context', (e)=>{
+      const det = (e && e.detail) || {};
+      if (det && det.spreadsheetId){
+        state.spreadsheetId = det.spreadsheetId;
+        state.sheetGid = det.sheetGid ?? state.sheetGid;
+        console.log('[mat-orch][fix6] ctx set', state);
+        run();
+      }
+    });
+    document.addEventListener('lm:model-ready', run, { once:true });
+  }catch(e){ console.warn('[fix6] init error', e); }
+})();
