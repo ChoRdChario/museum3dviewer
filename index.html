@@ -1,9 +1,8 @@
-<!DOCTYPE html>
-
+<!doctype html>
 <html lang="ja">
 <head>
 <!-- ESM import map for THREE (and addons) -->
-<script id="lm-importmap-three" type="importmap">
+<script type="importmap" id="lm-importmap-three">
 {
   "imports": {
     "three": "https://unpkg.com/three@0.156.1/build/three.module.js",
@@ -46,15 +45,17 @@
   }
 })();
 </script>
-<meta charset="utf-8"/>
-<meta content="width=device-width,initial-scale=1" name="viewport"/>
-<title>LociMyu v6.6 (ESM/CDN)</title>
-<link href="data:," rel="icon"/>
-<!-- Google OAuth (keys are read by boot.esm.cdn.js) -->
-<meta content="595200751510-ncahnf7edci6b9925becn5to49r6cguv.apps.googleusercontent.com" name="google-oauth-client_id"/>
-<meta content="AIzaSyCUnTCr5yWUWPdEXST9bKP1LpgawU5rIbI" name="google-api-key"/>
-<script async="" defer="" src="https://accounts.google.com/gsi/client"></script>
-<style>
+
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>LociMyu v6.6 (ESM/CDN)</title>
+  <link rel="icon" href="data:," />
+  <!-- Google OAuth (keys are read by boot.esm.cdn.js) -->
+  <meta name="google-oauth-client_id" content="595200751510-ncahnf7edci6b9925becn5to49r6cguv.apps.googleusercontent.com">
+  <meta name="google-api-key" content="AIzaSyCUnTCr5yWUWPdEXST9bKP1LpgawU5rIbI">
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
+
+  <style>
     :root{
       --bg:#0f1115; --panel:#0b0d11; --line:#1f2937; --acc:#94a3b8; --text:#cbd5e1; --sel:#60a5fa;
     }
@@ -100,7 +101,16 @@
     #ui *{max-width:100%}
     #ui{overflow-x:hidden}
   </style>
-<!-- ESM import map (viewer uses these) -->
+
+  <!-- ESM import map (viewer uses these) -->
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://unpkg.com/three@0.155.0/build/three.module.js",
+      "three/examples/jsm/": "https://unpkg.com/three@0.155.0/examples/jsm/"
+    }
+  }
+  </script>
 
 <style id="lm-material-layout-fix">
 /* ===== Material pane: overflow & wrapping fixes ===== */
@@ -148,111 +158,123 @@
 #pm-chroma .feather-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
 </style>
 </head>
+
 <body>
-<div id="app">
-<div id="stage"><canvas id="gl"></canvas></div>
-<aside id="ui">
-<header id="topbar">
-<div id="brand">LociMyu v6.6</div>
-<div class="row" style="gap:6px;flex:0 0 auto">
-<button id="auth-signin">Sign in</button>
-</div>
-</header>
-<div class="pad" style="border-bottom:1px solid var(--line)">
-<div class="row">
-<input id="glbUrl" placeholder="Drive fileId / GLB URL" type="text"/>
-<button id="btnGlb">Load</button>
-</div>
-<div class="row" style="margin-top:8px">
-<select id="save-target-sheet"><option value="">Select sheet…</option></select>
-<button id="save-target-create">Create</button>
-</div>
-</div>
-<nav class="tabs" role="tablist">
-<button aria-selected="true" data-tab="caption" id="tab-caption" role="tab">Caption</button>
-<button aria-selected="false" data-tab="material" id="tab-material" role="tab">Material</button>
-<button aria-selected="false" data-tab="views" id="tab-views" role="tab">Views</button>
-</nav>
-<!-- Caption pane (unchanged structure) -->
-<section class="pane" data-active="true" data-pane="caption" id="pane-caption">
-<div class="grp">
-<div class="hint">Pin color</div>
-<div class="chips" id="pinColorChips"></div>
-</div>
-<div class="grp">
-<div class="hint">Filter</div>
-<div class="chips" id="pinFilterChips"></div>
-</div>
-<div class="grp">
-<div class="hint">Caption list</div>
-<div id="caption-list"></div>
-</div>
-<div class="grp">
-<div class="hint">Title / Body</div>
-<input id="caption-title" placeholder="Title"/>
-<input id="caption-body" placeholder="Body"/>
-</div>
-<div class="grp">
-<div class="hint">Images (auto from GLB folder)</div>
-<div id="images-grid"></div>
-<div class="row" style="margin-top:8px">
-<button class="full" id="btnRefreshImages">Refresh images</button>
-</div>
-<div class="hint" id="images-status" style="margin-top:6px"></div>
-</div>
-</section>
-<!-- Material pane (refined) -->
-<section class="pane" data-pane="material" id="pane-material">
-<div class="mat-grid">
-<div class="mat-card">
-<h4>Per‑material opacity (saved per sheet)</h4>
-<div id="pm-opacity">
-<select aria-label="Select material" id="pm-material">
-<option value="">— Select material —</option>
-</select>
-<input id="pm-opacity-range" max="1" min="0" step="0.01" type="range" value="1"/>
-<output id="pm-opacity-val">1.00</output>
-</div>
-<div class="hint">Pick a material, then set its opacity. This does not change global opacity above.</div>
-</div>
-<div class="mat-card">
-<h4>Shading</h4>
-<div class="inline">
-<label class="nowrap"><input id="pm-flag-doublesided" type="checkbox"/> Double‑sided</label>
-<label class="nowrap"><input id="pm-flag-unlit" type="checkbox"/> Unlit‑like</label>
-</div>
-</div>
-<div class="mat-card">
-<h4>Chroma key</h4>
-<!-- Row 1: Enable + Color -->
-<div class="inline" style="margin-bottom:8px">
-<label class="nowrap"><input id="pm-chroma-enable" type="checkbox"/> Enable</label>
-<input aria-label="Color" id="pm-chroma-color" type="color" value="#000000"/>
-</div>
-<!-- Row 2: Tolerance -->
-<div class="mat-row" style="margin-bottom:6px">
-<span class="nowrap">Tolerance</span>
-<input id="pm-chroma-tol" max="1" min="0" step="0.01" type="range" value="0.10"/>
-</div>
-<!-- Row 3: Feather -->
-<div class="mat-row">
-<span class="nowrap">Feather</span>
-<input id="pm-chroma-feather" max="1" min="0" step="0.01" type="range" value="0.00"/>
-</div>
-</div>
-</div>
-</section>
-<section class="pane" data-pane="views" id="pane-views">
-<div class="grp">
-<button id="view-save">Save view</button>
-<div class="row"><label><input id="proj-ortho" type="checkbox"> Orthographic</input></label></div>
-</div>
-<div id="views-preset-list"></div>
-</section>
-</aside>
-</div>
-<!-- Tabs behavior -->
-<script>
+  <div id="app">
+    <div id="stage"><canvas id="gl"></canvas></div>
+
+    <aside id="ui">
+      <header id="topbar">
+        <div id="brand">LociMyu v6.6</div>
+        <div class="row" style="gap:6px;flex:0 0 auto">
+          <button id="auth-signin">Sign in</button>
+        </div>
+      </header>
+
+      <div class="pad" style="border-bottom:1px solid var(--line)">
+        <div class="row">
+          <input id="glbUrl" type="text" placeholder="Drive fileId / GLB URL" />
+          <button id="btnGlb">Load</button>
+        </div>
+        <div class="row" style="margin-top:8px">
+          <select id="save-target-sheet"><option value="">Select sheet…</option></select>
+          <button id="save-target-create">Create</button>
+        </div>
+      </div>
+
+      <nav class="tabs" role="tablist">
+        <button id="tab-caption" role="tab" aria-selected="true" data-tab="caption">Caption</button>
+        <button id="tab-material" role="tab" aria-selected="false" data-tab="material">Material</button>
+        <button id="tab-views" role="tab" aria-selected="false" data-tab="views">Views</button>
+      </nav>
+
+      <!-- Caption pane (unchanged structure) -->
+      <section id="pane-caption" class="pane" data-pane="caption" data-active="true">
+        <div class="grp">
+          <div class="hint">Pin color</div>
+          <div id="pinColorChips" class="chips"></div>
+        </div>
+        <div class="grp">
+          <div class="hint">Filter</div>
+          <div id="pinFilterChips" class="chips"></div>
+        </div>
+        <div class="grp">
+          <div class="hint">Caption list</div>
+          <div id="caption-list"></div>
+        </div>
+        <div class="grp">
+          <div class="hint">Title / Body</div>
+          <input id="caption-title" placeholder="Title" />
+          <input id="caption-body" placeholder="Body" />
+        </div>
+        <div class="grp">
+          <div class="hint">Images (auto from GLB folder)</div>
+          <div id="images-grid"></div>
+          <div class="row" style="margin-top:8px">
+            <button id="btnRefreshImages" class="full">Refresh images</button>
+          </div>
+          <div id="images-status" class="hint" style="margin-top:6px"></div>
+        </div>
+      </section>
+
+      <!-- Material pane (refined) -->
+      <section id="pane-material" class="pane" data-pane="material">
+        <div class="mat-grid">
+
+          <div class="mat-card">
+            <h4>Per‑material opacity (saved per sheet)</h4>
+            <div id="pm-opacity">
+              <select id="pm-material" aria-label="Select material">
+                <option value="">— Select material —</option>
+              </select>
+              <input type="range" id="pm-opacity-range" min="0" max="1" step="0.01" value="1" />
+              <output id="pm-opacity-val">1.00</output>
+            </div>
+            <div class="hint">Pick a material, then set its opacity. This does not change global opacity above.</div>
+          </div>
+
+          <div class="mat-card">
+            <h4>Shading</h4>
+            <div class="inline">
+              <label class="nowrap"><input id="pm-flag-doublesided" type="checkbox"> Double‑sided</label>
+              <label class="nowrap"><input id="pm-flag-unlit" type="checkbox"> Unlit‑like</label>
+            </div>
+          </div>
+
+          <div class="mat-card">
+            <h4>Chroma key</h4>
+            <!-- Row 1: Enable + Color -->
+            <div class="inline" style="margin-bottom:8px">
+              <label class="nowrap"><input id="pm-chroma-enable" type="checkbox"> Enable</label>
+              <input id="pm-chroma-color" type="color" value="#000000" aria-label="Color">
+            </div>
+            <!-- Row 2: Tolerance -->
+            <div class="mat-row" style="margin-bottom:6px">
+              <span class="nowrap">Tolerance</span>
+              <input id="pm-chroma-tol" type="range" min="0" max="1" step="0.01" value="0.10">
+            </div>
+            <!-- Row 3: Feather -->
+            <div class="mat-row">
+              <span class="nowrap">Feather</span>
+              <input id="pm-chroma-feather" type="range" min="0" max="1" step="0.01" value="0.00">
+            </div>
+          </div>
+
+        </div>
+      </section>
+
+      <section id="pane-views" class="pane" data-pane="views">
+        <div class="grp">
+          <button id="view-save">Save view</button>
+          <div class="row"><label><input type="checkbox" id="proj-ortho" /> Orthographic</label></div>
+        </div>
+        <div id="views-preset-list"></div>
+      </section>
+    </aside>
+  </div>
+
+  <!-- Tabs behavior -->
+  <script>
     (function(){
       const tabs = document.querySelectorAll('[role="tab"]');
       const panes = document.querySelectorAll('.pane');
@@ -262,14 +284,16 @@
       }));
     })();
   </script>
-<!-- Boot runtime -->
-<script src="./boot.esm.cdn.js" type="module"></script><script src="./viewer.module.cdn.js" type="module"></script><script src="./viewer.bridge.module.js" type="module"></script><script defer="" src="./sheet.ctx.bridge.js" type="module"></script><script src="./material.orchestrator.js" type="module"></script>
-<link href="app.sheet-rename.css" rel="stylesheet"/>
-<script src="sheet-rename.module.js" type="module"></script>
-<!-- Event bridge: emit lm:sheet-context / lm:sheet-changed (Approach A) -->
 
-<!-- Keep existing modules (they listen to our custom events if needed) -->
+  <!-- Boot runtime -->
+  <script type="module" src="./boot.esm.cdn.js"></script>
+  <link rel="stylesheet" href="app.sheet-rename.css" />
+  <script type="module" src="sheet-rename.module.js"></script>
+  <!-- Event bridge: emit lm:sheet-context / lm:sheet-changed (Approach A) -->
+  <script src="./sheet.ctx.bridge.js" defer></script>
 
-
+  <!-- Keep existing modules (they listen to our custom events if needed) -->
+  <script type="module" src="./viewer.bridge.module.js"></script>
+  <script type="module" src="./material.orchestrator.js"></script>
 </body>
 </html>

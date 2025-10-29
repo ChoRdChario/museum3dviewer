@@ -7,7 +7,7 @@
 // - 既存機能を壊さない UI-only 変更
 //
 // VERSION TAG
-const VERSION_TAG = 'V6_10_AUTOCONSENT_FIX4';
+const VERSION_TAG = 'V6_10_AUTOCONSENT_FIX5';
 const log  = (...a)=>console.log('[mat-orch]', ...a);
 const warn = (...a)=>console.warn('[mat-orch]', ...a);
 
