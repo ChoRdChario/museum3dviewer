@@ -102,3 +102,70 @@ try{
   if (!window.getAccessToken) window.getAccessToken = getAccessToken;
   if (!window.getLastAuthError) window.getLastAuthError = getLastAuthError;
 }catch(_){}
+
+// ===== FIX4: Auto-consent helpers =====
+async function lmRequestTokenSilent(){
+  try{
+    await ensureGisScript();
+    if (!tokenClient){
+      tokenClient = google.accounts.oauth2.initTokenClient({
+        client_id: (window.__LM_CLIENT_ID || window.CLIENT_ID || (window.lm_config && lm_config.client_id)),
+        scope: DEFAULT_SCOPES,
+        callback: ()=>{}
+      });
+    }
+    return await new Promise((resolve,reject)=>{
+      tokenClient.callback = (resp)=> resp && resp.access_token ? (accessToken = resp.access_token, resolve(resp.access_token)) : reject(resp);
+      try{
+        tokenClient.requestAccessToken({ prompt: "" });
+      }catch(e){ reject(e); }
+    });
+  }catch(e){ return null; }
+}
+async function lmRequestTokenInteractive(){
+  try{
+    await ensureGisScript();
+    if (!tokenClient){
+      tokenClient = google.accounts.oauth2.initTokenClient({
+        client_id: (window.__LM_CLIENT_ID || window.CLIENT_ID || (window.lm_config && lm_config.client_id)),
+        scope: DEFAULT_SCOPES,
+        callback: ()=>{}
+      });
+    }
+    return await new Promise((resolve,reject)=>{
+      tokenClient.callback = (resp)=> resp && resp.access_token ? (accessToken = resp.access_token, resolve(resp.access_token)) : reject(resp);
+      try{
+        tokenClient.requestAccessToken({ prompt: "consent" });
+      }catch(e){ reject(e); }
+    });
+  }catch(e){ return null; }
+}
+// Override ensureToken to prefer silent, then rely on first user gesture
+const __origEnsureToken = typeof ensureToken==="function" ? ensureToken : null;
+async function ensureToken(opts){
+  // try silent first
+  const silent = await lmRequestTokenSilent();
+  if (silent) return silent;
+  // if gesture provided, try interactive immediately
+  if (opts && (opts.interactive || opts.forceInteractive)) {
+    try{
+      const t = await lmRequestTokenInteractive();
+      if (t) return t;
+    }catch(_){}
+  }
+  // else, install one-time gesture hook
+  if (!window.__LM_PENDING_INTERACTIVE){
+    window.__LM_PENDING_INTERACTIVE = true;
+    const handler = async ()=>{
+      document.removeEventListener('pointerdown', handler, true);
+      try{ await lmRequestTokenInteractive(); }catch(_){}
+      window.__LM_PENDING_INTERACTIVE = false;
+      document.dispatchEvent(new CustomEvent('lm:auth-ready', {detail:{ token: !!accessToken }}));
+    };
+    document.addEventListener('pointerdown', handler, true);
+  }
+  return accessToken;
+}
+try{
+  window.ensureToken = ensureToken;
+}catch(_){}

@@ -7,7 +7,7 @@
 // - 既存機能を壊さない UI-only 変更
 //
 // VERSION TAG
-const VERSION_TAG = 'V6_10_AUTH_UI_ENSURE';
+const VERSION_TAG = 'V6_10_AUTOCONSENT_FIX4';
 const log  = (...a)=>console.log('[mat-orch]', ...a);
 const warn = (...a)=>console.warn('[mat-orch]', ...a);
 
@@ -365,31 +365,3 @@ log('loaded VERSION_TAG:'+VERSION_TAG);
 populateWhenReady();
 document.addEventListener('lm:model-ready', populateWhenReady);
 document.getElementById('tab-material')?.addEventListener('click', populateWhenReady);
-
-
-// ===== PLAN_A_FIX3 (append-only, brace-safe) =====
-(function(){
-  try{
-    // robust sheet-context: set state first, then ensure
-    document.addEventListener('lm:sheet-context', function(e){
-      try{
-        var det = (e && e.detail) || {};
-        console.log('[mat-orch][fix3] sheet-context detail', det);
-        if (det && det.spreadsheetId){
-          state.spreadsheetId = det.spreadsheetId;
-          if (typeof det.sheetGid !== 'undefined' && det.sheetGid !== null) state.sheetGid = det.sheetGid;
-          log('ctx set (fix3)', { spreadsheetId: state.spreadsheetId, sheetGid: state.sheetGid });
-          Promise.resolve().then(()=>ensureMaterialSheet()).catch(function(err){
-            console.warn('[mat-orch][fix3] ensureMaterialSheet failed', err);
-          });
-        } else {
-          warn('[fix3] sheet-context missing spreadsheetId');
-        }
-      }catch(err){
-        console.warn('[mat-orch][fix3] sheet-context handler error', err);
-      }
-    }, { once:false });
-  }catch(e){
-    console.warn('[mat-orch][fix3] install error', e);
-  }
-})();
