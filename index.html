@@ -152,11 +152,18 @@
 
           <div class="mat-card">
             <h4>Chroma key</h4>
-            <div class="inline">
+            <!-- Row 1: Enable + Color -->
+            <div class="inline" style="margin-bottom:8px">
               <label class="nowrap"><input id="pm-chroma-enable" type="checkbox"> Enable</label>
               <input id="pm-chroma-color" type="color" value="#000000" aria-label="Color">
+            </div>
+            <!-- Row 2: Tolerance -->
+            <div class="mat-row" style="margin-bottom:6px">
               <span class="nowrap">Tolerance</span>
               <input id="pm-chroma-tol" type="range" min="0" max="1" step="0.01" value="0.10">
+            </div>
+            <!-- Row 3: Feather -->
+            <div class="mat-row">
               <span class="nowrap">Feather</span>
               <input id="pm-chroma-feather" type="range" min="0" max="1" step="0.01" value="0.00">
             </div>
@@ -298,11 +305,25 @@
       let names=[];
       const viewer = await import('./viewer.module.cdn.js').catch(()=>({}));
       while (tries++ < 30) {
-        names = dedup([ ...listFromViewer(viewer), ...listFromScene() ]);
+        names = [...new Set([ ...(viewer?.listMaterials?.()||[]).map(m=>m?.name).filter(Boolean),
+                               ...(() => { const s=window.__LM_SCENE, set=new Set(); s?.traverse(o=>{
+                                  if (!o.isMesh||!o.material) return;
+                                  (Array.isArray(o.material)?o.material:[o.material]).forEach(m=>m?.name&&set.add(m.name));
+                               }); return [...set]; })()
+                             ])].filter(n=>!/^#\d+$/.test(n));
         if (names.length) break;
         await new Promise(r=>setTimeout(r, 200));
       }
-      if (names.length) fillSelect(names);
+      if (names.length) {
+        const sel = document.querySelector('#pm-material');
+        if (sel) {
+          const cur = sel.value;
+          sel.innerHTML = '<option value=\"\">— Select material —</option>' + names.map(n=>`<option value=\"${n}\">${n}</option>`).join('');
+          if (cur && names.includes(cur)) sel.value = cur;
+        }
+      } else {
+        console.warn('[mat-orch] materials still empty after retries (will wait for next model)');
+      }
     }
 
     // Trigger on load and on Model-ready events
