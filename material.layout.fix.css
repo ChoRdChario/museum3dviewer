@@ -1,43 +1,67 @@
-/* ===== Material pane: overflow & wrapping fixes ===== */
-#pane-material .scroller {
+
+/* === LociMyu: Material panel layout fix v2 ===
+   - Keep sliders inside the card (no overflow)
+   - Put Tolerance / Feather on their own lines (already handled structurally)
+   - Make sliders responsive to card width
+   - Avoid horizontal scrolling in the right panel
+*/
+
+/* Scope to the right pane / material tab */
+#pane-material {
   overflow-x: hidden;
 }
 
-#pane-material .mat-card {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-#pane-material .row,
-#pane-material .inline,
-#pane-material .pair,
-#pane-material .controls {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-#pane-material .row > *,
-#pane-material .controls > * {
-  min-width: 0;
-}
-
-#pane-material select,
-#pane-material input[type="range"],
-#pm-material,
-#pm-chroma-tol,
-#pm-chroma-feather {
-  flex: 1 1 100%;
+/* Generic: any input range in the material pane should never overflow */
+#pane-material input[type="range"] {
+  box-sizing: border-box;
   width: 100%;
   max-width: 100%;
+  padding-right: 0;
 }
 
-#pane-material .btn,
-#pane-material .switch,
-#pane-material .mini {
+/* Ensure rows don't force overflow */
+#pane-material .mat-row,
+#pane-material .lm-row,
+#pane-material .row,
+#pane-material .line {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+/* Give the slider flexible space without overflowing */
+#pane-material .mat-row input[type="range"],
+#pane-material .lm-row input[type="range"],
+#pane-material .row input[type="range"],
+#pane-material .line input[type="range"] {
+  flex: 1 1 240px;
+  min-width: 140px;
+}
+
+/* Prevent tiny badges/inputs from stretching layout */
+#pane-material .mini,
+#pane-material .micro,
+#pane-material .tiny,
+#pane-material .badge {
   flex: 0 0 auto;
 }
 
-#pm-chroma .tol-row { display: flex; flex-wrap: wrap; gap: 8px; }
-#pm-chroma .feather-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
+/* Cards/boxes shouldn't scroll horizontally */
+#pane-material .card,
+#pane-material .box,
+#pane-material .group {
+  overflow-x: hidden;
+}
+
+/* If there is any inner scroller, clamp x */
+#pane-material .scroller {
+  overflow-x: hidden !important;
+}
+
+/* Optional: reduce right padding so 100% sliders fit neatly */
+#pane-material .card .content,
+#pane-material .box .content,
+#pane-material .group .content {
+  padding-right: 10px;
+}
