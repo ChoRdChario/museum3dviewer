@@ -1,22 +1,16 @@
 /* material.orchestrator.js
- * LociMyu – Material Orchestrator (v6.8 AUTH-FIX)
- * PURPOSE
- *   - Populate/select materials (existing behavior kept)
- *   - Persist per-material props to Google Sheets
- *   - **Permanently** handle Google Identity Services (GIS) loading & token acquisition
- *
- * WHAT'S NEW (v6.8):
- *   - VERSION_TAG:V6_8_AUTHFIX
- *   - getAccessToken(): falls back to GIS on-demand (auto-load gsi/client if missing)
- *   - Uses window.__LM_CLIENT_ID if present (recommended to define in HTML), otherwise
- *     keeps compatibility with existing gauth.getAccessToken()
- *   - Keeps all public API surface: window.lmMaterials.{setCurrentSheetContext,ensureMaterialSheet,upsertProps,saveCurrentOpacity,report}
+ * LociMyu – Material Orchestrator (v6.9 AUTH-FIX + AUTO-CTX)
+ * - Robust Google Identity Services fallback (auto-load gsi/client; silent→consent)
+ * - Auto bind to current Spreadsheet context (ID/GID) via events & sniffing
+ * - Ensure __LM_MATERIALS on first use and at safe UI hooks
+ * - Preserve public API surface:
+ *     window.lmMaterials.{setCurrentSheetContext,ensureMaterialSheet,upsertProps,saveCurrentOpacity,report}
  */
 
 (() => {
-  const SHEET_NAME = '__LM_MATERIALS';
-  const SCHEMA_VER = '1';
-  const VERSION_TAG = 'VERSION_TAG:V6_8_AUTHFIX';
+  const SHEET_NAME  = '__LM_MATERIALS';
+  const SCHEMA_VER  = '1';
+  const VERSION_TAG = 'VERSION_TAG:V6_9_AUTHFIX_AUTOCtx';
 
   const log  = (...a) => console.log('[mat-orch]', ...a);
   const warn = (...a) => console.warn('[mat-orch]', ...a);
@@ -37,7 +31,7 @@
 
   // ----------------- Token acquisition (robust) -----------------
   async function getAccessToken() {
-    // 1) Preferred local hook (kept for compatibility)
+    // 1) Preferred local hook (compat)
     try {
       if (typeof window.__lm_getAccessToken === 'function') {
         const tok = await window.__lm_getAccessToken();
@@ -45,7 +39,7 @@
       }
     } catch {}
 
-    // 2) Legacy gauth path (kept for compatibility)
+    // 2) Legacy gauth path (compat)
     try {
       if (window.gauth && typeof window.gauth.getAccessToken === 'function') {
         const tok = await window.gauth.getAccessToken();
@@ -53,41 +47,32 @@
       }
     } catch {}
 
-    // 3) GIS fallback (permanent fix)
+    // 3) GIS fallback (permanent)
     const ok = await ensureGISLoaded();
     if (!ok) throw new Error('gis_not_loaded');
 
-    // Use provided client id if defined; you can define this in HTML:
-    // <script>window.__LM_CLIENT_ID="YOUR_CLIENT_ID.apps.googleusercontent.com"</script>
     const clientId =
       window.__LM_CLIENT_ID ||
       window.gauth?.CLIENT_ID ||
-      '595200751510-ncahnf7edci6b9925becn5to49r6cguv.apps.googleusercontent.com'; // fallback (replace with yours if needed)
+      '595200751510-ncahnf7edci6b9925becn5to49r6cguv.apps.googleusercontent.com'; // fallback (replace with yours)
 
-    // Cache token client
     if (!window.__lm_tokenClient) {
       window.__lm_token = undefined;
       window.__lm_tokenClient = google.accounts.oauth2.initTokenClient({
         client_id: clientId,
         scope: 'https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive.readonly',
-        callback: (resp) => {
-          if (resp?.access_token) window.__lm_token = resp.access_token;
-        }
+        callback: (resp) => { if (resp?.access_token) window.__lm_token = resp.access_token; }
       });
     }
 
-    // Try silent first
+    // silent first
     window.__lm_tokenClient.requestAccessToken({ prompt: '' });
-    for (let i = 0; i < 25 && !window.__lm_token; i++) {
-      await new Promise(r => setTimeout(r, 100));
-    }
+    for (let i=0; i<25 && !window.__lm_token; i++) await new Promise(r => setTimeout(r, 100));
     if (window.__lm_token) return window.__lm_token;
 
-    // Fallback to consent prompt
+    // then consent
     window.__lm_tokenClient.requestAccessToken({ prompt: 'consent' });
-    for (let i = 0; i < 50 && !window.__lm_token; i++) {
-      await new Promise(r => setTimeout(r, 100));
-    }
+    for (let i=0; i<50 && !window.__lm_token; i++) await new Promise(r => setTimeout(r, 100));
     if (window.__lm_token) return window.__lm_token;
 
     throw new Error('token_missing');
@@ -114,7 +99,7 @@
     log('sheet context set', { spreadsheetId: state.spreadsheetId, sheetGid: state.sheetGid });
   }
 
-  // ----------------- Ensure __LM_MATERIALS -----------------
+  // ----------------- __LM_MATERIALS bootstrap -----------------
   async function ensureMaterialSheet() {
     if (!state.spreadsheetId) {
       warn('ensureMaterialSheet: no spreadsheetId');
@@ -199,7 +184,7 @@
     }
   }
 
-  // ----------------- UI hooks (non-intrusive) -----------------
+  // ----------------- UI hooks -----------------
   function captureUI() {
     state.ui.dropdown     = document.querySelector('#pm-material') || document.querySelector('#lm-material-select');
     state.ui.perMatSlider = document.querySelector('#pm-opacity-range') || document.querySelector('input[type="range"][data-lm="permat-opacity"]');
@@ -225,6 +210,90 @@
     }
   }
   window.addEventListener('lm:model-ready', wireUIOnce);
+
+  // ----------------- AUTO-CTX (events + sniff) -----------------
+  function sniffSheetContext() {
+    try {
+      const ctx = window.lmSheets?.getCurrentContext?.();
+      if (ctx?.spreadsheetId && (ctx.sheetGid ?? '') !== '') return ctx;
+    } catch {}
+
+    const cands = [
+      () => ({ spreadsheetId: window.__lm_spreadsheetId, sheetGid: window.__lm_sheetGid }),
+      () => (window.__lm_sheet ? { spreadsheetId: window.__lm_sheet.spreadsheetId, sheetGid: window.__lm_sheet.sheetGid } : null),
+    ];
+    for (const f of cands) {
+      try {
+        const v = f(); if (v?.spreadsheetId) return v;
+      } catch {}
+    }
+
+    const el = document.querySelector('[data-lm-spreadsheet-id]');
+    if (el) {
+      const sid = el.getAttribute('data-lm-spreadsheet-id');
+      const gidAttr = el.getAttribute('data-lm-sheet-gid');
+      const gid = gidAttr ? Number(gidAttr) : null;
+      if (sid) return { spreadsheetId: sid, sheetGid: gid };
+    }
+    return null;
+  }
+
+  async function ensureIfCtx() {
+    const r = window.lmMaterials.report();
+    if (r.spreadsheetId && (r.sheetGid ?? '') !== null) {
+      try {
+        const res = await window.lmMaterials.ensureMaterialSheet();
+        log('auto-ensure', res);
+      } catch (e) {
+        warn('auto-ensure failed', e);
+      }
+    } else {
+      log('auto-ensure skipped: no ctx');
+    }
+  }
+
+  window.addEventListener('lm:sheet-context', (e) => {
+    const d = e.detail || {};
+    if (d.spreadsheetId) {
+      window.lmMaterials.setCurrentSheetContext({ spreadsheetId: d.spreadsheetId, sheetGid: d.sheetGid });
+      ensureIfCtx();
+    }
+  });
+  window.addEventListener('lm:sheet-changed', (e) => {
+    const d = e.detail || {};
+    if (d.spreadsheetId) {
+      window.lmMaterials.setCurrentSheetContext({ spreadsheetId: d.spreadsheetId, sheetGid: d.sheetGid });
+      ensureIfCtx();
+    }
+  });
+
+  (function autoScanCtxBoot() {
+    let tries = 0;
+    const t = setInterval(() => {
+      tries++;
+      const ctx = sniffSheetContext();
+      if (ctx?.spreadsheetId) {
+        window.lmMaterials.setCurrentSheetContext(ctx);
+        ensureIfCtx();
+        clearInterval(t);
+      }
+      if (tries > 10) clearInterval(t);
+    }, 200);
+  })();
+  window.addEventListener('lm:model-ready', () => {
+    const ctx = sniffSheetContext();
+    if (ctx?.spreadsheetId) {
+      window.lmMaterials.setCurrentSheetContext(ctx);
+      ensureIfCtx();
+    }
+  });
+  document.querySelector('#tab-material')?.addEventListener('click', () => {
+    const ctx = sniffSheetContext();
+    if (ctx?.spreadsheetId) {
+      window.lmMaterials.setCurrentSheetContext(ctx);
+      ensureIfCtx();
+    }
+  });
 
   // ----------------- Public API -----------------
   window.lmMaterials = Object.freeze({
