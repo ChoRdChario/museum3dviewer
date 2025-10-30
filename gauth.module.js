@@ -82,7 +82,7 @@ export async function ensureToken({ interactive=false } = {}){
   // silent first
   try{
     await new Promise((resolve, reject)=>{
-      tokenClient.callback = (resp)=> resp?.access_token ? (accessToken = resp.access_token, resolve(resp)) : reject(resp);
+      tokenClient.callback = (resp)=> resp?.access_token ? (accessToken = resp.access_token, window.dispatchEvent(new CustomEvent('lm:auth-ok', {detail:{accessToken}})), resolve(resp)) : reject(resp);
       tokenClient.requestAccessToken({ prompt: '' });
     });
     return accessToken;
@@ -90,8 +90,8 @@ export async function ensureToken({ interactive=false } = {}){
   if (!interactive) throw lastError || new Error('silent_failed');
   // interactive
   await new Promise((resolve, reject)=>{
-    tokenClient.callback = (resp)=> resp?.access_token ? (accessToken = resp.access_token, resolve(resp)) : reject(resp);
-    tokenClient.requestAccessToken({ prompt: 'consent' });
+    tokenClient.callback = (resp)=> resp?.access_token ? (accessToken = resp.access_token, window.dispatchEvent(new CustomEvent('lm:auth-ok', {detail:{accessToken}})), resolve(resp)) : reject(resp);
+    tokenClient.requestAccessToken({ prompt: '' });
   });
   return accessToken;
 }
@@ -102,69 +102,3 @@ try{
   if (!window.getAccessToken) window.getAccessToken = getAccessToken;
   if (!window.getLastAuthError) window.getLastAuthError = getLastAuthError;
 }catch(_){}
-
-// ===== FIX5: Auto-consent helpers (no redeclare) =====
-(function(){
-  if (window.__LM_ENSURETOKEN_PATCHED) return;
-  window.__LM_ENSURETOKEN_PATCHED = true;
-
-  async function lmRequestTokenSilent(){
-    try{
-      await ensureGisScript();
-      if (!tokenClient){
-        tokenClient = google.accounts.oauth2.initTokenClient({
-          client_id: (window.__LM_CLIENT_ID || window.CLIENT_ID || (window.lm_config && lm_config.client_id)),
-          scope: DEFAULT_SCOPES,
-          callback: ()=>{}
-        });
-      }
-      return await new Promise((resolve,reject)=>{
-        tokenClient.callback = (resp)=> resp && resp.access_token ? (accessToken = resp.access_token, resolve(resp.access_token)) : reject(resp);
-        try{ tokenClient.requestAccessToken({ prompt: "" }); }catch(e){ reject(e); }
-      });
-    }catch(e){ return null; }
-  }
-  async function lmRequestTokenInteractive(){
-    try{
-      await ensureGisScript();
-      if (!tokenClient){
-        tokenClient = google.accounts.oauth2.initTokenClient({
-          client_id: (window.__LM_CLIENT_ID || window.CLIENT_ID || (window.lm_config && lm_config.client_id)),
-          scope: DEFAULT_SCOPES,
-          callback: ()=>{}
-        });
-      }
-      return await new Promise((resolve,reject)=>{
-        tokenClient.callback = (resp)=> resp && resp.access_token ? (accessToken = resp.access_token, resolve(resp.access_token)) : reject(resp);
-        try{ tokenClient.requestAccessToken({ prompt: "consent" }); }catch(e){ reject(e); }
-      });
-    }catch(e){ return null; }
-  }
-
-  const __origEnsure = (typeof window.ensureToken === 'function') ? window.ensureToken : null;
-
-  async function lmEnsureTokenPatched(opts){
-    try{
-      const silent = await lmRequestTokenSilent();
-      if (silent) return silent;
-    }catch(_){}
-    if (opts && (opts.interactive || opts.forceInteractive)){
-      try{ const t = await lmRequestTokenInteractive(); if (t) return t; }catch(_){}
-    }
-    if (!window.__LM_PENDING_INTERACTIVE){
-      window.__LM_PENDING_INTERACTIVE = true;
-      const handler = async ()=>{
-        document.removeEventListener('pointerdown', handler, true);
-        try{ await lmRequestTokenInteractive(); }catch(_){}
-        window.__LM_PENDING_INTERACTIVE = false;
-        document.dispatchEvent(new CustomEvent('lm:auth-ready', {detail:{ token: !!accessToken }}));
-      };
-      document.addEventListener('pointerdown', handler, true);
-    }
-    // Fallback to original if exists
-    if (__origEnsure){ try{ return await __origEnsure(opts||{}); }catch(_){ } }
-    return accessToken;
-  }
-
-  try{ window.ensureToken = lmEnsureTokenPatched; }catch(_){}
-})();

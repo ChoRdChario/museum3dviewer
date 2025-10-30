@@ -7,28 +7,12 @@
 // - 既存機能を壊さない UI-only 変更
 //
 // VERSION TAG
-const VERSION_TAG = 'V6_11_AUTH_UI_ENSURE';
-
-async function __lm_safeGetToken(){
-  try{
-    if (typeof getAccessToken === 'function'){
-      const t = await Promise.resolve(getAccessToken());
-      if (t) return t;
-    }
-  }catch(e){ console.warn('[mat-orch] getAccessToken error', e); }
-  try{
-    if (typeof ensureToken === 'function'){
-      const t2 = await Promise.resolve(ensureToken({interactive:false}));
-      if (t2) return t2;
-    }
-  }catch(e){ console.warn('[mat-orch] ensureToken error', e); }
-  return null;
-}
+const VERSION_TAG = 'V6_10_AUTH_UI_ENSURE';
 const log  = (...a)=>console.log('[mat-orch]', ...a);
 const warn = (...a)=>console.warn('[mat-orch]', ...a);
 
 // --------- State ---------
-const state = { modelReady:false, sheetEnsured:false, 
+const state = {
   spreadsheetId: null,
   sheetGid: null,
   ui: {},
@@ -90,7 +74,7 @@ async function getAccessToken() {
 }
 
 async function authFetch(url, init={}) {
-  const tok = await __lm_safeGetToken(); // token_missing の可能性：呼び元でハンドル
+  const tok = await getAccessToken(); // token_missing の可能性：呼び元でハンドル
   const headers = new Headers(init.headers || {});
   headers.set('Authorization', `Bearer ${tok}`);
   return fetch(url, { ...init, headers });
@@ -124,7 +108,7 @@ async function ensureMaterialSheet() {
 
   // token 無ければユーザー操作まで待つ
   try {
-    await __lm_safeGetToken();
+    await getAccessToken();
   } catch (e) {
     if (String(e?.message||e).includes('token_missing')) {
       warn('auto-ensure skipped (no token). Use __lm_requestSheetsConsent() from a user action.');
@@ -175,7 +159,7 @@ async function saveCurrentOpacity() {
     return;
   }
   // token 無ければ何もしない（ユーザー操作で同意後に再試行される）
-  try { await __lm_safeGetToken(); }
+  try { await getAccessToken(); }
   catch(e) {
     if (String(e?.message||e).includes('token_missing')) {
       warn('save skipped: token_missing');
@@ -384,36 +368,17 @@ document.getElementById('tab-material')?.addEventListener('click', populateWhenR
 
 
 function ensureIfReady(){
-  if (state.sheetEnsured) return;
-  if (state.spreadsheetId && state.modelReady){
-    state.sheetEnsured = true;
-    setTimeout(function(){
-      try{
-        Promise.resolve(ensureMaterialSheet()).catch(function(e){
-          console.warn('[mat-orch] ensureMaterialSheet failed', e);
-          state.sheetEnsured = false;
-        });
-      }catch(e){
-        console.warn('[mat-orch] ensure call error', e);
-        state.sheetEnsured = false;
-      }
-    }, 50);
-  }
-}
-
-// unify listeners
-function __lm_sheetContextHandler(ev){
   try{
-    var d = (ev && ev.detail) || {};
-    if (d && d.spreadsheetId){ state.spreadsheetId = d.spreadsheetId; }
-    if (d && (d.sheetGid!==undefined && d.sheetGid!==null)){ state.sheetGid = d.sheetGid; }
-    log('sheet context set', { spreadsheetId: state.spreadsheetId, sheetGid: state.sheetGid });
-    ensureIfReady();
-  }catch(e){ console.warn('[mat-orch] sheetContextHandler error', e); }
+    if (typeof state !== 'undefined' && state && state.spreadsheetId){
+      if (typeof ensureMaterialSheet === 'function'){
+        Promise.resolve(ensureMaterialSheet()).catch(e=>console.warn('[mat-orch] ensureMaterialSheet err', e));
+      } else if (typeof ensureIfCtx === 'function'){
+        Promise.resolve(ensureIfCtx()).catch(e=>console.warn('[mat-orch] ensureIfCtx err', e));
+      }
+    }
+  }catch(e){ console.warn('[mat-orch] ensureIfReady err', e); }
 }
-document.addEventListener('lm:sheet-context', __lm_sheetContextHandler);
-window.addEventListener('lm:sheet-context', __lm_sheetContextHandler);
 
-document.addEventListener('lm:model-ready', function(){ state.modelReady = true; ensureIfReady(); });
-window.addEventListener('lm:model-ready', function(){ state.modelReady = true; ensureIfReady(); });
 
+document.addEventListener('lm:auth-ok', ()=>{ try{ ensureIfReady(); }catch(e){} });
+window.addEventListener('lm:auth-ok', ()=>{ try{ ensureIfReady(); }catch(e){} });

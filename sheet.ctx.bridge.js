@@ -1,8 +1,10 @@
-/* sheet.ctx.bridge.js (reconstructed clean)
- * Emits sheet-context events from existing globals.
- * Fires:
- *   - lm:sheet-context  : first time both spreadsheetId & sheetGid are known
- *   - lm:sheet-changed  : when either changes thereafter
+/* sheet.ctx.bridge.js
+ * Approach A: Emit sheet-context events from existing globals
+ * - Watches window.currentSpreadsheetId / window.currentSheetId
+ * - Fires:
+ *    - lm:sheet-context  : first time both are known
+ *    - lm:sheet-changed  : when either value changes afterwards
+ * - Safe to include multiple times; internal guard prevents duplicates.
  */
 (() => {
   if (window.__lm_sheet_ctx_bridge_installed) return;
@@ -15,25 +17,19 @@
   let firedInitial = false;
 
   function readCtx() {
-    const sid = (window.currentSpreadsheetId || window.spreadsheetId || null);
-    const gid = (typeof window.currentSheetId !== 'undefined' ? window.currentSheetId
-               : typeof window.sheetGid !== 'undefined' ? window.sheetGid
-               : null);
+    // Primary globals used in your repo
+    let sid = window.currentSpreadsheetId ?? window.__lm_spreadsheetId ?? window.__lm_sheet?.spreadsheetId ?? null;
+    let gid = window.currentSheetId ?? window.__lm_sheetGid ?? window.__lm_sheet?.sheetGid ?? null;
+    if (gid != null && typeof gid !== 'number') {
+      const n = Number(gid);
+      gid = Number.isNaN(n) ? null : n;
+    }
     return { sid, gid };
   }
 
   function fire(type, sid, gid) {
-    try {
-      const detail = { spreadsheetId: sid, sheetGid: gid };
-      // dispatch fresh events to both targets; enable bubbles/composed
-      const evDoc = new CustomEvent(type, { detail, bubbles: true, composed: true });
-      document.dispatchEvent(evDoc);
-      const evWin = new CustomEvent(type, { detail, bubbles: true, composed: true });
-      window.dispatchEvent(evWin);
-      log(type, detail);
-    } catch (e) {
-      console.warn('[sheet-ctx-bridge] fire error', e);
-    }
+    window.dispatchEvent(new CustomEvent(type, { detail: { spreadsheetId: sid, sheetGid: gid } }));
+    log(type, { spreadsheetId: sid, sheetGid: gid });
   }
 
   const tick = () => {
@@ -50,8 +46,10 @@
     }
   };
 
+  // Start polling after document is interactive
   const start = () => {
     tick();
+    // Keep it light; 400ms is a good compromise
     window.__lm_sheet_ctx_bridge_timer = window.setInterval(tick, 400);
   };
 
