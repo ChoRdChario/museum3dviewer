@@ -1,71 +1,63 @@
-/* sheet.ctx.bridge.js
- * Approach A: Emit sheet-context events from existing globals
- * - Watches window.currentSpreadsheetId / window.currentSheetId
- * - Fires:
- *    - lm:sheet-context  : first time both are known
- *    - lm:sheet-changed  : when either value changes afterwards
- * - Safe to include multiple times; internal guard prevents duplicates.
- */
-(() => {
+/* sheet.ctx.bridge.js — clean rebuild (2025-10-30)
+   Emits sheet context events once globals are available.
+*/
+(function(){
   if (window.__lm_sheet_ctx_bridge_installed) return;
   window.__lm_sheet_ctx_bridge_installed = true;
 
-  const log = (...a) => console.log('[sheet-ctx-bridge]', ...a);
+  function log(){ try{ console.log.apply(console, ['[sheet-ctx-bridge]'].concat([].slice.call(arguments))); }catch(e){} }
 
-  let lastSid = null;
-  let lastGid = null;
-  let firedInitial = false;
+  var lastSid = null;
+  var lastGid = null;
+  var firedInitial = false;
 
-  function readCtx() {
-    // Primary globals used in your repo
-    let sid = window.currentSpreadsheetId ?? window.__lm_spreadsheetId ?? window.__lm_sheet?.spreadsheetId ?? null;
-    let gid = window.currentSheetId ?? window.__lm_sheetGid ?? window.__lm_sheet?.sheetGid ?? null;
-    if (gid != null && typeof gid !== 'number') {
-      const n = Number(gid);
-      gid = Number.isNaN(n) ? null : n;
+  function readCtx(){
+    var sid = window.currentSpreadsheetId || window.spreadsheetId || null;
+    var gid = (typeof window.currentSheetId !== 'undefined') ? window.currentSheetId
+            : (typeof window.sheetGid !== 'undefined') ? window.sheetGid
+            : null;
+    return { sid: sid, gid: gid };
+  }
+
+  function fire(type, sid, gid){
+    try{
+      var detail = { spreadsheetId: sid, sheetGid: gid };
+      var evDoc = new CustomEvent(type, { detail: detail, bubbles: true, composed: true });
+      document.dispatchEvent(evDoc);
+      var evWin = new CustomEvent(type, { detail: detail, bubbles: true, composed: true });
+      window.dispatchEvent(evWin);
+      log(type, detail);
+    }catch(e){
+      console.warn('[sheet-ctx-bridge] fire error', e);
     }
-    return { sid, gid };
   }
 
-  function fire(type, sid, gid) {
-  try {
-    const detail = { spreadsheetId: sid, sheetGid: gid };
-    const evDoc = new CustomEvent(type, { detail, bubbles: true, composed: true });
-    document.dispatchEvent(evDoc);
-    const evWin = new CustomEvent(type, { detail, bubbles: true, composed: true });
-    window.dispatchEvent(evWin);
-    console.log('[sheet-ctx-bridge]', type, detail);
-  } catch (e) {
-    console.warn('[sheet-ctx-bridge] fire error', e);
-  }
-} }));
-    log(type, { spreadsheetId: sid, sheetGid: gid });
-  }
-
-  const tick = () => {
-    const { sid, gid } = readCtx();
-    if (sid && gid != null) {
-      if (!firedInitial) {
-        fire('lm:sheet-context', sid, gid);
-        firedInitial = true;
-        lastSid = sid; lastGid = gid;
-      } else if (sid !== lastSid || gid !== lastGid) {
-        fire('lm:sheet-changed', sid, gid);
-        lastSid = sid; lastGid = gid;
+  function tick(){
+    try{
+      var ctx = readCtx();
+      if (ctx.sid && (ctx.gid !== null && typeof ctx.gid !== 'undefined')){
+        if (!firedInitial){
+          fire('lm:sheet-context', ctx.sid, ctx.gid);
+          firedInitial = true;
+          lastSid = ctx.sid; lastGid = ctx.gid;
+        }else if (ctx.sid !== lastSid || ctx.gid !== lastGid){
+          fire('lm:sheet-changed', ctx.sid, ctx.gid);
+          lastSid = ctx.sid; lastGid = ctx.gid;
+        }
       }
+    }catch(e){
+      console.warn('[sheet-ctx-bridge] tick error', e);
     }
-  };
+  }
 
-  // Start polling after document is interactive
-  const start = () => {
+  function start(){
     tick();
-    // Keep it light; 400ms is a good compromise
     window.__lm_sheet_ctx_bridge_timer = window.setInterval(tick, 400);
-  };
+  }
 
-  if (document.readyState === 'complete' || document.readyState === 'interactive') {
+  if (document.readyState === 'complete' || document.readyState === 'interactive'){
     start();
-  } else {
+  }else{
     window.addEventListener('DOMContentLoaded', start, { once: true });
   }
 })();
