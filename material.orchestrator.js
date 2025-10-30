@@ -1,4 +1,20 @@
 // material.orchestrator.js
+
+async function __lm_safeGetToken(){
+  try{
+    if (typeof getAccessToken === 'function'){
+      const t = await Promise.resolve(getAccessToken());
+      if (t) return t;
+    }
+  }catch(e){ console.warn('[mat-orch] getAccessToken error', e); }
+  try{
+    if (typeof ensureToken === 'function'){
+      const t2 = await Promise.resolve(ensureToken({interactive:false}));
+      if (t2) return t2;
+    }
+  }catch(e){ console.warn('[mat-orch] ensureToken error', e); }
+  return null;
+}
 // LociMyu Material Orchestrator
 // - ユーザー操作直後のみ GIS ポップアップを許可（ブラウザブロック回避）
 // - Spreadsheet/GID を自動ブリッジ（sheet.ctx.bridge.js 経由）
@@ -7,12 +23,12 @@
 // - 既存機能を壊さない UI-only 変更
 //
 // VERSION TAG
-const VERSION_TAG = 'V6_10_AUTH_UI_ENSURE';
+const VERSION_TAG = 'V6_11_AUTH_UI_ENSURE';
 const log  = (...a)=>console.log('[mat-orch]', ...a);
 const warn = (...a)=>console.warn('[mat-orch]', ...a);
 
 // --------- State ---------
-const state = {
+const state = { modelReady:false, sheetEnsured:false, 
   spreadsheetId: null,
   sheetGid: null,
   ui: {},
@@ -74,7 +90,7 @@ async function getAccessToken() {
 }
 
 async function authFetch(url, init={}) {
-  const tok = await getAccessToken(); // token_missing の可能性：呼び元でハンドル
+  const tok = await __lm_safeGetToken(); // token_missing の可能性：呼び元でハンドル
   const headers = new Headers(init.headers || {});
   headers.set('Authorization', `Bearer ${tok}`);
   return fetch(url, { ...init, headers });
@@ -101,61 +117,54 @@ async function batchUpdate(spreadsheetId, body) {
 
 // __LM_MATERIALS の存在保証
 async function ensureMaterialSheet() {
+  if (!state.spreadsheetId) {
+    warn('ensureMaterialSheet: no spreadsheetId');
+    return { ok:false, reason:'no_spreadsheet' };
+  }
+
+  // token 無ければユーザー操作まで待つ
   try {
-    console.log('[mat-orch][fix7] ensureMaterialSheet start', state && state.spreadsheetId);
-    if (!state || !state.spreadsheetId) {
-      console.warn('[fix7] missing spreadsheetId');
-      return { ok:false, reason:'no_spreadsheet' };
-    }
-    // token
-    var token = null;
-    try { token = await getAccessToken(); } catch(e){ console.warn('[fix7] getAccessToken error', e); }
-    if (!token && typeof ensureToken === 'function') {
-      try { token = await ensureToken({ interactive:false }); } catch(e){ console.warn('[fix7] ensureToken error', e); }
-    }
-    if (!token) {
-      console.warn('[fix7] token missing');
+    await __lm_safeGetToken();
+  } catch (e) {
+    if (String(e?.message||e).includes('token_missing')) {
+      warn('auto-ensure skipped (no token). Use __lm_requestSheetsConsent() from a user action.');
       return { ok:false, reason:'no_token' };
     }
-    var base = 'https://sheets.googleapis.com/v4/spreadsheets/' + encodeURIComponent(state.spreadsheetId);
-    // existence check by title
-    var getRes = await fetch(base + '?fields=sheets.properties', { headers:{ 'Authorization':'Bearer '+token } });
-    console.log('[fix7] get status', getRes.status);
-    if (!getRes.ok) {
-      return { ok:false, reason:'get_failed', status:getRes.status };
-    }
-    var info = await getRes.json();
-    var exists = false;
-    if (info && info.sheets) {
-      for (var si=0; si<info.sheets.length; si++){
-        var p = info.sheets[si].properties || {};
-        if (p.title === '__LM_MATERIALS'){ exists = true; break; }
-      }
-    }
-    if (!exists) {
-      var body = { requests: [ { addSheet: { properties: { title: '__LM_MATERIALS', gridProperties:{ frozenRowCount:1 } } } } ] };
-      var bu = await fetch(base + ':batchUpdate', {
-        method:'POST',
-        headers:{ 'Authorization':'Bearer '+token, 'Content-Type':'application/json' },
-        body: JSON.stringify(body)
-      });
-      var buTxt = await bu.text();
-      console.log('[fix7] addSheet status', bu.status, buTxt);
-      if (!bu.ok) return { ok:false, reason:'add_failed', status:bu.status, text:buTxt };
-    }
-    // header
-    var header = [["key","modelKey","materialKey","materialName","opacity","doubleSided","unlit","chromaEnabled","chromaColor","chromaTol","chromaFeather","updatedAt","updatedBy","sheetGid"]];
-    var up = await fetch(base + '/values/' + encodeURIComponent('__LM_MATERIALS!A1:N1') + '?valueInputOption=RAW', {
+    throw e;
+  }
+
+  // 存在チェック
+  try {
+    await spreadsheetGetA1(state.spreadsheetId, '__LM_MATERIALS!A1:F');
+    // すでにある
+    return { ok:true, existed:true };
+  } catch (_) {
+    // 無ければ作成
+    const body = {
+      requests: [
+        { addSheet: { properties: { title: '__LM_MATERIALS' } } },
+        { updateCells: {
+            range: { sheetId: null }, // タイトル指定で updateValues の方が楽
+            fields: 'userEnteredValue'
+        } }
+      ],
+      includeSpreadsheetInResponse: false
+    };
+    // addSheet は sheetId を返すが、ここでは列見出しだけ A1:Fx に書く
+    await batchUpdate(state.spreadsheetId, { requests: [{ addSheet: { properties: { title: '__LM_MATERIALS' } } }] });
+    // ヘッダを書き込み
+    const url = `https://sheets.googleapis.com/v4/spreadsheets/${state.spreadsheetId}/values/${encodeURIComponent('__LM_MATERIALS!A1:F1')}:update?valueInputOption=RAW`;
+    await authFetch(url, {
       method:'PUT',
-      headers:{ 'Authorization':'Bearer '+token, 'Content-Type':'application/json' },
-      body: JSON.stringify({ range:'__LM_MATERIALS!A1:N1', majorDimension:'ROWS', values: header })
+      headers:{ 'Content-Type':'application/json' },
+      body: JSON.stringify({
+        range: '__LM_MATERIALS!A1:F1',
+        majorDimension: 'ROWS',
+        values: [[ 'sheetGid','matUuid','matName','schemaVer','props','updatedAt' ]]
+      })
     });
-    var upTxt = await up.text();
-    console.log('[fix7] header status', up.status, upTxt);
-    return { ok: up.ok };
-  } catch (err) {
-    console.warn('[fix7] ensureMaterialSheet error', err);
-    return { ok:false, reason:'exception' };
+    log('created __LM_MATERIALS');
+    return { ok:true, created:true };
   }
 }
 
@@ -166,7 +175,7 @@ async function saveCurrentOpacity() {
     return;
   }
   // token 無ければ何もしない（ユーザー操作で同意後に再試行される）
-  try { await getAccessToken(); }
+  try { await __lm_safeGetToken(); }
   catch(e) {
     if (String(e?.message||e).includes('token_missing')) {
       warn('save skipped: token_missing');
@@ -372,3 +381,38 @@ log('loaded VERSION_TAG:'+VERSION_TAG);
 populateWhenReady();
 document.addEventListener('lm:model-ready', populateWhenReady);
 document.getElementById('tab-material')?.addEventListener('click', populateWhenReady);
+
+
+function ensureIfReady(){
+  if (state.sheetEnsured) return;
+  if (state.spreadsheetId && state.modelReady){
+    state.sheetEnsured = true;
+    setTimeout(function(){
+      try{
+        Promise.resolve(ensureMaterialSheet()).catch(function(e){
+          console.warn('[mat-orch] ensureMaterialSheet failed', e);
+          state.sheetEnsured = false;
+        });
+      }catch(e){
+        console.warn('[mat-orch] ensure call error', e);
+        state.sheetEnsured = false;
+      }
+    }, 50);
+  }
+}
+
+
+function sheetContextHandler(ev){
+  try{
+    var d = (ev && ev.detail) || {};
+    if (d && d.spreadsheetId){ state.spreadsheetId = d.spreadsheetId; }
+    if (d && (d.sheetGid!==undefined && d.sheetGid!==null)){ state.sheetGid = d.sheetGid; }
+    log('[mat-orch] sheet context set', {spreadsheetId: state.spreadsheetId, sheetGid: state.sheetGid});
+    ensureIfReady();
+  }catch(e){ console.warn('[mat-orch] sheetContextHandler error', e); }
+}
+document.addEventListener('lm:sheet-context', sheetContextHandler);
+window.addEventListener('lm:sheet-context', sheetContextHandler);
+function modelReadyListener(){ try{ state.modelReady = true; ensureIfReady(); }catch(e){ console.warn('[mat-orch] modelReadyListener', e); } }
+document.addEventListener('lm:model-ready', modelReadyListener);
+window.addEventListener('lm:model-ready', modelReadyListener);

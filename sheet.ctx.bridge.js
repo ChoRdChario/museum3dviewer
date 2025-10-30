@@ -28,7 +28,17 @@
   }
 
   function fire(type, sid, gid) {
-    window.dispatchEvent(new CustomEvent(type, { detail: { spreadsheetId: sid, sheetGid: gid } }));
+  try {
+    const detail = { spreadsheetId: sid, sheetGid: gid };
+    const evDoc = new CustomEvent(type, { detail, bubbles: true, composed: true });
+    document.dispatchEvent(evDoc);
+    const evWin = new CustomEvent(type, { detail, bubbles: true, composed: true });
+    window.dispatchEvent(evWin);
+    log(type, detail);
+  } catch (e) {
+    console.warn('[sheet-ctx] fire error', e);
+  }
+} }));
     log(type, { spreadsheetId: sid, sheetGid: gid });
   }
 
