@@ -8,6 +8,22 @@
 //
 // VERSION TAG
 const VERSION_TAG = 'V6_10_AUTH_UI_ENSURE';
+
+async function __lm_safeGetToken(){
+  try{
+    if (typeof getAccessToken === 'function'){
+      const t = await Promise.resolve(getAccessToken());
+      if (t) return t;
+    }
+  }catch(e){ console.warn('[mat-orch] getAccessToken error', e); }
+  try{
+    if (typeof lmRequestTokenSilent === 'function'){
+      const t2 = await Promise.resolve(lmRequestTokenSilent());
+      if (t2) return t2;
+    }
+  }catch(e){ console.warn('[mat-orch] lmRequestTokenSilent error', e); }
+  return null;
+}
 const log  = (...a)=>console.log('[mat-orch]', ...a);
 const warn = (...a)=>console.warn('[mat-orch]', ...a);
 
@@ -74,7 +90,7 @@ async function getAccessToken() {
 }
 
 async function authFetch(url, init={}) {
-  const tok = await getAccessToken(); // token_missing の可能性：呼び元でハンドル
+  const tok = await __lm_safeGetToken(); // token_missing の可能性：呼び元でハンドル
   const headers = new Headers(init.headers || {});
   headers.set('Authorization', `Bearer ${tok}`);
   return fetch(url, { ...init, headers });
@@ -108,7 +124,7 @@ async function ensureMaterialSheet() {
 
   // token 無ければユーザー操作まで待つ
   try {
-    await getAccessToken();
+    await __lm_safeGetToken();
   } catch (e) {
     if (String(e?.message||e).includes('token_missing')) {
       warn('auto-ensure skipped (no token). Use __lm_requestSheetsConsent() from a user action.');
@@ -159,7 +175,7 @@ async function saveCurrentOpacity() {
     return;
   }
   // token 無ければ何もしない（ユーザー操作で同意後に再試行される）
-  try { await getAccessToken(); }
+  try { await __lm_safeGetToken(); }
   catch(e) {
     if (String(e?.message||e).includes('token_missing')) {
       warn('save skipped: token_missing');
