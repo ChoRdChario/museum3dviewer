@@ -7,28 +7,12 @@
 // - 既存機能を壊さない UI-only 変更
 //
 // VERSION TAG
-const VERSION_TAG = 'V6_11_AUTH_UI_ENSURE';
-
-async function __lm_safeGetToken(){
-  try{
-    if (typeof getAccessToken === 'function'){
-      const t = await Promise.resolve(getAccessToken());
-      if (t) return t;
-    }
-  }catch(e){ console.warn('[mat-orch] getAccessToken error', e); }
-  try{
-    if (typeof ensureToken === 'function'){
-      const t2 = await Promise.resolve(ensureToken({interactive:false}));
-      if (t2) return t2;
-    }
-  }catch(e){ console.warn('[mat-orch] ensureToken error', e); }
-  return null;
-}
+const VERSION_TAG = 'V6_10_AUTH_UI_ENSURE';
 const log  = (...a)=>console.log('[mat-orch]', ...a);
 const warn = (...a)=>console.warn('[mat-orch]', ...a);
 
 // --------- State ---------
-const state = { modelReady:false, sheetEnsured:false, 
+const state = {
   spreadsheetId: null,
   sheetGid: null,
   ui: {},
@@ -90,7 +74,7 @@ async function getAccessToken() {
 }
 
 async function authFetch(url, init={}) {
-  const tok = await __lm_safeGetToken(); // token_missing の可能性：呼び元でハンドル
+  const tok = await getAccessToken(); // token_missing の可能性：呼び元でハンドル
   const headers = new Headers(init.headers || {});
   headers.set('Authorization', `Bearer ${tok}`);
   return fetch(url, { ...init, headers });
@@ -124,7 +108,7 @@ async function ensureMaterialSheet() {
 
   // token 無ければユーザー操作まで待つ
   try {
-    await __lm_safeGetToken();
+    await getAccessToken();
   } catch (e) {
     if (String(e?.message||e).includes('token_missing')) {
       warn('auto-ensure skipped (no token). Use __lm_requestSheetsConsent() from a user action.');
@@ -175,7 +159,7 @@ async function saveCurrentOpacity() {
     return;
   }
   // token 無ければ何もしない（ユーザー操作で同意後に再試行される）
-  try { await __lm_safeGetToken(); }
+  try { await getAccessToken(); }
   catch(e) {
     if (String(e?.message||e).includes('token_missing')) {
       warn('save skipped: token_missing');
@@ -383,101 +367,76 @@ document.addEventListener('lm:model-ready', populateWhenReady);
 document.getElementById('tab-material')?.addEventListener('click', populateWhenReady);
 
 
-function ensureIfReady(){
-  if (state.sheetEnsured) return;
-  if (state.spreadsheetId && state.modelReady){
-    state.sheetEnsured = true;
-    setTimeout(function(){
-      try{
-        Promise.resolve(ensureMaterialSheet()).catch(function(e){
-          console.warn('[mat-orch] ensureMaterialSheet failed', e);
-          state.sheetEnsured = false;
-        });
-      }catch(e){
-        console.warn('[mat-orch] ensure call error', e);
-        state.sheetEnsured = false;
-      }
-    }, 50);
-  }
-}
-
-// unify listeners
-function __lm_sheetContextHandler(ev){
-  try{
-    var d = (ev && ev.detail) || {};
-    if (d && d.spreadsheetId){ state.spreadsheetId = d.spreadsheetId; }
-    if (d && (d.sheetGid!==undefined && d.sheetGid!==null)){ state.sheetGid = d.sheetGid; }
-    log('sheet context set', { spreadsheetId: state.spreadsheetId, sheetGid: state.sheetGid });
-    ensureIfReady();
-  }catch(e){ console.warn('[mat-orch] sheetContextHandler error', e); }
-}
-document.addEventListener('lm:sheet-context', __lm_sheetContextHandler);
-window.addEventListener('lm:sheet-context', __lm_sheetContextHandler);
-
-document.addEventListener('lm:model-ready', function(){ state.modelReady = true; ensureIfReady(); });
-window.addEventListener('lm:model-ready', function(){ state.modelReady = true; ensureIfReady(); });
-
-
-
-/* === LM Auto-Consent Installer (permanent) 2025-10-30 ===
-   On the first user interaction, request interactive consent for Drive + Sheets.
-   This keeps the UX simple: users click once anywhere and we're authorized.
+/* === LM Scheduler Hotfix (2025-10-30) ===
+   Ensures __LM_MATERIALS creation only after (sheet-context + model-ready + token).
+   Does not remove existing logic; just guarantees a late re-try when conditions are met.
 */
 (function(){
   try{
-    if (window.__lm_autoConsentInstalled) return;
-    window.__lm_autoConsentInstalled = true;
+    if (window.__lm_scheduler_installed) return;
+    window.__lm_scheduler_installed = true;
 
-    const defaultScopes = [
-      'https://www.googleapis.com/auth/drive.readonly',
-      'https://www.googleapis.com/auth/drive.metadata.readonly',
-      'https://www.googleapis.com/auth/drive.file',
-      'https://www.googleapis.com/auth/spreadsheets'
-    ];
+    const gate = { hasCtx:false, modelReady:false, ensuring:false };
+    let __lm_ensureTimer = null;
 
-    function hasToken(){
+    async function __lm_safeGetToken(){
       try{
         if (typeof getAccessToken === 'function'){
-          const t = getAccessToken();
-          return !!t;
+          const t = await Promise.resolve(getAccessToken());
+          if (t) return t;
         }
-      }catch(_){}
-      return false;
+      }catch(e){ /* no-op */ }
+      try{
+        if (typeof lmRequestTokenSilent === 'function'){
+          const t2 = await Promise.resolve(lmRequestTokenSilent()); // prompt:''
+          if (t2) return t2;
+        }
+      }catch(e){ /* no-op */ }
+      return null;
     }
 
-    async function requestConsent(){
+    function scheduleEnsure(){
+      if (__lm_ensureTimer) clearTimeout(__lm_ensureTimer);
+      __lm_ensureTimer = setTimeout(tryEnsure, 100);
+    }
+
+    async function tryEnsure(){
+      if (gate.ensuring) return;
+      if (!gate.hasCtx || !gate.modelReady) return;
+      const tok = await __lm_safeGetToken();
+      if (!tok) return; // wait for lm:auth-ok to arrive
+      if (typeof ensureMaterialSheet !== 'function') return;
+      gate.ensuring = true;
       try{
-        if (hasToken()) return;
-        const scopes = (Array.isArray(window.LM_SCOPES) && window.LM_SCOPES.length) ? window.LM_SCOPES : defaultScopes;
-        if (typeof window.__lm_requestSheetsConsent === 'function'){
-          await window.__lm_requestSheetsConsent(scopes);
-        } else if (typeof window.ensureToken === 'function'){
-          await window.ensureToken({ interactive:true, scopes });
-        }
-        try{
-          const tok = (typeof getAccessToken==='function') ? getAccessToken() : null;
-          if (tok) window.dispatchEvent(new CustomEvent('lm:auth-ok', { detail:{ accessToken: tok } }));
-        }catch(_){}
+        await ensureMaterialSheet();
       }catch(e){
-        console.warn('[auto-consent] error', e);
+        console.warn('[mat-orch] scheduler ensure error', e);
+      }finally{
+        gate.ensuring = false;
       }
     }
 
-    const trigger = async () => {
-      document.removeEventListener('pointerdown', trigger, true);
-      document.removeEventListener('keydown', trigger, true);
-      document.removeEventListener('click', trigger, true);
-      await requestConsent();
-    };
-
-    if (!hasToken()){
-      document.addEventListener('pointerdown', trigger, true);
-      document.addEventListener('keydown', trigger, true);
-      document.addEventListener('click', trigger, true);
-      console.log('[auto-consent] armed (first user interaction will request consent)');
+    function onCtx(ev){
+      const d = (ev && ev.detail) || {};
+      if (d && d.spreadsheetId) gate.hasCtx = true;
+      scheduleEnsure();
     }
+    function onModel(){
+      gate.modelReady = true;
+      scheduleEnsure();
+    }
+    function onAuthOk(){
+      scheduleEnsure();
+    }
+
+    document.addEventListener('lm:sheet-context', onCtx);
+    window.addEventListener('lm:sheet-context', onCtx);
+    document.addEventListener('lm:model-ready', onModel);
+    window.addEventListener('lm:model-ready', onModel);
+    document.addEventListener('lm:auth-ok', onAuthOk);
+    window.addEventListener('lm:auth-ok', onAuthOk);
   }catch(e){
-    console.warn('[auto-consent] install failed', e);
+    console.warn('[mat-orch] scheduler install error', e);
   }
 })();
-/* === /LM Auto-Consent Installer === */
+/* === /LM Scheduler Hotfix === */
