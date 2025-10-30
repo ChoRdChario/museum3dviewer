@@ -418,7 +418,6 @@ document.addEventListener('lm:model-ready', function(){ state.modelReady = true;
 window.addEventListener('lm:model-ready', function(){ state.modelReady = true; ensureIfReady(); });
 
 
-
 /* === LM Opacity Upsert (Sheets) 2025-10-30 ==================================
    - Debounced save on opacity slider changes
    - Idempotent upsert into __LM_MATERIALS (find row by key; else append)
@@ -574,10 +573,9 @@ window.addEventListener('lm:model-ready', function(){ state.modelReady = true; e
     function isOpacityInput(el){
       if (!el) return false;
       if (el.matches && (el.matches('[data-lm="mat-opacity"]') || el.matches('#lm-opacity') || el.matches('input[type="range"].lm-opacity') || el.matches('input[type="range"][name="opacity"]'))) return true;
-      // Heuristic: range input inside Material tab container
-      if (el.tagName === 'INPUT' and getattr(el, 'type','') == 'range'):
-          return True
-      return false
+      // Heuristic: any range input inside the Material tab container
+      if (el.tagName === 'INPUT' && String(el.type||'').toLowerCase() === 'range') return true;
+      return false;
     }
 
     document.addEventListener('input', (e)=>{
@@ -600,3 +598,4 @@ window.addEventListener('lm:model-ready', function(){ state.modelReady = true; e
   }
 })();
 /* === /LM Opacity Upsert ===================================================== */
+
