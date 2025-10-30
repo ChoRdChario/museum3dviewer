@@ -350,7 +350,7 @@ document.addEventListener('lm:sheet-context', (ev)=>{
   log('sheet context set', { spreadsheetId: state.spreadsheetId, sheetGid: state.sheetGid });
 
   // トークンが既にあるなら ensure を試みる（無ければスキップして UI へ委ねる）
-  ensureIfCtx().catch(e=>warn('auto-ensure failed', e));
+  Promise.resolve((typeof ensureIfCtx==='function' && ensureIfCtx()) || undefined).catch(e=>warn('auto-ensure failed', e));
 });
 
 async function ensureIfCtx(){
@@ -417,93 +417,3 @@ window.addEventListener('lm:sheet-context', __lm_sheetContextHandler);
 document.addEventListener('lm:model-ready', function(){ state.modelReady = true; ensureIfReady(); });
 window.addEventListener('lm:model-ready', function(){ state.modelReady = true; ensureIfReady(); });
 
-
-
-/* === LM Scheduler + MonkeyPatch Hotfix (2025-10-30) === */
-(function(){
-  try{
-    if (window.__lm_scheduler_monkey_installed) return;
-    window.__lm_scheduler_monkey_installed = true;
-
-    const gate = { hasCtx:false, modelReady:false, ensuring:false };
-    let __lm_ensureTimer = null;
-
-    async function __lm_safeGetToken(){
-      try{
-        if (typeof getAccessToken === 'function'){
-          const t = await Promise.resolve(getAccessToken());
-          if (t) return t;
-        }
-      }catch(e){}
-      try{
-        if (typeof lmRequestTokenSilent === 'function'){
-          const t2 = await Promise.resolve(lmRequestTokenSilent()); // prompt:''
-          if (t2) return t2;
-        }
-      }catch(e){}
-      return null;
-    }
-
-    function scheduleEnsure(){
-      if (__lm_ensureTimer) clearTimeout(__lm_ensureTimer);
-      __lm_ensureTimer = setTimeout(tryEnsure, 120);
-    }
-
-    async function tryEnsure(){
-      if (gate.ensuring) return;
-      if (!gate.hasCtx || !gate.modelReady) return;
-      const tok = await __lm_safeGetToken();
-      if (!tok) return; // wait for lm:auth-ok
-      if (typeof __lm_origEnsureMaterialSheet === 'function'){
-        gate.ensuring = true;
-        try{ await __lm_origEnsureMaterialSheet(); }catch(e){ console.warn('[mat-orch] ensure error', e); }
-        gate.ensuring = false;
-      } else if (typeof ensureMaterialSheet === 'function'){
-        gate.ensuring = true;
-        try{ await ensureMaterialSheet(); }catch(e){ console.warn('[mat-orch] ensure error', e); }
-        gate.ensuring = false;
-      }
-    }
-
-    // Monkey-patch ensureIfCtx to only schedule, not execute
-    if (typeof ensureIfCtx === 'function'){
-      window.__lm_origEnsureIfCtx = ensureIfCtx;
-      ensureIfCtx = function(){
-        try{ scheduleEnsure(); }catch(e){}
-      };
-    }
-
-    // Monkey-patch ensureMaterialSheet to defer when token missing (avoid early skip)
-    if (typeof ensureMaterialSheet === 'function'){
-      window.__lm_origEnsureMaterialSheet = ensureMaterialSheet;
-      ensureMaterialSheet = async function(){
-        try{
-          const tok = await __lm_safeGetToken();
-          if (!tok){
-            scheduleEnsure();
-            return; // defer
-          }
-        }catch(e){}
-        return await window.__lm_origEnsureMaterialSheet.apply(this, arguments);
-      };
-    }
-
-    function onCtx(ev){
-      const d = (ev && ev.detail) || {};
-      if (d && d.spreadsheetId) gate.hasCtx = true;
-      scheduleEnsure();
-    }
-    function onModel(){ gate.modelReady = true; scheduleEnsure(); }
-    function onAuthOk(){ scheduleEnsure(); }
-
-    document.addEventListener('lm:sheet-context', onCtx);
-    window.addEventListener('lm:sheet-context', onCtx);
-    document.addEventListener('lm:model-ready', onModel);
-    window.addEventListener('lm:model-ready', onModel);
-    document.addEventListener('lm:auth-ok', onAuthOk);
-    window.addEventListener('lm:auth-ok', onAuthOk);
-  }catch(e){
-    console.warn('[mat-orch] scheduler/monkey install error', e);
-  }
-})();
-/* === /LM Scheduler + MonkeyPatch Hotfix === */
