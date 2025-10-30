@@ -1,4 +1,13 @@
 // material.orchestrator.js
+// LociMyu Material Orchestrator
+// - ユーザー操作直後のみ GIS ポップアップを許可（ブラウザブロック回避）
+// - Spreadsheet/GID を自動ブリッジ（sheet.ctx.bridge.js 経由）
+// - __LM_MATERIALS シートの ensure / Upsert
+// - マテリアルのドロップダウン populate を堅牢化
+// - 既存機能を壊さない UI-only 変更
+//
+// VERSION TAG
+const VERSION_TAG = 'V6_11_AUTH_UI_ENSURE';
 
 async function __lm_safeGetToken(){
   try{
@@ -15,15 +24,6 @@ async function __lm_safeGetToken(){
   }catch(e){ console.warn('[mat-orch] ensureToken error', e); }
   return null;
 }
-// LociMyu Material Orchestrator
-// - ユーザー操作直後のみ GIS ポップアップを許可（ブラウザブロック回避）
-// - Spreadsheet/GID を自動ブリッジ（sheet.ctx.bridge.js 経由）
-// - __LM_MATERIALS シートの ensure / Upsert
-// - マテリアルのドロップダウン populate を堅牢化
-// - 既存機能を壊さない UI-only 変更
-//
-// VERSION TAG
-const VERSION_TAG = 'V6_11_AUTH_UI_ENSURE';
 const log  = (...a)=>console.log('[mat-orch]', ...a);
 const warn = (...a)=>console.warn('[mat-orch]', ...a);
 
@@ -401,18 +401,19 @@ function ensureIfReady(){
   }
 }
 
-
-function sheetContextHandler(ev){
+// unify listeners
+function __lm_sheetContextHandler(ev){
   try{
     var d = (ev && ev.detail) || {};
     if (d && d.spreadsheetId){ state.spreadsheetId = d.spreadsheetId; }
     if (d && (d.sheetGid!==undefined && d.sheetGid!==null)){ state.sheetGid = d.sheetGid; }
-    log('[mat-orch] sheet context set', {spreadsheetId: state.spreadsheetId, sheetGid: state.sheetGid});
+    log('sheet context set', { spreadsheetId: state.spreadsheetId, sheetGid: state.sheetGid });
     ensureIfReady();
   }catch(e){ console.warn('[mat-orch] sheetContextHandler error', e); }
 }
-document.addEventListener('lm:sheet-context', sheetContextHandler);
-window.addEventListener('lm:sheet-context', sheetContextHandler);
-function modelReadyListener(){ try{ state.modelReady = true; ensureIfReady(); }catch(e){ console.warn('[mat-orch] modelReadyListener', e); } }
-document.addEventListener('lm:model-ready', modelReadyListener);
-window.addEventListener('lm:model-ready', modelReadyListener);
+document.addEventListener('lm:sheet-context', __lm_sheetContextHandler);
+window.addEventListener('lm:sheet-context', __lm_sheetContextHandler);
+
+document.addEventListener('lm:model-ready', function(){ state.modelReady = true; ensureIfReady(); });
+window.addEventListener('lm:model-ready', function(){ state.modelReady = true; ensureIfReady(); });
+

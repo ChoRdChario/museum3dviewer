@@ -36,7 +36,7 @@
     window.dispatchEvent(evWin);
     log(type, detail);
   } catch (e) {
-    console.warn('[sheet-ctx] fire error', e);
+    console.warn('[sheet-ctx-bridge] fire error', e);
   }
 } }));
     log(type, { spreadsheetId: sid, sheetGid: gid });
