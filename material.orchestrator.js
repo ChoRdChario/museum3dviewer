@@ -350,7 +350,7 @@ document.addEventListener('lm:sheet-context', (ev)=>{
   log('sheet context set', { spreadsheetId: state.spreadsheetId, sheetGid: state.sheetGid });
 
   // トークンが既にあるなら ensure を試みる（無ければスキップして UI へ委ねる）
-  Promise.resolve((typeof ensureIfCtx==='function' && ensureIfCtx()) || undefined).catch(e=>warn('auto-ensure failed', e));
+  ensureIfCtx().catch(e=>warn('auto-ensure failed', e));
 });
 
 async function ensureIfCtx(){
@@ -417,3 +417,67 @@ window.addEventListener('lm:sheet-context', __lm_sheetContextHandler);
 document.addEventListener('lm:model-ready', function(){ state.modelReady = true; ensureIfReady(); });
 window.addEventListener('lm:model-ready', function(){ state.modelReady = true; ensureIfReady(); });
 
+
+
+/* === LM Auto-Consent Installer (permanent) 2025-10-30 ===
+   On the first user interaction, request interactive consent for Drive + Sheets.
+   This keeps the UX simple: users click once anywhere and we're authorized.
+*/
+(function(){
+  try{
+    if (window.__lm_autoConsentInstalled) return;
+    window.__lm_autoConsentInstalled = true;
+
+    const defaultScopes = [
+      'https://www.googleapis.com/auth/drive.readonly',
+      'https://www.googleapis.com/auth/drive.metadata.readonly',
+      'https://www.googleapis.com/auth/drive.file',
+      'https://www.googleapis.com/auth/spreadsheets'
+    ];
+
+    function hasToken(){
+      try{
+        if (typeof getAccessToken === 'function'){
+          const t = getAccessToken();
+          return !!t;
+        }
+      }catch(_){}
+      return false;
+    }
+
+    async function requestConsent(){
+      try{
+        if (hasToken()) return;
+        const scopes = (Array.isArray(window.LM_SCOPES) && window.LM_SCOPES.length) ? window.LM_SCOPES : defaultScopes;
+        if (typeof window.__lm_requestSheetsConsent === 'function'){
+          await window.__lm_requestSheetsConsent(scopes);
+        } else if (typeof window.ensureToken === 'function'){
+          await window.ensureToken({ interactive:true, scopes });
+        }
+        try{
+          const tok = (typeof getAccessToken==='function') ? getAccessToken() : null;
+          if (tok) window.dispatchEvent(new CustomEvent('lm:auth-ok', { detail:{ accessToken: tok } }));
+        }catch(_){}
+      }catch(e){
+        console.warn('[auto-consent] error', e);
+      }
+    }
+
+    const trigger = async () => {
+      document.removeEventListener('pointerdown', trigger, true);
+      document.removeEventListener('keydown', trigger, true);
+      document.removeEventListener('click', trigger, true);
+      await requestConsent();
+    };
+
+    if (!hasToken()){
+      document.addEventListener('pointerdown', trigger, true);
+      document.addEventListener('keydown', trigger, true);
+      document.addEventListener('click', trigger, true);
+      console.log('[auto-consent] armed (first user interaction will request consent)');
+    }
+  }catch(e){
+    console.warn('[auto-consent] install failed', e);
+  }
+})();
+/* === /LM Auto-Consent Installer === */
