@@ -419,41 +419,184 @@ window.addEventListener('lm:model-ready', function(){ state.modelReady = true; e
 
 
 
-/* === LM No-Throw Token Wrapper (2025-10-30) ===================================
-   - Prevents getAccessToken() from throwing 'token_missing'.
-   - Provides robust hasToken() that never throws and tolerates sync/async returns.
-=============================================================================== */
+/* === LM Opacity Upsert (Sheets) 2025-10-30 ==================================
+   - Debounced save on opacity slider changes
+   - Idempotent upsert into __LM_MATERIALS (find row by key; else append)
+   - Tries multiple selectors to resolve current material + opacity input
+============================================================================= */
 (function(){
   try{
-    // Wrap getAccessToken so it NEVER throws 'token_missing' (return null instead)
-    if (!window.__lm_origGetAccessToken && typeof getAccessToken === 'function'){
-      window.__lm_origGetAccessToken = getAccessToken;
-      window.getAccessToken = function(){
-        try{
-          const v = window.__lm_origGetAccessToken();
-          return v || null;
-        }catch(e){
-          const msg = String(e && e.message || e || '');
-          if (msg.indexOf('token_missing') !== -1) return null;
-          throw e;
+    const SHEET_TITLE = '__LM_MATERIALS';
+    const HEADER = ["key","modelKey","materialKey","opacity","doubleSided","unlit","chromaEnable","chromaColor","chromaTolerance","chromaFeather","updatedAt","updatedBy","spreadsheetId","sheetGid"];
+    const RANGE_A1 = SHEET_TITLE + '!A1:N1';
+
+    // Light state shim (will be merged with orchestrator's state if present)
+    const lmState = (window.__lm_materialState = window.__lm_materialState || { spreadsheetId:null, sheetGid:null, modelKey:null, currentMaterialKey:null });
+
+    // Wire into known context events to keep state synchronized
+    const onSheetCtx = (ev)=>{
+      const d = (ev && ev.detail) || {};
+      if (d.spreadsheetId) lmState.spreadsheetId = d.spreadsheetId;
+      if (typeof d.sheetGid !== 'undefined') lmState.sheetGid = d.sheetGid;
+      console.log('[mat-upsert] ctx', JSON.stringify({sid:lmState.spreadsheetId,gid:lmState.sheetGid}));
+    };
+    window.addEventListener('lm:sheet-context', onSheetCtx);
+    document.addEventListener('lm:sheet-context', onSheetCtx);
+
+    // Try to absorb model key/material key from common events if they exist
+    window.addEventListener('lm:model-ready', (e)=>{
+      // allow other code to set window.__lm_modelKey beforehand
+      if (!lmState.modelKey && typeof window.__lm_modelKey === 'string') lmState.modelKey = window.__lm_modelKey;
+    });
+
+    // Helper: robust get token (works with our no-throw wrapper if present)
+    async function getTokenSafe(){
+      try{
+        if (typeof getAccessToken === 'function'){
+          const v = getAccessToken();
+          return (v && typeof v.then==='function') ? await v : v;
         }
-      };
+      }catch(e){}
+      return null;
     }
 
-    // Expose a safe checker used by consent and schedulers
-    window.__lm_hasTokenSafe = async function(){
-      try{
-        const v = (typeof getAccessToken==='function') ? getAccessToken() : null;
-        const t = (v && typeof v.then==='function') ? await v : v;
-        return !!t;
-      }catch(e){
-        return false;
+    // Ensure header exists (idempotent)
+    async function ensureHeader(){
+      const token = await getTokenSafe();
+      if (!token || !lmState.spreadsheetId) return false;
+      // GET A1 to check
+      const getUrl = `https://sheets.googleapis.com/v4/spreadsheets/${lmState.spreadsheetId}/values/${encodeURIComponent(RANGE_A1)}`;
+      const r0 = await fetch(getUrl, { headers:{'Authorization':'Bearer '+token} });
+      if (r0.ok){
+        const js = await r0.json();
+        const has = js && js.values && js.values[0] && js.values[0][0];
+        if (has) return true;
       }
+      // PUT header
+      const putUrl = `https://sheets.googleapis.com/v4/spreadsheets/${lmState.spreadsheetId}/values/${encodeURIComponent(RANGE_A1)}?valueInputOption=RAW`;
+      const body = JSON.stringify({ range:RANGE_A1, majorDimension:'ROWS', values:[HEADER] });
+      const r1 = await fetch(putUrl, { method:'PUT', headers:{'Authorization':'Bearer '+token,'Content-Type':'application/json'}, body });
+      return r1.ok;
+    }
+
+    // Read all keys in column A to find a matching row (simple, small scale)
+    async function findRowIndexByKey(key){
+      const token = await getTokenSafe();
+      if (!token || !lmState.spreadsheetId) return null;
+      const range = SHEET_TITLE + '!A:A';
+      const url = `https://sheets.googleapis.com/v4/spreadsheets/${lmState.spreadsheetId}/values/${encodeURIComponent(range)}`;
+      const r = await fetch(url, { headers:{'Authorization':'Bearer '+token} });
+      if (!r.ok) return null;
+      const js = await r.json();
+      const rows = (js && js.values) ? js.values.map(v=>v[0]||'') : [];
+      for (let i=0;i<rows.length;i++){
+        if (rows[i] === key) return i+1; // 1-based row number
+      }
+      return null;
+    }
+
+    // Upsert a row: if exists, update A..N on that row; else append
+    async function upsertRow(payload){
+      const token = await getTokenSafe();
+      if (!token || !lmState.spreadsheetId) throw new Error('no_token_or_ctx');
+      await ensureHeader();
+
+      const key = payload[0];
+      let row = await findRowIndexByKey(key);
+      if (row){ // UPDATE that row
+        const a1 = `${SHEET_TITLE}!A${row}:N${row}`;
+        const url = `https://sheets.googleapis.com/v4/spreadsheets/${lmState.spreadsheetId}/values/${encodeURIComponent(a1)}?valueInputOption=RAW`;
+        const body = JSON.stringify({ range:a1, majorDimension:'ROWS', values:[payload] });
+        const r = await fetch(url, { method:'PUT', headers:{'Authorization':'Bearer '+token,'Content-Type':'application/json'}, body });
+        return r.ok;
+      }else{ // APPEND
+        const url = `https://sheets.googleapis.com/v4/spreadsheets/${lmState.spreadsheetId}/values/${encodeURIComponent(SHEET_TITLE)}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`;
+        const body = JSON.stringify({ range:SHEET_TITLE, majorDimension:'ROWS', values:[payload] });
+        const r = await fetch(url, { method:'POST', headers:{'Authorization':'Bearer '+token,'Content-Type':'application/json'}, body });
+        return r.ok;
+      }
+    }
+
+    // Resolve current material key from multiple potential selectors/state
+    function resolveCurrentMaterial(){
+      // 1) Internal state populated elsewhere
+      if (lmState.currentMaterialKey) return lmState.currentMaterialKey;
+      // 2) Common selectors
+      const sel = document.querySelector('[data-lm="material-select"],#material-select,#lm-material-select,select[name="material"]');
+      if (sel && sel.value) return sel.value;
+      // 3) Fallback: text of first option:selected
+      if (sel && sel.options && sel.selectedIndex >= 0){
+        const opt = sel.options[sel.selectedIndex];
+        if (opt && opt.text) return opt.text.trim();
+      }
+      return null;
+    }
+
+    // Try to keep state.currentMaterialKey in sync if dropdown changes
+    document.addEventListener('change', (e)=>{
+      const t = e.target;
+      if (!t) return;
+      if (t.matches('[data-lm="material-select"],#material-select,#lm-material-select,select[name="material"]')){
+        lmState.currentMaterialKey = t.value || (t.options && t.options[t.selectedIndex] && t.options[t.selectedIndex].text) || lmState.currentMaterialKey;
+      }
+    }, true);
+
+    // Debounce helper
+    function debounce(fn, ms){
+      let h; return function(...args){ clearTimeout(h); h = setTimeout(()=>fn.apply(this,args), ms); };
+    }
+
+    // Build payload for opacity save
+    function buildPayload(opacity){
+      const spreadsheetId = lmState.spreadsheetId || '';
+      const sheetGid = (lmState.sheetGid==null? '': lmState.sheetGid);
+      const materialKey = resolveCurrentMaterial() || '';
+      const modelKey = lmState.modelKey || '';
+      const now = new Date().toISOString();
+      const user = (window.__lm_userEmail || window.__lm_user || '');
+      // key format: sid:modelKey:materialKey
+      const key = [spreadsheetId, modelKey, materialKey].join(':');
+      // cols: key, modelKey, materialKey, opacity, doubleSided, unlit, chromaEnable, chromaColor, chromaTolerance, chromaFeather, updatedAt, updatedBy, spreadsheetId, sheetGid
+      return [key, modelKey, materialKey, String(opacity), '', '', '', '', '', '', now, user, spreadsheetId, String(sheetGid)];
+    }
+
+    // Main save (debounced)
+    const saveOpacityDebounced = debounce(async function(val){
+      try{
+        const ok = await upsertRow(buildPayload(val));
+        console.log('[mat-upsert] opacity saved', ok);
+      }catch(e){
+        console.warn('[mat-upsert] save failed', e && e.message || e);
+      }
+    }, 300);
+
+    // Event delegation for opacity sliders (support multiple selector variants)
+    function isOpacityInput(el){
+      if (!el) return false;
+      if (el.matches && (el.matches('[data-lm="mat-opacity"]') || el.matches('#lm-opacity') || el.matches('input[type="range"].lm-opacity') || el.matches('input[type="range"][name="opacity"]'))) return true;
+      // Heuristic: range input inside Material tab container
+      if (el.tagName === 'INPUT' and getattr(el, 'type','') == 'range'):
+          return True
+      return false
+    }
+
+    document.addEventListener('input', (e)=>{
+      const t = e.target;
+      if (!isOpacityInput(t)) return;
+      const v = (typeof t.value === 'string') ? parseFloat(t.value) : (t.value || 0);
+      if (isNaN(v)) return;
+      saveOpacityDebounced(v);
+    }, true);
+
+    // Also expose a manual API for testing
+    window.__lm_saveCurrentOpacity = function(op){
+      const v = (typeof op === 'number') ? op : parseFloat(op);
+      if (!isNaN(v)) saveOpacityDebounced(v);
     };
 
-    console.log('[mat-orch] token wrapper installed');
+    console.log('[mat-upsert] installed');
   }catch(e){
-    console.warn('[mat-orch] token wrapper install error', e);
+    console.warn('[mat-upsert] install failed', e);
   }
 })();
-/* === /LM No-Throw Token Wrapper ============================================= */
+/* === /LM Opacity Upsert ===================================================== */
