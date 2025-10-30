@@ -1,15 +1,9 @@
 // material.orchestrator.js
-// LociMyu Material Orchestrator (robust material enumeration + dropdown populate)
-// VERSION_TAG: V6_12d_MATERIAL_ENUM_ROBUST
-// This module focuses on reliably populating the material dropdown without
-// touching token/Sheets flows. It is safe to drop-in.
-
-(function(){
-  const VER = 'V6_12d_MATERIAL_ENUM_ROBUST';
+(() => {
+  const VER = 'V6_12e_MATERIAL_ENUM_ROBUST_BRIDGE';
   const NS  = '[mat-orch]';
   const log = (...a)=>console.log(NS, ...a);
   const warn= (...a)=>console.warn(NS, ...a);
-
   log('loaded VERSION_TAG:'+VER);
 
   // ---------- State ---------------------------------------------------------
@@ -38,140 +32,148 @@
 
   function onModel(){
     st.modelReady = true;
-    // absorb optional model key if provided by host
     if (!st.modelKey && typeof window.__lm_modelKey === 'string') st.modelKey = window.__lm_modelKey;
   }
   window.addEventListener('lm:model-ready', onModel);
   document.addEventListener('lm:model-ready', onModel);
 
-  // ---------- DOM helpers ---------------------------------------------------
-  function $(sel){ return document.querySelector(sel); }
-  function findMaterialSelect(){
-    return (
-      $('#lm-material-select') ||
-      document.querySelector('[data-lm="material-select"]') ||
-      document.querySelector('select[name="material"]') ||
-      document.querySelector('select.lm-material-select')
-    );
-  }
-
-  function ensurePlaceholderOption(selectEl){
-    // Keep first option as placeholder. If none, add one.
-    if (!selectEl) return;
-    const first = selectEl.options && selectEl.options[0];
-    if (!first || (first.value && first.value !== '')){
-      const opt = document.createElement('option');
-      opt.value = '';
-      opt.textContent = '— Select material —';
-      selectEl.insertBefore(opt, selectEl.firstChild);
-    }
-  }
-
-  // ---------- Scene/Materials discovery ------------------------------------
-  function callIfFn(fn){
+  // ---------- Material enumeration (hybrid + fallbacks) ---------------------
+  function listMaterialsViaBridge(){
     try{
-      if (typeof fn === 'function') return fn();
+      const b = window.viewerBridge || window.__lm_viewerBridge || window.lm_viewer_bridge;
+      if (b && typeof b.listMaterials === 'function'){
+        const r = b.listMaterials();
+        if (Array.isArray(r) && r.length) return r;
+      }
     }catch(_e){}
-    return null;
+    return [];
   }
 
-  function findScene(){
-    // Try multiple well-known bridges/vars
-    let scene =
-      callIfFn(window.__lm_getScene) ||
-      (window.viewer && window.viewer.scene) ||
-      (window.__lm_viewer && window.__lm_viewer.scene) ||
-      window.__lm_threeScene ||
-      null;
-    return scene || null;
+  function getSceneCandidates(){
+    const cands = [];
+    try{ if (typeof window.__lm_getScene === 'function'){ const s = window.__lm_getScene(); if (s) cands.push(s); } }catch(_e){}
+    try{ if (window.__lm_viewer && window.__lm_viewer.scene) cands.push(window.__lm_viewer.scene); }catch(_e){}
+    try{ if (window.viewer && window.viewer.scene) cands.push(window.viewer.scene); }catch(_e){}
+    try{ if (window.THREE && window.__lm_renderer && window.__lm_renderer.scene) cands.push(window.__lm_renderer.scene); }catch(_e){}
+    return cands.filter(Boolean);
   }
 
   function listMaterialsFromScene(scene){
-    const out = new Map(); // key: displayName -> true
+    const set = new Set();
+    if (!scene) return [];
+    scene.traverse(obj => {
+      const m = obj && obj.material;
+      if (!m) return;
+      if (Array.isArray(m)){
+        m.forEach(mi => collectMaterial(mi, set));
+      } else {
+        collectMaterial(m, set);
+      }
+    });
+    return Array.from(set);
+  }
+
+  function collectMaterial(mat, set){
+    if (!mat) return;
+    const name = (mat.name && String(mat.name).trim()) || ('material.' + (mat.id ?? ''));
+    set.add(name);
+  }
+
+  async function listMaterialsHybrid(){
+    // 0) app-provided helper (rare)
     try{
-      if (!scene || !scene.traverse) return [];
-      scene.traverse(obj => {
-        let mats = null;
-        if (obj && obj.material){
-          mats = Array.isArray(obj.material) ? obj.material : [obj.material];
-        }
-        if (!mats) return;
-        for (const m of mats){
-          if (!m) continue;
-          let name = '';
-          try{
-            name = (m.name || '').trim();
-          }catch(_e){ name = ''; }
-          if (!name) {
-            // Construct a readable fallback
-            const base = (m.type || 'material').toLowerCase();
-            name = `${base}.${(m.id!=null ? m.id : Math.random().toString(36).slice(2,6))}`;
-          }
-          if (!out.has(name)) out.set(name, true);
-        }
-      });
-    }catch(_e){/* ignore */}
-    return Array.from(out.keys()).sort((a,b)=>a.localeCompare(b));
-  }
-
-  // ---------- UI populate ---------------------------------------------------
-  function buildMaterialSelect(materials){
-    const sel = findMaterialSelect();
-    if (!sel) return false;
-    // Clear (keep placeholder if present)
-    const keepFirst = 1;
-    while (sel.options.length > keepFirst) sel.remove(sel.options.length-1);
-    ensurePlaceholderOption(sel);
-    for (const name of materials){
-      const opt = document.createElement('option');
-      opt.value = name;
-      opt.textContent = name;
-      sel.appendChild(opt);
+      if (typeof window.__lm_listMaterials === 'function'){
+        const r = window.__lm_listMaterials();
+        if (Array.isArray(r) && r.length) return r;
+      }
+    }catch(_e){}
+    // 1) bridge
+    const viaBridge = listMaterialsViaBridge();
+    if (viaBridge.length) return viaBridge;
+    // 2) scene traversal (try multiple candidates)
+    const scenes = getSceneCandidates();
+    for (const s of scenes){
+      const arr = listMaterialsFromScene(s);
+      if (arr.length) return arr;
     }
-    sel.disabled = false;
-    // remember to state
-    sel.addEventListener('change', ()=>{
-      st.currentMaterialKey = sel.value;
-    }, {once:false, passive:true});
-    return true;
+    return [];
   }
 
-  // Retry-populate loop: wait for both scene + select
+  function ensureSelectSlot(){
+    const existing =
+      document.querySelector('[data-lm="material-select"]') ||
+      document.querySelector('#lm-material-select') ||
+      document.querySelector('select[name="material"]') ||
+      document.querySelector('#material-select');
+    if (existing) return existing;
+    // create minimal select safely in Material tab
+    const box = document.querySelector('[data-lm="material-tab"], #lm-material-tab') || document.body;
+    const wrap = document.createElement('div');
+    wrap.style.marginBottom = '8px';
+    const sel = document.createElement('select');
+    sel.id = 'lm-material-select';
+    sel.style.width='100%';
+    wrap.appendChild(sel);
+    box.prepend(wrap);
+    return sel;
+  }
+
+  function buildMaterialSelect(materials){
+    const sel = ensureSelectSlot();
+    while (sel.firstChild) sel.removeChild(sel.firstChild);
+    const add = (val, txt)=>{ const o=document.createElement('option'); o.value=val; o.textContent=txt; sel.appendChild(o); };
+    add('', '— Select —');
+    materials.forEach(m => add(m, m));
+    sel.addEventListener('change', ()=>{ st.currentMaterialKey = sel.value; }, { once:false });
+    log('materials populated', materials.length);
+  }
+
   async function populateWhenReady(){
-    const retryMax = 30; // ~6s
-    const interval = 200;
+    const retryMax = 40, interval = 200;
     for (let i=0;i<retryMax;i++){
-      const sel = findMaterialSelect();
-      const scene = findScene();
-      if (sel && scene){
-        const materials = listMaterialsFromScene(scene);
+      // try on every loop in case viewer loads slowly
+      try{
+        const materials = await Promise.resolve(listMaterialsHybrid());
         if (materials && materials.length){
           buildMaterialSelect(materials);
           return;
         }
-      }
+      }catch(_e){}
       await new Promise(r=>setTimeout(r, interval));
     }
     warn('[mat-orch-hotfix] materials still empty after retries (non-fatal)');
   }
 
-  // Kick after DOM ready as well
+  // Run when scene/model reported ready
+  document.addEventListener('lm:scene-ready', ()=>populateWhenReady(), { once:true });
+  document.addEventListener('lm:model-ready', ()=>populateWhenReady(), { once:true });
+
+  // also try after DOMContentLoaded just in case
   if (document.readyState === 'loading'){
-    document.addEventListener('DOMContentLoaded', ()=>setTimeout(populateWhenReady, 0), {once:true});
+    document.addEventListener('DOMContentLoaded', ()=>setTimeout(populateWhenReady, 0), { once:true });
   }else{
     setTimeout(populateWhenReady, 0);
   }
-  // Also kick on our lifecycle events
-  window.addEventListener('lm:model-ready', ()=>setTimeout(populateWhenReady, 0), {once:false});
-  document.addEventListener('lm:model-ready', ()=>setTimeout(populateWhenReady, 0), {once:false});
-  window.addEventListener('lm:scene-ready', ()=>setTimeout(populateWhenReady, 0), {once:false});
-  document.addEventListener('lm:scene-ready', ()=>setTimeout(populateWhenReady, 0), {once:false});
 
-  // ---------- Debug surface -------------------------------------------------
-  window.__lm_material_orch_debug = {
-    VER,
-    findScene,
-    listMaterialsFromScene,
-    populateWhenReady
-  };
+  // ---------- Hide __LM_* from sheet pickers --------------------------------
+  function hideMaterialsSheetInPicker(){
+    const HIDE = (opt) => {
+      const txt = (opt.textContent || opt.value || '').trim();
+      if (!txt) return false;
+      if (txt === '__LM_MATERIALS' || txt.startsWith('__LM_')) { opt.remove(); return true; }
+      return false;
+    };
+    document.querySelectorAll('select option').forEach(HIDE);
+    if (!hideMaterialsSheetInPicker._armed){
+      hideMaterialsSheetInPicker._armed = true;
+      let t=null;
+      const mo = new MutationObserver(()=>{
+        if (t) clearTimeout(t);
+        t = setTimeout(()=>document.querySelectorAll('select option').forEach(HIDE), 60);
+      });
+      mo.observe(document.body, { childList:true, subtree:true });
+    }
+  }
+  hideMaterialsSheetInPicker();
+
 })();
