@@ -7,7 +7,7 @@
 // - 既存機能を壊さない UI-only 変更
 //
 // VERSION TAG
-const VERSION_TAG = 'V6_11_AUTH_UI_ENSURE';
+const VERSION_TAG = 'V6_10_AUTH_UI_ENSURE';
 const log  = (...a)=>console.log('[mat-orch]', ...a);
 const warn = (...a)=>console.warn('[mat-orch]', ...a);
 
@@ -366,5 +366,77 @@ populateWhenReady();
 document.addEventListener('lm:model-ready', populateWhenReady);
 document.getElementById('tab-material')?.addEventListener('click', populateWhenReady);
 
-document.addEventListener('lm:auth-ok', function(){ try{ if (typeof ensureIfReady==='function') ensureIfReady(); }catch(e){} });
-window.addEventListener('lm:auth-ok', function(){ try{ if (typeof ensureIfReady==='function') ensureIfReady(); }catch(e){} });
+
+/* === LM Scheduler Hotfix (2025-10-30) ===
+   Ensures __LM_MATERIALS creation only after (sheet-context + model-ready + token).
+   Does not remove existing logic; just guarantees a late re-try when conditions are met.
+*/
+(function(){
+  try{
+    if (window.__lm_scheduler_installed) return;
+    window.__lm_scheduler_installed = true;
+
+    const gate = { hasCtx:false, modelReady:false, ensuring:false };
+    let __lm_ensureTimer = null;
+
+    async function __lm_safeGetToken(){
+      try{
+        if (typeof getAccessToken === 'function'){
+          const t = await Promise.resolve(getAccessToken());
+          if (t) return t;
+        }
+      }catch(e){ /* no-op */ }
+      try{
+        if (typeof lmRequestTokenSilent === 'function'){
+          const t2 = await Promise.resolve(lmRequestTokenSilent()); // prompt:''
+          if (t2) return t2;
+        }
+      }catch(e){ /* no-op */ }
+      return null;
+    }
+
+    function scheduleEnsure(){
+      if (__lm_ensureTimer) clearTimeout(__lm_ensureTimer);
+      __lm_ensureTimer = setTimeout(tryEnsure, 100);
+    }
+
+    async function tryEnsure(){
+      if (gate.ensuring) return;
+      if (!gate.hasCtx || !gate.modelReady) return;
+      const tok = await __lm_safeGetToken();
+      if (!tok) return; // wait for lm:auth-ok to arrive
+      if (typeof ensureMaterialSheet !== 'function') return;
+      gate.ensuring = true;
+      try{
+        await ensureMaterialSheet();
+      }catch(e){
+        console.warn('[mat-orch] scheduler ensure error', e);
+      }finally{
+        gate.ensuring = false;
+      }
+    }
+
+    function onCtx(ev){
+      const d = (ev && ev.detail) || {};
+      if (d && d.spreadsheetId) gate.hasCtx = true;
+      scheduleEnsure();
+    }
+    function onModel(){
+      gate.modelReady = true;
+      scheduleEnsure();
+    }
+    function onAuthOk(){
+      scheduleEnsure();
+    }
+
+    document.addEventListener('lm:sheet-context', onCtx);
+    window.addEventListener('lm:sheet-context', onCtx);
+    document.addEventListener('lm:model-ready', onModel);
+    window.addEventListener('lm:model-ready', onModel);
+    document.addEventListener('lm:auth-ok', onAuthOk);
+    window.addEventListener('lm:auth-ok', onAuthOk);
+  }catch(e){
+    console.warn('[mat-orch] scheduler install error', e);
+  }
+})();
+/* === /LM Scheduler Hotfix === */
