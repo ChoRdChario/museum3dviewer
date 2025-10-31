@@ -1,24 +1,27 @@
 
 /* materials.sheet.bridge.js
- * LociMyu - Materials Sheet Bridge (create-if-missing / load / upsert one)
+ * LociMyu - Materials Sheet Bridge (persist __LM_MATERIALS)
  * Requires:
- *  - window.__lm_fetchJSONAuth(url, init) (provided by boot)
- *  - event 'lm:sheet-context' with { spreadsheetId, sheetGid? }
+ *  - window.__lm_fetchJSONAuth(url, init) (boot ensures)
+ *  - event 'lm:sheet-context' with { spreadsheetId, sheetGid }
  */
 (function(){
   const log  = (...a)=>console.log('[mat-sheet]', ...a);
   const warn = (...a)=>console.warn('[mat-sheet]', ...a);
+  const err  = (...a)=>console.error('[mat-sheet]', ...a);
 
-  const SheetTitle = 'materials';
+  const SheetTitle = '__LM_MATERIALS';
   const Header = [
-    'materialKey','name','opacity','unlit','doubleSided',
-    'chromaColor','chromaThreshold','chromaFeather','updatedAt','updatedBy'
+    'key','modelKey','materialKey','opacity','doubleSided','unlit',
+    'chromaEnable','chromaColor','chromaTolerance','chromaFeather',
+    'updatedAt','updatedBy','spreadsheetId','sheetGid'
   ];
 
   const S = {
     spreadsheetId: null,
+    sheetGid: null,
     title: SheetTitle,
-    sheetId: null,
+    sheetId: null, // numeric id of __LM_MATERIALS
     headerReady: false,
   };
 
@@ -33,19 +36,17 @@
     }
     return window.__lm_fetchJSONAuth(url, init);
   }
-
   function gv(base, params){
     const usp = new URLSearchParams(params);
     return `${base}?${usp.toString()}`;
   }
 
-  // ===== Sheet ensure =====
   async function ensureSheet(){
     if (!S.spreadsheetId) throw new Error('spreadsheetId missing');
+    // spreadsheet metadata
     const meta = await fjson(gv(`https://sheets.googleapis.com/v4/spreadsheets/${S.spreadsheetId}`, {
-      includeGridData: false
+      includeGridData: 'false'
     }), { method:'GET' });
-
     const sheets = meta?.sheets || [];
     let target = sheets.find(s => s?.properties?.title === S.title);
     if (!target){
@@ -76,58 +77,72 @@
     S.headerReady = true;
   }
 
-  // ===== Load all -> map by materialKey =====
+  function makeKey(modelKey, materialKey){
+    // global unique key (sheet-scoped): SSID:GID:materialKey
+    return `${S.spreadsheetId || ''}:${S.sheetGid || ''}:${materialKey}`;
+  }
+  function modelKeyFromState(){
+    // use spreadsheetId:sheetGid as modelKey
+    return `${S.spreadsheetId || ''}:${S.sheetGid || ''}`;
+  }
+
+  // read all into map keyed by materialKey for quick check
   async function loadAll(){
     await ensureSheet();
-    const res = await fjson(gv(`https://sheets.googleapis.com/v4/spreadsheets/${S.spreadsheetId}/values/${encodeURIComponent(S.title+'!A2:J')}`, {}), { method:'GET' });
+    const res = await fjson(gv(`https://sheets.googleapis.com/v4/spreadsheets/${S.spreadsheetId}/values/${encodeURIComponent(S.title+'!A2:N')}`, {}), { method:'GET' });
     const rows = res?.values || [];
     const map = new Map();
     for (const r of rows){
       const [
-        materialKey='', name='', opacity='', unlit='', doubleSided='',
-        chromaColor='', chromaThreshold='', chromaFeather='', updatedAt='', updatedBy=''
+        key='', modelKey='', materialKey='', opacity='',
+        doubleSided='', unlit='', chromaEnable='', chromaColor='', chromaTolerance='',
+        chromaFeather='', updatedAt='', updatedBy='', spreadsheetId='', sheetGid=''
       ] = r;
       if (!materialKey) continue;
       map.set(materialKey, {
-        materialKey,
-        name,
+        key, modelKey, materialKey,
         opacity: asFloat(opacity, null),
-        unlit: toBool(unlit),
         doubleSided: toBool(doubleSided),
+        unlit: toBool(unlit),
+        chromaEnable: toBool(chromaEnable),
         chromaColor: chromaColor || '',
-        chromaThreshold: asFloat(chromaThreshold, null),
+        chromaTolerance: asFloat(chromaTolerance, null),
         chromaFeather: asFloat(chromaFeather, null),
-        updatedAt, updatedBy
+        updatedAt, updatedBy,
+        spreadsheetId, sheetGid
       });
     }
     return map;
   }
 
-  // ===== Upsert one (by materialKey) =====
   async function upsertOne(item){
     await ensureSheet();
-    // find existing rowIndex by reading materialKey column
-    const rangeAll = `${S.title}!A2:A`;
+    // fetch existing materialKey column
+    const rangeAll = `${S.title}!C2:C`; // materialKey column
     const res = await fjson(gv(`https://sheets.googleapis.com/v4/spreadsheets/${S.spreadsheetId}/values/${encodeURIComponent(rangeAll)}`, {}), { method:'GET' });
     const keys = (res?.values || []).map(v=>v[0]);
-    const idx = keys.indexOf(item.materialKey);
+    const idx = keys.indexOf(item.materialKey); // 0-based
 
     const row = [
+      makeKey(modelKeyFromState(), item.materialKey),
+      modelKeyFromState(),
       item.materialKey || '',
-      item.name || '',
       item.opacity==null ? '' : String(item.opacity),
-      item.unlit ? '1':'',
       item.doubleSided ? '1':'',
+      item.unlit ? '1':'',
+      item.chromaEnable ? '1':'',
       item.chromaColor || '',
-      item.chromaThreshold==null ? '' : String(item.chromaThreshold),
+      item.chromaTolerance==null ? '' : String(item.chromaTolerance),
       item.chromaFeather==null ? '' : String(item.chromaFeather),
       item.updatedAt || nowIso(),
-      item.updatedBy || 'app'
+      item.updatedBy || 'app',
+      S.spreadsheetId || '',
+      String(S.sheetGid ?? '')
     ];
 
     if (idx >= 0){
       const rowNum = idx + 2;
-      const range = `${S.title}!A${rowNum}:J${rowNum}`;
+      const range = `${S.title}!A${rowNum}:N${rowNum}`;
       await fjson(gv(`https://sheets.googleapis.com/v4/spreadsheets/${S.spreadsheetId}/values/${encodeURIComponent(range)}`, {
         valueInputOption:'RAW'
       }), {
@@ -137,7 +152,7 @@
       });
       log('updated row', rowNum, item.materialKey);
     } else {
-      await fjson(gv(`https://sheets.googleapis.com/v4/spreadsheets/${S.spreadsheetId}/values/${encodeURIComponent(S.title+'!A:J')}`, {
+      await fjson(gv(`https://sheets.googleapis.com/v4/spreadsheets/${S.spreadsheetId}/values/${encodeURIComponent(S.title+'!A:N')}`, {
         valueInputOption:'RAW',
         insertDataOption:'INSERT_ROWS'
       }), {
@@ -149,15 +164,18 @@
     }
   }
 
-  // ===== Listen sheet-context =====
   window.addEventListener('lm:sheet-context', (ev)=>{
     const d = ev?.detail || ev;
     if (!d?.spreadsheetId) { warn('sheet-context missing spreadsheetId'); return; }
     S.spreadsheetId = d.spreadsheetId;
-    log('sheet-context bound:', S.spreadsheetId);
+    S.sheetGid = d.sheetGid ?? null;
+    log('sheet-context bound:', S.spreadsheetId, 'gid=', S.sheetGid);
   }, { once:false });
 
   window.materialsSheetBridge = {
-    ensureSheet, loadAll, upsertOne, config: S,
+    ensureSheet,
+    loadAll,
+    upsertOne,
+    config: S,
   };
 })();
