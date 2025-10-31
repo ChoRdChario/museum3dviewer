@@ -1,47 +1,64 @@
 // viewer.bridge.module.js
-// Exposes window.viewerBridge with helpers to access the three.js scene and list materials.
-(() => {
-  const log = (...a)=>console.log('[viewer-bridge]', ...a);
+// LociMyu: viewerBridge (scene access + materials list) with GLTFLoader tap fallback
+(function(){
+  const log  = (...a)=>console.log('[viewer-bridge]', ...a);
+  const warn = (...a)=>console.warn('[viewer-bridge]', ...a);
 
-  let cachedScene = null;
-
-  function getScene() {
-    if (cachedScene) return cachedScene;
-    // Common globals the app may expose
-    const s = (window.__viewer && window.__viewer.scene)
-           || (window.viewer && window.viewer.scene)
-           || (window.lm && window.lm.scene)
-           || null;
-    if (s) cachedScene = s;
-    return s;
+  // ---- Scene discovery ----
+  function discoverScene() {
+    try { if (window.viewerBridge && window.viewerBridge.__scene) return window.viewerBridge.__scene; } catch(e){}
+    try { if (window.__viewer && window.__viewer.scene) return (window.viewerBridge.__scene = window.__viewer.scene); } catch(e){}
+    try { if (window.viewer && window.viewer.scene)     return (window.viewerBridge.__scene = window.viewer.scene); } catch(e){}
+    try { if (window.lm && window.lm.scene)             return (window.viewerBridge.__scene = window.lm.scene); } catch(e){}
+    return null;
   }
 
-  // Poll once in a while until a scene appears (helps slower GLB loads)
-  (function pollScene(){
-    const iv = setInterval(() => {
-      const s = getScene();
-      if (s) {
-        clearInterval(iv);
-        log('scene captured via poll');
-        window.dispatchEvent(new CustomEvent('lm:scene-ready', { detail: { when: Date.now() } }));
-      }
-    }, 250);
-    setTimeout(()=>clearInterval(iv), 15000);
+  // ---- Optional GLTFLoader.parse tap (safe no-op if unavailable) ----
+  (function tapGLTFLoader(){
+    const THREE = window.THREE;
+    const GL = THREE && THREE.GLTFLoader && THREE.GLTFLoader.prototype;
+    if (!GL || GL.__lm_scene_tapped) return;
+    const origParse = GL.parse;
+    GL.parse = function(data, path, onLoad, onError){
+      const wrapped = (gltf) => {
+        try {
+          const sc = gltf && (gltf.scene || (gltf.scenes && gltf.scenes[0]));
+          if (sc) {
+            window.__viewer = window.__viewer || {};
+            window.__viewer.scene = sc;
+            window.dispatchEvent(new CustomEvent('lm:scene-ready', {detail:{from:'gltf-parse'}}));
+            log('scene captured via GLTFLoader.parse');
+          }
+        } catch(e){ /*noop*/ }
+        onLoad && onLoad(gltf);
+      };
+      return origParse.call(this, data, path, wrapped, onError);
+    };
+    GL.__lm_scene_tapped = true;
+    log('GLTFLoader.parse hooked');
   })();
 
-  function listMaterials() {
-    const scene = getScene();
-    if (!scene) return [];
-    const names = new Set();
-    scene.traverse(obj => {
-      const m = obj.material;
-      if (!m) return;
-      (Array.isArray(m) ? m : [m]).forEach(mm => {
-        if (mm && typeof mm.name === 'string' && mm.name) names.add(mm.name);
+  // ---- Install bridge ----
+  const vb = Object.assign(window.viewerBridge || {}, {
+    getScene(){
+      const sc = discoverScene();
+      if (sc) this.__scene = sc;
+      return sc;
+    },
+    listMaterials(){
+      const sc = this.getScene();
+      const set = new Set();
+      sc && sc.traverse && sc.traverse(o => {
+        const m = o.material; if (!m) return;
+        (Array.isArray(m)?m:[m]).forEach(mm => { if (mm && mm.name) set.add(mm.name); });
       });
-    });
-    return Array.from(names);
-  }
+      return Array.from(set);
+    }
+  });
+  window.viewerBridge = vb;
 
-  window.viewerBridge = { getScene, listMaterials };
+  // Update cached scene when ready
+  window.addEventListener('lm:scene-ready', () => { vb.getScene(); log('scene ready'); });
+
+  log('installed');
 })();

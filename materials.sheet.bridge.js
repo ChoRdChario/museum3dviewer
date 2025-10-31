@@ -1,11 +1,13 @@
 /* materials.sheet.bridge.js
  * LociMyu - Materials Sheet Bridge (create-if-missing / load / upsert one)
- * Requires window.__lm_fetchJSONAuth(url, init)
- * Binds spreadsheetId from 'lm:sheet-context' event
+ * Requires:
+ *  - window.__lm_fetchJSONAuth(url, init) available (provided by boot)
+ *  - event 'lm:sheet-context' carries { spreadsheetId, sheetGid? }
  */
-(() => {
+(function(){
   const log  = (...a)=>console.log('[mat-sheet]', ...a);
   const warn = (...a)=>console.warn('[mat-sheet]', ...a);
+  const err  = (...a)=>console.error('[mat-sheet]', ...a);
 
   const SheetTitle = 'materials';
   const Header = [
@@ -13,12 +15,24 @@
     'chromaColor','chromaThreshold','chromaFeather','updatedAt','updatedBy'
   ];
 
-  const S = { spreadsheetId: null, title: SheetTitle, sheetId: null, headerReady: false };
+  const S = {
+    spreadsheetId: null,
+    title: SheetTitle,
+    sheetId: null,      // numeric
+    headerReady: false,
+  };
 
+  // ===== Utils =====
   function nowIso(){ return new Date().toISOString(); }
-  function toBool(x){ if (typeof x==='boolean') return x; if (x==null) return false;
-    const s=String(x).toLowerCase(); return s==='1'||s==='true'||s==='yes'; }
-  function asFloat(x, def=null){ const n=parseFloat(x); return Number.isFinite(n)?n:def; }
+  function toBool(x){
+    if (typeof x==='boolean') return x;
+    if (x==null) return false;
+    const s=String(x).toLowerCase();
+    return s==='1'||s==='true'||s==='yes';
+  }
+  function asFloat(x, def=null){
+    const n=parseFloat(x); return Number.isFinite(n)?n:def;
+  }
 
   function fjson(url, init){
     if (typeof window.__lm_fetchJSONAuth !== 'function'){
@@ -26,10 +40,16 @@
     }
     return window.__lm_fetchJSONAuth(url, init);
   }
-  function gv(base, params){ const usp = new URLSearchParams(params); return `${base}?${usp.toString()}`; }
 
+  function gv(base, params){
+    const usp = new URLSearchParams(params);
+    return `${base}?${usp.toString()}`;
+  }
+
+  // ===== Sheet ensure =====
   async function ensureSheet(){
     if (!S.spreadsheetId) throw new Error('spreadsheetId missing');
+    // 1) get spreadsheet metadata
     const meta = await fjson(gv(`https://sheets.googleapis.com/v4/spreadsheets/${S.spreadsheetId}`, {
       includeGridData: false
     }), { method:'GET' });
@@ -37,6 +57,7 @@
     const sheets = meta?.sheets || [];
     let target = sheets.find(s => s?.properties?.title === S.title);
     if (!target){
+      // create
       const res = await fjson(`https://sheets.googleapis.com/v4/spreadsheets/${S.spreadsheetId}:batchUpdate`, {
         method:'POST',
         headers:{ 'Content-Type':'application/json' },
@@ -47,7 +68,7 @@
     }
     S.sheetId = target?.properties?.sheetId;
 
-    // header row check
+    // 2) header row check
     const hdr = await fjson(gv(`https://sheets.googleapis.com/v4/spreadsheets/${S.spreadsheetId}/values/${encodeURIComponent(S.title+'!1:1')}`, {}), { method:'GET' });
     const row = (hdr?.values && hdr.values[0]) || [];
     const same = Header.length === row.length && Header.every((h,i)=>row[i]===h);
@@ -64,6 +85,7 @@
     S.headerReady = true;
   }
 
+  // ===== Load all -> map by materialKey =====
   async function loadAll(){
     await ensureSheet();
     const res = await fjson(gv(`https://sheets.googleapis.com/v4/spreadsheets/${S.spreadsheetId}/values/${encodeURIComponent(S.title+'!A2:J')}`, {}), { method:'GET' });
@@ -90,12 +112,14 @@
     return map;
   }
 
+  // ===== Upsert one (by materialKey) =====
   async function upsertOne(item){
     await ensureSheet();
+    // 1) find existing row index by reading materialKey column
     const rangeAll = `${S.title}!A2:A`;
     const res = await fjson(gv(`https://sheets.googleapis.com/v4/spreadsheets/${S.spreadsheetId}/values/${encodeURIComponent(rangeAll)}`, {}), { method:'GET' });
     const keys = (res?.values || []).map(v=>v[0]);
-    const idx = keys.indexOf(item.materialKey);
+    const idx = keys.indexOf(item.materialKey); // 0-based within A2:A
 
     const row = [
       item.materialKey || '',
@@ -111,6 +135,7 @@
     ];
 
     if (idx >= 0){
+      // update at row (A2 is rowIndex=0 -> sheet row = 2)
       const rowNum = idx + 2;
       const range = `${S.title}!A${rowNum}:J${rowNum}`;
       await fjson(gv(`https://sheets.googleapis.com/v4/spreadsheets/${S.spreadsheetId}/values/${encodeURIComponent(range)}`, {
@@ -122,6 +147,7 @@
       });
       log('updated row', rowNum, item.materialKey);
     } else {
+      // append
       await fjson(gv(`https://sheets.googleapis.com/v4/spreadsheets/${S.spreadsheetId}/values/${encodeURIComponent(S.title+'!A:J')}`, {
         valueInputOption:'RAW',
         insertDataOption:'INSERT_ROWS'
@@ -134,12 +160,19 @@
     }
   }
 
+  // ===== Listen sheet-context =====
   window.addEventListener('lm:sheet-context', (ev)=>{
     const d = ev?.detail || ev;
     if (!d?.spreadsheetId) { warn('sheet-context missing spreadsheetId'); return; }
     S.spreadsheetId = d.spreadsheetId;
     log('sheet-context bound:', S.spreadsheetId);
-  });
+  }, { once:false });
 
-  window.materialsSheetBridge = { ensureSheet, loadAll, upsertOne, config: S };
+  // ===== export =====
+  window.materialsSheetBridge = {
+    ensureSheet,
+    loadAll,
+    upsertOne,
+    config: S,
+  };
 })();
