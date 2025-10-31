@@ -1,61 +1,50 @@
-// viewer.bridge.module.js
-// LociMyu - viewer bridge (scene access & material listing + stabilization ping)
-(function(){
-  const log  = (...a)=>console.log('[viewer-bridge]', ...a);
-  const warn = (...a)=>console.warn('[viewer-bridge]', ...a);
 
-  if (!window.viewerBridge) window.viewerBridge = {};
+// viewer.bridge.module.js  V6_15b  (scene stabilize -> lm:scene-ready)
+(() => {
+  const log = (...a)=>console.log('[viewer-bridge]', ...a);
 
-  function pickScene(){
-    try {
-      if (window.viewerBridge.__scene) return window.viewerBridge.__scene;
-      if (window.__LM_SCENE) return window.__LM_SCENE;
-      if (window.__viewer?.scene) return window.__viewer.scene;
-      if (window.viewer?.scene) return window.viewer.scene;
-      if (window.lm?.scene) return window.lm.scene;
-    } catch(e){}
+  function getSceneCandidate(){
+    if (window.viewerBridge?.__scene) return window.viewerBridge.__scene;
+    if (window.__LM_SCENE) return window.__LM_SCENE;
+    if (window.__viewer?.scene) return window.__viewer.scene;
+    if (window.viewer?.scene) return window.viewer.scene;
+    if (window.lm?.scene) return window.lm.scene;
     return null;
   }
 
-  if (typeof window.viewerBridge.getScene !== 'function'){
-    window.viewerBridge.getScene = () => {
-      const sc = pickScene();
-      if (sc) window.viewerBridge.__scene = sc;
-      return sc;
-    };
-  }
+  const vb = window.viewerBridge = window.viewerBridge || {};
 
-  if (typeof window.viewerBridge.listMaterials !== 'function'){
-    window.viewerBridge.listMaterials = () => {
-      const sc = window.viewerBridge.getScene();
-      const set = new Set();
-      sc?.traverse(o=>{
-        const m = o.material; if (!m) return;
-        (Array.isArray(m)?m:[m]).forEach(mm=>{ if (mm?.name) set.add(mm.name); });
-      });
-      return Array.from(set);
-    };
-  }
+  vb.getScene = vb.getScene || (() => {
+    const sc = getSceneCandidate();
+    if (sc && !vb.__scene) vb.__scene = sc;
+    return vb.__scene || sc || null;
+  });
 
+  vb.listMaterials = vb.listMaterials || (() => {
+    const sc = vb.getScene();
+    const set = new Set();
+    sc?.traverse(o => {
+      const m = o.material; if (!m) return;
+      (Array.isArray(m) ? m : [m]).forEach(mm => { if (mm?.name) set.add(mm.name); });
+    });
+    return Array.from(set);
+  });
+
+  // Poll until mesh count stabilizes once after GLB load
   (function pollSceneUntilReady(){
-    let last = -1, stable = 0;
-    const iv = setInterval(()=>{
-      const sc = window.viewerBridge.getScene();
-      if (!sc) return;
-      let cnt = 0;
-      sc.traverse(o=>{ if (o.isMesh) cnt++; });
-      if (cnt>0 && cnt===last) {
-        stable++;
-        if (stable>=3){
-          clearInterval(iv);
-          window.dispatchEvent(new CustomEvent('lm:scene-ready', {detail:{from:'poll-stable', meshCount:cnt}}));
-          log('scene stabilized with', cnt, 'meshes');
-        }
-      } else {
-        stable = 0;
+    let last = -1, stable = 0, ticks = 0;
+    const iv = setInterval(() => {
+      const sc = vb.getScene();
+      let meshes = 0;
+      sc?.traverse(o => { if (o.isMesh) meshes++; });
+      if (meshes>0 && meshes===last) stable++; else stable=0;
+      last = meshes;
+      if (stable>=2) {
+        clearInterval(iv);
+        log('scene stabilized with', meshes, 'meshes');
+        window.dispatchEvent(new CustomEvent('lm:scene-ready', {detail:{from:'bridge-stable', meshCount:meshes}}));
       }
-      last = cnt;
-    }, 300);
-    setTimeout(()=>clearInterval(iv), 30000);
+      ticks++; if (ticks>150) clearInterval(iv);
+    }, 200);
   })();
 })();
