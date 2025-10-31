@@ -1,117 +1,133 @@
-// === material.orchestrator.js (V6_12g_ENUM_ROBUST) ===========================
+/*! material.orchestrator.js (enum + UI populate robust) */
 (function(){
-  const VER = 'V6_12g_ENUM_ROBUST';
-  const NS  = '[mat-orch]';
-  const log = (...a)=>console.log(NS, ...a);
-  const warn= (...a)=>console.warn(NS, ...a);
+  var VER='V6_12h_ENUM_ROBUST_SCAN';
+  var NS='[mat-orch]';
+  function log(){ try{ console.log.apply(console, [NS].concat([].slice.call(arguments))); }catch(e){} }
+  function warn(){ try{ console.warn.apply(console, [NS].concat([].slice.call(arguments))); }catch(e){} }
   log('loaded VERSION_TAG:'+VER);
 
-  const st = (window.__lm_materialState = window.__lm_materialState || {
+  var st = (window.__lm_materialState = window.__lm_materialState || {
     spreadsheetId:null, sheetGid:null, modelKey:null, currentMaterialKey:null
   });
 
   function onSheetCtx(ev){
-    const d = ev && ev.detail || {};
+    var d = (ev && ev.detail) || {};
     if (d.spreadsheetId) st.spreadsheetId = d.spreadsheetId;
-    if (typeof d.sheetGid !== 'undefined') st.sheetGid = d.sheetGid;
+    if (typeof d.sheetGid!=='undefined') st.sheetGid = d.sheetGid;
     log('sheet context set', {spreadsheetId:st.spreadsheetId, sheetGid:st.sheetGid});
   }
   window.addEventListener('lm:sheet-context', onSheetCtx);
   document.addEventListener('lm:sheet-context', onSheetCtx);
 
-  async function listMaterialsRobust(){
-    try{
-      const b = (window.viewerBridge && typeof window.viewerBridge.listMaterials==='function')
-        ? window.viewerBridge.listMaterials() : [];
-      if (Array.isArray(b) && b.length) return b;
-    }catch(_){}
-
-    try{
-      const scene = (window.viewerBridge && window.viewerBridge.getScene && window.viewerBridge.getScene())
-                 || (window.__lm_getScene && window.__lm_getScene())
-                 || (window.__lm_viewer && window.__lm_viewer.scene)
-                 || (window.viewer && window.viewer.scene)
-                 || null;
-      const THREE = window.THREE;
-      if (!scene || !THREE) return [];
-
-      const set = new Set();
-      const badType = (m)=> /Depth|Distance|Shadow|Sprite|Shader/.test(m?.type||'') ||
-        m?.isLineBasicMaterial || m?.isLineDashedMaterial || m?.isPointsMaterial;
-      const isOverlayObj = (o)=> o?.type==='Sprite' || o?.name?.startsWith?.('__LM_') || o?.userData?.__lmOverlay;
-
-      scene.traverse((obj)=>{
-        if (isOverlayObj(obj)) return;
-        const mat = obj && obj.material;
-        const push = (m)=>{
-          if (!m || badType(m)) return;
-          const n = (m.name||'').trim();
-          if (!n || /^material\.[0-9]+$/.test(n)) return;
-          set.add(n);
-        };
-        if (!mat) return;
-        Array.isArray(mat) ? mat.forEach(push) : push(mat);
-      });
-      return Array.from(set);
-    }catch(_){}
-    return [];
+  // ---- UI helpers -----------------------------------------------------------
+  function getSelect(){
+    return document.querySelector('[data-lm="material-select"]')
+        || document.querySelector('#lm-material-select')
+        || document.querySelector('select[name="material"]')
+        || document.querySelector('#material-select')
+        || null;
   }
-
-  function ensureMaterialSelect(){
-    const sel =
-      document.querySelector('[data-lm="material-select"]') ||
-      document.querySelector('#lm-material-select') ||
-      document.querySelector('select[name="material"]') ||
-      document.querySelector('#material-select');
+  function ensureSelect(){
+    var sel = getSelect();
     if (sel) return sel;
-    const box = document.querySelector('[data-lm="material-tab"], #lm-material-tab') || document.body;
-    const wrap = document.createElement('div'); wrap.style.marginBottom='8px';
-    const s = document.createElement('select'); s.id='lm-material-select'; s.style.width='100%';
-    wrap.appendChild(s); box.prepend(wrap); return s;
+    var box = document.querySelector('[data-lm="material-tab"]')
+           || document.querySelector('#lm-material-tab')
+           || document.querySelector('[data-lm="right-panel"]')
+           || document.querySelector('#right-panel')
+           || document.body;
+    var wrap = document.createElement('div');
+    wrap.style.cssText='margin:6px 0;';
+    var lab = document.createElement('div');
+    lab.textContent='Select material';
+    lab.style.cssText='font-size:12px;opacity:.7;margin-bottom:4px;';
+    sel = document.createElement('select');
+    sel.id = 'lm-material-select';
+    sel.style.width='100%';
+    wrap.appendChild(lab);
+    wrap.appendChild(sel);
+    box.prepend(wrap);
+    return sel;
   }
-
-  function buildMaterialSelect(materials){
-    const sel = ensureMaterialSelect();
+  function fillSelect(values){
+    var sel = ensureSelect();
     while (sel.firstChild) sel.removeChild(sel.firstChild);
-    const add=(v,t)=>{ const o=document.createElement('option'); o.value=v; o.textContent=t; sel.appendChild(o); };
+    function add(v,t){ var o=document.createElement('option'); o.value=v; o.textContent=t; sel.appendChild(o); }
     add('', '— Select —');
-    materials.forEach(m=>add(m,m));
-    sel.addEventListener('change', ()=>{ st.currentMaterialKey = sel.value; }, { once:false });
+    values.forEach(function(v){ add(v,v); });
+    sel.onchange = function(){ st.currentMaterialKey = sel.value; };
     sel.dispatchEvent(new Event('change', {bubbles:true}));
   }
 
+  // ---- hide __LM_* in any sheet pickers ------------------------------------
+  (function hideSheetNames(){
+    function hide(opt){
+      try{
+        var txt = (opt.textContent || opt.value || '').trim();
+        if (txt && (txt==='__LM_MATERIALS' || txt.indexOf('__LM_')===0)) opt.remove();
+      }catch(e){}
+    }
+    var mo = new MutationObserver(function(){ document.querySelectorAll('select option').forEach(hide); });
+    mo.observe(document.body, {childList:true, subtree:true});
+    document.addEventListener('DOMContentLoaded', function(){ document.querySelectorAll('select option').forEach(hide); });
+    setTimeout(function(){ document.querySelectorAll('select option').forEach(hide); }, 400);
+  })();
+
+  // ---- materials enumeration ------------------------------------------------
+  function listFromBridge(){
+    try{
+      var b = window.viewerBridge || window.__lm_viewerBridge || window.lm_viewer_bridge;
+      if (b && typeof b.listMaterials==='function'){
+        var arr = b.listMaterials() || [];
+        return Array.isArray(arr) ? arr.slice() : [];
+      }
+    }catch(e){}
+    return [];
+  }
+  function listFromScene(){
+    var scene = (window.__lm_getScene && window.__lm_getScene())
+             || (window.viewerBridge && window.viewerBridge.getScene && window.viewerBridge.getScene())
+             || (window.__lm_viewer && window.__lm_viewer.scene)
+             || (window.viewer && window.viewer.scene)
+             || null;
+    var THREE = window.THREE;
+    if (!scene || !THREE) return [];
+    function badType(m){
+      var t=(m&&m.type)||'';
+      if (/Depth|Distance|Shadow|Sprite|Shader/.test(t)) return true;
+      return !!(m && (m.isLineBasicMaterial || m.isLineDashedMaterial || m.isPointsMaterial));
+    }
+    var set={};
+    scene.traverse(function(obj){
+      if (obj && (obj.type==='Sprite' || (obj.name && obj.name.indexOf('__LM_')===0) || (obj.userData && obj.userData.__lmOverlay))) return;
+      var mat = obj && obj.material;
+      function push(m){
+        if (!m || badType(m)) return;
+        var n=(m.name||'').trim();
+        if (!n || /^material\.\d+$/.test(n)) return;
+        set[n]=true;
+      }
+      if (!mat) return;
+      if (Array.isArray(mat)) mat.forEach(push); else push(mat);
+    });
+    return Object.keys(set);
+  }
+
+  // ---- populate with retry --------------------------------------------------
   async function populateWhenReady(){
-    const retryMax=50, interval=200;
-    for (let i=0;i<retryMax;i++){
-      const mats = await listMaterialsRobust();
-      if (mats && mats.length){
-        buildMaterialSelect(mats);
+    var tries=0, max=60; // ~12s
+    while(tries++<max){
+      var mats = listFromBridge();
+      if (!mats.length) mats = listFromScene();
+      if (mats.length){
+        fillSelect(mats);
         log('materials populated', mats.length);
         return;
       }
-      await new Promise(r=>setTimeout(r, interval));
+      await new Promise(function(r){ setTimeout(r, 200); });
+      if (tries===5 || tries===15 || tries===30) warn('[mat-orch-hotfix] materials still empty after retries (non-fatal)');
     }
-    warn('[mat-orch-hotfix] materials still empty after retries (non-fatal)');
   }
 
-  (function hideMaterialsSheetInPicker(){
-    const HIDE = (opt)=>{
-      const txt = (opt.textContent || opt.value || '').trim();
-      if (!txt) return false;
-      if (txt === '__LM_MATERIALS' || txt.startsWith('__LM_')) { opt.remove(); return true; }
-      return false;
-    };
-    try{ document.querySelectorAll('select option').forEach(HIDE); }catch(_){}
-    if (!hideMaterialsSheetInPicker._armed){
-      hideMaterialsSheetInPicker._armed = true;
-      let t=null;
-      const mo = new MutationObserver(()=>{
-        if (t) clearTimeout(t);
-        t = setTimeout(()=>{ try{ document.querySelectorAll('select option').forEach(HIDE); }catch(_){} }, 60);
-      });
-      mo.observe(document.body, { childList:true, subtree:true });
-    }
-  })();
-
+  // kick
   populateWhenReady();
 })();
