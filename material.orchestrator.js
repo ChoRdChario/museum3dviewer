@@ -1,265 +1,174 @@
-/* LociMyu Material Orchestrator (panel-targeted)
- * VERSION_TAG: V6_12j_PANEL_SELECT
- * Purpose:
- *   - Enumerate materials from viewerBridge (or scene fallback) after model is ready
- *   - Populate the EXISTING material dropdown in the Material tab (middle/right panel)
- *   - Do NOT render any extra "diagnostic" select at top of page
- *   - Hide '__LM_*' sheets from any sheet pickers
- *
- * Safe to drop-in over previous 'material.orchestrator.js'.
+/* LociMyu material.orchestrator.js
+ * VERSION_TAG: V6_12k_PANEL_INJECT
+ * Safe, drop-in file focused on populating the right-panel material select.
+ * It does not hard-depend on other modules; it no-ops if bridges are absent.
  */
 (function(){
-  var VER = 'V6_12j_PANEL_SELECT';
-  var NS  = '[mat-orch]';
-  var log = function(){ try{ console.log.apply(console, [NS].concat([].slice.call(arguments))); }catch(e){} };
-  var warn= function(){ try{ console.warn.apply(console, [NS].concat([].slice.call(arguments))); }catch(e){} };
+  var NS = '[mat-orch]';
 
-  log('loaded VERSION_TAG:'+VER);
+  function log(){ try{ console.log.apply(console, arguments); }catch(_){ } }
+  function warn(){ try{ console.warn.apply(console, arguments); }catch(_){ } }
 
-  // ---------- State ----------------------------------------------------------
-  var st = (window.__lm_materialState = window.__lm_materialState || {
-    spreadsheetId: null,
-    sheetGid: null,
-    modelReady: false,
-    sceneReady: false,
-    populatedOnce: false
-  });
-
-  // ---------- Sheet context wiring ------------------------------------------
-  function onSheetCtx(ev){
-    try{
+  // ---- bridge/sheet context logging (non-invasive) ---------------------------
+  try {
+    window.addEventListener('lm:sheet-context', function(ev){
       var d = (ev && ev.detail) || {};
-      if (d.spreadsheetId) st.spreadsheetId = d.spreadsheetId;
-      if (typeof d.sheetGid !== 'undefined') st.sheetGid = d.sheetGid;
-      log('sheet context set', {spreadsheetId: st.spreadsheetId, sheetGid: st.sheetGid});
-    }catch(e){}
-  }
-  window.addEventListener('lm:sheet-context', onSheetCtx);
-  document.addEventListener('lm:sheet-context', onSheetCtx);
+      log(NS, 'sheet context set', d);
+    });
+  } catch(_){}
 
-  // ---------- Bridge helpers -------------------------------------------------
-  function getBridge(){
-    return window.viewerBridge || window.__lm_viewerBridge || window.lm_viewer_bridge || null;
-  }
-  function listMaterialsFromBridge(){
+  // ---- material listing sources ---------------------------------------------
+  function listFromBridge(){
     try{
-      var b = getBridge();
+      var b = window.viewerBridge;
       if (b && typeof b.listMaterials === 'function'){
         var arr = b.listMaterials() || [];
         if (Array.isArray(arr)) return arr.slice();
       }
-    }catch(e){}
+    }catch(_){}
     return [];
   }
-  function getScene(){
-    try{
-      var b = getBridge();
-      if (b && typeof b.getScene === 'function'){
-        var s = b.getScene();
-        if (s && s.isScene) return s;
-      }
-    }catch(e){}
-    // fallbacks
-    try{
-      if (window.__lm_getScene) {
-        var s2 = window.__lm_getScene();
-        if (s2 && s2.isScene) return s2;
-      }
-    }catch(e){}
-    try{
-      var v = window.__lm_viewer || window.viewer || null;
-      if (v && v.scene && v.scene.isScene) return v.scene;
-    }catch(e){}
-    return null;
+  function listFromDiag(){
+    var dbg = document.querySelector('#lm-material-select');
+    if (!dbg || !dbg.options) return [];
+    var out = [];
+    for (var i=0;i<dbg.options.length;i++){
+      var v = dbg.options[i].value || dbg.options[i].textContent || '';
+      if (!v) continue;
+      out.push(v);
+    }
+    // drop placeholder
+    if (out.length && /select/i.test(out[0])) out.shift();
+    return out;
   }
-  function listMaterialsFromScene(scene){
-    var THREE = window.THREE;
-    if (!scene || !THREE) return [];
-    // filters
-    function badType(m){
-      var t = (m && m.type) || '';
-      if (/Depth|Distance|Shadow|Sprite|Shader/.test(t)) return true;
-      return !!(m && (m.isLineBasicMaterial || m.isLineDashedMaterial || m.isPointsMaterial));
-    }
-    function isOverlayObj(o){
-      return !!(o && (o.type === 'Sprite' || (o.name && o.name.indexOf('__LM_') === 0) || (o.userData && o.userData.__lmOverlay)));
-    }
-    var set = {};
-    scene.traverse(function(obj){
-      if (isOverlayObj(obj)) return;
-      var mat = obj && obj.material;
-      function push(m){
-        if (!m || badType(m)) return;
-        var n = (m.name || '').trim();
-        if (!n || /^material\.\d+$/.test(n)) return; // drop placeholders
-        set[n] = true;
-      }
-      if (!mat) return;
-      if (Array.isArray(mat)) mat.forEach(push); else push(mat);
-    });
-    return Object.keys(set);
+  function getMaterials(){
+    var b = listFromBridge();
+    if (b.length) return b;
+    return listFromDiag();
   }
 
-  // ---------- Panel select detection ----------------------------------------
-  function getRightPanelRoot(){
+  // ---- panel/section lookup --------------------------------------------------
+  function getRightPanel(){
     return document.querySelector('[data-lm="right-panel"]')
         || document.querySelector('#right-panel')
         || document.querySelector('#panel')
         || document.body;
   }
-  function getMaterialSection(){
-    var root = getRightPanelRoot();
-    var cands = [
-      root && root.querySelector('[data-lm="material-tab"]'),
-      root && root.querySelector('#lm-material-tab'),
-      root && root.querySelector('#tab-material'),
-      root
-    ];
-    for (var i=0;i<cands.length;i++){ if (cands[i]) return cands[i]; }
-    return root;
+  function findOpacityCard(){
+    var panel = getRightPanel();
+    if (!panel) return document.body;
+    var divs = panel.querySelectorAll('div');
+    var best = null;
+    for (var i=0;i<divs.length;i++){
+      var d = divs[i];
+      var txt = (d.innerText || '').toLowerCase();
+      if (!txt) continue;
+      if (txt.indexOf('per-material opacity') >= 0 || txt.indexOf('select material') >= 0){
+        if (d.querySelector('input[type="range"]')) { best = d; break; }
+        best = best || d;
+      }
+    }
+    return best || panel;
   }
-  function findPanelSelect(){
-    var box = getMaterialSection();
-    if (!box) return null;
-    // Priority selectors
-    var sel =
-      box.querySelector('[data-lm="material-select"]') ||
-      box.querySelector('#material-select') ||
-      box.querySelector('select[name="material"]');
+  function findPanelSelect(card){
+    if (!card) return null;
+    var sel = card.querySelector('[data-lm="material-select"]')
+           || card.querySelector('#material-select')
+           || card.querySelector('select[name="material"]');
     if (sel) return sel;
-    // Heuristic: nearest select to a label containing 'Select material' or 'material'
-    var labels = box.querySelectorAll('div, label, span, p');
-    for (var i=0;i<labels.length;i++){
-      var t = (labels[i].textContent || '').toLowerCase();
+
+    // Text-nearby fallback
+    var nodes = card.querySelectorAll('div,label,span,p');
+    for (var i=0;i<nodes.length;i++){
+      var t = (nodes[i].textContent || '').toLowerCase();
       if (!t) continue;
-      if (t.indexOf('select material')>=0 || t.indexOf('material')>=0){
-        var near = labels[i].parentElement;
-        if (!near) continue;
-        var s = near.querySelector('select');
+      if (t.indexOf('select material') >= 0 || t === 'select'){
+        var s = nodes[i].parentElement && nodes[i].parentElement.querySelector('select');
         if (s) return s;
       }
     }
-    // Fallback: pick first empty-ish select inside the Material tab
-    var all = box.querySelectorAll('select');
+    // Empty select candidate
+    var all = card.querySelectorAll('select');
     for (var j=0;j<all.length;j++){
       var s2 = all[j];
-      if (s2.id === 'lm-material-select') continue; // ignore any debug/detached select
+      if (s2.id === 'lm-material-select') continue; // exclude diag select
       if (!s2.options || s2.options.length <= 1) return s2;
     }
     return null;
   }
+  function ensurePanelSelect(card){
+    var sel = findPanelSelect(card);
+    if (sel) return sel;
+    var wrap = document.createElement('div');
+    wrap.style.cssText = 'margin:6px 0 10px 0';
+    var lab = document.createElement('div');
+    lab.textContent = 'Select material';
+    lab.style.cssText = 'font-size:12px;opacity:.7;margin-bottom:4px;';
+    sel = document.createElement('select');
+    sel.setAttribute('data-lm','material-select');
+    sel.style.width = '100%';
+    wrap.appendChild(lab);
+    wrap.appendChild(sel);
+    card.prepend(wrap);
+    return sel;
+  }
 
-  // ---------- Populate into panel select ------------------------------------
-  function populatePanelSelect(materials){
-    var sel = findPanelSelect();
-    if (!sel){
-      warn('panel select not found');
+  function cleanupDiagSelect(){
+    var dbg = document.querySelector('#lm-material-select');
+    if (!dbg) return;
+    var panel = getRightPanel();
+    if (panel && !panel.contains(dbg)) dbg.remove();
+  }
+
+  // ---- populate core ---------------------------------------------------------
+  function populatePanelSelect(){
+    var materials = getMaterials();
+    if (!materials.length){
+      warn(NS, '[mat-orch-hotfix] materials still empty after retries (non-fatal)');
       return false;
     }
-    while (sel.firstChild) sel.removeChild(sel.firstChild);
-    var add = function(v,t){ var o=document.createElement('option'); o.value=v; o.textContent=t||v; sel.appendChild(o); };
-    add('', '-- Select --');
+    var card = findOpacityCard();
+    var dst  = ensurePanelSelect(card);
+    if (!dst){
+      warn(NS, 'panel select not found');
+      return false;
+    }
+    while (dst.firstChild) dst.removeChild(dst.firstChild);
+    var add = function(v,t){ var o=document.createElement('option'); o.value=v; o.textContent=t||v; dst.appendChild(o); };
+    add('','-- Select --');
     for (var i=0;i<materials.length;i++) add(materials[i], materials[i]);
-    sel.value = '';
-    try{ sel.dispatchEvent(new Event('change', {bubbles:true})); }catch(e){}
-    log('materials populated', materials.length);
+    dst.value = '';
+    try { dst.dispatchEvent(new Event('change', {bubbles:true})); } catch(_){}
+    cleanupDiagSelect();
+    log(NS, 'populated into panel select:', materials.length);
     return true;
   }
 
-  // ---------- Hide __LM_* in sheet pickers ----------------------------------
-  function hideMaterialsSheetInPicker(){
-    function HIDE(opt){
-      var txt = ((opt && (opt.textContent || opt.value)) || '').trim();
-      if (!txt) return false;
-      if (txt === '__LM_MATERIALS' || txt.indexOf('__LM_') === 0){ if (opt && opt.parentNode) opt.parentNode.removeChild(opt); return true; }
-      return false;
-    }
-    try{ Array.prototype.forEach.call(document.querySelectorAll('select option'), HIDE); }catch(e){}
-    if (!hideMaterialsSheetInPicker._armed){
-      hideMaterialsSheetInPicker._armed = true;
-      var t = null;
-      try{
-        var mo = new MutationObserver(function(){
-          if (t) clearTimeout(t);
-          t = setTimeout(function(){
-            try{ Array.prototype.forEach.call(document.querySelectorAll('select option'), HIDE); }catch(e){}
-          }, 60);
-        });
-        mo.observe(document.body, {childList:true, subtree:true});
-      }catch(e){}
-    }
-  }
-  hideMaterialsSheetInPicker();
-
-  // ---------- Main populate flow --------------------------------------------
-  function enumerateMaterials(){
-    var list = listMaterialsFromBridge();
-    if (list.length) return list;
-    var scene = getScene();
-    if (!scene) return [];
-    return listMaterialsFromScene(scene);
-  }
-
-  function populateWhenReady(){
-    if (st.populatedOnce) return;
-    var tries = 0, MAX = 40;
-    (function tick(){
-      tries++;
-      var mats = enumerateMaterials();
-      var ok = false;
-      if (mats && mats.length){
-        ok = populatePanelSelect(mats);
-      }
-      if (ok){
-        st.populatedOnce = true;
+  // ---- triggers --------------------------------------------------------------
+  try { window.addEventListener('lm:scene-ready', function(){ setTimeout(populatePanelSelect, 0); }); } catch(_){}
+  try { window.addEventListener('lm:sheet-context', function(){ setTimeout(populatePanelSelect, 0); }); } catch(_){}
+  (function hookTab(){
+    try{
+      var btn = document.querySelector('[data-lm="tab-material"]') || document.querySelector('#tab-material');
+      if (btn){
+        btn.addEventListener('click', function(){ setTimeout(populatePanelSelect, 0); });
         return;
       }
-      if (tries < MAX){
-        setTimeout(tick, 250);
-      }else{
-        warn('[mat-orch-hotfix] materials still empty after retries (non-fatal)');
-      }
-    })();
-  }
+      document.addEventListener('click', function(ev){
+        var t = ev && ev.target;
+        if (!t) return;
+        var txt = (t.textContent||'').trim().toLowerCase();
+        if (txt === 'material') setTimeout(populatePanelSelect, 0);
+      });
+    }catch(_){}
+  })();
 
-  // ---------- Tab activation watcher ----------------------------------------
-  function isMaterialTabActive(){
-    try{
-      var root = getRightPanelRoot();
-      // Look for a tab button that is "Material" and active-ish
-      var tabs = (root && root.querySelectorAll('button, a, [role="tab"]')) || [];
-      for (var i=0;i<tabs.length;i++){
-        var t = (tabs[i].textContent || '').trim().toLowerCase();
-        if (!t) continue;
-        if (t === 'material' || t === 'materials'){
-          // if it looks selected via aria or class
-          if (tabs[i].getAttribute('aria-selected') === 'true') return true;
-          var cls = tabs[i].className || '';
-          if (/\bactive\b/.test(cls)) return true;
-        }
-      }
-    }catch(e){}
-    return false;
-  }
-  function armTabWatcher(){
-    // Re-populate when Material tab becomes active
-    var root = getRightPanelRoot();
-    function handler(){ if (isMaterialTabActive()) populateWhenReady(); }
-    try{
-      root.addEventListener('click', handler, true);
-      root.addEventListener('keydown', function(ev){ var k=(ev.key||'').toLowerCase(); if (k==='enter' || k===' ') handler(); }, true);
-    }catch(e){}
-  }
-  armTabWatcher();
+  // initial retries
+  (function retry(i){
+    if (populatePanelSelect()) return;
+    if (i > 10) return;
+    setTimeout(function(){ retry(i+1); }, 250);
+  })(0);
 
-  // ---------- Scene/model ready bridges -------------------------------------
-  function onScene(){ st.sceneReady = true; populateWhenReady(); }
-  function onModel(){ st.modelReady = true; populateWhenReady(); }
-  window.addEventListener('lm:scene-ready', onScene);
-  document.addEventListener('lm:scene-ready', onScene);
-  window.addEventListener('lm:model-ready', onModel);
-  document.addEventListener('lm:model-ready', onModel);
-
-  // Try immediately as well (in case tab is already active and model ready)
-  setTimeout(populateWhenReady, 0);
+  log(NS, 'loaded VERSION_TAG:V6_12k_PANEL_INJECT');
 })();
