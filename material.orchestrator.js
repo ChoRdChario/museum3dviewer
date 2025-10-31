@@ -1,25 +1,25 @@
-/*! material.orchestrator.js (enum + UI populate robust) */
+/* LociMyu Material Orchestrator
+   VERSION_TAG: V6_12i_ENUM_ON_TAB
+   - Populate material dropdown when the Material tab becomes ACTIVE
+   - Enumerate via viewerBridge.listMaterials() (preferred) or scene traversal fallback
+   - Hide __LM_* sheets from caption sheet pickers
+   - Safe, idempotent; minimal logging
+*/
 (function(){
-  var VER='V6_12h_ENUM_ROBUST_SCAN';
-  var NS='[mat-orch]';
-  function log(){ try{ console.log.apply(console, [NS].concat([].slice.call(arguments))); }catch(e){} }
-  function warn(){ try{ console.warn.apply(console, [NS].concat([].slice.call(arguments))); }catch(e){} }
-  log('loaded VERSION_TAG:'+VER);
+  const NS='[mat-orch]';
+  const log =(…a)=>{ try{ console.log(NS, …a); }catch(_){}};
+  const warn=(…a)=>{ try{ console.warn(NS, …a); }catch(_){}};
+  log('loaded VERSION_TAG:V6_12i_ENUM_ON_TAB');
 
-  var st = (window.__lm_materialState = window.__lm_materialState || {
-    spreadsheetId:null, sheetGid:null, modelKey:null, currentMaterialKey:null
+  // ---------- State ----------------------------------------------------------
+  const st = (window.__lm_materialState = window.__lm_materialState || {
+    populatedOnce:false,
+    lastPopulateAt:0
   });
 
-  function onSheetCtx(ev){
-    var d = (ev && ev.detail) || {};
-    if (d.spreadsheetId) st.spreadsheetId = d.spreadsheetId;
-    if (typeof d.sheetGid!=='undefined') st.sheetGid = d.sheetGid;
-    log('sheet context set', {spreadsheetId:st.spreadsheetId, sheetGid:st.sheetGid});
-  }
-  window.addEventListener('lm:sheet-context', onSheetCtx);
-  document.addEventListener('lm:sheet-context', onSheetCtx);
+  // ---------- Utilities ------------------------------------------------------
+  const sleep = (ms)=> new Promise(r=>setTimeout(r, ms));
 
-  // ---- UI helpers -----------------------------------------------------------
   function getSelect(){
     return document.querySelector('[data-lm="material-select"]')
         || document.querySelector('#lm-material-select')
@@ -28,16 +28,17 @@
         || null;
   }
   function ensureSelect(){
-    var sel = getSelect();
+    let sel = getSelect();
     if (sel) return sel;
-    var box = document.querySelector('[data-lm="material-tab"]')
-           || document.querySelector('#lm-material-tab')
-           || document.querySelector('[data-lm="right-panel"]')
-           || document.querySelector('#right-panel')
-           || document.body;
-    var wrap = document.createElement('div');
+    // Mount under Material tab container if possible
+    const box = document.querySelector('[data-lm="material-tab"]')
+            || document.querySelector('#lm-material-tab')
+            || document.querySelector('[data-lm="right-panel"]')
+            || document.querySelector('#right-panel')
+            || document.body;
+    const wrap = document.createElement('div');
     wrap.style.cssText='margin:6px 0;';
-    var lab = document.createElement('div');
+    const lab = document.createElement('div');
     lab.textContent='Select material';
     lab.style.cssText='font-size:12px;opacity:.7;margin-bottom:4px;';
     sel = document.createElement('select');
@@ -49,85 +50,138 @@
     return sel;
   }
   function fillSelect(values){
-    var sel = ensureSelect();
+    const sel = ensureSelect();
     while (sel.firstChild) sel.removeChild(sel.firstChild);
-    function add(v,t){ var o=document.createElement('option'); o.value=v; o.textContent=t; sel.appendChild(o); }
+    const add=(v,t)=>{ const o=document.createElement('option'); o.value=v; o.textContent=t; sel.appendChild(o); };
     add('', '— Select —');
-    values.forEach(function(v){ add(v,v); });
-    sel.onchange = function(){ st.currentMaterialKey = sel.value; };
+    values.forEach(v=>add(v,v));
     sel.dispatchEvent(new Event('change', {bubbles:true}));
+    log('materials populated', values.length);
   }
 
-  // ---- hide __LM_* in any sheet pickers ------------------------------------
-  (function hideSheetNames(){
-    function hide(opt){
-      try{
-        var txt = (opt.textContent || opt.value || '').trim();
-        if (txt && (txt==='__LM_MATERIALS' || txt.indexOf('__LM_')===0)) opt.remove();
-      }catch(e){}
-    }
-    var mo = new MutationObserver(function(){ document.querySelectorAll('select option').forEach(hide); });
-    mo.observe(document.body, {childList:true, subtree:true});
-    document.addEventListener('DOMContentLoaded', function(){ document.querySelectorAll('select option').forEach(hide); });
-    setTimeout(function(){ document.querySelectorAll('select option').forEach(hide); }, 400);
-  })();
-
-  // ---- materials enumeration ------------------------------------------------
+  // ---------- Enumeration ----------------------------------------------------
   function listFromBridge(){
     try{
-      var b = window.viewerBridge || window.__lm_viewerBridge || window.lm_viewer_bridge;
-      if (b && typeof b.listMaterials==='function'){
-        var arr = b.listMaterials() || [];
+      const b = window.viewerBridge || window.__lm_viewerBridge || window.lm_viewer_bridge;
+      if (b && typeof b.listMaterials === 'function'){
+        const arr = b.listMaterials() || [];
         return Array.isArray(arr) ? arr.slice() : [];
       }
-    }catch(e){}
+    }catch(_){}
     return [];
   }
   function listFromScene(){
-    var scene = (window.__lm_getScene && window.__lm_getScene())
-             || (window.viewerBridge && window.viewerBridge.getScene && window.viewerBridge.getScene())
-             || (window.__lm_viewer && window.__lm_viewer.scene)
-             || (window.viewer && window.viewer.scene)
-             || null;
-    var THREE = window.THREE;
+    // Prefer scene via bridge if available
+    const scene = (window.viewerBridge && window.viewerBridge.getScene && window.viewerBridge.getScene())
+               || (window.__lm_getScene && window.__lm_getScene())
+               || (window.__lm_viewer && window.__lm_viewer.scene)
+               || (window.viewer && window.viewer.scene)
+               || null;
+    const THREE = window.THREE;
     if (!scene || !THREE) return [];
-    function badType(m){
-      var t=(m&&m.type)||'';
-      if (/Depth|Distance|Shadow|Sprite|Shader/.test(t)) return true;
-      return !!(m && (m.isLineBasicMaterial || m.isLineDashedMaterial || m.isPointsMaterial));
-    }
-    var set={};
-    scene.traverse(function(obj){
-      if (obj && (obj.type==='Sprite' || (obj.name && obj.name.indexOf('__LM_')===0) || (obj.userData && obj.userData.__lmOverlay))) return;
-      var mat = obj && obj.material;
-      function push(m){
+    // filter out overlays / non-surface materials
+    const badType = (m)=> /Depth|Distance|Shadow|Sprite|Shader/.test(m?.type||'')
+                      || m?.isLineBasicMaterial || m?.isLineDashedMaterial || m?.isPointsMaterial;
+    const isOverlayObj = (o)=> o?.type==='Sprite' || o?.name?.indexOf?.('__LM_')===0 || o?.userData?.__lmOverlay;
+    const set = new Set();
+    scene.traverse((obj)=>{
+      if (isOverlayObj(obj)) return;
+      const push=(m)=>{
         if (!m || badType(m)) return;
-        var n=(m.name||'').trim();
+        const n=(m.name||'').trim();
         if (!n || /^material\.\d+$/.test(n)) return;
-        set[n]=true;
-      }
+        set.add(n);
+      };
+      const mat=obj.material;
       if (!mat) return;
       if (Array.isArray(mat)) mat.forEach(push); else push(mat);
     });
-    return Object.keys(set);
+    return Array.from(set);
   }
 
-  // ---- populate with retry --------------------------------------------------
-  async function populateWhenReady(){
-    var tries=0, max=60; // ~12s
-    while(tries++<max){
-      var mats = listFromBridge();
-      if (!mats.length) mats = listFromScene();
-      if (mats.length){
-        fillSelect(mats);
-        log('materials populated', mats.length);
-        return;
+  async function populateOnceWithBackoff(maxWaitMs){
+    const deadline = Date.now()+maxWaitMs;
+    let tryBridgeFirst = true;
+    while (Date.now() < deadline){
+      let list = tryBridgeFirst ? listFromBridge() : [];
+      if (!list.length) list = listFromScene();
+      if (list.length){
+        fillSelect(list);
+        st.populatedOnce = true;
+        st.lastPopulateAt = Date.now();
+        return true;
       }
-      await new Promise(function(r){ setTimeout(r, 200); });
-      if (tries===5 || tries===15 || tries===30) warn('[mat-orch-hotfix] materials still empty after retries (non-fatal)');
+      // alternate between bridge/scene every tick
+      tryBridgeFirst = !tryBridgeFirst;
+      await sleep(200);
+    }
+    warn('[mat-orch-hotfix] materials still empty after retries (non-fatal)');
+    return false;
+  }
+
+  // ---------- Tab activation detection --------------------------------------
+  function isMaterialTabActive(){
+    // heuristics: active nav/tab with text 'Material', or panel has aria-selected=true / visible
+    const activeBtn = Array.from(document.querySelectorAll('button, [role="tab"]'))
+      .find(el=>/material/i.test(el.textContent||'') && (el.getAttribute('aria-selected')==='true' || el.classList.contains('active')));
+    if (activeBtn) return true;
+    const panel = document.querySelector('#lm-material-tab,[data-lm="material-tab"]');
+    if (panel){
+      const style = window.getComputedStyle(panel);
+      if (style && style.display!=='none' && style.visibility!=='hidden') return true;
+      if (panel.getAttribute('aria-hidden')==='false') return true;
+    }
+    // fallback: if only one tab UI exists, assume active after 1s
+    return false;
+  }
+
+  async function maybePopulateOnActivation(){
+    // called on tab clicks / mutations
+    if (st.populatedOnce) return;
+    if (!isMaterialTabActive()) return;
+    await populateOnceWithBackoff(12000);
+  }
+
+  function armTabWatchers(){
+    // click handlers on any nav that contains "Material"
+    document.addEventListener('click', (e)=>{
+      const t = e.target;
+      if (!t) return;
+      const label = (t.textContent||'') + ' ' + ((t.closest && t.closest('button,[role="tab"]')||{})?.textContent||'');
+      if (/material/i.test(label)) setTimeout(maybePopulateOnActivation, 10);
+    }, true);
+    // mutation observer to catch programmatic tab switches
+    const mo = new MutationObserver(()=>{
+      if (isMaterialTabActive()) maybePopulateOnActivation();
+    });
+    mo.observe(document.body, { attributes:true, childList:true, subtree:true });
+    // safety: also try once on load (with backoff, but only when tab already active)
+    setTimeout(maybePopulateOnActivation, 300);
+  }
+
+  // ---------- Hide __LM_* from sheet pickers ---------------------------------
+  function hideMaterialsSheetInPicker(){
+    const HIDE = (opt) => {
+      const txt = (opt.textContent || opt.value || '').trim();
+      if (!txt) return false;
+      if (txt === '__LM_MATERIALS' || txt.indexOf('__LM_')===0) { opt.remove(); return true; }
+      return false;
+    };
+    try{ document.querySelectorAll('select option').forEach(HIDE); }catch(_){}
+    if (!hideMaterialsSheetInPicker._armed){
+      hideMaterialsSheetInPicker._armed = true;
+      let t=null;
+      const mo = new MutationObserver(()=>{
+        if (t) clearTimeout(t);
+        t = setTimeout(()=>{
+          try{ document.querySelectorAll('select option').forEach(HIDE); }catch(_){}
+        }, 60);
+      });
+      mo.observe(document.body, { childList:true, subtree:true });
     }
   }
 
-  // kick
-  populateWhenReady();
+  // ---------- Boot -----------------------------------------------------------
+  hideMaterialsSheetInPicker();
+  armTabWatchers();
 })();
