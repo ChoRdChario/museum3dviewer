@@ -1,13 +1,13 @@
+
 /* materials.sheet.bridge.js
- * LociMyu - Materials Sheet Bridge (ensure/create/load/upsert)
- * Requires: window.__lm_fetchJSONAuth(url, init)
- * Listens:  'lm:sheet-context' { spreadsheetId, sheetGid? }
- * Exposes:  window.materialsSheetBridge { ensureSheet, loadAll, upsertOne, config }
+ * LociMyu - Materials Sheet Bridge (create-if-missing / load / upsert one)
+ * Requires:
+ *  - window.__lm_fetchJSONAuth(url, init) (provided by boot)
+ *  - event 'lm:sheet-context' with { spreadsheetId, sheetGid? }
  */
-(() => {
-  const NS='mat-sheet';
-  const log  = (...a)=>console.log(`[${NS}]`, ...a);
-  const warn = (...a)=>console.warn(`[${NS}]`, ...a);
+(function(){
+  const log  = (...a)=>console.log('[mat-sheet]', ...a);
+  const warn = (...a)=>console.warn('[mat-sheet]', ...a);
 
   const SheetTitle = 'materials';
   const Header = [
@@ -27,15 +27,19 @@
     const s=String(x).toLowerCase(); return s==='1'||s==='true'||s==='yes'; }
   function asFloat(x, def=null){ const n=parseFloat(x); return Number.isFinite(n)?n:def; }
 
-  async function fjson(url, init) {
-    if (typeof window.__lm_fetchJSONAuth !== 'function') {
+  function fjson(url, init){
+    if (typeof window.__lm_fetchJSONAuth !== 'function'){
       throw new Error('__lm_fetchJSONAuth missing');
     }
     return window.__lm_fetchJSONAuth(url, init);
   }
 
-  const gv = (base, params) => `${base}?${new URLSearchParams(params||{}).toString()}`;
+  function gv(base, params){
+    const usp = new URLSearchParams(params);
+    return `${base}?${usp.toString()}`;
+  }
 
+  // ===== Sheet ensure =====
   async function ensureSheet(){
     if (!S.spreadsheetId) throw new Error('spreadsheetId missing');
     const meta = await fjson(gv(`https://sheets.googleapis.com/v4/spreadsheets/${S.spreadsheetId}`, {
@@ -51,7 +55,7 @@
         body: JSON.stringify({ requests: [{ addSheet: { properties: { title: S.title } } }] })
       });
       target = (res?.replies?.[0]?.addSheet) || null;
-      console.log('sheet created:', S.title);
+      log('sheet created:', S.title);
     }
     S.sheetId = target?.properties?.sheetId;
 
@@ -62,12 +66,17 @@
     if (!same){
       await fjson(gv(`https://sheets.googleapis.com/v4/spreadsheets/${S.spreadsheetId}/values/${encodeURIComponent(S.title+'!1:1')}`, {
         valueInputOption:'RAW'
-      }), { method:'PUT', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ values:[Header] }) });
-      console.log('header initialized for', S.title);
+      }), {
+        method:'PUT',
+        headers:{ 'Content-Type':'application/json' },
+        body: JSON.stringify({ values:[Header] })
+      });
+      log('header initialized for', S.title);
     }
     S.headerReady = true;
   }
 
+  // ===== Load all -> map by materialKey =====
   async function loadAll(){
     await ensureSheet();
     const res = await fjson(gv(`https://sheets.googleapis.com/v4/spreadsheets/${S.spreadsheetId}/values/${encodeURIComponent(S.title+'!A2:J')}`, {}), { method:'GET' });
@@ -94,8 +103,10 @@
     return map;
   }
 
+  // ===== Upsert one (by materialKey) =====
   async function upsertOne(item){
     await ensureSheet();
+    // find existing rowIndex by reading materialKey column
     const rangeAll = `${S.title}!A2:A`;
     const res = await fjson(gv(`https://sheets.googleapis.com/v4/spreadsheets/${S.spreadsheetId}/values/${encodeURIComponent(rangeAll)}`, {}), { method:'GET' });
     const keys = (res?.values || []).map(v=>v[0]);
@@ -119,22 +130,34 @@
       const range = `${S.title}!A${rowNum}:J${rowNum}`;
       await fjson(gv(`https://sheets.googleapis.com/v4/spreadsheets/${S.spreadsheetId}/values/${encodeURIComponent(range)}`, {
         valueInputOption:'RAW'
-      }), { method:'PUT', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ values: [row] }) });
-      console.log('updated row', rowNum, item.materialKey);
+      }), {
+        method:'PUT',
+        headers:{ 'Content-Type':'application/json' },
+        body: JSON.stringify({ values: [row] })
+      });
+      log('updated row', rowNum, item.materialKey);
     } else {
       await fjson(gv(`https://sheets.googleapis.com/v4/spreadsheets/${S.spreadsheetId}/values/${encodeURIComponent(S.title+'!A:J')}`, {
-        valueInputOption:'RAW', insertDataOption:'INSERT_ROWS'
-      }), { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ values: [row], majorDimension: 'ROWS' }) });
-      console.log('appended', item.materialKey);
+        valueInputOption:'RAW',
+        insertDataOption:'INSERT_ROWS'
+      }), {
+        method:'POST',
+        headers:{ 'Content-Type':'application/json' },
+        body: JSON.stringify({ values: [row], majorDimension: 'ROWS' })
+      });
+      log('appended', item.materialKey);
     }
   }
 
+  // ===== Listen sheet-context =====
   window.addEventListener('lm:sheet-context', (ev)=>{
     const d = ev?.detail || ev;
     if (!d?.spreadsheetId) { warn('sheet-context missing spreadsheetId'); return; }
     S.spreadsheetId = d.spreadsheetId;
-    console.log('[mat-sheet] sheet-context bound:', S.spreadsheetId);
+    log('sheet-context bound:', S.spreadsheetId);
   }, { once:false });
 
-  window.materialsSheetBridge = { ensureSheet, loadAll, upsertOne, config: S };
+  window.materialsSheetBridge = {
+    ensureSheet, loadAll, upsertOne, config: S,
+  };
 })();

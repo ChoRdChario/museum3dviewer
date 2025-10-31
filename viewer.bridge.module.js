@@ -1,92 +1,77 @@
-/**
- * viewer.bridge.module.js
- * Provide a stable external bridge to the viewer's three.js Scene and materials.
- * - Exposes: window.viewerBridge.getScene(), listMaterials()
- * - Emits:   window 'lm:scene-ready' when a non-empty scene stabilizes
+
+/* viewer.bridge.module.js
+ * LociMyu - Viewer Bridge (scene access + material listing + stability poll)
+ * Provides:
+ *   - window.viewerBridge.getScene(): THREE.Scene | null
+ *   - window.viewerBridge.listMaterials(): string[]
+ * Emits:
+ *   - window 'lm:scene-ready' when scene is stable (as a safety)
  */
-(() => {
-  const VBNS = 'viewer-bridge';
-  const log  = (...a)=>console.log(`[${VBNS}]`, ...a);
-  const warn = (...a)=>console.warn(`[${VBNS}]`, ...a);
+(function(){
+  const log  = (...a)=>console.log('[viewer-bridge]', ...a);
+  const warn = (...a)=>console.warn('[viewer-bridge]', ...a);
 
-  const vb = (window.viewerBridge = window.viewerBridge || {});
-  vb.__scene = vb.__scene || null;
+  if (!window.viewerBridge) window.viewerBridge = {};
+  const vb = window.viewerBridge;
 
-  function firstSceneCandidate() {
-    if (vb.__scene)                 return vb.__scene;
-    if (window.__LM_SCENE)          return window.__LM_SCENE;
-    if (window.__viewer?.scene)     return window.__viewer.scene;
-    if (window.viewer?.scene)       return window.viewer.scene;
-    if (window.lm?.scene)           return window.lm.scene;
+  function pickSceneCandidate(){
+    try {
+      if (vb.__scene && typeof vb.__scene === 'object') return vb.__scene;
+    } catch(e){}
+    try {
+      if (typeof vb.getScene === 'function') {
+        const s = vb.getScene();
+        if (s) return s;
+      }
+    } catch(e){}
+    if (window.__LM_SCENE) return window.__LM_SCENE;
+    if (window.__viewer?.scene) return window.__viewer.scene;
+    if (window.viewer?.scene)   return window.viewer.scene;
+    if (window.lm?.scene)       return window.lm.scene;
     return null;
   }
 
-  // stable getters
-  if (typeof vb.getScene !== 'function') {
-    vb.getScene = () => (vb.__scene || firstSceneCandidate());
-  }
-
-  if (typeof vb.listMaterials !== 'function') {
-    vb.listMaterials = () => {
-      const scene = vb.getScene();
-      const set = new Set();
-      scene?.traverse(o => {
-        const m = o.material;
-        if (!m) return;
-        (Array.isArray(m) ? m : [m]).forEach(mm => {
-          if (mm && mm.name) set.add(mm.name);
-        });
-      });
-      return Array.from(set);
-    };
-  }
-
-  // cache any incoming scene-ready
-  const cacheSceneFromDetail = (ev) => {
-    const sc = ev?.detail?.scene;
-    if (sc && sc !== vb.__scene) {
-      vb.__scene = sc;
-      log('scene cached from lm:scene-ready');
-    }
+  vb.getScene = function(){
+    const s = pickSceneCandidate();
+    if (s) vb.__scene = s;
+    return s;
   };
-  window.addEventListener('lm:scene-ready', cacheSceneFromDetail);
-  document.addEventListener('lm:scene-ready', cacheSceneFromDetail);
 
-  // Poll until the scene stabilizes (meshes count stops changing).
+  vb.listMaterials = function(){
+    const sc = vb.getScene();
+    const set = new Set();
+    if (!sc) return [];
+    try {
+      sc.traverse(o => {
+        const m = o.material; if (!m) return;
+        (Array.isArray(m)?m:[m]).forEach(mm => { if (mm?.name) set.add(mm.name); });
+      });
+    } catch(e){ warn('traverse failed', e); }
+    return Array.from(set);
+  };
+
+  // Safety: poll until scene has a stable mesh count and fire lm:scene-ready
   (function pollSceneUntilReady(){
-    let lastCount = -1;
-    let stable = 0;
-    let fired = false;
-    const maxMs = 30000;
-    const start = Date.now();
-
+    let last = -1, stable = 0;
     const iv = setInterval(() => {
-      const sc = firstSceneCandidate();
-      if (sc) vb.__scene = sc;
-
+      const sc = vb.getScene();
+      if (!sc) return;
       let cnt = 0;
-      (vb.__scene || sc)?.traverse(o => { if (o.isMesh) cnt++; });
-
-      if (cnt > 0 && cnt === lastCount) {
+      sc.traverse(o => { if (o && o.isMesh) cnt++; });
+      if (cnt > 0 && cnt === last) {
         stable++;
+        if (stable >= 3) {
+          clearInterval(iv);
+          log('scene stabilized with', cnt, 'meshes');
+          try { window.dispatchEvent(new CustomEvent('lm:scene-ready', { detail:{ from:'bridge-poll', meshCount: cnt } })); } catch(e){}
+        }
       } else {
         stable = 0;
       }
-      lastCount = cnt;
-
-      if (!fired && cnt > 0 && stable >= 3) {
-        fired = true;
-        clearInterval(iv);
-        try {
-          window.dispatchEvent(new CustomEvent('lm:scene-ready', { detail: { from: 'bridge-poll', meshCount: cnt, scene: vb.__scene || sc } }));
-          log('lm:scene-ready dispatched (bridge-poll), meshes=', cnt);
-        } catch(e) { warn('dispatch failed', e); }
-      }
-
-      if (Date.now() - start > maxMs) {
-        clearInterval(iv);
-        if (!fired) warn('scene did not stabilize within timeout');
-      }
+      last = cnt;
     }, 300);
+    setTimeout(() => clearInterval(iv), 30000);
   })();
+
+  log('bridge installed');
 })();
