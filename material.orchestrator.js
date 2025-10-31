@@ -1,199 +1,199 @@
-/* LociMyu Material Orchestrator (panel-targeted)
- * VERSION_TAG: V6_12m_PANEL_INJECT_APPLY
- * - Enumerate materials via viewerBridge.listMaterials() (preferred).
- * - Populate the existing select in the "Per‑material opacity" card.
- * - Remove stray debug select (#lm-material-select) if it exists outside the panel.
- * - Wire the slider to apply opacity directly to the scene (fallback when app handlers don't).
- * - Re-run safely on scene ready, sheet context, and material tab activation.
- */
+
+// LociMyu Material Orchestrator - Panel Inject & Apply (V6_12n)
+// See chat for details.
 (function(){
   const NS='[mat-orch]';
-  const log =( ...a)=>console.log(NS, ...a);
-  const warn=( ...a)=>console.warn(NS, ...a);
+  const log=(...a)=>console.log(NS, ...a);
+  const warn=(...a)=>console.warn(NS, ...a);
 
-  // --- helpers ---------------------------------------------------------------
-  function getRightPanel(){
+  function listFromBridge(){
+    try{
+      const b = window.viewerBridge || window.__lm_viewerBridge || window.lm_viewer_bridge;
+      if (b && typeof b.listMaterials==='function'){
+        const arr = b.listMaterials() || [];
+        return Array.isArray(arr) ? arr.slice() : [];
+      }
+    }catch(_){}
+    return [];
+  }
+
+  function listFromScene(){
+    const getScene = ()=>
+      (window.viewerBridge && typeof window.viewerBridge.getScene==='function' && window.viewerBridge.getScene())
+      || (window.__lm_getScene && window.__lm_getScene())
+      || (window.__lm_viewer && window.__lm_viewer.scene)
+      || (window.viewer && window.viewer.scene)
+      || null;
+    const scene = getScene();
+    const THREE = window.THREE;
+    if (!scene || !THREE) return [];
+    const badType = (m)=> /Depth|Distance|Shadow|Sprite|Shader/.test(m?.type||'')
+      || m?.isLineBasicMaterial || m?.isLineDashedMaterial || m?.isPointsMaterial;
+    const isOverlayObj = (o)=> o?.type==='Sprite' || o?.name?.startsWith?.('__LM_') || o?.userData?.__lmOverlay;
+    const set = new Set();
+    scene.traverse((obj)=>{
+      if (isOverlayObj(obj)) return;
+      const mat = obj.material;
+      const push = (m)=>{
+        if (!m || badType(m)) return;
+        const n = (m.name||'').trim();
+        if (!n) return;
+        set.add(n);
+      };
+      if (Array.isArray(mat)) mat.forEach(push); else push(mat);
+    });
+    return [...set];
+  }
+
+  function getMaterials(){
+    const a = listFromBridge();
+    if (a.length) return a;
+    const b = listFromScene();
+    return b;
+  }
+
+  function rightPanel(){
     return document.querySelector('[data-lm="right-panel"]')
         || document.querySelector('#right-panel')
         || document.querySelector('#panel')
         || document.body;
   }
-  function getMaterialSection(){
-    const root = getRightPanel();
+  function materialSection(){
+    const root = rightPanel();
     const cands = [
       root.querySelector('[data-lm="material-tab"]'),
       root.querySelector('#lm-material-tab'),
       root.querySelector('#tab-material'),
       root
     ];
-    for (const el of cands) if (el) return el;
+    for (const n of cands) if (n) return n;
     return root;
   }
-  function getOpacityCard(){
-    const box = getMaterialSection();
-    // The card that contains label like "Per-material opacity"
-    const cards = box.querySelectorAll('div');
-    for (const c of cards){
-      const t = (c.textContent||'').toLowerCase();
-      if (t.includes('per-material opacity') || t.includes('per material opacity')) return c;
+  function perMaterialOpacityCard(){
+    const box = materialSection();
+    const blocks = box.querySelectorAll('section, div, fieldset');
+    for (const el of blocks){
+      const t = (el.textContent||'').toLowerCase();
+      if ((t.includes('per-material opacity') || t.includes('saved per sheet')) &&
+          el.querySelector('input[type="range"]')) return el;
     }
-    // fallback: first fieldset-like block
+    for (const el of blocks){
+      if (el.querySelector('input[type="range"]')) return el;
+    }
     return box;
   }
   function findPanelSelect(){
-    const card = getOpacityCard();
-    // Prefer specifically named hooks if present
-    let sel = card.querySelector('[data-lm="material-select"]')
-           || card.querySelector('#material-select')
-           || card.querySelector('select[name="material"]')
-           || card.querySelector('select');
-    return sel || null;
+    const card = perMaterialOpacityCard();
+    let sel = card.querySelector('select:not(#lm-material-select)');
+    if (sel) return sel;
+    const box = materialSection();
+    const all = box.querySelectorAll('select');
+    for (const s of all){ if (s.id!=='lm-material-select') return s; }
+    return null;
   }
-  function findPanelSlider(){
-    const card = getOpacityCard();
-    // The first range input inside the opacity card
-    const r = card.querySelector('input[type="range"]');
-    return r || null;
+  function findOpacitySlider(){
+    const card = perMaterialOpacityCard();
+    return card.querySelector('input[type="range"]');
   }
-  function removeStrayDebugSelect(){
-    const dbg = document.getElementById('lm-material-select');
+  function cleanupDebugSelect(){
+    const dbg = document.querySelector('#lm-material-select');
     if (!dbg) return;
-    const panel = getMaterialSection();
-    if (!panel.contains(dbg)) {
-      dbg.remove();
-      log('removed stray debug select');
-    }
+    const panel = materialSection();
+    if (!panel.contains(dbg)) dbg.remove();
   }
 
-  // --- materials enumeration -------------------------------------------------
-  function listMaterials(){
-    try{
-      const b = window.viewerBridge || window.__lm_viewerBridge || window.lm_viewer_bridge;
-      if (b && typeof b.listMaterials==='function'){
-        const arr = b.listMaterials() || [];
-        if (Array.isArray(arr)) return arr.slice();
-      }
-    }catch(_){}
-    // As a fallback, traverse scene and collect material names (excluding placeholders)
-    const scene = (window.viewerBridge && window.viewerBridge.getScene && window.viewerBridge.getScene())
-               || (window.__lm_getScene && window.__lm_getScene())
-               || (window.__lm_viewer && window.__lm_viewer.scene)
-               || (window.viewer && window.viewer.scene)
-               || null;
-    const THREE = window.THREE;
-    if (!scene || !THREE) return [];
-    const badType = (m)=>/Depth|Distance|Shadow|Sprite|Shader/.test(m?.type||'') || m?.isLineBasicMaterial || m?.isLineDashedMaterial || m?.isPointsMaterial;
-    const set = new Set();
-    scene.traverse((obj)=>{
-      const mat = obj && obj.material;
-      const push = (m)=>{
-        if (!m || badType(m)) return;
-        const n = (m.name||'').trim();
-        if (!n || /^material\.\d+$/.test(n)) return;
-        set.add(n);
-      };
-      if (!mat) return;
-      if (Array.isArray(mat)) mat.forEach(push); else push(mat);
-    });
-    return [...set];
-  }
-
-  // --- populate & wire -------------------------------------------------------
-  function populatePanelSelect(){
-    const sel = findPanelSelect();
-    if (!sel){ warn('panel select not found'); return false; }
-    const materials = listMaterials();
-    if (!materials.length){ warn('[mat-orch-hotfix] materials still empty after retries (non-fatal)'); return false; }
-
-    // clear and fill
-    while (sel.firstChild) sel.removeChild(sel.firstChild);
-    const add=(v,t)=>{ const o=document.createElement('option'); o.value=v; o.textContent=t||v; sel.appendChild(o); };
+  function populateIntoPanelSelect(materials){
+    let dst = findPanelSelect();
+    if (!dst) { warn('panel select not found'); return false; }
+    while (dst.firstChild) dst.removeChild(dst.firstChild);
+    const add=(v,t)=>{ const o=document.createElement('option'); o.value=v; o.textContent=t||v; dst.appendChild(o); };
     add('','-- Select --');
-    materials.forEach((m)=>add(m,m));
-    sel.value='';
-    sel.dispatchEvent(new Event('change', {bubbles:true}));
-
+    materials.forEach(m=>add(m,m));
+    dst.value='';
+    dst.dispatchEvent(new Event('change', {bubbles:true}));
     log('populated into panel select:', materials.length);
     return true;
   }
 
-  // direct scene application (fallback when the host app doesn't react)
   function getScene(){
-    return (window.viewerBridge && window.viewerBridge.getScene && window.viewerBridge.getScene())
+    return (window.viewerBridge && typeof window.viewerBridge.getScene==='function' && window.viewerBridge.getScene())
         || (window.__lm_getScene && window.__lm_getScene())
         || (window.__lm_viewer && window.__lm_viewer.scene)
         || (window.viewer && window.viewer.scene)
         || null;
   }
-  function applyOpacityToScene(name, alpha){
+  function setOpacityFor(name, alpha){
     const scene = getScene();
-    if (!scene || !name) return;
-    const clamp = (v)=>Math.max(0, Math.min(1, Number(v)||0));
-    const a = clamp(alpha);
+    if (!scene) return;
     scene.traverse((obj)=>{
-      let mat = obj && obj.material;
-      const set = (m)=>{
-        if (!m || (m.name||'')!==name) return;
-        if (typeof m.opacity==='number'){
-          m.transparent = a < 1 ? true : m.transparent;
-          m.opacity = a;
-          m.needsUpdate = true;
-        }
+      const mat = obj.material;
+      const apply = (m)=>{
+        if (!m) return;
+        const n = (m.name||'').trim();
+        if (n !== name) return;
+        if (typeof m.transparent==='boolean') m.transparent = (alpha < 1.0) || m.transparent;
+        if ('opacity' in m) m.opacity = alpha;
+        if (typeof m.needsUpdate!=='undefined') m.needsUpdate = true;
       };
-      if (!mat) return;
-      if (Array.isArray(mat)) mat.forEach(set); else set(mat);
+      if (Array.isArray(mat)) mat.forEach(apply); else apply(mat);
     });
   }
-
-  function wireSlider(){
+  function wireSliderToApply(){
     const sel = findPanelSelect();
-    const slider = findPanelSlider();
-    if (!sel || !slider) return;
-    // avoid duplicate wiring
-    if (slider.__lm_mat_wired) return;
-    slider.__lm_mat_wired = true;
+    const slider = findOpacitySlider();
+    if (!sel || !slider) { warn('apply wire: select or slider missing'); return; }
+    if (slider.__lm_wired) return;
     slider.addEventListener('input', ()=>{
-      // if host app has its own handler, it will run too; this is a safe fallback
       const name = sel.value;
-      const val = parseFloat(slider.value);
-      applyOpacityToScene(name, val);
+      if (!name) return;
+      const alpha = parseFloat(slider.value);
+      if (!isFinite(alpha)) return;
+      setOpacityFor(name, alpha);
     });
+    slider.__lm_wired = true;
+    log('slider wired for apply');
   }
 
-  // --- runners & event hooks -------------------------------------------------
-  let armed = false;
-  function arm(){
-    if (armed) return;
-    armed = true;
-
-    // try immediately and then lazy retries
-    const start = Date.now();
-    const tryFill = ()=>{
-      removeStrayDebugSelect();
-      populatePanelSelect();
-      wireSlider();
-      // throttle retries for ~2s while scene gets ready
-      if (Date.now()-start < 2000){
-        setTimeout(tryFill, 150);
-      }
-    };
-    tryFill();
-
-    // tab activation (click on "Material")
-    const tabRoot = getRightPanel();
-    tabRoot.addEventListener('click', (ev)=>{
-      const t = (ev.target && (ev.target.textContent||'').toLowerCase()) || '';
-      if (t.includes('material')){
-        setTimeout(()=>{ removeStrayDebugSelect(); populatePanelSelect(); wireSlider(); }, 0);
-      }
-    });
-
-    // app-specific custom events (if present)
-    window.addEventListener('lm:scene-ready', ()=>{ setTimeout(()=>{ removeStrayDebugSelect(); populatePanelSelect(); wireSlider(); }, 0); });
-    window.addEventListener('lm:sheet-context', ()=>{ setTimeout(()=>{ populatePanelSelect(); }, 0); });
+  let populatedOnce = false;
+  function tryPopulate(){
+    const mats = getMaterials();
+    if (!mats.length){ warn('[mat-orch-hotfix] materials still empty (non-fatal)'); return false; }
+    const ok = populateIntoPanelSelect(mats);
+    if (ok){ populatedOnce = true; cleanupDebugSelect(); wireSliderToApply(); }
+    return ok;
   }
 
-  // boot
-  log('loaded VERSION_TAG:V6_12m_PANEL_INJECT_APPLY');
-  arm();
+  function whenDomReady(fn){
+    if (document.readyState === 'complete' || document.readyState === 'interactive') fn();
+    else document.addEventListener('DOMContentLoaded', fn, {once:true});
+  }
+  function armObserver(){
+    const panel = rightPanel();
+    const obs = new MutationObserver(()=>{ tryPopulate(); });
+    obs.observe(panel, {subtree:true, childList:true});
+    const stop = setInterval(()=>{
+      if (populatedOnce){ obs.disconnect(); clearInterval(stop); }
+    }, 500);
+  }
+  function armTabHook(){
+    const tabs = document.querySelectorAll('button, a');
+    for (const t of tabs){
+      const text = (t.textContent||'').trim().toLowerCase();
+      if (!text) continue;
+      if (text === 'material' || text === 'materials'){
+        if (t.__lm_tab_hooked) continue;
+        t.addEventListener('click', ()=> setTimeout(tryPopulate, 60));
+        t.__lm_tab_hooked = true;
+      }
+    }
+  }
+
+  log('loaded VERSION_TAG:V6_12n_PANEL_INJECT_APPLY');
+  whenDomReady(()=>{
+    armTabHook();
+    setTimeout(tryPopulate, 0);
+    setTimeout(tryPopulate, 150);
+    setTimeout(tryPopulate, 400);
+    armObserver();
+  });
 })();
