@@ -267,17 +267,13 @@
 <!-- Event bridge: emit lm:sheet-context / lm:sheet-changed (Approach A) -->
 <script defer="" src="./sheet.ctx.bridge.js"></script>
 <!-- Keep existing modules (they listen to our custom events if needed) -->
-
-
+<script src="./viewer.bridge.module.js" type="module"></script>
+<script src="./material.orchestrator.js" type="module"></script>
 
     <!-- LociMyu material bridge stack -->
-    
-    
-    
-
-
-<script type="module" src="./viewer.bridge.module.js?v=V6_15b"></script>
-<script type="module" src="./materials.sheet.bridge.js?v=V6_14_append"></script>
-<script type="module" src="./material.orchestrator.js?v=V6_15b"></script>
+    <!-- LociMyu: scene bridge + sheet bridge + orchestrator (order matters) -->
+    <script type="module" src="./viewer.bridge.module.js"></script>
+    <script type="module" src="./materials.sheet.bridge.js"></script>
+    <script type="module" src="./material.orchestrator.js"></script>
 </body>
 </html>

@@ -1,50 +1,51 @@
-// viewer.bridge.module.js
+
+/* viewer.bridge.module.js
+ * Provide viewerBridge.getScene/listMaterials and stabilize scene-ready
+ */
 (function(){
-  const log=(...a)=>console.log('[viewer-bridge]',...a), warn=(...a)=>console.warn('[viewer-bridge]',...a);
-  const vb = window.viewerBridge || (window.viewerBridge = {});
+  const log  = (...a)=>console.log('[viewer-bridge]', ...a);
+  const warn = (...a)=>console.warn('[viewer-bridge]', ...a);
 
-  function pickScene(){
-    if (vb.__scene?.isScene) return vb.__scene;
-    if (window.__LM_SCENE?.isScene) return window.__LM_SCENE;
-    if (window.__viewer?.scene?.isScene) return window.__viewer.scene;
-    if (window.viewer?.scene?.isScene) return window.viewer.scene;
-    if (window.lm?.scene?.isScene) return window.lm.scene;
-    return null;
+  const vb = window.viewerBridge = window.viewerBridge || {};
+
+  function getSceneCandidate(){
+    return window.__LM_SCENE || window.__viewer?.scene || window.viewer?.scene || window.lm?.scene || null;
   }
+  vb.getScene = vb.getScene || (()=>{
+    try{ return getSceneCandidate(); }catch(e){ warn(e); return null; }
+  });
+  vb.listMaterials = vb.listMaterials || (()=>{
+    const sc = vb.getScene();
+    const set = new Set();
+    sc?.traverse(o=>{
+      const m=o.material; if(!m) return;
+      (Array.isArray(m)?m:[m]).forEach(mm=>{ if(mm?.name) set.add(mm.name); });
+    });
+    return Array.from(set);
+  });
 
-  if (typeof vb.getScene !== 'function') {
-    vb.getScene = () => {
-      const s = pickScene();
-      if (s) vb.__scene = s;
-      return s;
-    };
-  }
-
-  if (typeof vb.listMaterials !== 'function') {
-    vb.listMaterials = () => {
-      const sc = vb.getScene();
-      const set = new Set();
-      sc?.traverse(o=>{
-        const m=o.material; if(!m) return;
-        (Array.isArray(m)?m:[m]).forEach(mm=>{ if(mm?.name) set.add(mm.name); });
-      });
-      return Array.from(set);
-    };
-  }
-
-  (function pollStable(){
-    let prev= -1, stable=0;
+  // poll until mesh count stabilizes, then notify
+  (function pollSceneUntilReady(){
+    let last= -1, stable=0, count=0;
     const iv = setInterval(()=>{
-      const sc = vb.getScene(); if(!sc) return;
-      let count=0; sc.traverse(o=>{ if (o.isMesh) count++; });
-      if (count>0 && count===prev) stable++; else stable=0;
-      prev=count;
-      if (stable>=3){
-        window.dispatchEvent(new CustomEvent('lm:scene-ready', {detail:{from:'bridge-poll', meshCount:count}}));
-        log('scene stabilized with', count, 'meshes');
-        clearInterval(iv);
+      const sc = vb.getScene();
+      if (!sc) return;
+      count = 0;
+      sc.traverse(o=>{ if (o.isMesh) count++; });
+      if (count>0 && count===last) {
+        stable++;
+        if (stable>=3){
+          log('scene stabilized with', count, 'meshes');
+          try{
+            window.dispatchEvent(new CustomEvent('lm:scene-ready', {detail:{from:'poll-stable', meshCount:count}}));
+          }catch(e){ warn('dispatch failed', e); }
+          clearInterval(iv);
+        }
+      } else {
+        stable=0;
       }
-    },300);
-    setTimeout(()=>clearInterval(iv),30000);
+      last = count;
+    }, 300);
+    setTimeout(()=>clearInterval(iv), 30000);
   })();
 })();
