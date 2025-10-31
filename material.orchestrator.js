@@ -1,152 +1,218 @@
-/* LociMyu material.orchestrator.js (permanent fix)
- * VERSION_TAG: V6_12p_PANEL_PM_BIND
- * - Prefer the in-panel select #pm-material
- * - Populate material names via viewerBridge.listMaterials()
- * - Bind the nearest opacity slider to the select (no duplicate handlers)
- * - Robust retries with MutationObserver + interval, low-noise logging
+/* material.orchestrator.js
+ * LociMyu - Material UI Orchestrator (P0: persist + perf)
+ * 前提:
+ *  - viewerBridge.listMaterials(): string[] (material.name 列挙)
+ *  - viewerBridge.getScene(): THREE.Scene
+ *  - materialsSheetBridge.loadAll()/upsertOne() 利用可（①で追加）
+ *  - 右パネルの中段カード: select#pm-material, 近傍 range スライダ
  */
-(()=>{
-  const TAG = 'mat-orch';
-  const log  = (...a)=>console.log(`[${TAG}]`, ...a);
-  const warn = (...a)=>console.warn(`[${TAG}]`, ...a);
+(function(){
+  const log  = (...a)=>console.log('[mat-orch]', ...a);
+  const warn = (...a)=>console.warn('[mat-orch]', ...a);
 
-  // --- helpers ---------------------------------------------------------------
-  function listMaterials(){
-    try{
-      const b = window.viewerBridge;
-      if (b && typeof b.listMaterials === 'function') {
-        const arr = b.listMaterials() || [];
-        if (Array.isArray(arr) && arr.length) return arr.slice();
-      }
-    }catch(e){/*ignore*/}
-    return [];
+  const VERSION_TAG = 'V6_13_P0_PERSIST_APPLY';
+  log('loaded VERSION_TAG:', VERSION_TAG);
+
+  // ==== State ====
+  const ST = {
+    spreadsheetId: null,
+    materialNames: [],               // from viewerBridge
+    matCacheByName: new Map(),       // name -> Material[]（初回 traverse で構築）
+    applyQueue: null,                // rAF キュー
+    saveTimer: null,                 // debounce
+    lastSel: '',                     // last selected material name
+  };
+
+  // ==== Event wiring ====
+  window.addEventListener('lm:sheet-context', (ev)=>{
+    const d = ev?.detail || ev;
+    if (d?.spreadsheetId) {
+      ST.spreadsheetId = d.spreadsheetId;
+      log('sheet-context captured', ST.spreadsheetId);
+    }
+  });
+
+  // ==== DOM helpers ====
+  function $(s,root=document){ return root.querySelector(s); }
+  function nearestSlider(from){
+    let p = from.closest('section,fieldset,div') || from.parentElement;
+    while (p){ const r = p.querySelector('input[type="range"]'); if (r) return r; p=p.parentElement; }
+    return document.querySelector('[data-lm="right-panel"] input[type="range"]') || $('input[type="range"]');
   }
 
+  // ==== Bridge helpers ====
+  function listMaterials(){
+    try{ const b=window.viewerBridge; if (b?.listMaterials){ const arr=b.listMaterials()||[]; if (arr.length) return arr.slice(); } }catch(e){}
+    return [];
+  }
   function getScene(){
-    const b = window.viewerBridge;
-    if (b && typeof b.getScene === 'function') { try { return b.getScene(); } catch(e){} }
+    const b=window.viewerBridge;
+    if (b?.getScene){ try{ return b.getScene(); }catch(e){} }
     return window.__viewer?.scene || window.viewer?.scene || window.lm?.scene || null;
   }
 
-  function applyOpacityByName(name, alpha){
-    const scene = getScene();
-    if (!scene || !name) return false;
-    let hit = 0;
+  // ==== Cache build (name -> material instances[]) ====
+  function buildCacheOnce(){
+    if (ST.matCacheByName.size) return;
+    const scene = getScene(); if (!scene) return;
+    const map = ST.matCacheByName;
     scene.traverse(o=>{
-      const m = o.material; if(!m) return;
+      const m = o.material; if (!m) return;
       (Array.isArray(m)?m:[m]).forEach(mm=>{
-        if (mm && mm.name === name){
-          mm.transparent = alpha < 1 ? true : mm.transparent;
-          mm.opacity = alpha;
-          mm.needsUpdate = true;
-          hit++;
-        }
+        const name = mm?.name || '';
+        if (!name) return;
+        const arr = map.get(name) || [];
+        arr.push(mm);
+        map.set(name, arr);
       });
     });
-    if (hit) log(`opacity ${alpha.toFixed(2)} → "${name}" x${hit}`);
+    log('cache built (names):', map.size);
+  }
+
+  // ==== Apply opacity by name (rAF-coalesced) ====
+  function _applyOpacityNow(name, alpha){
+    const arr = ST.matCacheByName.get(name);
+    if (!arr || !arr.length) return false;
+    let hit=0;
+    for (const mm of arr){
+      if (!mm) continue;
+      mm.transparent = alpha < 1 ? true : mm.transparent;
+      mm.opacity = alpha;
+      mm.needsUpdate = true;
+      hit++;
+    }
     return !!hit;
   }
-
-  // Prefer the real panel select first
-  function getPanelSelect(){
-    const panel = document.querySelector('[data-lm="right-panel"]') || document;
-    return (
-      document.getElementById('pm-material') ||
-      panel.querySelector('[data-lm="material-select"]') ||
-      panel.querySelector('select[name="material"]') ||
-      panel.querySelector('select') ||
-      null
-    );
+  function applyOpacity(name, alpha){
+    if (!name) return;
+    if (ST.applyQueue) cancelAnimationFrame(ST.applyQueue);
+    ST.applyQueue = requestAnimationFrame(()=>{
+      buildCacheOnce();
+      const ok = _applyOpacityNow(name, alpha);
+      if (!ok) warn('apply miss (name not cached yet?):', name);
+    });
   }
 
-  function nearestSlider(from){
-    if (!from) return null;
-    let p = from.closest('section,fieldset,div') || from.parentElement;
-    while (p){
-      const r = p.querySelector('input[type="range"]');
-      if (r) return r;
-      p = p.parentElement;
-    }
-    const panel = document.querySelector('[data-lm="right-panel"]') || document;
-    return panel.querySelector('input[type="range"]');
+  // ==== Save (debounce) ====
+  function debounceSave(materialName, patch){
+    if (!ST.spreadsheetId || !window.materialsSheetBridge) return;
+    if (ST.saveTimer) clearTimeout(ST.saveTimer);
+    ST.saveTimer = setTimeout(async ()=>{
+      try{
+        const item = {
+          materialKey: materialName,           // P0は name をキー（次フェーズで安定IDに）
+          name: materialName,
+          opacity: patch.opacity,
+          unlit: !!patch.unlit,
+          doubleSided: !!patch.doubleSided,
+          chromaColor: patch.chromaColor||'',
+          chromaThreshold: patch.chromaThreshold ?? null,
+          chromaFeather: patch.chromaFeather ?? null,
+          updatedAt: new Date().toISOString(),
+          updatedBy: (window.__lm_userEmail || '') // 任意
+        };
+        await window.materialsSheetBridge.upsertOne(item);
+        log('saved', materialName, item);
+      }catch(e){ warn('save failed', e); }
+    }, 250);
   }
 
-  function populateSelect(sel, names){
-    if (!sel) return false;
-    const prev = sel.value;
+  // ==== Load & apply persisted values ====
+  async function loadAndApplyAll(){
+    if (!ST.spreadsheetId || !window.materialsSheetBridge) return;
+    try{
+      const map = await window.materialsSheetBridge.loadAll();
+      if (!map || !map.size) return;
+      // 今は opacity のみ適用（P0範囲）
+      buildCacheOnce();
+      for (const name of ST.materialNames){
+        const rec = map.get(name);
+        if (rec && rec.opacity!=null){
+          _applyOpacityNow(name, rec.opacity);
+          log('applied persisted opacity', name, rec.opacity);
+        }
+      }
+    }catch(e){ warn('load persisted failed', e); }
+  }
+
+  // ==== UI wiring ====
+  function bindUI(){
+    const sel = document.getElementById('pm-material');
+    if (!sel){ warn('panel select #pm-material not found'); return false; }
+    // 材料名投入
     sel.innerHTML = '';
-    const add = (v,t)=>{ const o=document.createElement('option'); o.value=v; o.textContent=t; sel.appendChild(o); };
+    const add=(v,t)=>{ const o=document.createElement('option'); o.value=v; o.textContent=t; sel.appendChild(o); };
     add('', '-- Select --');
-    names.forEach(n=>add(n,n));
-    // keep previous selection if still exists
-    sel.value = names.includes(prev) ? prev : '';
-    sel.title = sel.value || '-- Select --';
-    sel.dispatchEvent(new Event('change', {bubbles:true}));
-    return true;
-  }
+    ST.materialNames.forEach(n=>add(n,n));
+    sel.value = ST.lastSel || '';
 
-  function bindSliderAndSelect(sel){
-    if (!sel) return false;
-    const sld = nearestSlider(sel);
-    if (!sld){ warn('opacity slider not found (bind skipped)'); return false; }
+    const slider = nearestSlider(sel);
+    if (!slider) warn('opacity slider not found near #pm-material');
 
-    // avoid duplicate handlers by cloning
-    const sel2 = sel.cloneNode(true);  sel2.id  = sel.id;
+    // 重複防止：クローン置換
+    const sel2 = sel.cloneNode(true); sel2.id = sel.id;
     sel.parentNode.replaceChild(sel2, sel);
-    const sld2 = sld.cloneNode(true); sld2.id = sld.id;
-    sld.parentNode.replaceChild(sld2, sld);
+    const sld2 = slider ? (()=>{ const n=slider.cloneNode(true); n.id = slider.id; slider.parentNode.replaceChild(n, slider); return n; })() : null;
 
-    const onChange = () => {
-      const name = sel2.value; if (!name) return;
+    const handle = ()=>{
+      const name = sel2.value;
+      ST.lastSel = name;
+      if (!name || !sld2) return;
       let a = parseFloat(sld2.value);
       if (isNaN(a)) a = Math.min(1, Math.max(0, (parseFloat(sld2.value)||100)/100));
-      applyOpacityByName(name, a);
+      applyOpacity(name, a);
+      debounceSave(name, { opacity:a });
     };
 
-    sel2.addEventListener('change', onChange);
-    sld2.addEventListener('input', onChange, {passive:true});
-    log('wired select+slider');
+    sel2.addEventListener('change', handle);
+    sld2?.addEventListener('input', handle, {passive:true});
+    log('UI bound to #pm-material', { sliderFound: !!sld2 });
     return true;
   }
 
-  // --- main loop (retry until both UI and materials are ready) ---------------
-  let tries = 0;
-  const MAX_TRIES = 120; // ~12s
-  function tick(){
-    const sel   = getPanelSelect();
-    const mats  = listMaterials();
-
-    if (sel && mats.length){
-      populateSelect(sel, mats);
-      bindSliderAndSelect(sel);
-      stop();
-      return;
-    }
-    tries++;
-    if (tries === 1) log('loaded VERSION_TAG: V6_12p_PANEL_PM_BIND');
-    if (tries % 20 === 0) log('waiting...', {hasSelect: !!sel, materials: mats.length});
-    if (tries >= MAX_TRIES){
-      warn('gave up (no select or no materials)');
-      stop();
-    }
-  }
-
-  let iv = null, mo = null;
+  // ==== Bootstrap ====
   function start(){
-    if (iv) clearInterval(iv);
-    iv = setInterval(tick, 100);
-    if (mo) mo.disconnect();
-    mo = new MutationObserver(()=>tick());
-    mo.observe(document.body, {childList:true, subtree:true});
-    // couple of likely signals
-    document.addEventListener('lm:scene-ready', tick, {once:false});
-    document.addEventListener('lm:sheet-context', tick, {once:false});
-  }
-  function stop(){
-    if (iv){ clearInterval(iv); iv = null; }
-    if (mo){ mo.disconnect(); mo = null; }
+    // 1) materials from scene
+    ST.materialNames = listMaterials();
+    if (!ST.materialNames.length){
+      // 少し待ってから再試行（最大3秒）
+      let tries=0; const iv=setInterval(()=>{
+        ST.materialNames = listMaterials();
+        tries++;
+        if (ST.materialNames.length || tries>30){ clearInterval(iv); afterMaterials(); }
+      },100);
+    } else {
+      afterMaterials();
+    }
   }
 
-  // kick
-  start();
+  function afterMaterials(){
+    if (!ST.materialNames.length){ warn('no materials found in scene'); return; }
+    // 2) cache
+    buildCacheOnce();
+    // 3) bind UI
+    const ok = bindUI();
+    // 4) persisted load適用（UIの有無に関係なく）
+    loadAndApplyAll();
+    if (!ok){
+      // UIまだなら、DOM変化を少し監視
+      let tries=0; const mo = new MutationObserver(()=>{
+        if (bindUI()){ mo.disconnect(); }
+        tries++; if (tries>50){ mo.disconnect(); }
+      });
+      mo.observe(document.body, {childList:true,subtree:true});
+    }
+  }
+
+  // 起動タイミング：viewerBridgeのシーン確立後を想定
+  // 既存の bridge ログからポーリングで捕捉
+  let t=0; const readyIv = setInterval(()=>{
+    try{
+      if (window.viewerBridge?.getScene && getScene()){
+        clearInterval(readyIv);
+        start();
+      }
+    }catch(e){}
+    t++; if (t>100){ clearInterval(readyIv); warn('scene not ready'); }
+  }, 100);
 })();
