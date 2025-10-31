@@ -1,103 +1,86 @@
-/* viewer.bridge.module.js — Robust Scene Bridge (2025-10-31)
-   - Captures THREE.Scene from multiple sources (event, polling, hooks)
-   - Exposes window.viewerBridge.{getScene,listMaterials}
-   - Safe to include multiple times (idempotent)
-*/
+// === viewer.bridge.module.js (ROBUST) ========================================
 (function(){
-  const NS='[viewer-bridge]';
-  if (window.viewerBridge && window.viewerBridge.__robust) {
-    console.log(NS, 'already installed'); 
-    return;
-  }
-  const log=(...a)=>console.log(NS, ...a);
-  const warn=(...a)=>console.warn(NS, ...a);
+  const NS = '[viewer-bridge]';
+  const log  = (...a)=>console.log(NS, ...a);
+  const warn = (...a)=>console.warn(NS, ...a);
 
-  const st = { scene:null, armed:false, fired:false };
+  const st = { scene:null, armed:false };
 
-  function setScene(s, reason){
-    if (!s || st.scene) return;
+  function findSceneNow(){
     try{
-      st.scene = s;
-      log('scene captured via', reason);
-      if (!st.fired){
-        st.fired = true;
-        const ev = new CustomEvent('lm:scene-ready', { detail:{ via:'viewer-bridge' }});
-        window.dispatchEvent(ev); document.dispatchEvent(ev);
-        log('lm:scene-ready dispatched (bridge)');
+      if (typeof window.__lm_getScene === 'function') {
+        const s = window.__lm_getScene();
+        if (s && s.isScene) return s;
       }
-    }catch(e){ warn('setScene failed', e); }
-  }
-
-  function trySlots(){
-    const w = window;
-    const slots = [
-      ()=> w.__LM && w.__LM.scene,
-      ()=> w.__LM_SCENE,
-      ()=> w.__lm_getScene && w.__lm_getScene(),
-      ()=> w.__lm_viewer && w.__lm_viewer.scene,
-      ()=> w.viewer && w.viewer.scene,
-      ()=> w.viewer3d && w.viewer3d.scene,
-      ()=> (w.__sceneProbe && w.__sceneProbe.scene) // from any probes
-    ];
-    for (const f of slots){
-      try { const s = f(); if (s && s.isScene) return s; } catch{}
-    }
+      const cands = [
+        window.__lm_viewer && window.__lm_viewer.scene,
+        window.viewer && window.viewer.scene,
+        window.viewer3d && window.viewer3d.scene,
+      ].filter(Boolean);
+      for (const s of cands) if (s && s.isScene) return s;
+    }catch(_) {}
     return null;
   }
 
-  // Event from viewer.module.cdn.js
-  function onSceneEvt(){
-    const s = trySlots();
-    if (s) setScene(s, 'event(lm:scene-ready)');
+  function dispatchSceneReady(){
+    try{
+      const ev = new CustomEvent('lm:scene-ready', { detail:{ scene:true } });
+      window.dispatchEvent(ev);
+      document.dispatchEvent(ev);
+    }catch(_) {}
   }
-  window.addEventListener('lm:scene-ready', onSceneEvt);
-  document.addEventListener('lm:scene-ready', onSceneEvt);
 
-  // Poll (up to ~12s)
-  (async () => {
-    for (let i=0;i<60;i++){
-      const s = trySlots();
-      if (s){ setScene(s, 'poll'); break; }
-      await new Promise(r=>setTimeout(r,200));
-    }
-    if (!st.scene) warn('scene not found during bridge watch (non-fatal)');
-  })();
+  function armSceneWatcher(){
+    if (st.armed) return;
+    st.armed = true;
 
-  // Optional THREE hook (works only if global THREE exists)
-  try{
-    const T = window.THREE;
-    if (T && T.Scene && T.Scene.prototype && !T.Scene.prototype.__lm_bridge_hooked){
-      const add = T.Scene.prototype.add;
-      T.Scene.prototype.add = function(...args){
-        try { setScene(this, 'THREE.Scene.add hook'); } catch{}
-        return add.apply(this, args);
-      };
-      T.Scene.prototype.__lm_bridge_hooked = true;
-      log('armed THREE.Scene.add hook');
-    }
-  }catch{}
+    const mark = (s)=>{
+      if (s && s.isScene){ st.scene = s; log('scene captured via poll'); dispatchSceneReady(); }
+    };
+
+    window.addEventListener('lm:scene-ready', ()=>{ const s=findSceneNow(); if (s) mark(s); });
+    document.addEventListener('lm:scene-ready', ()=>{ const s=findSceneNow(); if (s) mark(s); });
+
+    let ticks=0;
+    const t = setInterval(()=>{
+      ticks++;
+      const s = findSceneNow();
+      if (s){ mark(s); clearInterval(t); }
+      if (ticks>50){ clearInterval(t); warn('scene not found during bridge watch (non-fatal)'); }
+    }, 200);
+  }
 
   function listMaterials(){
-    const s = st.scene || trySlots();
-    if (!s) return [];
+    const s = st.scene || findSceneNow();
+    if (!s || !window.THREE) return [];
+
+    const badType = (m)=>{
+      const t = (m && m.type) || '';
+      return /Depth|Distance|Shadow|Sprite|Shader/.test(t) ||
+             (m && (m.isLineBasicMaterial || m.isLineDashedMaterial || m.isPointsMaterial));
+    };
+    const isOverlayObj = (o)=> !!(o && (o.type==='Sprite' || (o.name||'').startsWith('__LM_') || (o.userData && o.userData.__lmOverlay)));
+
     const set = new Set();
-    const nameOf = (m) => (m && m.name && String(m.name).trim()) || (m && m.id!=null ? `material.${m.id}` : '');
-    try{
-      s.traverse(obj=>{
-        const mat = obj && obj.material;
-        if (!mat) return;
-        if (Array.isArray(mat)) mat.forEach(m=>{ const n=nameOf(m); if(n) set.add(n); });
-        else { const n=nameOf(mat); if(n) set.add(n); }
-      });
-    }catch(e){ warn('traverse failed', e); }
+    s.traverse((obj)=>{
+      if (isOverlayObj(obj)) return;
+      const mat = obj && obj.material;
+      const push = (m)=>{
+        if (!m || badType(m)) return;
+        const n = (m.name||'').trim();
+        if (!n || /^material\.[0-9]+$/.test(n)) return;
+        set.add(n);
+      };
+      if (!mat) return;
+      if (Array.isArray(mat)) mat.forEach(push); else push(mat);
+    });
     return Array.from(set);
   }
 
-  window.viewerBridge = {
-    __robust: true,
-    getScene: () => st.scene || trySlots(),
-    listMaterials
-  };
+  window.viewerBridge = window.viewerBridge || {};
+  window.viewerBridge.getScene      = ()=> st.scene || findSceneNow();
+  window.viewerBridge.listMaterials = ()=> listMaterials();
 
+  armSceneWatcher();
   log('bridge installed');
 })();
