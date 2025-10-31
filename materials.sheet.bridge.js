@@ -1,17 +1,20 @@
 /* materials.sheet.bridge.js
- * LociMyu - Materials Sheet Bridge (create-if-missing / load / upsert one)
- * Requires:
- *  - Authenticated fetch function. Prefers window.__lm_fetchJSONAuth; if absent,
- *    falls back to dynamic import('./gauth.module.js') and uses getAccessToken().
- *  - Event 'lm:sheet-context' with { spreadsheetId, sheetGid? }.
+ * LociMyu - Materials Sheet Bridge (ensure / load / append)
+ * 依存:
+ *  - window.__lm_fetchJSONAuth(url, init?) があればそれを優先
+ *  - ない場合は gauth.module.js の getAccessToken() をフォールバックで使用
+ *  - 'lm:sheet-context' で { spreadsheetId, sheetGid } が飛ぶ
  */
 (function(){
   const log  = (...a)=>console.log('[mat-sheet]', ...a);
   const warn = (...a)=>console.warn('[mat-sheet]', ...a);
   const err  = (...a)=>console.error('[mat-sheet]', ...a);
 
-  const SHEET_TITLE = '__LM_MATERIALS';
-  const HEADER = [
+  // スクショのタブ名に合わせる（__LM_MATERIALS）
+  const SheetTitle = '__LM_MATERIALS';
+
+  // ヘッダはスクショの列順（A〜N）
+  const Header = [
     'key','modelKey','materialKey','opacity','doubleSided','unlit',
     'chromaEnable','chromaColor','chromaTolerance','chromaFeather',
     'updatedAt','updatedBy','spreadsheetId','sheetGid'
@@ -19,48 +22,44 @@
 
   const S = {
     spreadsheetId: null,
-    sheetGid: null,
-    title: SHEET_TITLE,
-    sheetId: null, // numeric
+    sheetGid: null,        // 参考保存用（数値 or 文字列でもOK）
+    title: SheetTitle,
+    sheetId: null,         // 数値の sheetId（batchUpdate 用などで使う）
     headerReady: false,
   };
 
+  // ===== Utilities =====
   function nowIso(){ return new Date().toISOString(); }
-  function toBool(x){ if (typeof x==='boolean') return x; if (x==null) return false;
-    const s=String(x).toLowerCase(); return s==='1'||s==='true'||s==='yes'; }
+  function to01(v){ return v ? '1' : ''; }
   function asFloat(x, def=null){ const n=parseFloat(x); return Number.isFinite(n)?n:def; }
 
-  // ---- Authenticated fetch resolver ---------------------------------------
-  async function getAuthFetch(){
-    // 1) Preferred: provided by boot
-    const wait = (ms)=>new Promise(r=>setTimeout(r,ms));
-    for (let i=0;i<100;i++){ // up to ~10s
-      if (typeof window.__lm_fetchJSONAuth === 'function'){
-        return window.__lm_fetchJSONAuth;
-      }
-      await wait(100);
+  // 認可付き fetch ラッパ（__lm_fetchJSONAuth が無ければフォールバック実装）
+  async function fjson(url, init){
+    if (typeof window.__lm_fetchJSONAuth === 'function') {
+      return window.__lm_fetchJSONAuth(url, init);
     }
-    // 2) Fallback: dynamic import gauth.module.js and use token
-    try{
-      const g = await import('./gauth.module.js');
-      if (typeof g.getAccessToken === 'function'){
-        return async (url, init={})=>{
-          const tok = await g.getAccessToken();
-          const headers = new Headers(init.headers||{});
-          headers.set('Authorization', 'Bearer ' + tok);
-          headers.set('Accept', 'application/json');
-          const res = await fetch(url, {...init, headers});
-          if (!res.ok){
-            const text = await res.text().catch(()=>'');
-            throw new Error(`fetch ${res.status}: ${text.slice(0,200)}`);
-          }
-          return res.json();
-        };
-      }
-    }catch(e){
-      warn('gauth fallback failed', e);
+    // フォールバック: gauth からトークン取得して Authorization 付与
+    const g = await import('./gauth.module.js');
+    const token = await g.getAccessToken({ interactive: true });
+    const headers = new Headers(init?.headers || {});
+    if (!headers.has('Authorization')) headers.set('Authorization', `Bearer ${token}`);
+    if (!headers.has('Content-Type') && init?.method && init.method !== 'GET') {
+      headers.set('Content-Type','application/json');
     }
-    throw new Error('__lm_fetchJSONAuth missing');
+    const res = await fetch(url, { ...(init||{}), headers });
+    if (!res.ok) {
+      // 401 のときは一回だけトークン更新して再試行
+      if (res.status === 401) {
+        const fresh = await g.getAccessToken({ forceRefresh: true, interactive: true });
+        headers.set('Authorization', `Bearer ${fresh}`);
+        const res2 = await fetch(url, { ...(init||{}), headers });
+        if (!res2.ok) throw new Error(`HTTP ${res2.status}`);
+        return res2.json();
+      }
+      throw new Error(`HTTP ${res.status}`);
+    }
+    // 204 等もありえるが、Sheets は通常 JSON 返す
+    return res.status === 204 ? null : res.json();
   }
 
   function gv(base, params){
@@ -68,68 +67,76 @@
     return `${base}?${usp.toString()}`;
   }
 
-  // ===== Sheet ensure =====
+  // ===== ensure: シート存在 & ヘッダ行の保証 =====
   async function ensureSheet(){
     if (!S.spreadsheetId) throw new Error('spreadsheetId missing');
-    const fjson = await getAuthFetch();
 
-    // 1) get spreadsheet metadata
+    // スプレッドシートのメタ取得
     const meta = await fjson(gv(`https://sheets.googleapis.com/v4/spreadsheets/${S.spreadsheetId}`, {
-      includeGridData: false
+      includeGridData: 'false'
     }), { method:'GET' });
 
     const sheets = meta?.sheets || [];
     let target = sheets.find(s => s?.properties?.title === S.title);
     if (!target){
-      // create
+      // なければ追加
       const res = await fjson(`https://sheets.googleapis.com/v4/spreadsheets/${S.spreadsheetId}:batchUpdate`, {
         method:'POST',
-        headers:{ 'Content-Type':'application/json' },
-        body: JSON.stringify({ requests: [{ addSheet: { properties: { title: S.title } } }] })
+        body: JSON.stringify({
+          requests: [{ addSheet: { properties: { title: S.title } } }]
+        })
       });
-      target = (res?.replies?.[0]?.addSheet) || null;
+      target = res?.replies?.[0]?.addSheet || null;
       log('sheet created:', S.title);
     }
     S.sheetId = target?.properties?.sheetId ?? S.sheetId;
 
-    // 2) header row check
-    const hdr = await fjson(gv(`https://sheets.googleapis.com/v4/spreadsheets/${S.spreadsheetId}/values/${encodeURIComponent(S.title+'!1:1')}`, {}), { method:'GET' });
+    // ヘッダ確認（A1:N1）
+    const hdr = await fjson(
+      `https://sheets.googleapis.com/v4/spreadsheets/${S.spreadsheetId}/values/${encodeURIComponent(S.title+'!A1:N1')}`,
+      { method:'GET' }
+    );
     const row = (hdr?.values && hdr.values[0]) || [];
-    const same = HEADER.length === row.length && HEADER.every((h,i)=>row[i]===h);
+    const same = Header.length === row.length && Header.every((h,i)=>row[i]===h);
     if (!same){
-      await fjson(gv(`https://sheets.googleapis.com/v4/spreadsheets/${S.spreadsheetId}/values/${encodeURIComponent(S.title+'!1:1')}`, {
-        valueInputOption:'RAW'
-      }), {
-        method:'PUT',
-        headers:{ 'Content-Type':'application/json' },
-        body: JSON.stringify({ values:[HEADER] })
-      });
+      await fjson(
+        gv(`https://sheets.googleapis.com/v4/spreadsheets/${S.spreadsheetId}/values/${encodeURIComponent(S.title+'!A1:N1')}`, {
+          valueInputOption:'RAW'
+        }),
+        {
+          method:'PUT',
+          body: JSON.stringify({ values:[Header] })
+        }
+      );
       log('header initialized for', S.title);
     }
     S.headerReady = true;
   }
 
-  // ===== Load all -> map by materialKey =====
+  // ===== loadAll: 全行を読み込み（Map by key） =====
   async function loadAll(){
     await ensureSheet();
-    const fjson = await getAuthFetch();
-    const res = await fjson(gv(`https://sheets.googleapis.com/v4/spreadsheets/${S.spreadsheetId}/values/${encodeURIComponent(S.title+'!A2:N')}`, {}), { method:'GET' });
+    const res = await fjson(
+      `https://sheets.googleapis.com/v4/spreadsheets/${S.spreadsheetId}/values/${encodeURIComponent(S.title+'!A2:N')}`,
+      { method:'GET' }
+    );
     const rows = res?.values || [];
     const map = new Map();
     for (const r of rows){
       const [
-        key='', modelKey='', materialKey='', opacity='', doubleSided='',
-        unlit='', chromaEnable='', chromaColor='', chromaTolerance='',
-        chromaFeather='', updatedAt='', updatedBy='', spreadsheetId='', sheetGid=''
+        key='', modelKey='', materialKey='', opacity='',
+        doubleSided='', unlit='',
+        chromaEnable='', chromaColor='', chromaTolerance='', chromaFeather='',
+        updatedAt='', updatedBy='', spreadsheetId='', sheetGid=''
       ] = r;
-      if (!materialKey) continue;
-      map.set(materialKey, {
+      if (!key) continue;
+      map.set(key, {
         key, modelKey, materialKey,
         opacity: asFloat(opacity, null),
-        doubleSided: toBool(doubleSided),
-        unlit: toBool(unlit),
-        chromaEnable: toBool(chromaEnable),
-        chromaColor: chromaColor || '',
+        doubleSided: doubleSided==='1',
+        unlit: unlit==='1',
+        chromaEnable: chromaEnable==='1',
+        chromaColor,
         chromaTolerance: asFloat(chromaTolerance, null),
         chromaFeather: asFloat(chromaFeather, null),
         updatedAt, updatedBy, spreadsheetId, sheetGid
@@ -138,62 +145,40 @@
     return map;
   }
 
-  // ===== Upsert one (by materialKey) =====
+  // ===== upsertOne: ひとまず append（履歴を残す運用） =====
   async function upsertOne(item){
     await ensureSheet();
-    const fjson = await getAuthFetch();
 
-    // 0) derive row values
+    // 行データを RAW で渡す
     const row = [
-      item.key || `${item.modelKey||''}:${item.materialKey||''}`,
+      item.key || '',
       item.modelKey || '',
       item.materialKey || '',
-      item.opacity==null ? '' : String(item.opacity),
-      item.doubleSided ? '1' : '',
-      item.unlit ? '1' : '',
-      item.chromaEnable ? '1' : '',
+      item.opacity==null ? '' : Number(item.opacity),
+      to01(!!item.doubleSided),
+      to01(!!item.unlit),
+      to01(!!item.chromaEnable),
       item.chromaColor || '',
-      item.chromaTolerance==null ? '' : String(item.chromaTolerance),
-      item.chromaFeather==null ? '' : String(item.chromaFeather),
+      item.chromaTolerance==null ? '' : Number(item.chromaTolerance),
+      item.chromaFeather==null ? '' : Number(item.chromaFeather),
       item.updatedAt || nowIso(),
       item.updatedBy || 'app',
       S.spreadsheetId || '',
-      String(S.sheetGid ?? '')
+      S.sheetGid ?? ''
     ];
 
-    // 1) find existing row index by reading materialKey column
-    const rangeAll = `${S.title}!C2:C`; // materialKey
-    const res = await fjson(gv(`https://sheets.googleapis.com/v4/spreadsheets/${S.spreadsheetId}/values/${encodeURIComponent(rangeAll)}`, {}), { method:'GET' });
-    const keys = (res?.values || []).map(v=>v[0]);
-    const idx = keys.indexOf(item.materialKey); // 0-based within C2:C
+    // ★ ここが本題：values.append は「:append」が必須
+    const url = `https://sheets.googleapis.com/v4/spreadsheets/${S.spreadsheetId}/values/${encodeURIComponent(S.title+'!A:N')}:append`;
+    const qs  = { valueInputOption:'RAW', insertDataOption:'INSERT_ROWS' };
 
-    if (idx >= 0){
-      // update at row (C2 is rowIndex=0 -> sheet row = 2)
-      const rowNum = idx + 2;
-      const range = `${S.title}!A${rowNum}:N${rowNum}`;
-      await fjson(gv(`https://sheets.googleapis.com/v4/spreadsheets/${S.spreadsheetId}/values/${encodeURIComponent(range)}`, {
-        valueInputOption:'RAW'
-      }), {
-        method:'PUT',
-        headers:{ 'Content-Type':'application/json' },
-        body: JSON.stringify({ values: [row] })
-      });
-      log('updated row', rowNum, item.materialKey);
-    } else {
-      // append
-      await fjson(gv(`https://sheets.googleapis.com/v4/spreadsheets/${S.spreadsheetId}/values/${encodeURIComponent(S.title+'!A:N')}`, {
-        valueInputOption:'RAW',
-        insertDataOption:'INSERT_ROWS'
-      }), {
-        method:'POST',
-        headers:{ 'Content-Type':'application/json' },
-        body: JSON.stringify({ values: [row], majorDimension: 'ROWS' })
-      });
-      log('appended', item.materialKey);
-    }
+    await fjson(gv(url, qs), {
+      method:'POST',
+      body: JSON.stringify({ values: [row] /* majorDimension: ROWS (デフォルト) */ })
+    });
+    log('appended', item.key || item.materialKey || '(no-key)');
   }
 
-  // ===== Listen sheet-context =====
+  // ===== lm:sheet-context を取り込む =====
   window.addEventListener('lm:sheet-context', (ev)=>{
     const d = ev?.detail || ev;
     if (!d?.spreadsheetId) { warn('sheet-context missing spreadsheetId'); return; }
