@@ -1,111 +1,120 @@
-// @license MIT
-// material.orchestrator.js (UI guard overlay) — V6_15c_INIT_ORDER_FIX
-(function(){
-  const TAG='[mat-orch]';
-  const log = (...a)=>console.log(TAG, ...a);
 
-  let suppressPersist = false;
-  let programmaticSet = false;
-  let currentKey = null;
-  const lastSaved = new Map();
+// material.orchestrator.js  (V6_15d)
+// - Selection sync: when a material is selected, UI reflects saved values
+// - Programmatic set guard to avoid accidental persists
+// - Save only on change/pointerup with EPS threshold
+(() => {
+  const MOD = 'mat-orch';
   const EPS = 0.01;
 
-  const qs = (s, r=document)=>r.querySelector(s);
-  const on = (el, ev, fn)=> el && el.addEventListener(ev, fn);
+  const ui = {
+    ddl: null,
+    perMatSlider: null,
+  };
 
-  function setSliderValue(slider, v){
-    if (!slider) return;
-    programmaticSet = true;
-    slider.value = String(v);
-    programmaticSet = false;
+  const state = {
+    programmaticSet: false,
+    suppressPersist: false,
+    currentKey: null,
+  };
+
+  function q(sel) { return document.querySelector(sel); }
+
+  function clamp01(v){ v = Number(v); if (Number.isNaN(v)) return 1; return Math.min(1, Math.max(0, v)); }
+
+  function setSliderSilently(v){
+    state.programmaticSet = true;
+    ui.perMatSlider.value = String(v);
+    state.programmaticSet = false;
   }
 
   function applyOpacityToScene(materialKey, v){
-    if (window.applyOpacityToScene) return window.applyOpacityToScene(materialKey, v);
-    window.dispatchEvent(new CustomEvent('lm:material-opacity-apply', {detail:{materialKey, opacity:v}}));
-  }
-
-  function persist(matKey, value){
-    if (suppressPersist || programmaticSet || !window.matSheet) return;
-    const prev = lastSaved.get(matKey);
-    if (prev!=null && Math.abs(prev - value) < EPS) return;
-    lastSaved.set(matKey, value);
+    // The actual scene-update function is assumed to exist at window.viewerBridge.applyOpacityPerMaterial
     try {
-      window.matSheet.upsertOne({
-        materialKey: matKey,
-        opacity: value,
-        updatedBy: 'ui'
-      });
-      log('persisted', matKey, value);
-    } catch(e) {
-      console.warn(TAG, 'persist failed', e);
+      if (window.viewerBridge && typeof window.viewerBridge.applyOpacityPerMaterial === 'function') {
+        window.viewerBridge.applyOpacityPerMaterial(materialKey, v);
+      }
+    } catch (e) {
+      console.warn(`[${MOD}] applyOpacityToScene failed`, e);
     }
   }
 
+  async function persist(materialKey, v){
+    if (state.suppressPersist) return;
+    if (!window.matSheet) return;
+    const prev = window.matSheet.getOne(materialKey);
+    if (prev && Math.abs(Number(prev.opacity ?? 1) - v) < EPS) return; // no-op
+    await window.matSheet.upsertOne({
+      materialKey,
+      name: materialKey,
+      opacity: v,
+      updatedBy: 'ui'
+    });
+    console.log(`[${MOD}] persisted`, materialKey, v);
+  }
+
+  async function onSelectChange(){
+    const key = ui.ddl.value || null;
+    state.currentKey = key;
+    if (!key) return;
+
+    // 1) read saved value
+    let saved = 1;
+    const rec = window.matSheet && window.matSheet.getOne(key);
+    if (rec && rec.opacity !== undefined) saved = clamp01(rec.opacity);
+
+    // 2) first apply to scene, then reflect to UI (programmatic)
+    state.suppressPersist = true;
+    applyOpacityToScene(key, saved);
+    setSliderSilently(saved);
+    state.suppressPersist = false;
+  }
+
+  function onSliderInput(){
+    if (!state.currentKey) return;
+    const v = clamp01(ui.perMatSlider.value);
+    // While dragging: reflect to scene only
+    applyOpacityToScene(state.currentKey, v);
+    // do not persist on input
+  }
+
+  function onSliderChange(){
+    if (state.programmaticSet || !state.currentKey) return;
+    const v = clamp01(ui.perMatSlider.value);
+    persist(state.currentKey, v);
+  }
+
   async function boot(){
-    await new Promise(r=>setTimeout(r, 0));
-    const matSelect    = qs('#mat-select') || qs('[data-mat-select]') || qs('select[name="mat-select"]');
-    const perSlider    = qs('#mat-opacity') || qs('[data-mat-opacity]') || qs('input[type="range"][name="mat-opacity"]');
-    const globalSlider = qs('#global-opacity') || qs('[data-global-opacity]') || qs('input[type="range"][name="global-opacity"]');
+    console.log(`[${MOD}] loaded VERSION_TAG: V6_15d_INIT_ORDER_FIX`);
+    ui.ddl = q('[data-mat="select"]') || q('#lm-mat-select');
+    ui.perMatSlider = q('[data-mat="per-opacity"]') || q('#lm-per-opacity');
 
-    try{
-      suppressPersist = true;
-      if (window.matSheet && typeof window.matSheet.loadAll === 'function'){
-        const rows = await window.matSheet.loadAll();
-        (rows||[]).forEach(r=>{
-          const k = r && (r.materialKey || r.key || r.name);
-          if (!k) return;
-          const v = (typeof r.opacity === 'number') ? r.opacity : 1;
-          lastSaved.set(k, v);
-        });
-        lastSaved.forEach((v,k)=>applyOpacityToScene(k, v));
+    if (!ui.ddl || !ui.perMatSlider) {
+      console.warn(`[${MOD}] UI controls not found`);
+      return;
+    }
+
+    // Wire UI
+    ui.ddl.addEventListener('change', onSelectChange);
+    ui.perMatSlider.addEventListener('input', onSliderInput);
+    ['change','pointerup','mouseup','touchend'].forEach(ev =>
+      ui.perMatSlider.addEventListener(ev, onSliderChange)
+    );
+
+    // Wait a tick to ensure matSheet is ready, then prime cache from sheet
+    setTimeout(async () => {
+      try {
+        if (window.matSheet) {
+          await window.matSheet.loadAll().catch(()=>{});
+        }
+      } finally {
+        console.log(`[${MOD}] overlay wired`);
       }
-    } finally { suppressPersist = false; }
-
-    on(matSelect, 'change', async ()=>{
-      const key = matSelect && (matSelect.value || matSelect.getAttribute('value'));
-      currentKey = key || null;
-      if (!currentKey) return;
-
-      suppressPersist = true;
-      let v = 1;
-      try{
-        const rec = window.matSheet && typeof window.matSheet.getOne==='function'
-          ? window.matSheet.getOne(currentKey) : null;
-        if (rec && typeof rec.opacity === 'number') v = rec.opacity;
-      } catch(e){ /* ignore */ }
-
-      applyOpacityToScene(currentKey, v);
-      setSliderValue(perSlider, v);
-      suppressPersist = false;
-    });
-
-    on(perSlider, 'input', ()=>{
-      if (programmaticSet || suppressPersist || !currentKey) return;
-      const v = Number(perSlider.value);
-      applyOpacityToScene(currentKey, v);
-    });
-
-    const commit = ()=>{
-      if (programmaticSet || suppressPersist || !currentKey) return;
-      const v = Number(perSlider.value);
-      persist(currentKey, v);
-    };
-    on(perSlider, 'change', commit);
-    on(perSlider, 'pointerup', commit);
-    on(perSlider, 'mouseup', commit);
-
-    on(globalSlider, 'input', ()=>{
-      if (programmaticSet || suppressPersist) return;
-      const v = Number(globalSlider.value);
-      window.dispatchEvent(new CustomEvent('lm:global-opacity-apply', {detail:{opacity:v}}));
-    });
-
-    log('overlay wired');
+    }, 0);
   }
 
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', boot);
+    document.addEventListener('DOMContentLoaded', boot, { once: true });
   } else {
     boot();
   }
