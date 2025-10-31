@@ -1,156 +1,103 @@
-/* viewer.bridge.module.js — ROBUST SCENE/MATERIAL BRIDGE (drop-in)
-   - Works with ESM three.js (no global THREE at boot)
-   - Captures scene via late binding + prototype hook
-   - Exposes window.viewerBridge.listMaterials()
-   - Emits 'lm:scene-ready' once
+/* viewer.bridge.module.js — Robust Scene Bridge (2025-10-31)
+   - Captures THREE.Scene from multiple sources (event, polling, hooks)
+   - Exposes window.viewerBridge.{getScene,listMaterials}
+   - Safe to include multiple times (idempotent)
 */
 (function(){
   const NS='[viewer-bridge]';
+  if (window.viewerBridge && window.viewerBridge.__robust) {
+    console.log(NS, 'already installed'); 
+    return;
+  }
   const log=(...a)=>console.log(NS, ...a);
   const warn=(...a)=>console.warn(NS, ...a);
 
-  // --------------------------------------------------------------------------
-  // State
-  const st = {
-    THREE: null,
-    scene: null,
-    firedSceneReady: false,
-    armedAddHook: false,
-  };
+  const st = { scene:null, armed:false, fired:false };
 
-  function fireSceneReady(){
-    if (st.firedSceneReady || !st.scene) return;
-    st.firedSceneReady = true;
-    const ev = new CustomEvent('lm:scene-ready', { detail: { scene:true }});
-    window.dispatchEvent(ev);
-    document.dispatchEvent(ev);
-    log('lm:scene-ready dispatched (bridge)');
-  }
-
-  // --------------------------------------------------------------------------
-  // Late capture helpers
-  function captureTHREE(v){
-    if (!v || st.THREE) return;
-    try {
-      st.THREE = v;
-      log('THREE captured (late)');
-      armAddHook();               // once THREE known, we can hook Scene.add
-    } catch(e){ warn('captureTHREE failed', e); }
-  }
-
-  function captureScene(s){
+  function setScene(s, reason){
     if (!s || st.scene) return;
-    try {
-      if (s.isScene) {
-        st.scene = s;
-        log('scene captured');
-        // Try firing event a tiny bit later to let listeners attach
-        setTimeout(fireSceneReady, 0);
+    try{
+      st.scene = s;
+      log('scene captured via', reason);
+      if (!st.fired){
+        st.fired = true;
+        const ev = new CustomEvent('lm:scene-ready', { detail:{ via:'viewer-bridge' }});
+        window.dispatchEvent(ev); document.dispatchEvent(ev);
+        log('lm:scene-ready dispatched (bridge)');
       }
-    } catch(e){ warn('captureScene failed', e); }
+    }catch(e){ warn('setScene failed', e); }
   }
 
-  // Hook Scene.prototype.add to catch the first scene encountered
-  function armAddHook(){
-    if (st.armedAddHook || !st.THREE || !st.THREE.Scene) return;
-    st.armedAddHook = true;
-    try {
-      const proto = st.THREE.Scene.prototype;
-      const origAdd = proto.add;
-      if (typeof origAdd === 'function'){
-        proto.add = function(...args){
-          // "this" is the Scene instance
-          captureScene(this);
-          return origAdd.apply(this, args);
-        };
-        log('Scene.add hook armed');
-      }
-    } catch(e){ warn('armAddHook failed', e); }
-  }
-
-  // Observe late assignment to window.THREE (if not present yet)
-  (function armWindowThreeWatcher(){
-    if ('THREE' in window) { captureTHREE(window.THREE); return; }
-    try{
-      Object.defineProperty(window, 'THREE', {
-        configurable: true,
-        enumerable: true,
-        get(){ return st.THREE; },
-        set(v){
-          // replace this property with a normal value and capture
-          Object.defineProperty(window, 'THREE', { value:v, writable:true, configurable:true });
-          captureTHREE(v);
-        }
-      });
-      log('window.THREE watcher armed');
-    }catch(e){ /* some environments disallow defineProperty on window – ignore */ }
-  })();
-
-  // Observe late assignment to a common viewer handle (__lm_viewer)
-  (function armViewerHandleWatcher(){
-    const key='__lm_viewer';
-    if (key in window && window[key] && window[key].scene) captureScene(window[key].scene);
-    try{
-      Object.defineProperty(window, key, {
-        configurable: true,
-        enumerable: true,
-        get(){ return undefined; },
-        set(v){
-          Object.defineProperty(window, key, { value:v, writable:true, configurable:true });
-          try{ if (v && v.scene) captureScene(v.scene); }catch{}
-        }
-      });
-      log('window.__lm_viewer watcher armed');
-    }catch(e){ /* optional */ }
-  })();
-
-  // Best-effort polling for already-existing scene locations
-  async function tryFindScenePoll(){
+  function trySlots(){
+    const w = window;
     const slots = [
-      ()=>window.__lm_getScene && window.__lm_getScene(),
-      ()=>window.__lm_viewer && window.__lm_viewer.scene,
-      ()=>window.viewer && window.viewer.scene,
-      ()=>window.viewer3d && window.viewer3d.scene,
-      ()=>window.__LM && window.__LM.scene,
+      ()=> w.__LM && w.__LM.scene,
+      ()=> w.__LM_SCENE,
+      ()=> w.__lm_getScene && w.__lm_getScene(),
+      ()=> w.__lm_viewer && w.__lm_viewer.scene,
+      ()=> w.viewer && w.viewer.scene,
+      ()=> w.viewer3d && w.viewer3d.scene,
+      ()=> (w.__sceneProbe && w.__sceneProbe.scene) // from any probes
     ];
-    const MAX=50, INTERVAL=200;
-    for (let i=0;i<MAX && !st.scene;i++){
-      for (const f of slots){
-        try{
-          const s = f && f();
-          if (s && s.isScene){ captureScene(s); break; }
-        }catch{}
-      }
-      // THREE might appear later too
-      if (!st.THREE && window.THREE) captureTHREE(window.THREE);
-      await new Promise(r=>setTimeout(r, INTERVAL));
+    for (const f of slots){
+      try { const s = f(); if (s && s.isScene) return s; } catch{}
+    }
+    return null;
+  }
+
+  // Event from viewer.module.cdn.js
+  function onSceneEvt(){
+    const s = trySlots();
+    if (s) setScene(s, 'event(lm:scene-ready)');
+  }
+  window.addEventListener('lm:scene-ready', onSceneEvt);
+  document.addEventListener('lm:scene-ready', onSceneEvt);
+
+  // Poll (up to ~12s)
+  (async () => {
+    for (let i=0;i<60;i++){
+      const s = trySlots();
+      if (s){ setScene(s, 'poll'); break; }
+      await new Promise(r=>setTimeout(r,200));
     }
     if (!st.scene) warn('scene not found during bridge watch (non-fatal)');
-  }
-  tryFindScenePoll();
+  })();
 
-  // --------------------------------------------------------------------------
-  // Materials enumeration exposed to orchestrator
+  // Optional THREE hook (works only if global THREE exists)
+  try{
+    const T = window.THREE;
+    if (T && T.Scene && T.Scene.prototype && !T.Scene.prototype.__lm_bridge_hooked){
+      const add = T.Scene.prototype.add;
+      T.Scene.prototype.add = function(...args){
+        try { setScene(this, 'THREE.Scene.add hook'); } catch{}
+        return add.apply(this, args);
+      };
+      T.Scene.prototype.__lm_bridge_hooked = true;
+      log('armed THREE.Scene.add hook');
+    }
+  }catch{}
+
   function listMaterials(){
-    if (!st.scene) return [];
+    const s = st.scene || trySlots();
+    if (!s) return [];
     const set = new Set();
-    const nameOf = (m)=> (m && m.name && String(m.name).trim())
-                     || (m && m.id!=null ? `material.${m.id}` : '');
+    const nameOf = (m) => (m && m.name && String(m.name).trim()) || (m && m.id!=null ? `material.${m.id}` : '');
     try{
-      st.scene.traverse(obj=>{
+      s.traverse(obj=>{
         const mat = obj && obj.material;
         if (!mat) return;
-        if (Array.isArray(mat)) mat.forEach(mi=>{ const n=nameOf(mi); if(n) set.add(n); });
+        if (Array.isArray(mat)) mat.forEach(m=>{ const n=nameOf(m); if(n) set.add(n); });
         else { const n=nameOf(mat); if(n) set.add(n); }
       });
     }catch(e){ warn('traverse failed', e); }
-    return [...set];
+    return Array.from(set);
   }
 
-  // Public bridge API
-  window.viewerBridge = Object.assign(window.viewerBridge || {}, {
-    listMaterials,
-  });
+  window.viewerBridge = {
+    __robust: true,
+    getScene: () => st.scene || trySlots(),
+    listMaterials
+  };
 
   log('bridge installed');
 })();
