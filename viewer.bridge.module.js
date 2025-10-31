@@ -1,64 +1,92 @@
-// viewer.bridge.module.js
-// LociMyu: viewerBridge (scene access + materials list) with GLTFLoader tap fallback
-(function(){
-  const log  = (...a)=>console.log('[viewer-bridge]', ...a);
-  const warn = (...a)=>console.warn('[viewer-bridge]', ...a);
+/**
+ * viewer.bridge.module.js
+ * Provide a stable external bridge to the viewer's three.js Scene and materials.
+ * - Exposes: window.viewerBridge.getScene(), listMaterials()
+ * - Emits:   window 'lm:scene-ready' when a non-empty scene stabilizes
+ */
+(() => {
+  const VBNS = 'viewer-bridge';
+  const log  = (...a)=>console.log(`[${VBNS}]`, ...a);
+  const warn = (...a)=>console.warn(`[${VBNS}]`, ...a);
 
-  // ---- Scene discovery ----
-  function discoverScene() {
-    try { if (window.viewerBridge && window.viewerBridge.__scene) return window.viewerBridge.__scene; } catch(e){}
-    try { if (window.__viewer && window.__viewer.scene) return (window.viewerBridge.__scene = window.__viewer.scene); } catch(e){}
-    try { if (window.viewer && window.viewer.scene)     return (window.viewerBridge.__scene = window.viewer.scene); } catch(e){}
-    try { if (window.lm && window.lm.scene)             return (window.viewerBridge.__scene = window.lm.scene); } catch(e){}
+  const vb = (window.viewerBridge = window.viewerBridge || {});
+  vb.__scene = vb.__scene || null;
+
+  function firstSceneCandidate() {
+    if (vb.__scene)                 return vb.__scene;
+    if (window.__LM_SCENE)          return window.__LM_SCENE;
+    if (window.__viewer?.scene)     return window.__viewer.scene;
+    if (window.viewer?.scene)       return window.viewer.scene;
+    if (window.lm?.scene)           return window.lm.scene;
     return null;
   }
 
-  // ---- Optional GLTFLoader.parse tap (safe no-op if unavailable) ----
-  (function tapGLTFLoader(){
-    const THREE = window.THREE;
-    const GL = THREE && THREE.GLTFLoader && THREE.GLTFLoader.prototype;
-    if (!GL || GL.__lm_scene_tapped) return;
-    const origParse = GL.parse;
-    GL.parse = function(data, path, onLoad, onError){
-      const wrapped = (gltf) => {
-        try {
-          const sc = gltf && (gltf.scene || (gltf.scenes && gltf.scenes[0]));
-          if (sc) {
-            window.__viewer = window.__viewer || {};
-            window.__viewer.scene = sc;
-            window.dispatchEvent(new CustomEvent('lm:scene-ready', {detail:{from:'gltf-parse'}}));
-            log('scene captured via GLTFLoader.parse');
-          }
-        } catch(e){ /*noop*/ }
-        onLoad && onLoad(gltf);
-      };
-      return origParse.call(this, data, path, wrapped, onError);
-    };
-    GL.__lm_scene_tapped = true;
-    log('GLTFLoader.parse hooked');
-  })();
+  // stable getters
+  if (typeof vb.getScene !== 'function') {
+    vb.getScene = () => (vb.__scene || firstSceneCandidate());
+  }
 
-  // ---- Install bridge ----
-  const vb = Object.assign(window.viewerBridge || {}, {
-    getScene(){
-      const sc = discoverScene();
-      if (sc) this.__scene = sc;
-      return sc;
-    },
-    listMaterials(){
-      const sc = this.getScene();
+  if (typeof vb.listMaterials !== 'function') {
+    vb.listMaterials = () => {
+      const scene = vb.getScene();
       const set = new Set();
-      sc && sc.traverse && sc.traverse(o => {
-        const m = o.material; if (!m) return;
-        (Array.isArray(m)?m:[m]).forEach(mm => { if (mm && mm.name) set.add(mm.name); });
+      scene?.traverse(o => {
+        const m = o.material;
+        if (!m) return;
+        (Array.isArray(m) ? m : [m]).forEach(mm => {
+          if (mm && mm.name) set.add(mm.name);
+        });
       });
       return Array.from(set);
+    };
+  }
+
+  // cache any incoming scene-ready
+  const cacheSceneFromDetail = (ev) => {
+    const sc = ev?.detail?.scene;
+    if (sc && sc !== vb.__scene) {
+      vb.__scene = sc;
+      log('scene cached from lm:scene-ready');
     }
-  });
-  window.viewerBridge = vb;
+  };
+  window.addEventListener('lm:scene-ready', cacheSceneFromDetail);
+  document.addEventListener('lm:scene-ready', cacheSceneFromDetail);
 
-  // Update cached scene when ready
-  window.addEventListener('lm:scene-ready', () => { vb.getScene(); log('scene ready'); });
+  // Poll until the scene stabilizes (meshes count stops changing).
+  (function pollSceneUntilReady(){
+    let lastCount = -1;
+    let stable = 0;
+    let fired = false;
+    const maxMs = 30000;
+    const start = Date.now();
 
-  log('installed');
+    const iv = setInterval(() => {
+      const sc = firstSceneCandidate();
+      if (sc) vb.__scene = sc;
+
+      let cnt = 0;
+      (vb.__scene || sc)?.traverse(o => { if (o.isMesh) cnt++; });
+
+      if (cnt > 0 && cnt === lastCount) {
+        stable++;
+      } else {
+        stable = 0;
+      }
+      lastCount = cnt;
+
+      if (!fired && cnt > 0 && stable >= 3) {
+        fired = true;
+        clearInterval(iv);
+        try {
+          window.dispatchEvent(new CustomEvent('lm:scene-ready', { detail: { from: 'bridge-poll', meshCount: cnt, scene: vb.__scene || sc } }));
+          log('lm:scene-ready dispatched (bridge-poll), meshes=', cnt);
+        } catch(e) { warn('dispatch failed', e); }
+      }
+
+      if (Date.now() - start > maxMs) {
+        clearInterval(iv);
+        if (!fired) warn('scene did not stabilize within timeout');
+      }
+    }, 300);
+  })();
 })();

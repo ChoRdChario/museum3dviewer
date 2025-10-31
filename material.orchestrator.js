@@ -1,87 +1,131 @@
-// material.orchestrator.js
-// LociMyu: Populate #pm-material from viewerBridge and bind opacity slider
-(function(){
-  const VERSION_TAG = 'V6_13c_BRIDGE_TAP_PERSIST';
-  const log  = (...a)=>console.log('[mat-orch]', ...a);
-  const warn = (...a)=>console.warn('[mat-orch]', ...a);
+/**
+ * material.orchestrator.js
+ * Wires #pm-material select with material names and binds the opacity slider.
+ * Robust against late scene availability: reacts to repeated 'lm:scene-ready' and polls.
+ */
+(() => {
+  const NS='mat-orch';
+  const VERSION_TAG = 'V6_13C_BRIDGE_TAP_PERSIST';
+  const log  = (...a)=>console.log(`[${NS}]`, ...a);
+  const warn = (...a)=>console.warn(`[${NS}]`, ...a);
 
+  function getPanelSelect() {
+    return document.getElementById('pm-material');
+  }
   function nearestSlider(from){
-    let p = from.closest('section,fieldset,div') || from.parentElement;
+    let p = from?.closest('section,fieldset,div') || from?.parentElement || document;
     while (p){
       const r = p.querySelector('input[type="range"]');
       if (r) return r;
       p = p.parentElement;
     }
-    return document.querySelector('[data-lm="right-panel"] input[type="range"]') ||
-           document.querySelector('input[type="range"]');
+    return document.querySelector('[data-lm="right-panel"] input[type="range"]') || document.querySelector('input[type="range"]');
   }
 
-  function populateSelect(sel, names){
+  function listMaterials() {
+    try {
+      const b = window.viewerBridge;
+      if (b?.listMaterials) {
+        const arr = b.listMaterials() || [];
+        if (Array.isArray(arr) && arr.length) return arr.slice();
+      }
+    } catch(e){}
+    return [];
+  }
+
+  function populate(sel, names){
     sel.innerHTML='';
     const add=(v,t)=>{ const o=document.createElement('option'); o.value=v; o.textContent=t; sel.appendChild(o); };
-    add('', '-- Select --');
+    add('','-- Select --');
     names.forEach(n=>add(n,n));
     sel.value='';
     sel.dispatchEvent(new Event('change',{bubbles:true}));
-    log('populated into #pm-material:', names.length);
+    log('populated', names.length, 'materials');
   }
 
+  function getScene(){
+    try { return window.viewerBridge?.getScene?.() || window.__viewer?.scene || window.viewer?.scene || window.lm?.scene || null; }
+    catch(e){ return null; }
+  }
   function applyOpacityByName(name, a){
-    const sc = window.viewerBridge?.getScene?.();
-    if (!sc || !name) return false;
+    const sc=getScene(); if(!sc||!name) return false;
     let hit=0;
     sc.traverse(o=>{
       const m=o.material; if(!m) return;
       (Array.isArray(m)?m:[m]).forEach(mm=>{
         if (mm?.name===name){
           mm.transparent = a < 1 ? true : mm.transparent;
-          mm.opacity = a; mm.needsUpdate = true; hit++;
+          mm.opacity = a;
+          mm.needsUpdate = true;
+          hit++;
         }
       });
     });
-    if (hit) log(`opacity ${a.toFixed(2)} -> "${name}" x${hit}`);
     return !!hit;
   }
 
-  function wireOnce(){
-    const sel = document.getElementById('pm-material');
-    if (!sel){ warn('select #pm-material not found'); return false; }
-    const names = (window.viewerBridge && window.viewerBridge.listMaterials && window.viewerBridge.listMaterials()) || [];
-    if (!names.length){ warn('no materials yet'); return false; }
-    populateSelect(sel, names);
+  let wired = false;
+  function wireOnce() {
+    if (wired) return true;
+    const sel = getPanelSelect();
+    if (!sel) return false;
 
-    const slider = nearestSlider(sel);
+    const names = listMaterials();
+    if (!names.length) return false;
 
-    // avoid duplicate handlers
+    populate(sel, names);
+
+    const sld = nearestSlider(sel);
     const sel2 = sel.cloneNode(true); sel2.id = sel.id; sel.parentNode.replaceChild(sel2, sel);
-    let sld2 = slider;
-    if (slider){ const c=slider.cloneNode(true); c.id = slider.id; slider.parentNode.replaceChild(c, slider); sld2=c; }
+    let sld2 = sld;
+    if (sld) { const c=sld.cloneNode(true); c.id=sld.id; sld.parentNode.replaceChild(c,sld); sld2=c; }
 
     const onChange = () => {
       if (!sld2) return;
       let a = parseFloat(sld2.value);
       if (isNaN(a)) a = Math.min(1, Math.max(0, (parseFloat(sld2.value)||100)/100));
-      const name = sel2.value; if (!name) return;
-      applyOpacityByName(name, a);
+      const name = sel2.value;
+      if (!name) return;
+      const ok = applyOpacityByName(name, a);
+      if (!ok) warn('material not found in scene for', name);
+      // TODO: persist via materialsSheetBridge.upsertOne(...) when save timing is defined.
     };
     sel2.addEventListener('change', onChange);
-    sld2 && sld2.addEventListener('input', onChange, {passive:true});
-    log('bound #pm-material & slider');
+    sld2?.addEventListener('input', onChange, {passive:true});
+
+    wired = true;
+    log('wired successfully');
     return true;
   }
 
   function start(){
     log('loaded VERSION_TAG:', VERSION_TAG);
-    // Try immediately, then on scene-ready, then with short retries.
+    // immediate try
     if (wireOnce()) return;
+
+    // listen multiple times
+    const onReady = () => {
+      log('scene-ready received, trying wireOnce...');
+      wireOnce();
+    };
+    window.addEventListener('lm:scene-ready', onReady, { once:false });
+    document.addEventListener('lm:scene-ready', onReady, { once:false });
+
+    // polling fallback
     let tries = 0;
     const iv = setInterval(() => {
       if (wireOnce()) { clearInterval(iv); }
-      else if (++tries > 80) { clearInterval(iv); warn('gave up: no materials'); }
-    }, 100);
-    window.addEventListener('lm:scene-ready', () => { wireOnce(); }, { once:false });
+      else {
+        tries++;
+        if (tries > 150) { clearInterval(iv); warn('gave up after', tries, 'attempts'); }
+        else if (tries % 25 === 0) { log('still trying...', tries); }
+      }
+    }, 200);
   }
 
-  // defer start to next tick so DOM is ready
-  (typeof queueMicrotask === 'function' ? queueMicrotask : setTimeout)(start, 0);
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', start, { once:true });
+  } else {
+    start();
+  }
 })();
