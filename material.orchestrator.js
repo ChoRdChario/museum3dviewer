@@ -1,174 +1,139 @@
-/* material.orchestrator.js
- * VERSION_TAG: V6_15h_BRIDGE_WAIT_ROBUST
- * See in-chat notes for behavior.
- */
-(function () {
-  const VERSION_TAG = 'V6_15h_BRIDGE_WAIT_ROBUST';
-  const log = (...a) => console.log('[mat-orch]', ...a);
-  const warn = (...a) => console.warn('[mat-orch]', ...a);
-  const sleep = (ms) => new Promise(r => setTimeout(r, ms));
-  const nowISO = () => new Date().toISOString();
 
-  async function waitForUI(timeoutMs = 8000) {
-    const t0 = Date.now();
-    let matSel = null, opacity = null;
-    do {
-      matSel = document.querySelector('#pm-material') ||
-               document.querySelector('select#pm-material') ||
-               document.querySelector('[data-role="pm-material"]') ||
-               document.querySelector('select[data-mat]') ||
-               (document.querySelectorAll('select').length > 1 ? document.querySelectorAll('select')[1] : null);
-      opacity = document.querySelector('#pm-opacity') ||
-                document.querySelector('input#pm-opacity[type="range"]') ||
-                document.querySelector('input[type="range"][name="pm-opacity"]') ||
-                document.querySelector('[data-role="pm-opacity"]') ||
-                document.querySelector('input[type="range"]');
-      if (matSel && opacity) return { matSel, opacity };
-      await sleep(120);
-    } while (Date.now() - t0 < timeoutMs);
+/* material.orchestrator.js — V6_15i_FIX_PACK
+ * Robust wiring order: (UI) → (bridges) → (context) → (load saved → apply → bind events)
+ */
+(function(){
+  const LOG='[mat-orch]';
+  const VERSION_TAG='V6_15i_FIX_PACK';
+  function log(...a){ try{ console.log(LOG, ...a);}catch(e){} }
+  function warn(...a){ try{ console.warn(LOG, ...a);}catch(e){} }
+  if (window.__mat_orch_loaded){ return; }
+  window.__mat_orch_loaded = true;
+  log('loaded VERSION_TAG:', VERSION_TAG);
+
+  const $ = (s,r=document)=>r.querySelector(s);
+  const sleep = ms=>new Promise(r=>setTimeout(r,ms));
+  const debounce = (fn,ms)=>{ let t; return (...args)=>{ clearTimeout(t); t=setTimeout(()=>fn(...args),ms);} };
+
+  async function waitForUI(timeout=6000){
+    const t0 = performance.now();
+    while (performance.now()-t0 < timeout){
+      const sel = $('#pm-material-select') || $('[data-lm="pm-material-select"]');
+      const rang = $('#pm-opacity') || $('[data-lm="pm-opacity"]') || document.querySelector('input[type="range"][name="pm-opacity"]');
+      if (sel && rang) return { sel, rang };
+      await sleep(50);
+    }
     throw new Error('UI controls not found');
   }
 
-  async function waitForBridges(timeoutMs = 12000) {
-    const t0 = Date.now();
-    do {
-      const vb = window.viewerBridge;
-      const sb = window.materialsSheetBridge;
-      if (vb && typeof vb.listMaterials === 'function' && sb && typeof sb.loadAll === 'function' && typeof sb.upsertOne === 'function') {
-        return { vb, sb };
-      }
-      await sleep(150);
-    } while (Date.now() - t0 < timeoutMs);
+  async function waitForBridges(timeout=6000){
+    const t0 = performance.now();
+    const ok = ()=> window.viewerBridge?.listMaterials && window.viewerBridge?.getScene &&
+                    window.materialsSheetBridge?.ensureSheet && window.materialsSheetBridge?.loadAll && window.materialsSheetBridge?.upsertOne;
+    while (performance.now()-t0 < timeout){
+      if (ok()) return true;
+      await sleep(60);
+    }
     throw new Error('viewerBridge/materialsSheetBridge not ready');
   }
 
-  async function applyOpacityToScene(vb, materialName, value) {
-    try {
-      if (typeof vb.applyMaterialOpacity === 'function') {
-        vb.applyMaterialOpacity(materialName, value);
-        return;
-      }
-      const mats = await vb.listMaterials();
-      const targets = mats.filter(m => (m.name || m.material?.name || '').trim() === materialName);
-      targets.forEach(m => {
-        const mat = m.material || m;
-        if (mat && 'opacity' in mat) {
-          mat.transparent = value < 1.0 || mat.transparent === true;
-          mat.opacity = value;
-          if ('needsUpdate' in mat) mat.needsUpdate = true;
-        }
-      });
-    } catch (e) {
-      warn('applyOpacity fallback failed', e);
+  async function waitForContext(timeout=8000){
+    let scene = false, sheet = false;
+    const t0 = performance.now();
+    const hs = ()=> scene=true;
+    const hc = ()=> sheet=true;
+    document.addEventListener('lm:scene-ready', hs, {once:true});
+    document.addEventListener('lm:sheet-context', hc, {once:true});
+    if (window.__lm_last_sheet_context) sheet = true;
+    while (performance.now()-t0 < timeout){
+      if (scene && sheet) return true;
+      await sleep(80);
     }
+    throw new Error('scene/sheet context not ready');
   }
 
-  function uniqueNames(list) {
-    const seen = new Set(), out = [];
-    for (const m of list) {
-      const n = (m.name || m.material?.name || '').trim();
-      if (!n || seen.has(n)) continue;
-      seen.add(n); out.push(n);
-    }
-    return out.sort((a,b)=>a.localeCompare(b));
-  }
-
-  function debounce(fn, delay = 220) {
-    let h = null;
-    return function (...args) { clearTimeout(h); h = setTimeout(()=>fn.apply(this,args), delay); };
-  }
-
-  async function boot() {
-    log('loaded VERSION_TAG:', VERSION_TAG);
-    const { matSel, opacity } = await waitForUI();
+  let wired=false;
+  async function boot(){
+    const ui = await waitForUI();
     log('ui ok');
-    const { vb, sb } = await waitForBridges();
+    await waitForBridges();
+    await waitForContext();
+    if (wired) return; wired=true;
 
-    // Populate list
-    const mats = await vb.listMaterials();
-    const names = uniqueNames(mats);
-    matSel.innerHTML = '';
-    const opt0 = document.createElement('option');
-    opt0.value = ''; opt0.textContent = '— Select material —';
-    matSel.appendChild(opt0);
-    for (const n of names) {
-      const o = document.createElement('option');
-      o.value = n; o.textContent = n; matSel.appendChild(o);
-    }
-    log('panel populated', names.length, 'materials');
+    const sel = ui.sel;
+    const slider = ui.rang;
 
-    // Load saved rows
+    // populate select
+    const mats = await window.viewerBridge.listMaterials();
+    sel.innerHTML = '';
+    const ph = document.createElement('option'); ph.value=''; ph.textContent='— Select —'; sel.appendChild(ph);
+    (mats||[]).forEach(m=>{
+      const opt = document.createElement('option');
+      const key = m.name || m.materialKey || m.uuid || '';
+      opt.value = key; opt.textContent = key || '(unnamed)';
+      sel.appendChild(opt);
+    });
+    log(`panel populated ${mats?.length||0} materials`);
+
     let saved = new Map();
-    try {
-      const rows = await sb.loadAll();
-      for (const r of rows || []) {
-        const key = (r.materialKey || r.name || '').trim();
-        if (!key) continue;
-        const prev = saved.get(key);
-        if (!prev || (r.updatedAt || '') > (prev.updatedAt || '')) saved.set(key, r);
-      }
-    } catch (e) { warn('loadAll failed (continue with empty):', e); }
+    try{ saved = await window.materialsSheetBridge.loadAll(); } catch(e){ warn('loadAll failed (continue with empty):', e); }
 
-    // Apply saved to scene
-    for (const [k, r] of saved.entries()) {
-      const v = Number(r.opacity);
-      if (!isNaN(v)) await applyOpacityToScene(vb, k, v);
+    let current=null, applying=false;
+
+    function applyToScene(matKey, opacity){
+      try{
+        const scene = window.viewerBridge.getScene();
+        scene.traverse?.((obj)=>{
+          const mat = obj.material;
+          const applyOne = (m)=>{
+            if (!m || !m.name) return;
+            if (m.name === matKey){
+              m.transparent = true;
+              m.opacity = Number(opacity);
+              m.needsUpdate = true;
+            }
+          };
+          if (Array.isArray(mat)) mat.forEach(applyOne); else applyOne(mat);
+        });
+      }catch(e){}
     }
 
-    function reflectUIFor(name) {
-      const r = saved.get(name);
-      const v = r ? Number(r.opacity) : 1.0;
-      opacity.value = String(isNaN(v) ? 1.0 : v);
-      opacity.dispatchEvent(new Event('input', { bubbles: true }));
+    function reflect(state){
+      const v = (state && state.opacity!=null) ? Number(state.opacity) : 1;
+      slider.value = String(v);
     }
 
-    matSel.addEventListener('change', () => { const n = matSel.value; if (n) reflectUIFor(n); });
+    async function onSel(){
+      current = sel.value || null;
+      if (!current) return;
+      applying = true;
+      const state = saved.get(current) || { opacity: 1 };
+      reflect(state);
+      applyToScene(current, state.opacity ?? 1);
+      applying = false;
+    }
+    sel.addEventListener('change', onSel);
 
-    opacity.addEventListener('input', async () => {
-      const n = matSel.value; if (!n) return;
-      const v = Number(opacity.value); if (isNaN(v)) return;
-      await applyOpacityToScene(vb, n, v);
+    slider.addEventListener('input', (e)=>{
+      if (!current) return;
+      applyToScene(current, parseFloat(e.target.value));
     });
 
-    const persist = debounce(async () => {
-      const n = matSel.value; if (!n) return;
-      const v = Number(opacity.value); if (isNaN(v)) return;
-      try {
-        await sb.upsertOne({
-          materialKey: n, name: n, opacity: v,
-          updatedAt: nowISO(), updatedBy: 'ui',
-          sheetGid: (window.__lm_sheet_gid || 0), modelKey: (window.__lm_model_key || 'mat-orch')
-        });
-        saved.set(n, { materialKey: n, name: n, opacity: v, updatedAt: nowISO() });
-        log('persisted to sheet:', n, v);
-      } catch (e) { warn('upsertOne failed', e); }
-    }, 220);
+    const persist = debounce(async (v)=>{
+      if (!current || applying) return;
+      try{
+        await window.materialsSheetBridge.upsertOne({ materialKey: current, name: current, opacity: v });
+      }catch(e){ warn('upsertOne failed', e); }
+    }, 250);
 
-    opacity.addEventListener('change', persist);
-    opacity.addEventListener('pointerup', persist);
-    opacity.addEventListener('touchend', persist);
+    slider.addEventListener('change', (e)=> persist(parseFloat(e.target.value)));
 
-    if (names.length) { matSel.value = names[0]; reflectUIFor(names[0]); }
     log('wired panel');
   }
 
-  let wiring = false, wired = false;
-  async function maybeWire() {
-    if (wired || wiring) return;
-    wiring = false; // will set to true while booting
-    wiring = true;
-    try { await boot(); wired = true; }
-    catch (e) { warn('boot failed (will retry automatically)', e); wired = false; }
-    finally { wiring = false; }
+  async function maybeWire(){
+    try{ await boot(); }
+    catch(e){ warn('boot failed (will retry automatically)', e); setTimeout(maybeWire, 700); }
   }
-
-  window.addEventListener('lm:scene-ready', maybeWire);
-  window.addEventListener('lm:sheet-context', (e) => {
-    const ctx = e && e.detail ? e.detail : e;
-    window.__lm_sheet_gid = (ctx && ctx.sheetGid) || 0;
-    maybeWire();
-  });
-  document.addEventListener('DOMContentLoaded', () => setTimeout(maybeWire, 600));
-
-  log('loaded VERSION_TAG:', VERSION_TAG);
+  maybeWire();
 })();
