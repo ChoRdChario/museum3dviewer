@@ -1,291 +1,262 @@
-
 // material.orchestrator.js
-// LociMyu v6.x — Material UI Orchestrator (patched full file)
-// Order-sensitive: this module assumes viewer.bridge.module.js and materials.sheet.bridge.js are loaded first.
-// VERSION TAG:
-const __MAT_ORCH_VERSION_TAG__ = 'V6_16_UI_SYNC_PREAPPLY';
+// Robust, order-safe orchestrator for Material pane.
 
 (() => {
-  console.log('[mat-orch] loaded VERSION_TAG:', __MAT_ORCH_VERSION_TAG__);
+  const VERSION_TAG = 'V6_16b_ORDER_SAFE_UI_SYNC';
+  console.log('[mat-orch] loaded VERSION_TAG:', VERSION_TAG);
 
-  // ---------- Utilities ----------
-  const $ = (sel) => document.querySelector(sel);
-  const on = (el, ev, fn, opts) => el && el.addEventListener(ev, fn, opts);
+  // ======== tiny utils ========
+  const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
-  function throttle(fn, wait) {
-    let t = 0, lastArgs = null, scheduled = False;
+  // 「false」のタイポ注意（ReferenceError対策）
+  const throttle = (fn, wait) => {
+    let last = 0, timer = null, lastArgs = null;
     return (...args) => {
-      lastArgs = args;
       const now = Date.now();
-      const fire = () => { scheduled = false; t = Date.now(); fn(...lastArgs); };
-      if (!scheduled) {
-        const delay = Math.max(0, wait - (now - t));
-        scheduled = true;
-        setTimeout(fire, delay);
+      const remain = wait - (now - last);
+      lastArgs = args;
+      if (remain <= 0) {
+        last = now;
+        fn(...lastArgs);
+        lastArgs = null;
+      } else if (timer === null) {
+        timer = setTimeout(() => {
+          last = Date.now();
+          fn(...(lastArgs || []));
+          lastArgs = null;
+          timer = null;
+        }, remain);
       }
     };
-  }
+  };
 
-  function waitForEventOnce(eventName, timeoutMs = 5000) {
+  function waitForEventOnce(type, timeoutMs = 8000) {
     return new Promise((resolve, reject) => {
-      let timer = null;
+      let to = null;
       const handler = (ev) => {
-        cleanup();
-        resolve(ev);
+        clearTimeout(to);
+        window.removeEventListener(type, handler, { capture: false });
+        resolve(ev.detail || ev);
       };
-      const cleanup = () => {
-        window.removeEventListener(eventName, handler);
-        if (timer) clearTimeout(timer);
-      };
-      window.addEventListener(eventName, handler, { once: true });
-      timer = setTimeout(() => {
-        cleanup();
-        reject(new Error(`waitForEventOnce timeout: ${eventName}`));
+      window.addEventListener(type, handler, { once: true });
+      to = setTimeout(() => {
+        window.removeEventListener(type, handler, { capture: false });
+        reject(new Error(`waitForEventOnce timeout: ${type}`));
       }, timeoutMs);
     });
   }
 
-  async function waitForUI(timeoutMs = 4000) {
-    const t0 = performance.now();
-    while (performance.now() - t0 < timeoutMs) {
-      const ok = el.materialSelect && el.opacityRange && el.opacityOut;
-      if (ok) return true;
-      await new Promise(r => setTimeout(r, 50));
-    }
-    throw new Error('UI controls not found');
-  }
+  function qs(id) { return document.getElementById(id); }
 
-  async function waitReadyBridges(timeoutMs = 6000) {
-    const t0 = performance.now();
-    while (performance.now() - t0 < timeoutMs) {
-      const vb = window.viewerBridge;
-      const sb = window.materialsSheetBridge;
-      const vbOk = vb && typeof vb.listMaterials === 'function';
-      const sbOk = sb && typeof sb.loadAll === 'function' && typeof sb.upsertOne === 'function';
-      if (vbOk && sbOk) return { vb, sb };
-      await new Promise(r => setTimeout(r, 80));
-    }
-    throw new Error('viewerBridge/materialsSheetBridge not ready');
-  }
-
-  // ---------- DOM refs ----------
-  const el = {
-    materialSelect: $('#pm-material'),
-    opacityRange  : $('#pm-opacity-range'),
-    opacityOut    : $('#pm-opacity-val'),
-    flagDouble    : $('#pm-flag-doublesided'),
-    flagUnlit     : $('#pm-flag-unlit'),
-    // future: chroma controls etc.
+  // ======== UI refs ========
+  const ui = {
+    selectModel: qs('pm-model') || qs('pm-model-select'), // 互換
+    selectMaterial: qs('pm-material'),
+    rangeOpacity: qs('pm-opacity-range'),
+    outOpacity: qs('pm-opacity-val'),
+    chkDouble: qs('pm-flag-doublesided'),
+    chkUnlit: qs('pm-flag-unlit'),
+    chkChromaEnable: qs('pm-ck-enable'),
+    rangeChromaTol: qs('pm-ck-tol'),
+    rangeChromaFeather: qs('pm-ck-feather'),
   };
 
-  // ---------- In-memory state ----------
-  let stateByMat = new Map();  // materialKey -> { opacity, doubleSided, unlit, ... }
-  let syncingUI  = false;      // guard to avoid UI -> scene write during programmatic sync
-  let wiredOnce  = false;
-
-  function normalizeRowsToStateMap(rows) {
-    // rows: array of append-only entries. Last one wins per materialKey.
-    const m = new Map();
-    if (!Array.isArray(rows)) return m;
-    for (const r of rows) {
-      const k = r.materialKey || r.name || r.key;
-      if (!k) continue;
-      m.set(k, {
-        opacity     : r.opacity != null ? Number(r.opacity) : 1,
-        doubleSided : !!r.doubleSided,
-        unlit       : !!r.unlit,
-        // extend here (chroma, etc.)
-      });
-    }
-    return m;
+  function assertUI() {
+    const missing = Object.entries(ui).filter(([k, v]) => !v).map(([k]) => k);
+    if (missing.length) throw new Error('UI controls not found: ' + missing.join(', '));
   }
 
-  async function applyAndSyncUI(materialKey, viewerBridge) {
-    const s = stateByMat.get(materialKey) || { opacity: 1, doubleSided: false, unlit: false };
-    // 1) Scene first
+  // ======== State ========
+  let suspendEvents = false;
+  let latestByKey = new Map(); // materialKey -> saved row
+  let stableMaterials = [];     // [{key, name, ref}...]
+
+  // ======== Viewer Helpers ========
+  function getViewer() {
+    if (!window.viewerBridge || typeof window.viewerBridge.getScene !== 'function') return null;
+    return window.viewerBridge;
+  }
+
+  function listMaterialsSafe() {
+    const vb = getViewer();
+    if (!vb || typeof vb.listMaterials !== 'function') return [];
+    const arr = vb.listMaterials() || [];
+    // 安全な名称付け（unnamed対策）
+    let unnamed = 0;
+    return arr.map((m) => {
+      let name = m?.name;
+      if (!name || String(name).trim() === '') {
+        unnamed += 1;
+        name = `(unnamed ${unnamed})`;
+      }
+      return { key: name, name, ref: m };
+    });
+  }
+
+  function applyToScene(materialKey, state) {
+    const vb = getViewer();
+    if (!vb || typeof vb.applyMaterialState !== 'function') return;
+    vb.applyMaterialState(materialKey, {
+      opacity: state.opacity,
+      doubleSided: !!Number(state.doubleSided || 0),
+      unlit: !!Number(state.unlit || 0),
+      chromaEnable: !!Number(state.chromaEnable || 0),
+      chromaColor: state.chromaColor || '',
+      chromaTolerance: Number(state.chromaTolerance || 0),
+      chromaFeather: Number(state.chromaFeather || 0),
+    });
+  }
+
+  // ======== UI Setters (イベント抑止) ========
+  function setOpacityUI(v) {
+    suspendEvents = true;
     try {
-      viewerBridge?.setMaterialOpacity?.(materialKey, s.opacity);
-      viewerBridge?.setMaterialFlags?.(materialKey, { doubleSided: !!s.doubleSided, unlit: !!s.unlit });
-    } catch (e) {
-      console.warn('[mat-orch] scene apply failed', e);
-    }
-
-    // 2) UI sync (guard events)
-    syncingUI = true;
+      if (ui.rangeOpacity) ui.rangeOpacity.value = String(v);
+      if (ui.outOpacity) ui.outOpacity.value = (Number(v).toFixed(2));
+    } finally { suspendEvents = false; }
+  }
+  function setFlagsUI(state) {
+    suspendEvents = true;
     try {
-      if (el.opacityRange) {
-        el.opacityRange.value = String(s.opacity);
-        if (el.opacityOut) el.opacityOut.value = (+s.opacity).toFixed(2);
-      }
-      if (el.flagDouble) el.flagDouble.checked = !!s.doubleSided;
-      if (el.flagUnlit)  el.flagUnlit.checked  = !!s.unlit;
-    } finally {
-      setTimeout(() => { syncingUI = false; }, 0);
-    }
+      if (ui.chkDouble) ui.chkDouble.checked = !!Number(state.doubleSided || 0);
+      if (ui.chkUnlit) ui.chkUnlit.checked = !!Number(state.unlit || 0);
+      if (ui.chkChromaEnable) ui.chkChromaEnable.checked = !!Number(state.chromaEnable || 0);
+      if (ui.rangeChromaTol) ui.rangeChromaTol.value = String(state.chromaTolerance || 0);
+      if (ui.rangeChromaFeather) ui.rangeChromaFeather.value = String(state.chromaFeather || 0);
+    } finally { suspendEvents = false; }
   }
 
-  function wireUIEvents(viewerBridge, materialsSheetBridge, getCurrentKey) {
-    const persist = throttle(async (k, partial) => {
-      const cur = stateByMat.get(k) || {};
-      const next = { ...cur, ...partial };
-      stateByMat.set(k, next);
-      try {
-        await materialsSheetBridge.upsertOne({ materialKey: k, ...next });
-        console.log('[mat-orch] persisted to sheet:', k);
-      } catch (e) {
-        console.warn('[mat-orch] upsertOne failed', e);
-      }
-    }, 250);
-
-    on(el.opacityRange, 'input', () => {
-      if (syncingUI) return;
-      const k = getCurrentKey();
-      if (!k) return;
-      const v = Number(el.opacityRange.value);
-      try {
-        viewerBridge?.setMaterialOpacity?.(k, v);
-        if (el.opacityOut) el.opacityOut.value = v.toFixed(2);
-      } finally {
-        persist(k, { opacity: v });
-      }
-    });
-
-    on(el.flagDouble, 'change', () => {
-      if (syncingUI) return;
-      const k = getCurrentKey();
-      if (!k) return;
-      const v = !!el.flagDouble.checked;
-      try {
-        viewerBridge?.setMaterialFlags?.(k, { doubleSided: v, unlit: !!(el.flagUnlit?.checked) });
-      } finally {
-        persist(k, { doubleSided: v });
-      }
-    });
-
-    on(el.flagUnlit, 'change', () => {
-      if (syncingUI) return;
-      const k = getCurrentKey();
-      if (!k) return;
-      const v = !!el.flagUnlit.checked;
-      try {
-        viewerBridge?.setMaterialFlags?.(k, { doubleSided: !!(el.flagDouble?.checked), unlit: v });
-      } finally {
-        persist(k, { unlit: v });
-      }
-    });
+  function readCurrentStateFromUI(materialKey) {
+    return {
+      materialKey,
+      opacity: Number(ui.rangeOpacity?.value ?? 1),
+      doubleSided: ui.chkDouble?.checked ? 1 : 0,
+      unlit: ui.chkUnlit?.checked ? 1 : 0,
+      chromaEnable: ui.chkChromaEnable?.checked ? 1 : 0,
+      chromaColor: '', // 予約
+      chromaTolerance: Number(ui.rangeChromaTol?.value ?? 0),
+      chromaFeather: Number(ui.rangeChromaFeather?.value ?? 0),
+    };
   }
 
-  async function wireOnce(viewerBridge, materialsSheetBridge) {
-    if (wiredOnce) return;
-    wiredOnce = true;
-
-    // 1) Populate material select from scene
-    const mats = (viewerBridge?.listMaterials?.() || []);
-    const sel  = el.materialSelect;
-    if (!sel) throw new Error('material <select> missing');
-    sel.innerHTML = '<option value="">— Select —</option>';
-    for (const m of mats) {
-      const key = m.key || m.name;
-      const text = m.name || m.key || '(unnamed)';
-      if (!key) continue;
+  // ======== Wiring ========
+  function populateDropdown(materials) {
+    const sel = ui.selectMaterial;
+    if (!sel) return;
+    sel.innerHTML = '';
+    const opt0 = document.createElement('option');
+    opt0.value = '';
+    opt0.textContent = '— Select —';
+    sel.appendChild(opt0);
+    for (const m of materials) {
       const opt = document.createElement('option');
-      opt.value = key;
-      opt.textContent = text;
+      opt.value = m.key;
+      opt.textContent = m.name;
       sel.appendChild(opt);
     }
-    console.log('[mat-orch] panel populated', mats.length, 'materials');
+  }
 
-    // 2) Load saved rows from sheet → normalize to Map
+  function getDefaultState() {
+    return { opacity: 1, doubleSided: 0, unlit: 0, chromaEnable: 0, chromaColor: '', chromaTolerance: 0, chromaFeather: 0 };
+  }
+
+  function onMaterialChange() {
+    if (!ui.selectMaterial) return;
+    const key = ui.selectMaterial.value;
+    if (!key) return; // 未選択
+    const saved = latestByKey.get(key) || getDefaultState();
+    // 1) シーン → 2) UI の順で適用（イベント抑止）
+    applyToScene(key, saved);
+    setOpacityUI(saved.opacity ?? 1);
+    setFlagsUI(saved);
+  }
+
+  const persistThrottled = throttle(async () => {
+    if (suspendEvents) return;
+    const key = ui.selectMaterial?.value;
+    if (!key) return;
+    const state = readCurrentStateFromUI(key);
     try {
-      const rows = await materialsSheetBridge.loadAll();
-      stateByMat = normalizeRowsToStateMap(rows);
+      const row = await window.materialsSheetBridge.upsertOne(state);
+      latestByKey.set(key, { ...latestByKey.get(key), ...row, ...state });
+      // 直後の選択遷移でも最新が使われる
+    } catch (e) {
+      console.warn('[mat-orch] upsertOne failed', e);
+    }
+  }, 220);
+
+  function wireUIEvents() {
+    // 選択変更
+    ui.selectMaterial?.addEventListener('change', onMaterialChange);
+
+    // スライダ/チェック群 → throttled persist
+    const emitChange = () => { if (!suspendEvents) persistThrottled(); };
+
+    ui.rangeOpacity?.addEventListener('input', () => {
+      if (suspendEvents) return;
+      ui.outOpacity && (ui.outOpacity.value = Number(ui.rangeOpacity.value).toFixed(2));
+      emitChange();
+    });
+    ui.rangeOpacity?.addEventListener('change', emitChange);
+    ui.chkDouble?.addEventListener('change', emitChange);
+    ui.chkUnlit?.addEventListener('change', emitChange);
+    ui.chkChromaEnable?.addEventListener('change', emitChange);
+    ui.rangeChromaTol?.addEventListener('input', emitChange);
+    ui.rangeChromaFeather?.addEventListener('input', emitChange);
+  }
+
+  async function wireOnce() {
+    // 1) viewerとsheet-contextの両方を待つ（順番保証）
+    const [sceneEv, sheetCtx] = await Promise.all([
+      waitForEventOnce('lm:scene-ready').catch(async (e) => {
+        // 既にreadyなら viewer.bridge 側でイベント発火済みの可能性→ 1回だけ短い猶予
+        console.warn('[mat-orch] scene-ready wait failed, retry shortly', e);
+        await sleep(300);
+        return waitForEventOnce('lm:scene-ready');
+      }),
+      waitForEventOnce('lm:sheet-context'),
+    ]);
+    // 2) UI確認
+    assertUI();
+    console.log('[mat-orch] ui ok');
+
+    // 3) viewerからマテリアル列挙 → ドロップダウン構築
+    stableMaterials = listMaterialsSafe();
+    populateDropdown(stableMaterials);
+    console.log('[mat-orch] panel populated', stableMaterials.length, 'materials');
+
+    // 4) 保存値のロード（最新行に正規化）
+    try {
+      latestByKey = await window.materialsSheetBridge.loadAll();
     } catch (e) {
       console.warn('[mat-orch] loadAll failed (continue with empty):', e);
-      stateByMat = new Map();
+      latestByKey = new Map();
     }
 
-    // 3) Select change = apply saved state to scene and sync UI
-    on(sel, 'change', () => {
-      const k = sel.value || '';
-      if (!k) return;
-      applyAndSyncUI(k, viewerBridge);
-    });
+    // 5) UIイベントを bind（この時点で行う）
+    wireUIEvents();
 
-    // 4) Bind UI events (last, to avoid firing during initial sync)
-    wireUIEvents(viewerBridge, materialsSheetBridge, () => sel.value || '');
-
+    // 6) 初期状態：未選択。ユーザーが選んだ瞬間に onMaterialChange が保存値→シーン→UIの順で反映
     console.log('[mat-orch] wired panel');
   }
 
-  // ---------- Boot sequence ----------
   async function boot() {
-    try {
-      await waitForUI(3500);
-      console.log('[mat-orch] ui ok');
-    } catch (e) {
-      console.warn('[mat-orch] boot failed (will retry automatically) Error:', e);
-      scheduleRetry();
-      return;
-    }
-
-    let vb, sb;
-    try {
-      ({ vb, sb } = await waitReadyBridges(6000));
-    } catch (e) {
-      console.warn('[mat-orch] boot failed (will retry automatically) Error:', e);
-      scheduleRetry();
-      return;
-    }
-
-    // Wait scene-ready if viewer exposes event. If scene already ready, skip.
-    const needScene = !(vb?.getScene?.()); // if getScene exists and returns something, assume ready
-    if (needScene) {
-      try {
-        await waitForEventOnce('lm:scene-ready', 6000);
-      } catch (e) {
-        console.warn('[mat-orch] boot failed (will retry automatically) Error:', e);
-        scheduleRetry();
-        return;
+    // UI存在チェック（足りない場合は少し待って再試行）
+    for (let i = 0; i < 20; i++) {
+      try { assertUI(); break; }
+      catch {
+        await sleep(100);
       }
     }
-
     try {
-      await wireOnce(vb, sb);
+      await wireOnce();
     } catch (e) {
-      console.warn('[mat-orch] boot failed (will retry automatically) Error:', e);
-      scheduleRetry();
-      return;
+      console.warn('[mat-orch] boot failed (will retry automatically)', e);
+      // 再試行（低頻度）
+      setTimeout(() => boot(), 1200);
     }
   }
 
-  let retryTimer = null;
-  function scheduleRetry() {
-    if (retryTimer) return;
-    retryTimer = setTimeout(() => {
-      retryTimer = null;
-      boot();
-    }, 500);
-  }
-
-  // Start
-  // Kick once now, and also re-kick when scene or sheet context changes.
+  // kick
   boot();
-  window.addEventListener('lm:scene-ready', () => {
-    // Try to wire if not wired yet
-    if (!wiredOnce) boot();
-  }, { passive: true });
-
-  // sheet-context can change when user switches gid, etc.
-  window.addEventListener('lm:sheet-context', () => {
-    // We don't auto rewire to avoid duplicate handlers;
-    // but if boot had failed previously because sheet wasn't ready yet, try again.
-    if (!wiredOnce) boot();
-  }, { passive: true });
-
-  // Expose for debugging
-  window.__mat_orch__ = {
-    version: __MAT_ORCH_VERSION_TAG__,
-    get stateByMat() { return stateByMat; },
-    forceRewire: () => { wiredOnce = false; boot(); },
-  };
 })();
