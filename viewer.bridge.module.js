@@ -1,72 +1,88 @@
-// viewer.bridge.module.js
-// Robust listMaterials: names for unnamed materials.
-// Keeps existing getScene and event wiring pattern minimal and non-breaking.
 
+/*! viewer.bridge.module.js (sticky-ready) */
 (() => {
-  let _scene = null;
+  const log = (...a) => console.log("[viewer-bridge]", ...a);
+  if (window.viewerBridge?.__installed) return;
 
-  // Expose a setter only if not already provided by existing loader logic.
-  // (If your loader already sets window.viewerBridge.setScene, this block is harmless.)
-  if (!window.viewerBridge) window.viewerBridge = {};
+  const state = {
+    scene: null,
+    ready: false,
+    materials: [],
+  };
 
-  // Consumers call this after GLB load; keep for compatibility if needed.
-  if (!window.viewerBridge.setScene) {
-    window.viewerBridge.setScene = function setScene(scene) {
-      _scene = scene;
-      if (_scene) {
-        const ev = new Event('lm:scene-ready');
-        window.dispatchEvent(ev);
-      }
-    };
-  } else {
-    // If someone else defines setScene and stores scene internally,
-    // we still mirror it if they dispatch lm:scene-ready.
-    // getScene below will fall back to existing API if available.
-  }
-
-  function getScene() {
-    if (window.viewerBridge && typeof window.viewerBridge._getInternalScene === 'function') {
-      try { return window.viewerBridge._getInternalScene(); } catch (_e) {}
-    }
-    return _scene;
-  }
-
-  function listMaterials() {
-    const scene = getScene();
+  // Helper: list materials safely (handles arrays/single, unnamed)
+  function listMaterialsFromScene(scene) {
+    const mats = new Map();
     if (!scene) return [];
-
-    const found = new Map();
     scene.traverse(obj => {
-      if (!obj || !obj.isMesh) return;
-      let mats = obj.material;
-      if (!mats) return;
-      mats = Array.isArray(mats) ? mats : [mats];
-
-      mats.forEach((mat, idx) => {
+      if (!obj.isMesh) return;
+      const m = obj.material;
+      const list = Array.isArray(m) ? m : (m ? [m] : []);
+      list.forEach((mat, idx) => {
         if (!mat) return;
-        const key = mat.uuid;               // stable unique key for a material instance
-        if (found.has(key)) return;
-
-        // Build a robust, human-friendly display name
-        const meshName = (obj.name && String(obj.name).trim()) ? String(obj.name).trim() : 'Mesh';
-        let name = (mat.name && String(mat.name).trim()) ? String(mat.name).trim() : '';
-        if (!name && mat.userData && typeof mat.userData.name === 'string' && mat.userData.name.trim()) {
-          name = mat.userData.name.trim();
-        }
-        if (!name) {
-          name = (mats.length > 1) ? `${meshName} [${idx}]` : meshName;
-        }
-
-        found.set(key, { key, name, mesh: meshName, index: idx });
+        const key = mat.uuid || `${obj.uuid}:${idx}`;
+        const name = (mat.name && String(mat.name).trim()) ? String(mat.name) : null;
+        if (!mats.has(key)) mats.set(key, { key, name: name || null, material: mat });
       });
     });
-
-    return Array.from(found.values());
+    const arr = Array.from(mats.values()).map((m, i) => ({
+      key: m.key,
+      name: m.name || `(unnamed ${i+1})`,
+      ref: m.material
+    }));
+    return arr;
   }
 
-  // Publish API (non-breaking merge)
-  Object.assign(window.viewerBridge, {
-    getScene,
-    listMaterials,
-  });
+  // Sticky dispatch
+  function dispatchReady() {
+    const evName = "lm:scene-ready";
+    const payload = { materials: state.materials.map(m => ({ key: m.key, name: m.name })) };
+    window.__lm_sceneReady = { at: Date.now(), ...payload };
+    log("scene stabilized with", state.materials.length, "meshes");
+    document.dispatchEvent(new CustomEvent(evName, { detail: payload }));
+  }
+
+  // Poll until scene exists (host provides THREE scene on window.__lm_viewer / getScene)
+  function pollSceneUntilReady() {
+    let tries = 0;
+    const max = 100; // ~10s
+    const id = setInterval(() => {
+      tries++;
+      try {
+        const scene = (window.viewer?.scene) || (window.__lm_viewer && window.__lm_viewer.scene) || (window.getScene && window.getScene());
+        if (scene && !state.ready) {
+          state.scene = scene;
+          state.materials = listMaterialsFromScene(scene);
+          state.ready = true;
+          clearInterval(id);
+          dispatchReady();
+        }
+        if (tries >= max) clearInterval(id);
+      } catch (e) {
+        // keep polling
+      }
+    }, 100);
+  }
+
+  window.viewerBridge = {
+    __installed: true,
+    isReady: () => !!state.ready,
+    getScene: () => state.scene,
+    listMaterials: () => state.materials.map(m => ({ key: m.key, name: m.name, ref: m.ref })),
+    waitUntilReady: ({ timeout = 8000 } = {}) => new Promise((resolve, reject) => {
+      if (state.ready) return resolve(true);
+      const start = Date.now();
+      const on = () => {
+        document.removeEventListener("lm:scene-ready", on);
+        resolve(true);
+      };
+      document.addEventListener("lm:scene-ready", on, { once: true });
+      const t = setInterval(() => {
+        if (state.ready) { clearInterval(t); on(); }
+        else if (Date.now() - start > timeout) { clearInterval(t); reject(new Error("viewerBridge timeout")); }
+      }, 100);
+    }),
+  };
+
+  pollSceneUntilReady();
 })();
