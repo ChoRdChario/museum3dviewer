@@ -1,17 +1,37 @@
-/* LociMyu - Sheet Context Bridge (sticky cache)
- * Adds a persistent cache so late listeners can pick up the latest ctx.
- */
+
+// LociMyu - Sheet Context Bridge (sticky cache)
 (function(){
-  // expose a helper to publish ctx (call where ctx is produced), or set __lm_last_sheet_ctx before dispatch elsewhere.
-  window.__lm_publish_sheet_ctx = function(ctx){
-    try { window.__lm_last_sheet_ctx = ctx; } catch {}
+  if (window.__lm_sheet_ctx_bridge_installed) return;
+  window.__lm_sheet_ctx_bridge_installed = true;
+
+  function readCtx() {
+    const spreadsheetId = window.currentSpreadsheetId || window.spreadsheetId || null;
+    const gid = (typeof window.currentSheetId !== 'undefined') ? window.currentSheetId : window.sheetGid;
+    return { spreadsheetId, sheetGid: gid };
+  }
+
+  function dispatch(ctx) {
     try {
-      window.dispatchEvent(new CustomEvent('lm:sheet-context', { detail: ctx }));
-    } catch (e){
-      console.warn('[sheet-ctx-bridge] dispatch failed', e);
+      window.__lm_last_sheet_ctx = ctx;
+      const ev = new CustomEvent('lm:sheet-context', { detail: ctx, bubbles: true, composed: true });
+      window.dispatchEvent(ev);
+    } catch (e) {
+      console.warn('[sheet-ctx-bridge] dispatch fail', e);
     }
-  };
-  // If existing producer already dispatches 'lm:sheet-context', add:
-  //   window.__lm_last_sheet_ctx = ctx;
-  // immediately before dispatch to enable late listeners.
+  }
+
+  function tick() {
+    try {
+      const ctx = readCtx();
+      if (ctx && ctx.spreadsheetId) dispatch(ctx);
+    } catch (e) {}
+  }
+
+  function start() {
+    tick();
+    window.__lm_sheet_ctx_timer = setInterval(tick, 400);
+  }
+
+  if (document.readyState === 'complete' || document.readyState === 'interactive') start();
+  else window.addEventListener('DOMContentLoaded', start, { once: true });
 })();
