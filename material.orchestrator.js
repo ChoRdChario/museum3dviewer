@@ -1,199 +1,239 @@
-// material.orchestrator.js — V6_15e_INIT_ORDER_FIX
-// Ensures correct init order: (load saved -> apply to scene -> reflect to UI -> bind)
+// LociMyu - material.orchestrator.js
+// VERSION_TAG: V6_15f_UI_WAIT_FIX
+// Purpose: Ensure strict init order (load saved -> apply scene -> reflect UI -> bind events)
+// and make the UI lookup resilient so it doesn't abort when scripts race with DOM build.
+
 (() => {
-  const TAG = 'V6_15e_INIT_ORDER_FIX';
-  console.log('[mat-orch] loaded VERSION_TAG:', TAG);
+  const TAG = '[mat-orch]';
+  const VERSION_TAG = 'V6_15f_UI_WAIT_FIX';
+  console.log(TAG, 'loaded VERSION_TAG:', VERSION_TAG);
 
-  // --- Guards & shared state ---
-  let gotScene = false;
-  let gotSheet = false;
-  let wired = false;
-
-  let ctx = { spreadsheetId: null, sheetGid: null };
-  let ui = null; // {global, sel, perOpacity, dbl, unlit}
-
-  // --- helpers ---
+  // --------- tiny helpers ---------
   const sleep = (ms) => new Promise(r => setTimeout(r, ms));
-  const qs = (id) => document.getElementById(id);
 
-  async function waitForDOMContentReady() {
-    if (document.readyState === 'loading') {
-      await new Promise(r => document.addEventListener('DOMContentLoaded', r, { once: true }));
-    }
-  }
+  // Debounce utility
+  const debounce = (fn, ms=200) => {
+    let t = null;
+    return (...args) => {
+      if (t) clearTimeout(t);
+      t = setTimeout(() => fn(...args), ms);
+    };
+  };
 
-  async function waitForUI(maxTries = 60, intervalMs = 100) {
-    for (let i = 0; i < maxTries; i++) {
-      const u = {
-        global: qs('pm-global'),
-        sel: qs('pm-material'),
-        perOpacity: qs('pm-material-opacity'),
-        dbl: qs('pm-double'),
-        unlit: qs('pm-unlit'),
-      };
-      if (u.global && u.sel && u.perOpacity) return u;
-      await sleep(intervalMs);
+  // Safe DOM query with retries; returns an object of found controls
+  async function waitForUI(timeoutMs = 10000, pollMs = 120) {
+    const t0 = Date.now();
+    let lastWarn = 0;
+
+    while (Date.now() - t0 < timeoutMs) {
+      // Select candidates with multiple fallback selectors (be permissive)
+      const selMaterial = document.querySelector('#pm-material, select[name="pm-material"], [data-lm="pm-material"]');
+      // Per-material opacity slider: try several common ids/fallbacks
+      const rngOpacity  = document.querySelector(
+        '#pm-opacity, #pm-permat-opacity, input[type="range"][name="pm-opacity"], [data-lm="pm-opacity"]'
+      );
+      // Optional checkboxes (future use; tolerate missing now)
+      const chkDouble   = document.querySelector('#pm-double, #pm-doublesided, [data-lm="pm-double"]');
+      const chkUnlit    = document.querySelector('#pm-unlit, [data-lm="pm-unlit"]');
+
+      // Detect the material panel container to scope future queries if needed
+      const panel = selMaterial?.closest('.card, .panel, section') || document.querySelector('#panel-material, [data-lm="panel-material"]') || document;
+
+      if (selMaterial && rngOpacity) {
+        return { panel, selMaterial, rngOpacity, chkDouble, chkUnlit };
+      }
+
+      // Emit a throttled warning to avoid log spam
+      const now = Date.now();
+      if (now - lastWarn > 1200) {
+        console.warn(TAG, 'waiting UI...', { hasSelect: !!selMaterial, hasRange: !!rngOpacity });
+        lastWarn = now;
+      }
+      await sleep(pollMs);
     }
     throw new Error('UI controls not found');
   }
 
-  function normalizeSavedMap(saved) {
-    // Accept Map, Array of rows, or plain object keyed by materialKey
-    if (!saved) return new Map();
-    if (saved instanceof Map) return saved;
-    const m = new Map();
+  // Event bus guard
+  let booted = false;
+  let haveScene = false;
+  let haveSheet = false;
+
+  // External bridges (assumed to be loaded by index.html in correct order)
+  const viewerBridge = window.viewerBridge || {};
+  const matSheet     = window.materialsSheetBridge || window.matSheet;
+
+  // cache: latest saved values map materialKey -> value row (latest)
+  let savedMap = new Map();
+
+  // Selected state
+  let ui = null; // filled by waitForUI()
+  let currentMaterial = null;
+  let applyingFromLoad = false; // guard to avoid feedback loop on select->apply
+
+  // --------- data normalization ---------
+  function normalizeSaved(saved) {
+    // Accept Map<string, object>, Array<object>, or plain object map
+    const out = new Map();
+    if (!saved) return out;
+
+    if (saved instanceof Map) {
+      saved.forEach((v, k) => out.set(k, v));
+      return out;
+    }
     if (Array.isArray(saved)) {
+      // pick the last for each materialKey
       for (const row of saved) {
-        if (!row) continue;
-        const key = row.materialKey || row.name || row.key;
-        if (!key) continue;
-        m.set(key, row); // last wins
+        const k = row.materialKey || row.name || row.key;
+        if (!k) continue;
+        out.set(k, row); // later rows overwrite earlier => treat as latest
       }
-      return m;
+      return out;
     }
     if (typeof saved === 'object') {
-      for (const [k, v] of Object.entries(saved)) m.set(k, v);
-      return m;
+      for (const [k, v] of Object.entries(saved)) out.set(k, v);
+      return out;
     }
-    return new Map();
+    return out;
   }
 
-  // --- wire ---
-  async function boot() {
+  // --------- scene application ---------
+  function applyOpacityToScene(materialKey, value) {
     try {
-      await waitForDOMContentReady();
-      ui = await waitForUI();
-      console.log('[mat-orch] ui ok');
-
-      window.addEventListener('lm:scene-ready', () => { gotScene = true; tryWire(); });
-      window.addEventListener('lm:sheet-context', (e) => {
-        const d = e && e.detail || {};
-        if (d.spreadsheetId) {
-          ctx.spreadsheetId = d.spreadsheetId;
-          ctx.sheetGid = d.sheetGid;
-          gotSheet = true;
-        }
-        tryWire();
-      });
-    } catch (err) {
-      console.warn('[mat-orch] UI controls not found (abort)', err);
+      if (!viewerBridge || typeof viewerBridge.setMaterialOpacity !== 'function') return;
+      viewerBridge.setMaterialOpacity(materialKey, value);
+    } catch (e) {
+      console.warn(TAG, 'applyOpacityToScene failed', e);
     }
   }
 
-  async function tryWire() {
-    if (wired || !gotScene || !gotSheet || !ui) return;
-    wired = true;
-    await wireOnce();
+  // Reflect a value to UI without triggering save
+  function reflectUIOpacity(value) {
+    if (!ui?.rngOpacity) return;
+    ui.rngOpacity.value = String(value);
+    // if there is a display target (like an output), reflect as well
+    const out = ui.panel.querySelector('#pm-opacity-display, [data-lm="pm-opacity-display"]');
+    if (out) out.textContent = Number(value).toFixed(2);
   }
 
+  // --------- binding once both scene & sheet are ready ---------
   async function wireOnce() {
-    // Safety: required bridges
-    const viewerBridge = window.viewerBridge;
-    const matSheet = window.matSheet;
-    if (!viewerBridge || !viewerBridge.listMaterials || !viewerBridge.setMaterialOpacity) {
-      console.error('[mat-orch] viewerBridge missing or incomplete');
-      return;
-    }
-    if (!matSheet || !matSheet.loadAll || !matSheet.upsertOne) {
-      console.error('[mat-orch] matSheet bridge missing or incomplete');
-      return;
-    }
+    if (booted || !haveScene || !haveSheet) return;
+    booted = true;
 
-    // 1) populate dropdown from scene
-    const mats = await viewerBridge.listMaterials();
-    ui.sel.replaceChildren();
-    // placeholder
-    const ph = document.createElement('option');
-    ph.value = ''; ph.textContent = '— Select material —';
-    ui.sel.appendChild(ph);
-    for (const name of mats) {
-      const o = document.createElement('option');
-      o.value = name; o.textContent = name;
-      ui.sel.appendChild(o);
-    }
-    console.log('[mat-orch] panel populated', mats.length, 'materials');
+    // 1) Wait UI (resilient)
+    ui = await waitForUI().catch((e) => {
+      console.error(TAG, 'UI wait failed:', e);
+      throw e;
+    });
+    console.log(TAG, 'ui ok');
 
-    // 2) read all saved rows first
-    let savedMap = normalizeSavedMap(await matSheet.loadAll(ctx));
-
-    // apply saved opacity to scene before binding UI
-    for (const name of mats) {
-      const row = savedMap.get(name);
-      if (row && typeof row.opacity === 'number' && !Number.isNaN(row.opacity)) {
-        try { viewerBridge.setMaterialOpacity(name, row.opacity); } catch {}
+    // 2) Populate material list from scene
+    const mats = (typeof viewerBridge.listMaterials === 'function') ? viewerBridge.listMaterials() : [];
+    if (Array.isArray(mats)) {
+      // Clear options
+      ui.selMaterial.innerHTML = '<option value="">— Select material —</option>';
+      for (const m of mats) {
+        const key = typeof m === 'string' ? m : (m.name || m.materialKey || m.key);
+        if (!key) continue;
+        const opt = document.createElement('option');
+        opt.value = key;
+        opt.textContent = key;
+        ui.selMaterial.appendChild(opt);
       }
+      console.log(TAG, 'panel populated', mats.length, 'materials');
     }
 
-    // initial UI (no selection)
-    ui.sel.value = '';
-    // keep default at 1.0 if provided otherwise current value
-    const defaultVal = ui.perOpacity.defaultValue || '1.0';
-    ui.perOpacity.value = String(defaultVal);
+    // 3) Load saved values FIRST, apply to scene, then reflect UI defaults (do not save here)
+    try {
+      const loaded = await matSheet.loadAll?.();
+      savedMap = normalizeSaved(loaded);
+      console.log(TAG, 'savedMap size', savedMap.size);
+    } catch (e) {
+      console.warn(TAG, 'loadAll failed (continue with empty):', e);
+      savedMap = new Map();
+    }
 
-    // 3) bind events
-    bindEvents(savedMap);
-  }
-
-  function bindEvents(savedMap) {
-    const viewerBridge = window.viewerBridge;
-    const matSheet = window.matSheet;
-    let saveTimer = null;
-
-    // Selecting a material should reflect its saved value both to scene and UI (without triggering persistence)
-    ui.sel.addEventListener('change', () => {
-      const key = ui.sel.value;
-      if (!key) return;
-
-      const row = savedMap.get(key);
-      const op = (row && typeof row.opacity === 'number' && !Number.isNaN(row.opacity)) ? row.opacity : 1.0;
-
-      // 1) scene first
-      try { viewerBridge.setMaterialOpacity(key, op); } catch {}
-      // 2) then UI without emitting synthetic events
-      ui.perOpacity.value = String(op);
-      // no persist here
-      console.log('[mat-orch] applied saved opacity', op, 'to', key);
-    });
-
-    // Live preview on input
-    ui.perOpacity.addEventListener('input', () => {
-      const key = ui.sel.value; if (!key) return;
-      const val = Number(ui.perOpacity.value);
-      if (Number.isNaN(val)) return;
-      try { viewerBridge.setMaterialOpacity(key, val); } catch {}
-    });
-
-    // Persist on change/pointerup with debounce and diff check
-    const schedulePersist = () => {
-      const key = ui.sel.value; if (!key) return;
-      const val = Number(ui.perOpacity.value);
-      if (Number.isNaN(val)) return;
-      const prev = savedMap.get(key)?.opacity;
-      if (prev === val) return; // no-op
-
-      clearTimeout(saveTimer);
-      saveTimer = setTimeout(async () => {
-        try {
-          await matSheet.upsertOne(ctx, {
-            materialKey: key,
-            name: key,
-            opacity: val,
-            updatedAt: new Date().toISOString(),
-            updatedBy: 'ui',
-            sheetGid: Number(ctx.sheetGid) || 0,
-            modelKey: (window.viewerBridge && window.viewerBridge.getModelKey && window.viewerBridge.getModelKey()) || ''
-          });
-          savedMap.set(key, { ...(savedMap.get(key) || {}), opacity: val });
-          console.log('[mat-orch] persisted to sheet:', key, val);
-        } catch (e) {
-          console.warn('[mat-orch] persist failed', e);
-        }
-      }, 200);
+    // Helper to compute initial opacity for a material
+    const getSavedOpacity = (matKey) => {
+      const row = savedMap.get(matKey);
+      const v = row && ('opacity' in row) ? Number(row.opacity) : 1.0;
+      return Number.isFinite(v) ? Math.min(1, Math.max(0, v)) : 1.0;
     };
 
-    ui.perOpacity.addEventListener('change', schedulePersist);
-    ui.perOpacity.addEventListener('pointerup', schedulePersist);
+    // If a first option exists (not empty), preselect nothing to avoid accidental overwrite
+    ui.selMaterial.value = '';
+
+    // 4) Bind UI events (after saved applied path is set up)
+    ui.selMaterial.addEventListener('change', () => {
+      const key = ui.selMaterial.value;
+      currentMaterial = key || null;
+      if (!currentMaterial) return;
+
+      // pull saved value; fall back 1.0; then apply -> reflect UI
+      const v = getSavedOpacity(currentMaterial);
+      applyingFromLoad = true;
+      applyOpacityToScene(currentMaterial, v);
+      reflectUIOpacity(v);
+      // clear the guard shortly after frame to avoid catching user interactions
+      requestAnimationFrame(() => { applyingFromLoad = false; });
+    });
+
+    // Opacity slider live preview (no save)
+    ui.rngOpacity.addEventListener('input', () => {
+      if (!currentMaterial) return;
+      const v = Number(ui.rngOpacity.value);
+      applyOpacityToScene(currentMaterial, v);
+    });
+
+    // Debounced save on change/pointerup
+    const persistDebounced = debounce(async () => {
+      if (!currentMaterial) return;
+      if (applyingFromLoad) return; // ignore reflections
+      const v = Number(ui.rngOpacity.value);
+      // prepare row
+      const row = {
+        materialKey: currentMaterial,
+        name: currentMaterial,
+        opacity: v,
+        updatedAt: new Date().toISOString(),
+        updatedBy: 'ui',
+        sheetGid: (window.__lm_sheet_context && window.__lm_sheet_context.sheetGid) || 0,
+        modelKey: (window.__lm_model_key) || '',
+      };
+      try {
+        await matSheet.upsertOne?.(row);
+        // update local cache so subsequent selects see latest
+        savedMap.set(currentMaterial, row);
+        console.log(TAG, 'persisted to sheet:', currentMaterial, v.toFixed(2));
+      } catch (e) {
+        console.warn(TAG, 'upsertOne failed', e);
+      }
+    }, 220);
+
+    const saveEvents = ['change', 'pointerup'];
+    for (const ev of saveEvents) {
+      ui.rngOpacity.addEventListener(ev, persistDebounced);
+    }
+
+    console.log(TAG, 'wired panel');
   }
 
-  boot();
+  // --------- listen external readiness ---------
+  window.addEventListener('lm:scene-ready', () => {
+    haveScene = true;
+    wireOnce();
+  }, { once: false });
+
+  window.addEventListener('lm:sheet-context', (ev) => {
+    // store for upserts; and mark ready
+    try {
+      window.__lm_sheet_context = ev?.detail || ev; // keep around for upsert row
+    } catch {}
+    haveSheet = true;
+    wireOnce();
+  }, { once: false });
+
+  // In case both are already ready by the time this file loads, try a delayed kick
+  setTimeout(() => wireOnce(), 1500);
 })();
