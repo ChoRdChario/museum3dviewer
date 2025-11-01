@@ -1,88 +1,51 @@
 
-/*! viewer.bridge.module.js (sticky-ready) */
-(() => {
-  const log = (...a) => console.log("[viewer-bridge]", ...a);
-  if (window.viewerBridge?.__installed) return;
+/* viewer.bridge.module.js
+ * Provide viewerBridge.getScene/listMaterials and stabilize scene-ready
+ */
+(function(){
+  const log  = (...a)=>console.log('[viewer-bridge]', ...a);
+  const warn = (...a)=>console.warn('[viewer-bridge]', ...a);
 
-  const state = {
-    scene: null,
-    ready: false,
-    materials: [],
-  };
+  const vb = window.viewerBridge = window.viewerBridge || {};
 
-  // Helper: list materials safely (handles arrays/single, unnamed)
-  function listMaterialsFromScene(scene) {
-    const mats = new Map();
-    if (!scene) return [];
-    scene.traverse(obj => {
-      if (!obj.isMesh) return;
-      const m = obj.material;
-      const list = Array.isArray(m) ? m : (m ? [m] : []);
-      list.forEach((mat, idx) => {
-        if (!mat) return;
-        const key = mat.uuid || `${obj.uuid}:${idx}`;
-        const name = (mat.name && String(mat.name).trim()) ? String(mat.name) : null;
-        if (!mats.has(key)) mats.set(key, { key, name: name || null, material: mat });
-      });
+  function getSceneCandidate(){
+    return window.__LM_SCENE || window.__viewer?.scene || window.viewer?.scene || window.lm?.scene || null;
+  }
+  vb.getScene = vb.getScene || (()=>{
+    try{ return getSceneCandidate(); }catch(e){ warn(e); return null; }
+  });
+  vb.listMaterials = vb.listMaterials || (()=>{
+    const sc = vb.getScene();
+    const set = new Set();
+    sc?.traverse(o=>{
+      const m=o.material; if(!m) return;
+      (Array.isArray(m)?m:[m]).forEach(mm=>{ if(mm?.name) set.add(mm.name); });
     });
-    const arr = Array.from(mats.values()).map((m, i) => ({
-      key: m.key,
-      name: m.name || `(unnamed ${i+1})`,
-      ref: m.material
-    }));
-    return arr;
-  }
+    return Array.from(set);
+  });
 
-  // Sticky dispatch
-  function dispatchReady() {
-    const evName = "lm:scene-ready";
-    const payload = { materials: state.materials.map(m => ({ key: m.key, name: m.name })) };
-    window.__lm_sceneReady = { at: Date.now(), ...payload };
-    log("scene stabilized with", state.materials.length, "meshes");
-    document.dispatchEvent(new CustomEvent(evName, { detail: payload }));
-  }
-
-  // Poll until scene exists (host provides THREE scene on window.__lm_viewer / getScene)
-  function pollSceneUntilReady() {
-    let tries = 0;
-    const max = 100; // ~10s
-    const id = setInterval(() => {
-      tries++;
-      try {
-        const scene = (window.viewer?.scene) || (window.__lm_viewer && window.__lm_viewer.scene) || (window.getScene && window.getScene());
-        if (scene && !state.ready) {
-          state.scene = scene;
-          state.materials = listMaterialsFromScene(scene);
-          state.ready = true;
-          clearInterval(id);
-          dispatchReady();
+  // poll until mesh count stabilizes, then notify
+  (function pollSceneUntilReady(){
+    let last= -1, stable=0, count=0;
+    const iv = setInterval(()=>{
+      const sc = vb.getScene();
+      if (!sc) return;
+      count = 0;
+      sc.traverse(o=>{ if (o.isMesh) count++; });
+      if (count>0 && count===last) {
+        stable++;
+        if (stable>=3){
+          log('scene stabilized with', count, 'meshes');
+          try{
+            window.dispatchEvent(new CustomEvent('lm:scene-ready', {detail:{from:'poll-stable', meshCount:count}}));
+          }catch(e){ warn('dispatch failed', e); }
+          clearInterval(iv);
         }
-        if (tries >= max) clearInterval(id);
-      } catch (e) {
-        // keep polling
+      } else {
+        stable=0;
       }
-    }, 100);
-  }
-
-  window.viewerBridge = {
-    __installed: true,
-    isReady: () => !!state.ready,
-    getScene: () => state.scene,
-    listMaterials: () => state.materials.map(m => ({ key: m.key, name: m.name, ref: m.ref })),
-    waitUntilReady: ({ timeout = 8000 } = {}) => new Promise((resolve, reject) => {
-      if (state.ready) return resolve(true);
-      const start = Date.now();
-      const on = () => {
-        document.removeEventListener("lm:scene-ready", on);
-        resolve(true);
-      };
-      document.addEventListener("lm:scene-ready", on, { once: true });
-      const t = setInterval(() => {
-        if (state.ready) { clearInterval(t); on(); }
-        else if (Date.now() - start > timeout) { clearInterval(t); reject(new Error("viewerBridge timeout")); }
-      }, 100);
-    }),
-  };
-
-  pollSceneUntilReady();
+      last = count;
+    }, 300);
+    setTimeout(()=>clearInterval(iv), 30000);
+  })();
 })();
