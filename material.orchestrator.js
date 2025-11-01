@@ -1,262 +1,155 @@
-// material.orchestrator.js
-// Robust, order-safe orchestrator for Material pane.
-
-(() => {
-  const VERSION_TAG = 'V6_16b_ORDER_SAFE_UI_SYNC';
+/* LociMyu - Material Orchestrator (sticky-ready + UI sync)
+ * VERSION: V6_16c_STICKY_READY_UI_SYNC
+ */
+(function(){
+  const VERSION_TAG = 'V6_16c_STICKY_READY_UI_SYNC';
+  const NS = '__lm_mat_orch__';
+  if (window[NS]?.wired) {
+    console.log('[mat-orch] already wired; skip');
+    return;
+  }
+  window[NS] = window[NS] || { wired:false };
   console.log('[mat-orch] loaded VERSION_TAG:', VERSION_TAG);
 
-  // ======== tiny utils ========
-  const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+  // ---------- tiny utils ----------
+  const sleep = (ms)=>new Promise(r=>setTimeout(r,ms));
+  function num(v, d){ return (v==='' || v==null || Number.isNaN(+v)) ? d : +v; }
+  function flag(v){ return v===true || v==='1' || v===1 || v==='true'; }
 
-  // 「false」のタイポ注意（ReferenceError対策）
-  const throttle = (fn, wait) => {
-    let last = 0, timer = null, lastArgs = null;
-    return (...args) => {
-      const now = Date.now();
-      const remain = wait - (now - last);
-      lastArgs = args;
-      if (remain <= 0) {
-        last = now;
-        fn(...lastArgs);
-        lastArgs = null;
-      } else if (timer === null) {
-        timer = setTimeout(() => {
-          last = Date.now();
-          fn(...(lastArgs || []));
-          lastArgs = null;
-          timer = null;
-        }, remain);
-      }
-    };
+  // ---------- sticky waits (robust against event races) ----------
+  async function waitSceneReadySticky(total=8000, step=80){
+    const t0 = performance.now();
+    while (performance.now()-t0 < total){
+      try{
+        const vb = window.viewerBridge;
+        if (vb && typeof vb.listMaterials === 'function'){
+          const list = vb.listMaterials() || [];
+          if (list.length > 0) return true;
+        }
+      }catch{}
+      let hit=false;
+      const once = ()=>{ hit=true; window.removeEventListener('lm:scene-ready', once); };
+      window.addEventListener('lm:scene-ready', once, { once:true });
+      await new Promise(r => setTimeout(r, step));
+      if (hit) return true;
+    }
+    throw new Error('scene-ready timeout');
+  }
+  async function getSheetCtxSticky(total=8000, step=80){
+    const t0 = performance.now();
+    while (performance.now()-t0 < total){
+      if (window.__lm_last_sheet_ctx) return window.__lm_last_sheet_ctx;
+      let ctx=null;
+      const once = (e)=>{ ctx = e.detail || e; };
+      window.addEventListener('lm:sheet-context', once, { once:true });
+      await new Promise(r => setTimeout(r, step));
+      if (ctx) return ctx;
+    }
+    throw new Error('sheet-context timeout');
+  }
+
+  // ---------- UI refs ----------
+  const els = {
+    material: document.getElementById('pm-material'),
+    range:    document.getElementById('pm-opacity-range'),
+    out:      document.getElementById('pm-opacity-val'),
+    dbl:      document.getElementById('pm-flag-doublesided'),
+    unlit:    document.getElementById('pm-flag-unlit'),
   };
-
-  function waitForEventOnce(type, timeoutMs = 8000) {
-    return new Promise((resolve, reject) => {
-      let to = null;
-      const handler = (ev) => {
-        clearTimeout(to);
-        window.removeEventListener(type, handler, { capture: false });
-        resolve(ev.detail || ev);
-      };
-      window.addEventListener(type, handler, { once: true });
-      to = setTimeout(() => {
-        window.removeEventListener(type, handler, { capture: false });
-        reject(new Error(`waitForEventOnce timeout: ${type}`));
-      }, timeoutMs);
-    });
+  function uiOk(){
+    return !!(els.material && els.range && els.out && els.dbl && els.unlit);
   }
-
-  function qs(id) { return document.getElementById(id); }
-
-  // ======== UI refs ========
-  const ui = {
-    selectModel: qs('pm-model') || qs('pm-model-select'), // 互換
-    selectMaterial: qs('pm-material'),
-    rangeOpacity: qs('pm-opacity-range'),
-    outOpacity: qs('pm-opacity-val'),
-    chkDouble: qs('pm-flag-doublesided'),
-    chkUnlit: qs('pm-flag-unlit'),
-    chkChromaEnable: qs('pm-ck-enable'),
-    rangeChromaTol: qs('pm-ck-tol'),
-    rangeChromaFeather: qs('pm-ck-feather'),
-  };
-
-  function assertUI() {
-    const missing = Object.entries(ui).filter(([k, v]) => !v).map(([k]) => k);
-    if (missing.length) throw new Error('UI controls not found: ' + missing.join(', '));
+  function applyStateToUI(state){
+    if (!state) return;
+    if (typeof state.opacity === 'number'){
+      els.range.value = String(state.opacity);
+      els.out.value   = Number(state.opacity).toFixed(2);
+    }
+    if (typeof state.doubleSided === 'boolean') els.dbl.checked  = !!state.doubleSided;
+    if (typeof state.unlit       === 'boolean') els.unlit.checked = !!state.unlit;
   }
-
-  // ======== State ========
-  let suspendEvents = false;
-  let latestByKey = new Map(); // materialKey -> saved row
-  let stableMaterials = [];     // [{key, name, ref}...]
-
-  // ======== Viewer Helpers ========
-  function getViewer() {
-    if (!window.viewerBridge || typeof window.viewerBridge.getScene !== 'function') return null;
-    return window.viewerBridge;
-  }
-
-  function listMaterialsSafe() {
-    const vb = getViewer();
-    if (!vb || typeof vb.listMaterials !== 'function') return [];
-    const arr = vb.listMaterials() || [];
-    // 安全な名称付け（unnamed対策）
-    let unnamed = 0;
-    return arr.map((m) => {
-      let name = m?.name;
-      if (!name || String(name).trim() === '') {
-        unnamed += 1;
-        name = `(unnamed ${unnamed})`;
-      }
-      return { key: name, name, ref: m };
-    });
-  }
-
-  function applyToScene(materialKey, state) {
-    const vb = getViewer();
-    if (!vb || typeof vb.applyMaterialState !== 'function') return;
-    vb.applyMaterialState(materialKey, {
-      opacity: state.opacity,
-      doubleSided: !!Number(state.doubleSided || 0),
-      unlit: !!Number(state.unlit || 0),
-      chromaEnable: !!Number(state.chromaEnable || 0),
-      chromaColor: state.chromaColor || '',
-      chromaTolerance: Number(state.chromaTolerance || 0),
-      chromaFeather: Number(state.chromaFeather || 0),
-    });
-  }
-
-  // ======== UI Setters (イベント抑止) ========
-  function setOpacityUI(v) {
-    suspendEvents = true;
-    try {
-      if (ui.rangeOpacity) ui.rangeOpacity.value = String(v);
-      if (ui.outOpacity) ui.outOpacity.value = (Number(v).toFixed(2));
-    } finally { suspendEvents = false; }
-  }
-  function setFlagsUI(state) {
-    suspendEvents = true;
-    try {
-      if (ui.chkDouble) ui.chkDouble.checked = !!Number(state.doubleSided || 0);
-      if (ui.chkUnlit) ui.chkUnlit.checked = !!Number(state.unlit || 0);
-      if (ui.chkChromaEnable) ui.chkChromaEnable.checked = !!Number(state.chromaEnable || 0);
-      if (ui.rangeChromaTol) ui.rangeChromaTol.value = String(state.chromaTolerance || 0);
-      if (ui.rangeChromaFeather) ui.rangeChromaFeather.value = String(state.chromaFeather || 0);
-    } finally { suspendEvents = false; }
-  }
-
-  function readCurrentStateFromUI(materialKey) {
+  function readStateFromRows(rows){
+    if (!rows || !rows.length) return null;
+    const sorted = rows.slice().sort((a,b)=> (b.updatedAt||'').localeCompare(a.updatedAt||''));
+    const r = sorted[0];
     return {
-      materialKey,
-      opacity: Number(ui.rangeOpacity?.value ?? 1),
-      doubleSided: ui.chkDouble?.checked ? 1 : 0,
-      unlit: ui.chkUnlit?.checked ? 1 : 0,
-      chromaEnable: ui.chkChromaEnable?.checked ? 1 : 0,
-      chromaColor: '', // 予約
-      chromaTolerance: Number(ui.rangeChromaTol?.value ?? 0),
-      chromaFeather: Number(ui.rangeChromaFeather?.value ?? 0),
+      opacity:     num(r.opacity, 1),
+      doubleSided: flag(r.doubleSided),
+      unlit:       flag(r.unlit),
     };
   }
 
-  // ======== Wiring ========
-  function populateDropdown(materials) {
-    const sel = ui.selectMaterial;
-    if (!sel) return;
-    sel.innerHTML = '';
-    const opt0 = document.createElement('option');
-    opt0.value = '';
-    opt0.textContent = '— Select —';
-    sel.appendChild(opt0);
-    for (const m of materials) {
+  // ---------- polyfill: materialsSheetBridge.loadByKey ----------
+  (function ensureLoadByKey(){
+    const msb = window.materialsSheetBridge;
+    if (!msb) return;
+    if (!msb.loadByKey){
+      msb.loadByKey = async function(ctx, key){
+        const all = await msb.loadAll(ctx);
+        return (all||[]).filter(r => r && r.materialKey === key);
+      };
+      console.log('[mat-orch] polyfilled materialsSheetBridge.loadByKey');
+    }
+  })();
+
+  // ---------- main wiring ----------
+  async function wireOnce(){
+    if (window[NS].wired) return;
+    if (!uiOk()){
+      console.warn('[mat-orch] UI controls not found');
+      return;
+    }
+
+    // 1) wait for scene & sheet context in a sticky way
+    await waitSceneReadySticky();
+    const sheetCtx = await getSheetCtxSticky();
+
+    // 2) build dropdown
+    const vb = window.viewerBridge;
+    const mats = (vb.listMaterials && vb.listMaterials()) || [];
+    els.material.innerHTML = '<option value="">— Select —</option>';
+    mats.forEach(m => {
+      if (!m || !m.name) return;
       const opt = document.createElement('option');
-      opt.value = m.key;
-      opt.textContent = m.name;
-      sel.appendChild(opt);
-    }
-  }
-
-  function getDefaultState() {
-    return { opacity: 1, doubleSided: 0, unlit: 0, chromaEnable: 0, chromaColor: '', chromaTolerance: 0, chromaFeather: 0 };
-  }
-
-  function onMaterialChange() {
-    if (!ui.selectMaterial) return;
-    const key = ui.selectMaterial.value;
-    if (!key) return; // 未選択
-    const saved = latestByKey.get(key) || getDefaultState();
-    // 1) シーン → 2) UI の順で適用（イベント抑止）
-    applyToScene(key, saved);
-    setOpacityUI(saved.opacity ?? 1);
-    setFlagsUI(saved);
-  }
-
-  const persistThrottled = throttle(async () => {
-    if (suspendEvents) return;
-    const key = ui.selectMaterial?.value;
-    if (!key) return;
-    const state = readCurrentStateFromUI(key);
-    try {
-      const row = await window.materialsSheetBridge.upsertOne(state);
-      latestByKey.set(key, { ...latestByKey.get(key), ...row, ...state });
-      // 直後の選択遷移でも最新が使われる
-    } catch (e) {
-      console.warn('[mat-orch] upsertOne failed', e);
-    }
-  }, 220);
-
-  function wireUIEvents() {
-    // 選択変更
-    ui.selectMaterial?.addEventListener('change', onMaterialChange);
-
-    // スライダ/チェック群 → throttled persist
-    const emitChange = () => { if (!suspendEvents) persistThrottled(); };
-
-    ui.rangeOpacity?.addEventListener('input', () => {
-      if (suspendEvents) return;
-      ui.outOpacity && (ui.outOpacity.value = Number(ui.rangeOpacity.value).toFixed(2));
-      emitChange();
+      opt.value = opt.textContent = m.name;
+      els.material.appendChild(opt);
     });
-    ui.rangeOpacity?.addEventListener('change', emitChange);
-    ui.chkDouble?.addEventListener('change', emitChange);
-    ui.chkUnlit?.addEventListener('change', emitChange);
-    ui.chkChromaEnable?.addEventListener('change', emitChange);
-    ui.rangeChromaTol?.addEventListener('input', emitChange);
-    ui.rangeChromaFeather?.addEventListener('input', emitChange);
-  }
 
-  async function wireOnce() {
-    // 1) viewerとsheet-contextの両方を待つ（順番保証）
-    const [sceneEv, sheetCtx] = await Promise.all([
-      waitForEventOnce('lm:scene-ready').catch(async (e) => {
-        // 既にreadyなら viewer.bridge 側でイベント発火済みの可能性→ 1回だけ短い猶予
-        console.warn('[mat-orch] scene-ready wait failed, retry shortly', e);
-        await sleep(300);
-        return waitForEventOnce('lm:scene-ready');
-      }),
-      waitForEventOnce('lm:sheet-context'),
-    ]);
-    // 2) UI確認
-    assertUI();
-    console.log('[mat-orch] ui ok');
-
-    // 3) viewerからマテリアル列挙 → ドロップダウン構築
-    stableMaterials = listMaterialsSafe();
-    populateDropdown(stableMaterials);
-    console.log('[mat-orch] panel populated', stableMaterials.length, 'materials');
-
-    // 4) 保存値のロード（最新行に正規化）
-    try {
-      latestByKey = await window.materialsSheetBridge.loadAll();
-    } catch (e) {
-      console.warn('[mat-orch] loadAll failed (continue with empty):', e);
-      latestByKey = new Map();
-    }
-
-    // 5) UIイベントを bind（この時点で行う）
-    wireUIEvents();
-
-    // 6) 初期状態：未選択。ユーザーが選んだ瞬間に onMaterialChange が保存値→シーン→UIの順で反映
-    console.log('[mat-orch] wired panel');
-  }
-
-  async function boot() {
-    // UI存在チェック（足りない場合は少し待って再試行）
-    for (let i = 0; i < 20; i++) {
-      try { assertUI(); break; }
-      catch {
-        await sleep(100);
+    // 3) selection -> fetch rows -> reflect to UI (no viewer apply here)
+    els.material.addEventListener('change', async () => {
+      const key = els.material.value;
+      if (!key) return;
+      try{
+        const rows = await window.materialsSheetBridge.loadByKey(sheetCtx, key);
+        const st = readStateFromRows(rows) || { opacity:1, doubleSided:false, unlit:false };
+        applyStateToUI(st);
+      }catch(e){
+        console.warn('[mat-orch] loadByKey failed', e);
+        applyStateToUI({ opacity:1, doubleSided:false, unlit:false });
       }
-    }
-    try {
-      await wireOnce();
-    } catch (e) {
-      console.warn('[mat-orch] boot failed (will retry automatically)', e);
-      // 再試行（低頻度）
-      setTimeout(() => boot(), 1200);
-    }
+    });
+
+    // 4) keep existing viewer bindings (lightweight helpers, optional)
+    els.range.addEventListener('input', () => {
+      els.out.value = Number(els.range.value).toFixed(2);
+      if (!els.material.value) return;
+      const fn = window.viewerBridge && window.viewerBridge.applyOpacity;
+      if (typeof fn === 'function'){
+        fn(els.material.value, Number(els.range.value) || 0);
+      }
+    });
+
+    window[NS].wired = true;
+    console.log('[mat-orch] wired panel (sticky)');
   }
 
-  // kick
-  boot();
+  // boot with retry (rare)
+  (async function boot(){
+    try{
+      await wireOnce();
+    }catch(e){
+      console.warn('[mat-orch] first wire failed, retry soon', e);
+      setTimeout(boot, 300);
+    }
+  })();
 })();
