@@ -1,131 +1,105 @@
+// materials.sheet.bridge.js
+// Sheets bridge with auth wait + header enforcement, append-only writes.
 
-/* materials.sheet.bridge.js — V6_15i_FIX_PACK
- * Exposes window.materialsSheetBridge { ensureSheet, loadAll, upsertOne }
- * Listens to 'lm:sheet-context' and emits 'lm:materials-bridge-ready' on first bind.
- */
-(function(){
-  const LOG = '[mat-sheet]';
+(() => {
   const SHEET_NAME = '__LM_MATERIALS';
-  const HEADER = [
-    'materialKey','name','opacity','unlit','doubleSided',
-    'chromaColor','chromaThreshold','chromaFeather',
-    'updatedAt','updatedBy','sheetGid','modelKey'
-  ];
-  let ctx = { spreadsheetId:null, sheetGid:null };
-  let ready = false;
-  let ensuring = null;
+  const HEADERS = ['key', 'materialKey', 'opacity', 'updatedAt'];
 
-  const log  = (...a)=>{ try{ console.log(LOG, ...a);}catch(e){} };
-  const warn = (...a)=>{ try{ console.warn(LOG, ...a);}catch(e){} };
+  function currentCtx() {
+    const ctx = window.__lm_sheetCtx || {};
+    return {
+      spreadsheetId: ctx.spreadsheetId || null,
+      sheetGid: ctx.sheetGid || null,
+    };
+  }
 
-  function fjson(url, opts={}){
-    if (typeof window.__lm_fetchJSONAuth !== 'function'){
-      throw new Error('__lm_fetchJSONAuth missing');
+  async function waitAuth(timeoutMs = 12000) {
+    const t0 = performance.now();
+    while (!window.__lm_fetchJSONAuth) {
+      if (performance.now() - t0 > timeoutMs) {
+        throw new Error('__lm_fetchJSONAuth missing');
+      }
+      await new Promise(r => setTimeout(r, 120));
     }
-    return window.__lm_fetchJSONAuth(url, opts);
+    return window.__lm_fetchJSONAuth;
   }
 
-  async function getOrCreateSheet(spreadsheetId){
-    const murl = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}?fields=sheets(properties(sheetId,title))`;
-    const meta = await fjson(murl, { method:'GET' });
-    const sheets = (meta && meta.sheets) ? meta.sheets : [];
-    for (const s of sheets){
-      const p = s.properties;
-      if (p && p.title === SHEET_NAME) return p.sheetId;
+  async function fjson(url, opts) {
+    const fx = await waitAuth();
+    return fx(url, opts);
+  }
+
+  async function ensureSheet() {
+    const { spreadsheetId } = currentCtx();
+    if (!spreadsheetId) throw new Error('spreadsheetId missing');
+
+    // 1) spreadsheet meta
+    const meta = await fjson(
+      `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}`
+    );
+
+    // 2) ensure sheet exists
+    let sheetId = null;
+    let found = (meta.sheets || []).find(s => s.properties && s.properties.title === SHEET_NAME);
+    if (!found) {
+      const req = { requests: [{ addSheet: { properties: { title: SHEET_NAME } } }] };
+      const res = await fjson(
+        `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}:batchUpdate`,
+        { method: 'POST', body: JSON.stringify(req) }
+      );
+      const add = (res.replies || [])[0]?.addSheet?.properties;
+      sheetId = add?.sheetId ?? null;
+    } else {
+      sheetId = found.properties.sheetId;
     }
-    const burl = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}:batchUpdate`;
-    const body = { requests: [{ addSheet: { properties: { title: SHEET_NAME } } }] };
-    const r = await fjson(burl, { method:'POST', body: JSON.stringify(body) });
-    const added = r && r.replies && r.replies[0] && r.replies[0].addSheet && r.replies[0].addSheet.properties;
-    return added ? added.sheetId : null;
+
+    // 3) enforce header row (A1)
+    const range = `${SHEET_NAME}!A1:${String.fromCharCode(64 + HEADERS.length)}1`;
+    await fjson(
+      `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(range)}?valueInputOption=RAW`,
+      { method: 'PUT', body: JSON.stringify({ values: [HEADERS] }) }
+    );
+
+    return { spreadsheetId, sheetId, title: SHEET_NAME };
   }
 
-  async function ensureHeader(spreadsheetId){
-    const getUrl = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(SHEET_NAME)}!1:1?majorDimension=ROWS`;
-    const got = await fjson(getUrl, { method:'GET' });
-    const row = (got && got.values && got.values[0]) ? got.values[0] : [];
-    const same = HEADER.length === row.length && HEADER.every((h,i)=> String(row[i]||'')===h);
-    if (same) return true;
-    const putUrl = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(SHEET_NAME)}!1:1?valueInputOption=RAW`;
-    const body = { range:`${SHEET_NAME}!1:1`, majorDimension:'ROWS', values:[HEADER] };
-    await fjson(putUrl, { method:'PUT', body: JSON.stringify(body) });
-    return true;
-  }
+  async function loadAll() {
+    const { spreadsheetId } = currentCtx();
+    if (!spreadsheetId) throw new Error('spreadsheetId missing');
 
-  async function ensureSheet(){
-    if (!ctx.spreadsheetId) throw new Error('spreadsheetId missing');
-    if (ensuring) return ensuring;
-    ensuring = (async ()=>{
-      await getOrCreateSheet(ctx.spreadsheetId);
-      await ensureHeader(ctx.spreadsheetId);
-      return true;
-    })();
-    return ensuring;
-  }
-
-  async function loadAll(){
     await ensureSheet();
-    const url = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(ctx.spreadsheetId)}/values/${encodeURIComponent(SHEET_NAME)}?majorDimension=ROWS`;
-    const j = await fjson(url, { method:'GET' });
-    const rows = (j && j.values) ? j.values : [];
-    if (rows.length <= 1) return new Map();
+    const range = `${SHEET_NAME}!A2:D`;
+    const res = await fjson(
+      `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(range)}`
+    );
+    const rows = (res.values || []);
     const map = new Map();
-    for (let r=1; r<rows.length; r++){
-      const row = rows[r];
-      const obj = {};
-      HEADER.forEach((h,i)=> obj[h] = row[i] ?? '');
-      if (obj.opacity !== '') obj.opacity = Number(obj.opacity);
-      obj.unlit = obj.unlit === '' ? '' : Number(obj.unlit);
-      obj.doubleSided = obj.doubleSided === '' ? '' : Number(obj.doubleSided);
-      const key = obj.materialKey || obj.name || `row${r}`;
-      map.set(key, obj); // last wins
+    for (const row of rows) {
+      const [key, materialKey, opacityStr, updatedAt] = row;
+      const opacity = Number(opacityStr);
+      map.set(materialKey, { key, materialKey, opacity, updatedAt });
     }
     return map;
   }
 
-  async function upsertOne(record){
+  async function upsertOne(rec) {
+    const { spreadsheetId } = currentCtx();
+    if (!spreadsheetId) throw new Error('spreadsheetId missing');
+
     await ensureSheet();
+    const range = `${SHEET_NAME}!A1:D1:append`;
     const row = [
-      record.materialKey ?? '',
-      record.name ?? '',
-      record.opacity ?? '',
-      record.unlit ?? '',
-      record.doubleSided ?? '',
-      record.chromaColor ?? '',
-      record.chromaThreshold ?? '',
-      record.chromaFeather ?? '',
-      new Date().toISOString(),
-      'ui',
-      String(ctx.sheetGid ?? ''),
-      record.modelKey ?? ''
+      rec.key ?? 'opacity',
+      rec.materialKey ?? '',
+      typeof rec.opacity === 'number' ? rec.opacity : '',
+      rec.updatedAt ?? new Date().toISOString(),
     ];
-    const range = `${SHEET_NAME}!A:A`;
-    const url = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(ctx.spreadsheetId)}/values/${encodeURIComponent(range)}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`;
-    const body = { range, majorDimension:'ROWS', values:[row] };
-    return await fjson(url, { method:'POST', body: JSON.stringify(body) });
+    await fjson(
+      `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(range)}?valueInputOption=RAW&insertDataOption=INSERT_ROWS`,
+      { method: 'POST', body: JSON.stringify({ values: [row] }) }
+    );
   }
 
-  function onSheetContext(ev){
-    const d = ev && ev.detail ? ev.detail : ev;
-    if (!d || !d.spreadsheetId) return;
-    ctx.spreadsheetId = d.spreadsheetId;
-    ctx.sheetGid = d.sheetGid ?? d.gid ?? null;
-    log('sheet-context bound:', ctx.spreadsheetId, 'gid=', ctx.sheetGid||0);
-    if (!ready){
-      ready = true;
-      document.dispatchEvent(new CustomEvent('lm:materials-bridge-ready'));
-      log('ready');
-    }
-  }
-
-  // Expose API
-  window.materialsSheetBridge = window.materialsSheetBridge || { ensureSheet, loadAll, upsertOne };
-
-  // Bind listeners
-  document.addEventListener('lm:sheet-context', onSheetContext);
-  if (window.__lm_last_sheet_context){
-    try { onSheetContext({ detail: window.__lm_last_sheet_context }); } catch(e){}
-  }
-
-  log('cache wrapper installed');
+  console.log('[mat-sheet] ready');
+  window.materialsSheetBridge = { ensureSheet, loadAll, upsertOne };
 })();

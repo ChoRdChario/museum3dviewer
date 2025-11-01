@@ -1,50 +1,72 @@
+// viewer.bridge.module.js
+// Robust listMaterials: names for unnamed materials.
+// Keeps existing getScene and event wiring pattern minimal and non-breaking.
 
-// viewer.bridge.module.js  V6_15b  (scene stabilize -> lm:scene-ready)
 (() => {
-  const log = (...a)=>console.log('[viewer-bridge]', ...a);
+  let _scene = null;
 
-  function getSceneCandidate(){
-    if (window.viewerBridge?.__scene) return window.viewerBridge.__scene;
-    if (window.__LM_SCENE) return window.__LM_SCENE;
-    if (window.__viewer?.scene) return window.__viewer.scene;
-    if (window.viewer?.scene) return window.viewer.scene;
-    if (window.lm?.scene) return window.lm.scene;
-    return null;
+  // Expose a setter only if not already provided by existing loader logic.
+  // (If your loader already sets window.viewerBridge.setScene, this block is harmless.)
+  if (!window.viewerBridge) window.viewerBridge = {};
+
+  // Consumers call this after GLB load; keep for compatibility if needed.
+  if (!window.viewerBridge.setScene) {
+    window.viewerBridge.setScene = function setScene(scene) {
+      _scene = scene;
+      if (_scene) {
+        const ev = new Event('lm:scene-ready');
+        window.dispatchEvent(ev);
+      }
+    };
+  } else {
+    // If someone else defines setScene and stores scene internally,
+    // we still mirror it if they dispatch lm:scene-ready.
+    // getScene below will fall back to existing API if available.
   }
 
-  const vb = window.viewerBridge = window.viewerBridge || {};
+  function getScene() {
+    if (window.viewerBridge && typeof window.viewerBridge._getInternalScene === 'function') {
+      try { return window.viewerBridge._getInternalScene(); } catch (_e) {}
+    }
+    return _scene;
+  }
 
-  vb.getScene = vb.getScene || (() => {
-    const sc = getSceneCandidate();
-    if (sc && !vb.__scene) vb.__scene = sc;
-    return vb.__scene || sc || null;
-  });
+  function listMaterials() {
+    const scene = getScene();
+    if (!scene) return [];
 
-  vb.listMaterials = vb.listMaterials || (() => {
-    const sc = vb.getScene();
-    const set = new Set();
-    sc?.traverse(o => {
-      const m = o.material; if (!m) return;
-      (Array.isArray(m) ? m : [m]).forEach(mm => { if (mm?.name) set.add(mm.name); });
+    const found = new Map();
+    scene.traverse(obj => {
+      if (!obj || !obj.isMesh) return;
+      let mats = obj.material;
+      if (!mats) return;
+      mats = Array.isArray(mats) ? mats : [mats];
+
+      mats.forEach((mat, idx) => {
+        if (!mat) return;
+        const key = mat.uuid;               // stable unique key for a material instance
+        if (found.has(key)) return;
+
+        // Build a robust, human-friendly display name
+        const meshName = (obj.name && String(obj.name).trim()) ? String(obj.name).trim() : 'Mesh';
+        let name = (mat.name && String(mat.name).trim()) ? String(mat.name).trim() : '';
+        if (!name && mat.userData && typeof mat.userData.name === 'string' && mat.userData.name.trim()) {
+          name = mat.userData.name.trim();
+        }
+        if (!name) {
+          name = (mats.length > 1) ? `${meshName} [${idx}]` : meshName;
+        }
+
+        found.set(key, { key, name, mesh: meshName, index: idx });
+      });
     });
-    return Array.from(set);
-  });
 
-  // Poll until mesh count stabilizes once after GLB load
-  (function pollSceneUntilReady(){
-    let last = -1, stable = 0, ticks = 0;
-    const iv = setInterval(() => {
-      const sc = vb.getScene();
-      let meshes = 0;
-      sc?.traverse(o => { if (o.isMesh) meshes++; });
-      if (meshes>0 && meshes===last) stable++; else stable=0;
-      last = meshes;
-      if (stable>=2) {
-        clearInterval(iv);
-        log('scene stabilized with', meshes, 'meshes');
-        window.dispatchEvent(new CustomEvent('lm:scene-ready', {detail:{from:'bridge-stable', meshCount:meshes}}));
-      }
-      ticks++; if (ticks>150) clearInterval(iv);
-    }, 200);
-  })();
+    return Array.from(found.values());
+  }
+
+  // Publish API (non-breaking merge)
+  Object.assign(window.viewerBridge, {
+    getScene,
+    listMaterials,
+  });
 })();
