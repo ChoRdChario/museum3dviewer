@@ -1,277 +1,253 @@
 
-/**
- * LociMyu - Material Orchestrator (sticky-ready + UI sync + robust selectors)
- * VERSION_TAG: V6_16e_STICKY_UI_APPLY_PERSIST
- *
- * Goals:
- *  - Always populate the dropdown from viewer first (no hard-fail on waits).
- *  - Wire UI exactly once with resilient selectors (works across ids).
- *  - On selection: read saved row from sheet (if available) and reflect to UI.
- *  - On slider/input: apply to viewer (throttled) and persist append-only.
- *  - Avoid log spam / duplicate wire by using an idempotent guard.
- */
+// LociMyu - Material Orchestrator (robust $$ and UI pickup fixes)
+// VERSION_TAG: V6_16f_UI_PICKUP_SAFEGUARD
+
 (function(){
-  if (window.__lm_mat_orch_installed) return;
-  window.__lm_mat_orch_installed = true;
+  if (window.__lm_material_orchestrator_installed) return;
+  window.__lm_material_orchestrator_installed = true;
 
-  const VERSION_TAG = 'V6_16e_STICKY_UI_APPLY_PERSIST';
-  const log = (...a) => { try { console.log('[mat-orch]', ...a); } catch(_){} };
-  log('loaded VERSION_TAG:', VERSION_TAG);
+  const VER = 'V6_16f_UI_PICKUP_SAFEGUARD';
+  const log = (...a)=>{ try{ console.log('[mat-orch]', ...a);}catch(_){} };
+  log('loaded VERSION_TAG:', VER);
 
-  // ---- Small utils
-  const $ = (sel, root=document) => root.querySelector(sel);
-  const $$ = (sels, root=document) => sels.map(s=>root.querySelector(s)).find(Boolean);
-  const clamp01 = (v) => Math.max(0, Math.min(1, v));
-  const rafThrottle = (fn) => {
-    let r = false, lastArgs=null;
-    return (...args)=>{
-      lastArgs=args;
-      if (r) return;
-      r = true;
-      requestAnimationFrame(()=>{ r=false; fn(...lastArgs); });
+  // ---------- small utils ----------
+  const raf = (fn)=> (window.requestAnimationFrame||setTimeout)(fn,0);
+
+  // robust $$: accepts selector string, element, NodeList/HTMLCollection, or array(mixed)
+  function $$(input) {
+    // normalize to array
+    const normalizeOne = (v) => {
+      if (!v) return [];
+      if (typeof v === 'string') return Array.from(document.querySelectorAll(v));
+      if (v.nodeType === 1) return [v];
+      if (Array.isArray(v)) return v.flatMap(normalizeOne);
+      if (v instanceof NodeList || v instanceof HTMLCollection) return Array.from(v);
+      return [];
     };
-  };
-  const sleep = (ms)=> new Promise(r=>setTimeout(r, ms));
-
-  // ---- Robust element pickup
-  function pickupUI(){
-    const els = {
-      sel: $$('#pm-material, select[data-lm="pm-material"], select[name="pm-material"]'),
-      range: $$('#pm-opacity-range, #pm-opacity, input[type="range"][data-role="pm-opacity"], input[type="range"][name="pm-opacity"]'),
-      val: $$('#pm-opacity-val, [data-role="pm-opacity-val"]'),
-      ds: $$('#pm-flag-doublesided, input[name="pm-double-sided"]'),
-      ul: $$('#pm-flag-unlit, input[name="pm-unlit"]'),
-    };
-    return els;
+    return normalizeOne(input).filter(Boolean);
   }
 
-  // ---- Sticky waits (soft) --------------------------------------------------
-  async function waitSceneReadySticky(timeoutMs=1200){
-    // Try to short-circuit if viewerBridge already provides materials
-    try{
-      if (window.viewerBridge && typeof window.viewerBridge.listMaterials==='function'){
-        const list = window.viewerBridge.listMaterials();
-        if (list && list.length) return true;
-      }
-    }catch{}
-    // Soft wait on event
-    return new Promise(async (resolve)=>{
-      let done=false;
-      const onEvt = ()=>{ if (!done){ done=true; resolve(true);} };
-      window.addEventListener('lm:scene-ready', onEvt, { once:true });
-      await sleep(timeoutMs);
-      if (!done){ resolve(false); }
-    });
-  }
-
-  async function getSheetCtxSticky(timeoutMs=1200){
-    // take last sticky value if present
-    if (window.__lm_last_sheet_ctx) return window.__lm_last_sheet_ctx;
-    // soft wait once
-    return new Promise(async (resolve)=>{
-      let done=false;
-      const onEvt = (e)=>{ if (!done){ done=true; resolve(e.detail || null);} };
-      window.addEventListener('lm:sheet-context', onEvt, { once:true });
-      await sleep(timeoutMs);
-      if (!done){ resolve(window.__lm_last_sheet_ctx || null); }
-    });
-  }
-
-  // ---- Panel population from viewer ----------------------------------------
-  function populatePanelFromViewer(els){
-    const vb = window.viewerBridge;
-    if (!vb || typeof vb.listMaterials!=='function') return 0;
-    const list = vb.listMaterials() || [];
-    if (!els.sel) return list.length;
-    // Clear once
-    els.sel.innerHTML = '';
-    // Placeholder
-    const ph = document.createElement('option');
-    ph.value=''; ph.textContent='— Select material —';
-    els.sel.appendChild(ph);
-    for (const m of list){
-      // allow both string keys and {key,name}
-      const key = typeof m==='string' ? m : (m.key||m.name||m.id||'');
-      if (!key) continue;
-      const opt = document.createElement('option');
-      opt.value = key;
-      opt.textContent = (m.name || m.key || key);
-      els.sel.appendChild(opt);
+  // safe query for first match among candidates
+  function pickOne(candidates){
+    for (const c of candidates){
+      const arr = $$(c);
+      if (arr.length) return arr[0];
     }
-    log('panel populated', list.length, 'materials');
-    return list.length;
+    return null;
   }
 
-  // ---- Apply helpers --------------------------------------------------------
-  function applyOpacityToViewer(matKey, opacity){
-    const vb = window.viewerBridge;
-    if (!vb || !matKey) return 0;
-    let count = 0;
+  // viewerBridge helpers (be liberal about method names across versions)
+  function applyOpacityByKey(key, value){
+    const vb = window.viewerBridge || window.viewer || {};
+    if (!key) return;
     try{
       if (typeof vb.setMaterialOpacity === 'function'){
-        count = vb.setMaterialOpacity(matKey, opacity) | 0;
-      }else if (typeof vb.applyOpacityByMaterial === 'function'){
-        count = vb.applyOpacityByMaterial(matKey, opacity) | 0;
-      }else if (typeof vb.setOpacityForMaterial === 'function'){
-        count = vb.setOpacityForMaterial(matKey, opacity) | 0;
+        vb.setMaterialOpacity(key, value); return true;
+      }
+      if (typeof vb.applyOpacityByMaterial === 'function'){
+        vb.applyOpacityByMaterial(key, value); return true;
+      }
+      if (typeof vb.setOpacityForMaterial === 'function'){
+        vb.setOpacityForMaterial(key, value); return true;
       }
     }catch(e){
       console.warn('[mat-orch] applyOpacity error', e);
     }
-    log(`opacity ${opacity.toFixed(2)} → "${matKey}" x${count}`);
-    return count;
+    return false;
   }
 
-  function reflectOpacityUI(els, v){
-    if (!els.range) return;
-    const vv = Number.isFinite(v) ? clamp01(v) : 1;
-    els.range.value = vv;
-    if (els.val) els.val.textContent = vv.toFixed(2);
-  }
-
-  // ---- Persist (append-only) -----------------------------------------------
-  function buildRecord(ctx, modelKey, matKey, state){
-    const now = new Date().toISOString();
-    return {
-      key: matKey,
-      modelKey: modelKey || '',
-      materialKey: matKey,
-      opacity: state.opacity,
-      doubleSided: !!state.doubleSided,
-      unlit: !!state.unlit,
-      // chroma fields reserved
-      chromaEnable: !!state.chromaEnable,
-      chromaColor: state.chromaColor || '',
-      chromaTolerance: state.chromaTolerance ?? '',
-      chromaFeather: state.chromaFeather ?? '',
-      updatedAt: now,
-      updatedBy: 'mat-orch',
-      spreadsheetId: ctx && ctx.spreadsheetId || '',
-      sheetGid: ctx && ctx.sheetGid != null ? ctx.sheetGid : 0,
-    };
-  }
-
-  async function persistAppend(ctx, rec){
-    const br = window.materialsSheetBridge;
-    if (!br) return false;
+  function listMaterialKeys(){
+    const vb = window.viewerBridge || window.viewer || {};
     try{
-      if (typeof br.append === 'function') { await br.append(ctx, rec); }
-      else if (typeof br.appendOne === 'function') { await br.appendOne(ctx, rec); }
-      else if (typeof br.save === 'function') { await br.save(ctx, rec); }
-      else if (typeof br.write === 'function') { await br.write(ctx, rec); }
-      else { console.warn('[mat-orch] no append-like API on materialsSheetBridge'); return false; }
-      log('persisted to sheet:', rec.key);
-      return true;
-    }catch(e){
-      console.warn('[mat-orch] persist error', e);
-      return false;
+      if (typeof vb.listMaterials === 'function') return vb.listMaterials() || [];
+      if (vb.scene && vb.scene.materials) return Object.keys(vb.scene.materials);
+    }catch(e){}
+    return [];
+  }
+
+  // --------- UI wiring ---------
+  let ui = {
+    materialSelect: null,
+    opacityRange  : null,
+    doubleSided   : null,
+    unlit         : null
+  };
+
+  function pickupUI(){
+    ui.materialSelect = pickOne([
+      '#pm-material-select',
+      'select[data-lm="material-select"]',
+      '.lm-material-select'
+    ]);
+    ui.opacityRange = pickOne([
+      '#pm-opacity-range',
+      'input[type="range"][data-lm="opacity-range"]',
+      '.lm-opacity-range input[type="range"]'
+    ]);
+    ui.doubleSided = pickOne([
+      '#pm-double-sided',
+      'input[type="checkbox"][data-lm="double-sided"]'
+    ]);
+    ui.unlit = pickOne([
+      '#pm-unlit',
+      'input[type="checkbox"][data-lm="unlit-like"]'
+    ]);
+
+    // basic sanity
+    if (!ui.materialSelect || !ui.opacityRange){
+      throw new Error('UI elements not found (materialSelect/opacityRange)');
     }
+    log('ui ok');
   }
 
-  async function loadSaved(ctx, modelKey, matKey){
-    const br = window.materialsSheetBridge;
-    if (!br || !ctx) return null;
-    try{
-      // polyfill path: loadByKey(ctx, modelKey, matKey)
-      if (typeof br.loadByKey === 'function'){
-        return await br.loadByKey(ctx, modelKey, matKey);
-      }
-      // fallback: getLatest or read
-      if (typeof br.getLatest === 'function'){
-        return await br.getLatest(ctx, modelKey, matKey);
-      }
-    }catch(e){ console.warn('[mat-orch] loadByKey error', e); }
+  // --------- Sheet bridge (append-only) ---------
+  function persistRow(row){
+    const b = window.materialsSheetBridge || {};
+    // we try common API variants; if none exists, silently skip (viewer change only)
+    if (typeof b.append === 'function') return b.append(row);
+    if (typeof b.appendRow === 'function') return b.appendRow(row);
+    if (typeof b.persist === 'function') return b.persist(row);
+  }
+
+  function loadByKey(key){
+    const b = window.materialsSheetBridge || {};
+    if (!key) return null;
+    if (typeof b.loadByKey === 'function') return b.loadByKey(key);
+    if (typeof b.load === 'function') return b.load(key);
     return null;
   }
 
-  // ---- Main wire ------------------------------------------------------------
-  const state = {
-    wired:false,
-    currentMatKey:'',
-    modelKey:''
-  };
-
-  function modelKeyFromURL(){
-    try {
-      const u = new URL(window.location.href);
-      return (u.searchParams.get('model') || u.searchParams.get('glb') || '').split('/').pop() || '';
-    }catch{ return ''; }
+  // reflect row -> UI (only fields we currently expose)
+  function reflectToUI(row){
+    if (!row) return;
+    if (ui.opacityRange && typeof row.opacity === 'number'){
+      ui.opacityRange.value = String(row.opacity);
+    }
+    if (ui.doubleSided && typeof row.doubleSided === 'number'){
+      ui.doubleSided.checked = !!row.doubleSided;
+    }
+    if (ui.unlit && typeof row.unlit === 'number'){
+      ui.unlit.checked = !!row.unlit;
+    }
   }
 
-  function ensureModelKey(){ if (!state.modelKey) state.modelKey = modelKeyFromURL(); }
+  // gather UI -> row
+  function readUI(key){
+    const row = {
+      key: key || '',
+      materialKey: key || '',
+      opacity: Number(ui.opacityRange ? ui.opacityRange.value : 1),
+      doubleSided: ui.doubleSided && ui.doubleSided.checked ? 1 : 0,
+      unlit: ui.unlit && ui.unlit.checked ? 1 : 0,
+      updatedAt: new Date().toISOString(),
+      updatedBy: 'mat-orch'
+    };
+    return row;
+  }
 
-  function wireUIEvents(els){
-    if (state.wired) return;
-    state.wired = true;
+  // populate material dropdown
+  function fillMaterialsOnce(){
+    const sel = ui.materialSelect;
+    if (!sel) return;
+    // keep current selection if any
+    const current = sel.value;
+    // reset
+    sel.innerHTML = '';
+    const placeholder = document.createElement('option');
+    placeholder.textContent = '— Select material —';
+    placeholder.value = '';
+    sel.appendChild(placeholder);
 
-    // slider input -> apply (throttled), label sync
-    const throttledApply = rafThrottle(async ()=>{
-      if (!state.currentMatKey) return;
-      const v = clamp01(parseFloat(els.range.value || '1'));
-      if (els.val) els.val.textContent = v.toFixed(2);
-      applyOpacityToViewer(state.currentMatKey, v);
+    const keys = listMaterialKeys();
+    keys.forEach(k=>{
+      const opt = document.createElement('option');
+      opt.value = k;
+      opt.textContent = k;
+      sel.appendChild(opt);
     });
-    if (els.range){
-      els.range.addEventListener('input', throttledApply);
-      els.range.addEventListener('change', async ()=>{
-        // persist after change
-        const ctx = await getSheetCtxSticky(800);
-        ensureModelKey();
-        const rec = buildRecord(ctx, state.modelKey, state.currentMatKey, {
-          opacity: clamp01(parseFloat(els.range.value||'1')),
-          doubleSided: !!(els.ds && els.ds.checked),
-          unlit: !!(els.ul && els.ul.checked),
-        });
-        await persistAppend(ctx, rec);
-      });
-    }
 
-    // material selection -> reflect saved -> pre-apply
-    if (els.sel){
-      els.sel.addEventListener('change', async ()=>{
-        const key = els.sel.value || '';
-        state.currentMatKey = key;
-        // default UI
-        reflectOpacityUI(els, 1);
-        if (!key) return;
-        // try load saved
-        const ctx = await getSheetCtxSticky(800);
-        ensureModelKey();
-        const saved = await loadSaved(ctx, state.modelKey, key);
-        const op = saved && Number.isFinite(+saved.opacity) ? +saved.opacity : 1;
-        reflectOpacityUI(els, op);
-        // pre-apply
-        applyOpacityToViewer(key, op);
-      });
-    }
+    if (current && keys.includes(current)) sel.value = current;
+  }
 
-    log('wired panel');
+  function onSelectChange(){
+    const key = ui.materialSelect.value;
+    if (!key) return;
+
+    // try load saved row for this material
+    Promise.resolve(loadByKey(key)).then(row=>{
+      if (row && typeof row === 'object'){
+        reflectToUI(row);
+        raf(()=> applyOpacityByKey(key, Number(ui.opacityRange.value||1)));
+      }else{
+        // reset to defaults but do not change model until user touches slider
+        reflectToUI({opacity: 1, doubleSided: 0, unlit: 0});
+      }
+    }).catch(()=>{});
+  }
+
+  function onOpacityInput(){
+    const key = ui.materialSelect && ui.materialSelect.value;
+    if (!key) return;
+    const v = Number(ui.opacityRange.value||1);
+    applyOpacityByKey(key, v);
+    // append-only persist
+    persistRow(readUI(key));
+  }
+
+  function wireUI(){
+    // prevent duplicate listeners across retries
+    const marker = '__lm_wired';
+    for (const [name, el] of Object.entries(ui)){
+      if (el && !el[marker]){
+        if (name === 'materialSelect') el.addEventListener('change', onSelectChange, {passive:true});
+        if (name === 'opacityRange') el.addEventListener('input', ()=> raf(onOpacityInput), {passive:true});
+        el[marker] = true;
+      }
+    }
+  }
+
+  // waiters (scene & sheet context) with conservative timeouts + retry
+  function once(target, type, timeoutMs){
+    return new Promise((resolve, reject)=>{
+      let to = setTimeout(()=>{
+        target.removeEventListener(type, on);
+        reject(new Error(type+' timeout'));
+      }, timeoutMs||3000);
+      function on(e){
+        clearTimeout(to);
+        target.removeEventListener(type, on);
+        resolve(e && e.detail);
+      }
+      target.addEventListener(type, on, {once:true});
+    });
   }
 
   async function boot(){
-    const els = pickupUI();
-    // populate from viewer immediately
-    populatePanelFromViewer(els);
-
-    // try soft waits (do not abort if false)
-    await waitSceneReadySticky(1000);
-    const ctx = await getSheetCtxSticky(1000);
-    if (ctx && !window.__lm_last_sheet_ctx) window.__lm_last_sheet_ctx = ctx;
-
-    // wire once
-    wireUIEvents(els);
-
-    // if nothing is selected yet, keep first actual material selected
-    if (els.sel && !els.sel.value && els.sel.options.length > 1){
-      els.sel.selectedIndex = 1;
-      els.sel.dispatchEvent(new Event('change', {bubbles:true}));
+    try{
+      pickupUI();
+    }catch(e){
+      log('ui not ready yet, retry...', e.message);
+      setTimeout(boot, 300);
+      return;
     }
+
+    // populate dropdown early
+    fillMaterialsOnce();
+
+    // wait for scene & sheet context (sticky bridges will re-emit)
+    try{
+      await once(window, 'lm:scene-ready', 4000);
+    }catch{}
+    try{
+      await once(window, 'lm:sheet-context', 4000);
+    }catch{}
+
+    // repopulate (now that scene is surely ready)
+    fillMaterialsOnce();
+    wireUI();
+    log('wired panel');
   }
 
   // kick
-  if (document.readyState === 'complete' || document.readyState === 'interactive'){
-    boot();
-  }else{
-    window.addEventListener('DOMContentLoaded', boot, { once:true });
-  }
+  boot();
 })();
