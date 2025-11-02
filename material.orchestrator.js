@@ -1,210 +1,379 @@
-/* LociMyu - Material Orchestrator
- * Version: V6_16g_SAFE_UI_PIPELINE
- * Purpose: Robust, order-safe wiring for Material UI (dropdown + opacity slider),
- *          model application, and sheet persistence with append-only writes.
+/* 
+ * material.orchestrator.js
+ * V6_16g_SAFE_UI_PIPELINE (A-variant)
+ *
+ * 方針（寄せ方A）:
+ * - Orchestrator 側を materialsSheetBridge の公開API（loadAll / upsertOne）に寄せる
+ * - 保存は upsertOne() に一本化（内部で ensureSheet() が走る想定 / 自動作成は現状維持）
+ * - 読み込みは loadAll() を取得して materialKey で絞り込み、”最新行 wins” を適用
+ *
+ * 期待UI要素（存在しない場合は待機＆間引きログで再試行）:
+ * - #materialSelect (HTMLSelectElement)
+ * - #opacityRange (HTMLInputElement[type=range], 0..1)
+ * - #doubleSided (HTMLInputElement[type=checkbox])
+ * - #unlitLike   (HTMLInputElement[type=checkbox])
+ * - chroma系はあれば拾う: #chromaEnable, #chromaColor, #chromaTolerance, #chromaFeather
+ *
+ * 期待外部API:
+ * - window.viewerBridge.listMaterials() -> [{ key, name }]|string[]|string
+ * - window.viewerBridge.setMaterialOpacity(key, val)
+ * - window.viewerBridge.setMaterialFlags?(key, { doubleSided, unlit })
+ * - window.viewerBridge.setChromaKey?(key, { enable, color, tolerance, feather })
+ * - window.materialsSheetBridge.loadAll(ctx) -> Promise<row[]>
+ * - window.materialsSheetBridge.upsertOne(ctx, row) -> Promise<void>
+ * - Sticky ctx: window.__lm_last_sheet_ctx  または  'lm:sheet-context' イベント(detail={spreadsheetId,sheetGid})
  */
-(function(){
-  if (window.__lm_mat_orch_installed) return;
-  window.__lm_mat_orch_installed = true;
 
-  const VERSION_TAG = 'V6_16g_SAFE_UI_PIPELINE';
-  const state = { wired:false, ui:null, optionsBuilt:false, lastListSig:'' };
+(() => {
+  const TAG = '[mat-orch]';
+  const VER = 'V6_16g_SAFE_UI_PIPELINE.A';
 
-  function log(){ try{ console.log.apply(console, ['[mat-orch]', VERSION_TAG].concat([].slice.call(arguments))); }catch(_){} }
+  const state = {
+    wired: false,
+    lastListSig: '',
+    ui: null,
+    selectedKey: null,
+    saveTimer: null,
+    lastLog: new Map(), // key -> last timestamp
+  };
 
-  // ---------- small helpers ----------
-  function clamp01(v){ v = parseFloat(v); if (isNaN(v)) v = 0; return Math.max(0, Math.min(1, v)); }
+  const logOnce = (k, msg) => {
+    const now = performance.now();
+    const last = state.lastLog.get(k) || 0;
+    if (now - last > 2000) {
+      console.log(`${TAG} ${msg}`);
+      state.lastLog.set(k, now);
+    }
+  };
 
-  // Wait for predicate using MutationObserver + polling
-  function waitFor(pred, {timeout=6000, interval=120} = {}) {
-    return new Promise((resolve, reject) => {
-      const t0 = performance.now();
-      const tick = () => {
-        try{
-          const v = pred();
-          if (v) { cleanup(); return resolve(v); }
-          if (performance.now() - t0 > timeout) { cleanup(); return reject(new Error('waitFor timeout')); }
-        }catch(e){ /* ignore */ }
+  const hardLog = (msg) => console.log(`${TAG} ${msg}`);
+
+  // ---- wait helpers ----
+  function waitForDOMContentLoaded() {
+    if (document.readyState === 'complete' || document.readyState === 'interactive') return Promise.resolve();
+    return new Promise(res => addEventListener('DOMContentLoaded', res, { once: true }));
+  }
+
+  function waitForUI(maxMs = 10000) {
+    const t0 = performance.now();
+    return new Promise((res, rej) => {
+      const tryPick = () => {
+        const ui = pickUI();
+        if (ui) {
+          state.ui = ui;
+          return res(ui);
+        }
+        if (performance.now() - t0 > maxMs) {
+          return rej(new Error('UI elements not found (materialSelect/opacityRange)'));
+        }
+        logOnce('wait-ui', 'ui not ready yet, retry... UI elements not found (materialSelect/opacityRange)');
+        setTimeout(tryPick, 600);
       };
-      const mo = new MutationObserver(tick);
-      try{ mo.observe(document.body, {subtree:true, childList:true}); }catch(_){}
-      const tm = setInterval(tick, interval);
-      const cleanup = () => { try{mo.disconnect();}catch(_){}; clearInterval(tm); };
+      tryPick();
+    });
+  }
+
+  function waitForViewer(maxMs = 15000) {
+    const t0 = performance.now();
+    return new Promise((res, rej) => {
+      const tick = () => {
+        if (window.viewerBridge && typeof window.viewerBridge.listMaterials === 'function') {
+          try {
+            // a light probe
+            window.viewerBridge.listMaterials();
+            return res(window.viewerBridge);
+          } catch (e) {/* ignore, not ready */}
+        }
+        if (performance.now() - t0 > maxMs) {
+          return rej(new Error('viewerBridge not ready (listMaterials unavailable)'));
+        }
+        logOnce('wait-viewer', 'viewer not ready yet, retry...');
+        setTimeout(tick, 700);
+      };
       tick();
     });
   }
 
-  // Find the Per-material opacity section and pick select/range within it
-  async function pickupUI() {
-    const container = await waitFor(() => {
-      const nodes = document.querySelectorAll('section,div,fieldset,.card,.panel');
-      for (const el of nodes) {
-        const txt = (el.textContent || '').toLowerCase();
-        if ((txt.includes('per-material opacity') || txt.includes('per material opacity') || txt.includes('saved per sheet'))
-            && el.querySelector('input[type="range"]') && el.querySelector('select')) {
-          return el;
+  function waitForSheetCtx(maxMs = 15000) {
+    if (window.__lm_last_sheet_ctx) return Promise.resolve(window.__lm_last_sheet_ctx);
+    const t0 = performance.now();
+    return new Promise((res, rej) => {
+      const on = (e) => {
+        const ctx = e.detail || null;
+        if (ctx) {
+          window.__lm_last_sheet_ctx = ctx; // sticky
+          removeEventListener('lm:sheet-context', on);
+          return res(ctx);
         }
-      }
-      return null;
-    }, {timeout: 8000});
-
-    const selects = Array.from(container.querySelectorAll('select'));
-    const opacityRange = container.querySelector('input[type="range"]');
-    if (!opacityRange || selects.length === 0) throw new Error('UI elements not found (materialSelect/opacityRange)');
-
-    // Prefer select which looks like it contains materials
-    let materialSelect = selects.find(s => {
-      const t = (s.textContent || '').toLowerCase();
-      return t.includes('material'); // wide match
-    }) || selects[1] || selects[0];
-
-    return { container, materialSelect, opacityRange };
-  }
-
-  // Build dropdown options from viewerBridge.listMaterials()
-  async function fillMaterialsOnce() {
-    const ui = state.ui;
-    if (!ui) return;
-    const vb = window.viewerBridge;
-    if (!vb || typeof vb.listMaterials !== 'function') return;
-
-    const list = vb.listMaterials() || [];
-    const normalizeKey = (m) => {
-      if (!m) return null;
-      if (typeof m === 'string') return m;
-      return m.name || m.materialKey || m.key || null;
-    };
-    const keys = list.map(normalizeKey).filter(Boolean);
-
-    const sig = JSON.stringify(keys);
-    if (sig === state.lastListSig && state.optionsBuilt) return; // already populated with same list
-    state.lastListSig = sig;
-
-    // Clear and rebuild
-    const sel = ui.materialSelect;
-    while (sel.firstChild) sel.removeChild(sel.firstChild);
-    const ph = document.createElement('option');
-    ph.value = ''; ph.textContent = '— Select material —';
-    sel.appendChild(ph);
-
-    for (const k of keys) {
-      const opt = document.createElement('option');
-      opt.value = k; opt.textContent = k;
-      sel.appendChild(opt);
-    }
-    state.optionsBuilt = true;
-    log('panel populated', keys.length, 'materials');
-  }
-
-  // Load existing row by material key (API name variations tolerated)
-  async function sheetLoadByKey(key){
-    const br = window.materialsSheetBridge || {};
-    const cand = br.loadByKey || br.load || br.fetchByKey || br.getByKey || null;
-    if (typeof cand === 'function') {
-      try { return await cand(key); } catch(e){ log('loadByKey error', e); }
-    }
-    return null;
-  }
-
-  // Append/persist row (API name variations tolerated)
-  async function sheetAppend(row){
-    const br = window.materialsSheetBridge || {};
-    const cand = br.append || br.appendRow || br.persist || br.save || null;
-    if (typeof cand === 'function') {
-      try { return await cand(row); } catch(e){ log('append error', e); }
-    }
-    return null;
-  }
-
-  async function onSelectChange() {
-    const { materialSelect, opacityRange } = state.ui || {};
-    const key = materialSelect && materialSelect.value;
-    if (!key) return;
-
-    // Prefer saved value
-    let opacity = 1.0;
-    const saved = await sheetLoadByKey(key);
-    if (saved && typeof saved.opacity === 'number') {
-      opacity = saved.opacity;
-    } else {
-      try {
-        const vb = window.viewerBridge;
-        const g = vb && vb.getMaterialOpacity;
-        if (typeof g === 'function') opacity = clamp01(g.call(vb, key));
-      } catch(e){}
-    }
-    opacityRange.value = String(opacity);
-    opacityRange.dispatchEvent(new Event('input', {bubbles:false}));
-  }
-
-  const persistDebounce = (() => { let h; return (fn)=>{ clearTimeout(h); h=setTimeout(fn,200); }; })();
-
-  async function onOpacityInput() {
-    const { materialSelect, opacityRange } = state.ui || {};
-    const key = materialSelect && materialSelect.value;
-    if (!key) return;
-    const val = clamp01(opacityRange.value);
-
-    // apply to model
-    try {
-      const vb = window.viewerBridge;
-      const setter = vb.setMaterialOpacity || vb.applyOpacityByMaterial || vb.setOpacityForMaterial;
-      if (typeof setter === 'function') setter.call(vb, key, val);
-    } catch(e){ log('apply opacity error', e); }
-
-    // persist (debounced)
-    persistDebounce(async () => {
-      await sheetAppend({ materialKey: key, opacity: val });
+      };
+      addEventListener('lm:sheet-context', on);
+      const tick = () => {
+        if (window.__lm_last_sheet_ctx) {
+          removeEventListener('lm:sheet-context', on);
+          return res(window.__lm_last_sheet_ctx);
+        }
+        if (performance.now() - t0 > maxMs) {
+          removeEventListener('lm:sheet-context', on);
+          return rej(new Error('sheet-context not available'));
+        }
+        logOnce('wait-sheet', 'sheet-context not ready yet, retry...');
+        setTimeout(tick, 800);
+      };
+      tick();
     });
   }
 
-  async function wireOnce() {
-    // 1) viewer ready (API present)
-    await waitFor(() => {
-      const vb = window.viewerBridge;
-      return vb && typeof vb.listMaterials === 'function';
-    }, {timeout: 8000});
+  // ---- UI picker ----
+  function pickUI() {
+    const materialSelect = document.querySelector('#materialSelect');
+    const opacityRange   = document.querySelector('#opacityRange');
+    const doubleSided    = document.querySelector('#doubleSided');
+    const unlitLike      = document.querySelector('#unlitLike');
+    // chroma (optional)
+    const chromaEnable   = document.querySelector('#chromaEnable');
+    const chromaColor    = document.querySelector('#chromaColor');
+    const chromaTolerance= document.querySelector('#chromaTolerance');
+    const chromaFeather  = document.querySelector('#chromaFeather');
 
-    // 2) sheet-context non-null/undefined
-    const sheetCtx = await waitFor(() => {
-      const ctx = window.__lm_last_sheet_ctx;
-      return (ctx && ctx.spreadsheetId && ctx.sheetGid !== undefined && ctx.sheetGid !== null) ? ctx : null;
-    }, {timeout: 8000});
-    log('sheet-context', sheetCtx);
-
-    // 3) pickup UI
-    state.ui = await pickupUI();
-
-    // 4) populate and wire once
-    await fillMaterialsOnce();
-
-    if (!state.wired) {
-      const { materialSelect, opacityRange } = state.ui;
-      materialSelect.addEventListener('change', onSelectChange, {passive:true});
-      opacityRange.addEventListener('input', onOpacityInput, {passive:true});
-      state.wired = true;
-      log('wired panel');
-    }
-
-    // Trigger initial sync if any
-    if (state.ui.materialSelect.value) await onSelectChange();
+    if (!materialSelect || !opacityRange) return null;
+    return { materialSelect, opacityRange, doubleSided, unlitLike, chromaEnable, chromaColor, chromaTolerance, chromaFeather };
   }
 
-  // Boot once after DOM ready
-  async function boot(){
-    log('loaded VERSION_TAG:', VERSION_TAG);
+  // ---- materials list helpers ----
+  function normalizeMaterials(list) {
+    // Accepts: [{key,name}] | string[] | string
+    if (!list) return [];
+    if (typeof list === 'string') return [{ key: list, name: String(list) }];
+    if (Array.isArray(list)) {
+      if (list.length && typeof list[0] === 'string') {
+        return list.map(s => ({ key: String(s), name: String(s) }));
+      }
+      if (list.length && typeof list[0] === 'object') {
+        return list.map(o => ({ key: String(o.key ?? o.name ?? ''), name: String(o.name ?? o.key ?? '') }))
+                   .filter(m => m.key);
+      }
+    }
+    return [];
+  }
+
+  function sigOf(list) {
+    return JSON.stringify(list.map(m => m.key));
+  }
+
+  function fillMaterialSelect(list) {
+    const ui = state.ui;
+    const sel = ui.materialSelect;
+    sel.innerHTML = '';
+    const opt0 = document.createElement('option');
+    opt0.value = '';
+    opt0.textContent = '---';
+    sel.appendChild(opt0);
+    for (const m of list) {
+      const opt = document.createElement('option');
+      opt.value = m.key;
+      opt.textContent = m.name || m.key;
+      sel.appendChild(opt);
+    }
+  }
+
+  // ---- sheet helpers (寄せ方A) ----
+  async function loadLatestByKey(ctx, materialKey) {
+    // materialsSheetBridge.loadAll(ctx) -> rows
+    if (!window.materialsSheetBridge || typeof window.materialsSheetBridge.loadAll !== 'function') {
+      hardLog('materialsSheetBridge.loadAll missing');
+      return null;
+    }
+    const rows = await window.materialsSheetBridge.loadAll(ctx).catch(() => null);
+    if (!rows || !rows.length) return null;
+    const filtered = rows.filter(r => (r.materialKey ?? r.key) === materialKey);
+    if (!filtered.length) return null;
+    // 最新行 wins: updatedAt desc / ない場合は末尾
+    filtered.sort((a,b) => {
+      const ta = Date.parse(a.updatedAt || '') || 0;
+      const tb = Date.parse(b.updatedAt || '') || 0;
+      return tb - ta;
+    });
+    const latest = filtered[0];
+    // 正規化
+    return {
+      materialKey,
+      opacity: toNum(latest.opacity, 1),
+      doubleSided: toBool(latest.doubleSided, false),
+      unlit: toBool(latest.unlit, false),
+      chromaEnable: toBool(latest.chromaEnable, false),
+      chromaColor: latest.chromaColor || '#000000',
+      chromaTolerance: toNum(latest.chromaTolerance, 0),
+      chromaFeather: toNum(latest.chromaFeather, 0),
+    };
+  }
+
+  function toNum(v, def=0) {
+    const n = Number(v);
+    return Number.isFinite(n) ? n : def;
+    }
+  function toBool(v, def=false) {
+    if (typeof v === 'boolean') return v;
+    if (v === 'true' || v === '1' || v === 1) return true;
+    if (v === 'false' || v === '0' || v === 0) return false;
+    return def;
+  }
+
+  async function saveDebounced(ctx, payload) {
+    clearTimeout(state.saveTimer);
+    state.saveTimer = setTimeout(async () => {
+      try {
+        if (!window.materialsSheetBridge || typeof window.materialsSheetBridge.upsertOne !== 'function') {
+          hardLog('materialsSheetBridge.upsertOne missing');
+          return;
+        }
+        const row = {
+          materialKey: payload.materialKey,
+          opacity: payload.opacity,
+          doubleSided: payload.doubleSided,
+          unlit: payload.unlit,
+          chromaEnable: payload.chromaEnable,
+          chromaColor: payload.chromaColor,
+          chromaTolerance: payload.chromaTolerance,
+          chromaFeather: payload.chromaFeather,
+          updatedAt: new Date().toISOString(),
+          updatedBy: (window.__lm_identity && window.__lm_identity.email) || 'unknown',
+        };
+        await window.materialsSheetBridge.upsertOne(ctx, row);
+        logOnce('save-ok', `saved material "${row.materialKey}"`);
+      } catch (e) {
+        console.warn(`${TAG} save failed`, e);
+      }
+    }, 400);
+  }
+
+  // ---- UI <-> model ----
+  function applyToUI(uivalues) {
+    const ui = state.ui;
+    if (ui.opacityRange && typeof uivalues.opacity === 'number') ui.opacityRange.value = String(uivalues.opacity);
+    if (ui.doubleSided != null) ui.doubleSided.checked = !!uivalues.doubleSided;
+    if (ui.unlitLike != null) ui.unlitLike.checked = !!uivalues.unlit;
+    if (ui.chromaEnable != null) ui.chromaEnable.checked = !!uivalues.chromaEnable;
+    if (ui.chromaColor  != null && uivalues.chromaColor) ui.chromaColor.value = String(uivalues.chromaColor);
+    if (ui.chromaTolerance != null && Number.isFinite(uivalues.chromaTolerance)) ui.chromaTolerance.value = String(uivalues.chromaTolerance);
+    if (ui.chromaFeather   != null && Number.isFinite(uivalues.chromaFeather)) ui.chromaFeather.value = String(uivalues.chromaFeather);
+  }
+
+  function collectFromUI() {
+    const ui = state.ui;
+    return {
+      materialKey: state.selectedKey,
+      opacity: Number(ui.opacityRange?.value ?? 1),
+      doubleSided: !!ui.doubleSided?.checked,
+      unlit: !!ui.unlitLike?.checked,
+      chromaEnable: !!ui.chromaEnable?.checked,
+      chromaColor: ui.chromaColor?.value || '#000000',
+      chromaTolerance: Number(ui.chromaTolerance?.value ?? 0),
+      chromaFeather: Number(ui.chromaFeather?.value ?? 0),
+    };
+  }
+
+  function applyToModel(materialKey, vals) {
+    if (!materialKey) return;
     try {
-      await wireOnce();
+      if (typeof window.viewerBridge.setMaterialOpacity === 'function' && typeof vals.opacity === 'number') {
+        window.viewerBridge.setMaterialOpacity(materialKey, vals.opacity);
+      }
+      if (typeof window.viewerBridge.setMaterialFlags === 'function') {
+        window.viewerBridge.setMaterialFlags(materialKey, { doubleSided: !!vals.doubleSided, unlit: !!vals.unlit });
+      }
+      if (typeof window.viewerBridge.setChromaKey === 'function') {
+        window.viewerBridge.setChromaKey(materialKey, {
+          enable: !!vals.chromaEnable,
+          color: vals.chromaColor || '#000000',
+          tolerance: Number(vals.chromaTolerance || 0),
+          feather: Number(vals.chromaFeather || 0),
+        });
+      }
     } catch (e) {
-      log('first wire failed, retry soon', e && e.message || e);
-      setTimeout(() => boot(), 600); // one-shot retry window; wireOnce guards against dupes
+      console.warn(`${TAG} applyToModel error`, e);
     }
   }
 
-  if (document.readyState === 'complete' || document.readyState === 'interactive') {
-    boot();
-  } else {
-    window.addEventListener('DOMContentLoaded', boot, { once:true });
+  // ---- handlers ----
+  async function onSelectChange(ctx) {
+    const ui = state.ui;
+    const key = ui.materialSelect.value || null;
+    state.selectedKey = key;
+    if (!key) return;
+    // 保存値ロード → UI → モデル の順
+    let vals = await loadLatestByKey(ctx, key);
+    if (!vals) {
+      // 初回: モデル現状値から拾えるなら拾う（なければデフォルト）
+      vals = {
+        materialKey: key,
+        opacity: Number(ui.opacityRange?.value ?? 1),
+        doubleSided: !!ui.doubleSided?.checked,
+        unlit: !!ui.unlitLike?.checked,
+        chromaEnable: !!ui.chromaEnable?.checked,
+        chromaColor: ui.chromaColor?.value || '#000000',
+        chromaTolerance: Number(ui.chromaTolerance?.value ?? 0),
+        chromaFeather: Number(ui.chromaFeather?.value ?? 0),
+      };
+    }
+    applyToUI(vals);
+    applyToModel(key, vals);
   }
+
+  function onUIChange(ctx) {
+    // 即時プレビュー＋保存（デバウンス）
+    const vals = collectFromUI();
+    applyToModel(state.selectedKey, vals);
+    saveDebounced(ctx, vals);
+  }
+
+  // ---- wireOnce ----
+  function wireOnce(ctx, materials) {
+    if (state.wired) return;
+    const ui = state.ui;
+    // build list once (guard by signature outside)
+    fillMaterialSelect(materials);
+
+    // events (one-time)
+    ui.materialSelect.addEventListener('change', () => onSelectChange(ctx), { passive: true });
+    if (ui.opacityRange) ui.opacityRange.addEventListener('input', () => onUIChange(ctx), { passive: true });
+    if (ui.doubleSided)  ui.doubleSided.addEventListener('change', () => onUIChange(ctx), { passive: true });
+    if (ui.unlitLike)    ui.unlitLike.addEventListener('change', () => onUIChange(ctx), { passive: true });
+    if (ui.chromaEnable) ui.chromaEnable.addEventListener('change', () => onUIChange(ctx), { passive: true });
+    if (ui.chromaColor)  ui.chromaColor.addEventListener('input',  () => onUIChange(ctx), { passive: true });
+    if (ui.chromaTolerance) ui.chromaTolerance.addEventListener('input', () => onUIChange(ctx), { passive: true });
+    if (ui.chromaFeather)   ui.chromaFeather.addEventListener('input',  () => onUIChange(ctx), { passive: true });
+
+    state.wired = True;
+    hardLog(`${VER} wireOnce complete`);
+  }
+
+  // ---- main boot ----
+  (async function boot() {
+    try {
+      hardLog(`${VER} boot`);
+      await waitForDOMContentLoaded();
+      await waitForUI();
+      const viewer = await waitForViewer();
+      const ctx = await waitForSheetCtx();
+
+      // materials probe
+      const raw = viewer.listMaterials();
+      const mats = normalizeMaterials(raw);
+      const sig = sigOf(mats);
+      if (sig && sig !== state.lastListSig) {
+        state.lastListSig = sig;
+        wireOnce(ctx, mats);
+      } else if (!sig) {
+        logOnce('empty-list', 'listMaterials returned empty; will retry');
+        setTimeout(boot, 1200); // soft retry once
+        return;
+      }
+
+    } catch (e) {
+      console.warn(`${TAG} boot error`, e);
+      // soft backoff retry
+      setTimeout(boot, 1500);
+    }
+  })();
 
 })();

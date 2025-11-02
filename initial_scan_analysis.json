@@ -1,0 +1,115 @@
+{
+  "material.orchestrator.js": {
+    "bytes": 7593,
+    "chars": 7589,
+    "version_tags": [
+      "V6_16g_SAFE_UI_PIPELINE"
+    ],
+    "console_tags": [
+      "[mat-orch]"
+    ],
+    "event_names_sample": [
+      "DOMContentLoaded",
+      "change",
+      "input"
+    ],
+    "todo_sample": [],
+    "first_5_lines": "/* LociMyu - Material Orchestrator\n * Version: V6_16g_SAFE_UI_PIPELINE\n * Purpose: Robust, order-safe wiring for Material UI (dropdown + opacity slider),\n *          model application, and sheet persistence with append-only writes.\n */"
+  },
+  "materials.sheet.bridge.js": {
+    "bytes": 6129,
+    "chars": 5939,
+    "version_tags": [],
+    "console_tags": [
+      "[mat-sheet]"
+    ],
+    "event_names_sample": [
+      "lm:sheet-context"
+    ],
+    "todo_sample": [],
+    "first_5_lines": "// materials.sheet.bridge.js\n// Bridge for __LM_MATERIALS sheet (append-only, latest-row-wins)\n\n(() => {\n  const SHEET_NAME = '__LM_MATERIALS';"
+  },
+  "sheet.ctx.bridge.js": {
+    "bytes": 1521,
+    "chars": 1521,
+    "version_tags": [
+      "V6_16f_SHEET_CTX_STICKY"
+    ],
+    "console_tags": [
+      "[sheet-ctx-bridge]"
+    ],
+    "event_names_sample": [
+      "DOMContentLoaded"
+    ],
+    "todo_sample": [],
+    "first_5_lines": "\n// LociMyu - Sheet Context Bridge (sticky, deduped)\n// VERSION_TAG: V6_16f_SHEET_CTX_STICKY\n(function(){\n  if (window.__lm_sheet_ctx_bridge_installed) return;"
+  },
+  "viewer.bridge.module.js": {
+    "bytes": 1626,
+    "chars": 1626,
+    "version_tags": [],
+    "console_tags": [
+      "[viewer-bridge]"
+    ],
+    "event_names_sample": [],
+    "todo_sample": [],
+    "first_5_lines": "\n/* viewer.bridge.module.js\n * Provide viewerBridge.getScene/listMaterials and stabilize scene-ready\n */\n(function(){"
+  },
+  "boot.esm.cdn.js": {
+    "bytes": 51555,
+    "chars": 51242,
+    "version_tags": [],
+    "console_tags": [
+      "[materials]"
+    ],
+    "event_names_sample": [
+      "DOMContentLoaded",
+      "change",
+      "click",
+      "input",
+      "keydown",
+      "materials:seed",
+      "pointerdown",
+      "pointermove",
+      "pointerup"
+    ],
+    "todo_sample": [],
+    "first_5_lines": "// boot.esm.cdn.js — LociMyu boot (clean full build, overlay image + Sheets delete fixes)\n\n// ---------- Globals (palette & helpers) ----------\nwindow.LM_PALETTE = window.LM_PALETTE || [\"#ef9368\",\"#e9df5d\",\"#a8e063\",\"#8bb6ff\",\"#b38bff\",\"#86d2c4\",\"#d58cc1\",\"#9aa1a6\"];\nwindow.currentPinColor = window.currentPinColor || window.LM_PALETTE[0];"
+  },
+  "index.html": {
+    "bytes": 10668,
+    "chars": 10656,
+    "version_tags": [],
+    "console_tags": [],
+    "event_names_sample": [
+      "click"
+    ],
+    "todo_sample": [],
+    "first_5_lines": "<!DOCTYPE html>\n\n<html lang=\"ja\">\n<head>\n<!-- ESM import map for THREE (and addons) -->"
+  },
+  "material.ui.orch.js": {
+    "bytes": 6994,
+    "chars": 6990,
+    "version_tags": [],
+    "console_tags": [],
+    "event_names_sample": [
+      "DOMContentLoaded",
+      "change",
+      "input",
+      "lm:scene-ready"
+    ],
+    "todo_sample": [],
+    "first_5_lines": "\n// material.ui.orch.js - Step2 UI wiring for LociMyu (chroma key + per-material ops)\nimport * as V from './viewer.module.cdn.js';\nimport './viewer.bridge.module.js';\n"
+  },
+  "gauth.module.js": {
+    "bytes": 3605,
+    "chars": 3603,
+    "version_tags": [],
+    "console_tags": [],
+    "event_names_sample": [
+      "click"
+    ],
+    "todo_sample": [],
+    "first_5_lines": "\n// gauth.module.js — GIS auth (compat): accepts opts.clientId or opts.client_id; uses meta/window if needed; caches token; silent refresh.\nlet accessToken = null;\nlet tokenClient = null;\nlet lastError = null;"
+  }
+}
