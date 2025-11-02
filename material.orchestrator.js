@@ -1,17 +1,19 @@
 /*
  * material.orchestrator.js
- * V6_16g_SAFE_UI_PIPELINE.A2.1
+ * V6_16g_SAFE_UI_PIPELINE.A2.2
  *
- * - 強化ポイント -
- * 1) applyToModel() に詳細ログ＋複数API名のフォールバックを実装
- * 2) saveDebounced() で ctx と ctx.spreadsheetId の厳格チェック（無ければ保存しない）
- * 3) onSelectChange()/onUIChange() で適用時にログを出し、選択キー未設定を早期return
- * 4) 透明度のクランプ(0..1)
+ * 追加: viewerBridge が per-material API を持たない場合に備え、
+ *      起動時に "互換シム(shim)" を自動注入して描画反映を行う。
+ * - setMaterialOpacity(key, val)     -> traverse Scene, material.name===key の opacity を更新
+ * - setMaterialFlags(key, {doubleSided, unlit})
+ * - setChromaKey(key, {enable,color,tolerance,feather})  (no-op placeholder; 将来対応)
+ *
+ * 既存の A2.1 の強化点は維持。
  */
 
 (() => {
   const TAG = '[mat-orch]';
-  const VER = 'V6_16g_SAFE_UI_PIPELINE.A2.1';
+  const VER = 'V6_16g_SAFE_UI_PIPELINE.A2.2';
 
   const state = {
     ui: null,
@@ -24,6 +26,7 @@
     viewerReady: false,
     lastLog: new Map(),
     mo: null,
+    threeReady: false,
   };
 
   const hardLog = (msg, ...rest) => console.log(`${TAG} ${msg}`, ...rest);
@@ -36,8 +39,115 @@
       state.lastLog.set(k, now);
     }
   };
+  const clamp01 = (n)=>{ n = Number(n); if (!Number.isFinite(n)) return 1; return Math.max(0, Math.min(1, n)); };
 
-  function clamp01(n) { n = Number(n); if (!Number.isFinite(n)) return 1; return Math.max(0, Math.min(1, n)); }
+  // ---------- THREE scene helpers (shim) ----------
+  function locateThreeScene() {
+    const T = window.THREE;
+    if (!T) return null;
+    // パス候補
+    const cand = [
+      window.viewerBridge && window.viewerBridge.scene,
+      window.viewerBridge && typeof window.viewerBridge.getScene === 'function' && window.viewerBridge.getScene(),
+      window.viewerBridge && window.viewerBridge.viewer && window.viewerBridge.viewer.scene,
+      window.__lm_scene,
+      window.__LM_SCENE,
+    ].filter(Boolean);
+    for (const s of cand) {
+      if (s && typeof s.traverse === 'function') return s;
+    }
+    // 最後の手段: グローバルから Scene を総当たり（重いので一度だけ）
+    try {
+      for (const k of Object.keys(window)) {
+        const v = window[k];
+        if (v && v.isScene && typeof v.traverse === 'function') return v;
+      }
+    } catch {}
+    return null;
+  }
+
+  function ensureViewerShims() {
+    if (!window.viewerBridge) return;
+    // 既に実装があれば触らない
+    const needOpacity = (typeof window.viewerBridge.setMaterialOpacity !== 'function') &&
+                        (typeof window.viewerBridge.setOpacityForMaterial !== 'function') &&
+                        (typeof window.viewerBridge.setMatOpacity !== 'function') &&
+                        (typeof window.viewerBridge.setOpacity !== 'function');
+    const needFlags   = (typeof window.viewerBridge.setMaterialFlags !== 'function') &&
+                        (typeof window.viewerBridge.setFlagsForMaterial !== 'function') &&
+                        (typeof window.viewerBridge.setMatFlags !== 'function') &&
+                        (typeof window.viewerBridge.setFlags !== 'function');
+    const needChroma  = (typeof window.viewerBridge.setChromaKey !== 'function');
+
+    if (!(needOpacity || needFlags || needChroma)) return;
+
+    const T = window.THREE;
+    const scene = locateThreeScene();
+    if (!T || !scene) { logOnce('shim-wait', 'THREE/scene not ready; deferred shim'); return; }
+
+    // 実装: 名前一致で material を集めて反映
+    function findMaterialsByName(name) {
+      const mats = new Set();
+      scene.traverse(obj => {
+        const mat = obj && obj.material;
+        if (!mat) return;
+        if (Array.isArray(mat)) {
+          for (const m of mat) if (m && m.name === name) mats.add(m);
+        } else {
+          if (mat.name === name) mats.add(mat);
+        }
+      });
+      return Array.from(mats);
+    }
+
+    function applyOpacityByName(name, value) {
+      const v = clamp01(value);
+      const mats = findMaterialsByName(name);
+      if (!mats.length) { logOnce('no-mat', `material "${name}" not found`); return false; }
+      for (const m of mats) {
+        m.transparent = true;
+        if ('opacity' in m) m.opacity = v;
+        m.needsUpdate = true;
+      }
+      hardLog(`shim opacity ${name} -> ${v} (x${mats.length})`);
+      return true;
+    }
+
+    function applyFlagsByName(name, flags) {
+      const mats = findMaterialsByName(name);
+      if (!mats.length) { logOnce('no-mat', `material "${name}" not found`); return false; }
+      for (const m of mats) {
+        if (flags && 'doubleSided' in flags && window.THREE) {
+          m.side = flags.doubleSided ? window.THREE.DoubleSide : window.THREE.FrontSide;
+        }
+        if (flags && 'unlit' in flags) {
+          // 近似: ライティングの影響を軽減
+          m.lights = !flags.unlit;
+          // トーンマッピングの影響を切る
+          if ('toneMapped' in m) m.toneMapped = !flags.unlit;
+          m.needsUpdate = true;
+        }
+      }
+      hardLog(`shim flags ${name} ->`, flags);
+      return true;
+    }
+
+    // シム注入
+    if (needOpacity) {
+      window.viewerBridge.setMaterialOpacity = (key, val) => applyOpacityByName(String(key), val);
+    }
+    if (needFlags) {
+      window.viewerBridge.setMaterialFlags = (key, payload) => applyFlagsByName(String(key), payload || {});
+    }
+    if (needChroma) {
+      window.viewerBridge.setChromaKey = (key, payload) => {
+        // ここでは no-op（将来必要なら Shader/alphaTest 等を適用）
+        hardLog('shim chromaKey (placeholder)', key, payload);
+        return true;
+      };
+    }
+    hardLog('viewer shims installed');
+  }
 
   // --------- Wait helpers ---------
   function onDOMContentLoaded() {
@@ -50,6 +160,7 @@
       const tick = () => {
         if (window.viewerBridge && typeof window.viewerBridge.listMaterials === 'function') {
           state.viewerReady = true;
+          ensureViewerShims(); // ビューアが生えたらシム試行
           return res(window.viewerBridge);
         }
         if (performance.now() - t0 > maxMs) {
@@ -178,7 +289,7 @@
     }
     return [];
   }
-  function sigOf(list) { return JSON.stringify(list.map(m => m.key)); }
+  const sigOf = (list) => JSON.stringify(list.map(m => m.key));
   function fillMaterialSelect(list) {
     if (!state.ui) return;
     const sel = state.ui.materialSelect;
@@ -199,22 +310,18 @@
     const refresh = () => {
       try {
         if (!state.viewerReady || !window.viewerBridge) return;
+        ensureViewerShims(); // viewer/THREE が後から用意されてもOK
         const raw = window.viewerBridge.listMaterials && window.viewerBridge.listMaterials();
         const mats = normalizeMaterials(raw);
         const sig  = sigOf(mats);
-        if (mats.length === 0) {
-          logOnce('empty-list', 'listMaterials is empty; will retry');
-          return;
-        }
+        if (mats.length === 0) { logOnce('empty-list', 'listMaterials is empty; will retry'); return; }
         if (sig !== state.lastListSig) {
           state.lastListSig = sig;
           fillMaterialSelect(mats);
           maybeWire();
           hardLog(`${VER} materials listed (${mats.length})`);
         }
-      } catch (e) {
-        logOnce('refresh-err', 'materials refresh failed; will retry');
-      }
+      } catch (e) { logOnce('refresh-err', 'materials refresh failed; will retry'); }
     };
     refresh();
     addEventListener('lm:scene-ready', () => {
@@ -308,23 +415,35 @@
     const vb = window.viewerBridge;
     const opacity = clamp01(vals.opacity);
 
-    // 複数API名のフォールバック
     const fOpacity = vb.setMaterialOpacity || vb.setOpacityForMaterial || vb.setMatOpacity || vb.setOpacity;
     const fFlags   = vb.setMaterialFlags   || vb.setFlagsForMaterial   || vb.setMatFlags   || vb.setFlags;
     const fChroma  = vb.setChromaKey       || vb.setChromaForMaterial  || vb.setMatChroma  || null;
 
     hardLog(`apply model key=${key} opacity=${opacity} ds=${!!vals.doubleSided} unlit=${!!vals.unlit}`);
 
-    if (typeof fOpacity === 'function') tryCall(fOpacity, key, opacity);
-    else warnLog('no per-material opacity API');
-
-    if (typeof fFlags === 'function') tryCall(fFlags, key, { doubleSided: !!vals.doubleSided, unlit: !!vals.unlit });
-    if (typeof fChroma === 'function') tryCall(fChroma, key, {
+    let used = false;
+    if (typeof fOpacity === 'function') { tryCall(fOpacity, key, opacity); used = true; }
+    if (typeof fFlags === 'function')   { tryCall(fFlags, key, { doubleSided: !!vals.doubleSided, unlit: !!vals.unlit }); used = true; }
+    if (typeof fChroma === 'function')  { tryCall(fChroma, key, {
       enable: !!vals.chromaEnable,
       color: vals.chromaColor || '#000000',
       tolerance: Number(vals.chromaTolerance || 0),
       feather: Number(vals.chromaFeather || 0),
-    });
+    }); used = true; }
+
+    if (!used) {
+      // フォールバック: shim を試す（未インストールならここで試行）
+      ensureViewerShims();
+      if (typeof window.viewerBridge.setMaterialOpacity === 'function') {
+        tryCall(window.viewerBridge.setMaterialOpacity, key, opacity);
+        used = true;
+      }
+      if (typeof window.viewerBridge.setMaterialFlags === 'function') {
+        tryCall(window.viewerBridge.setMaterialFlags, key, { doubleSided: !!vals.doubleSided, unlit: !!vals.unlit });
+        used = true;
+      }
+      if (!used) warnLog('no per-material opacity API (even after shim)');
+    }
   }
 
   async function onSelectChange() {
@@ -348,17 +467,6 @@
     applyToModel(key, vals);
   }
 
-  function onUIChange() {
-    if (!state.selectedKey) { logOnce('no-key', 'UI changed but no material selected'); return; }
-    const vals = {
-      materialKey: state.selectedKey,
-      ...collectFromUI()
-    };
-    applyToModel(state.selectedKey, vals);
-    if (state.ctx && state.ctx.spreadsheetId) saveDebounced(state.ctx, vals);
-    else logOnce('skip-save', 'ctx not ready; skip save');
-  }
-
   function collectFromUI() {
     const ui = state.ui;
     return {
@@ -370,6 +478,17 @@
       chromaTolerance: Number(ui.chromaTolerance?.value ?? 0),
       chromaFeather: Number(ui.chromaFeather?.value ?? 0),
     };
+  }
+
+  function onUIChange() {
+    if (!state.selectedKey) { logOnce('no-key', 'UI changed but no material selected'); return; }
+    const vals = {
+      materialKey: state.selectedKey,
+      ...collectFromUI()
+    };
+    applyToModel(state.selectedKey, vals);
+    if (state.ctx && state.ctx.spreadsheetId) saveDebounced(state.ctx, vals);
+    else logOnce('skip-save', 'ctx not ready; skip save');
   }
 
   // --------- wiring ---------
@@ -387,9 +506,7 @@
     state.wired = true;
     hardLog(`${VER} wireOnce complete`);
   }
-  function maybeWire() {
-    if (state.ui && state.haveList && !state.wired) wireOnce();
-  }
+  function maybeWire() { if (state.ui && state.haveList && !state.wired) wireOnce(); }
 
   // --------- boot ---------
   (async function boot() {
