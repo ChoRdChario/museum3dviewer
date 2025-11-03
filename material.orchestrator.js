@@ -1,40 +1,37 @@
-
-/* LociMyu: material.orchestrator.js (UI-detect fix A3.1)
- * - Robust UI detection with MutationObserver + periodic probe
+/* LociMyu: material.orchestrator.js (UI-detect fix A3.2)
+ * - Relaxed UI detection: "material select present" is sufficient (others optional)
+ * - Scoped DOM search to Material tab/panel to avoid collisions
+ * - Broadened selectors (supports #pm-material / aria-label / name*="material" / id*="material")
  * - Populates material select once scene is ready and UI appears
- * - GLB-only material list (filters out overlay MeshBasicMaterial with empty name)
+ * - GLB-only material list (filters MeshBasicMaterial with empty name)
  * - Selection loads sheet row and applies ONLY TO UI (no save on select)
- * - UI edits apply to scene + debounced save to sheet
+ * - UI edits apply to scene + debounced save to sheet (if optional controls exist)
  */
 
 (function(){
   const TAG = '[mat-orch]';
-  const VERSION = 'A3.1_UI_DETECT_FIX';
+  const VERSION = 'A3.2_UI_SCOPE_RELAX';
 
   // --- safe loggers ---
   const log = (...a)=>console.log(TAG, ...a);
   const warn = (...a)=>console.warn(TAG, ...a);
-  const err = (...a)=>console.error(TAG, ...a);
+  const err =  (...a)=>console.error(TAG, ...a);
 
   log('boot', VERSION);
 
   // --- bridges / globals ---
   const br = window.__LM_VIEWER_BRIDGE__ || window.LM_VIEWER_BRIDGE || window.viewerBridge || null;
-  if (!br) {
-    warn('viewer-bridge not found on window (yet)');
-  }
+  if (!br) warn('viewer-bridge not found on window (yet)');
 
-  // materials sheet bridge (expected global)
   const sheetBridge = window.__LM_MATERIALS_SHEET__ || window.materialsSheetBridge || window.MATERIALS_SHEET_BRIDGE || null;
-  if (!sheetBridge) {
-    warn('materialsSheetBridge not found on window (yet)');
-  }
+  if (!sheetBridge) warn('materialsSheetBridge not found on window (yet)');
 
   // --- state ---
   const state = {
     sceneReady: false,
     scene: null,
     ui: {
+      root: null,
       select: null,
       opacity: null,
       doubleSided: null,
@@ -43,24 +40,101 @@
     currentKey: null,
     suppressUI: false,
     saveTimer: null,
-    materialIndex: [], // {key,label,name,uuid,mesh,type}
+    materialIndex: [], // {key,label,name,uuid,mesh,type,_ref}
   };
 
   // --- helpers ---
   function until(ms){ return new Promise(r=>setTimeout(r,ms)); }
 
+  // Deep query (shadow DOM aware) scoped to a root node
+  function qsAllDeep(root, sel){
+    const out = [];
+    const walk = (node)=>{
+      if (!node) return;
+      try{ node.querySelectorAll(sel).forEach(n=>out.push(n)); }catch{}
+      const kids = node.children || [];
+      for (const k of kids){
+        if (k.shadowRoot) walk(k.shadowRoot);
+        walk(k);
+      }
+    };
+    walk(root);
+    return out;
+  }
+
+  // Try to find a reasonable root for the "Material" tab panel
+  function findMaterialRoot(){
+    // common patterns
+    const candidates = [
+      '[data-tab="material"]',
+      '#panel-material',
+      '[role="tabpanel"][id*="material" i]',
+      '[id*="panel"][id*="material" i]',
+      // fallback to any element that contains our known header label
+      // (cheap check to narrow scope)
+      null,
+    ];
+    for (const sel of candidates){
+      if (!sel) break;
+      const el = document.querySelector(sel);
+      if (el) return el;
+    }
+    // very last resort: whole document
+    return document.body || document.documentElement;
+  }
+
   function findUI(){
-    const select = document.querySelector('#materialSelect, #mat-select, #matKeySelect');
-    const opacity = document.querySelector('#opacityRange, #matOpacity');
-    const doubleSided = document.querySelector('#doubleSided, #matDoubleSided');
-    const unlit = document.querySelector('#unlit, #matUnlit');
-    state.ui = { select, opacity, doubleSided, unlit };
-    const ok = !!(select && opacity && doubleSided && unlit);
-    return ok;
+    const root = findMaterialRoot();
+    state.ui.root = root;
+
+    // Broadened selector set for the select
+    const selectCand = [
+      '#pm-material',
+      '#materialSelect', '#mat-select', '#matKeySelect',
+      'select[aria-label="Select material"]',
+      'select[name="material" i]',
+      'select[id*="material" i]',
+      'select',
+    ];
+
+    const rangeCand = ['#opacityRange', '#matOpacity', 'input[type="range"]'];
+    const dsCand    = ['#doubleSided', '#matDoubleSided', 'input[type="checkbox"][name*="double" i]'];
+    const unCand    = ['#unlit', '#matUnlit', 'input[type="checkbox"][name*="unlit" i]'];
+
+    const pickFirst = (cands)=>{
+      for (const sel of cands){
+        const list = qsAllDeep(root, sel);
+        if (list.length) return list[0];
+      }
+      return null;
+    };
+
+    const select = pickFirst(selectCand);
+    const opacity = pickFirst(rangeCand);
+    const doubleSided = pickFirst(dsCand);
+    const unlit = pickFirst(unCand);
+
+    state.ui.select = select;
+    state.ui.opacity = opacity || null;
+    state.ui.doubleSided = doubleSided || null;
+    state.ui.unlit = unlit || null;
+
+    // Relax: select が存在すれば UI 検出成功とみなす
+    const ok = !!select;
+    if (!ok) return false;
+
+    // 視認性（非表示）も警告として出すだけで失敗にしない
+    try{
+      const vis = !!(select && select.ownerDocument && select.getClientRects().length &&
+                     getComputedStyle(select).display !== 'none' &&
+                     getComputedStyle(select).visibility !== 'hidden');
+      if (!vis) warn('select is present but invisible (tab may be collapsed)');
+    }catch{}
+
+    return true;
   }
 
   function startUIDetector(){
-    // 1) immediate probe + interval (cheap)
     let tries = 0;
     const tick = setInterval(()=>{
       tries++;
@@ -72,12 +146,11 @@
       } else if (tries % 10 === 0) {
         log('UI still not found; keep idle');
       }
-      // give up after 2 minutes (120 * 1s) but keep observer running
+      // Stop after 2 minutes
       if (tries > 120) clearInterval(tick);
     }, 1000);
 
-    // 2) mutation observer as a backstop for SPA mounts
-    const mo = new MutationObserver((_mut)=>{
+    const mo = new MutationObserver(()=>{
       if (findUI()) {
         if (tick) clearInterval(tick);
         mo.disconnect();
@@ -116,14 +189,12 @@
           uuid: uuid || null,
           mesh: obj.name || null,
           type: m.type || null,
-          _ref: m, // for quick lookups
+          _ref: m,
         });
       });
     });
-    // uniq by key
     const seen = new Set();
     const uniq = list.filter(r=>r.key && !seen.has(r.key) && seen.add(r.key));
-    // stable sort
     uniq.sort((a,b)=> (a.label||'').localeCompare(b.label||'') || (a.mesh||'').localeCompare(b.mesh||''));
     return uniq;
   }
@@ -138,7 +209,6 @@
       opt.textContent = r.label || r.key;
       sel.appendChild(opt);
     }
-    // keep previous selection if still present
     if (state.currentKey){
       const found = state.materialIndex.find(r=>r.key===state.currentKey);
       if (found) sel.value = state.currentKey;
@@ -146,7 +216,7 @@
   }
 
   function getMaterialByKey(key){
-    return state.materialIndex.find(r=>r.key === key) || null;
+    return state.materialIndex.find(r=>r.key===key) || null;
   }
 
   // --- sheet sync (read on select; write only on edit) ---
@@ -169,7 +239,6 @@
     if (opacity && typeof values.opacity === 'number') opacity.value = String(values.opacity);
     if (doubleSided && typeof values.doubleSided === 'boolean') doubleSided.checked = values.doubleSided;
     if (unlit && typeof values.unlit === 'boolean') unlit.checked = values.unlit;
-    // microtask to release suppress flag
     Promise.resolve().then(()=>{ state.suppressUI = false; });
   }
 
@@ -187,8 +256,6 @@
       if (m.needsUpdate !== undefined) m.needsUpdate = true;
     }
     if (typeof values.unlit === 'boolean'){
-      // naive toggle: if unlit -> try to set emissive/intensity-ish (depends on material type)
-      // Here we just flag via userData; actual shader swap is out of scope for this patch.
       m.userData = m.userData || {};
       m.userData.__lm_unlit = !!values.unlit;
     }
@@ -214,7 +281,6 @@
     state.currentKey = key || null;
     if (!key) return;
 
-    // 1) load row -> UI だけ反映
     const row = await loadSheetRow(key);
     if (row){
       const vals = {
@@ -226,9 +292,7 @@
                (row.unlit != null ? (String(row.unlit).toLowerCase() === 'true') : undefined),
       };
       uiSet(vals);
-      // シーンは変更しない（ユーザーがUIを操作するまで適用・保存しない）
     } else {
-      // シートに行が無い場合: 現在材質の実値をUIに初期表示（保存はしない）
       const rec = getMaterialByKey(key);
       const m = rec && rec._ref;
       if (m){
@@ -246,14 +310,13 @@
     if (state.suppressUI) return;
     const key = state.currentKey;
     if (!key) return;
-    const o = state.ui.opacity ? Number(state.ui.opacity.value) : undefined;
+    const o  = state.ui.opacity ? Number(state.ui.opacity.value) : undefined;
     const ds = state.ui.doubleSided ? !!state.ui.doubleSided.checked : undefined;
     const un = state.ui.unlit ? !!state.ui.unlit.checked : undefined;
     const vals = {};
     if (Number.isFinite(o)) vals.opacity = Math.min(1, Math.max(0, o));
     if (typeof ds === 'boolean') vals.doubleSided = ds;
     if (typeof un === 'boolean') vals.unlit = un;
-    // scene apply + debounced save
     applyToScene(key, vals);
     debouncedSave(key, vals);
   }
@@ -267,13 +330,10 @@
   }
 
   async function onUIReady(){
-    // we might already have scene ready; if not, wait
     if (!state.sceneReady) {
-      // still bind handlers; population will run when scene gets ready
       bindUIHandlers();
       return;
     }
-    // scene is ready and ui is here -> build index and populate
     state.materialIndex = listGLBMaterials(state.scene);
     populateSelect();
     bindUIHandlers();
@@ -288,7 +348,6 @@
       return;
     }
     log('scene-ready observed');
-    // if UI already exists, finish initialization
     if (state.ui.select) {
       state.materialIndex = listGLBMaterials(state.scene);
       populateSelect();
@@ -299,10 +358,8 @@
 
   // --- bootstrap ---
   (function bootstrap(){
-    // listen for scene-ready (from viewer.bridge.module.js)
     window.addEventListener('lm:scene-ready', onSceneReady, { once:false });
 
-    // If scene is already ready, pick it up
     const maybeScene = getScene();
     if (maybeScene) {
       state.scene = maybeScene;
@@ -310,7 +367,6 @@
       log('scene was already available at boot');
     }
 
-    // start UI detector
     startUIDetector();
   })();
 
