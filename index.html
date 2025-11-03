@@ -6,16 +6,16 @@
   <title>LociMyu – Single-load Minimal Index</title>
 
   <!-- Core boot (unchanged) -->
-  <script src="./boot.esm.cdn.js" defer></script>
+  <script type="module" src="./boot.esm.cdn.js"></script>
 
   <!-- Sheet helpers (single include each) -->
-  <script src="./sheet-rename.module.js" defer></script>
-  <script src="./sheet.ctx.bridge.js" defer></script>
+  <script type="module" src="./sheet-rename.module.js"></script>
+  <script type="module" src="./sheet.ctx.bridge.js"></script>
 
   <!-- Viewer & Materials (single include, correct order) -->
-  <script src="./viewer.bridge.module.js" defer></script>
+  <script type="module" src="./viewer.bridge.module.js"></script>
   <script src="./materials.sheet.bridge.js" defer></script>
-  <script src="./material.orchestrator.hotfix.js" defer></script>
+  <script src="./material.orchestrator.js" defer></script>
 
   <!-- Defensive: prune duplicate scripts with the same src that might have been injected by legacy code -->
   <script>
