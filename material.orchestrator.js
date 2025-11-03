@@ -1,321 +1,317 @@
 
-/**
- * material.orchestrator.js (patched)
- * Safe UI pipeline: selection restores settings (no writes),
- * user edits apply to scene and save (debounced) only when changed.
- *
- * Version: V6_16h_SAFE_UI_PIPELINE.A3.glbOnly+sheetReflect
+/* LociMyu: material.orchestrator.js (UI-detect fix A3.1)
+ * - Robust UI detection with MutationObserver + periodic probe
+ * - Populates material select once scene is ready and UI appears
+ * - GLB-only material list (filters out overlay MeshBasicMaterial with empty name)
+ * - Selection loads sheet row and applies ONLY TO UI (no save on select)
+ * - UI edits apply to scene + debounced save to sheet
  */
-(function () {
+
+(function(){
   const TAG = '[mat-orch]';
-  console.log(TAG, 'A3 boot');
+  const VERSION = 'A3.1_UI_DETECT_FIX';
 
-  // --------- State ---------
-  let ui = null;
-  let sheetCtx = null;
-  let currentKey = null;
-  let suspendUI = false;  // true while we are programmatically updating inputs
-  let dirty = false;
-  let loadToken = 0;      // to defeat out-of-order async
+  // --- safe loggers ---
+  const log = (...a)=>console.log(TAG, ...a);
+  const warn = (...a)=>console.warn(TAG, ...a);
+  const err = (...a)=>console.error(TAG, ...a);
 
-  // Guards
-  const g = {
-    sceneReady: false,
-    uiReady: false,
-  };
+  log('boot', VERSION);
 
-  // --------- Utils ---------
-  const $ = (sel) => document.querySelector(sel);
-  const on = (el, ev, fn) => el && el.addEventListener(ev, fn, { passive: true });
-  const clamp01 = (v) => Math.max(0, Math.min(1, v));
-
-  function debounce(fn, ms) {
-    let t = 0;
-    return (...args) => {
-      clearTimeout(t);
-      t = setTimeout(() => fn(...args), ms);
-    };
+  // --- bridges / globals ---
+  const br = window.__LM_VIEWER_BRIDGE__ || window.LM_VIEWER_BRIDGE || window.viewerBridge || null;
+  if (!br) {
+    warn('viewer-bridge not found on window (yet)');
   }
 
-  // Access to bridges
-  const viewerBridge =
-    window.__LM_VIEWER_BRIDGE__ || window.LM_VIEWER_BRIDGE || window.viewerBridge || null;
-  const matSheet = window.materialsSheetBridge || (window.__LM && window.__LM.materialsSheetBridge) || null;
+  // materials sheet bridge (expected global)
+  const sheetBridge = window.__LM_MATERIALS_SHEET__ || window.materialsSheetBridge || window.MATERIALS_SHEET_BRIDGE || null;
+  if (!sheetBridge) {
+    warn('materialsSheetBridge not found on window (yet)');
+  }
 
-  // --------- UI bootstrap ---------
-  function findUI() {
-    const select = $('#materialSelect,#mat-select,#matKeySelect');
-    const opacity = $('#opacityRange,#matOpacity');
-    const doubleSided = $('#doubleSided,#matDoubleSided');
-    const unlit = $('#unlit,#matUnlit');
-    if (select && opacity && doubleSided && unlit) {
-      return { select, opacity, doubleSided, unlit };
-    }
+  // --- state ---
+  const state = {
+    sceneReady: false,
+    scene: null,
+    ui: {
+      select: null,
+      opacity: null,
+      doubleSided: null,
+      unlit: null,
+    },
+    currentKey: null,
+    suppressUI: false,
+    saveTimer: null,
+    materialIndex: [], // {key,label,name,uuid,mesh,type}
+  };
+
+  // --- helpers ---
+  function until(ms){ return new Promise(r=>setTimeout(r,ms)); }
+
+  function findUI(){
+    const select = document.querySelector('#materialSelect, #mat-select, #matKeySelect');
+    const opacity = document.querySelector('#opacityRange, #matOpacity');
+    const doubleSided = document.querySelector('#doubleSided, #matDoubleSided');
+    const unlit = document.querySelector('#unlit, #matUnlit');
+    state.ui = { select, opacity, doubleSided, unlit };
+    const ok = !!(select && opacity && doubleSided && unlit);
+    return ok;
+  }
+
+  function startUIDetector(){
+    // 1) immediate probe + interval (cheap)
+    let tries = 0;
+    const tick = setInterval(()=>{
+      tries++;
+      if (findUI()) {
+        clearInterval(tick);
+        if (mo) mo.disconnect();
+        log('UI found via interval', state.ui);
+        onUIReady();
+      } else if (tries % 10 === 0) {
+        log('UI still not found; keep idle');
+      }
+      // give up after 2 minutes (120 * 1s) but keep observer running
+      if (tries > 120) clearInterval(tick);
+    }, 1000);
+
+    // 2) mutation observer as a backstop for SPA mounts
+    const mo = new MutationObserver((_mut)=>{
+      if (findUI()) {
+        if (tick) clearInterval(tick);
+        mo.disconnect();
+        log('UI found via MutationObserver', state.ui);
+        onUIReady();
+      }
+    });
+    mo.observe(document.documentElement || document.body, { childList:true, subtree:true });
+  }
+
+  function getScene(){
+    try {
+      const s = (br && typeof br.getScene === 'function') ? br.getScene() : null;
+      if (s && typeof s.traverse === 'function') return s;
+    } catch(e){ /* noop */ }
     return null;
   }
 
-  function disableControls(disabled) {
-    if (!ui) return;
-    ui.select.disabled = !!disabled;
-    ui.opacity.disabled = !!disabled;
-    ui.doubleSided.disabled = !!disabled;
-    ui.unlit.disabled = !!disabled;
-  }
-
-  // --------- Scene helpers ---------
-  function getScene() {
-    if (!viewerBridge || typeof viewerBridge.getScene !== 'function') return null;
-    try { return viewerBridge.getScene(); } catch { return null; }
-  }
-
-  function collectGLBMaterials(scene) {
-    // Build unique list of materials coming from GLB (heuristics):
-    // - Mesh only (skip Sprites/Lines/Points)
-    // - Exclude MeshBasicMaterial with empty name (likely overlay)
-    // - Key is uuid (fallback to name), label is name or mesh+type
+  function listGLBMaterials(scene){
     const list = [];
-    const seen = new Set();
-    scene.traverse((obj) => {
+    scene.traverse(obj => {
       if (!obj || !obj.isMesh) return;
       if (obj.isSprite || obj.isPoints || obj.isLine) return;
-      const arr = Array.isArray(obj.material) ? obj.material : [obj.material];
-      arr.forEach((m, i) => {
+      const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+      mats.forEach((m,i)=>{
         if (!m) return;
         const rawName = (m.name || '').trim();
         const isOverlayBasic = (m.type === 'MeshBasicMaterial' && !rawName);
-        if (isOverlayBasic) return; // exclude generated overlay mats
-        const key = m.uuid || rawName || `${obj.uuid}:${i}`;
-        if (seen.has(key)) return;
-        seen.add(key);
-        const label = rawName || (obj.name ? `${obj.name} (${m.type || 'Material'})` : `${m.type || 'Material'} ${i+1}`);
+        if (isOverlayBasic) return; // overlay-ish generated material; ignore
+        const uuid = m.uuid || m.id || null;
+        const label = rawName || (obj.name ? `${obj.name} (${m.type||'Material'})` : `${m.type||'Material'} ${i+1}`);
         list.push({
-          key,
+          key: uuid || rawName || `${obj.uuid}:${i}`,
           label,
-          uuid: m.uuid || null,
           name: rawName || null,
+          uuid: uuid || null,
           mesh: obj.name || null,
           type: m.type || null,
+          _ref: m, // for quick lookups
         });
       });
     });
-    // Sort for stability
-    list.sort((a,b) => (a.label||'').localeCompare(b.label||'') || (a.mesh||'').localeCompare(b.mesh||''));
-    return list;
+    // uniq by key
+    const seen = new Set();
+    const uniq = list.filter(r=>r.key && !seen.has(r.key) && seen.add(r.key));
+    // stable sort
+    uniq.sort((a,b)=> (a.label||'').localeCompare(b.label||'') || (a.mesh||'').localeCompare(b.mesh||''));
+    return uniq;
   }
 
-  function getMaterialByKey(scene, key) {
-    let found = null;
-    scene.traverse((obj) => {
-      if (found || !obj || !obj.isMesh) return;
-      const arr = Array.isArray(obj.material) ? obj.material : [obj.material];
-      for (const m of arr) {
-        if (!m) continue;
-        const k = m.uuid || m.name || null;
-        if (k && String(k) === String(key)) { found = m; break; }
-      }
-    });
-    return found;
+  function populateSelect(){
+    const sel = state.ui.select;
+    if (!sel) return;
+    sel.innerHTML = '';
+    for (const r of state.materialIndex){
+      const opt = document.createElement('option');
+      opt.value = r.key;
+      opt.textContent = r.label || r.key;
+      sel.appendChild(opt);
+    }
+    // keep previous selection if still present
+    if (state.currentKey){
+      const found = state.materialIndex.find(r=>r.key===state.currentKey);
+      if (found) sel.value = state.currentKey;
+    }
   }
 
-  // --------- Sheet helpers ---------
-  // Each row schema (expected):
-  // { materialKey, opacity, doubleSided, unlit, updatedAt, updatedBy, ... }
-  async function loadRowFor(key) {
-    if (!matSheet || typeof matSheet.loadAll !== 'function') return null;
+  function getMaterialByKey(key){
+    return state.materialIndex.find(r=>r.key === key) || null;
+  }
+
+  // --- sheet sync (read on select; write only on edit) ---
+  async function loadSheetRow(materialKey){
+    if (!sheetBridge || typeof sheetBridge.loadAll !== 'function') return null;
     try {
-      const map = await matSheet.loadAll(); // Map<key, row> or object
-      if (!map) return null;
-      return map.get ? map.get(key) : map[key] || null;
-    } catch (e) {
-      console.warn(TAG, 'loadRowFor error', e);
+      const rows = await sheetBridge.loadAll();
+      if (!Array.isArray(rows)) return null;
+      const row = rows.find(r => String(r.materialKey || r.key || '').trim() === String(materialKey));
+      return row || null;
+    } catch(e){
+      warn('sheet loadAll error', e);
       return null;
     }
   }
 
-  async function saveRow(partial) {
-    if (!matSheet || typeof matSheet.upsertOne !== 'function') return;
-    try {
-      await matSheet.upsertOne(partial);
-    } catch (e) {
-      console.warn(TAG, 'upsertOne error', e);
+  function uiSet(values){
+    const {opacity, doubleSided, unlit} = state.ui;
+    state.suppressUI = true;
+    if (opacity && typeof values.opacity === 'number') opacity.value = String(values.opacity);
+    if (doubleSided && typeof values.doubleSided === 'boolean') doubleSided.checked = values.doubleSided;
+    if (unlit && typeof values.unlit === 'boolean') unlit.checked = values.unlit;
+    // microtask to release suppress flag
+    Promise.resolve().then(()=>{ state.suppressUI = false; });
+  }
+
+  function applyToScene(materialKey, values){
+    const rec = getMaterialByKey(materialKey);
+    if (!rec || !rec._ref) return;
+    const m = rec._ref;
+    if (typeof values.opacity === 'number'){
+      if ('transparent' in m) m.transparent = (values.opacity < 1);
+      if ('opacity' in m) m.opacity = values.opacity;
+      if (m.needsUpdate !== undefined) m.needsUpdate = true;
+    }
+    if (typeof values.doubleSided === 'boolean'){
+      if ('side' in m) m.side = values.doubleSided ? (window.THREE && THREE.DoubleSide || 2) : (window.THREE && THREE.FrontSide || 0);
+      if (m.needsUpdate !== undefined) m.needsUpdate = true;
+    }
+    if (typeof values.unlit === 'boolean'){
+      // naive toggle: if unlit -> try to set emissive/intensity-ish (depends on material type)
+      // Here we just flag via userData; actual shader swap is out of scope for this patch.
+      m.userData = m.userData || {};
+      m.userData.__lm_unlit = !!values.unlit;
     }
   }
 
-  // --------- UI reflect from row (no write) ---------
-  function reflectToUI(row, matObj) {
-    if (!ui) return;
-    suspendUI = true;
-    try {
-      if (row && typeof row.opacity === 'number') {
-        ui.opacity.value = String(clamp01(row.opacity));
-      } else if (matObj && typeof matObj.opacity === 'number') {
-        ui.opacity.value = String(clamp01(matObj.opacity));
+  function debouncedSave(materialKey, values){
+    if (!sheetBridge || typeof sheetBridge.upsertOne !== 'function') return;
+    if (state.saveTimer) clearTimeout(state.saveTimer);
+    state.saveTimer = setTimeout(async ()=>{
+      try {
+        await sheetBridge.upsertOne(Object.assign({ materialKey }, values));
+        log('saved', { materialKey, values });
+      } catch(e){
+        warn('upsertOne failed', e);
       }
-      if (row && typeof row.doubleSided === 'boolean') {
-        ui.doubleSided.checked = !!row.doubleSided;
-      } else if (matObj && typeof matObj.side !== 'undefined') {
-        // THREE: DoubleSide === 2
-        ui.doubleSided.checked = (matObj.side === 2);
+    }, 500);
+  }
+
+  // --- UI wiring ---
+  async function onMaterialChange(){
+    const sel = state.ui.select;
+    const key = sel && sel.value;
+    state.currentKey = key || null;
+    if (!key) return;
+
+    // 1) load row -> UI だけ反映
+    const row = await loadSheetRow(key);
+    if (row){
+      const vals = {
+        opacity: (typeof row.opacity === 'number') ? row.opacity :
+                 (row.opacity != null ? Number(row.opacity) : undefined),
+        doubleSided: (typeof row.doubleSided === 'boolean') ? row.doubleSided :
+                     (row.doubleSided != null ? (String(row.doubleSided).toLowerCase() === 'true') : undefined),
+        unlit: (typeof row.unlit === 'boolean') ? row.unlit :
+               (row.unlit != null ? (String(row.unlit).toLowerCase() === 'true') : undefined),
+      };
+      uiSet(vals);
+      // シーンは変更しない（ユーザーがUIを操作するまで適用・保存しない）
+    } else {
+      // シートに行が無い場合: 現在材質の実値をUIに初期表示（保存はしない）
+      const rec = getMaterialByKey(key);
+      const m = rec && rec._ref;
+      if (m){
+        const vals = {
+          opacity: (typeof m.opacity === 'number') ? m.opacity : 1,
+          doubleSided: (('side' in m) ? (m.side === (window.THREE && THREE.DoubleSide || 2)) : false),
+          unlit: !!(m.userData && m.userData.__lm_unlit),
+        };
+        uiSet(vals);
       }
-      if (row && typeof row.unlit === 'boolean') {
-        ui.unlit.checked = !!row.unlit;
-      } else if (matObj && typeof matObj.isMeshBasicMaterial === 'boolean') {
-        ui.unlit.checked = !!matObj.isMeshBasicMaterial;
-      }
-    } finally {
-      suspendUI = false;
     }
   }
 
-  // --------- Apply to scene (no save) ---------
-  function applyToScene(matObj, values) {
-    if (!matObj || !values) return;
-    if (typeof values.opacity === 'number' && matObj.opacity !== values.opacity) {
-      matObj.opacity = clamp01(values.opacity);
-      matObj.transparent = matObj.opacity < 1 ? true : matObj.transparent;
-      matObj.needsUpdate = true;
-    }
-    if (typeof values.doubleSided === 'boolean') {
-      const DoubleSide = (window.THREE && window.THREE.DoubleSide) || 2;
-      const newSide = values.doubleSided ? DoubleSide : (matObj.side || 0);
-      if (matObj.side !== newSide) {
-        matObj.side = newSide;
-        matObj.needsUpdate = true;
-      }
-    }
-    // Unlit toggle requires material swap in general; here we only reflect checkbox,
-    // actual implementation may be a no-op unless you have a swapper. Keep as-is.
+  function onUIEdited(){
+    if (state.suppressUI) return;
+    const key = state.currentKey;
+    if (!key) return;
+    const o = state.ui.opacity ? Number(state.ui.opacity.value) : undefined;
+    const ds = state.ui.doubleSided ? !!state.ui.doubleSided.checked : undefined;
+    const un = state.ui.unlit ? !!state.ui.unlit.checked : undefined;
+    const vals = {};
+    if (Number.isFinite(o)) vals.opacity = Math.min(1, Math.max(0, o));
+    if (typeof ds === 'boolean') vals.doubleSided = ds;
+    if (typeof un === 'boolean') vals.unlit = un;
+    // scene apply + debounced save
+    applyToScene(key, vals);
+    debouncedSave(key, vals);
   }
 
-  // --------- Select -> UI reflect (no saves) ---------
-  async function onSelectMaterial(key){
-    if(!key){
-      currentKey = null;
+  function bindUIHandlers(){
+    const { select, opacity, doubleSided, unlit } = state.ui;
+    if (select) select.addEventListener('change', onMaterialChange);
+    if (opacity) opacity.addEventListener('input', onUIEdited);
+    if (doubleSided) doubleSided.addEventListener('change', onUIEdited);
+    if (unlit) unlit.addEventListener('change', onUIEdited);
+  }
+
+  async function onUIReady(){
+    // we might already have scene ready; if not, wait
+    if (!state.sceneReady) {
+      // still bind handlers; population will run when scene gets ready
+      bindUIHandlers();
       return;
     }
-    currentKey = key;
-    dirty = false;
-    const token = ++loadToken;
-    suspendUI = true;
-    disableControls(true);
+    // scene is ready and ui is here -> build index and populate
+    state.materialIndex = listGLBMaterials(state.scene);
+    populateSelect();
+    bindUIHandlers();
+    log('UI initialized with materials:', state.materialIndex.length);
+  }
 
-    try {
-      const scene = getScene();
-      const matObj = scene ? getMaterialByKey(scene, key) : null;
-      const row = await loadRowFor(key);
-      if (token !== loadToken) return; // out-of-order protection
-      // Reflect row (or mat defaults) to UI
-      reflectToUI(row, matObj);
-    } finally {
-      suspendUI = false;
-      disableControls(false);
+  async function onSceneReady(){
+    state.scene = getScene();
+    state.sceneReady = !!state.scene;
+    if (!state.sceneReady) {
+      warn('scene-ready observed but getScene() returned null');
+      return;
+    }
+    log('scene-ready observed');
+    // if UI already exists, finish initialization
+    if (state.ui.select) {
+      state.materialIndex = listGLBMaterials(state.scene);
+      populateSelect();
+      bindUIHandlers();
+      log('materials populated on scene-ready:', state.materialIndex.length);
     }
   }
 
-  // --------- Edit handlers (apply + debounce-save) ---------
-  const debouncedSave = debounce(async () => {
-    if (!currentKey || !dirty) return;
-    const scene = getScene();
-    const matObj = scene ? getMaterialByKey(scene, currentKey) : null;
-    if (!matObj) return;
+  // --- bootstrap ---
+  (function bootstrap(){
+    // listen for scene-ready (from viewer.bridge.module.js)
+    window.addEventListener('lm:scene-ready', onSceneReady, { once:false });
 
-    const row = {
-      materialKey: currentKey,
-      opacity: Number(ui.opacity.value),
-      doubleSided: !!ui.doubleSided.checked,
-      unlit: !!ui.unlit.checked,
-      updatedAt: new Date().toISOString(),
-    };
-    await saveRow(row);
-    dirty = false;
-    console.log(TAG, 'saved', row);
-  }, 500);
-
-  function wireInputs(){
-    if (!ui) return;
-    on(ui.select, 'change', (e) => onSelectMaterial(e.target.value));
-
-    const markAndApply = () => {
-      if (suspendUI || !currentKey) return;
-      dirty = true;
-      const scene = getScene();
-      const matObj = scene ? getMaterialByKey(scene, currentKey) : null;
-      if (matObj) {
-        applyToScene(matObj, {
-          opacity: Number(ui.opacity.value),
-          doubleSided: !!ui.doubleSided.checked,
-          unlit: !!ui.unlit.checked,
-        });
-      }
-      debouncedSave();
-    };
-
-    on(ui.opacity, 'input', markAndApply);
-    on(ui.doubleSided, 'change', markAndApply);
-    on(ui.unlit, 'change', markAndApply);
-  }
-
-  // --------- Populate material list ---------
-  function populateSelect(list){
-    if (!ui || !ui.select) return;
-    const sel = ui.select;
-    sel.innerHTML = '';
-    const opt0 = document.createElement('option');
-    opt0.value = '';
-    opt0.textContent = '— Select material —';
-    sel.appendChild(opt0);
-    list.forEach(r => {
-      const opt = document.createElement('option');
-      opt.value = r.uuid || r.key;
-      opt.textContent = r.label || r.name || r.uuid || r.key;
-      sel.appendChild(opt);
-    });
-  }
-
-  async function refreshMaterials(){
-    const scene = getScene();
-    if (!scene || typeof scene.traverse !== 'function') return;
-    const list = collectGLBMaterials(scene);
-    if (!list.length) return;
-    populateSelect(list);
-    console.log(TAG, 'material list (GLB-only)', list.map(x => x.label));
-  }
-
-  // --------- Boot loop ---------
-  function boot(){
-    // 1) wait UI
-    if (!ui) {
-      ui = findUI();
-      if (!ui) {
-        console.log(TAG, 'UI still not found; keep idle');
-        return;
-      }
-      wireInputs();
+    // If scene is already ready, pick it up
+    const maybeScene = getScene();
+    if (maybeScene) {
+      state.scene = maybeScene;
+      state.sceneReady = true;
+      log('scene was already available at boot');
     }
-    // 2) wait scene ready (viewer-bridge will dispatch lm:scene-ready)
-    if (!g.sceneReady) return;
-    // 3) once ready, refresh list once
-    refreshMaterials();
-  }
 
-  // --------- Scene ready hook ---------
-  window.addEventListener('lm:scene-ready', () => {
-    g.sceneReady = true;
-    console.log(TAG, 'scene-ready observed');
-    // run once right after scene
-    setTimeout(boot, 0);
-  }, { once: true });
+    // start UI detector
+    startUIDetector();
+  })();
 
-  // Safety: if scene already ready in bridge (late attach)
-  try {
-    if (viewerBridge && typeof viewerBridge.getScene === 'function') {
-      const sc = viewerBridge.getScene();
-      if (sc) {
-        g.sceneReady = true;
-      }
-    }
-  } catch {}
-
-  // --------- Tick ---------
-  setInterval(boot, 250);
 })();
