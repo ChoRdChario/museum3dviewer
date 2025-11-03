@@ -1,212 +1,228 @@
-/* LociMyu Material UI Silence+Reflect Patch v2.3
- * Goal:
- * - When switching material (select change), DO NOT leak previous material's UI value into the newly selected one.
- * - Immediately reflect the newly selected material's own values into the UI controls (e.g., opacity slider).
- * - During a short guard window, suppress any 'input'/'change' events from UI controls so orchestrators don't persist/apply stale values.
- *
- * How it works:
- * 1) On <select> change => set a global silence lock for ~420ms.
- * 2) During the lock, capture-phase listeners on range/number inputs stop events (unless flagged as __lm_reflect__).
- * 3) We read the selected material's current value from the Three.js scene via viewer bridge and set UI controls directly.
- * 4) No synthetic 'input' events are dispatched (prevents accidental persistence). Numeric display is updated manually.
- */
+
+/* material.ui.silence.patch.js  v2.4
+   Fix: When switching material (A -> B), prevent A's UI state from leaking into B.
+   Strategy:
+     1) On SELECT change (capture), immediately enter a "silence window" that blocks input/change.
+     2) During the window, synchronously set the sliders to B's *stored* value
+        (prefer sheet-bridge cache; fallback to localStorage persisted cache).
+     3) Do NOT fire input/change while reflecting.
+     4) Maintain cache by observing real user input (outside of silence) and persisting per (docId, matKey).
+*/
+
 (function(){
-  const TAG = '[silence-patch v2.3]';
-  const log = (...a)=>console.log(TAG, ...a);
-  const warn = (...a)=>console.warn(TAG, ...a);
+  const TAG = "[silence-patch v2.4]";
+  if (window.__lm_silence_patch && window.__lm_silence_patch.version >= 204) {
+    console.log(TAG, "already installed");
+    return;
+  }
 
-  // Silence window (ms)
   const SILENCE_MS = 420;
-
-  // Global guard timestamp
-  const isLocked = () => {
-    const until = window.__LM_SILENCE_UNTIL__ || 0;
-    return performance.now() < until;
+  const LS_KEY = "__lm_mat_cache_v1"; // localStorage fallback cache
+  const state = {
+    silenced: false,
+    until: 0,
+    version: 204,
+    ctx: {
+      spreadsheetId: null,
+      sheetGid: null,
+    },
   };
-  const lock = (ms=SILENCE_MS) => {
-    const until = performance.now() + ms;
-    window.__LM_SILENCE_UNTIL__ = until;
-    log('silence', ms+'ms (select-change)');
-  };
 
-  // Helpers: element finders
-  const qs = (sel) => document.querySelector(sel);
-  const findSelect = () =>
-    qs('#pm-material') ||
-    qs('select[aria-label="Select material"]') ||
-    qs('#materialSelect') ||
-    qs('#mat-select') ||
-    qs('#matKeySelect') ||
-    qs('select[name*="material"]') ||
-    qs('select[id*="material"]');
+  // Expose for debugging
+  window.__lm_silence_patch = state;
 
-  const findOpacityRange = () =>
-    qs('#pm-opacity') ||
-    qs('#opacityRange') ||
-    qs('input[type="range"][name*="opacity"]') ||
-    qs('input[type="range"][id*="opacity"]');
-
-  const findOpacityNumber = () =>
-    qs('#pm-opacity-num') ||
-    qs('input[type="number"][name*="opacity"]') ||
-    qs('input[type="number"][id*="opacity"]');
-
-  const clamp01 = (v)=> Math.max(0, Math.min(1, v));
-
-  // Read scene & sample opacity by material name
-  const sampleOpacityFromScene = (matName) => {
+  // ---- Cache helpers -------------------------------------------------------
+  function readLS() {
+    try { return JSON.parse(localStorage.getItem(LS_KEY) || "{}"); } catch(e){ return {}; }
+  }
+  function writeLS(obj) {
+    try { localStorage.setItem(LS_KEY, JSON.stringify(obj)); } catch(e){}
+  }
+  function cacheKey(spreadsheetId, matKey) {
+    return (spreadsheetId||"__no_spreadsheet__") + "::" + (matKey||"");
+  }
+  function getCachedOpacity(spreadsheetId, matKey) {
+    // 1) sheet-bridge live cache (if available)
     try {
-      const br = window.__LM_VIEWER_BRIDGE__ || window.LM_VIEWER_BRIDGE || window.viewerBridge;
-      const scene = br?.getScene?.();
-      if (!scene?.traverse) return null;
-      let found = null;
-      scene.traverse(o=>{
-        if (!o?.isMesh) return;
-        const mats = Array.isArray(o.material) ? o.material : [o.material];
-        for (const m of mats) {
-          if (!m || !m.name) continue;
-          if (m.name === matName) {
-            if (typeof m.opacity === 'number') {
-              found = m.opacity;
-              return;
-            }
-          }
+      const br = window.lmMaterialsSheetBridge || window.__lm_mat_sheet_bridge || null;
+      if (br && typeof br.getCachedOpacity === "function") {
+        const v = br.getCachedOpacity(matKey);
+        if (typeof v === "number") return v;
+      }
+    } catch(e){}
+
+    // 2) localStorage fallback
+    const obj = readLS();
+    const key = cacheKey(spreadsheetId, matKey);
+    if (Object.prototype.hasOwnProperty.call(obj, key)) return obj[key];
+    return null;
+  }
+  function setCachedOpacity(spreadsheetId, matKey, value) {
+    // write to LS
+    const obj = readLS();
+    obj[cacheKey(spreadsheetId, matKey)] = value;
+    writeLS(obj);
+    // optional: notify sheet-bridge if helper exists
+    try {
+      const br = window.lmMaterialsSheetBridge || window.__lm_mat_sheet_bridge || null;
+      if (br && typeof br.setCachedOpacity === "function") {
+        br.setCachedOpacity(matKey, value);
+      }
+    } catch(e){}
+  }
+
+  // Try to hook sheet-context events to learn spreadsheetId
+  window.addEventListener("lm:sheet-context", (ev)=>{
+    try {
+      const d = ev.detail || {};
+      state.ctx.spreadsheetId = d.spreadsheetId || state.ctx.spreadsheetId;
+      state.ctx.sheetGid = d.sheetGid || state.ctx.sheetGid;
+      console.log(TAG, "sheet-context", state.ctx);
+    } catch(e){}
+  }, {passive:true});
+
+  // ---- Find UI elements defensively ---------------------------------------
+  function qs(sel){ return document.querySelector(sel); }
+  function qsa(sel){ return Array.from(document.querySelectorAll(sel)); }
+
+  // Heuristics for material select & sliders
+  function findMaterialSelect() {
+    // common ids/classes used in this project
+    return qs("#materialSelect") || qs('select[name="material"]') || qs('.lm-material-select') || qs('select[data-lm="material"]');
+  }
+  function findOpacityInputs() {
+    // Return likely sliders/number inputs that control opacity
+    const sliders = qsa('input[type="range"]#opacityRange, input[type="range"][name="opacity"], input[type="range"].lm-opacity, input[type="range"][data-lm="opacity"]');
+    const numbers = qsa('input[type="number"]#opacityNumber, input[type="number"][name="opacity"], input[type="number"].lm-opacity, input[type="number"][data-lm="opacity"]');
+    return { sliders, numbers };
+  }
+
+  // ---- Silence gate (capture) ---------------------------------------------
+  function now(){ return performance.now(); }
+  function enterSilence(ms = SILENCE_MS) {
+    state.silenced = true;
+    state.until = now() + ms;
+    // Ensure exit in any case
+    setTimeout(exitSilence, ms + 40);
+  }
+  function exitSilence() {
+    if (now() >= state.until) {
+      state.silenced = false;
+    } else {
+      // keep a tiny buffer
+      setTimeout(exitSilence, Math.max(10, state.until - now()));
+    }
+  }
+
+  // Globally suppress input/change during silence (capture)
+  function globalBlocker(ev){
+    if (!state.silenced) return;
+    // Always block user-generated input/change during silence
+    // (Reflection never dispatches real events)
+    ev.stopImmediatePropagation();
+    ev.preventDefault();
+  }
+  window.addEventListener("input", globalBlocker, true);
+  window.addEventListener("change", globalBlocker, true);
+
+  // ---- Reflection without events ------------------------------------------
+  function reflectOpacityToUI(value01){
+    const { sliders, numbers } = findOpacityInputs();
+    const clamp = (v)=> Math.max(0, Math.min(1, v));
+    const v01 = clamp(value01);
+    // set slider(s)
+    sliders.forEach(el=>{
+      try {
+        // avoid triggering any listeners by not dispatching events
+        el.value = (el.max && Number(el.max) > 1) ? String(Math.round(v01 * Number(el.max))) : String(v01);
+        // also update any textual label if directly bound (optional)
+        if (el.hasAttribute("data-bind-target")) {
+          const t = qs(el.getAttribute("data-bind-target"));
+          if (t) t.textContent = el.value;
         }
-      });
-      return (typeof found === 'number') ? clamp01(found) : null;
-    } catch(e){
-      warn('sampleOpacityFromScene failed:', e);
-      return null;
+      } catch(e){}
+    });
+    // set number(s)
+    numbers.forEach(el=>{
+      try {
+        const step = Number(el.step || "0.01");
+        const rounded = Math.round(v01 / step) * step;
+        el.value = String(clamp(rounded));
+      } catch(e){}
+    });
+  }
+
+  // ---- Observe real user input to maintain cache --------------------------
+  function installUserInputObserver(){
+    const { sliders, numbers } = findOpacityInputs();
+    const record = (ev)=>{
+      if (state.silenced) return; // ignore during silence/reflection
+      const select = findMaterialSelect();
+      const matKey = select ? select.value : null;
+      if (!matKey) return;
+      // compute value in 0..1 from the event target
+      let v01 = null;
+      try {
+        const el = ev.target;
+        if (el && el.type === "range") {
+          const max = Number(el.max || "1");
+          const val = Number(el.value || "0");
+          v01 = max > 1 ? (val / max) : val;
+        } else if (el && el.type === "number") {
+          v01 = Number(el.value || "0");
+        }
+        if (typeof v01 === "number" && !Number.isNaN(v01)) {
+          setCachedOpacity(state.ctx.spreadsheetId, matKey, Math.max(0, Math.min(1, v01)));
+        }
+      } catch(e){}
+    };
+    [...sliders, ...numbers].forEach(el=>{
+      el.removeEventListener("input", record);
+      el.addEventListener("input", record);
+      el.removeEventListener("change", record);
+      el.addEventListener("change", record);
+    });
+  }
+
+  // ---- SELECT change handler (capture) ------------------------------------
+  function onSelectChangeCapture(ev){
+    // Enter silence immediately
+    enterSilence(SILENCE_MS);
+    const select = ev.currentTarget;
+    const matKey = select && select.value;
+    // Synchronously lookup stored value
+    let v01 = getCachedOpacity(state.ctx.spreadsheetId, matKey);
+    if (typeof v01 !== "number") {
+      // default if unknown
+      v01 = 1.0;
     }
-  };
+    // Reflect without emitting events
+    reflectOpacityToUI(v01);
+    // keep inputs wired for cache
+    setTimeout(installUserInputObserver, 0);
+    console.log(TAG, "switch ->", matKey, "reflect", v01);
+  }
 
-  // UI setters without firing events
-  const reflectOpacityToUI = (opacity01) => {
-    const rng = findOpacityRange();
-    const num = findOpacityNumber();
-
-    if (!rng && !num) return false;
-
-    // Decide scale: 0..1 or 0..100
-    let vRange = opacity01;
-    if (rng) {
-      const max = Number(rng.max || '1');
-      const step = Number(rng.step || '0.01');
-      // If it looks like percentage slider, convert
-      if (max > 1.01 || step >= 1) {
-        vRange = Math.round(opacity01 * 100);
-      }
-      rng.value = String(vRange);
-    }
-    if (num) {
-      // Try to mirror scale of number field as well
-      const maxN = Number(num.max || '1');
-      const stepN = Number(num.step || '0.01');
-      let vNum = opacity01;
-      if (maxN > 1.01 || stepN >= 1) {
-        vNum = Math.round(opacity01 * 100);
-      }
-      num.value = String(vNum);
-    }
-    return true;
-  };
-
-  // Capture-phase event suppressor for range/number during lock
-  const suppressor = (ev) => {
-    if (!isLocked()) return;
-    const detail = ev?.detail || {};
-    if (detail && detail.__lm_reflect__ === true) {
-      // allow programmatic reflect if ever used
-      return;
-    }
-    // Block everything else
-    ev.stopImmediatePropagation?.();
-    ev.stopPropagation?.();
-    // preventDefault for safety on changes
-    ev.preventDefault?.();
-    const t = ev.target && (ev.target.id || ev.target.name || ev.target.tagName);
-    log('blocked', ev.type, t);
-  };
-
-  const installSuppressors = () => {
-    const opts = {capture: true, passive: false};
-    // Delegate on document to also catch late-bound inputs
-    document.addEventListener('input', suppressor, opts);
-    document.addEventListener('change', suppressor, opts);
-  };
-
-  // Main: hook select change
-  const install = () => {
-    const sel = findSelect();
+  function install(){
+    const sel = findMaterialSelect();
     if (!sel) {
-      // Retry a few times because UI may come late
-      let tries = 0;
-      const timer = setInterval(()=>{
-        tries++;
-        const s = findSelect();
-        if (s) {
-          clearInterval(timer);
-          bindSelect(s);
-        } else if (tries > 40) { // ~12s
-          clearInterval(timer);
-          warn('select not found');
-        }
-      }, 300);
+      console.log(TAG, "material SELECT not found; retrying...");
+      setTimeout(install, 300);
       return;
     }
-    bindSelect(sel);
-  };
+    // Ensure capture-phase listener (runs before bubbling handlers)
+    sel.removeEventListener("change", onSelectChangeCapture, true);
+    sel.addEventListener("change", onSelectChangeCapture, true);
 
-  const bindSelect = (sel) => {
-    // Avoid multiple bindings
-    if (sel.__lm_silence_bound__) return;
-    sel.__lm_silence_bound__ = true;
+    installUserInputObserver();
 
-    sel.addEventListener('change', (ev) => {
-      // Start silence window immediately
-      lock();
+    console.log(TAG, "installed");
+  }
 
-      // Get selected material key (prefer text; fallback to value)
-      const opt = sel.options[sel.selectedIndex];
-      const matName = (opt?.text || opt?.value || '').trim();
-
-      // Sample from scene
-      let op = null;
-      if (matName) op = sampleOpacityFromScene(matName);
-      if (typeof op !== 'number') {
-        // Fallback: keep current slider (but do NOT dispatch events)
-        const rng = findOpacityRange();
-        if (rng) {
-          if (Number(rng.max || '1') > 1.01) {
-            op = clamp01((Number(rng.value || '100')/100) || 0);
-          } else {
-            op = clamp01(Number(rng.value || '1') || 0);
-          }
-        } else {
-          op = 1;
-        }
-      }
-
-      // Reflect immediately to UI without emitting 'input'/'change'
-      reflectOpacityToUI(op);
-
-      // Release the silence slightly later, giving orchestrators time to swap current material safely
-      setTimeout(()=>{
-        // Keep a tiny buffer to ensure any late listeners have finished
-        window.__LM_SILENCE_UNTIL__ = performance.now() + 30;
-      }, SILENCE_MS - 60);
-    }, {capture: true}); // capture ensures we run before bubble-phase orchestrators
-
-    installSuppressors();
-    log('hooked select for silence+reflect');
-  };
-
-  // Kick
-  if (!window.__LM_SILENCE_PATCH_INSTALLED__) {
-    window.__LM_SILENCE_PATCH_INSTALLED__ = true;
-    install();
-    log('installed');
+  // Try install now and after DOM loaded
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", install, {once:true});
   } else {
-    log('already installed (skipped)');
+    install();
   }
 })();
