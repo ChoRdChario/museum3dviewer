@@ -1,10 +1,10 @@
 
 /**
- * material.orchestrator.js
+ * material.orchestrator.js (patched)
  * Safe UI pipeline: selection restores settings (no writes),
  * user edits apply to scene and save (debounced) only when changed.
  *
- * Version: V6_16h_SAFE_UI_PIPELINE.A3
+ * Version: V6_16h_SAFE_UI_PIPELINE.A3.glbOnly+sheetReflect
  */
 (function () {
   const TAG = '[mat-orch]';
@@ -14,106 +14,177 @@
   let ui = null;
   let sheetCtx = null;
   let currentKey = null;
-  let snapshot = null;
+  let suspendUI = false;  // true while we are programmatically updating inputs
   let dirty = false;
-  let suspendUI = false;
-  let loadToken = 0;
-  const cache = new Map();
+  let loadToken = 0;      // to defeat out-of-order async
 
-  // External bridges (soft dependencies)
-  const getSheetBridge = () => (window.__LM_MAT_SHEET__ || window.__LM_MATERIALS_SHEET_BRIDGE__ || null);
-  const getViewerBridge = () => (window.__LM_VIEWER_BRIDGE__ || null);
+  // Guards
+  const g = {
+    sceneReady: false,
+    uiReady: false,
+  };
 
-  // --------- Defaults & helpers ---------
-  const defaults = Object.freeze({
-    opacity: 1.0,
-    doubleSided: false,
-    unlit: false,
-    chromaEnable: false,
-    chromaTolerance: 0,
-    chromaFeather: 0
-  });
+  // --------- Utils ---------
+  const $ = (sel) => document.querySelector(sel);
+  const on = (el, ev, fn) => el && el.addEventListener(ev, fn, { passive: true });
+  const clamp01 = (v) => Math.max(0, Math.min(1, v));
 
-  function normalize(s) {
-    const n = s || {};
-    return {
-      opacity: clamp(num(n.opacity, 1.0), 0, 1),
-      doubleSided: !!n.doubleSided,
-      unlit: !!n.unlit,
-      chromaEnable: !!n.chromaEnable,
-      chromaTolerance: clamp(num(n.chromaTolerance, 0), 0, 1),
-      chromaFeather: clamp(num(n.chromaFeather, 0), 0, 1),
-    };
-  }
-  function num(v, d){ v = Number(v); return Number.isFinite(v) ? v : d; }
-  function clamp(x, lo, hi){ return Math.min(hi, Math.max(lo, x)); }
-  function shallowEqual(a,b){
-    if(!a||!b) return false;
-    for(const k of Object.keys(defaults)){
-      if(a[k] !== b[k]) return false;
-    }
-    return true;
-  }
-
-  function debounce(fn, ms){
-    let t=null;
-    return function(...args){
+  function debounce(fn, ms) {
+    let t = 0;
+    return (...args) => {
       clearTimeout(t);
-      t = setTimeout(()=>fn.apply(this,args), ms);
+      t = setTimeout(() => fn(...args), ms);
     };
   }
 
-  // --------- UI discovery ---------
-  function discoverUI(){
-    const $ = (id)=> document.getElementById(id);
-    const materialSelect = $('materialSelect') || $('matSelect') || $('material-select');
-    const opacityRange   = $('opacityRange')   || $('matOpacity');
-    const chkDouble      = $('doubleSided')    || $('matDoubleSided');
-    const chkUnlit       = $('unlit')          || $('matUnlit');
-    const chromaEnable   = $('chromaEnable')   || $('matChromaEnable');
-    const chromaTol      = $('chromaTolerance')|| $('matChromaTolerance');
-    const chromaFeather  = $('chromaFeather')  || $('matChromaFeather');
+  // Access to bridges
+  const viewerBridge =
+    window.__LM_VIEWER_BRIDGE__ || window.LM_VIEWER_BRIDGE || window.viewerBridge || null;
+  const matSheet = window.materialsSheetBridge || (window.__LM && window.__LM.materialsSheetBridge) || null;
 
-    if(!materialSelect || !opacityRange || !chkDouble || !chkUnlit || !chromaEnable || !chromaTol || !chromaFeather){
+  // --------- UI bootstrap ---------
+  function findUI() {
+    const select = $('#materialSelect,#mat-select,#matKeySelect');
+    const opacity = $('#opacityRange,#matOpacity');
+    const doubleSided = $('#doubleSided,#matDoubleSided');
+    const unlit = $('#unlit,#matUnlit');
+    if (select && opacity && doubleSided && unlit) {
+      return { select, opacity, doubleSided, unlit };
+    }
+    return null;
+  }
+
+  function disableControls(disabled) {
+    if (!ui) return;
+    ui.select.disabled = !!disabled;
+    ui.opacity.disabled = !!disabled;
+    ui.doubleSided.disabled = !!disabled;
+    ui.unlit.disabled = !!disabled;
+  }
+
+  // --------- Scene helpers ---------
+  function getScene() {
+    if (!viewerBridge || typeof viewerBridge.getScene !== 'function') return null;
+    try { return viewerBridge.getScene(); } catch { return null; }
+  }
+
+  function collectGLBMaterials(scene) {
+    // Build unique list of materials coming from GLB (heuristics):
+    // - Mesh only (skip Sprites/Lines/Points)
+    // - Exclude MeshBasicMaterial with empty name (likely overlay)
+    // - Key is uuid (fallback to name), label is name or mesh+type
+    const list = [];
+    const seen = new Set();
+    scene.traverse((obj) => {
+      if (!obj || !obj.isMesh) return;
+      if (obj.isSprite || obj.isPoints || obj.isLine) return;
+      const arr = Array.isArray(obj.material) ? obj.material : [obj.material];
+      arr.forEach((m, i) => {
+        if (!m) return;
+        const rawName = (m.name || '').trim();
+        const isOverlayBasic = (m.type === 'MeshBasicMaterial' && !rawName);
+        if (isOverlayBasic) return; // exclude generated overlay mats
+        const key = m.uuid || rawName || `${obj.uuid}:${i}`;
+        if (seen.has(key)) return;
+        seen.add(key);
+        const label = rawName || (obj.name ? `${obj.name} (${m.type || 'Material'})` : `${m.type || 'Material'} ${i+1}`);
+        list.push({
+          key,
+          label,
+          uuid: m.uuid || null,
+          name: rawName || null,
+          mesh: obj.name || null,
+          type: m.type || null,
+        });
+      });
+    });
+    // Sort for stability
+    list.sort((a,b) => (a.label||'').localeCompare(b.label||'') || (a.mesh||'').localeCompare(b.mesh||''));
+    return list;
+  }
+
+  function getMaterialByKey(scene, key) {
+    let found = null;
+    scene.traverse((obj) => {
+      if (found || !obj || !obj.isMesh) return;
+      const arr = Array.isArray(obj.material) ? obj.material : [obj.material];
+      for (const m of arr) {
+        if (!m) continue;
+        const k = m.uuid || m.name || null;
+        if (k && String(k) === String(key)) { found = m; break; }
+      }
+    });
+    return found;
+  }
+
+  // --------- Sheet helpers ---------
+  // Each row schema (expected):
+  // { materialKey, opacity, doubleSided, unlit, updatedAt, updatedBy, ... }
+  async function loadRowFor(key) {
+    if (!matSheet || typeof matSheet.loadAll !== 'function') return null;
+    try {
+      const map = await matSheet.loadAll(); // Map<key, row> or object
+      if (!map) return null;
+      return map.get ? map.get(key) : map[key] || null;
+    } catch (e) {
+      console.warn(TAG, 'loadRowFor error', e);
       return null;
     }
-    return {
-      materialSelect, opacityRange, chkDouble, chkUnlit, chromaEnable, chromaTol, chromaFeather,
-      all: [opacityRange, chkDouble, chkUnlit, chromaEnable, chromaTol, chromaFeather]
-    };
   }
 
-  function disableControls(disabled){
-    if(!ui) return;
-    for(const el of ui.all){
-      if(el) el.disabled = disabled;
+  async function saveRow(partial) {
+    if (!matSheet || typeof matSheet.upsertOne !== 'function') return;
+    try {
+      await matSheet.upsertOne(partial);
+    } catch (e) {
+      console.warn(TAG, 'upsertOne error', e);
     }
   }
 
-  // --------- UI <-> Settings mapping ---------
-  function applySettingsToControls(s){
-    if(!ui) return;
+  // --------- UI reflect from row (no write) ---------
+  function reflectToUI(row, matObj) {
+    if (!ui) return;
     suspendUI = true;
-    const v = normalize(s);
-    ui.opacityRange.value = String(v.opacity);
-    ui.chkDouble.checked  = !!v.doubleSided;
-    ui.chkUnlit.checked   = !!v.unlit;
-    ui.chromaEnable.checked = !!v.chromaEnable;
-    ui.chromaTol.value    = String(v.chromaTolerance);
-    ui.chromaFeather.value= String(v.chromaFeather);
-    suspendUI = false;
+    try {
+      if (row && typeof row.opacity === 'number') {
+        ui.opacity.value = String(clamp01(row.opacity));
+      } else if (matObj && typeof matObj.opacity === 'number') {
+        ui.opacity.value = String(clamp01(matObj.opacity));
+      }
+      if (row && typeof row.doubleSided === 'boolean') {
+        ui.doubleSided.checked = !!row.doubleSided;
+      } else if (matObj && typeof matObj.side !== 'undefined') {
+        // THREE: DoubleSide === 2
+        ui.doubleSided.checked = (matObj.side === 2);
+      }
+      if (row && typeof row.unlit === 'boolean') {
+        ui.unlit.checked = !!row.unlit;
+      } else if (matObj && typeof matObj.isMeshBasicMaterial === 'boolean') {
+        ui.unlit.checked = !!matObj.isMeshBasicMaterial;
+      }
+    } finally {
+      suspendUI = false;
+    }
   }
 
-  function gatherControls(){
-    if(!ui) return normalize(defaults);
-    return normalize({
-      opacity: Number(ui.opacityRange.value),
-      doubleSided: !!ui.chkDouble.checked,
-      unlit: !!ui.chkUnlit.checked,
-      chromaEnable: !!ui.chromaEnable.checked,
-      chromaTolerance: Number(ui.chromaTol.value),
-      chromaFeather: Number(ui.chromaFeather.value),
-    });
+  // --------- Apply to scene (no save) ---------
+  function applyToScene(matObj, values) {
+    if (!matObj || !values) return;
+    if (typeof values.opacity === 'number' && matObj.opacity !== values.opacity) {
+      matObj.opacity = clamp01(values.opacity);
+      matObj.transparent = matObj.opacity < 1 ? true : matObj.transparent;
+      matObj.needsUpdate = true;
+    }
+    if (typeof values.doubleSided === 'boolean') {
+      const DoubleSide = (window.THREE && window.THREE.DoubleSide) || 2;
+      const newSide = values.doubleSided ? DoubleSide : (matObj.side || 0);
+      if (matObj.side !== newSide) {
+        matObj.side = newSide;
+        matObj.needsUpdate = true;
+      }
+    }
+    // Unlit toggle requires material swap in general; here we only reflect checkbox,
+    // actual implementation may be a no-op unless you have a swapper. Keep as-is.
   }
 
   // --------- Select -> UI reflect (no saves) ---------
@@ -128,138 +199,123 @@
     suspendUI = true;
     disableControls(true);
 
-    // prefer cache, else fetch
-    let settings = cache.get(key);
-    const sheet = getSheetBridge();
-    if(!settings && sheet && sheet.getLatestSettings){
-      try{
-        settings = await sheet.getLatestSettings({ key, ctx: sheetCtx });
-      }catch(err){
-        console.warn(TAG, 'getLatestSettings failed', err);
-      }
-    }
-
-    if(token !== loadToken){
-      // selection changed while awaiting -> abandon
-      return;
-    }
-
-    applySettingsToControls(settings || defaults);
-    snapshot = normalize(settings || defaults);
-    cache.set(key, snapshot);
-    suspendUI = false;
-    disableControls(false);
-
-    // Apply to scene for immediate visual coherence (no saving)
-    const viewer = getViewerBridge();
-    if(viewer && viewer.applyMaterialSettings){
-      try{
-        viewer.applyMaterialSettings(currentKey, snapshot);
-      }catch(err){
-        console.warn(TAG, 'applyMaterialSettings (onSelect) failed', err);
-      }
+    try {
+      const scene = getScene();
+      const matObj = scene ? getMaterialByKey(scene, key) : null;
+      const row = await loadRowFor(key);
+      if (token !== loadToken) return; // out-of-order protection
+      // Reflect row (or mat defaults) to UI
+      reflectToUI(row, matObj);
+    } finally {
+      suspendUI = false;
+      disableControls(false);
     }
   }
 
-  // --------- UI -> apply & save (debounced) ---------
-  function onAnyControlChanged(){
-    if(suspendUI || !currentKey) return;
-    const next = gatherControls();
-    if(shallowEqual(next, snapshot)){
-      dirty = false;
-      return;
-    }
-    dirty = true;
-    cache.set(currentKey, next);
+  // --------- Edit handlers (apply + debounce-save) ---------
+  const debouncedSave = debounce(async () => {
+    if (!currentKey || !dirty) return;
+    const scene = getScene();
+    const matObj = scene ? getMaterialByKey(scene, currentKey) : null;
+    if (!matObj) return;
 
-    // Apply to scene immediately
-    const viewer = getViewerBridge();
-    if(viewer && viewer.applyMaterialSettings){
-      try{
-        viewer.applyMaterialSettings(currentKey, next);
-      }catch(err){
-        console.warn(TAG, 'applyMaterialSettings failed', err);
+    const row = {
+      materialKey: currentKey,
+      opacity: Number(ui.opacity.value),
+      doubleSided: !!ui.doubleSided.checked,
+      unlit: !!ui.unlit.checked,
+      updatedAt: new Date().toISOString(),
+    };
+    await saveRow(row);
+    dirty = false;
+    console.log(TAG, 'saved', row);
+  }, 500);
+
+  function wireInputs(){
+    if (!ui) return;
+    on(ui.select, 'change', (e) => onSelectMaterial(e.target.value));
+
+    const markAndApply = () => {
+      if (suspendUI || !currentKey) return;
+      dirty = true;
+      const scene = getScene();
+      const matObj = scene ? getMaterialByKey(scene, currentKey) : null;
+      if (matObj) {
+        applyToScene(matObj, {
+          opacity: Number(ui.opacity.value),
+          doubleSided: !!ui.doubleSided.checked,
+          unlit: !!ui.unlit.checked,
+        });
       }
-    }
+      debouncedSave();
+    };
 
-    scheduleSave();
+    on(ui.opacity, 'input', markAndApply);
+    on(ui.doubleSided, 'change', markAndApply);
+    on(ui.unlit, 'change', markAndApply);
   }
 
-  const scheduleSave = debounce(async function(){
-    if(!dirty || !currentKey) return;
-    const sheet = getSheetBridge();
-    if(!(sheet && sheet.saveSettings)){
-      console.warn(TAG, 'sheet bridge not ready; skip save');
-      return;
-    }
-    const data = cache.get(currentKey);
-    try{
-      await sheet.saveSettings({ key: currentKey, data, ctx: sheetCtx });
-      snapshot = normalize(data);
-      dirty = false;
-    }catch(err){
-      console.warn(TAG, 'saveSettings failed', err);
-    }
-  }, 450);
-
-  // --------- Wiring ---------
-  function bindUI(){
-    if(!ui) return;
-    ui.materialSelect.addEventListener('change', (e)=> onSelectMaterial(e.target.value));
-    // Use `input` for immediate responsiveness
-    for(const el of ui.all){
-      const evt = (el.tagName === 'INPUT' && (el.type === 'range' || el.type === 'checkbox')) ? 'input' : 'change';
-      el.addEventListener(evt, onAnyControlChanged);
-    }
+  // --------- Populate material list ---------
+  function populateSelect(list){
+    if (!ui || !ui.select) return;
+    const sel = ui.select;
+    sel.innerHTML = '';
+    const opt0 = document.createElement('option');
+    opt0.value = '';
+    opt0.textContent = '— Select material —';
+    sel.appendChild(opt0);
+    list.forEach(r => {
+      const opt = document.createElement('option');
+      opt.value = r.uuid || r.key;
+      opt.textContent = r.label || r.name || r.uuid || r.key;
+      sel.appendChild(opt);
+    });
   }
 
-  // Listen sheet context
-  window.addEventListener('lm:sheet-context', (e)=>{
-    sheetCtx = e && e.detail;
-    console.log(TAG, 'ctx-bridge|lm:sheet-context', sheetCtx);
-  });
+  async function refreshMaterials(){
+    const scene = getScene();
+    if (!scene || typeof scene.traverse !== 'function') return;
+    const list = collectGLBMaterials(scene);
+    if (!list.length) return;
+    populateSelect(list);
+    console.log(TAG, 'material list (GLB-only)', list.map(x => x.label));
+  }
 
-  // If viewer bridge publishes material keys via a custom event, reflect selection
-  window.addEventListener('lm:viewer:materials', (e)=>{
-    const keys = (e && e.detail && e.detail.keys) || [];
-    // If a currentKey exists in list, refresh UI from cache/sheet
-    if(keys && keys.length){
-      if(!currentKey || !keys.includes(currentKey)){
-        // pick first as default but do not auto-save
-        onSelectMaterial(keys[0]);
-      }else{
-        onSelectMaterial(currentKey);
+  // --------- Boot loop ---------
+  function boot(){
+    // 1) wait UI
+    if (!ui) {
+      ui = findUI();
+      if (!ui) {
+        console.log(TAG, 'UI still not found; keep idle');
+        return;
+      }
+      wireInputs();
+    }
+    // 2) wait scene ready (viewer-bridge will dispatch lm:scene-ready)
+    if (!g.sceneReady) return;
+    // 3) once ready, refresh list once
+    refreshMaterials();
+  }
+
+  // --------- Scene ready hook ---------
+  window.addEventListener('lm:scene-ready', () => {
+    g.sceneReady = true;
+    console.log(TAG, 'scene-ready observed');
+    // run once right after scene
+    setTimeout(boot, 0);
+  }, { once: true });
+
+  // Safety: if scene already ready in bridge (late attach)
+  try {
+    if (viewerBridge && typeof viewerBridge.getScene === 'function') {
+      const sc = viewerBridge.getScene();
+      if (sc) {
+        g.sceneReady = true;
       }
     }
-  });
+  } catch {}
 
-  // --------- Boot: poll for readiness ---------
-  (function boot(){
-    const startedAt = Date.now();
-    let tries = 0;
-    const t = setInterval(()=>{
-      tries++;
-      if(!ui){
-        ui = discoverUI();
-        if(!ui){
-          if(tries%20===0) console.warn(TAG, 'UI still not found; keep idle');
-          return;
-        }
-        console.log(TAG, 'UI discovered');
-        bindUI();
-      }
-      // Optionally detect viewer bridge keys
-      const viewer = getViewerBridge();
-      if(viewer && typeof viewer.getMaterialKeys === 'function'){
-        const keys = viewer.getMaterialKeys();
-        if(keys && keys.length && !currentKey){
-          onSelectMaterial(keys[0]);
-        }
-      }
-      // If both UI exists and we have at least attempted selection once, we can stop polling
-      if(ui){
-        clearInterval(t);
-      }
-    }, 200);
-  })();
+  // --------- Tick ---------
+  setInterval(boot, 250);
 })();
