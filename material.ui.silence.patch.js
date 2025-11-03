@@ -1,228 +1,176 @@
-
-/* material.ui.silence.patch.js  v2.4
-   Fix: When switching material (A -> B), prevent A's UI state from leaking into B.
-   Strategy:
-     1) On SELECT change (capture), immediately enter a "silence window" that blocks input/change.
-     2) During the window, synchronously set the sliders to B's *stored* value
-        (prefer sheet-bridge cache; fallback to localStorage persisted cache).
-     3) Do NOT fire input/change while reflecting.
-     4) Maintain cache by observing real user input (outside of silence) and persisting per (docId, matKey).
+/* material.ui.silence.patch.js v2.5
+   Goal:
+   - When switching material, immediately reflect the saved value (from sheet cache or localStorage) to the UI slider
+   - During that short reflection window, silence input/change so orchestrator doesn't leak prior material's value
+   - Learn/save per-material values locally when user actually manipulates the slider
 */
-
 (function(){
-  const TAG = "[silence-patch v2.4]";
-  if (window.__lm_silence_patch && window.__lm_silence_patch.version >= 204) {
-    console.log(TAG, "already installed");
-    return;
-  }
+  const TAG='[silence-patch v2.5]';
+  let sheetCtx = { spreadsheetId:null, sheetGid:null };
+  let silenceUntil = 0;
+  const SILENCE_MS = 480;
 
-  const SILENCE_MS = 420;
-  const LS_KEY = "__lm_mat_cache_v1"; // localStorage fallback cache
-  const state = {
-    silenced: false,
-    until: 0,
-    version: 204,
-    ctx: {
-      spreadsheetId: null,
-      sheetGid: null,
-    },
-  };
-
-  // Expose for debugging
-  window.__lm_silence_patch = state;
-
-  // ---- Cache helpers -------------------------------------------------------
-  function readLS() {
-    try { return JSON.parse(localStorage.getItem(LS_KEY) || "{}"); } catch(e){ return {}; }
-  }
-  function writeLS(obj) {
-    try { localStorage.setItem(LS_KEY, JSON.stringify(obj)); } catch(e){}
-  }
-  function cacheKey(spreadsheetId, matKey) {
-    return (spreadsheetId||"__no_spreadsheet__") + "::" + (matKey||"");
-  }
-  function getCachedOpacity(spreadsheetId, matKey) {
-    // 1) sheet-bridge live cache (if available)
-    try {
-      const br = window.lmMaterialsSheetBridge || window.__lm_mat_sheet_bridge || null;
-      if (br && typeof br.getCachedOpacity === "function") {
-        const v = br.getCachedOpacity(matKey);
-        if (typeof v === "number") return v;
+  // capture sheet-context (logs show `lm:sheet-context {spreadsheetId, sheetGid}` is dispatched)
+  window.addEventListener('lm:sheet-context', (ev)=>{
+    try{
+      const d = ev && ev.detail || ev;
+      if(d && d.spreadsheetId){
+        sheetCtx = { spreadsheetId: d.spreadsheetId, sheetGid: d.sheetGid ?? null };
+        console.log(TAG,'sheet-context', sheetCtx);
       }
-    } catch(e){}
+    }catch(e){ console.warn(TAG,'sheet-context parse error', e); }
+  }, {capture:true, passive:true});
 
-    // 2) localStorage fallback
-    const obj = readLS();
-    const key = cacheKey(spreadsheetId, matKey);
-    if (Object.prototype.hasOwnProperty.call(obj, key)) return obj[key];
-    return null;
+  function now(){ return Date.now(); }
+  function inSilence(){ return now() < silenceUntil; }
+  function armSilence(ms=SILENCE_MS){ silenceUntil = now()+ms; }
+
+  // local cache helpers
+  function cacheKey(matKey){
+    const ss = sheetCtx.spreadsheetId || 'no-sheet';
+    return `lm::mat::${ss}::${matKey}::opacity`;
   }
-  function setCachedOpacity(spreadsheetId, matKey, value) {
-    // write to LS
-    const obj = readLS();
-    obj[cacheKey(spreadsheetId, matKey)] = value;
-    writeLS(obj);
-    // optional: notify sheet-bridge if helper exists
-    try {
-      const br = window.lmMaterialsSheetBridge || window.__lm_mat_sheet_bridge || null;
-      if (br && typeof br.setCachedOpacity === "function") {
-        br.setCachedOpacity(matKey, value);
+  function readLocal(matKey){
+    try{
+      const v = localStorage.getItem(cacheKey(matKey));
+      if(v===null || v===undefined) return null;
+      const n = Number(v);
+      return Number.isFinite(n) ? n : null;
+    }catch(_){ return null; }
+  }
+  function writeLocal(matKey, value){
+    try{ localStorage.setItem(cacheKey(matKey), String(value)); }catch(_){}
+  }
+
+  // optional integration: if materials.sheet.bridge exposes cached getters
+  function readBridge(matKey){
+    try{
+      const b = window.__lm_mat_sheet_bridge || window.materialsSheetBridge || window.materials_sheet_bridge;
+      if(!b) return null;
+      const fns = ['getCachedOpacity','getOpacityCached','getLastOpacity','getLastValue'];
+      for(const fn of fns){
+        if(typeof b[fn] === 'function'){
+          const val = b[fn](matKey);
+          const num = Number(val);
+          if(Number.isFinite(num)) return num;
+        }
       }
-    } catch(e){}
+      return null;
+    }catch(_){ return null; }
   }
 
-  // Try to hook sheet-context events to learn spreadsheetId
-  window.addEventListener("lm:sheet-context", (ev)=>{
-    try {
-      const d = ev.detail || {};
-      state.ctx.spreadsheetId = d.spreadsheetId || state.ctx.spreadsheetId;
-      state.ctx.sheetGid = d.sheetGid || state.ctx.sheetGid;
-      console.log(TAG, "sheet-context", state.ctx);
-    } catch(e){}
-  }, {passive:true});
-
-  // ---- Find UI elements defensively ---------------------------------------
-  function qs(sel){ return document.querySelector(sel); }
-  function qsa(sel){ return Array.from(document.querySelectorAll(sel)); }
-
-  // Heuristics for material select & sliders
-  function findMaterialSelect() {
-    // common ids/classes used in this project
-    return qs("#materialSelect") || qs('select[name="material"]') || qs('.lm-material-select') || qs('select[data-lm="material"]');
-  }
-  function findOpacityInputs() {
-    // Return likely sliders/number inputs that control opacity
-    const sliders = qsa('input[type="range"]#opacityRange, input[type="range"][name="opacity"], input[type="range"].lm-opacity, input[type="range"][data-lm="opacity"]');
-    const numbers = qsa('input[type="number"]#opacityNumber, input[type="number"][name="opacity"], input[type="number"].lm-opacity, input[type="number"][data-lm="opacity"]');
-    return { sliders, numbers };
+  // find UI controls robustly
+  function findControls(){
+    const candidates = [].concat(
+      Array.from(document.querySelectorAll('select#materialSelect')),
+      Array.from(document.querySelectorAll('select[name="materialSelect"]')),
+      Array.from(document.querySelectorAll('select[data-lm="material-select"]')),
+      Array.from(document.querySelectorAll('#materialsTab select')),
+      Array.from(document.querySelectorAll('section.materials select')),
+      Array.from(document.querySelectorAll('select'))
+    );
+    const selectEl = candidates.find(el => el && el.tagName === 'SELECT' && (el.id==='materialSelect' || el.name==='materialSelect' || el.dataset.lm==='material-select' || el.closest('#materialsTab') || el.closest('section.materials')));
+    const rangeCandidates = [].concat(
+      Array.from(document.querySelectorAll('input#opacityRange')),
+      Array.from(document.querySelectorAll('input[name="opacityRange"]')),
+      Array.from(document.querySelectorAll('input[data-lm="opacity-range"]')),
+      Array.from(document.querySelectorAll('#materialsTab input[type="range"]')),
+      Array.from(document.querySelectorAll('section.materials input[type="range"]')),
+      Array.from(document.querySelectorAll('input[type="range"]'))
+    );
+    const rangeEl = rangeCandidates.find(el => el && el.tagName==='INPUT' && el.type==='range');
+    return {selectEl, rangeEl};
   }
 
-  // ---- Silence gate (capture) ---------------------------------------------
-  function now(){ return performance.now(); }
-  function enterSilence(ms = SILENCE_MS) {
-    state.silenced = true;
-    state.until = now() + ms;
-    // Ensure exit in any case
-    setTimeout(exitSilence, ms + 40);
-  }
-  function exitSilence() {
-    if (now() >= state.until) {
-      state.silenced = false;
-    } else {
-      // keep a tiny buffer
-      setTimeout(exitSilence, Math.max(10, state.until - now()));
+  // generic capture silencer
+  function captureSilencer(ev){
+    if(inSilence()){
+      ev.stopImmediatePropagation();
+      ev.preventDefault();
+      // no log spam
+      return false;
     }
   }
 
-  // Globally suppress input/change during silence (capture)
-  function globalBlocker(ev){
-    if (!state.silenced) return;
-    // Always block user-generated input/change during silence
-    // (Reflection never dispatches real events)
-    ev.stopImmediatePropagation();
-    ev.preventDefault();
-  }
-  window.addEventListener("input", globalBlocker, true);
-  window.addEventListener("change", globalBlocker, true);
-
-  // ---- Reflection without events ------------------------------------------
-  function reflectOpacityToUI(value01){
-    const { sliders, numbers } = findOpacityInputs();
-    const clamp = (v)=> Math.max(0, Math.min(1, v));
-    const v01 = clamp(value01);
-    // set slider(s)
-    sliders.forEach(el=>{
-      try {
-        // avoid triggering any listeners by not dispatching events
-        el.value = (el.max && Number(el.max) > 1) ? String(Math.round(v01 * Number(el.max))) : String(v01);
-        // also update any textual label if directly bound (optional)
-        if (el.hasAttribute("data-bind-target")) {
-          const t = qs(el.getAttribute("data-bind-target"));
-          if (t) t.textContent = el.value;
-        }
-      } catch(e){}
-    });
-    // set number(s)
-    numbers.forEach(el=>{
-      try {
-        const step = Number(el.step || "0.01");
-        const rounded = Math.round(v01 / step) * step;
-        el.value = String(clamp(rounded));
-      } catch(e){}
-    });
+  function currentMatKey(selectEl){
+    if(!selectEl) return null;
+    // prefer value; fallback to option text
+    const opt = selectEl.options[selectEl.selectedIndex];
+    return (selectEl.value||'').trim() || (opt ? (opt.value||opt.textContent||'').trim() : null);
   }
 
-  // ---- Observe real user input to maintain cache --------------------------
-  function installUserInputObserver(){
-    const { sliders, numbers } = findOpacityInputs();
-    const record = (ev)=>{
-      if (state.silenced) return; // ignore during silence/reflection
-      const select = findMaterialSelect();
-      const matKey = select ? select.value : null;
-      if (!matKey) return;
-      // compute value in 0..1 from the event target
-      let v01 = null;
-      try {
-        const el = ev.target;
-        if (el && el.type === "range") {
-          const max = Number(el.max || "1");
-          const val = Number(el.value || "0");
-          v01 = max > 1 ? (val / max) : val;
-        } else if (el && el.type === "number") {
-          v01 = Number(el.value || "0");
-        }
-        if (typeof v01 === "number" && !Number.isNaN(v01)) {
-          setCachedOpacity(state.ctx.spreadsheetId, matKey, Math.max(0, Math.min(1, v01)));
-        }
-      } catch(e){}
-    };
-    [...sliders, ...numbers].forEach(el=>{
-      el.removeEventListener("input", record);
-      el.addEventListener("input", record);
-      el.removeEventListener("change", record);
-      el.addEventListener("change", record);
-    });
-  }
-
-  // ---- SELECT change handler (capture) ------------------------------------
-  function onSelectChangeCapture(ev){
-    // Enter silence immediately
-    enterSilence(SILENCE_MS);
-    const select = ev.currentTarget;
-    const matKey = select && select.value;
-    // Synchronously lookup stored value
-    let v01 = getCachedOpacity(state.ctx.spreadsheetId, matKey);
-    if (typeof v01 !== "number") {
-      // default if unknown
-      v01 = 1.0;
+  function reflectUI(selectEl, rangeEl){
+    const matKey = currentMatKey(selectEl);
+    if(!matKey || !rangeEl) return;
+    // priority: bridge -> local -> default 1.0
+    let val = readBridge(matKey);
+    if(val===null) val = readLocal(matKey);
+    if(val===null) val = 1.0;
+    // silence around UI programmatic set
+    armSilence();
+    // set without firing events
+    try{
+      rangeEl.value = val;
+      // also mirror any numeric readout next to the slider
+      const num = rangeEl.closest('label,div,section')?.querySelector('input[type="number"]');
+      if(num){ num.value = val; }
+      console.log(TAG,'switch ->', matKey, 'reflect', val);
+    }catch(e){
+      console.warn(TAG,'reflect failed', e);
     }
-    // Reflect without emitting events
-    reflectOpacityToUI(v01);
-    // keep inputs wired for cache
-    setTimeout(installUserInputObserver, 0);
-    console.log(TAG, "switch ->", matKey, "reflect", v01);
   }
 
-  function install(){
-    const sel = findMaterialSelect();
-    if (!sel) {
-      console.log(TAG, "material SELECT not found; retrying...");
-      setTimeout(install, 300);
-      return;
+  function learnOnUserInput(selectEl, rangeEl){
+    // only when not in silence, store to local
+    rangeEl.addEventListener('input', (ev)=>{
+      if(inSilence()) return;
+      const matKey = currentMatKey(selectEl);
+      if(!matKey) return;
+      const v = Number(rangeEl.value);
+      if(Number.isFinite(v)){ writeLocal(matKey, v); }
+    }, {passive:true});
+  }
+
+  function hookOnce(selectEl, rangeEl){
+    // capture silencer on both controls
+    ['change','input'].forEach(t=>{
+      selectEl.addEventListener(t, captureSilencer, {capture:true});
+      rangeEl.addEventListener(t, captureSilencer, {capture:true});
+    });
+
+    // on material change: silence then reflect saved value
+    selectEl.addEventListener('change', (ev)=>{
+      armSilence();
+      // queue microtask to ensure option index updated
+      Promise.resolve().then(()=> reflectUI(selectEl, rangeEl));
+    }, {capture:false});
+
+    learnOnUserInput(selectEl, rangeEl);
+
+    console.log(TAG,'hooked select+range for silence+reflect');
+  }
+
+  // Wait for controls using MutationObserver + fallback polling
+  function waitAndHook(){
+    const {selectEl, rangeEl} = findControls();
+    if(selectEl && rangeEl){
+      hookOnce(selectEl, rangeEl);
+      // initial bootstrap: reflect for first selected material as well
+      reflectUI(selectEl, rangeEl);
+      return true;
     }
-    // Ensure capture-phase listener (runs before bubbling handlers)
-    sel.removeEventListener("change", onSelectChangeCapture, true);
-    sel.addEventListener("change", onSelectChangeCapture, true);
-
-    installUserInputObserver();
-
-    console.log(TAG, "installed");
+    return false;
   }
 
-  // Try install now and after DOM loaded
-  if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", install, {once:true});
-  } else {
-    install();
+  if(!waitAndHook()){
+    console.log(TAG,'controls not found; observing...');
+    const obs = new MutationObserver(()=>{
+      if(waitAndHook()){
+        obs.disconnect();
+      }
+    });
+    obs.observe(document.documentElement || document.body, {subtree:true, childList:true});
+    // hard fallback: stop after 15s
+    setTimeout(()=>obs.disconnect(), 15000);
   }
 })();
