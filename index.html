@@ -99,6 +99,7 @@
     #ui{overflow-x:hidden}
   </style>
 <!-- ESM import map (viewer uses these) -->
+
 <style id="lm-material-layout-fix">
 /* ===== Material pane: overflow & wrapping fixes ===== */
 #pane-material .scroller {
@@ -242,7 +243,7 @@
 <section class="pane" data-pane="views" id="pane-views">
 <div class="grp">
 <button id="view-save">Save view</button>
-<div class="row"><label><input id="proj-ortho" type="checkbox"/> Orthographic</label></div>
+<div class="row"><label><input id="proj-ortho" type="checkbox"> Orthographic</input></label></div>
 </div>
 <div id="views-preset-list"></div>
 </section>
@@ -266,132 +267,13 @@
 <!-- Event bridge: emit lm:sheet-context / lm:sheet-changed (Approach A) -->
 <script defer="" src="./sheet.ctx.bridge.js"></script>
 <!-- Keep existing modules (they listen to our custom events if needed) -->
-
-
-<!-- LociMyu material bridge stack -->
-<!-- LociMyu: scene bridge + sheet bridge + orchestrator (order matters) -->
 <script src="./viewer.bridge.module.js" type="module"></script>
-<script src="./materials.sheet.bridge.js" type="module"></script>
-<script src="./material.orchestrator.js" type="module"></script><script id="lm-material-hydrator" type="module">
-// Material settings hydrator (inline) — prevents overwriting on selection switch.
-// Protocol:
-//  - Dispatch 'lm:request-material-settings' with { materialKey }
-//  - Expect a single 'lm:material-settings-response' with { materialKey, settings } where
-//    settings = { opacity, doubleSided, unlit, chroma: { enabled, color, tolerance, feather } }
-//  - Suppress write events during hydration (no accidental sheet writes).
-(() => {
-  const $ = (id) => document.getElementById(id);
-  const sel = $('pm-material');
-  const opacityRange = $('pm-opacity-range');
-  const opacityOut = $('pm-opacity-val');
-  const ckDouble = $('pm-flag-doublesided');
-  const ckUnlit = $('pm-flag-unlit');
-  const ckEnable = $('pm-chroma-enable');
-  const color = $('pm-chroma-color');
-  const tol = $('pm-chroma-tol');
-  const feather = $('pm-chroma-feather');
+<script src="./material.orchestrator.js" type="module"></script>
 
-  if (!sel) return;
-
-  let hydrating = false;
-  let lastHydratedKey = null;
-
-  function setOpacityUI(v) {
-    if (typeof v !== 'number' || isNaN(v)) return;
-    opacityRange.value = String(v);
-    opacityOut.textContent = Number(v).toFixed(2);
-  }
-
-  function applySettingsToUI(s) {
-    if (!s) return;
-    hydrating = true;
-    try {
-      if (typeof s.opacity === 'number') setOpacityUI(s.opacity);
-      if (typeof s.doubleSided === 'boolean') ckDouble.checked = s.doubleSided;
-      if (typeof s.unlit === 'boolean') ckUnlit.checked = s.unlit;
-      if (s.chroma) {
-        if (typeof s.chroma.enabled === 'boolean') ckEnable.checked = s.chroma.enabled;
-        if (typeof s.chroma.color === 'string') color.value = s.chroma.color;
-        if (typeof s.chroma.tolerance === 'number') tol.value = String(s.chroma.tolerance);
-        if (typeof s.chroma.feather === 'number') feather.value = String(s.chroma.feather);
-      }
-    } finally {
-      // Release in next microtask so 'input' handlers that fire synchronously can skip writes.
-      Promise.resolve().then(() => { hydrating = false; });
-    }
-  }
-
-  function requestSettings(materialKey) {
-    return new Promise((resolve) => {
-      let done = false;
-      const onResp = (ev) => {
-        const d = ev.detail || {};
-        if (d.materialKey === materialKey) {
-          done = true;
-          window.removeEventListener('lm:material-settings-response', onResp);
-          resolve(d.settings || null);
-        }
-      };
-      window.addEventListener('lm:material-settings-response', onResp, { once: true });
-      // Fire request
-      window.dispatchEvent(new CustomEvent('lm:request-material-settings', { detail: { materialKey } }));
-      // Fallback timeout
-      setTimeout(() => {
-        if (!done) {
-          window.removeEventListener('lm:material-settings-response', onResp);
-          resolve(null);
-        }
-      }, 800); // quick timeout; UI should not block
-    });
-  }
-
-  // On selection change: hydrate UI from sheet if available. Do not auto-write.
-  sel.addEventListener('change', async () => {
-    const key = sel.value || '';
-    if (!key) return;
-    lastHydratedKey = key;
-    const settings = await requestSettings(key);
-    if (key !== lastHydratedKey) return; // user changed again
-    if (settings) {
-      applySettingsToUI(settings);
-      console.log('[mat-hydrator] applied sheet settings for', key, settings);
-    } else {
-      console.log('[mat-hydrator] no prior settings for', key, '(keeping current UI)');
-    }
-  });
-
-  // Mirror opacity number
-  opacityRange && opacityRange.addEventListener('input', () => {
-    setOpacityUI(parseFloat(opacityRange.value));
-  });
-
-  // Forward user-initiated changes ONLY (skip when hydrating)
-  function sendIfUserInitiated() {
-    if (hydrating) return;
-    const key = sel && sel.value;
-    if (!key) return;
-    const payload = {
-      materialKey: key,
-      settings: {
-        opacity: parseFloat(opacityRange?.value ?? '1'),
-        doubleSided: !!ckDouble?.checked,
-        unlit: !!ckUnlit?.checked,
-        chroma: {
-          enabled: !!ckEnable?.checked,
-          color: color?.value || '#000000',
-          tolerance: parseFloat(tol?.value ?? '0'),
-          feather: parseFloat(feather?.value ?? '0'),
-        }
-      }
-    };
-    window.dispatchEvent(new CustomEvent('lm:material-settings-changed', { detail: payload }));
-  }
-
-  [opacityRange, ckDouble, ckUnlit, ckEnable, color, tol, feather].forEach(el => {
-    if (el) el.addEventListener('input', sendIfUserInitiated);
-    if (el) el.addEventListener('change', sendIfUserInitiated);
-  });
-})();
-</script>
+    <!-- LociMyu material bridge stack -->
+    <!-- LociMyu: scene bridge + sheet bridge + orchestrator (order matters) -->
+    <script type="module" src="./viewer.bridge.module.js"></script>
+    <script type="module" src="./materials.sheet.bridge.js"></script>
+    <script type="module" src="./material.orchestrator.js"></script>
 </body>
 </html>
