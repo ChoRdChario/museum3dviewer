@@ -1,62 +1,54 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>LociMyu – Single-load Minimal Index</title>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>LociMyu v6.6</title>
 
-  <!-- Core boot (unchanged) -->
+  <!-- three.js import map (fix for: Failed to resolve module specifier "three") -->
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://unpkg.com/three@0.154.0/build/three.module.js",
+      "three/addons/": "https://unpkg.com/three@0.154.0/examples/jsm/"
+    }
+  }
+  </script>
+
+  <!-- ESM boot & bridges -->
   <script type="module" src="./boot.esm.cdn.js"></script>
-
-  <!-- Sheet helpers (single include each) -->
+  <script type="module" src="./viewer.bridge.module.js"></script>
   <script type="module" src="./sheet-rename.module.js"></script>
   <script type="module" src="./sheet.ctx.bridge.js"></script>
 
-  <!-- Viewer & Materials (single include, correct order) -->
-  <script type="module" src="./viewer.bridge.module.js"></script>
-  <script src="./materials.sheet.bridge.js" defer></script>
-  <script src="./material.orchestrator.js" defer></script>
-
-  <!-- Defensive: prune duplicate scripts with the same src that might have been injected by legacy code -->
-  <script>
-  (function selfPruneDuplicateScripts(){
-    const seen = new Set();
-    const scripts = Array.from(document.getElementsByTagName('script'));
-    for (const s of scripts) {
-      const src = s.getAttribute('src');
-      if (!src) continue;
-      if (seen.has(src)) {
-        // remove later duplicates
-        s.parentNode && s.parentNode.removeChild(s);
-        console.log('[index prune] removed duplicate <script>:', src);
-      } else {
-        seen.add(src);
-      }
-    }
-  })();
-  </script>
+  <!-- Non-ESM orchestrators/bridges (defer to wait for DOM) -->
+  <script defer src="./materials.sheet.bridge.js"></script>
+  <script defer src="./material.orchestrator.js"></script>
 
   <style>
-    body{font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;}
-    #app{display:flex;min-height:100vh}
-    #stage{flex:1; background:#111}
-    #panel-material{width:360px; border-left:1px solid #222; background:#181818; color:#eee; padding:12px}
+    html,body{height:100%;margin:0;background:#0f0f10;color:#e5e7eb;font-family:system-ui, -apple-system, Segoe UI, Roboto, Noto Sans, Ubuntu, Cantarell, Helvetica Neue, Arial, "Apple Color Emoji","Segoe UI Emoji";}
+    #stage{position:absolute;left:0;top:0;bottom:0;right:420px;background:#0f0f10;}
+    #panel{position:absolute;top:0;right:0;width:420px;bottom:0;background:#121214;border-left:1px solid #222;padding:12px;overflow:auto}
+    .row{margin:12px 0}
+    label{display:block;margin-bottom:6px;font-size:12px;color:#9ca3af}
     select, input[type="range"]{width:100%}
+    .section{border:1px solid #222;border-radius:8px;padding:12px;margin-bottom:12px}
+    .section h3{margin:0 0 8px 0;font-size:14px;color:#cbd5e1}
   </style>
 </head>
 <body>
-  <div id="app">
-    <div id="stage" role="region" aria-label="3D Stage"></div>
-    <div id="panel-material" role="tabpanel" aria-labelledby="tab-material">
-      <label for="pm-material">Select material</label>
+  <div id="stage"></div>
+  <aside id="panel">
+    <div class="section">
+      <h3>Select material</h3>
       <select id="pm-material" aria-label="Select material">
         <option>— Select material —</option>
       </select>
-      <div style="margin-top:12px">
-        <label for="pm-opacity">Opacity</label>
-        <input id="pm-opacity" type="range" min="0" max="1" step="0.01" value="1">
-      </div>
     </div>
-  </div>
+    <div class="section">
+      <h3>Opacity</h3>
+      <input id="opacityRange" type="range" min="0" max="1" step="0.01" value="1">
+    </div>
+  </aside>
 </body>
 </html>
