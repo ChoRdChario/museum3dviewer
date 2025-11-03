@@ -1,133 +1,145 @@
 
-// viewer.bridge.module.js
-// Bridge between viewer (THREE scene) and material orchestrator.
-// Exposes window.__LM_MATERIALS__ with keys() and apply().
-
-(function(){
-  const log = (...args)=>console.log('[viewer-bridge]', ...args);
-  const warn = (...args)=>console.warn('[viewer-bridge]', ...args);
-
-  // State bag
-  const BAG = {
-    ready: false,
+/**
+ * viewer.bridge.module.js
+ * Resilient bridge that discovers a THREE.Scene and exposes material helpers.
+ */
+(() => {
+  const LOG_PREFIX = '[viewer-bridge]';
+  const STATE = {
     scene: null,
-    materials: new Map(), // key -> material
-    lastIndexCount: 0
+    tried: 0,
+    maxTries: 600, // ~60s
+    intervalMs: 100,
+    materialsReady: false,
   };
 
-  function ensureGlobal(){
-    if (!window.__LM_MATERIALS__) {
-      window.__LM_MATERIALS__ = {
-        get ready(){ return BAG.ready; },
-        keys(){
-          return Array.from(BAG.materials.keys());
-        },
-        apply(key, opts){
-          const mat = BAG.materials.get(key);
-          if (!mat) { warn('apply: material not found', key); return false; }
-          if (opts && typeof opts.opacity === 'number') {
-            mat.transparent = opts.opacity < 1.0 || mat.transparent === true;
-            mat.opacity = opts.opacity;
-          }
-          if (opts && typeof opts.doubleSided === 'boolean') {
-            const THREE = window.THREE || (window.__three__ && window.__three__.THREE);
-            if (THREE) {
-              mat.side = opts.doubleSided ? THREE.DoubleSide : THREE.FrontSide;
-            } else {
-              warn('apply: THREE missing for side update');
-            }
-          }
-          if (opts && typeof opts.unlit === 'boolean') {
-            // "Unlit-like": kill lighting by pushing everything to emissive
-            if ('emissive' in mat) {
-              if (opts.unlit) {
-                try { mat._lm_prevEmissive = mat.emissive.clone(); } catch(e){}
-                mat.emissive.setRGB(1,1,1);
-              } else if (mat._lm_prevEmissive) {
-                mat.emissive.copy(mat._lm_prevEmissive);
-              }
-            }
-            if ('metalness' in mat && 'roughness' in mat) {
-              if (opts.unlit) {
-                if (mat._lm_prevMR === undefined) mat._lm_prevMR = {m: mat.metalness, r: mat.roughness};
-                mat.metalness = 0.0; mat.roughness = 1.0;
-              } else if (mat._lm_prevMR) {
-                mat.metalness = mat._lm_prevMR.m; mat.roughness = mat._lm_prevMR.r;
-              }
-            }
-          }
-          try { mat.needsUpdate = true; } catch(e){}
-          return true;
-        }
-      };
-    }
+  const log = (...args) => console.log(LOG_PREFIX, ...args);
+  const warn = (...args) => console.warn(LOG_PREFIX, ...args);
+
+  function getThree() {
+    if (window.THREE) return window.THREE;
+    try { if (globalThis.THREE) return globalThis.THREE; } catch {}
+    return null;
   }
 
-  function indexMaterials(scene){
-    BAG.materials.clear();
-    const keys = new Set();
-    scene.traverse(obj=>{
-      if (obj && obj.isMesh && obj.material) {
-        if (Array.isArray(obj.material)) {
-          obj.material.forEach(m=> collect(m));
-        } else {
-          collect(obj.material);
+  function findSceneCandidates() {
+    const cand = [];
+    if (window.__lm && window.__lm.scene) cand.push(window.__lm.scene);
+    if (window.lmScene) cand.push(window.lmScene);
+    if (window.__LOCIMYU_SCENE__) cand.push(window.__LOCIMYU_SCENE__);
+    if (window.__THREE_SCENES__ && Array.isArray(window.__THREE_SCENES__)) {
+      cand.push(...window.__THREE_SCENES__);
+    }
+    try {
+      const canvases = Array.from(document.querySelectorAll('canvas'));
+      canvases.forEach((cv) => {
+        if (cv.__webglrenderer && cv.__webglrenderer.scene) {
+          cand.push(cv.__webglrenderer.scene);
         }
+      });
+    } catch {}
+    return cand.filter(Boolean);
+  }
+
+  function isScene(obj, THREE) {
+    try { return !!THREE && obj && (obj.isScene || obj.type === 'Scene'); } catch { return false; }
+  }
+
+  function collectMaterialMap(scene) {
+    const map = new Map();
+    scene.traverse((obj) => {
+      if (obj.material) {
+        const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+        mats.forEach((m) => {
+          const key = (m.name && String(m.name)) || (m.uuid && String(m.uuid)) || 'material';
+          if (!map.has(key)) map.set(key, m);
+        });
       }
     });
-    function collect(m){
-      if (!m) return;
-      let key = m.name || (m.map && m.map.name) || m.uuid || null;
-      if (!key) return;
-      if (keys.has(key)) {
-        // same key already, keep first
-        return;
-      }
-      keys.add(key);
-      BAG.materials.set(key, m);
-    }
-    BAG.lastIndexCount = BAG.materials.size;
-    log('scene indexed', BAG.lastIndexCount, 'materials');
+    return map;
   }
 
-  function tryAttachFromGlobals(){
-    const s = window.__lm && window.__lm.scene ? window.__lm.scene : (window.lmScene || null);
-    if (s && s.isScene) {
-      BAG.scene = s;
-      indexMaterials(BAG.scene);
-      BAG.ready = true;
-      ensureGlobal();
-      window.dispatchEvent(new CustomEvent('lm:materials-ready', {detail:{count: BAG.lastIndexCount}}));
-      log('materials ready (global hook)', BAG.lastIndexCount);
+  function publishMaterials(scene, THREE) {
+    const mm = collectMaterialMap(scene);
+    const keys = Array.from(mm.keys());
+    const api = {
+      keys: () => keys.slice(),
+      apply: (opts) => {
+        if (!opts || !opts.key) return false;
+        const mat = mm.get(opts.key);
+        if (!mat) return false;
+        if (typeof opts.opacity === 'number') {
+          mat.transparent = opts.opacity < 0.999;
+          mat.opacity = Math.min(1, Math.max(0, opts.opacity));
+        }
+        if (typeof opts.doubleSided === 'boolean') {
+          mat.side = opts.doubleSided ? THREE.DoubleSide : THREE.FrontSide;
+        }
+        if (typeof opts.unlitLike === 'boolean') {
+          if (opts.unlitLike && !mat.___lm_backup) {
+            const back = mat.clone();
+            back.name = mat.name || 'lit-backup';
+            mat.___lm_backup = back;
+            // simulate unlit by reducing metalness/roughness influence if present
+            if ('metalness' in mat) mat.metalness = 0;
+            if ('roughness' in mat) mat.roughness = 1;
+            if ('envMapIntensity' in mat) mat.envMapIntensity = 0;
+          } else if (!opts.unlitLike && mat.___lm_backup) {
+            const back = mat.___lm_backup;
+            Object.assign(mat, back);
+            delete mat.___lm_backup;
+          }
+        }
+        if ('needsUpdate' in mat) mat.needsUpdate = true;
+        return true;
+      },
+    };
+    window.__LM_MATERIALS__ = api;
+    if (!STATE.materialsReady) {
+      STATE.materialsReady = true;
+      window.dispatchEvent(new CustomEvent('lm:materials-ready', { detail: { count: keys.length } }));
+    }
+    log('materials ready', keys.length);
+  }
+
+  function tryBind() {
+    const THREE = getThree();
+    const candidates = findSceneCandidates();
+    for (const c of candidates) {
+      if (isScene(c, THREE)) {
+        STATE.scene = c;
+        break;
+      }
+    }
+    if (STATE.scene && THREE) {
+      publishMaterials(STATE.scene, THREE);
       return true;
     }
     return false;
   }
 
-  // Event wiring: accept a number of possible events from the viewer
-  function onSceneReady(ev){
-    const detail = ev && ev.detail || {};
-    const scene = detail.scene || detail.root || window.scene || (detail.renderer && detail.renderer.scene) || null;
-    const candidate = scene && scene.isScene ? scene : (window.__lm && window.__lm.scene) || null;
-    if (!candidate) { warn('lm:scene-ready fired but no scene on detail'); return; }
-    BAG.scene = candidate;
-    indexMaterials(BAG.scene);
-    BAG.ready = true;
-    ensureGlobal();
-    window.dispatchEvent(new CustomEvent('lm:materials-ready', {detail:{count: BAG.lastIndexCount}}));
-    log('materials ready (event)', BAG.lastIndexCount);
+  function startPolling() {
+    const tid = setInterval(() => {
+      if (tryBind()) {
+        clearInterval(tid);
+      } else {
+        STATE.tried++;
+        if (STATE.tried % 20 === 0) warn('still waiting for scene/THREE...', { tried: STATE.tried });
+        if (STATE.tried > STATE.maxTries) { clearInterval(tid); warn('gave up waiting for scene'); }
+      }
+    }, STATE.intervalMs);
   }
 
-  // Bootstrap
-  ensureGlobal();
-  window.addEventListener('lm:scene-ready', onSceneReady, { once:false });
-  // Some builds don't emit the event; poll briefly as a fallback
-  let attempts = 0;
-  const poll = setInterval(()=>{
-    attempts++;
-    if (tryAttachFromGlobals() || BAG.ready) { clearInterval(poll); return; }
-    if (attempts > 100) { clearInterval(poll); warn('gave up waiting for scene'); }
-  }, 100);
+  window.addEventListener('lm:scene-ready', () => {
+    log('lm:scene-ready');
+    setTimeout(() => { tryBind(); }, 50);
+  });
 
   log('bridge loaded');
+  if (!tryBind()) startPolling();
+
+  window.__LM_BRIDGE_DEBUG__ = () => {
+    const THREE = getThree();
+    return { hasTHREE: !!THREE, scene: !!STATE.scene, tried: STATE.tried, keys: (window.__LM_MATERIALS__?.keys()||[]) };
+  };
 })();
