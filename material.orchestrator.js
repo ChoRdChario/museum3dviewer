@@ -1,159 +1,122 @@
-/* material.orchestrator.js
- * Connects Material tab UI to the viewer bridge (__LM_MATERIALS__) and to Sheets bridge.
- * Safe pipeline with retries; logs mimic existing format.
- */
+
+// material.orchestrator.js
+// UI <-> __LM_MATERIALS__ bridge controller
 (function(){
-  const VERSION = 'V6_16g_SAFE_UI_PIPELINE.A2.4';
-  const LOG_PREFIX = '[mat-orch]';
-  const log = (...args)=>console.log(LOG_PREFIX, ...args);
-  const warn = (...args)=>console.warn(LOG_PREFIX, ...args);
+  const VER = 'V6_16h_SAFE_UI_PIPELINE.A2.5';
+  const log = (...a)=>console.log('[mat-orch]', ...a);
+  const warn = (...a)=>console.warn('[mat-orch]', ...a);
 
-  log(VERSION, 'boot');
-
-  // ---- Debug helper requested by the user
+  // Debug helper visible to console
   window.__LM_DEBUG_DUMP = function(){
-    const vb = window.__LM_MATERIALS__;
-    const keys = vb && typeof vb.keys === 'function' ? vb.keys() : [];
-    const candidates = [
-      '#materialSelect','[data-lm="materialSelect"]','.lm-material-select select'
-    ].map(q=>({q, n: document.querySelectorAll(q).length}));
-    return { vbKeys: keys, candidates, THREE: !!window.THREE };
+    let candidates = [];
+    candidates.push(document.querySelectorAll('#materialSelect').length);
+    candidates.push(document.querySelectorAll('[data-lm="materialSelect"]').length);
+    candidates.push(document.querySelectorAll('.lm-material-select select').length);
+    const g = window.__LM_MATERIALS__;
+    const keys = g && g.keys ? g.keys() : [];
+    return { vbKeys: Array.from(keys||[]), candidates: candidates, THREE: !!window.THREE };
   };
 
-  // ---- UI discovery (support multiple selectors)
-  function pick(selList){
-    for (const s of selList) {
-      const el = document.querySelector(s);
-      if (el) return el;
-    }
-    return null;
+  function qsCandidates(){
+    return (
+      document.querySelector('#materialSelect') ||
+      document.querySelector('[data-lm="materialSelect"]') ||
+      (document.querySelector('.lm-material-select select'))
+    );
   }
-  const El = {
-    select: pick(['#materialSelect','[data-lm="materialSelect"]','.lm-material-select select']),
-    opacity: pick(['#materialOpacity','[data-lm="materialOpacity"]','.lm-material-opacity input[type="range"]']),
-    ds: pick(['#doubleSided','[data-lm="doubleSided"]','.lm-material-double input[type="checkbox"]']),
-    unlit: pick(['#unlitLike','[data-lm="unlitLike"]','.lm-material-unlit input[type="checkbox"]']),
-  };
-  log(VERSION, 'ui discovered');
+  function $opacity(){ return document.querySelector('#materialOpacity') || document.querySelector('[data-lm="materialOpacity"]') || document.querySelector('.lm-opacity input[type="range"]'); }
+  function $ds(){ return document.querySelector('#doubleSided') || document.querySelector('[data-lm="doubleSided"]'); }
+  function $unlit(){ return document.querySelector('#unlitLike') || document.querySelector('[data-lm="unlitLike"]'); }
 
-  // ---- Sheet context (provided by materials.sheet.bridge.js)
-  let sheetCtx = null;
-  window.addEventListener('lm:sheet-context', (e)=>{
-    sheetCtx = e && e.detail || null;
-  });
-  // backward-compatible log echo
-  window.addEventListener('lm:sheet-context', (e)=>{
-    log('sheet ctx ready');
-  });
-
-  // helper
-  function ctxReady(){
-    return !!(sheetCtx && sheetCtx.spreadsheetId);
+  function fillSelect(keys){
+    const sel = qsCandidates();
+    if (!sel) return false;
+    sel.innerHTML = '';
+    keys.forEach(k=>{
+      const opt = document.createElement('option');
+      opt.value = k;
+      opt.textContent = k;
+      sel.appendChild(opt);
+    });
+    return true;
   }
 
-  // ---- Populate material list when bridge is ready
-  function populateWhenReady(){
-    const vb = window.__LM_MATERIALS__;
-    if (!vb || !vb.ready || !vb.keys || vb.keys().length===0){
-      log('THREE/scene not ready; deferred shim');
-      setTimeout(populateWhenReady, 200);
-      return;
-    }
-    // Fill select
-    if (El.select) {
-      const keys = vb.keys();
-      // clear and add options
-      El.select.innerHTML = '';
-      keys.forEach(k=>{
-        const opt = document.createElement('option');
-        opt.value = k; opt.textContent = k;
-        El.select.appendChild(opt);
+  async function waitForMaterialsReady(){
+    return new Promise(resolve=>{
+      const g = window.__LM_MATERIALS__;
+      if (g && g.ready) return resolve(true);
+      const onReady = ()=>{ window.removeEventListener('lm:materials-ready', onReady); resolve(true); };
+      window.addEventListener('lm:materials-ready', onReady, {once:true});
+      // Also poll in case event is missed
+      let tries=0;
+      const iv = setInterval(()=>{
+        tries++;
+        if (window.__LM_MATERIALS__ && window.__LM_MATERIALS__.ready){ clearInterval(iv); resolve(true); }
+        if (tries>100) { clearInterval(iv); resolve(false); }
+      },100);
+    });
+  }
+
+  function wireUI(){
+    const sel = qsCandidates();
+    const r = $opacity();
+    const ds = $ds();
+    const un = $unlit();
+    if (!sel || !r) { warn('ui not ready yet, retry... UI elements not found (materialSelect/opacityRange)'); return false; }
+
+    const G = window.__LM_MATERIALS__;
+
+    const applyFromUI = ()=>{
+      const key = sel.value;
+      if (!key) return;
+      const ok = G.apply(key, {
+        opacity: Number(r.value),
+        doubleSided: ds ? !!ds.checked : false,
+        unlit: un ? !!un.checked : false,
       });
-      // select first
-      if (keys.length) El.select.value = keys[0];
+      if (!ok){ warn('apply failed for', key); }
+    };
+
+    sel.addEventListener('change', applyFromUI);
+    r.addEventListener('input', applyFromUI);
+    if (ds) ds.addEventListener('change', applyFromUI);
+    if (un) un.addEventListener('change', applyFromUI);
+    return true;
+  }
+
+  async function boot(){
+    log(VER, 'boot');
+    // UI discover
+    if (!qsCandidates()) {
+      // wait a bit for UI to mount
+      let tries=0;
+      const iv = setInterval(()=>{
+        tries++;
+        if (qsCandidates()){ clearInterval(iv); start(); }
+        if (tries>50){ clearInterval(iv); warn('UI still not found; give up'); }
+      },100);
     } else {
-      warn('materialSelect not found');
+      start();
     }
   }
 
-  populateWhenReady();
-
-  // ---- Apply helpers
-  function currentKey(){ return El.select && El.select.value; }
-  function applyToModel(partial){
-    const key = currentKey();
-    if (!key) return;
-    const ok = window.__LM_MATERIALS__ && window.__LM_MATERIALS__.apply(key, partial);
-    if (!ok) warn('apply skipped; key not indexed yet');
-    log('apply model', 'key='+key, `opacity=${typeof partial.opacity==='number'?partial.opacity:'-'}`, `ds=${!!partial.doubleSided}`, `unlit=${!!partial.unlit}`);
+  async function start(){
+    log(VER, 'ui discovered');
+    // Wait for materials from bridge
+    const ok = await waitForMaterialsReady();
+    if (!ok){ warn('THREE/scene not ready; deferred shim'); }
+    const G = window.__LM_MATERIALS__;
+    const keys = (G && G.keys) ? G.keys() : [];
+    fillSelect(keys || []);
+    // Wire UI
+    let wired = wireUI();
+    if (!wired){
+      // retry once more shortly
+      setTimeout(()=>wireUI(), 300);
+    }
+    log(VER, 'wireOnce complete');
   }
 
-  // ---- UI bindings
-  function wireOnce(){
-    if (El.select) {
-      El.select.addEventListener('change', ()=>{
-        // No immediate apply; only selection
-      });
-    }
-    if (El.opacity) {
-      const handler = ()=>{
-        const v = parseFloat(El.opacity.value);
-        if (!isFinite(v)) return;
-        applyToModel({opacity: v});
-        saveDebounced();
-      };
-      El.opacity.addEventListener('input', handler);
-      El.opacity.addEventListener('change', handler);
-    }
-    if (El.ds) {
-      El.ds.addEventListener('change', ()=>{
-        applyToModel({doubleSided: !!El.ds.checked});
-        saveDebounced();
-      });
-    }
-    if (El.unlit) {
-      El.unlit.addEventListener('change', ()=>{
-        applyToModel({unlit: !!El.unlit.checked});
-        saveDebounced();
-      });
-    }
-    log(VERSION, 'wireOnce complete');
-  }
-  wireOnce();
-
-  // ---- Scene ready echo from viewer bridge
-  window.addEventListener('lm:scene-ready', ()=>{
-    log('EVENT lm:scene-ready');
-    populateWhenReady();
-  });
-
-  // ---- Save to sheet via materials.sheet.bridge.js
-  // Expects global "materialsSheetBridge" with upsertOne(ctx, row)
-  const SAVE_DELAY = 350;
-  let saveTimer = null;
-  function saveDebounced(){
-    clearTimeout(saveTimer);
-    saveTimer = setTimeout(()=>{
-      if (!ctxReady()){
-        log('ctx not ready; skip save');
-        return;
-      }
-      try {
-        const row = {
-          materialKey: currentKey() || '',
-          opacity: El.opacity ? parseFloat(El.opacity.value) : null,
-          doubleSided: El.ds ? !!El.ds.checked : null,
-          unlit: El.unlit ? !!El.unlit.checked : null,
-          updatedAt: new Date().toISOString()
-        };
-        // materials.sheet.bridge.js exposes global "LM_MAT_SHEET"
-        const api = window.LM_MAT_SHEET || window.materialsSheetBridge || null;
-        if (!api || typeof api.upsertOne !== 'function') throw new Error('sheet API missing');
-        api.upsertOne(sheetCtx, row);
-      } catch(e){
-        warn('save failed', e);
-      }
-    }, SAVE_DELAY);
-  }
-
+  // start immediately
+  boot();
 })();
