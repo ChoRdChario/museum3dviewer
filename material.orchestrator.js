@@ -1,159 +1,182 @@
 
-/* material.orchestrator.js
- * LociMyu Material Orchestrator (panel wiring + persist to Sheets)
+/* material.orchestrator.js — commit-mode aware replacement
+ * Policy:
+ *  - If window.__LM_COMMIT_MODE === true:
+ *      * select.change: reflect UI from sheet/scene (no persist)
+ *      * range.input:  preview material opacity only (no persist)
+ *      * range.change/blur: persist once
+ *      * programmatic UI updates do not trigger handlers
+ *  - Otherwise: fall back to legacy behavior (if needed)
  */
-(function(){
-  const VERSION_TAG = 'V6_14_PERSIST_FIX';
-  const log  = (...a)=>console.log('[mat-orch]', ...a);
-  const warn = (...a)=>console.warn('[mat-orch]', ...a);
 
-  function getScene(){
-    try { if (window.viewerBridge?.getScene) return window.viewerBridge.getScene(); } catch(_){}
-    return window.__LM_SCENE || window.__viewer?.scene || window.viewer?.scene || window.lm?.scene || null;
-  }
-  function listMaterials(){
-    try { if (window.viewerBridge?.listMaterials) return window.viewerBridge.listMaterials() || []; } catch(_){}
-    const sc = getScene(); if (!sc) return [];
-    const set = new Set();
-    sc.traverse(o=>{
-      const m=o.material; if(!m) return;
-      (Array.isArray(m)?m:[m]).forEach(mm=>{ if(mm?.name) set.add(mm.name); });
-    });
-    return Array.from(set);
-  }
+(function () {
+  const log = (...a)=>console.log('[mat-orch]', ...a);
 
-  // === Panel helpers ===
-  function nearestSlider(from){
-    let p = from.closest('section,fieldset,div') || from.parentElement;
-    while (p){
-      const r = p.querySelector('input[type="range"]');
-      if (r) return r;
-      p = p.parentElement;
-    }
-    return document.querySelector('[data-lm="right-panel"] input[type="range"]') ||
-           document.querySelector('input[type="range"]') || null;
-  }
-  function populateSelect(sel, names){
-    sel.innerHTML='';
-    const add=(v,t)=>{ const o=document.createElement('option'); o.value=v; o.textContent=t; sel.appendChild(o); };
-    add('','-- Select --');
-    names.forEach(n=>add(n,n));
-    sel.value='';
-    sel.dispatchEvent(new Event('change',{bubbles:true}));
-    log('panel populated', names.length, 'materials');
+  // Global guard (can be set by patches or here)
+  if (typeof window.__LM_COMMIT_MODE === 'undefined') window.__LM_COMMIT_MODE = true;
+
+  const $ = (sel, root=document) => root.querySelector(sel);
+  const $$ = (sel, root=document) => Array.from(root.querySelectorAll(sel));
+
+  // Weak coupling to other modules the app already exposes
+  const sheet = window.materialsSheetBridge || window.materialsSheet || {};
+  const vbridge = window.viewerBridge || window.viewer || {};
+
+  // Small helper: get scene if exposed
+  function getScene() {
+    try { return (vbridge.getScene && vbridge.getScene()) || vbridge.scene || null; } catch(e){ return null; }
   }
 
-  // === Apply opacity ===
-  function applyOpacityByName(name, a){
-    const sc=getScene(); if(!sc||!name) return false;
-    let hit=0;
-    sc.traverse(o=>{
-      const m=o.material; if(!m) return;
-      (Array.isArray(m)?m:[m]).forEach(mm=>{
-        if (mm?.name===name){
-          mm.transparent = a < 1 ? true : mm.transparent;
-          mm.opacity = a;
-          mm.needsUpdate = true;
-          hit++;
-        }
+  // Apply opacity to all meshes whose material name matches `matName`
+  function applyOpacityByName(matName, opacity) {
+    const scene = getScene();
+    if (!scene) return;
+    let count = 0;
+    scene.traverse?.((obj)=>{
+      const m = obj?.material;
+      if (!m) return;
+      const mats = Array.isArray(m) ? m : [m];
+      mats.forEach(mm=>{
+        if (mm && mm.name === matName) { mm.transparent = opacity < 1.0; mm.opacity = opacity; count++; }
       });
     });
-    if (hit) log(`opacity ${a.toFixed(2)} → "${name}" x${hit}`);
-    return !!hit;
+    log(`opacity ${(+opacity).toFixed(2)} → "${matName}" x${count}`);
   }
 
-  // === Persist ===
-  function debounce(fn, ms){
-    let t=null;
-    return (...args)=>{ clearTimeout(t); t=setTimeout(()=>fn(...args), ms); };
-  }
-  const persist = debounce(async (sel, slider)=>{
-    try{
-      const name = sel.value;
-      if (!name || !window.materialsSheetBridge?.upsertOne) return;
-      let a = parseFloat(slider?.value ?? '1');
-      if (isNaN(a)) a = Math.min(1, Math.max(0, (parseFloat(slider?.value)||100)/100));
-
-      const panel = document.querySelector('[data-lm="right-panel"]') || document;
-      const ds = panel.querySelector('input[type="checkbox"][name="doubleSided"], input#doubleSided');
-      const ul = panel.querySelector('input[type="checkbox"][name="unlit"], input#unlit');
-      const ck = panel.querySelector('input[type="checkbox"][name="chromaEnable"], input#chroma-enable');
-      const tol = panel.querySelector('input[type="range"][name="chromaTolerance"], input#chroma-tolerance');
-      const fea = panel.querySelector('input[type="range"][name="chromaFeather"], input#chroma-feather');
-      const col = panel.querySelector('input[type="color"][name="chromaColor"], input#chroma-color');
-
-      const item = {
-        materialKey: name,
-        opacity: a,
-        doubleSided: !!(ds && ds.checked),
-        unlit: !!(ul && ul.checked),
-        chromaEnable: !!(ck && ck.checked),
-        chromaColor: col ? col.value : '',
-        chromaTolerance: tol ? parseFloat(tol.value) : null,
-        chromaFeather: fea ? parseFloat(fea.value) : null,
-        updatedAt: new Date().toISOString(),
-        updatedBy: 'mat-orch'
-      };
-      await window.materialsSheetBridge.upsertOne(item);
-      log('persisted to sheet:', name);
-    }catch(e){ warn('persist failed:', e); }
-  }, 400);
-
-  function wireOnce(){
-    const sel = document.getElementById('pm-material');
-    if (!sel) return false;
-    const sld = nearestSlider(sel);
-    const names = listMaterials();
-    if (!names.length) return false;
-
-    populateSelect(sel, names);
-
-    // rebind to avoid duplicates
-    const sel2 = sel.cloneNode(true); sel2.id = sel.id; sel.parentNode.replaceChild(sel2, sel);
-    let sld2 = sld;
-    if (sld){
-      const c = sld.cloneNode(true); c.id = sld.id; sld.parentNode.replaceChild(c, sld); sld2=c;
-    }
-    const onChange = ()=>{
-      if (!sld2) return;
-      let a=parseFloat(sld2.value); if (isNaN(a)) a=Math.min(1,Math.max(0,(parseFloat(sld2.value)||100)/100));
-      const name=sel2.value; if(!name) return;
-      applyOpacityByName(name,a);
-      persist(sel2, sld2);
-    };
-    sel2.addEventListener('change', onChange);
-    sld2?.addEventListener('input', onChange, {passive:true});
-
-    log('wired panel');
-    return true;
-  }
-
-  function start(){
-    log('loaded VERSION_TAG:', VERSION_TAG);
-
-    if (wireOnce()) return;
-
-    window.addEventListener('lm:scene-ready', () => {
-      log('scene-ready received, trying wireOnce...');
-      wireOnce();
-    }, { once: false });
-
-    let tries = 0;
-    const iv = setInterval(() => {
-      if (wireOnce()) {
-        clearInterval(iv);
-      } else {
-        tries++;
-        if (tries > 120) {
-          clearInterval(iv);
-          warn('gave up after', tries, 'tries');
-        } else if (tries % 20 === 0) {
-          log('still trying...', tries);
-        }
+  // Load saved opacity from sheet for the material, else fallback to current scene value
+  async function loadOpacityFor(matName) {
+    // try sheet first
+    try {
+      const row = await (sheet.getOne ? sheet.getOne(matName) : null);
+      if (row && row.opacity != null && row.opacity !== '') {
+        return parseFloat(row.opacity);
       }
-    }, 250);
+    } catch (e) { /* ignore */ }
+
+    // fallback: probe from scene
+    const scene = getScene();
+    let found = null;
+    scene?.traverse?.((obj)=>{
+      const m = obj?.material;
+      if (found != null || !m) return;
+      const mats = Array.isArray(m) ? m : [m];
+      for (const mm of mats) {
+        if (mm && mm.name === matName) { found = (mm.opacity ?? 1); break; }
+      }
+    });
+    return (found != null) ? found : 1.0;
   }
 
-  // kick
-  start();
+  // Persist to sheet
+  async function persistOpacity(matName, opacity) {
+    if (!sheet.upsertOne) return;
+    try {
+      await sheet.upsertOne({ materialKey: matName, opacity: +opacity, updatedAt: Date.now() });
+      log('persisted to sheet:', matName);
+    } catch(e) {
+      console.warn('[mat-orch] persist failed', e);
+    }
+  }
+
+  // Wire UI
+  async function wirePanel() {
+    const pane = document.getElementById('pane-material') || document;
+    const sel = $('#materialSelect', pane) || $('select#materialSelect', pane) || $('select[name="materialSelect"]', pane);
+    const range = $('#opacityRange', pane) || $('input#opacityRange', pane) || $('input[name="opacityRange"]', pane);
+
+    if (!sel || !range) {
+      log('ui not ready yet, retry... UI elements not found (materialSelect/opacityRange)');
+      setTimeout(wirePanel, 200);
+      return;
+    }
+
+    // prevent legacy multiple wiring
+    if (sel.__lmWired && range.__lmWired) return;
+    sel.__lmWired = range.__lmWired = true;
+
+    // programmatic-set guard on the slider
+    const desc = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(range), 'value')
+              || Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value');
+    let programmatic = false;
+    Object.defineProperty(range, 'value', {
+      configurable: true,
+      get(){ return desc.get.call(this); },
+      set(v){ programmatic = true; const r = desc.set.call(this, v); setTimeout(()=>programmatic=false, 0); return r; }
+    });
+
+    // helper to reflect selection into UI without persisting
+    async function reflectFromSheet() {
+      const matName = sel.value;
+      const op = await loadOpacityFor(matName);
+      programmatic = true;
+      range.value = String(op);
+      // fire an input event so any visual binding updates, but ignore due to programmatic flag
+      range.dispatchEvent(new Event('input', {bubbles:true}));
+      setTimeout(()=>programmatic=false, 0);
+      // also preview in scene to stay in sync visually
+      applyOpacityByName(matName, op);
+      log('reflected from sheet:', matName, op);
+    }
+
+    // --- Commit-mode wiring ---
+    if (window.__LM_COMMIT_MODE) {
+      log('wired panel (commit-mode)');
+
+      // selection: reflect only
+      sel.addEventListener('change', () => { reflectFromSheet(); });
+
+      // input: preview only (no persist)
+      let lastPreviewAt = 0;
+      range.addEventListener('input', (ev)=>{
+        if (programmatic) return; // ignore programmatic updates
+        const now = performance.now();
+        if (now - lastPreviewAt < 16) return; // ~60fps ceiling
+        lastPreviewAt = now;
+        applyOpacityByName(sel.value, range.value);
+      });
+
+      // change/blur: commit once
+      let commitTimer = null;
+      const scheduleCommit = ()=>{
+        if (programmatic) return;
+        if (commitTimer) clearTimeout(commitTimer);
+        commitTimer = setTimeout(async ()=>{
+          await persistOpacity(sel.value, range.value);
+        }, 50);
+      };
+      range.addEventListener('change', scheduleCommit);
+      range.addEventListener('blur', scheduleCommit);
+
+      // first reflect for initial selection
+      reflectFromSheet();
+      return;
+    }
+
+    // --- Legacy wiring (if commit-mode is off) ---
+    log('wired panel (legacy)');
+    sel.addEventListener('change', async ()=>{
+      const op = await loadOpacityFor(sel.value);
+      range.value = String(op);
+      applyOpacityByName(sel.value, op);
+      await persistOpacity(sel.value, op); // legacy kept saving on select
+    });
+    range.addEventListener('input', ()=>{
+      applyOpacityByName(sel.value, range.value);
+      persistOpacity(sel.value, range.value);
+    });
+  }
+
+  // Try wire once scene-ready or on DOM ready
+  document.addEventListener('DOMContentLoaded', wirePanel);
+  window.addEventListener('lm:scene-ready', wirePanel);
+  // Also a delayed retry loop like existing logs indicate
+  let tries = 0;
+  (function retry(){
+    tries++;
+    if (tries>60) return;
+    wirePanel();
+    setTimeout(retry, 250);
+  })();
+
+  log('loaded VERSION_TAG: V6_15_COMMIT_MODE');
 })();
