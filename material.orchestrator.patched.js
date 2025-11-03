@@ -12,14 +12,13 @@
   // Config: selector discovery (kept conservative to avoid breaking UI)
   const SEL = {
     panelRoot:    "#materialTab, #materialsTab, [data-lm='materials-tab']",
-    materialKey:  "#materialSelect, #pm-material, select[data-lm='material-key']",
-    opacity:      "#opacityRange, #pm-opacity, input[data-lm='opacity']",
-    unlit:        "#unlitCheckbox, #pm-unlit-like, input[data-lm='unlit']",
-    doubleSided:  "#doubleSidedCheckbox, #pm-double-sided, input[data-lm='doubleSided']",
+    materialKey:  "#materialSelect, select[data-lm='material-key']",
+    opacity:      "#opacityRange, input[data-lm='opacity']",
+    unlit:        "#unlitCheckbox, input[data-lm='unlit']",
+    doubleSided:  "#doubleSidedCheckbox, input[data-lm='doubleSided']",
     colorKey:     "#colorKeyInput, input[data-lm='colorKey']",
-    chromaEnable: "#chromaEnable, #pm-chroma-enable, input[data-lm='chromaEnable']",
-    threshold:    "#colorThreshold, #pm-chroma-threshold, input[data-lm='threshold']",
-    feather:      "#colorFeather, #pm-chroma-feather, input[data-lm='feather']",
+    threshold:    "#colorThreshold, input[data-lm='threshold']",
+    feather:      "#colorFeather, input[data-lm='feather']",
     saveBtn:      "#matSaveBtn, button[data-lm='save']",
     revertBtn:    "#matRevertBtn, button[data-lm='revert']",
     status:       "#matStatus, [data-lm='status']"
@@ -273,4 +272,104 @@
   if (document.readyState === "complete" || document.readyState === "interactive"){
     boot();
   }
+})();
+
+
+
+/* ===============================
+ * LociMyu Material UI Hotfix A3.3
+ * - Deep scan through shadow DOM for the "Select material" <select>
+ * - If found and GLB materials are detectable in scene, populate options
+ * - Non-destructive: does not change existing orchestrator logic
+ * =============================== */
+(function(){
+  const TAG = "[mat-orch.hotfix.A3.3]";
+  // Deep query across shadow roots
+  function qsAllDeep(root, sel){
+    const out=[];
+    const walk=(node)=>{
+      if(!node) return;
+      try{ node.querySelectorAll(sel).forEach(n=>out.push(n)); }catch{}
+      const kids = node.children || [];
+      for(const c of kids){
+        if(c.shadowRoot) walk(c.shadowRoot);
+        walk(c);
+      }
+    };
+    walk(root || document);
+    return out;
+  }
+  function findMaterialSelect(){
+    const CANDS = [
+      '#pm-material',
+      'select[aria-label="Select material"]',
+      '#materialSelect', '#mat-select', '#matKeySelect',
+      'select[name*="material"]', 'select[id*="material"]'
+    ];
+    for(const s of CANDS){
+      const list = qsAllDeep(document, s);
+      if(list.length) return list[0];
+    }
+    return null;
+  }
+  function getScene(){
+    const br = window.__LM_VIEWER_BRIDGE__ || window.LM_VIEWER_BRIDGE || window.viewerBridge || null;
+    return (br && typeof br.getScene === 'function') ? br.getScene() : (window.__lm && window.__lm.scene) || null;
+  }
+  function collectGlbMats(scene){
+    const map = new Map();
+    if (!scene || typeof scene.traverse !== 'function') return [];
+    scene.traverse(obj=>{
+      if(!obj || !obj.isMesh) return;
+      const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+      mats.forEach((m,i)=>{
+        if(!m) return;
+        const rawName = (m.name || "").trim();
+        // Exclude overlay/basic materials with no name
+        if(m.type === "MeshBasicMaterial" && !rawName) return;
+        const key = m.uuid || m.id || rawName || `${obj.uuid}:${i}`;
+        const label = rawName || (obj.name ? `${obj.name} (${m.type||"Material"})` : (m.type||"Material"));
+        if (!map.has(key)) map.set(key, label);
+      });
+    });
+    return Array.from(map, ([key,label]) => ({ key, label }));
+  }
+  function pumpOnce(){
+    const sel = findMaterialSelect();
+    const scene = getScene();
+    if(!sel || !scene) {
+      // console.log(TAG, "waiting… sel:", !!sel, "scene:", !!scene);
+      return false;
+    }
+    if (sel.__lm_mat_pumped) return true;
+    const mats = collectGlbMats(scene);
+    if(!mats.length) return false;
+    // preserve placeholder if present
+    const placeholder = Array.from(sel.options || []).find(o => o.value === "" || /Select material/i.test(o.textContent||""));
+    sel.innerHTML = "";
+    if (placeholder) sel.appendChild(placeholder);
+    const frag = document.createDocumentFragment();
+    for(const r of mats){
+      const opt = document.createElement("option");
+      opt.value = r.key;
+      opt.textContent = r.label;
+      frag.appendChild(opt);
+    }
+    sel.appendChild(frag);
+    sel.__lm_mat_pumped = true;
+    console.log(TAG, "pumped", mats.length, "materials into select");
+    return true;
+  }
+  // Try repeatedly for a short period, and on scene/tab events
+  let tries = 0;
+  const t = setInterval(()=>{
+    tries++;
+    if (pumpOnce() || tries > 60) clearInterval(t);
+  }, 250);
+
+  document.addEventListener("lm:scene-ready", () => setTimeout(pumpOnce, 50));
+  document.addEventListener("lm:tab-change", (ev) => {
+    const name = ev?.detail || ev?.target?.dataset?.tab || "";
+    if (/material/i.test(String(name))) setTimeout(pumpOnce, 50);
+  });
 })();
