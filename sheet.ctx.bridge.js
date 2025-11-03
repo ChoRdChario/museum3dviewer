@@ -1,44 +1,60 @@
-
-// LociMyu - Sheet Context Bridge (sticky, deduped)
-// VERSION_TAG: V6_16f_SHEET_CTX_STICKY
+/* sheet.ctx.bridge.js — clean rebuild (2025-10-30)
+   Emits sheet context events once globals are available.
+*/
 (function(){
   if (window.__lm_sheet_ctx_bridge_installed) return;
   window.__lm_sheet_ctx_bridge_installed = true;
 
-  const log=(...a)=>{try{console.log('[sheet-ctx-bridge]',...a);}catch(_){}}
-  log('ready');
+  function log(){ try{ console.log.apply(console, ['[sheet-ctx-bridge]'].concat([].slice.call(arguments))); }catch(e){} }
 
-  let last = { spreadsheetId: undefined, sheetGid: undefined };
+  var lastSid = null;
+  var lastGid = null;
+  var firedInitial = false;
 
   function readCtx(){
-    const sid = (window.currentSpreadsheetId || window.spreadsheetId || null);
-    const gid = (typeof window.currentSheetGid !== 'undefined' ? window.currentSheetGid :
-                (typeof window.sheetGid !== 'undefined' ? window.sheetGid : null));
-    return { spreadsheetId: sid, sheetGid: gid };
+    var sid = window.currentSpreadsheetId || window.spreadsheetId || null;
+    var gid = (typeof window.currentSheetId !== 'undefined') ? window.currentSheetId
+            : (typeof window.sheetGid !== 'undefined') ? window.sheetGid
+            : null;
+    return { sid: sid, gid: gid };
   }
 
-  function emit(type, detail){
-    try {
-      const ev = new CustomEvent(type, { detail, bubbles: true, composed: true });
-      window.dispatchEvent(ev);
-    } catch (e) {
-      console.warn('[sheet-ctx-bridge] dispatch failed', e);
+  function fire(type, sid, gid){
+    try{
+      var detail = { spreadsheetId: sid, sheetGid: gid };
+      var evDoc = new CustomEvent(type, { detail: detail, bubbles: true, composed: true });
+      document.dispatchEvent(evDoc);
+      var evWin = new CustomEvent(type, { detail: detail, bubbles: true, composed: true });
+      window.dispatchEvent(evWin);
+      log(type, detail);
+    }catch(e){
+      console.warn('[sheet-ctx-bridge] fire error', e);
     }
   }
 
   function tick(){
-    const ctx = readCtx();
-    if (!ctx.spreadsheetId) return; // avoid noise before first bind
-
-    if (ctx.spreadsheetId !== last.spreadsheetId || ctx.sheetGid !== last.sheetGid){
-      last = ctx;
-      window.__lm_last_sheet_ctx = ctx;
-      emit('lm:sheet-context', ctx);
-      log('lm:sheet-context', ctx);
+    try{
+      var ctx = readCtx();
+      if (ctx.sid && (ctx.gid !== null && typeof ctx.gid !== 'undefined')){
+        if (!firedInitial){
+          fire('lm:sheet-context', ctx.sid, ctx.gid);
+          firedInitial = true;
+          lastSid = ctx.sid; lastGid = ctx.gid;
+        }else if (ctx.sid !== lastSid || ctx.gid !== lastGid){
+          fire('lm:sheet-changed', ctx.sid, ctx.gid);
+          lastSid = ctx.sid; lastGid = ctx.gid;
+        }
+      }
+    }catch(e){
+      console.warn('[sheet-ctx-bridge] tick error', e);
     }
   }
 
-  const start = ()=> setInterval(tick, 400);
+  function start(){
+    tick();
+    window.__lm_sheet_ctx_bridge_timer = window.setInterval(tick, 400);
+  }
+
   if (document.readyState === 'complete' || document.readyState === 'interactive'){
     start();
   }else{
