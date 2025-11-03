@@ -1,145 +1,150 @@
 
 /**
  * viewer.bridge.module.js
- * Resilient bridge that discovers a THREE.Scene and exposes material helpers.
+ * Runtime bridge that exposes THREE, Scene, Camera, Renderer and Materials to the UI layer
+ * without touching your existing viewer code. Drop-in replacement.
+ *
+ * Strategy
+ * - Import the SAME ESM 'three' module as your viewer (same specifier -> same singleton instance)
+ * - Monkey-patch WebGLRenderer.render() once to capture (scene, camera) on first render
+ * - Publish globals on window and dispatch:
+ *      - 'lm:scene-ready'  with { scene, THREE }
+ *      - 'lm:materials-ready' with { keys }
+ * - Build a stable material index {list, byKey} and store at window.__LM_MATERIALS__
  */
-(() => {
-  const LOG_PREFIX = '[viewer-bridge]';
-  const STATE = {
-    scene: null,
-    tried: 0,
-    maxTries: 600, // ~60s
-    intervalMs: 100,
-    materialsReady: false,
-  };
 
-  const log = (...args) => console.log(LOG_PREFIX, ...args);
-  const warn = (...args) => console.warn(LOG_PREFIX, ...args);
+import * as THREE from 'three';
 
-  function getThree() {
-    if (window.THREE) return window.THREE;
-    try { if (globalThis.THREE) return globalThis.THREE; } catch {}
-    return null;
+// Make sure the app code and UI can see the same THREE
+if (!('THREE' in window)) {
+  // expose once
+  Object.defineProperty(window, 'THREE', { value: THREE, writable: false, configurable: true });
+}
+
+const LM = (window.__lm = window.__lm || {});
+LM.THREE = THREE;
+
+// Flag to ensure we patch only once
+let patched = false;
+let published = false;
+
+// Utility: once helper
+function once(fn) {
+  let done = false;
+  return (...args) => { if (done) return; done = true; return fn(...args); };
+}
+
+// Publish globals + events
+const publishScene = once((scene, camera, renderer) => {
+  try {
+    window.__lm = Object.assign(window.__lm || {}, { version: 'bridge.A2.6', THREE, scene, camera, renderer });
+    window.__THREE_SCENES__ = [ scene ];
+    // Dispatch scene-ready
+    window.dispatchEvent(new CustomEvent('lm:scene-ready', { detail: { scene, THREE } }));
+    // Extract and publish materials
+    const mats = extractMaterials(scene);
+    window.__LM_MATERIALS__ = mats;
+    window.dispatchEvent(new CustomEvent('lm:materials-ready', { detail: { keys: mats.list.map(m=>m.key) } }));
+    published = true;
+    console.log('[viewer-bridge] published scene & materials', mats.meta);
+  } catch (err) {
+    console.warn('[viewer-bridge] publish failed', err);
   }
+});
 
-  function findSceneCandidates() {
-    const cand = [];
-    if (window.__lm && window.__lm.scene) cand.push(window.__lm.scene);
-    if (window.lmScene) cand.push(window.lmScene);
-    if (window.__LOCIMYU_SCENE__) cand.push(window.__LOCIMYU_SCENE__);
-    if (window.__THREE_SCENES__ && Array.isArray(window.__THREE_SCENES__)) {
-      cand.push(...window.__THREE_SCENES__);
-    }
-    try {
-      const canvases = Array.from(document.querySelectorAll('canvas'));
-      canvases.forEach((cv) => {
-        if (cv.__webglrenderer && cv.__webglrenderer.scene) {
-          cand.push(cv.__webglrenderer.scene);
-        }
-      });
-    } catch {}
-    return cand.filter(Boolean);
-  }
-
-  function isScene(obj, THREE) {
-    try { return !!THREE && obj && (obj.isScene || obj.type === 'Scene'); } catch { return false; }
-  }
-
-  function collectMaterialMap(scene) {
-    const map = new Map();
-    scene.traverse((obj) => {
-      if (obj.material) {
-        const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
-        mats.forEach((m) => {
-          const key = (m.name && String(m.name)) || (m.uuid && String(m.uuid)) || 'material';
-          if (!map.has(key)) map.set(key, m);
-        });
-      }
-    });
-    return map;
-  }
-
-  function publishMaterials(scene, THREE) {
-    const mm = collectMaterialMap(scene);
-    const keys = Array.from(mm.keys());
-    const api = {
-      keys: () => keys.slice(),
-      apply: (opts) => {
-        if (!opts || !opts.key) return false;
-        const mat = mm.get(opts.key);
-        if (!mat) return false;
-        if (typeof opts.opacity === 'number') {
-          mat.transparent = opts.opacity < 0.999;
-          mat.opacity = Math.min(1, Math.max(0, opts.opacity));
-        }
-        if (typeof opts.doubleSided === 'boolean') {
-          mat.side = opts.doubleSided ? THREE.DoubleSide : THREE.FrontSide;
-        }
-        if (typeof opts.unlitLike === 'boolean') {
-          if (opts.unlitLike && !mat.___lm_backup) {
-            const back = mat.clone();
-            back.name = mat.name || 'lit-backup';
-            mat.___lm_backup = back;
-            // simulate unlit by reducing metalness/roughness influence if present
-            if ('metalness' in mat) mat.metalness = 0;
-            if ('roughness' in mat) mat.roughness = 1;
-            if ('envMapIntensity' in mat) mat.envMapIntensity = 0;
-          } else if (!opts.unlitLike && mat.___lm_backup) {
-            const back = mat.___lm_backup;
-            Object.assign(mat, back);
-            delete mat.___lm_backup;
-          }
-        }
-        if ('needsUpdate' in mat) mat.needsUpdate = true;
-        return true;
-      },
-    };
-    window.__LM_MATERIALS__ = api;
-    if (!STATE.materialsReady) {
-      STATE.materialsReady = true;
-      window.dispatchEvent(new CustomEvent('lm:materials-ready', { detail: { count: keys.length } }));
-    }
-    log('materials ready', keys.length);
-  }
-
-  function tryBind() {
-    const THREE = getThree();
-    const candidates = findSceneCandidates();
-    for (const c of candidates) {
-      if (isScene(c, THREE)) {
-        STATE.scene = c;
-        break;
-      }
-    }
-    if (STATE.scene && THREE) {
-      publishMaterials(STATE.scene, THREE);
-      return true;
-    }
-    return false;
-  }
-
-  function startPolling() {
-    const tid = setInterval(() => {
-      if (tryBind()) {
-        clearInterval(tid);
-      } else {
-        STATE.tried++;
-        if (STATE.tried % 20 === 0) warn('still waiting for scene/THREE...', { tried: STATE.tried });
-        if (STATE.tried > STATE.maxTries) { clearInterval(tid); warn('gave up waiting for scene'); }
-      }
-    }, STATE.intervalMs);
-  }
-
-  window.addEventListener('lm:scene-ready', () => {
-    log('lm:scene-ready');
-    setTimeout(() => { tryBind(); }, 50);
+// Material extractor (handles ArrayMaterial)
+function extractMaterials(scene) {
+  const seen = new Map(); // uuid -> material
+  scene.traverse(obj => {
+    const m = obj.material;
+    if (!m) return;
+    const push = (mat)=> { if (mat && !seen.has(mat.uuid)) seen.set(mat.uuid, mat); };
+    Array.isArray(m) ? m.forEach(push) : push(m);
   });
 
-  log('bridge loaded');
-  if (!tryBind()) startPolling();
+  const nameCount = Object.create(null);
+  const list = [];
+  for (const mat of seen.values()) {
+    const base = (mat.name && String(mat.name).trim()) || '';
+    let key = base || mat.uuid;
+    if (base) {
+      const n = (nameCount[base] = (nameCount[base] || 0) + 1);
+      if (n > 1) key = `${base}#${n}`;
+    }
+    list.push({ key, name: base, uuid: mat.uuid, type: mat.type || 'Material' });
+  }
+  list.sort((a,b)=> (a.name||'').localeCompare(b.name||'') || a.key.localeCompare(b.key));
 
-  window.__LM_BRIDGE_DEBUG__ = () => {
-    const THREE = getThree();
-    return { hasTHREE: !!THREE, scene: !!STATE.scene, tried: STATE.tried, keys: (window.__LM_MATERIALS__?.keys()||[]) };
+  const byKey = {};
+  const byUuid = {};
+  for (const item of list) {
+    const mat = [...seen.values()].find(m=>m.uuid===item.uuid);
+    byKey[item.key] = mat;
+    byUuid[item.uuid] = mat;
+  }
+
+  return {
+    list,
+    byKey,
+    byUuid,
+    meta: { extractedAt: Date.now(), count: list.length }
   };
-})();
+}
+
+// Patch WebGLRenderer.render to intercept the first render call
+function patchRenderer() {
+  if (patched) return;
+  const proto = THREE.WebGLRenderer && THREE.WebGLRenderer.prototype;
+  if (!proto || !proto.render) {
+    // three not yet fully initialized; try again on next tick
+    setTimeout(patchRenderer, 50);
+    return;
+  }
+  patched = true;
+  const original = proto.render;
+  proto.render = function patchedRender(scene, camera) {
+    try {
+      if (!published && scene && camera) {
+        publishScene(scene, camera, this);
+      }
+    } catch (err) {
+      console.warn('[viewer-bridge] intercept failed', err);
+    }
+    return original.apply(this, arguments);
+  };
+  console.log('[viewer-bridge] render() patched');
+}
+
+// In case the app already rendered before we loaded, try to find scene heuristically
+function heuristicFindScene() {
+  try {
+    // Common stash
+    if (window.__lm && window.__lm.scene && !published) {
+      publishScene(window.__lm.scene, window.__lm.camera, window.__lm.renderer);
+      return;
+    }
+    const candidates = [];
+    // Look for Object3D instances added to window by apps
+    for (const k of Object.keys(window)) {
+      const v = window[k];
+      if (v && v.isScene) candidates.push(v);
+    }
+    if (candidates.length && !published) {
+      publishScene(candidates[0], null, null);
+    }
+  } catch {}
+}
+
+// Kick off
+patchRenderer();
+setTimeout(heuristicFindScene, 500);
+setTimeout(()=>{ if (!published) patchRenderer(); }, 1000);
+
+// For debugging from console
+window.__LM_BRIDGE_DEBUG__ = function() {
+  return {
+    hasTHREE: !!window.THREE,
+    scene: !!(window.__lm && window.__lm.scene),
+    published, patched
+  };
+};
