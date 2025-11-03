@@ -1,19 +1,17 @@
 /*
  * material.orchestrator.js
- * V6_16g_SAFE_UI_PIPELINE.A2.2
+ * V6_16g_SAFE_UI_PIPELINE.A2.3
  *
- * 追加: viewerBridge が per-material API を持たない場合に備え、
- *      起動時に "互換シム(shim)" を自動注入して描画反映を行う。
- * - setMaterialOpacity(key, val)     -> traverse Scene, material.name===key の opacity を更新
- * - setMaterialFlags(key, {doubleSided, unlit})
- * - setChromaKey(key, {enable,color,tolerance,feather})  (no-op placeholder; 将来対応)
- *
- * 既存の A2.1 の強化点は維持。
+ * 変更点:
+ * - THREE/scene の探索強化（viewerBridge.root / model / gltf.scene / viewer.scene / meshes[] 等）
+ * - scene が見つからない場合でも、viewerBridge.meshes / objects / children 配列を総当たりして
+ *   material.name による反映を行うフォールバックを追加
+ * - デバッグ用ダンプ関数 __LM_DEBUG_DUMP を追加
  */
 
 (() => {
   const TAG = '[mat-orch]';
-  const VER = 'V6_16g_SAFE_UI_PIPELINE.A2.2';
+  const VER = 'V6_16g_SAFE_UI_PIPELINE.A2.3';
 
   const state = {
     ui: null,
@@ -26,7 +24,6 @@
     viewerReady: false,
     lastLog: new Map(),
     mo: null,
-    threeReady: false,
   };
 
   const hardLog = (msg, ...rest) => console.log(`${TAG} ${msg}`, ...rest);
@@ -40,23 +37,42 @@
     }
   };
   const clamp01 = (n)=>{ n = Number(n); if (!Number.isFinite(n)) return 1; return Math.max(0, Math.min(1, n)); };
+  const toBool = (v, d=false) => (v===true||v==='true'||v===1||v==='1') ? true : (v===false||v==='false'||v===0||v==='0'?false:d);
+
+  // ---------- Debug helper ----------
+  window.__LM_DEBUG_DUMP = () => {
+    const vb = window.viewerBridge || {};
+    const keys = Object.keys(vb);
+    const cand = [
+      vb.scene, vb.getScene && vb.getScene(), vb.viewer && vb.viewer.scene,
+      vb.root, vb.model, vb.gltf && vb.gltf.scene, vb.sceneRoot,
+      vb.three && (vb.three.scene||vb.three.root),
+      window.__lm_scene, window.__LM_SCENE
+    ].filter(Boolean);
+    return { vbKeys: keys, candidates: cand.map((x,i)=>({i, hasTraverse: !!(x&&x.traverse), type: (x && x.type)||typeof x })), THREE: !!window.THREE };
+  };
 
   // ---------- THREE scene helpers (shim) ----------
   function locateThreeScene() {
     const T = window.THREE;
     if (!T) return null;
-    // パス候補
+    const vb = window.viewerBridge || {};
     const cand = [
-      window.viewerBridge && window.viewerBridge.scene,
-      window.viewerBridge && typeof window.viewerBridge.getScene === 'function' && window.viewerBridge.getScene(),
-      window.viewerBridge && window.viewerBridge.viewer && window.viewerBridge.viewer.scene,
+      vb.scene,
+      typeof vb.getScene === 'function' && vb.getScene(),
+      vb.viewer && vb.viewer.scene,
+      vb.root,
+      vb.model,
+      vb.gltf && vb.gltf.scene,
+      vb.sceneRoot,
+      vb.three && (vb.three.scene || vb.three.root),
       window.__lm_scene,
       window.__LM_SCENE,
     ].filter(Boolean);
     for (const s of cand) {
       if (s && typeof s.traverse === 'function') return s;
     }
-    // 最後の手段: グローバルから Scene を総当たり（重いので一度だけ）
+    // 最後の手段: window.* を軽くスキャン
     try {
       for (const k of Object.keys(window)) {
         const v = window[k];
@@ -66,9 +82,25 @@
     return null;
   }
 
+  // 配列ベースの総当たり（scene がなくても使える）
+  function foreachCandidates(cb) {
+    const vb = window.viewerBridge || {};
+    const pools = [];
+    if (vb.meshes && Array.isArray(vb.meshes)) pools.push(vb.meshes);
+    if (vb.objects && Array.isArray(vb.objects)) pools.push(vb.objects);
+    if (vb.children && Array.isArray(vb.children)) pools.push(vb.children);
+    if (vb.viewer && vb.viewer.children && Array.isArray(vb.viewer.children)) pools.push(vb.viewer.children);
+    let hit = 0;
+    for (const arr of pools) {
+      for (const obj of arr) {
+        try { cb(obj); hit++; } catch {}
+      }
+    }
+    return hit;
+  }
+
   function ensureViewerShims() {
     if (!window.viewerBridge) return;
-    // 既に実装があれば触らない
     const needOpacity = (typeof window.viewerBridge.setMaterialOpacity !== 'function') &&
                         (typeof window.viewerBridge.setOpacityForMaterial !== 'function') &&
                         (typeof window.viewerBridge.setMatOpacity !== 'function') &&
@@ -83,69 +115,67 @@
 
     const T = window.THREE;
     const scene = locateThreeScene();
-    if (!T || !scene) { logOnce('shim-wait', 'THREE/scene not ready; deferred shim'); return; }
+    // シーンがなくても、配列フォールバックで動作可能にする
+    const hasAnyPool = !!foreachCandidates(()=>{});
 
-    // 実装: 名前一致で material を集めて反映
-    function findMaterialsByName(name) {
-      const mats = new Set();
-      scene.traverse(obj => {
-        const mat = obj && obj.material;
-        if (!mat) return;
-        if (Array.isArray(mat)) {
-          for (const m of mat) if (m && m.name === name) mats.add(m);
-        } else {
-          if (mat.name === name) mats.add(mat);
-        }
-      });
-      return Array.from(mats);
+    if (!T && !scene && !hasAnyPool) { logOnce('shim-wait', 'THREE/scene not ready; deferred shim'); return; }
+
+    function touchMaterial(m, fn) {
+      if (!m) return;
+      if (Array.isArray(m)) { for (const x of m) fn(x); }
+      else fn(m);
+    }
+
+    function visitAllMaterials(visitor) {
+      let count = 0;
+      if (scene) {
+        scene.traverse(obj => {
+          touchMaterial(obj && obj.material, m => { visitor(m, obj); count++; });
+        });
+      }
+      // 追加プールを総当たり
+      foreachCandidates(obj => touchMaterial(obj && obj.material, m => { visitor(m, obj); count++; }));
+      return count;
     }
 
     function applyOpacityByName(name, value) {
       const v = clamp01(value);
-      const mats = findMaterialsByName(name);
-      if (!mats.length) { logOnce('no-mat', `material "${name}" not found`); return false; }
-      for (const m of mats) {
+      let applied = 0;
+      visitAllMaterials((m) => {
+        if (!m || m.name !== name) return;
         m.transparent = true;
         if ('opacity' in m) m.opacity = v;
         m.needsUpdate = true;
-      }
-      hardLog(`shim opacity ${name} -> ${v} (x${mats.length})`);
-      return true;
+        applied++;
+      });
+      if (applied) hardLog(`shim opacity ${name} -> ${v} (x${applied})`);
+      else logOnce('no-mat', `material "${name}" not found`);
+      return applied>0;
     }
 
     function applyFlagsByName(name, flags) {
-      const mats = findMaterialsByName(name);
-      if (!mats.length) { logOnce('no-mat', `material "${name}" not found`); return false; }
-      for (const m of mats) {
+      let applied = 0;
+      visitAllMaterials((m) => {
+        if (!m || m.name !== name) return;
         if (flags && 'doubleSided' in flags && window.THREE) {
           m.side = flags.doubleSided ? window.THREE.DoubleSide : window.THREE.FrontSide;
         }
         if (flags && 'unlit' in flags) {
-          // 近似: ライティングの影響を軽減
           m.lights = !flags.unlit;
-          // トーンマッピングの影響を切る
           if ('toneMapped' in m) m.toneMapped = !flags.unlit;
-          m.needsUpdate = true;
         }
-      }
-      hardLog(`shim flags ${name} ->`, flags);
-      return true;
+        m.needsUpdate = true;
+        applied++;
+      });
+      if (applied) hardLog(`shim flags ${name} ->`, flags, `(x${applied})`);
+      else logOnce('no-mat', `material "${name}" not found`);
+      return applied>0;
     }
 
-    // シム注入
-    if (needOpacity) {
-      window.viewerBridge.setMaterialOpacity = (key, val) => applyOpacityByName(String(key), val);
-    }
-    if (needFlags) {
-      window.viewerBridge.setMaterialFlags = (key, payload) => applyFlagsByName(String(key), payload || {});
-    }
-    if (needChroma) {
-      window.viewerBridge.setChromaKey = (key, payload) => {
-        // ここでは no-op（将来必要なら Shader/alphaTest 等を適用）
-        hardLog('shim chromaKey (placeholder)', key, payload);
-        return true;
-      };
-    }
+    if (needOpacity) window.viewerBridge.setMaterialOpacity = (key, val) => applyOpacityByName(String(key), val);
+    if (needFlags)   window.viewerBridge.setMaterialFlags   = (key, payload) => applyFlagsByName(String(key), payload||{});
+    if (needChroma)  window.viewerBridge.setChromaKey       = (key, payload) => { hardLog('shim chromaKey (placeholder)', key, payload); return true; };
+
     hardLog('viewer shims installed');
   }
 
@@ -160,12 +190,10 @@
       const tick = () => {
         if (window.viewerBridge && typeof window.viewerBridge.listMaterials === 'function') {
           state.viewerReady = true;
-          ensureViewerShims(); // ビューアが生えたらシム試行
+          ensureViewerShims();
           return res(window.viewerBridge);
         }
-        if (performance.now() - t0 > maxMs) {
-          return rej(new Error('viewerBridge not ready'));
-        }
+        if (performance.now() - t0 > maxMs) return rej(new Error('viewerBridge not ready'));
         logOnce('wait-viewer', 'viewer not ready yet, retry...');
         setTimeout(tick, 600);
       };
@@ -173,32 +201,17 @@
     });
   }
   function waitForSheetCtx(maxMs = 20000) {
-    if (window.__lm_last_sheet_ctx) {
-      state.ctx = window.__lm_last_sheet_ctx;
-      return Promise.resolve(state.ctx);
-    }
+    if (window.__lm_last_sheet_ctx) { state.ctx = window.__lm_last_sheet_ctx; return Promise.resolve(state.ctx); }
     const t0 = performance.now();
     return new Promise((res, rej) => {
       const on = (e) => {
         const ctx = e.detail || null;
-        if (ctx) {
-          window.__lm_last_sheet_ctx = ctx;
-          state.ctx = ctx;
-          removeEventListener('lm:sheet-context', on);
-          return res(ctx);
-        }
+        if (ctx) { window.__lm_last_sheet_ctx = ctx; state.ctx = ctx; removeEventListener('lm:sheet-context', on); return res(ctx); }
       };
       addEventListener('lm:sheet-context', on);
       const tick = () => {
-        if (window.__lm_last_sheet_ctx) {
-          removeEventListener('lm:sheet-context', on);
-          state.ctx = window.__lm_last_sheet_ctx;
-          return res(state.ctx);
-        }
-        if (performance.now() - t0 > maxMs) {
-          removeEventListener('lm:sheet-context', on);
-          return rej(new Error('sheet-context not available'));
-        }
+        if (window.__lm_last_sheet_ctx) { removeEventListener('lm:sheet-context', on); state.ctx = window.__lm_last_sheet_ctx; return res(state.ctx); }
+        if (performance.now() - t0 > maxMs) { removeEventListener('lm:sheet-context', on); return rej(new Error('sheet-context not available')); }
         logOnce('wait-sheet', 'sheet-context not ready yet, retry...');
         setTimeout(tick, 800);
       };
@@ -220,15 +233,11 @@
   function pickUI() {
     let perMatPanel = findPanelByHeadingText('per-material opacity');
     if (!perMatPanel) {
-      const opt = Array.from(document.querySelectorAll('select')).find(s => {
-        return (s.textContent || '').toLowerCase().includes('select material');
-      });
+      const opt = Array.from(document.querySelectorAll('select')).find(s => (s.textContent || '').toLowerCase().includes('select material'));
       if (opt) perMatPanel = opt.closest('section,div,fieldset,article') || document.body;
     }
     const materialSelect = perMatPanel ? perMatPanel.querySelector('select') : null;
-    const opacityRange =
-      (perMatPanel ? perMatPanel.querySelector('input[type="range"]') : null) ||
-      document.querySelector('input[type="range"]');
+    const opacityRange = (perMatPanel ? perMatPanel.querySelector('input[type="range"]') : null) || document.querySelector('input[type="range"]');
 
     let shadingPanel = findPanelByHeadingText('shading');
     const doubleSided = shadingPanel ? shadingPanel.querySelector('input[type="checkbox"]') : null;
@@ -255,21 +264,13 @@
     if (state.ui) return;
     const tryPick = () => {
       const ui = pickUI();
-      if (ui) {
-        state.ui = ui;
-        hardLog(`${VER} ui discovered`);
-        maybeWire();
-        return true;
-      }
+      if (ui) { state.ui = ui; hardLog(`${VER} ui discovered`); maybeWire(); return true; }
       return false;
     };
     if (tryPick()) return;
     if (state.mo) return;
     state.mo = new MutationObserver(() => {
-      if (tryPick()) {
-        state.mo.disconnect();
-        state.mo = null;
-      }
+      if (tryPick()) { state.mo.disconnect(); state.mo = null; }
     });
     state.mo.observe(document.body, { childList: true, subtree: true });
     logOnce('wait-ui', 'ui not ready; observing...');
@@ -310,7 +311,7 @@
     const refresh = () => {
       try {
         if (!state.viewerReady || !window.viewerBridge) return;
-        ensureViewerShims(); // viewer/THREE が後から用意されてもOK
+        ensureViewerShims();
         const raw = window.viewerBridge.listMaterials && window.viewerBridge.listMaterials();
         const mats = normalizeMaterials(raw);
         const sig  = sigOf(mats);
@@ -329,6 +330,7 @@
       setTimeout(refresh, 100);
       setTimeout(refresh, 500);
       setTimeout(refresh, 1200);
+      setTimeout(()=>ensureViewerShims(), 50);
     });
     setInterval(refresh, 1200);
   }
@@ -342,11 +344,7 @@
       if (!rows || !rows.length) return null;
       const filtered = rows.filter(r => (r.materialKey ?? r.key) === materialKey);
       if (!filtered.length) return null;
-      filtered.sort((a,b) => {
-        const ta = Date.parse(a.updatedAt || '') || 0;
-        const tb = Date.parse(b.updatedAt || '') || 0;
-        return tb - ta;
-      });
+      filtered.sort((a,b) => (Date.parse(b.updatedAt||'0') - Date.parse(a.updatedAt||'0')));
       const latest = filtered[0];
       return {
         materialKey,
@@ -359,38 +357,6 @@
         chromaFeather: Number.isFinite(Number(latest.chromaFeather)) ? Number(latest.chromaFeather) : 0,
       };
     } catch { return null; }
-  }
-  function toBool(v, d=false) {
-    if (typeof v === 'boolean') return v;
-    if (v === 'true' || v === '1' || v === 1) return true;
-    if (v === 'false' || v === '0' || v === 0) return false;
-    return d;
-  }
-  async function saveDebounced(ctx, payload) {
-    clearTimeout(state.saveTimer);
-    state.saveTimer = setTimeout(async () => {
-      try {
-        const api = window.materialsSheetBridge;
-        if (!api || typeof api.upsertOne !== 'function') return;
-        if (!ctx || !ctx.spreadsheetId) { logOnce('skip-save', 'ctx missing; skip save'); return; }
-        const row = {
-          materialKey: payload.materialKey,
-          opacity: clamp01(payload.opacity),
-          doubleSided: !!payload.doubleSided,
-          unlit: !!payload.unlit,
-          chromaEnable: !!payload.chromaEnable,
-          chromaColor: payload.chromaColor || '#000000',
-          chromaTolerance: Number(payload.chromaTolerance || 0),
-          chromaFeather: Number(payload.chromaFeather || 0),
-          updatedAt: new Date().toISOString(),
-          updatedBy: (window.__lm_identity && window.__lm_identity.email) || 'unknown',
-        };
-        await api.upsertOne(ctx, row);
-        logOnce('save-ok', `saved ${row.materialKey}`);
-      } catch (e) {
-        warnLog('save failed', e);
-      }
-    }, 400);
   }
 
   // --------- UI <-> Model ---------
@@ -406,9 +372,7 @@
     if (ui.chromaFeather   && Number.isFinite(vals.chromaFeather))   ui.chromaFeather.value   = String(vals.chromaFeather);
   }
 
-  function tryCall(fn, ...args) {
-    try { return fn && fn(...args); } catch(e) { warnLog('viewer call failed', e); }
-  }
+  function tryCall(fn, ...args) { try { return fn && fn(...args); } catch(e) { warnLog('viewer call failed', e); } }
 
   function applyToModel(key, vals) {
     if (!key || !window.viewerBridge) { logOnce('no-key', 'no selected material; skip apply'); return; }
@@ -424,24 +388,15 @@
     let used = false;
     if (typeof fOpacity === 'function') { tryCall(fOpacity, key, opacity); used = true; }
     if (typeof fFlags === 'function')   { tryCall(fFlags, key, { doubleSided: !!vals.doubleSided, unlit: !!vals.unlit }); used = true; }
-    if (typeof fChroma === 'function')  { tryCall(fChroma, key, {
-      enable: !!vals.chromaEnable,
-      color: vals.chromaColor || '#000000',
-      tolerance: Number(vals.chromaTolerance || 0),
-      feather: Number(vals.chromaFeather || 0),
-    }); used = true; }
+    if (typeof fChroma === 'function')  { tryCall(fChroma, key, { enable: !!vals.chromaEnable, color: vals.chromaColor||'#000000', tolerance: Number(vals.chromaTolerance||0), feather: Number(vals.chromaFeather||0), }); used = true; }
 
     if (!used) {
-      // フォールバック: shim を試す（未インストールならここで試行）
+      // フォールバック: shim（scene / arrays）
       ensureViewerShims();
-      if (typeof window.viewerBridge.setMaterialOpacity === 'function') {
-        tryCall(window.viewerBridge.setMaterialOpacity, key, opacity);
-        used = true;
-      }
-      if (typeof window.viewerBridge.setMaterialFlags === 'function') {
-        tryCall(window.viewerBridge.setMaterialFlags, key, { doubleSided: !!vals.doubleSided, unlit: !!vals.unlit });
-        used = true;
-      }
+      const f1 = window.viewerBridge.setMaterialOpacity;
+      const f2 = window.viewerBridge.setMaterialFlags;
+      if (typeof f1 === 'function') { tryCall(f1, key, opacity); used = true; }
+      if (typeof f2 === 'function') { tryCall(f2, key, { doubleSided: !!vals.doubleSided, unlit: !!vals.unlit }); used = true; }
       if (!used) warnLog('no per-material opacity API (even after shim)');
     }
   }
@@ -482,13 +437,36 @@
 
   function onUIChange() {
     if (!state.selectedKey) { logOnce('no-key', 'UI changed but no material selected'); return; }
-    const vals = {
-      materialKey: state.selectedKey,
-      ...collectFromUI()
-    };
+    const vals = { materialKey: state.selectedKey, ...collectFromUI() };
     applyToModel(state.selectedKey, vals);
     if (state.ctx && state.ctx.spreadsheetId) saveDebounced(state.ctx, vals);
     else logOnce('skip-save', 'ctx not ready; skip save');
+  }
+
+  // --------- Saving ---------
+  async function saveDebounced(ctx, payload) {
+    clearTimeout(state.saveTimer);
+    state.saveTimer = setTimeout(async () => {
+      try {
+        const api = window.materialsSheetBridge;
+        if (!api || typeof api.upsertOne !== 'function') return;
+        if (!ctx || !ctx.spreadsheetId) { logOnce('skip-save', 'ctx missing; skip save'); return; }
+        const row = {
+          materialKey: payload.materialKey,
+          opacity: clamp01(payload.opacity),
+          doubleSided: !!payload.doubleSided,
+          unlit: !!payload.unlit,
+          chromaEnable: !!payload.chromaEnable,
+          chromaColor: payload.chromaColor || '#000000',
+          chromaTolerance: Number(payload.chromaTolerance || 0),
+          chromaFeather: Number(payload.chromaFeather || 0),
+          updatedAt: new Date().toISOString(),
+          updatedBy: (window.__lm_identity && window.__lm_identity.email) || 'unknown',
+        };
+        await api.upsertOne(ctx, row);
+        logOnce('save-ok', `saved ${row.materialKey}`);
+      } catch (e) { warnLog('save failed', e); }
+    }, 400);
   }
 
   // --------- wiring ---------
