@@ -1,12 +1,12 @@
-// material.orchestrator.js — V6_15_COMMIT_MODE+robust_ui_wait
+// material.orchestrator.js — V6_15_COMMIT_MODE+robust_ui_wait+pm_selectors
 (() => {
-  const VERSION_TAG = 'V6_15_COMMIT_MODE+robust_ui_wait';
+  const VERSION_TAG = 'V6_15_COMMIT_MODE+robust_ui_wait+pm_selectors';
   console.log('[mat-orch] loaded VERSION_TAG:', VERSION_TAG);
 
   if (typeof window.__LM_COMMIT_MODE === 'undefined') window.__LM_COMMIT_MODE = true;
 
   const SELECTORS = {
-    materialSelect: [
+    materialSelect: ['#pm-material', 
       '#materialSelect',
       'select[name="materialKey"]',
       '[data-lm="material-select"]',
@@ -15,7 +15,7 @@
       '#materialPanel select',
       '.material-panel select'
     ],
-    opacityRange: [
+    opacityRange: ['#pm-opacity-range', 
       '#opacityRange',
       'input[type="range"][name="opacity"]',
       '[data-lm="opacity-range"]',
