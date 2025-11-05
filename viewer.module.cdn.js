@@ -1,233 +1,218 @@
 
-// viewer.module.cdn.js — robust single-THREE implementation (r159-compatible)
+// viewer.module.cdn.js (patched)
+// - Normalizes Drive fileId argument (accepts string or picker file object)
+// - Uses auth-aware fetch if available (window.__lm_fetchAuth), falling back to fetch
+// - Keeps three.js imports via import map alias "three"
+// - Emits pm:scene-deep-ready after successful GLB load
+
 import * as THREE from 'three';
-import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
 console.log('[viewer-impl] loaded (three r' + THREE.REVISION + ')');
 
-// ----- module-scoped state -----
-let _renderer = null;
-let _scene = null;
-let _camera = null;
-let _controls = null;
-let _canvas = null;
-let _rafId = null;
-let _onRenderTick = null;
+let _scene, _renderer, _camera, _controls;
 
-// expose a minimal lm namespace for bridges, but don't overwrite existing getters
-const lm = (window.lm ||= {});
-if (!('getScene' in lm)) {
-  Object.defineProperty(lm, 'getScene', { get: () => _scene });
+// ---------------- auth-aware fetch ----------------
+async function authFetch(url, init = {}) {
+  // Prefer a host-provided auth fetch (adds Bearer automatically)
+  if (typeof window.__lm_fetchAuth === 'function') {
+    return window.__lm_fetchAuth(url, init);
+  }
+  // Fallback: attempt to inject an access token if host exposes a getter
+  const tokGetter =
+    (typeof window.__lm_getAccessToken === 'function' && window.__lm_getAccessToken) ||
+    (typeof window.__lm_getToken === 'function' && window.__lm_getToken) ||
+    null;
+
+  if (tokGetter) {
+    try {
+      const tok = await tokGetter();
+      if (tok) {
+        const headers = new Headers(init.headers || {});
+        headers.set('Authorization', `Bearer ${tok}`);
+        return fetch(url, { ...init, headers });
+      }
+    } catch (e) {
+      console.warn('[viewer] token getter failed, falling back to fetch', e);
+    }
+  }
+  // Last resort: plain fetch (will 401 if the file is private)
+  return fetch(url, init);
 }
 
-// Promise that resolves when a scene has been populated by GLB loader
-let _resolveReadyScene;
-lm.readyScenePromise = new Promise((res) => { _resolveReadyScene = res; });
+// --------------- utils ----------------
+function _resolveContainer(arg) {
+  // Accepts: string CSS selector, HTMLElement, HTMLCanvasElement, or {container, canvas, selector}
+  if (!arg) return document.getElementById('stage') || document.body;
 
-function _getElementFromMaybeSelector(maybe, fallbackSelector) {
-  // Accept: string(css), HTMLElement, null/undefined, or options object with .selector/.container/.canvas
-  if (!maybe) return document.querySelector(fallbackSelector);
-  if (typeof maybe === 'string') return document.querySelector(maybe);
-  // HTMLElement?
-  if (maybe instanceof HTMLElement) return maybe;
-  // Options object?
-  if (typeof maybe === 'object') {
-    if (maybe.canvas instanceof HTMLCanvasElement) return maybe.canvas;
-    if (typeof maybe.canvas === 'string') {
-      const el = document.querySelector(maybe.canvas);
+  if (typeof arg === 'string') {
+    const el = document.querySelector(arg);
+    if (el) return el;
+  }
+  // HTMLElement / Canvas directly
+  if (arg instanceof HTMLElement) return arg;
+
+  // options bag
+  if (typeof arg === 'object') {
+    if (arg.canvas instanceof HTMLCanvasElement) return arg.canvas;
+    if (arg.container instanceof HTMLElement) return arg.container;
+    if (typeof arg.selector === 'string') {
+      const el = document.querySelector(arg.selector);
       if (el) return el;
     }
-    if (maybe.container instanceof HTMLElement) return maybe.container;
-    if (typeof maybe.container === 'string') {
-      const el = document.querySelector(maybe.container);
-      if (el) return el;
-    }
-    if (typeof maybe.selector === 'string') return document.querySelector(maybe.selector);
   }
-  // Fallback
-  return document.querySelector(fallbackSelector);
+  // fallback
+  return document.getElementById('stage') || document.body;
 }
 
-function _ensureCanvas(containerOrCanvas) {
-  // If canvas provided, use it. If container provided, find/create a canvas inside.
-  if (containerOrCanvas instanceof HTMLCanvasElement) return containerOrCanvas;
-
-  const container = containerOrCanvas || document.body;
-  let cvs = container.querySelector?.('canvas');
-  if (!cvs) {
-    cvs = document.createElement('canvas');
-    cvs.id = 'lm-canvas';
-    cvs.style.width = '100%';
-    cvs.style.height = '100%';
-    cvs.style.display = 'block';
-    container.appendChild(cvs);
+function _normalizeFileId(input) {
+  // Accepts: fileId string OR Google Drive Picker/Files API object
+  if (!input) return null;
+  if (typeof input === 'string') return input.trim();
+  if (typeof input === 'object') {
+    // common shapes: {id}, {fileId}, {resourceId}
+    if (input.id) return String(input.id);
+    if (input.fileId) return String(input.fileId);
+    if (input.resourceId) return String(input.resourceId);
+    // sometimes picker returns array: [{id: '...'}]
+    if (Array.isArray(input) && input.length && input[0].id) return String(input[0].id);
   }
-  return cvs;
+  return null;
 }
 
-export function getScene() {
-  return _scene;
-}
-
-export function onRenderTick(fn) {
-  _onRenderTick = typeof fn === 'function' ? fn : null;
-}
+// --------------- core viewer ----------------
+export function getScene() { return _scene; }
 
 export function ensureViewer(opts) {
-  // opts can be: string selector, HTMLElement, HTMLCanvasElement, or {container, canvas, selector, antialias}
-  const target = _getElementFromMaybeSelector(opts, '#stage');
-  _canvas = _ensureCanvas(target);
-
-  // renderer
+  const mount = _resolveContainer(opts);
+  // create or reuse renderer/camera/controls
   if (!_renderer) {
-    _renderer = new THREE.WebGLRenderer({ canvas: _canvas, antialias: !!(opts && opts.antialias) });
-    _renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
-    _renderer.setSize(_canvas.clientWidth || window.innerWidth, _canvas.clientHeight || window.innerHeight, false);
-    // r159+: outputColorSpace
+    _renderer = new THREE.WebGLRenderer({ antialias: true, canvas: (mount instanceof HTMLCanvasElement) ? mount : undefined });
+    _renderer.setPixelRatio(window.devicePixelRatio || 1);
+    _renderer.setSize(mount.clientWidth || 1280, mount.clientHeight || 720, false);
     _renderer.outputColorSpace = THREE.SRGBColorSpace;
+    if (!(mount instanceof HTMLCanvasElement)) {
+      mount.innerHTML = ''; // clear previous
+      mount.appendChild(_renderer.domElement);
+    }
   }
 
-  // scene/camera
-  if (!_scene) _scene = new THREE.Scene();
+  if (!_scene) {
+    _scene = new THREE.Scene();
+    _scene.background = new THREE.Color(0x0b0e13);
+  }
+
   if (!_camera) {
-    _camera = new THREE.PerspectiveCamera(60, (_canvas.clientWidth || window.innerWidth) / (_canvas.clientHeight || window.innerHeight), 0.1, 2000);
-    _camera.position.set(0, 1.2, 3);
+    _camera = new THREE.PerspectiveCamera(50, (_renderer.domElement.width || 1280) / (_renderer.domElement.height || 720), 0.1, 5000);
+    _camera.position.set(2.5, 1.5, 3.5);
   }
 
-  // controls
   if (!_controls) {
     _controls = new OrbitControls(_camera, _renderer.domElement);
     _controls.enableDamping = true;
   }
 
-  // resize
-  function onResize() {
-    const w = _canvas.clientWidth || window.innerWidth;
-    const h = _canvas.clientHeight || window.innerHeight;
-    _renderer.setSize(w, h, false);
-    _camera.aspect = w / h;
-    _camera.updateProjectionMatrix();
+  // RAF loop
+  if (!ensureViewer._loop) {
+    const loop = () => {
+      requestAnimationFrame(loop);
+      _controls && _controls.update();
+      if (typeof onRenderTick === 'function') onRenderTick();
+      if (_renderer && _scene && _camera) _renderer.render(_scene, _camera);
+    };
+    ensureViewer._loop = true;
+    loop();
   }
-  window.addEventListener('resize', onResize);
 
-  // loop
-  function loop(t) {
-    _rafId = requestAnimationFrame(loop);
-    _controls?.update();
-    _onRenderTick?.(t, { renderer: _renderer, scene: _scene, camera: _camera });
-    _renderer.render(_scene, _camera);
-  }
-  if (!_rafId) _rafId = requestAnimationFrame(loop);
-
-  return { renderer: _renderer, scene: _scene, camera: _camera, controls: _controls };
+  return { scene: _scene, renderer: _renderer, camera: _camera, controls: _controls };
 }
 
-// Drive fetch helper
-async function _fetchDriveFileBlob(token, fileId) {
+export async function loadGlbFromDrive(fileRef) {
+  const fileId = _normalizeFileId(fileRef);
+  if (!fileId) {
+    throw new Error('Invalid Drive file reference (expected fileId or {id:...})');
+  }
   const url = `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?alt=media`;
-  const res = await fetch(url, { headers: { 'Authorization': `Bearer ${token}` } });
-  if (!res.ok) throw new Error(`Drive fetch failed ${res.status}`);
-  return await res.blob();
-}
-
-export async function loadGlbFromDrive(token, fileId) {
-  if (!token) throw new Error('token is required');
-  if (!fileId) throw new Error('fileId is required');
-  if (!_renderer) ensureViewer('#stage');
-
-  const blob = await _fetchDriveFileBlob(token, fileId);
+  const res = await authFetch(url);
+  if (!res.ok) {
+    throw new Error(`Drive fetch failed ${res.status}`);
+  }
+  const blob = await res.blob();
   const objectURL = URL.createObjectURL(blob);
+
+  const loader = new GLTFLoader();
+  const gltf = await loader.loadAsync(objectURL);
+
+  // clear old
+  if (_scene) {
+    while (_scene.children.length) _scene.remove(_scene.children.pop());
+  } else {
+    ensureViewer();
+  }
+  _scene.add(gltf.scene);
+
+  // center & frame
+  const box = new THREE.Box3().setFromObject(gltf.scene);
+  const size = new THREE.Vector3();
+  const center = new THREE.Vector3();
+  box.getSize(size); box.getCenter(center);
+  const maxDim = Math.max(size.x, size.y, size.z);
+  const fitDist = maxDim / (2 * Math.atan((Math.PI * 50) / 360));
+  _camera.position.copy(center).add(new THREE.Vector3(fitDist, fitDist, fitDist));
+  _camera.near = maxDim / 1000; _camera.far = maxDim * 1000; _camera.updateProjectionMatrix();
+  _controls && _controls.target.copy(center);
+
+  // notify deep-ready for UI/material population
   try {
-    const loader = new GLTFLoader();
-    const gltf = await loader.loadAsync(objectURL);
-
-    // clear old
-    if (_scene) {
-      const toRemove = [];
-      _scene.traverse((o) => {
-        if (o.isMesh || o.isGroup || o.isObject3D) {
-          if (o.parent === _scene) toRemove.push(o);
-        }
-      });
-      toRemove.forEach(o => _scene.remove(o));
+    window.dispatchEvent(new CustomEvent('pm:scene-deep-ready', { detail: { scene: _scene } }));
+    if (window.lm && typeof window.lm.__resolveReadyScene === 'function') {
+      window.lm.__resolveReadyScene(_scene);
     }
-
-    _scene.add(gltf.scene);
-
-    // fit camera
-    const box = new THREE.Box3().setFromObject(gltf.scene);
-    const size = box.getSize(new THREE.Vector3());
-    const center = box.getCenter(new THREE.Vector3());
-    const maxDim = Math.max(size.x, size.y, size.z);
-    const fov = _camera.fov * (Math.PI / 180);
-    const dist = (maxDim / 2) / Math.tan(fov / 2);
-    _camera.position.copy(center.clone().add(new THREE.Vector3(dist, dist * 0.6, dist)));
-    _camera.lookAt(center);
-    _controls?.target.copy(center);
-    _controls?.update();
-
-    // notify deep-ready
-    try {
-      window.dispatchEvent(new CustomEvent('pm:scene-deep-ready', { detail: { scene: _scene } }));
-      if (typeof _resolveReadyScene === 'function') _resolveReadyScene(_scene);
-      if (window.lm && typeof window.lm.__resolveReadyScene === 'function') window.lm.__resolveReadyScene(_scene);
-    } catch (e) {
-      console.warn('[viewer-impl] ready dispatch failed', e);
-    }
-  } finally {
-    URL.revokeObjectURL(objectURL);
+  } catch (e) {
+    console.warn('[viewer] deep-ready notify failed', e);
   }
+
+  return gltf;
 }
 
-// ----- pins (minimal stub so boot.esm.cdn.js doesn’t break) -----
-const _pinMeshes = new Map(); // id -> mesh
+// ---- pins API (minimal, no-op-safe) ----
+const _pins = new Map();
 
-export function addPinMarker(id, position /* {x,y,z} */, color = 0xff0000) {
-  if (!id) return;
+export function addPinMarker(id, position = { x: 0, y: 0, z: 0 }) {
+  if (!_scene) ensureViewer();
   const geom = new THREE.SphereGeometry(0.01, 12, 12);
-  const mat = new THREE.MeshBasicMaterial({ color });
+  const mat = new THREE.MeshBasicMaterial({ color: 0xff8844 });
   const m = new THREE.Mesh(geom, mat);
-  m.position.set(position?.x || 0, position?.y || 0, position?.z || 0);
+  m.position.set(position.x, position.y, position.z);
   _scene.add(m);
-  _pinMeshes.set(id, m);
+  _pins.set(id, m);
+  return m;
 }
-
 export function removePinMarker(id) {
-  const m = _pinMeshes.get(id);
-  if (m) {
-    _scene.remove(m);
-    _pinMeshes.delete(id);
-  }
+  const m = _pins.get(id);
+  if (m && _scene) { _scene.remove(m); _pins.delete(id); }
 }
-
 export function clearPins() {
-  for (const m of _pinMeshes.values()) _scene.remove(m);
-  _pinMeshes.clear();
+  for (const m of _pins.values()) { _scene && _scene.remove(m); }
+  _pins.clear();
 }
-
-export function onCanvasShiftPick(fn) {
-  // wiring happens in boot.esm.cdn.js; here we just keep API surface
-  // (left as no-op hook; if needed, attach raycaster handlers)
+export function setPinSelected(id, sel) {
+  const m = _pins.get(id);
+  if (m) m.material.emissive && (m.material.emissiveIntensity = sel ? 1.0 : 0.2);
 }
+export function onCanvasShiftPick() { /* placeholder */ }
+export function onPinSelect() { /* placeholder */ }
+export function onRenderTick() { /* placeholder */ }
 
-export function onPinSelect(fn) {
-  // API hook (no-op here)
-}
-
-export function setPinSelected(id, selected) {
-  const m = _pinMeshes.get(id);
-  if (m) m.material.wireframe = !!selected;
-}
-
-export function onRenderTickDebug() {
-  // utility to verify rAF calls; not used by boot
-}
-
-export function projectPoint(vec3) {
+export function projectPoint(world) {
   if (!_camera || !_renderer) return null;
-  const v = new THREE.Vector3(vec3.x, vec3.y, vec3.z).project(_camera);
-  const halfW = (_renderer.domElement.width) / 2;
-  const halfH = (_renderer.domElement.height) / 2;
+  const v = new THREE.Vector3(world.x, world.y, world.z);
+  v.project(_camera);
+  const halfW = _renderer.domElement.clientWidth / 2;
+  const halfH = _renderer.domElement.clientHeight / 2;
   return { x: (v.x * halfW) + halfW, y: (-v.y * halfH) + halfH };
 }
+
+// allow boot code to set scene explicitly if needed
+export function __set_lm_scene(s) { _scene = s; }
