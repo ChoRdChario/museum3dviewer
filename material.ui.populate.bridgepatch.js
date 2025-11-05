@@ -1,175 +1,100 @@
-/*
- * LociMyu — material.ui.populate.bridgepatch.js (v1.3)
- * Purpose:
- *   - Robustly obtain THREE.Scene from viewer bridge (window.lm.getScene || window.getScene)
- *   - Wait until scene actually has at least one material-bearing mesh
- *   - Populate the material <select> (id="pm-material" or legacy fallbacks) exactly once
- *   - Expose a readiness promise on window.lmReadyScene for other modules (no HTML change required)
- *   - Avoid infinite retry spam; bounded waits with multi-signal reattempts
- */
+
+// material.ui.populate.bridgepatch.js — populate material select after deep-ready (v2.0)
 (function(){
-  const TAG = '[populate-bridgepatch]';
-  const log  = (...a)=>console.log(`%c${TAG}`, 'color:#0bf', ...a);
-  const warn = (...a)=>console.warn(`%c${TAG}`, 'color:#d80', ...a);
-  const err  = (...a)=>console.error(`%c${TAG}`, 'color:#e33', ...a);
+  const TAG = '[populate-bridgepatch+]';
+  if (window.__populateBridgePlusInstalled) return;
+  window.__populateBridgePlusInstalled = true;
 
-  if (window.__lm_populate_patch_v13) {
-    log('already installed; skipping');
-    return;
+  const log  = (...a)=>console.log(TAG, ...a);
+  const warn = (...a)=>console.warn(TAG, ...a);
+
+  function qsMany(){
+    // selectors (pm first, then fallbacks)
+    const selSel = [
+      '#pm-material', '#materialSelect', 'select[name="materialKey"]',
+      '[data-lm="material-select"]', '.lm-material-select',
+      '#materialPanel select', '.material-panel select'
+    ];
+    const rngSel = [
+      '#pm-opacity-range', '#opacityRange', 'input[type="range"][name="opacity"]',
+      '[data-lm="opacity-range"]', '.lm-opacity-range',
+      '#materialPanel input[type="range"]', '.material-panel input[type="range"]'
+    ];
+    const $sel = selSel.map(s=>document.querySelector(s)).find(Boolean) || null;
+    const $rng = rngSel.map(s=>document.querySelector(s)).find(Boolean) || null;
+    return {$sel,$rng, tried:{sel:selSel, rng:rngSel}};
   }
-  window.__lm_populate_patch_v13 = true;
-  log('script initialized');
 
-  // ---------- small helpers ----------
-  const now = ()=>performance.now();
-  const sleep = (ms)=>new Promise(r=>setTimeout(r, ms));
-
-  const getSelect = () => (
-    document.querySelector('#pm-material')
-    || document.querySelector('#materialSelect')
-    || document.querySelector('select[name="materialKey"]')
-    || document.querySelector('[data-lm="material-select"]')
-    || document.querySelector('.lm-material-select')
-    || document.querySelector('#materialPanel select')
-    || document.querySelector('.material-panel select')
-  );
-
-  const getRange = () => (
-    document.querySelector('#pm-opacity-range')
-    || document.querySelector('#opacityRange')
-    || document.querySelector('input[type="range"][name="opacity"]')
-    || document.querySelector('[data-lm="opacity-range"]')
-    || document.querySelector('.lm-opacity-range')
-    || document.querySelector('#materialPanel input[type="range"]')
-    || document.querySelector('.material-panel input[type="range"]')
-  );
-
-  const getSceneGetter = () => (window.lm && typeof window.lm.getScene === 'function')
-    ? window.lm.getScene
-    : (typeof window.getScene === 'function' ? window.getScene : null);
-
-  const unwrapScene = (sLike) => {
-    if (!sLike) return null;
-    if (sLike.isScene && typeof sLike.traverse === 'function') return sLike; // THREE.Scene
-    if (sLike.scene && sLike.scene.isScene) return sLike.scene;
-    if (sLike.three && sLike.three.scene && sLike.three.scene.isScene) return sLike.three.scene;
-    return null;
-  };
-
-  const sceneHasMaterials = (scene) => {
-    if (!scene) return false;
-    let has = false;
+  function extractSceneMaterials(scene){
+    const map = new Map(); // name -> count
     scene.traverse(obj=>{
-      if (has) return;
-      const m = obj.material;
+      const m = obj && obj.material;
       if (!m) return;
-      if (Array.isArray(m)) {
-        if (m.some(mm=>!!mm)) has = true;
-      } else {
-        has = !!m;
-      }
-    });
-    return has;
-  };
-
-  const summarizeMaterials = (scene) => {
-    const mats = new Map();
-    scene.traverse(obj=>{
-      const m = obj.material;
-      if (!m) return;
-      const arr = Array.isArray(m) ? m : [m];
-      arr.forEach(mm=>{
+      const list = Array.isArray(m) ? m : [m];
+      list.forEach(mm=>{
         if (!mm) return;
         const name = (mm.name && String(mm.name).trim()) || '(no-name)';
-        if (!mats.has(name)) mats.set(name, 0);
-        mats.set(name, mats.get(name)+1);
+        map.set(name, (map.get(name)||0) + 1);
       });
     });
-    // Sort by usage desc, then name
-    return Array.from(mats.entries())
-      .sort((a,b)=> (b[1]-a[1]) || a[0].localeCompare(b[0]))
-      .map(([name,_])=>name);
-  };
-
-  // ---------- scene readiness promise (no HTML edits needed) ----------
-  // other modules can await window.lmReadyScene.then(scene=>{...})
-  if (!window.lmReadyScene) {
-    window.lmReadyScene = (async ()=>{
-      const t0 = now();
-      const deadline = t0 + 15000; // up to 15s total
-      // multi-signal loop: try on events and small sleeps
-      const signals = ['lm:scene-ready','lm:scene-stable','lm:viewer-ready','load'];
-      const onSignal = new Promise(resolve=>{
-        signals.forEach(s=>window.addEventListener(s, resolve, {once:false}));
-      });
-
-      while (now() < deadline) {
-        const get = getSceneGetter();
-        if (get) {
-          try {
-            const sLike = get();
-            const scene = unwrapScene(sLike);
-            if (scene && sceneHasMaterials(scene)) {
-              log('scene ready (materials present)');
-              return scene;
-            }
-          } catch(e) {
-            // ignore & retry
-          }
-        }
-        // whichever comes first: an event or a short timeout
-        await Promise.race([onSignal, sleep(120)]);
-      }
-      throw new Error('scene not ready (timeout)');
-    })();
+    return Array.from(map.entries())
+      .sort((a,b)=>b[1]-a[1])
+      .map(([name,count])=>({name,count}));
   }
 
-  // ---------- one-shot populate into <select> ----------
-  (async function populateOnce(){
-    const t0 = now();
-    const deadline = t0 + 16000;
-    const tried = [];
+  async function waitReadyScene(){
+    const lm = (window.lm = window.lm || {});
+    if (lm && lm.readyScenePromise) return lm.readyScenePromise;
+    // soft fallback if bridge not loaded yet
+    return new Promise((resolve, reject)=>{
+      let to = setTimeout(()=>reject(new Error('scene not ready (timeout)')), 20000);
+      function onDeep(e){ clearTimeout(to); resolve((e && e.detail && e.detail.scene) || (window.lm && window.lm.getScene && window.lm.getScene())); }
+      window.addEventListener('pm:scene-deep-ready', onDeep, { once:true });
+    });
+  }
+
+  async function populate(){
+    const { $sel, $rng, tried } = qsMany();
+    if (!$sel) {
+      warn('material SELECT not found; tried=', tried.sel);
+      return;
+    }
     try {
-      const scene = await window.lmReadyScene; // may throw
-      const $sel = await (async ()=>{
-        while (now() < deadline) {
-          const s = getSelect();
-          tried.push({hasScene:!!scene, hasSelect:!!s});
-          if (s) return s;
-          await sleep(80);
-        }
-        return null;
-      })();
+      const scene = await waitReadyScene();
+      if (!scene) throw new Error('no scene');
+      const mats = extractSceneMaterials(scene);
 
-      if (!scene || !$sel) {
-        warn('done, reason= timeout', {tried});
-        if (console && console.debug) console.debug(TAG, 'tried=', tried);
-        return;
-      }
+      // Current options (preserve placeholder at index 0 if exists)
+      const keepFirst = ($sel.options.length>0) ? $sel.options[0] : null;
+      while ($sel.options.length) $sel.remove(0);
+      if (keepFirst) $sel.add(keepFirst);
 
-      const names = summarizeMaterials(scene);
-      // if select already has options other than placeholder, don't duplicate
-      const currentValues = new Set(Array.from($sel.options||[]).map(o=>o.value));
       let inserted = 0;
-      names.forEach(name=>{
-        if (!currentValues.has(name)) {
-          const opt = document.createElement('option');
-          opt.value = name;
-          opt.textContent = name;
-          $sel.appendChild(opt);
-          inserted++;
-        }
+      mats.forEach(({name})=>{
+        // avoid adding placeholder-ish empty values
+        if (!name || name === '— Select material —') return;
+        const opt = document.createElement('option');
+        opt.value = name;
+        opt.textContent = name;
+        $sel.add(opt);
+        inserted++;
       });
 
-      // enable range if present
-      const $rng = getRange();
-      if ($rng && $rng.disabled) $rng.disabled = false;
-
-      log('populated', {count: names.length, inserted});
-      window.dispatchEvent(new CustomEvent('pm:materials-populated', {detail:{count:names.length}}));
+      if ($rng) { try{ $rng.disabled = false; }catch(e){} }
+      window.dispatchEvent(new CustomEvent('pm:materials-populated', {detail:{count:mats.length, inserted}}));
+      log('populated', {count:mats.length, inserted});
     } catch(e) {
-      warn('done, reason= error', e);
+      warn('done, reason=', 'error', e);
     }
-  })();
+  }
 
+  // Kick once DOM is ready enough; also react to deep-ready event.
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', populate, { once:true });
+  } else {
+    setTimeout(populate, 0);
+  }
+  window.addEventListener('pm:scene-deep-ready', populate, { once:true });
+
+  log('script initialized');
 })();
