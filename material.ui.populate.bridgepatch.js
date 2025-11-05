@@ -1,122 +1,136 @@
-// material.ui.populate.bridgepatch.js
-// Populate <select id="pm-material"> with scene materials when scene/UI are ready
-// Robust against load order; safe to call multiple times.
-(function(){
-  const LOGTAG = '[populate-bridgepatch]';
-  const SELS = {
-    select: [
-      '#pm-material',
-      '#materialSelect',
-      'select[name="materialKey"]',
-      '[data-lm="material-select"]',
-      '.lm-material-select',
-      '#materialPanel select',
-      '.material-panel select'
-    ]
-  };
 
-  function log(...a){ console.log(LOGTAG, ...a); }
-  function pickOne(selectors){
-    for (const s of selectors){
-      const el = document.querySelector(s);
-      if (el) return el;
-    }
-    return null;
+/**
+ * material.ui.populate.bridgepatch.js (v1.1)
+ * Purpose: Populate the per‑material <select> with materials from the THREE.Scene.
+ * More tolerant scene detection:
+ *  - getScene() may return the Scene itself or an object containing {scene}.
+ *  - Waits for a non-empty scene graph (has at least 1 Mesh with a material).
+ *  - Listens to multiple custom events and also performs a bounded retry loop.
+ */
+(() => {
+  const TAG = '[populate-bridgepatch]';
+  const log = (...a) => console.log('%c'+TAG, 'color:#0bf', ...a);
+
+  // --- Config ---
+  const MAX_TRIES = 120;      // 120 * 100ms = 12s
+  const INTERVAL_MS = 100;
+
+  // --- Helpers ---
+  function getSelectEl() {
+    return document.querySelector('#pm-material')
+        || document.querySelector('#materialSelect')
+        || document.querySelector('select[name="materialKey"]')
+        || document.querySelector('[data-lm="material-select"]')
+        || document.querySelector('.lm-material-select')
+        || document.querySelector('#materialPanel select')
+        || document.querySelector('.material-panel select');
   }
 
-  function getScene(){
+  function resolveSceneCandidate() {
     try {
-      if (window.lm && typeof window.lm.getScene === 'function') return window.lm.getScene();
-      if (typeof window.getScene === 'function') return window.getScene();
-    } catch(e){ /* noop */ }
-    return null;
+      const getter =
+        (window.lm && typeof window.lm.getScene === 'function' && window.lm.getScene) ||
+        (typeof window.getScene === 'function' && window.getScene) ||
+        null;
+      if (!getter) return null;
+      const candidate = getter();
+      // Candidate may be the Scene itself, or an object containing it.
+      if (candidate && candidate.isScene) return candidate;
+      if (candidate && candidate.scene && candidate.scene.isScene) return candidate.scene;
+      // Some wrappers use { viewer, three: { scene } }
+      if (candidate && candidate.three && candidate.three.scene && candidate.three.scene.isScene) {
+        return candidate.three.scene;
+      }
+      return null;
+    } catch (e) {
+      return null;
+    }
   }
 
-  function collectMaterials(scene){
-    const map = new Map(); // name -> {count, uuids:Set}
-    scene.traverse(obj=>{
-      let m = obj.material;
+  function harvestMaterials(scene) {
+    const map = new Map(); // name -> {count, uuidSet}
+    scene.traverse(obj => {
+      const m = obj.material;
       if (!m) return;
       const arr = Array.isArray(m) ? m : [m];
-      for (const mm of arr){
-        const name = (mm && (mm.name || '(no-name)')) || '(no-name)';
-        if (!map.has(name)) map.set(name, {count:0, uuids:new Set()});
+      arr.forEach(mm => {
+        if (!mm) return;
+        const name = (mm.name && String(mm.name)) || '(no-name)';
+        if (!map.has(name)) map.set(name, { count: 0, uuidSet: new Set() });
         const rec = map.get(name);
-        rec.count++;
-        if (mm && mm.uuid) rec.uuids.add(mm.uuid);
-      }
+        rec.count += 1;
+        if (mm.uuid) rec.uuidSet.add(mm.uuid);
+      });
     });
-    // return sorted array
-    return Array.from(map.entries()).sort((a,b)=> b[1].count - a[1].count);
+    // Convert to array, filter out zero (shouldn't happen), sort by uses desc then alpha.
+    return Array.from(map.entries())
+      .filter(([, rec]) => rec.count > 0)
+      .sort((a, b) => (b[1].count - a[1].count) || a[0].localeCompare(b[0]))
+      .map(([name, rec]) => ({ name, uses: rec.count, distinct: rec.uuidSet.size }));
   }
 
-  function fillSelect($sel, mats){
-    // preserve first option (placeholder) if present
-    const placeholder = $sel.options.length ? $sel.options[0] : null;
-    $sel.innerHTML = '';
-    if (placeholder){
-      $sel.appendChild(placeholder);
-    }else{
+  function populateSelect(list) {
+    const sel = getSelectEl();
+    if (!sel) return false;
+    // Keep first placeholder option (if any).
+    const first = sel.options[0] && !sel.options[0].value ? sel.options[0] : null;
+    sel.innerHTML = '';
+    if (first) sel.appendChild(first);
+    list.forEach(item => {
       const opt = document.createElement('option');
-      opt.value = '';
-      opt.textContent = '— Select material —';
-      $sel.appendChild(opt);
-    }
-    const matMap = {};
-    for (const [name, rec] of mats){
-      const opt = document.createElement('option');
-      opt.value = name;
-      opt.textContent = rec.count > 1 ? `${name} (x${rec.count})` : name;
-      opt.dataset.uuids = JSON.stringify(Array.from(rec.uuids));
-      $sel.appendChild(opt);
-      matMap[name] = Array.from(rec.uuids);
-    }
-    $sel.__pmMatMap = matMap;
-  }
-
-  function ensureChangeHandler($sel){
-    if ($sel.__pmBind) return;
-    $sel.addEventListener('change', (e)=>{
-      const name = e.target.value;
-      const uuids = ($sel.__pmMatMap && $sel.__pmMatMap[name]) || [];
-      const detail = { name, uuids };
-      window.dispatchEvent(new CustomEvent('pm:material-selected', {detail}));
-      log('material selected', detail);
+      opt.value = item.name;
+      // Show occurrences when duplicated names exist.
+      opt.textContent = item.distinct > 1 || item.uses > 1
+        ? `${item.name} (x${item.uses})`
+        : item.name;
+      sel.appendChild(opt);
     });
-    $sel.__pmBind = true;
+    // Announce once populated.
+    const detail = { count: list.length, reason: 'populated' };
+    window.dispatchEvent(new CustomEvent('pm:materials-populated', { detail }));
+    log('populated', detail);
+    return true;
   }
 
-  async function wait(ms){ return new Promise(r=>setTimeout(r,ms)); }
+  // Expose manual kick (idempotent safe).
+  window.__pm_populate = window.__pm_populate || {};
+  window.__pm_populate.tryPopulateOnce = (reason = 'manual') => attemptPopulate(reason, true);
 
-  async function tryPopulate(reason='auto'){
-    // Wait up to ~2.5s total for both scene and UI
+  let trying = false;
+  let attemptId = 0;
+
+  async function attemptPopulate(reason = 'auto', singleShot = false) {
+    if (trying) return;
+    trying = true;
+    attemptId++;
     const tried = [];
-    for (let i=0;i<25;i++){
-      const scene = getScene();
-      const $sel = pickOne(SELS.select);
-      if (scene && $sel){
-        const mats = collectMaterials(scene);
-        fillSelect($sel, mats);
-        ensureChangeHandler($sel);
-        log('populated', {count: mats.length, reason});
-        return true;
+    for (let i = 0; i < MAX_TRIES; i++) {
+      const sel = getSelectEl();
+      const scene = resolveSceneCandidate();
+      tried.push({ hasScene: !!scene, hasSelect: !!sel });
+      if (sel && scene) {
+        // Scene must contain at least one mesh with material to be meaningful.
+        const list = harvestMaterials(scene);
+        if (list.length > 0) {
+          populateSelect(list);
+          trying = false;
+          return true;
+        }
       }
-      tried.push({hasScene: !!getScene(), hasSelect: !!pickOne(SELS.select)});
-      await wait(100);
+      if (singleShot) break;
+      await new Promise(r => setTimeout(r, INTERVAL_MS));
     }
-    log('done, reason= timeout tried=', tried);
+    log('done, reason=', 'timeout', 'tried=', tried);
+    trying = false;
     return false;
   }
 
-  // Public manual kicker
-  window.__pm_populate = {
-    tryPopulateOnce: tryPopulate
-  };
+  // Boot: listen a bunch of plausible hooks.
+  ['DOMContentLoaded', 'load', 'lm:scene-ready', 'lm:scene-stable', 'lm:viewer-ready']
+    .forEach(ev => window.addEventListener(ev, () => attemptPopulate(ev, false), { once: false }));
 
-  // Auto wire
-  window.addEventListener('lm:scene-ready', ()=>tryPopulate('scene-ready'));
-  window.addEventListener('lm:scene-stable', ()=>tryPopulate('scene-stable'));
-  document.addEventListener('DOMContentLoaded', ()=>tryPopulate('dom'));
-  // Give it one last chance after load
-  window.addEventListener('load', ()=>setTimeout(()=>tryPopulate('load'), 50));
+  // Also attempt shortly after init (defer so other modules run first).
+  setTimeout(() => attemptPopulate('defer-init', false), 50);
+
+  log('script initialized');
 })();
