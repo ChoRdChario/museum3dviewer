@@ -1,135 +1,119 @@
-// viewer.module.cdn.js — shim/bridge
-// Purpose: provide named exports expected by boot.esm.cdn.js without importing Three.js,
-// and delegate to window.lm implementations when available. Avoids multiple THREE instances.
+
+// viewer.module.cdn.js — shim/bridge version
+// Guarantees named exports expected by boot.esm.cdn.js and forwards to window.lm if available.
+// If not available, it emits CustomEvents as a safe fallback so the app doesn't crash on load.
 //
-// Exports:
-//  - ensureViewer(opts)
-//  - getScene()
-//  - __set_lm_scene(scene)   // host can call after GLTF load
-//  - loadGlbFromDrive(source)
-//  - addPinMarker(payload)
-//  - clearPins()
-//  - onCanvasShiftPick(handler)   // newly added to satisfy boot import
+// Exported API:
+//   - ensureViewer(opts)
+//   - getScene()
+//   - __set_lm_scene(scene)        // call this from the viewer when GLB finishes loading
+//   - loadGlbFromDrive(source)
+//   - addPinMarker(payload)
+//   - clearPins()
+//   - onCanvasShiftPick(handler)    // subscribe; returns unsubscribe()
+//   - onPinSelect(handler)          // subscribe; returns unsubscribe()
 //
-// Design: prefer window.lm.* if present; otherwise fall back to CustomEvent dispatch
-// so that host can listen and perform the real work.
+// Events emitted (fallback path):
+//   'pm:ensure-viewer'         detail: { opts }
+//   'pm:load-glb'              detail: { source }
+//   'pm:add-pin'               detail: { payload }
+//   'pm:clear-pins'            detail: {}
+//   'pm:scene-deep-ready'      detail: { scene }
+//   'pm:canvas-shift-pick'     detail: { ... } (upstream should emit for handlers)
+//   'pm:pin-select'            detail: { pinId, data }
+//
+const _d = (...a)=>console.debug('[viewer-bridge shim]', ...a);
 
-const LOG_PREFIX = "[viewer-bridge/shim]";
-
-function log(...a){ try{ console.log(LOG_PREFIX, ...a); }catch(e){} }
-function warn(...a){ try{ console.warn(LOG_PREFIX, ...a); }catch(e){} }
-
-// A small helper to wait for a condition with timeout.
-async function waitFor(condFn, {timeoutMs=3000, intervalMs=50, label="cond"}={}){
-  const t0 = performance.now();
-  while (performance.now() - t0 < timeoutMs){
-    try{
-      const v = condFn();
-      if (v) return v;
-    }catch{}
-    await new Promise(r=>setTimeout(r, intervalMs));
+function _emit(type, detail) {
+  try {
+    window.dispatchEvent(new CustomEvent(type, { detail }));
+  } catch (e) {
+    console.warn('[viewer-bridge shim] event emit failed', type, e);
   }
-  throw new Error(`${label} timeout after ${timeoutMs}ms`);
 }
 
-// ---------------- core bridge state ----------------
-if (!window.lm) window.lm = {};
-if (!("__readySceneResolvers" in window.lm)){
-  Object.defineProperty(window.lm, "__readySceneResolvers", {
-    value: [], writable: false, enumerable: false, configurable: true
-  });
-}
-
-// expose a promise any consumer can await
-if (!("readyScenePromise" in window.lm)){
-  window.lm.readyScenePromise = new Promise((resolve)=>{
-    window.lm.__readySceneResolvers.push(resolve);
-  });
-}
-
-// public: host calls this when scene becomes ready
-export function __set_lm_scene(scene){
-  try{
-    Object.defineProperty(window, "__lm_scene", { value: scene, writable: true, configurable: true });
-  }catch(_){ window.__lm_scene = scene; }
-  const resolvers = (window.lm.__readySceneResolvers||[]).splice(0);
-  resolvers.forEach(fn=>{ try{ fn(scene); }catch(e){ warn("resolver err", e); } });
-  // fire deep-ready for any legacy listeners
-  try { window.dispatchEvent(new CustomEvent("pm:scene-deep-ready", { detail:{ scene } })); } catch(_){}
-  log("scene set via __set_lm_scene; resolvers=", resolvers.length);
-}
-
-export function getScene(){
-  if (window.lm && typeof window.lm.getScene === "function") {
-    try { return window.lm.getScene(); } catch(_){}
+function _delegate(fnName, argsArray, fallbackEmit) {
+  const lm = (typeof window !== 'undefined' && window.lm) ? window.lm : null;
+  if (lm && typeof lm[fnName] === 'function') {
+    return lm[fnName](...(argsArray || []));
   }
-  return window.__lm_scene || null;
+  if (fallbackEmit) fallbackEmit();
+  return undefined;
 }
 
-export async function ensureViewer(opts={}){
-  // Prefer host implementation if present
-  if (window.lm && typeof window.lm.ensureViewer === "function") {
-    log("delegating ensureViewer to window.lm.ensureViewer");
-    return window.lm.ensureViewer(opts);
-  }
-  // Fallback: ask host via event and wait for scene
-  log("ensureViewer fallback: dispatch pm:ensure-viewer and wait for scene");
-  try { window.dispatchEvent(new CustomEvent("pm:ensure-viewer", { detail:{ opts } })); } catch(_){}
-  await waitFor(()=>getScene(), { timeoutMs: 5000, label: "scene-ready" });
-  return true;
+// --- exported functions ---
+export function ensureViewer(opts = {}) {
+  _d('ensureViewer');
+  return _delegate('ensureViewer', [opts], ()=>_emit('pm:ensure-viewer', { opts }));
 }
 
-export async function loadGlbFromDrive(source){
-  // Delegate to host if available
-  if (window.lm && typeof window.lm.loadGlbFromDrive === "function"){
-    log("delegating loadGlbFromDrive to window.lm.loadGlbFromDrive");
-    const scene = await window.lm.loadGlbFromDrive(source);
-    return scene;
-  }
-  // Fallback: fire event and wait for scene change
-  const before = getScene();
-  try { window.dispatchEvent(new CustomEvent("pm:load-glb", { detail:{ source } })); } catch(_){}
-  await waitFor(()=>{
-    const s = getScene();
-    return s && s !== before && s;
-  }, { timeoutMs: 15000, label: "load-glb" });
-  return getScene();
+export function getScene() {
+  const lm = (typeof window !== 'undefined' && window.lm) ? window.lm : null;
+  if (lm && typeof lm.getScene === 'function') return lm.getScene();
+  // fallback cache
+  return (typeof window !== 'undefined' && window.__pm_scene) ? window.__pm_scene : null;
 }
 
-export function addPinMarker(payload){
-  if (window.lm && typeof window.lm.addPinMarker === "function"){
-    return window.lm.addPinMarker(payload);
+// Called by the viewer implementation once the GLB is loaded and scene is ready.
+export function __set_lm_scene(scene) {
+  _d('__set_lm_scene(scene)');
+  if (typeof window !== 'undefined') {
+    window.__pm_scene = scene;
+    // lazily provide getScene if lm is not ready
+    window.lm = window.lm || {};
+    if (typeof window.lm.getScene !== 'function') {
+      window.lm.getScene = () => window.__pm_scene || null;
+    }
+    // notify listeners (UI patches, populators, etc.)
+    _emit('pm:scene-deep-ready', { scene });
   }
-  try { window.dispatchEvent(new CustomEvent("pm:add-pin", { detail:{ payload } })); } catch(_){}
-  return true;
+  return scene;
 }
 
-export function clearPins(){
-  if (window.lm && typeof window.lm.clearPins === "function"){
-    return window.lm.clearPins();
-  }
-  try { window.dispatchEvent(new CustomEvent("pm:clear-pins")); } catch(_){}
-  return true;
+export function loadGlbFromDrive(source) {
+  _d('loadGlbFromDrive', source);
+  return _delegate('loadGlbFromDrive', [source], ()=>_emit('pm:load-glb', { source }));
 }
 
-// NEW: exported to satisfy boot.esm.cdn.js imports.
-// If a handler is provided, register; otherwise delegate to lm or no-op.
-export function onCanvasShiftPick(handler){
-  if (window.lm && typeof window.lm.onCanvasShiftPick === "function"){
-    return window.lm.onCanvasShiftPick(handler);
-  }
-  // Provide a simple fallback event hookup so host can listen
-  if (typeof handler === "function"){
-    const cb = (e)=>handler(e.detail);
-    window.addEventListener("pm:canvas-shift-pick", cb);
-    // return an unsubscribe function for parity with typical APIs
-    return ()=>window.removeEventListener("pm:canvas-shift-pick", cb);
-  }
-  return ()=>{};
+export function addPinMarker(payload) {
+  _d('addPinMarker', payload);
+  return _delegate('addPinMarker', [payload], ()=>_emit('pm:add-pin', { payload }));
 }
 
-// Optional default export (not required, but harmless)
-export default {
+export function clearPins() {
+  _d('clearPins');
+  return _delegate('clearPins', [], ()=>_emit('pm:clear-pins', {}));
+}
+
+// Subscribe helper that returns an unsubscribe function
+function _subscribe(eventType, handler) {
+  if (typeof handler !== 'function') {
+    console.warn('[viewer-bridge shim] handler must be a function for', eventType);
+    return () => {};
+  }
+  const wrapped = (ev) => {
+    try { handler(ev.detail); } catch (e) { console.error(e); }
+  };
+  window.addEventListener(eventType, wrapped);
+  return () => window.removeEventListener(eventType, wrapped);
+}
+
+export function onCanvasShiftPick(handler) {
+  // Delegate if upstream provides a direct API
+  const lm = (typeof window !== 'undefined' && window.lm) ? window.lm : null;
+  if (lm && typeof lm.onCanvasShiftPick === 'function') return lm.onCanvasShiftPick(handler);
+  // Fallback to event subscription
+  return _subscribe('pm:canvas-shift-pick', handler);
+}
+
+export function onPinSelect(handler) {
+  const lm = (typeof window !== 'undefined' && window.lm) ? window.lm : null;
+  if (lm && typeof lm.onPinSelect === 'function') return lm.onPinSelect(handler);
+  return _subscribe('pm:pin-select', handler);
+}
+
+// Default export is optional; provide noop object for compatibility if someone uses default.
+const defaultExport = {
   ensureViewer,
   getScene,
   __set_lm_scene,
@@ -137,4 +121,6 @@ export default {
   addPinMarker,
   clearPins,
   onCanvasShiftPick,
+  onPinSelect,
 };
+export default defaultExport;
