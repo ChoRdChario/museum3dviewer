@@ -1,142 +1,122 @@
-
-/**
- * material.ui.populate.bridgepatch.js
- * v1.2 - robust populate for per-material select
- *
- * Purpose:
- *  - Waits for both UI(select/range) and scene(getScene & materials)
- *  - Populates #pm-material with distinct material names from scene
- *  - Re-populates on `lm:scene-ready` and exposes a manual trigger
- *
- * Safe to include multiple times – uses idempotent guards.
- */
+// material.ui.populate.bridgepatch.js
+// Populate <select id="pm-material"> with scene materials when scene/UI are ready
+// Robust against load order; safe to call multiple times.
 (function(){
-  const TAG = '[populate-bridgepatch]';
-  if (window.__pm_populate?.__installed) {
-    console.log(TAG, 'already installed');
-    return;
-  }
+  const LOGTAG = '[populate-bridgepatch]';
+  const SELS = {
+    select: [
+      '#pm-material',
+      '#materialSelect',
+      'select[name="materialKey"]',
+      '[data-lm="material-select"]',
+      '.lm-material-select',
+      '#materialPanel select',
+      '.material-panel select'
+    ]
+  };
 
-  const SEL_SELECT_CANDIDATES = [
-    '#pm-material',
-    '#materialSelect',
-    'select[name="materialKey"]',
-    '[data-lm="material-select"]',
-    '.lm-material-select',
-    '#materialPanel select',
-    '.material-panel select'
-  ];
-
-  function pickSelect(){
-    for (const q of SEL_SELECT_CANDIDATES) {
-      const el = document.querySelector(q);
-      if (el && el.tagName === 'SELECT') return el;
+  function log(...a){ console.log(LOGTAG, ...a); }
+  function pickOne(selectors){
+    for (const s of selectors){
+      const el = document.querySelector(s);
+      if (el) return el;
     }
     return null;
   }
 
-  function waitFor(cond, timeout=8000, interval=80){
-    const start = performance.now();
-    return new Promise((resolve, reject)=>{
-      (function tick(){
-        try {
-          const v = cond();
-          if (v) return resolve(v);
-        } catch(e){ /* ignore */ }
-        if (performance.now() - start >= timeout) return reject(new Error('timeout'));
-        setTimeout(tick, interval);
-      })();
-    });
+  function getScene(){
+    try {
+      if (window.lm && typeof window.lm.getScene === 'function') return window.lm.getScene();
+      if (typeof window.getScene === 'function') return window.getScene();
+    } catch(e){ /* noop */ }
+    return null;
   }
 
-  function getGetScene(){
-    return (window.lm && typeof window.lm.getScene === 'function') ? window.lm.getScene
-         : (typeof window.getScene === 'function' ? window.getScene : null);
-  }
-
-  function extractMaterialNames(scene){
-    const names = new Map(); // name -> uses
+  function collectMaterials(scene){
+    const map = new Map(); // name -> {count, uuids:Set}
     scene.traverse(obj=>{
-      const m = obj.material;
+      let m = obj.material;
       if (!m) return;
       const arr = Array.isArray(m) ? m : [m];
       for (const mm of arr){
         const name = (mm && (mm.name || '(no-name)')) || '(no-name)';
-        names.set(name, (names.get(name)||0)+1);
+        if (!map.has(name)) map.set(name, {count:0, uuids:new Set()});
+        const rec = map.get(name);
+        rec.count++;
+        if (mm && mm.uuid) rec.uuids.add(mm.uuid);
       }
     });
-    return Array.from(names.entries())
-      .sort((a,b)=> b[1]-a[1] || a[0].localeCompare(b[0]))
-      .map(([n])=>n);
+    // return sorted array
+    return Array.from(map.entries()).sort((a,b)=> b[1].count - a[1].count);
   }
 
-  function populateSelect(select, names){
-    // Preserve selection if possible
-    const prev = select.value;
-    // Clear and rebuild
-    while(select.options.length) select.remove(0);
-    const opt0 = document.createElement('option');
-    opt0.textContent = '— Select material —';
-    opt0.value = '';
-    select.appendChild(opt0);
-    for (const n of names){
+  function fillSelect($sel, mats){
+    // preserve first option (placeholder) if present
+    const placeholder = $sel.options.length ? $sel.options[0] : null;
+    $sel.innerHTML = '';
+    if (placeholder){
+      $sel.appendChild(placeholder);
+    }else{
       const opt = document.createElement('option');
-      opt.value = n;
-      opt.textContent = n;
-      select.appendChild(opt);
+      opt.value = '';
+      opt.textContent = '— Select material —';
+      $sel.appendChild(opt);
     }
-    if (prev && names.includes(prev)) select.value = prev;
-    // Fire change so downstream sees new options
-    select.dispatchEvent(new Event('change', {bubbles:true}));
+    const matMap = {};
+    for (const [name, rec] of mats){
+      const opt = document.createElement('option');
+      opt.value = name;
+      opt.textContent = rec.count > 1 ? `${name} (x${rec.count})` : name;
+      opt.dataset.uuids = JSON.stringify(Array.from(rec.uuids));
+      $sel.appendChild(opt);
+      matMap[name] = Array.from(rec.uuids);
+    }
+    $sel.__pmMatMap = matMap;
   }
 
-  async function tryPopulateOnce(reason='auto'){
+  function ensureChangeHandler($sel){
+    if ($sel.__pmBind) return;
+    $sel.addEventListener('change', (e)=>{
+      const name = e.target.value;
+      const uuids = ($sel.__pmMatMap && $sel.__pmMatMap[name]) || [];
+      const detail = { name, uuids };
+      window.dispatchEvent(new CustomEvent('pm:material-selected', {detail}));
+      log('material selected', detail);
+    });
+    $sel.__pmBind = true;
+  }
+
+  async function wait(ms){ return new Promise(r=>setTimeout(r,ms)); }
+
+  async function tryPopulate(reason='auto'){
+    // Wait up to ~2.5s total for both scene and UI
     const tried = [];
-    try {
-      const select = await waitFor(()=>{
-        const s = pickSelect();
-        if (!s) { tried.push('select'); return null; }
-        return s;
-      }, 2500);
-
-      const getScene = await waitFor(()=> getGetScene(), 2500);
-      const scene = await waitFor(()=>{
-        const sc = getScene();
-        // Ensure scene object and at least one mesh with material
-        if (!sc) return null;
-        let hasMat = false;
-        sc.traverse(o=>{ if (o.material) hasMat = true; });
-        return hasMat ? sc : null;
-      }, 5500);
-
-      const names = extractMaterialNames(scene);
-      populateSelect(select, names);
-      console.log(TAG, 'populated', {count:names.length, reason});
-      return true;
-    } catch(e){
-      console.log(TAG, 'done, reason=', e.message || String(e), 'tried=', tried);
-      return false;
+    for (let i=0;i<25;i++){
+      const scene = getScene();
+      const $sel = pickOne(SELS.select);
+      if (scene && $sel){
+        const mats = collectMaterials(scene);
+        fillSelect($sel, mats);
+        ensureChangeHandler($sel);
+        log('populated', {count: mats.length, reason});
+        return true;
+      }
+      tried.push({hasScene: !!getScene(), hasSelect: !!pickOne(SELS.select)});
+      await wait(100);
     }
+    log('done, reason= timeout tried=', tried);
+    return false;
   }
 
-  // Expose & wire
+  // Public manual kicker
   window.__pm_populate = {
-    tryPopulateOnce,
-    __installed: true,
+    tryPopulateOnce: tryPopulate
   };
 
-  // Kick once after load
-  setTimeout(()=>tryPopulateOnce('boot'), 0);
-
-  // Re-populate on scene-ready signals
-  window.addEventListener('lm:scene-ready', ()=> tryPopulateOnce('scene-ready'));
-
-  // Also retry shortly if first attempt found zero options besides placeholder
-  setTimeout(()=>{
-    const sel = pickSelect();
-    if (!sel) return;
-    const hasReal = Array.from(sel.options).some(o=>o.value);
-    if (!hasReal) tryPopulateOnce('retry-short');
-  }, 1200);
-
+  // Auto wire
+  window.addEventListener('lm:scene-ready', ()=>tryPopulate('scene-ready'));
+  window.addEventListener('lm:scene-stable', ()=>tryPopulate('scene-stable'));
+  document.addEventListener('DOMContentLoaded', ()=>tryPopulate('dom'));
+  // Give it one last chance after load
+  window.addEventListener('load', ()=>setTimeout(()=>tryPopulate('load'), 50));
 })();
