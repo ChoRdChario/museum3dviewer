@@ -1,104 +1,182 @@
-// viewer.module.cdn.js — bridge/shim (no direct three.js import)
-// Provides named exports expected by boot.esm.cdn.js without creating an extra THREE instance.
-// Delegates to window.lm.* when available, otherwise uses lightweight events/promises.
 
-const NAMESPACE = 'viewer-bridge-shim';
+/**
+ * viewer.module.cdn.js — thin bridge/shim
+ * Goal:
+ *  - Provide named exports expected by boot.esm.cdn.js without importing THREE (avoid multi-instance).
+ *  - Delegate to window.lm if available; otherwise, communicate via CustomEvent and wait.
+ */
 
-function log(...a){ try{ console.log(`[${NAMESPACE}]`, ...a);}catch(_){} }
-function warn(...a){ try{ console.warn(`[${NAMESPACE}]`, ...a);}catch(_){} }
+const log = (...a) => console.log("%c[viewer-bridge/shim]", "color:#4aa", ...a);
+const warn = (...a) => console.warn("%c[viewer-bridge/shim]", "color:#d75", ...a);
 
-// Internal ready promise for a scene set from the host
-let __resolveScene = null;
-let __sceneReadyP = new Promise(res=>{ __resolveScene = res; });
+function now() { return (performance && performance.now) ? performance.now() : Date.now(); }
 
-// Public helper for host code to set the scene safely
-export function __set_lm_scene(scene){
-  try {
-    window.__lm_scene = scene;
-    if (__resolveScene){ __resolveScene(scene); __resolveScene = null; }
-    // Also emit a generic event many patches listen to
-    window.dispatchEvent(new CustomEvent('pm:scene-deep-ready', { detail: { scene } }));
-    log('__set_lm_scene called; scene registered');
-  } catch(e){ warn('__set_lm_scene failed', e); }
-}
-
-// Named exports expected by boot.esm.cdn.js
-export async function ensureViewer(options={}){
-  // If host provides a real ensureViewer, use it
-  if (window.lm && typeof window.lm.ensureViewer === 'function'){
-    log('delegating ensureViewer to window.lm.ensureViewer');
-    return window.lm.ensureViewer(options);
-  }
-
-  // If a scene already exists, return it immediately
-  if (window.__lm_scene){
-    log('ensureViewer: existing __lm_scene found');
-    return window.__lm_scene;
-  }
-
-  // Ask host/viewer to create/ensure the viewer
-  try {
-    window.dispatchEvent(new CustomEvent('pm:ensure-viewer', { detail: { options } }));
-  } catch(e){ warn('dispatch pm:ensure-viewer failed', e); }
-
-  // Wait for scene to be set via __set_lm_scene or for a direct getScene to appear
-  const timeoutMs = options.timeoutMs ?? 5000;
-  const start = performance.now();
-  const race = Promise.race([
-    __sceneReadyP,
-    new Promise(res=>{
-      const iv = setInterval(()=>{
-        if (window.lm && typeof window.lm.getScene === 'function'){
-          const s = window.lm.getScene();
-          if (s){ clearInterval(iv); res(s); }
-        } else if (window.__lm_scene){
-          clearInterval(iv); res(window.__lm_scene);
-        }
-        if (performance.now() - start > timeoutMs){
-          clearInterval(iv); res(null);
-        }
-      }, 50);
-    })
-  ]);
-
-  const scene = await race;
-  if (!scene) warn('ensureViewer timeout without scene');
-  return scene;
-}
-
-export function getScene(){
-  if (window.lm && typeof window.lm.getScene === 'function'){
-    return window.lm.getScene();
+/** Internal: get current scene if any */
+function _peekScene() {
+  if (window.lm && typeof window.lm.getScene === "function") {
+    try {
+      return window.lm.getScene();
+    } catch {}
   }
   return window.__lm_scene || null;
 }
 
-export function addPinMarker(pin){
-  if (window.lm && typeof window.lm.addPinMarker === 'function'){
-    return window.lm.addPinMarker(pin);
+/** Internal: safely register scene provider and emit ready event */
+function _setScene(scene) {
+  try {
+    // Keep a local backing field
+    window.__lm_scene = scene;
+    // Lazily ensure window.lm exists
+    if (!window.lm) window.lm = {};
+    // If lm.getScene is missing or not a getter-only, install a safe one
+    const desc = Object.getOwnPropertyDescriptor(window.lm, "getScene");
+    if (!desc || (desc.writable || desc.configurable)) {
+      // Either not defined, or writable -> define/overwrite safely
+      Object.defineProperty(window.lm, "getScene", {
+        configurable: true,
+        enumerable: false,
+        writable: true,
+        value: () => window.__lm_scene || null,
+      });
+    }
+    // Broadcast deep-ready for any listeners (UI populate, etc.)
+    try {
+      window.dispatchEvent(new CustomEvent("pm:scene-deep-ready", { detail: { scene } }));
+    } catch (e) {
+      // no-op
+    }
+    log("scene registered via shim");
+  } catch (e) {
+    warn("failed to set scene:", e);
   }
-  // Fallback: tell host to add a pin
-  try { window.dispatchEvent(new CustomEvent('pm:add-pin', { detail: { pin } })); }
-  catch(e){ warn('dispatch pm:add-pin failed', e); }
-  return undefined;
 }
 
-export function clearPins(){
-  if (window.lm && typeof window.lm.clearPins === 'function'){
+/** Exported: allow host to set scene explicitly */
+export function __set_lm_scene(scene) {
+  _setScene(scene);
+}
+
+/** Exported: query current scene */
+export function getScene() {
+  return _peekScene();
+}
+
+/** Exported: ensure a viewer exists and return a scene when ready */
+export async function ensureViewer(opts = {}) {
+  // Prefer host implementation if provided
+  if (window.lm && typeof window.lm.ensureViewer === "function") {
+    return window.lm.ensureViewer(opts);
+  }
+
+  // If we already have a scene, return it
+  const existing = _peekScene();
+  if (existing) return existing;
+
+  // Kick host to create viewer
+  try {
+    window.dispatchEvent(new CustomEvent("pm:ensure-viewer", { detail: { opts } }));
+  } catch {}
+
+  // Wait up to timeout for scene to become available
+  const timeoutMs = typeof opts.timeoutMs === "number" ? opts.timeoutMs : 5000;
+  const start = now();
+
+  return new Promise((resolve, reject) => {
+    let resolved = false;
+
+    const tryResolve = () => {
+      const s = _peekScene();
+      if (s && !resolved) {
+        resolved = true;
+        cleanup();
+        resolve(s);
+      }
+    };
+
+    const onDeepReady = (e) => {
+      if (e && e.detail && e.detail.scene) {
+        _setScene(e.detail.scene); // ensure registered
+      }
+      tryResolve();
+    };
+
+    const cleanup = () => {
+      clearInterval(tick);
+      window.removeEventListener("pm:scene-deep-ready", onDeepReady);
+    };
+
+    window.addEventListener("pm:scene-deep-ready", onDeepReady);
+
+    const tick = setInterval(() => {
+      if (now() - start > timeoutMs) {
+        cleanup();
+        if (!resolved) {
+          warn("ensureViewer timeout");
+          resolve(null);
+        }
+        return;
+      }
+      tryResolve();
+    }, 50);
+  });
+}
+
+/** Exported: load GLB by delegating to host or asking host via event */
+export async function loadGlbFromDrive(source) {
+  // Prefer host implementation
+  if (window.lm && typeof window.lm.loadGlbFromDrive === "function") {
+    return window.lm.loadGlbFromDrive(source);
+  }
+
+  // Ask host to load and wait for scene to refresh
+  const before = _peekScene();
+  try {
+    window.dispatchEvent(new CustomEvent("pm:load-glb", { detail: { source } }));
+  } catch {}
+
+  // Wait until scene reference changes or becomes available
+  const start = now();
+  const timeoutMs = 15000;
+  return new Promise((resolve) => {
+    const check = setInterval(() => {
+      const s = _peekScene();
+      if (s && s !== before) {
+        clearInterval(check);
+        resolve(s);
+      } else if (now() - start > timeoutMs) {
+        clearInterval(check);
+        warn("loadGlbFromDrive timeout (no scene change)");
+        resolve(s || null);
+      }
+    }, 100);
+  });
+}
+
+/** Exported: pin helpers -> delegate or emit events */
+export function addPinMarker(payload) {
+  if (window.lm && typeof window.lm.addPinMarker === "function") {
+    return window.lm.addPinMarker(payload);
+  }
+  try {
+    window.dispatchEvent(new CustomEvent("pm:add-pin", { detail: payload }));
+  } catch {}
+}
+
+export function clearPins() {
+  if (window.lm && typeof window.lm.clearPins === "function") {
     return window.lm.clearPins();
   }
-  try { window.dispatchEvent(new CustomEvent('pm:clear-pins')); }
-  catch(e){ warn('dispatch pm:clear-pins failed', e); }
-  return undefined;
+  try {
+    window.dispatchEvent(new CustomEvent("pm:clear-pins"));
+  } catch {}
 }
 
-// Optional: expose a minimal API for external inspection without clobbering getters
-try {
-  window.lm = window.lm || {};
-  if (!('getScene' in window.lm)){
-    Object.defineProperty(window.lm, 'getScene', { enumerable: true, configurable: true, value: getScene });
-  }
-  if (!('__set_lm_scene' in window.lm)){
-    Object.defineProperty(window.lm, '__set_lm_scene', { enumerable: true, configurable: true, value: __set_lm_scene });
-  }
-} catch(e){ /* ignore */ }
+// Optional default export (not required, but harmless)
+export default {
+  __set_lm_scene,
+  ensureViewer,
+  getScene,
+  loadGlbFromDrive,
+  addPinMarker,
+  clearPins,
+};
