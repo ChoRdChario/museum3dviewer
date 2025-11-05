@@ -1,49 +1,65 @@
-// viewer.module.cdn.js (shim)
-// Minimal bridge: provide named exports expected by boot.esm.cdn.js
-// without re-initializing Three.js or mutating window.lm. Safe to drop-in.
-//
-// Exports:
-//   - addPinMarker(...): delegates to global handler when available, or dispatches a CustomEvent
-//   - getScene(): tries bridge first, then a known global fallback
+// viewer.module.cdn.js (safe shim)
+// Exports expected by boot.esm.cdn.js without importing three.js to avoid multi-instance issues.
+// Provides minimal delegations into existing global viewer, if available.
 
-export function addPinMarker(...args) {
-  // Prefer a globally provided implementation if present
-  if (typeof window.addPinMarker === 'function') {
-    try { return window.addPinMarker(...args); } catch (e) { console.warn('[viewer.module shim] addPinMarker global threw', e); }
-  }
-  // Fallback: broadcast an event others can handle
-  try {
-    window.dispatchEvent(new CustomEvent('lm:add-pin', { detail: { args } }));
-  } catch (e) {
-    console.warn('[viewer.module shim] failed to dispatch lm:add-pin', e);
-  }
-  return null;
-}
+// --- internal helpers ---
+function _log(...a){ try{ console.log('[viewer-shim]', ...a); }catch(_){} }
 
-export function getScene() {
-  // Prefer bridge API
+// returns a Scene if obtainable
+export function getScene(){
   try {
-    if (window.lm && typeof window.lm.getScene === 'function') {
-      return window.lm.getScene();
+    if (globalThis.lm && typeof globalThis.lm.getScene === 'function') {
+      const s = globalThis.lm.getScene();
+      if (s) return s;
     }
-  } catch(_) {}
-  // Fallback: a global the viewer may set
-  if (window.__lm_scene) return window.__lm_scene;
-  // Last resort: let listeners know we tried
+  } catch(e){ _log('lm.getScene failed', e); }
+
   try {
-    window.dispatchEvent(new CustomEvent('lm:scene-request'));
+    if (globalThis.__lm_scene) return globalThis.__lm_scene;
+  } catch(e){ _log('__lm_scene access failed', e); }
+
+  // last resort: ask host to emit
+  try {
+    globalThis.dispatchEvent?.(new CustomEvent('pm:request-scene'));
   } catch(_) {}
-  return null;
+  return undefined;
 }
 
-// Optional: expose a non-invasive helper for others to set a scene safely
-// without overwriting getters on window.lm
-if (!window.__set_lm_scene) {
-  Object.defineProperty(window, '__set_lm_scene', {
-    value: (scene) => { window.__lm_scene = scene; },
-    writable: false, configurable: true, enumerable: false
-  });
+// allow viewer code to set the scene safely without rewriting globals
+export function __set_lm_scene(scene){
+  try { Object.defineProperty(globalThis, '__lm_scene', { value: scene, configurable: true, writable: true }); }
+  catch { globalThis.__lm_scene = scene; }
+  _log('scene set via __set_lm_scene', !!scene);
 }
 
-// Note: This file intentionally does NOT import 'three' or mutate window.lm,
-// avoiding multiple Three.js instances and read-only property errors.
+// add a pin marker, delegating if real impl exists
+export function addPinMarker(data){
+  // if viewer has real implementation, delegate
+  try {
+    if (globalThis.lm && typeof globalThis.lm.addPinMarker === 'function') {
+      return globalThis.lm.addPinMarker(data);
+    }
+  } catch(e){ _log('lm.addPinMarker failed', e); }
+
+  // otherwise, fire an event for legacy handlers
+  try {
+    globalThis.dispatchEvent?.(new CustomEvent('pm:add-pin', { detail: data }));
+  } catch(e){ _log('event pm:add-pin failed', e); }
+}
+
+// clear pins, delegating if real impl exists
+export function clearPins(){
+  try {
+    if (globalThis.lm && typeof globalThis.lm.clearPins === 'function') {
+      return globalThis.lm.clearPins();
+    }
+  } catch(e){ _log('lm.clearPins failed', e); }
+  try {
+    globalThis.dispatchEvent?.(new CustomEvent('pm:clear-pins'));
+  } catch(e){ _log('event pm:clear-pins failed', e); }
+}
+
+// Optionally expose everything on a namespaced object for compatibility (no override if exists)
+try {
+  globalThis.viewerShim = globalThis.viewerShim || { getScene, __set_lm_scene, addPinMarker, clearPins };
+} catch {}
