@@ -1,120 +1,164 @@
-// viewer.module.cdn.js — shim exports for boot.esm.cdn.js compatibility
-// Ensures a stable set of named exports even if underlying viewer implementation differs.
-// Uses the single three.js instance via import map alias "three".
+
+// viewer.module.cdn.js - shim to provide named exports expected by boot.esm.cdn.js
+// Ensures a single THREE instance via importmap alias 'three'
 import * as THREE from 'three';
 
-const log = (...a)=>console.log('[viewer-shim]', ...a);
+// Keep a stable namespace for cross-module cooperation
+const lm = (window.lm = window.lm || {});
 
-// Try to discover canvas and camera from window.lm if available
-function getCanvas() {
-  // common ids/selectors in this project
-  const el = (window.lm && window.lm.canvas) ||
-             document.querySelector('#stage canvas') ||
-             document.querySelector('canvas') ||
-             (window.lm && window.lm.renderer && window.lm.renderer.domElement) ||
-             null;
-  return el || null;
+// Local scene holder as fallback when window.lm doesn't own a getter
+let __sceneRef = null;
+
+// Small helper: delegate to window.lm[name] if available, otherwise use fallback
+function _delegate(name, fallback) {
+  const fn = lm && typeof lm[name] === "function" ? lm[name] : null;
+  return (...args) => (fn ? fn(...args) : (fallback ? fallback(...args) : undefined));
 }
 
-function getCamera() {
-  if (window.lm) {
-    if (typeof window.lm.getCamera === 'function') return window.lm.getCamera();
-    if (window.lm.camera) return window.lm.camera;
+// ---------- Fallback implementations (safe no-ops) ----------
+
+// ensureViewer fallback: create a minimal renderer/scene/camera if nothing exists yet
+async function _fallbackEnsureViewer() {
+  try {
+    if (!__sceneRef) __sceneRef = new THREE.Scene();
+    // Try not to create duplicate renderers; only create if a canvas is present and no renderer known
+    if (!lm.renderer) {
+      const canvas = document.querySelector("#stage canvas") || document.querySelector("canvas");
+      if (canvas) {
+        const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+        // three r152+: outputColorSpace replaces outputEncoding
+        if (renderer.outputColorSpace !== undefined) {
+          renderer.outputColorSpace = THREE.SRGBColorSpace;
+        }
+        lm.renderer = renderer;
+      }
+    }
+    if (!lm.camera) {
+      const cam = new THREE.PerspectiveCamera(50, 1, 0.01, 1000);
+      cam.position.set(0, 1, 3);
+      lm.camera = cam;
+    }
+    return true;
+  } catch (e) {
+    console.warn("[viewer-shim] ensureViewer fallback failed", e);
+    return false;
   }
+}
+
+async function _fallbackLoadGlbFromDrive(/* fileOrUrlOrId */) {
+  console.warn("[viewer-shim] loadGlbFromDrive: delegating fallback (noop). Provide lm.loadGlbFromDrive for real loading.");
   return null;
 }
 
-// --- exported shims (delegate to window.lm/* if present) ---
-// We avoid throwing; return sensible fallbacks.
-export function __set_lm_scene(scene){
-  if (!window.lm) window.lm = {};
-  window.lm.scene = scene;
-}
-
-export function getScene(){
-  if (window.lm && typeof window.lm.getScene === 'function') return window.lm.getScene();
-  return window.lm && window.lm.scene ? window.lm.scene : null;
-}
-
-export async function ensureViewer(){
-  if (window.lm && typeof window.lm.ensureViewer === 'function') return window.lm.ensureViewer();
-  // No-op fallback
-  return true;
-}
-
-export async function loadGlbFromDrive(fileId){
-  if (window.lm && typeof window.lm.loadGlbFromDrive === 'function') {
-    return window.lm.loadGlbFromDrive(fileId);
-  }
-  console.warn('[viewer-shim] loadGlbFromDrive fallback (no viewer impl)');
+function _fallbackAddPinMarker(/* pin */) {
+  console.warn("[viewer-shim] addPinMarker: fallback noop");
   return null;
 }
 
-export function addPinMarker(pin){
-  if (window.lm && typeof window.lm.addPinMarker === 'function') return window.lm.addPinMarker(pin);
-  // fallback: no-op
+function _fallbackRemovePinMarker(/* id */) {
+  console.warn("[viewer-shim] removePinMarker: fallback noop");
   return null;
 }
 
-export function clearPins(){
-  if (window.lm && typeof window.lm.clearPins === 'function') return window.lm.clearPins();
-  return 0;
+function _fallbackClearPins() {
+  console.warn("[viewer-shim] clearPins: fallback noop");
 }
 
-export function onCanvasShiftPick(handler){
-  if (window.lm && typeof window.lm.onCanvasShiftPick === 'function') return window.lm.onCanvasShiftPick(handler);
-  // fallback wire: basic listener on canvas mousedown + shiftKey
-  const cvs = getCanvas();
-  if (!cvs) return ()=>{};
-  const fn = (e)=>{
-    if (e.shiftKey) handler && handler(e);
+function _fallbackOnCanvasShiftPick(/* cb */) {
+  console.warn("[viewer-shim] onCanvasShiftPick: fallback noop");
+}
+
+function _fallbackOnPinSelect(/* cb */) {
+  console.warn("[viewer-shim] onPinSelect: fallback noop");
+}
+
+function _fallbackOnRenderTick(cb) {
+  // very lightweight ticker to avoid spam
+  let rafId = 0;
+  const loop = (t) => {
+    try { cb && cb(t); } catch(e){ /* swallow */ }
+    rafId = window.requestAnimationFrame(loop);
   };
-  cvs.addEventListener('mousedown', fn);
-  return ()=>cvs.removeEventListener('mousedown', fn);
+  rafId = window.requestAnimationFrame(loop);
+  return () => window.cancelAnimationFrame(rafId);
 }
 
-export function onPinSelect(handler){
-  if (window.lm && typeof window.lm.onPinSelect === 'function') return window.lm.onPinSelect(handler);
-  // fallback: no-op unsubscribe
-  return ()=>{};
-}
+// Project a 3D point or Object3D to screen space using a camera and canvas
+function _fallbackProjectPoint(pointOrObject, camera, canvas) {
+  try {
+    const cam = camera || lm.camera;
+    if (!cam) throw new Error("camera not available");
+    const v = new THREE.Vector3();
+    if (pointOrObject && typeof pointOrObject.x === "number") {
+      v.set(pointOrObject.x, pointOrObject.y, pointOrObject.z);
+    } else if (pointOrObject && pointOrObject.isObject3D && pointOrObject.matrixWorld) {
+      v.set(0, 0, 0).applyMatrix4(pointOrObject.matrixWorld);
+    } else {
+      throw new Error("invalid point/object");
+    }
+    const ndc = v.clone().project(cam);
+    const targetCanvas =
+      canvas ||
+      (lm.renderer && lm.renderer.domElement) ||
+      document.querySelector("#stage canvas") ||
+      document.querySelector("canvas");
 
-export function onRenderTick(handler){
-  if (window.lm && typeof window.lm.onRenderTick === 'function') return window.lm.onRenderTick(handler);
-  // fallback: rAF loop
-  let af = 0, alive = true;
-  const loop = (t)=>{
-    if (!alive) return;
-    try { handler && handler(t); } catch(e){ console.warn('[viewer-shim] onRenderTick handler error', e); }
-    af = requestAnimationFrame(loop);
-  };
-  af = requestAnimationFrame(loop);
-  return ()=>{ alive=false; cancelAnimationFrame(af); };
-}
+    const rect = targetCanvas && targetCanvas.getBoundingClientRect
+      ? targetCanvas.getBoundingClientRect()
+      : { left: 0, top: 0, width: targetCanvas?.width || window.innerWidth, height: targetCanvas?.height || window.innerHeight };
 
-// NEW required export
-export function projectPoint(pos){
-  // Delegate if provided by real viewer
-  if (window.lm && typeof window.lm.projectPoint === 'function') return window.lm.projectPoint(pos);
-
-  // Fallback: compute using active camera and canvas
-  const camera = getCamera();
-  const cvs = getCanvas();
-  if (!camera || !cvs || !pos) {
-    console.warn('[viewer-shim] projectPoint fallback missing camera/canvas/pos');
-    return null;
+    const x = (ndc.x * 0.5 + 0.5) * rect.width + rect.left;
+    const y = (-ndc.y * 0.5 + 0.5) * rect.height + rect.top;
+    const visible = ndc.z > -1 && ndc.z < 1;
+    return { x, y, visible, ndc };
+  } catch (e) {
+    console.warn("[viewer-shim] projectPoint fallback failed", e);
+    return { x: 0, y: 0, visible: false, ndc: new THREE.Vector3() };
   }
-
-  const rect = cvs.getBoundingClientRect();
-  const v = pos.isVector3 ? pos.clone() : new THREE.Vector3(pos.x||0, pos.y||0, pos.z||0);
-  v.project(camera);
-  const x = (v.x + 1) * 0.5 * rect.width + rect.left + window.scrollX;
-  const y = (1 - (v.y + 1) * 0.5) * rect.height + rect.top + window.scrollY;
-  return { x, y, inFront: v.z < 1, ndc: { x: v.x, y: v.y, z: v.z } };
 }
 
-// Dev log of available exports
-try {
-  const exp = ['__set_lm_scene','getScene','ensureViewer','loadGlbFromDrive','addPinMarker','clearPins','onCanvasShiftPick','onPinSelect','onRenderTick','projectPoint'];
-  log('shim loaded with exports:', exp);
-} catch(e){}
+// ---------- Public API (named exports) ----------
+
+// Allow external code to set scene explicitly (e.g., after GLTF load)
+export function __set_lm_scene(scene) {
+  __sceneRef = scene || null;
+  lm.scene = scene || lm.scene || null;
+}
+
+// Read scene (prefer lm.getScene if provided)
+export const getScene = _delegate("getScene", () => __sceneRef);
+
+// Viewer lifecycle
+export const ensureViewer = _delegate("ensureViewer", _fallbackEnsureViewer);
+export const loadGlbFromDrive = _delegate("loadGlbFromDrive", _fallbackLoadGlbFromDrive);
+
+// Pin APIs
+export const addPinMarker = _delegate("addPinMarker", _fallbackAddPinMarker);
+export const removePinMarker = _delegate("removePinMarker", _fallbackRemovePinMarker);
+export const clearPins = _delegate("clearPins", _fallbackClearPins);
+
+// Event hooks
+export const onCanvasShiftPick = _delegate("onCanvasShiftPick", _fallbackOnCanvasShiftPick);
+export const onPinSelect = _delegate("onPinSelect", _fallbackOnPinSelect);
+export const onRenderTick = _delegate("onRenderTick", _fallbackOnRenderTick);
+
+// Math / utils
+export const projectPoint = _delegate("projectPoint", _fallbackProjectPoint);
+
+// Debug banner so you can confirm the set of exports
+(function(){
+  const exported = [
+    "__set_lm_scene",
+    "getScene",
+    "ensureViewer",
+    "loadGlbFromDrive",
+    "addPinMarker",
+    "removePinMarker",
+    "clearPins",
+    "onCanvasShiftPick",
+    "onPinSelect",
+    "onRenderTick",
+    "projectPoint",
+  ];
+  console.log("[viewer-shim] shim loaded with exports:", exported);
+})();
