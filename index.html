@@ -497,3 +497,222 @@
 </script>
 </body>
 </html>
+
+<!-- ===== LociMyu Material v7 (lazy): GLBロード完了後にだけ配線・投入／保存 ===== -->
+<script type="module">
+(() => {
+  const TAG = '[lm-mat-v7]';
+  const log  = (...a)=>console.log(TAG, ...a);
+  const warn = (...a)=>console.warn(TAG, ...a);
+
+  // ===== DOM refs (Material pane controls) =====
+  function getControls() {
+    const sel = document.getElementById('pm-material') || document.getElementById('materialSelect');
+    const rng = document.getElementById('pm-opacity-range') || document.getElementById('opacityRange');
+    const out = document.getElementById('pm-opacity-val') || document.getElementById('pm-opacity-value');
+    // 既存オーケストレータ互換のための別名IDを付与（片方しか存在しない場合に限る）
+    if (sel && !document.getElementById('materialSelect')) sel.id = 'materialSelect';
+    if (rng && !document.getElementById('opacityRange'))   rng.id = 'opacityRange';
+    return { sel, rng, out, ok: !!sel && !!rng };
+  }
+
+  // ===== Scene helpers =====
+  const hasMeshes = (s)=>{
+    let n=0; try{s?.traverse?.(o=>{ if(o?.isMesh) n++; });}catch(_){}
+    return n>0;
+  };
+
+  // GLB 完了を待つ（起動時は何もしない＝遅延起動）
+  async function waitDeepScene(timeoutMs=15000){
+    const t0 = performance.now();
+    // 既に公開済みの深いシーンがあればそれを使う
+    if (window.__lm_last_deep_scene && hasMeshes(window.__lm_last_deep_scene)) {
+      return window.__lm_last_deep_scene;
+    }
+    while (performance.now()-t0 < timeoutMs){
+      const p = new Promise(res=>{
+        const once = (e)=>{ window.removeEventListener('pm:scene-deep-ready', once); res(e?.detail?.scene||null); };
+        window.addEventListener('pm:scene-deep-ready', once, {once:true});
+        setTimeout(()=>{ try{window.removeEventListener('pm:scene-deep-ready', once);}catch(_){}; res(null); }, 400);
+      });
+      const sc = await p;
+      if (sc && hasMeshes(sc)) return sc;
+    }
+    return null;
+  }
+
+  // ===== GLB由来マテリアル収集（名前ベース） =====
+  const isGLBMaterialName = (n)=>{
+    if (!n) return false;
+    if (/^mesh.*material$/i.test(n)) return false;
+    if (/^material(\.\d+)?$/i.test(n)) return false;
+    if (n.startsWith('__') || n.startsWith('LM_')) return false;
+    return true;
+  };
+
+  function collectByName(scene){
+    const map = new Map(); // name -> material[]
+    scene?.traverse?.(o=>{
+      if (!o?.isMesh) return;
+      (Array.isArray(o.material)?o.material:[o.material]).forEach(m=>{
+        const name = (m?.name||'').trim();
+        if (!isGLBMaterialName(name)) return;
+        if (!map.has(name)) map.set(name, []);
+        map.get(name).push(m);
+      });
+    });
+    return map;
+  }
+
+  function populateSelect(sel, nameMap){
+    sel.innerHTML = '';
+    const names = [...nameMap.keys()].sort((a,b)=>a.localeCompare(b,'ja'));
+    if (!names.length){
+      const opt = document.createElement('option');
+      opt.value=''; opt.textContent='(no GLB materials)';
+      sel.appendChild(opt);
+      return 0;
+    }
+    for (const nm of names){
+      const opt = document.createElement('option');
+      opt.value = nm; opt.textContent = nm;
+      sel.appendChild(opt);
+    }
+    return names.length;
+  }
+
+  // ===== Sheets bridge（ベストエフォート） =====
+  const sheetsQueue = []; // {key, val}
+  function flushSheets(){
+    const br = window.materialsSheetBridge;
+    if (!br) return false;
+    while (sheetsQueue.length){
+      const {key, val} = sheetsQueue.shift();
+      if (typeof br.saveOpacity === 'function')         br.saveOpacity(key, val);
+      else if (typeof br.persistOpacity === 'function')  br.persistOpacity(key, val);
+      else if (typeof br.setOpacity === 'function')      br.setOpacity(key, val);
+      else {
+        // どうしてもAPI不明ならイベントで委譲
+        window.dispatchEvent(new CustomEvent('lm:material-opacity-commit', { detail:{materialKey:key, value:val} }));
+      }
+    }
+    return true;
+  }
+  // シートコンテキストが来たら即時フラッシュ
+  window.addEventListener('lm:sheet-context', ()=> setTimeout(flushSheets, 0));
+
+  async function pullSheetSnapshot(){
+    const br = window.materialsSheetBridge;
+    // 代表的な関数名を順に試す
+    if (br && typeof br.listOpacities === 'function'){
+      try { return await br.listOpacities(); } catch(_){}
+    }
+    if (br && typeof br.readAll === 'function'){
+      try { return await br.readAll(); } catch(_){}
+    }
+    if (br && typeof br.getAll === 'function'){
+      try { return await br.getAll(); } catch(_){}
+    }
+    // 最終手段: 何らかのイベントでスナップショットを要求し、返ってきたら利用
+    const snap = await new Promise(res=>{
+      const once = (e)=>{ window.removeEventListener('lm:materials-snapshot', once); res(e?.detail||null); };
+      window.addEventListener('lm:materials-snapshot', once, {once:true});
+      window.dispatchEvent(new CustomEvent('lm:materials-request-sync'));
+      setTimeout(()=>{ try{window.removeEventListener('lm:materials-snapshot', once);}catch(_){ } res(null); }, 800);
+    });
+    return snap; // 期待フォーマット: { opacities: {name: value} }
+  }
+
+  // ===== Wiring =====
+  function wire(scene, sel, rng, out, nameMap, snapshot){
+    const setOut = (v)=>{ if(out) out.textContent = Number(v).toFixed(2); };
+
+    // 1) Live プレビュー（input中＝ドラッグ中）: Three.js のみ更新
+    const live = ()=>{
+      const key = sel.value; if(!key) return;
+      const v = parseFloat(rng.value);
+      const mats = nameMap.get(key) || [];
+      for (const m of mats){
+        m.transparent = (v < 1.0) || m.transparent;
+        m.opacity = v;
+        if ('needsUpdate' in m) m.needsUpdate = true;
+      }
+      setOut(v);
+    };
+
+    // 2) 確定（指を離す／change）: シート保存キュー投入
+    const commit = ()=>{
+      const key = sel.value; if(!key) return;
+      const v = parseFloat(rng.value);
+      sheetsQueue.push({key, val: v});
+      flushSheets();
+      window.dispatchEvent(new CustomEvent('lm:material-opacity-changed', { detail:{ materialKey:key, value:v } }));
+      log('persist request', key, v);
+    };
+
+    // handlers
+    rng.addEventListener('input', live);
+    rng.addEventListener('change', commit);
+    rng.addEventListener('pointerup', commit);
+    rng.addEventListener('mouseup', commit);
+    rng.addEventListener('touchend', commit);
+    sel.addEventListener('change', ()=>{ live(); commit(); });
+
+    // 3) 既存セーブデータの適用（あれば）
+    try{
+      const table = (snapshot && (snapshot.opacities || snapshot)) || null;
+      if (table && typeof table === 'object'){
+        for (const [name, val] of Object.entries(table)){
+          const v = Number(val);
+          if (!isFinite(v)) continue;
+          if (!nameMap.has(name)) continue;
+          // apply silently (no commit)
+          nameMap.get(name).forEach(m=>{
+            m.transparent = (v < 1.0) || m.transparent;
+            m.opacity = v;
+            if ('needsUpdate' in m) m.needsUpdate = true;
+          });
+        }
+      }
+    }catch(_){}
+  }
+
+  // ===== 起動（遅延）：pm:scene-deep-ready の度に再配線 =====
+  async function hydrateFromScene(scene){
+    const { sel, rng, out, ok } = getControls();
+    if (!ok){ warn('controls missing'); return; }
+
+    await Promise.resolve(); // viewer安定化を1tick待つ
+    const nameMap = collectByName(scene);
+    const n = populateSelect(sel, nameMap);
+    if (!n){ warn('no GLB materials'); return; }
+
+    // シートからスナップショットを取ってから配線
+    const snapshot = await pullSheetSnapshot().catch(()=>null);
+    wire(scene, sel, rng, out, nameMap, snapshot);
+    // 初期反映：選択中の値をUIに同期
+    rng.dispatchEvent(new Event('input'));
+    log('materials populated (GLB-only)', n);
+  }
+
+  const onDeep = (e)=>{
+    const sc = e?.detail?.scene || window.__lm_scene || null;
+    if (!sc || !hasMeshes(sc)) { warn('deep-ready without scene'); return; }
+    hydrateFromScene(sc);
+  };
+
+  // 初期はアイドル。GLB読み込み完了（pm:scene-deep-ready）だけで動く。
+  window.addEventListener('pm:scene-deep-ready', onDeep);
+  log('idle; waiting for GLB deep-ready');
+
+  // デバッグ用: 手動再投入
+  window.__lm_mat_v7 = {
+    rebind() {
+      const sc = (typeof window.getScene==='function' && window.getScene()) || window.__lm_scene || null;
+      if (!sc) return warn('no scene yet');
+      return hydrateFromScene(sc);
+    }
+  };
+})();
+</script>
+
