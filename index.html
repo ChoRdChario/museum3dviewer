@@ -279,7 +279,7 @@
 <script type="module">
 /* ===== LociMyu Material vNext (auto-bind + GLB-only + Sheets bridge) ===== */
 (() => {
-  const LOG_PREFIX = '
+  const LOG_PREFIX = '[lm-mat-vNext]';
   const log = (...a)=>console.log(LOG_PREFIX, ...a);
   const warn = (...a)=>console.warn(LOG_PREFIX, ...a);
 
@@ -496,190 +496,239 @@
 })();
 </script>
 
-<!-- LociMyu Material v7 (lazy): GLB deep-ready → populate + sheet save -->
-<script>
-(function(){
-  const TAG='[lm-mat-v7]';
-  const log=(...a)=>console.log(TAG, ...a);
-  const warn=(...a)=>console.warn(TAG, ...a);
+<script type="module">
+// ===== LociMyu Material v7b (lazy, robust) =====
+(() => {
+  const TAG = "[lm-mat-v7b]";
+  const log  = (...a)=>console.log(TAG, ...a);
+  const warn = (...a)=>console.warn(TAG, ...a);
 
-  // 1) Find existing UI inside Material tab (no DOM creation)
+  // guard: avoid double install
+  if (window.__lm_mat_v7b_installed) { log("already installed"); return; }
+  window.__lm_mat_v7b_installed = true;
+
+  // ---- UI discovery ----
   function findControls() {
-    const root = document.querySelector('#tab-material,[data-tab="material"],.tab-material,.material-tab')
-             || document.getElementById('pane-material')
-             || document.getElementById('right')
-             || document.querySelector('aside,.right,#sidebar,.sidebar')
-             || document.body;
+    // Prefer canonical ids if already present
+    const directSel = document.getElementById("pm-material") || document.getElementById("materialSelect");
+    const directRng = document.getElementById("pm-opacity-range") || document.getElementById("opacityRange");
+    if (directSel && directRng) {
+      directSel.id = "materialSelect";
+      directRng.id = "opacityRange";
+      return { sel: directSel, rng: directRng, card: directSel.closest("section,.card,.panel,.group") || null };
+    }
 
-    // Prefer a card that contains hint text
+    // Material tab/root
+    const root =
+      document.querySelector('#tab-material, [data-tab="material"], .tab-material, .material-tab, #pane-material') ||
+      document.getElementById('right') ||
+      document.querySelector('aside, .right, #sidebar, .sidebar') ||
+      document.body;
+
     const cards = [
-      ...root.querySelectorAll('[data-section="perMaterialOpacity"],#lm-per-material,.card,.panel,section,.group')
+      ...root.querySelectorAll('[data-section="perMaterialOpacity"], #lm-per-material, .card, .panel, section, .group')
     ];
 
-    let sel=null, rng=null;
+    let sel=null, rng=null, card=null;
     for (const c of cards) {
-      // match placeholders often used in this project
-      const s = c.querySelector('select#pm-material, select#materialSelect, select');
-      const r = c.querySelector('input#pm-opacity-range[type="range"], input#opacityRange[type="range"], input[type="range"]');
-      if (s && r) { sel=s; rng=r; break; }
-      // look for the well-known hint
-      if (/Pick a material, then set its opacity/i.test(c.textContent||'')) {
-        const s2 = c.querySelector('select') || sel;
-        const r2 = c.querySelector('input[type="range"]') || rng;
-        if (s2 && r2) { sel=s2; rng=r2; break; }
-      }
+      const s = c.querySelector('select');
+      const r = c.querySelector('input[type="range"]');
+      if (s && r) { sel=s; rng=r; card=c; break; }
     }
-    // Normalize IDs for downstream
-    if (sel) sel.id = 'pm-material';
-    if (rng) rng.id = 'pm-opacity-range';
-    return { sel, rng };
+
+    if (!sel) sel = document.querySelector('#tab-material select, .material-tab select, #pane-material select, select#pm-material');
+    if (!rng) rng = document.querySelector('#tab-material input[type="range"], .material-tab input[type="range"], #pane-material input[type="range"], input#pm-opacity-range');
+
+    if (sel) sel.id = "materialSelect";
+    if (rng) rng.id = "opacityRange";
+    return { sel, rng, card };
   }
 
-  // 2) GLB-origin material name heuristic (exclude runtime/anon)
-  function isGLBMaterialName(n){
+  // ---- GLB-only material collection (by name) ----
+  const isGLBMaterialName = (n) => {
     if (!n) return false;
-    if (/^mesh.*material$/i.test(n)) return false;
-    if (/^material(\.\d+)?$/i.test(n)) return false;
-    if (n.startsWith('__') || n.startsWith('LM_')) return false;
+    const name = n.trim();
+    if (!name) return false;
+    if (/^mesh.*material$/i.test(name)) return false;
+    if (/^material(\.\d+)?$/i.test(name)) return false;
+    if (name.startsWith("__") || name.startsWith("LM_")) return false;
     return true;
-  }
+  };
 
   function collectMaterialsByName(scene){
-    const map = new Map();
-    scene?.traverse?.(o=>{
-      if (!o?.isMesh) return;
-      (Array.isArray(o.material)?o.material:[o.material]).forEach(m=>{
-        const name=(m?.name||'').trim();
-        if (!isGLBMaterialName(name)) return;
-        if (!map.has(name)) map.set(name, []);
-        map.get(name).push(m);
+    const map = new Map(); // name -> material[]
+    try {
+      scene?.traverse?.((o)=>{
+        if (!o?.isMesh) return;
+        const mats = Array.isArray(o.material) ? o.material : [o.material];
+        for (const m of mats) {
+          const nm = (m?.name || "").trim();
+          if (!isGLBMaterialName(nm)) continue;
+          if (!map.has(nm)) map.set(nm, []);
+          map.get(nm).push(m);
+        }
       });
-    });
+    } catch (_) {}
     return map;
   }
 
   function populateSelect(sel, nameMap){
-    sel.innerHTML='';
-    const names=[...nameMap.keys()].sort((a,b)=>a.localeCompare(b,'ja'));
+    sel.innerHTML = "";
+    const names = [...nameMap.keys()].sort((a,b)=>a.localeCompare(b, "ja"));
     if (!names.length){
-      const opt=document.createElement('option');
-      opt.value=''; opt.textContent='(no GLB materials)';
+      const opt = document.createElement("option");
+      opt.value = ""; opt.textContent = "(no GLB materials)";
       sel.appendChild(opt);
       return 0;
     }
     for (const name of names){
-      const opt=document.createElement('option');
-      opt.value=name; opt.textContent=name;
+      const opt = document.createElement("option");
+      opt.value = name;
+      opt.textContent = name;
       sel.appendChild(opt);
     }
     return names.length;
   }
 
-  function ensureBridge(){
-    const b = window.materialsSheetBridge || window.materials?.sheetBridge || null;
-    if (!b) return null;
-    // unify API surface
-    const save = b.saveOpacity || b.persistOpacity || b.setOpacity || null;
-    const list = b.listOpacities || b.readAll || b.getAll || null;
-    return { raw:b, save, list };
+  function commitToSheet(materialName, value){
+    // If a bridge exists with explicit save fn, use it
+    try {
+      const bridge = window.materialsSheetBridge || window.__materialsSheetBridge || window.__matSheetBridge;
+      if (bridge) {
+        const fn = bridge.saveOpacity || bridge.persistOpacity || bridge.setOpacity || bridge.putOpacity;
+        if (typeof fn === "function") { fn.call(bridge, materialName, value); return; }
+      }
+    } catch (_) {}
+
+    // Fallback: event for existing listeners
+    window.dispatchEvent(new CustomEvent("lm:material-opacity-commit", {
+      detail: { materialKey: materialName, value }
+    }));
   }
 
   function wire(scene, sel, rng, nameMap){
-    const bridge = ensureBridge();
-
-    // apply to scene
-    const apply = ()=>{
+    let lastDown = false;
+    const applyLive = () => {
       const key = sel.value; if (!key) return;
       const v = parseFloat(rng.value);
       const mats = nameMap.get(key) || [];
       for (const m of mats){
         m.transparent = (v < 1.0) || m.transparent;
         m.opacity = v;
-        if ('needsUpdate' in m) m.needsUpdate = true;
+        if ("needsUpdate" in m) m.needsUpdate = true;
       }
-      // live readout if exists
-      const readout = document.querySelector('#pm-opacity-value,.pm-opacity-value,.readout,.value');
+      // live-change event for preview/UI
+      window.dispatchEvent(new CustomEvent("lm:material-opacity-changed", {
+        detail: { materialKey: key, value: v }
+      }));
+      // optional numeric readout
+      const readout = sel.closest("section,.card,.panel,.group")?.querySelector("#pm-opacity-value, .value, .readout");
       if (readout) readout.textContent = v.toFixed(2);
     };
 
-    // commit to sheet
-    const commit = ()=>{
+    const commitIfNeeded = () => {
+      if (!lastDown) return;
+      lastDown = false;
       const key = sel.value; if (!key) return;
       const v = parseFloat(rng.value);
-      const br = ensureBridge();
-      if (br?.save){
-        try { br.save(key, v); log('sheet saved via bridge.save', {key,v}); }
-        catch(e){ warn('bridge.save failed', e); }
-      } else {
-        // fallback to event so existing listeners can persist
-        window.dispatchEvent(new CustomEvent('lm:material-opacity-commit', { detail:{ materialKey:key, value:v } }));
-        log('sheet commit event dispatched', {key,v});
-      }
+      commitToSheet(key, v);
+      log("committed", {key, v});
     };
 
-    // initial restore from sheet if possible
-    (async ()=>{
-      try{
-        const br = ensureBridge();
-        if (br?.list){
-          const all = await br.list(); // any shape; we expect {key:opacity} or rows
-          // try few shapes
-          let map = null;
-          if (all && typeof all === 'object'){
-            if (!Array.isArray(all)) map = all;
-            else {
-              // array of rows; try common columns
-              map = {};
-              for (const row of all){
-                const name = row?.materialKey || row?.name || row?.material || null;
-                const val  = row?.opacity ?? row?.value ?? null;
-                if (name && typeof val === 'number') map[name]=val;
-              }
-            }
-          }
-          if (map){
-            const cur = sel.value;
-            const anyName = cur || sel.options[0]?.value || '';
-            const restore = map[anyName];
-            if (typeof restore === 'number'){
-              rng.value = String(restore);
-              apply();
-              log('restored from sheet', {name:anyName, value:restore});
-            }
-          }
-        }
-      }catch(e){ /* ignore */ }
-    })();
+    rng.addEventListener("input", applyLive);
+    sel.addEventListener("change", () => { applyLive(); commitIfNeeded(); });
 
-    // input: preview live
-    rng.addEventListener('input', apply);
-    // commit on pointer up / change
-    const commitEvents = ['change','mouseup','pointerup','touchend'];
-    for (const ev of commitEvents) rng.addEventListener(ev, commit);
-    sel.addEventListener('change', ()=>{ apply(); commit(); });
-    // first apply for default
-    apply();
+    // click-on/off semantics
+    ["mousedown","pointerdown","touchstart"].forEach(ev => rng.addEventListener(ev, () => { lastDown = true; }));
+    ["mouseup","pointerup","touchend","blur","change"].forEach(ev => rng.addEventListener(ev, commitIfNeeded));
+
+    // initial
+    applyLive();
   }
 
-  async function hydrate(scene){
+  // ---- Scene waiters ----
+  function sceneHasMeshes(s){
+    let n=0;
+    try { s?.traverse?.(o=>{ if (o?.isMesh) n++; }); } catch(_){}
+    return n>0;
+  }
+
+  function getSceneNow(){
+    try {
+      if (typeof getScene === "function") {
+        const s = getScene();
+        if (s) return s;
+      }
+    } catch(_){}
+    return window.__lm_scene || null;
+  }
+
+  async function waitSceneStable({attempts=40, delay=100}={}){
+    // fast path: cached
+    if (window.__lm_last_deep_scene && sceneHasMeshes(window.__lm_last_deep_scene)) {
+      return window.__lm_last_deep_scene;
+    }
+
+    // race: event listener + polling
+    let resolver = null;
+    const p = new Promise(res => { resolver = res; });
+    const onDeep = (e)=>{
+      const sc = e?.detail?.scene || getSceneNow();
+      if (sc && sceneHasMeshes(sc)) {
+        window.removeEventListener("pm:scene-deep-ready", onDeep);
+        window.removeEventListener("lm:scene-ready", onDeep);
+        window.removeEventListener("lm:model-ready", onDeep);
+        resolver(sc);
+      }
+    };
+    window.addEventListener("pm:scene-deep-ready", onDeep);
+    window.addEventListener("lm:scene-ready", onDeep);
+    window.addEventListener("lm:model-ready", onDeep);
+
+    // polling in parallel
+    for (let i=0;i<attempts;i++){
+      const s = getSceneNow();
+      if (s && sceneHasMeshes(s)) {
+        window.removeEventListener("pm:scene-deep-ready", onDeep);
+        window.removeEventListener("lm:scene-ready", onDeep);
+        window.removeEventListener("lm:model-ready", onDeep);
+        return s;
+      }
+      await new Promise(r=>setTimeout(r, delay));
+    }
+
+    // last chance: resolve with whatever we got (may be null)
+    window.removeEventListener("pm:scene-deep-ready", onDeep);
+    window.removeEventListener("lm:scene-ready", onDeep);
+    window.removeEventListener("lm:model-ready", onDeep);
+    resolver(null);
+    return p;
+  }
+
+  async function hydrate(){
     const { sel, rng } = findControls();
-    if (!sel || !rng){ warn('controls missing'); return; }
-    // let viewer fully settle
-    await Promise.resolve();
+    if (!sel || !rng) { warn("controls missing"); return; }
+
+    const scene = await waitSceneStable({attempts:60, delay:100});
+    if (!scene) { warn("scene not ready"); return; }
+
     const nameMap = collectMaterialsByName(scene);
     const n = populateSelect(sel, nameMap);
-    if (!n){ warn('no GLB materials'); return; }
+    if (!n) { warn("no GLB materials"); return; }
+
     wire(scene, sel, rng, nameMap);
-    log('populated', n);
+    log("materials populated", n);
   }
 
-  // Idle until deep-ready
-  log('idle; waiting for GLB deep-ready');
-  window.addEventListener('pm:scene-deep-ready', (e)=>{
-    const scene = e?.detail?.scene || window.__lm_scene || null;
-    if (!scene) return warn('deep-ready without scene');
-    hydrate(scene);
-  });
+  // ---- Install: idle until scene event ----
+  const start = () => { hydrate(); };
+  window.addEventListener("pm:scene-deep-ready", start);
+  window.addEventListener("lm:scene-ready", start);
+  window.addEventListener("lm:model-ready", start);
+  log("idle; waiting for GLB deep-ready");
+
+  // debug hooks
+  window.__lm_mat_v7b = { hydrate };
 })();
 </script>
 </body>
