@@ -276,203 +276,180 @@
     <script type="module" src="./materials.sheet.bridge.js"></script>
     <script type="module" src="./material.orchestrator.js"></script>
 
-<!-- LociMyu: Per-material opacity bridge (inlined) -->
+<!-- LM MATERIAL ADAPTER vNext: GLB-only material list + Sheets bridge shim -->
 <script type="module">
-// material.ui.pm-bridge.adapter.v5.js
-// LociMyu: Per‑material opacity bridge (GLB materials only)
+// ===== pm-bridge v6b + sheets-bridge shim (inline) =====
 (() => {
-  const log  = (...a)=>console.log('[pm-bridge v5]', ...a);
-  const warn = (...a)=>console.warn('[pm-bridge v5]', ...a);
+  const dbg = (...a)=>console.log("[lm-mat-vNext]", ...a);
+  const warn = (...a)=>console.warn("[lm-mat-vNext]", ...a);
 
-  const autoMatNamePat = /^Mesh[A-Za-z]+Material\s+[0-9a-f]{6,}$/i;
-
-  // --- DOM helpers ---------------------------------------------------------
-  function $(sel, root=document){ return root.querySelector(sel); }
-  function ensureIds() {
-    // 既存UIを壊さずに、期待IDへマッピング
-    const pmSel = $('#pm-material') || $('#materialSelect');
-    const pmRng = $('#pm-opacity-range') || $('#opacityRange');
-    if (pmSel) pmSel.id = 'materialSelect';
-    if (pmRng) pmRng.id = 'opacityRange';
-
-    const sel = $('#materialSelect');
-    const rng = $('#opacityRange');
-    return { sel, rng };
-  }
-
-  function ensureValueBadge(rng){
-    // スライダ右に 0.00 表示用バッジがあるなら再利用。なければ作る。
-    let badge = document.getElementById('pm-opacity-val');
-    if (!badge && rng && rng.parentElement) {
-      badge = document.createElement('span');
-      badge.id = 'pm-opacity-val';
-      badge.style.cssText = 'margin-left:8px; font-variant-numeric: tabular-nums; opacity:.8;';
-      rng.parentElement.appendChild(badge);
+  // ---------- Scene wait ----------
+  async function waitForSceneReady({timeoutMs=8000}={}) {
+    const t0 = performance.now();
+    const hasMeshes = (s)=>{ let n=0; try{ s?.traverse?.(o=>{ if (o?.isMesh) n++; }); }catch(_){ } return n>0; };
+    if (window.__lm_last_deep_scene && hasMeshes(window.__lm_last_deep_scene)) return window.__lm_last_deep_scene;
+    while (performance.now()-t0 < timeoutMs) {
+      try{
+        const s = (typeof window.getScene==='function' && window.getScene()) || window.__lm_scene || null;
+        if (s && hasMeshes(s)) return s;
+      }catch(_){}
+      const p = new Promise(res=>{
+        const once = e=>{ window.removeEventListener('pm:scene-deep-ready', once); res(e?.detail?.scene||null); };
+        window.addEventListener('pm:scene-deep-ready', once, {once:true});
+        setTimeout(()=>{ try{ window.removeEventListener('pm:scene-deep-ready', once);}catch(_){ } res(null); }, 300);
+      });
+      const ev = await p;
+      if (ev && hasMeshes(ev)) return ev;
     }
-    return badge || null;
+    warn("scene not ready (timeout)");
+    return null;
   }
 
-  // --- Scene access --------------------------------------------------------
-  function getSceneLoose(){
-    try { if (typeof getScene === 'function') { const s = getScene(); if (s) return s; } } catch(_){}
-    return window.__lm_scene || null;
-  }
-
-  // pm:scene-deep-ready を観測して scene を保持
-  window.addEventListener('pm:scene-deep-ready', (e) => {
-    if (e?.detail?.scene) window.__lm_scene = e.detail.scene;
-  });
-
-  // --- Materials enumerate (GLB-only heuristic) ---------------------------
-  function collectSceneMaterials(scene){
-    const byName = new Map(); // name -> material (代表)
-    if (!scene) return byName;
-    scene.traverse(obj => {
-      if (!obj || !obj.isMesh) return;
-      const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
-      for (const m of mats){
-        if (!m) continue;
-        const nm = (m.name || '').trim();
-        // include only "named" materials (GLB側で与えられた可能性が高い)
-        if (!nm) continue;
-        if (autoMatNamePat.test(nm)) continue; // MeshBasicMaterial 54a63... 等は除外
-        if (!byName.has(nm)) byName.set(nm, m);
-      }
-    });
-    return byName;
-  }
-
-  // --- Populate select -----------------------------------------------------
-  function populateSelect(sel, scene){
-    const mats = collectSceneMaterials(scene);
-    sel.innerHTML = '';
-
-    if (mats.size === 0){
-      const opt1 = document.createElement('option');
-      opt1.value = '';
-      opt1.textContent = '(no GLB)';
-      sel.appendChild(opt1);
-
-      const opt2 = document.createElement('option');
-      opt2.value = '';
-      opt2.textContent = '(no GLB materials)';
-      sel.appendChild(opt2);
-
-      log('materials populated 0');
-      return 0;
-    }
-
-    for (const name of mats.keys()){
-      const opt = document.createElement('option');
-      opt.value = name;   // 選択のキーは name（同名一括適用）
-      opt.textContent = name;
-      sel.appendChild(opt);
-    }
-    log('materials populated', mats.size);
-    return mats.size;
-  }
-
-  // --- Apply opacity by name ----------------------------------------------
-  function applyOpacityByName(scene, name, v){
-    if (!scene || !name) return 0;
-    let hit = 0;
-    scene.traverse(obj => {
-      if (!obj?.isMesh) return;
-      const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
-      for (const m of mats){
-        if (!m || (m.name||'').trim() !== name) continue;
-        m.transparent = (v < 1.0) || m.transparent;
-        m.opacity = v;
-        if ('needsUpdate' in m) m.needsUpdate = true;
-        hit++;
-      }
-    });
-    return hit;
-  }
-
-  // --- Sheets persist (best-effort) ---------------------------------------
-  const debouncers = new Map();
-  function debounce(key, fn, ms=200){
-    clearTimeout(debouncers.get(key));
-    const t = setTimeout(fn, ms);
-    debouncers.set(key, t);
-  }
-
-  function persistToSheets(materialKey, value){
-    const bridge = window.materialsSheetBridge;
-    const payload = { materialKey, value };
-    // 代表的な関数名を順に試行
-    const fns = ['saveOpacity', 'upsertOpacity', 'setOpacity', 'writeOpacity'];
-    for (const n of fns){
-      if (bridge && typeof bridge[n] === 'function'){
-        try{
-          bridge[n](materialKey, value);
-          log('sheets persisted via', n, payload);
-          return true;
-        }catch(e){ warn('bridge call failed', n, e); }
-      }
-    }
-    // イベントで外側に委譲（デフォルト経路）
-    window.dispatchEvent(new CustomEvent('lm:material-opacity-save', { detail: payload }));
-    log('sheets persist deferred (event dispatched)', payload);
-    return false;
-  }
-
-  // --- Bind handlers -------------------------------------------------------
-  function bind(){
-    const { sel, rng } = ensureIds();
-    if (!sel || !rng){ warn('UI controls not found'); return false; }
-
-    const badge = ensureValueBadge(rng);
-    const scene = getSceneLoose();
-
-    // 初回 populate（scene が未準備なら後続イベントで再試行）
-    populateSelect(sel, scene);
-
-    // スライダの数値表示を同期
-    const syncBadge = () => { if (badge) badge.textContent = Number.parseFloat(rng.value).toFixed(2); };
-    rng.addEventListener('input', syncBadge);
-    syncBadge();
-
-    // 値適用
-    function applyNow(){
-      const name = sel.value;
-      const v = parseFloat(rng.value);
-      const s = getSceneLoose();
-      const hits = applyOpacityByName(s, name, v);
-      window.dispatchEvent(new CustomEvent('lm:material-opacity-changed', { detail: { materialKey: name, value: v, hits } }));
-      debounce('sheets:'+name, () => persistToSheets(name, v), 200);
-    }
-    rng.addEventListener('input', applyNow);
-    sel.addEventListener('change', applyNow);
-
+  // ---------- GLB material filter ----------
+  function isGLBMaterial(m){
+    if (!m) return false;
+    const n = (m.name||"").trim();
+    if (!n) return false;
+    if (/^mesh.*material$/i.test(n)) return false;
+    if (/^material(\.\d+)?$/i.test(n)) return false;
+    if (n.startsWith("__") || n.startsWith("LM_")) return false;
     return true;
   }
 
-  // --- Re-populate on deep-ready ------------------------------------------
-  window.addEventListener('pm:scene-deep-ready', () => {
-    const sel = document.getElementById('materialSelect');
-    if (!sel) return;
-    const scene = getSceneLoose();
-    const had = sel.options.length;
-    const now = populateSelect(sel, scene);
-    // 既に選択済みなら現在値で適用
-    const rng = document.getElementById('opacityRange');
-    if (rng && had && sel.value) {
-      const v = parseFloat(rng.value);
-      applyOpacityByName(scene, sel.value, v);
+  function collectMaterialsByName(scene){
+    const map = new Map(); // name -> material[]
+    scene?.traverse?.(o=>{
+      if (!o?.isMesh) return;
+      (Array.isArray(o.material) ? o.material : [o.material]).forEach(m=>{
+        if (!isGLBMaterial(m)) return;
+        const key = m.name.trim();
+        if (!map.has(key)) map.set(key, []);
+        map.get(key).push(m);
+      });
+    });
+    return map;
+  }
+
+  function uiRefs(){
+    const sel = document.getElementById("materialSelect");
+    const rng = document.getElementById("opacityRange");
+    return {sel, rng, ok: !!sel && !!rng};
+  }
+
+  function populateSelect(sel, nameMap){
+    sel.innerHTML = "";
+    const names = [...nameMap.keys()];
+    if (names.length === 0){
+      const opt = document.createElement("option");
+      opt.value = "";
+      opt.textContent = "(no GLB)";
+      sel.appendChild(opt);
+      return 0;
     }
+    names.sort((a,b)=>a.localeCompare(b, "ja"));
+    for (const name of names){
+      const opt = document.createElement("option");
+      opt.value = name;
+      opt.textContent = name;
+      sel.appendChild(opt);
+    }
+    return names.length;
+  }
+
+  function wireHandlers(sel, rng, nameMap){
+    const applyOpacity = ()=>{
+      const name = sel.value;
+      if (!name) return;
+      const v = parseFloat(rng.value);
+      const mats = nameMap.get(name) || [];
+      for (const m of mats){
+        m.transparent = (v < 1.0) || m.transparent;
+        m.opacity = v;
+        if ("needsUpdate" in m) m.needsUpdate = true;
+      }
+      // Emit event for sheet bridge (name-based)
+      window.dispatchEvent(new CustomEvent("lm:material-opacity-changed", {
+        detail: { materialKey: name, value: v }
+      }));
+    };
+    rng.addEventListener("input", applyOpacity);
+    sel.addEventListener("change", ()=> rng.dispatchEvent(new Event("input")));
+    // initial
+    rng.dispatchEvent(new Event("input"));
+  }
+
+  async function hydrateOnce(){
+    const {sel, rng, ok} = uiRefs();
+    if (!ok){ warn("controls missing"); return false; }
+    const scene = await waitForSceneReady();
+    if (!scene){ warn("scene unavailable"); return false; }
+    const nameMap = collectMaterialsByName(scene);
+    const n = populateSelect(sel, nameMap);
+    wireHandlers(sel, rng, nameMap);
+    window.dispatchEvent(new CustomEvent("lm:materials-populated", { detail: { names: [...nameMap.keys()] } }));
+    dbg("materials populated (GLB-only)", n);
+    return n>0;
+  }
+
+  // ---------- Sheets bridge shim ----------
+  // 既存の materials.sheet.bridge への呼び出しを吸収。なければキューして待つ。
+  const queue = new Map(); // name -> lastValue
+  let flushTimer = 0;
+
+  function tryCallBridge(name, value){
+    const b = window.materialsSheetBridge || window.__lm_materialsSheetBridge || null;
+    if (!b) return false;
+    // 候補メソッドを順に試す
+    const candidates = [
+      "saveOpacity", "setOpacity", "persistOpacity", "save", "persist"
+    ];
+    for (const fn of candidates){
+      if (typeof b[fn] === "function"){
+        try {
+          b[fn]({ materialKey: name, value });
+          return true;
+        } catch(e){ console.warn("[lm-mat-vNext] bridge call failed:", fn, e); }
+      }
+    }
+    // イベントで拾うタイプにも対応（最終手段）
+    window.dispatchEvent(new CustomEvent("lm:material-opacity-commit", { detail: { materialKey: name, value } }));
+    return true;
+  }
+
+  function scheduleFlush(){
+    if (flushTimer) return;
+    flushTimer = window.setTimeout(()=>{
+      flushTimer = 0;
+      const entries = [...queue.entries()];
+      if (!entries.length) return;
+      let okAny = false;
+      for (const [name, value] of entries){
+        const ok = tryCallBridge(name, value);
+        okAny = okAny || ok;
+        if (ok) queue.delete(name);
+      }
+      if (!okAny){
+        // まだブリッジが来ていない。少し後で再挑戦。
+        scheduleFlush();
+      }
+    }, 200);
+  }
+
+  window.addEventListener("lm:material-opacity-changed", (e)=>{
+    const { materialKey, value } = e.detail || {};
+    if (!materialKey) return;
+    queue.set(materialKey, value);
+    scheduleFlush();
   });
 
-  // 起動
-  if (!bind()){
-    // UIがまだ生成されていない構成に備え、少しだけ再試行
-    let tries = 0;
-    const timer = setInterval(() => {
-      tries++;
-      if (bind() || tries > 20) clearInterval(timer);
-    }, 150);
-  }
+  // シートコンテキストがバインドされたら即フラッシュ
+  window.addEventListener("lm:sheet-context", ()=> scheduleFlush());
+
+  // ---------- boot ----------
+  (async () => {
+    await hydrateOnce();
+    window.addEventListener("pm:scene-deep-ready", ()=> setTimeout(()=>{ hydrateOnce(); }, 0));
+  })();
 })();
 </script>
 </body>
