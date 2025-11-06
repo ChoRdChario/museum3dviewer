@@ -373,15 +373,85 @@
 })();
 
 
-// ---- LociMyu patch: event-first populate ----
-(function __lm_installDeepReadyListener(){
-  if (window.__lm_mat_orch_ready_listener_installed) return;
-  window.__lm_mat_orch_ready_listener_installed = true;
+// ---- LociMyu patch: ensure Material UI exists (auto-inject if missing) ----
+function __lm_ensureMaterialUI(){
+  try{
+    let sel = document.getElementById('materialSelect');
+    let rng = document.getElementById('opacityRange');
+    if (sel && rng) return { sel, rng };
+    // Try to locate a right pane container
+    let right = document.getElementById('right') || document.querySelector('#right, .right, aside') || document.body;
+    const panelId = 'lm-material-panel-autogen';
+    let panel = document.getElementById(panelId);
+    if (!panel){
+      panel = document.createElement('div');
+      panel.id = panelId;
+      panel.className = 'panel';
+      panel.style.margin = '12px 0';
+      panel.style.padding = '12px';
+      panel.style.border = '1px solid #2a2f36';
+      panel.style.borderRadius = '10px';
+      panel.innerHTML = `
+        <h4 style="margin:0 0 8px">Material</h4>
+        <label style="display:block;margin:8px 0 6px;font-size:12px;opacity:.8">Select</label>
+        <select id="materialSelect" style="width:100%;padding:6px;background:#1a1d21;color:#e6e6e6;border:1px solid #2a2f36;border-radius:8px"></select>
+        <label for="opacityRange" style="display:block;margin:12px 0 6px;font-size:12px;opacity:.8">Opacity</label>
+        <input id="opacityRange" type="range" min="0" max="1" step="0.01" value="1" style="width:100%">
+      `;
+      right.prepend(panel);
+    }
+    sel = document.getElementById('materialSelect');
+    rng = document.getElementById('opacityRange');
+    return { sel, rng };
+  }catch(e){
+    console.warn('[mat-orch] auto-inject UI failed', e);
+    return { sel: null, rng: null };
+  }
+}
+
+
+// ---- LociMyu patch: deep-ready listener with UI ensure ----
+(function __lm_installDeepReadyListener2(){
+  if (window.__lm_mat_orch_ready_listener2_installed) return;
+  window.__lm_mat_orch_ready_listener2_installed = true;
   window.addEventListener('pm:scene-deep-ready', (e) => {
     try{
-      console.log('[mat-orch] pm:scene-deep-ready', !!(e && e.detail && e.detail.scene));
+      console.log('[mat-orch] pm:scene-deep-ready (auto)', !!(e && e.detail && e.detail.scene));
+      const ui = __lm_ensureMaterialUI();
       if (typeof populateSelect === 'function') populateSelect();
       if (typeof bindUIHandlers === 'function') bindUIHandlers();
+      // Fallback handlers if not present
+      if (typeof populateSelect !== 'function' && window.THREE && e?.detail?.scene && ui.sel){
+        // build basic material list
+        const mats = new Map();
+        e.detail.scene.traverse(obj => {
+          if (obj.isMesh && obj.material){
+            const arr = Array.isArray(obj.material) ? obj.material : [obj.material];
+            for(const m of arr){ if (m && m.uuid) mats.set(m.uuid, m); }
+          }
+        });
+        ui.sel.innerHTML = '';
+        for(const m of mats.values()){
+          const opt = document.createElement('option');
+          opt.value = m.uuid; opt.textContent = m.name || m.uuid.slice(0,8);
+          ui.sel.appendChild(opt);
+        }
+      }
+      if (typeof bindUIHandlers !== 'function' && e?.detail?.scene){
+        const ui = __lm_ensureMaterialUI();
+        if (ui.sel && ui.rng){
+          ui.rng.addEventListener('input', () => {
+            const targetUuid = ui.sel.value;
+            if (!targetUuid) return;
+            e.detail.scene.traverse(obj => {
+              if (obj.isMesh && obj.material){
+                const arr = Array.isArray(obj.material) ? obj.material : [obj.material];
+                for(const m of arr){ if (m && m.uuid === targetUuid){ m.transparent = true; m.opacity = parseFloat(ui.rng.value); } }
+              }
+            });
+          });
+        }
+      }
     }catch(err){ console.warn('[mat-orch] deep-ready handler error', err); }
   });
 })();    
