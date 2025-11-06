@@ -267,13 +267,28 @@
 <!-- Event bridge: emit lm:sheet-context / lm:sheet-changed (Approach A) -->
 <script defer="" src="./sheet.ctx.bridge.js"></script>
 <!-- Keep existing modules (they listen to our custom events if needed) -->
-<script src="./viewer.bridge.module.js" type="module"></script>
-<script src="./material.orchestrator.js" type="module"></script>
-
-    <!-- LociMyu material bridge stack -->
+<!-- LociMyu material bridge stack -->
     <!-- LociMyu: scene bridge + sheet bridge + orchestrator (order matters) -->
     <script type="module" src="./viewer.bridge.module.js"></script>
     <script type="module" src="./materials.sheet.bridge.js"></script>
+<!-- LociMyu: pm-bridge adapter (maps #pm-* to legacy IDs and wires the output) -->
+    <script type="module" id="pm-bridge-adapter">
+      (() => {
+        const selOld = document.getElementById('pm-material');
+        const rngOld = document.getElementById('pm-opacity-range');
+        const out = document.getElementById('pm-opacity-val');
+        if (selOld && selOld.id !== 'materialSelect') selOld.id = 'materialSelect';
+        if (rngOld && rngOld.id !== 'opacityRange')   rngOld.id = 'opacityRange';
+        // Keep the numeric output in sync with the slider
+        if (out && rngOld) {
+          const update = () => { try { out.textContent = Number(rngOld.value).toFixed(2); } catch(_) {} };
+          rngOld.addEventListener('input', update);
+          update();
+        }
+      })();
+    </script>
+    <script type="module" src="./material.orchestrator.js"></script>
+<script type="module" src="./materials.sheet.bridge.js"></script>
     <script type="module" src="./material.orchestrator.js"></script>
 </body>
 </html>
