@@ -1,4 +1,5 @@
 <!DOCTYPE html>
+
 <html lang="ja">
 <head>
 <!-- ESM import map for THREE (and addons) -->
@@ -82,6 +83,7 @@
     .chips{display:flex;flex-wrap:wrap;gap:6px}
     .chip{width:18px;height:18px;border-radius:50%;border:1px solid #0003;cursor:pointer;box-shadow:0 0 0 1px #0004 inset}
     #caption-list{height:160px;overflow:auto;border:1px solid var(--line);border-radius:8px}
+
     /* Material pane layout */
     .mat-grid{display:grid;grid-template-columns: 1fr; gap:12px; max-width:100%}
     .mat-card{border:1px solid var(--line);border-radius:12px;padding:12px;background:#0c1016}
@@ -97,16 +99,19 @@
     #ui{overflow-x:hidden}
   </style>
 <!-- ESM import map (viewer uses these) -->
+
 <style id="lm-material-layout-fix">
 /* ===== Material pane: overflow & wrapping fixes ===== */
 #pane-material .scroller {
   overflow-x: hidden;
 }
+
 #pane-material .mat-card {
   display: flex;
   flex-direction: column;
   gap: 10px;
 }
+
 #pane-material .row,
 #pane-material .inline,
 #pane-material .pair,
@@ -115,10 +120,12 @@
   flex-wrap: wrap;
   gap: 8px;
 }
+
 #pane-material .row > *,
 #pane-material .controls > * {
   min-width: 0;
 }
+
 #pane-material select,
 #pane-material input[type="range"],
 #pm-material,
@@ -128,11 +135,13 @@
   width: 100%;
   max-width: 100%;
 }
+
 #pane-material .btn,
 #pane-material .switch,
 #pane-material .mini {
   flex: 0 0 auto;
 }
+
 #pm-chroma .tol-row { display: flex; flex-wrap: wrap; gap: 8px; }
 #pm-chroma .feather-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
 </style>
@@ -258,15 +267,13 @@
 <!-- Event bridge: emit lm:sheet-context / lm:sheet-changed (Approach A) -->
 <script defer="" src="./sheet.ctx.bridge.js"></script>
 <!-- Keep existing modules (they listen to our custom events if needed) -->
-
+<script src="./viewer.bridge.module.js" type="module"></script>
 <script src="./material.orchestrator.js" type="module"></script>
+
     <!-- LociMyu material bridge stack -->
     <!-- LociMyu: scene bridge + sheet bridge + orchestrator (order matters) -->
+    <script type="module" src="./viewer.bridge.module.js"></script>
     <script type="module" src="./materials.sheet.bridge.js"></script>
-  <script src="material.ui.commitmode.patch.js"></script>
-
-  <script type="module" src="./viewer.bridge.module.js"></script>
-  <script type="module" src="./viewer.module.cdn.js"></script>
-  <script type="module" src="./material.ui.populate.bridgepatch.js"></script>
+    <script type="module" src="./material.orchestrator.js"></script>
 </body>
 </html>
