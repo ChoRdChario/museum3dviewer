@@ -276,179 +276,222 @@
     <script type="module" src="./materials.sheet.bridge.js"></script>
     <script type="module" src="./material.orchestrator.js"></script>
 
-<!-- LM MATERIAL ADAPTER vNext: GLB-only material list + Sheets bridge shim -->
 <script type="module">
-// ===== pm-bridge v6b + sheets-bridge shim (inline) =====
+/* ===== LociMyu Material vNext (auto-bind + GLB-only + Sheets bridge) ===== */
 (() => {
-  const dbg = (...a)=>console.log("[lm-mat-vNext]", ...a);
-  const warn = (...a)=>console.warn("[lm-mat-vNext]", ...a);
+  const LOG_PREFIX = '[lm-mat-vNext]';
+  const log = (...a)=>console.log(LOG_PREFIX, ...a);
+  const warn = (...a)=>console.warn(LOG_PREFIX, ...a);
 
-  // ---------- Scene wait ----------
-  async function waitForSceneReady({timeoutMs=8000}={}) {
+  // ---- tiny event bus helpers ------------------------------------------------
+  const once = (target, type, opts={}) =>
+    new Promise(res => target.addEventListener(type, e => res(e), { once: true, ...opts }));
+
+  // ---- 1) Robust UI binding (find select/range even if ids missing) ---------
+  function findMaterialPaneRoot() {
+    return document.querySelector('#tab-material, [data-tab="material"], .tab-material, .material-tab')
+        || document.getElementById('right')
+        || document.querySelector('aside, .right, #sidebar, .sidebar')
+        || document.body;
+  }
+
+  function searchControls(root) {
+    // Strategy A: explicit ids
+    let sel = root.querySelector('#materialSelect');
+    let rng = root.querySelector('#opacityRange');
+    if (sel && rng) return { sel, rng, card: sel.closest('.card,.panel,section,.group') || root };
+
+    // Strategy B: first select + first range in same card-like container
+    const containers = [...root.querySelectorAll('[data-section="perMaterialOpacity"], #lm-per-material, .card, .panel, section, .group')];
+    for (const c of containers) {
+      const s = c.querySelector('select');
+      const r = c.querySelector('input[type="range"]');
+      if (s && r) return { sel: s, rng: r, card: c };
+    }
+
+    // Strategy C: label text heuristics around "Per‑material opacity" / help text
+    const all = document.evaluate(
+      ".//*[contains(translate(normalize-space(.),'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz'),'per-material opacity')]",
+      root, null, XPathResult.ORDERED_NODE_SNAPSHOT_TYPE, null
+    );
+    for (let i = 0; i < all.snapshotLength; i++) {
+      const node = all.snapshotItem(i);
+      const card = node.closest('.card,.panel,section,.group') || node.parentElement;
+      if (!card) continue;
+      const s = card.querySelector('select');
+      const r = card.querySelector('input[type=\"range\"]');
+      if (s && r) return { sel: s, rng: r, card };
+    }
+
+    // Strategy D: any select/range under root
+    const sAny = root.querySelector('select');
+    const rAny = root.querySelector('input[type="range"]');
+    if (sAny && rAny) return { sel: sAny, rng: rAny, card: root };
+
+    return { sel: null, rng: null, card: null };
+  }
+
+  function ensureControls({ retryMs = 250, totalMs = 6000 } = {}) {
     const t0 = performance.now();
-    const hasMeshes = (s)=>{ let n=0; try{ s?.traverse?.(o=>{ if (o?.isMesh) n++; }); }catch(_){ } return n>0; };
-    if (window.__lm_last_deep_scene && hasMeshes(window.__lm_last_deep_scene)) return window.__lm_last_deep_scene;
-    while (performance.now()-t0 < timeoutMs) {
-      try{
-        const s = (typeof window.getScene==='function' && window.getScene()) || window.__lm_scene || null;
-        if (s && hasMeshes(s)) return s;
-      }catch(_){}
-      const p = new Promise(res=>{
-        const once = e=>{ window.removeEventListener('pm:scene-deep-ready', once); res(e?.detail?.scene||null); };
-        window.addEventListener('pm:scene-deep-ready', once, {once:true});
-        setTimeout(()=>{ try{ window.removeEventListener('pm:scene-deep-ready', once);}catch(_){ } res(null); }, 300);
+    const root = findMaterialPaneRoot();
+
+    return new Promise(async (resolve) => {
+      while (performance.now() - t0 < totalMs) {
+        const { sel, rng, card } = searchControls(root);
+        if (sel && rng) {
+          sel.id = 'materialSelect';
+          rng.id = 'opacityRange';
+          // remove any autogen placeholder panel if present
+          document.getElementById('lm-material-panel-autogen')?.remove();
+          return resolve({ sel, rng, card });
+        }
+        // Wait for DOM changes (tabs switching etc.)
+        await new Promise(r => setTimeout(r, retryMs));
+      }
+      resolve({ sel: null, rng: null, card: null });
+    });
+  }
+
+  // ---- 2) Scene readiness ----------------------------------------------------
+  function hasMeshes(scene) {
+    let n = 0;
+    try { scene?.traverse?.(o => { if (o?.isMesh) n++; }); } catch {}
+    return n > 0;
+  }
+
+  async function waitForScene({ timeoutMs = 12000 } = {}) {
+    const t0 = performance.now();
+
+    // already published deep scene
+    if (window.__lm_last_deep_scene && hasMeshes(window.__lm_last_deep_scene)) {
+      return window.__lm_last_deep_scene;
+    }
+
+    while (performance.now() - t0 < timeoutMs) {
+      const s = (typeof window.getScene === 'function' && window.getScene()) || window.__lm_scene || null;
+      if (s && hasMeshes(s)) return s;
+
+      // race with deep-ready
+      const p = new Promise(res => {
+        const cb = e => { window.removeEventListener('pm:scene-deep-ready', cb); res(e?.detail?.scene || null); };
+        window.addEventListener('pm:scene-deep-ready', cb, { once: true });
+        setTimeout(() => { try { window.removeEventListener('pm:scene-deep-ready', cb); } catch {} ; res(null); }, 300);
       });
       const ev = await p;
       if (ev && hasMeshes(ev)) return ev;
     }
-    warn("scene not ready (timeout)");
     return null;
   }
 
-  // ---------- GLB material filter ----------
-  function isGLBMaterial(m){
+  // ---- 3) GLB-only material collection (by name) -----------------------------
+  function isGLBMaterial(m) {
     if (!m) return false;
-    const n = (m.name||"").trim();
-    if (!n) return false;
+    const n = (m.name || '').trim();
+    if (!n) return false;                       // unnamed -> likely generated
     if (/^mesh.*material$/i.test(n)) return false;
     if (/^material(\.\d+)?$/i.test(n)) return false;
-    if (n.startsWith("__") || n.startsWith("LM_")) return false;
+    if (n.startsWith('__') || n.startsWith('LM_')) return false;
     return true;
   }
 
-  function collectMaterialsByName(scene){
+  function collectMaterialsByName(scene) {
     const map = new Map(); // name -> material[]
-    scene?.traverse?.(o=>{
+    scene?.traverse?.(o => {
       if (!o?.isMesh) return;
-      (Array.isArray(o.material) ? o.material : [o.material]).forEach(m=>{
+      (Array.isArray(o.material) ? o.material : [o.material]).forEach(m => {
         if (!isGLBMaterial(m)) return;
         const key = m.name.trim();
-        if (!map.has(key)) map.set(key, []);
-        map.get(key).push(m);
+        (map.get(key) || map.set(key, []).get(key)).push(m);
       });
     });
     return map;
   }
 
-  function uiRefs(){
-    const sel = document.getElementById("materialSelect");
-    const rng = document.getElementById("opacityRange");
-    return {sel, rng, ok: !!sel && !!rng};
-  }
-
-  function populateSelect(sel, nameMap){
-    sel.innerHTML = "";
-    const names = [...nameMap.keys()];
-    if (names.length === 0){
-      const opt = document.createElement("option");
-      opt.value = "";
-      opt.textContent = "(no GLB)";
-      sel.appendChild(opt);
+  // ---- 4) Populate + wire ----------------------------------------------------
+  function populateSelect(sel, nameMap) {
+    sel.innerHTML = '';
+    const names = [...nameMap.keys()].sort((a, b) => a.localeCompare(b, 'ja'));
+    if (names.length === 0) {
+      const opt = document.createElement('option'); opt.value = ''; opt.textContent = '(no GLB materials)'; sel.appendChild(opt);
       return 0;
     }
-    names.sort((a,b)=>a.localeCompare(b, "ja"));
-    for (const name of names){
-      const opt = document.createElement("option");
-      opt.value = name;
-      opt.textContent = name;
-      sel.appendChild(opt);
+    for (const name of names) {
+      const opt = document.createElement('option'); opt.value = name; opt.textContent = name; sel.appendChild(opt);
     }
     return names.length;
   }
 
-  function wireHandlers(sel, rng, nameMap){
-    const applyOpacity = ()=>{
-      const name = sel.value;
-      if (!name) return;
-      const v = parseFloat(rng.value);
-      const mats = nameMap.get(name) || [];
-      for (const m of mats){
-        m.transparent = (v < 1.0) || m.transparent;
-        m.opacity = v;
-        if ("needsUpdate" in m) m.needsUpdate = true;
-      }
-      // Emit event for sheet bridge (name-based)
-      window.dispatchEvent(new CustomEvent("lm:material-opacity-changed", {
-        detail: { materialKey: name, value: v }
-      }));
-    };
-    rng.addEventListener("input", applyOpacity);
-    sel.addEventListener("change", ()=> rng.dispatchEvent(new Event("input")));
-    // initial
-    rng.dispatchEvent(new Event("input"));
-  }
-
-  async function hydrateOnce(){
-    const {sel, rng, ok} = uiRefs();
-    if (!ok){ warn("controls missing"); return false; }
-    const scene = await waitForSceneReady();
-    if (!scene){ warn("scene unavailable"); return false; }
-    const nameMap = collectMaterialsByName(scene);
-    const n = populateSelect(sel, nameMap);
-    wireHandlers(sel, rng, nameMap);
-    window.dispatchEvent(new CustomEvent("lm:materials-populated", { detail: { names: [...nameMap.keys()] } }));
-    dbg("materials populated (GLB-only)", n);
-    return n>0;
-  }
-
-  // ---------- Sheets bridge shim ----------
-  // 既存の materials.sheet.bridge への呼び出しを吸収。なければキューして待つ。
-  const queue = new Map(); // name -> lastValue
-  let flushTimer = 0;
-
-  function tryCallBridge(name, value){
-    const b = window.materialsSheetBridge || window.__lm_materialsSheetBridge || null;
-    if (!b) return false;
-    // 候補メソッドを順に試す
-    const candidates = [
-      "saveOpacity", "setOpacity", "persistOpacity", "save", "persist"
-    ];
-    for (const fn of candidates){
-      if (typeof b[fn] === "function"){
-        try {
-          b[fn]({ materialKey: name, value });
-          return true;
-        } catch(e){ console.warn("[lm-mat-vNext] bridge call failed:", fn, e); }
+  // Sheets bridge: queue + best-effort method names
+  const sheetsQueue = [];
+  function tryFlushSheets() {
+    const br = window.materialsSheetBridge;
+    if (!br) return false;
+    while (sheetsQueue.length) {
+      const { key, val } = sheetsQueue.shift();
+      if (typeof br.saveOpacity === 'function')      br.saveOpacity(key, val);
+      else if (typeof br.persistOpacity === 'function') br.persistOpacity(key, val);
+      else if (typeof br.setOpacity === 'function')  br.setOpacity(key, val);
+      else {
+        // final fallback: emit event for anyone listening
+        window.dispatchEvent(new CustomEvent('lm:material-opacity-commit', { detail: { materialKey: key, value: val } }));
       }
     }
-    // イベントで拾うタイプにも対応（最終手段）
-    window.dispatchEvent(new CustomEvent("lm:material-opacity-commit", { detail: { materialKey: name, value } }));
     return true;
   }
+  // listen to context ready to flush
+  window.addEventListener('lm:sheet-context', () => setTimeout(tryFlushSheets, 0));
+  // and also poll a little after boot
+  setTimeout(tryFlushSheets, 1500);
 
-  function scheduleFlush(){
-    if (flushTimer) return;
-    flushTimer = window.setTimeout(()=>{
-      flushTimer = 0;
-      const entries = [...queue.entries()];
-      if (!entries.length) return;
-      let okAny = false;
-      for (const [name, value] of entries){
-        const ok = tryCallBridge(name, value);
-        okAny = okAny || ok;
-        if (ok) queue.delete(name);
+  function wireHandlers(scene, sel, rng, nameMap) {
+    const applyOpacity = () => {
+      const name = sel.value; if (!name) return;
+      const v = parseFloat(rng.value);
+      const mats = nameMap.get(name) || [];
+      for (const m of mats) {
+        m.transparent = (v < 1.0) || m.transparent;
+        m.opacity = v;
+        if ('needsUpdate' in m) m.needsUpdate = true;
       }
-      if (!okAny){
-        // まだブリッジが来ていない。少し後で再挑戦。
-        scheduleFlush();
-      }
-    }, 200);
+      // Reflect to any numeric readout if present
+      const disp = document.getElementById('pm-opacity-value') || rng.closest('label,div')?.querySelector('.value,.readout');
+      if (disp) { try { disp.textContent = v.toFixed(2); } catch {} }
+
+      // Persist request
+      const entry = { key: name, val: v };
+      sheetsQueue.push(entry);
+      tryFlushSheets();
+
+      // Public event for other listeners
+      window.dispatchEvent(new CustomEvent('lm:material-opacity-changed', { detail: { materialKey: name, value: v } }));
+    };
+
+    rng.addEventListener('input', applyOpacity);
+    sel.addEventListener('change', () => rng.dispatchEvent(new Event('input')));
+    // initial apply
+    rng.dispatchEvent(new Event('input'));
   }
 
-  window.addEventListener("lm:material-opacity-changed", (e)=>{
-    const { materialKey, value } = e.detail || {};
-    if (!materialKey) return;
-    queue.set(materialKey, value);
-    scheduleFlush();
-  });
+  async function hydrateOnce() {
+    const { sel, rng } = await ensureControls();
+    if (!sel || !rng) { warn('controls missing'); return false; }
 
-  // シートコンテキストがバインドされたら即フラッシュ
-  window.addEventListener("lm:sheet-context", ()=> scheduleFlush());
+    const scene = await waitForScene();
+    if (!scene) { warn('scene unavailable'); return false; }
 
-  // ---------- boot ----------
+    const nameMap = collectMaterialsByName(scene);
+    const n = populateSelect(sel, nameMap);
+    wireHandlers(scene, sel, rng, nameMap);
+    log('materials populated (GLB-only)', n);
+    // notify list as well
+    window.dispatchEvent(new CustomEvent('lm:materials-populated', { detail: { names: [...nameMap.keys()] } }));
+    return n > 0;
+  }
+
+  // ---- boot once + rehydrate on deep-ready -----------------------------------
   (async () => {
     await hydrateOnce();
-    window.addEventListener("pm:scene-deep-ready", ()=> setTimeout(()=>{ hydrateOnce(); }, 0));
+    window.addEventListener('pm:scene-deep-ready', () => setTimeout(() => { hydrateOnce(); }, 0));
   })();
 })();
 </script>
