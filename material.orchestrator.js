@@ -1,168 +1,174 @@
-/* LociMyu: material.orchestrator.js
- * Version: A3.4_RACE_FIX
- * Goal:
- *  - Eliminate race between UI mount and scene readiness.
- *  - Never give up early; retry until both (UI select + GLB materials) are ready.
- *  - Populate select using traverse() fallback (listMaterials optional).
- *  - Guard against double-boot when the script is accidentally included twice.
- */
-
+// material.orchestrator.js — V6_15_COMMIT_MODE+robust_ui_wait+pm_selectors
 (() => {
-  // --- double-run guard -----------------------------------------------------
-  if (window.__LM_MAT_ORCH__) {
-    console.warn('[mat-orch] already running; skip second boot');
-    return;
+  const VERSION_TAG = 'V6_15_COMMIT_MODE+robust_ui_wait+pm_selectors';
+  console.log('[mat-orch] loaded VERSION_TAG:', VERSION_TAG);
+
+  if (typeof window.__LM_COMMIT_MODE === 'undefined') window.__LM_COMMIT_MODE = true;
+
+  const SELECTORS = {
+    materialSelect: ['#pm-material', 
+      '#materialSelect',
+      'select[name="materialKey"]',
+      '[data-lm="material-select"]',
+      '.lm-material-select',
+      '[data-testid="material-select"]',
+      '#materialPanel select',
+      '.material-panel select'
+    ],
+    opacityRange: ['#pm-opacity-range', 
+      '#opacityRange',
+      'input[type="range"][name="opacity"]',
+      '[data-lm="opacity-range"]',
+      '.lm-opacity-range',
+      '[data-testid="opacity-range"]',
+      '#materialPanel input[type="range"]',
+      '.material-panel input[type="range"]'
+    ]
+  };
+
+  function pick(qs) {
+    for (const q of qs) {
+      const el = document.querySelector(q);
+      if (el) return el;
+    }
+    return null;
   }
-  window.__LM_MAT_ORCH__ = { version: 'A3.4_RACE_FIX' };
-  window.HOTFIX_BIND_MATERIALS = 'A3.4';
 
-  const LOG_PREFIX = '[mat-orch]';
-  const log  = (...a) => console.log(LOG_PREFIX, ...a);
-  const warn = (...a) => console.warn(LOG_PREFIX, ...a);
-  const err  = (...a) => console.error(LOG_PREFIX, ...a);
+  function waitForElement(qs, timeoutMs = 10000) {
+    const existing = pick(qs);
+    if (existing) return Promise.resolve(existing);
 
-  log('boot', window.__LM_MAT_ORCH__.version);
-
-  // --- utilities ------------------------------------------------------------
-  const getBridge = () =>
-    window.__LM_VIEWER_BRIDGE__ || window.LM_VIEWER_BRIDGE || window.viewerBridge || null;
-
-  const getScene = () => {
-    const br = getBridge();
-    try { return br && typeof br.getScene === 'function' ? br.getScene() : null; }
-    catch { return null; }
-  };
-
-  const findSelect = () =>
-    document.querySelector('#pm-material, select[aria-label="Select material"], #materialSelect, #mat-select, #matKeySelect, select[name*="material"], select[id*="material"]');
-
-  const isVisible = (el) =>
-    !!(el && el.getClientRects().length && getComputedStyle(el).visibility !== 'hidden' && getComputedStyle(el).display !== 'none');
-
-  const unique = (arr) => Array.from(new Set(arr));
-
-  // collect GLB materials via traverse (overlay/basic unnamed filtered out)
-  const collectMaterialsFromScene = (scene) => {
-    const out = [];
-    const seen = new Set();
-    if (!scene || typeof scene.traverse !== 'function') return out;
-    scene.traverse((obj) => {
-      if (!obj || !obj.isMesh) return;
-      const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
-      mats.forEach((m, i) => {
-        if (!m) return;
-        const rawName = (m.name || '').trim();
-        if (m.type === 'MeshBasicMaterial' && !rawName) return; // overlay etc.
-        const key = m.uuid || m.id || rawName || `${obj.uuid}:${i}`;
-        if (seen.has(key)) return;
-        seen.add(key);
-        const label = rawName || (obj.name ? `${obj.name} (${m.type || 'Material'})` : (m.type || 'Material'));
-        out.push({ key, label });
+    return new Promise((resolve) => {
+      const mo = new MutationObserver(() => {
+        const el = pick(qs);
+        if (el) {
+          mo.disconnect();
+          resolve(el);
+        }
       });
+      mo.observe(document.documentElement, { childList: true, subtree: true });
+      setTimeout(() => {
+        mo.disconnect();
+        console.warn('[mat-orch] UI not ready after wait; selectors tried:', qs);
+        resolve(null);
+      }, timeoutMs);
     });
-    return out;
-  };
+  }
 
-  // optional: listMaterials if available
-  const listMaterials = async () => {
-    try {
-      const br = getBridge();
-      if (!br || typeof br.listMaterials !== 'function') return [];
-      const mats = await br.listMaterials();
-      if (!Array.isArray(mats)) return [];
-      return unique(mats.map((m) => (m?.name || m?.uuid || m?.id)).filter(Boolean)).map((k) => ({ key: k, label: String(k) }));
-    } catch {
-      return [];
-    }
-  };
-
-  const populateSelect = (sel, rows) => {
-    if (!sel || !rows?.length) return false;
-    // Preserve a leading placeholder if present
-    const first = sel.options[0];
-    const keepPlaceholder = first && /select material/i.test(first.textContent || '');
-
-    // Clear and add
-    sel.innerHTML = '';
-    if (keepPlaceholder) {
-      const ph = document.createElement('option');
-      ph.textContent = first.textContent;
-      ph.value = '';
-      sel.appendChild(ph);
-    }
-    const frag = document.createDocumentFragment();
-    rows.forEach((r) => {
-      const opt = document.createElement('option');
-      opt.value = r.key;
-      opt.textContent = r.label || r.key;
-      frag.appendChild(opt);
-    });
-    sel.appendChild(frag);
-    log('bound', rows.length, 'materials → select');
+  const sheet = window.materialsSheetBridge || window.__materialsSheetBridge || {};
+  const getOne = sheet.getOne ? sheet.getOne.bind(sheet) : async (materialKey) => (window.__LM_MOCK_SHEET?.[materialKey] ?? null);
+  const upsertOne = sheet.upsertOne ? sheet.upsertOne.bind(sheet) : async ({ materialKey, opacity }) => {
+    window.__LM_MOCK_SHEET = window.__LM_MOCK_SHEET || {};
+    window.__LM_MOCK_SHEET[materialKey] = { opacity };
     return true;
   };
 
-  // --- orchestrate with retries --------------------------------------------
-  let bound = false;
-  const MAX_MS = 8000;
-  const START = performance.now();
+  const viewerBridge = window.viewerBridge || window.__viewerBridge || {};
+  const getScene = viewerBridge.getScene ? viewerBridge.getScene.bind(viewerBridge) : () => (window.__LM_SCENE || null);
 
-  const tryBindOnce = async (reason) => {
-    if (bound) return;
-    const sel = findSelect();
-    const scene = getScene();
-    if (!sel || !isVisible(sel)) {
-      log('wait UI…', reason || '');
+  let WIRED = false;
+  let PROGRAM_SET = false;
+
+  async function reflectFromSheet(selectEl, rangeEl) {
+    const key = selectEl?.value;
+    if (!key) return;
+    try {
+      const row = await getOne(key);
+      if (row && row.opacity != null) {
+        PROGRAM_SET = true;
+        rangeEl.value = String(row.opacity);
+        rangeEl.dispatchEvent(new Event('input', { bubbles: true }));
+        PROGRAM_SET = false;
+        console.log('[mat-orch] reflected from sheet:', key, '→', row.opacity);
+      } else {
+        console.log('[mat-orch] reflected from sheet: no row for', key);
+      }
+    } catch (e) {
+      console.warn('[mat-orch] reflectFromSheet error', e);
+    }
+  }
+
+  function applyPreview(rangeEl, selectEl) {
+    const scene = getScene?.();
+    if (!scene) return;
+    const key = selectEl?.value;
+    const opacity = parseFloat(rangeEl.value);
+    if (!key || isNaN(opacity)) return;
+
+    let count = 0;
+    try {
+      scene.traverse?.((obj) => {
+        const mat = obj.material;
+        if (!mat) return;
+        const mats = Array.isArray(mat) ? mat : [mat];
+        for (const m of mats) {
+          if (m?.name === key) {
+            if ('transparent' in m) m.transparent = opacity < 1.0;
+            if ('opacity' in m) m.opacity = opacity;
+            count++;
+          }
+        }
+      });
+    } catch {}
+    console.log(`[mat-orch] opacity ${opacity.toFixed(2)} → "${key}" x${count}`);
+  }
+
+  async function wireCommitMode(selectEl, rangeEl) {
+    if (WIRED) return;
+    WIRED = true;
+    console.log('[mat-orch] wired commit-mode');
+
+    selectEl.addEventListener('change', () => reflectFromSheet(selectEl, rangeEl));
+
+    let lastPreview = 0;
+    rangeEl.addEventListener('input', () => {
+      if (PROGRAM_SET) return;
+      const now = performance.now();
+      if (now - lastPreview < 16) return;
+      lastPreview = now;
+      applyPreview(rangeEl, selectEl);
+    });
+
+    async function commitOnce() {
+      if (PROGRAM_SET) return;
+      const key = selectEl?.value;
+      const opacity = parseFloat(rangeEl.value);
+      if (!key || isNaN(opacity)) return;
+      try {
+        await upsertOne({ materialKey: key, opacity });
+        console.log('[mat-orch] persisted to sheet:', key);
+      } catch (e) {
+        console.warn('[mat-orch] persist error', e);
+      }
+    }
+    rangeEl.addEventListener('change', commitOnce);
+    rangeEl.addEventListener('blur', commitOnce);
+
+    reflectFromSheet(selectEl, rangeEl);
+  }
+
+  async function wireOnce() {
+    if (WIRED) return;
+
+    const [selectEl, rangeEl] = await Promise.all([
+      waitForElement(SELECTORS.materialSelect, 10000),
+      waitForElement(SELECTORS.opacityRange, 10000),
+    ]);
+
+    if (!(selectEl && rangeEl)) {
+      console.warn('[mat-orch] UI still not ready; aborting wire (no infinite retry).');
       return;
     }
-    if (!scene || typeof scene.traverse !== 'function') {
-      log('wait scene…', reason || '');
-      return;
+
+    if (window.__LM_COMMIT_MODE) {
+      await wireCommitMode(selectEl, rangeEl);
+    } else {
+      console.log('[mat-orch] commit-mode disabled; no handlers wired.');
     }
+  }
 
-    // Prefer traverse-based list; fall back to listMaterials
-    let rows = collectMaterialsFromScene(scene);
-    if (!rows.length) {
-      const listed = await listMaterials();
-      // listMaterials can return keys only; leave labels same as key
-      rows = listed;
-    }
-
-    if (!rows.length) {
-      log('no GLB materials yet; retry…', reason || '');
-      return;
-    }
-
-    if (populateSelect(sel, rows)) {
-      bound = true;
-      window.__LM_MAT_ORCH__.bound = true;
-    }
-  };
-
-  // scene-ready event hook (from bridge)
-  const installSceneReadyHook = () => {
-    // Hook common custom events defensively
-    const onSceneReady = () => tryBindOnce('event:scene-ready');
-    window.addEventListener('lm:scene-ready', onSceneReady, { passive: true });
-    // As some builds dispatch on document:
-    document.addEventListener('lm:scene-ready', onSceneReady, { passive: true });
-
-    // Also attempt shortly after boot (common case where scene stabilizes just after boot)
-    setTimeout(() => tryBindOnce('t+300'), 300);
-  };
-
-  // polling fallback to cover any missed events
-  const interval = setInterval(async () => {
-    if (bound) { clearInterval(interval); return; }
-    const elapsed = performance.now() - START;
-    if (elapsed > MAX_MS) {
-      clearInterval(interval);
-      warn('timeout without binding (UI/scene/materials not simultaneously ready)');
-      return;
-    }
-    await tryBindOnce('poll');
-  }, 250);
-
-  // start
-  installSceneReadyHook();
+  document.addEventListener('DOMContentLoaded', () => queueMicrotask(wireOnce));
+  window.addEventListener('lm:scene-ready', () => queueMicrotask(wireOnce));
+  window.addEventListener('lm:panel-material-ready', () => queueMicrotask(wireOnce));
+  setTimeout(wireOnce, 500);
 })();
