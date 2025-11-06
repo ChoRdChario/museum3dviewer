@@ -171,9 +171,35 @@ export function resetAllMaterials(){
   }
 }
 
-import * as THREE from 'https://unpkg.com/three@0.159.0/build/three.module.js';
-import { OrbitControls } from 'https://unpkg.com/three@0.159.0/examples/jsm/controls/OrbitControls.js';
-import { GLTFLoader } from 'https://unpkg.com/three@0.159.0/examples/jsm/loaders/GLTFLoader.js';
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+
+
+// ---- LociMyu patch: renderer defaults & lights ----
+function __lm_applyRendererDefaults(renderer){
+  try{
+    if(!renderer) return;
+    if ('outputColorSpace' in renderer)
+      renderer.outputColorSpace = THREE.SRGBColorSpace;
+    if ('toneMapping' in renderer)
+      renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    if ('toneMappingExposure' in renderer)
+      renderer.toneMappingExposure = 1.0;
+  }catch(e){ console.warn('[viewer.patch] renderer defaults error', e); }
+}
+function __lm_ensureLights(scene){
+  try{
+    if(!scene) return;
+    const hasAmbient = scene.children && scene.children.some(n => n.isLight && n.type === 'AmbientLight');
+    const hasDir = scene.children && scene.children.some(n => n.isLight && n.type === 'DirectionalLight');
+    if(!hasAmbient) scene.add(new THREE.AmbientLight(0xffffff, 0.5));
+    if(!hasDir){ const d = new THREE.DirectionalLight(0xffffff, 0.8); d.position.set(5,5,5); scene.add(d); }
+  }catch(e){ console.warn('[viewer.patch] ensureLights error', e); }
+}
+
+
+if (!('THREE' in window)) { Object.defineProperty(window, 'THREE', { value: THREE, writable: false }); }
 
 let renderer, scene, camera, controls, raycaster, canvasEl;
 const pickHandlers = new Set();
@@ -377,6 +403,9 @@ try {
       scene.remove(obj);
     }
     scene.add(gltf.scene);
+__lm_ensureLights(scene);
+try{ window.dispatchEvent(new CustomEvent('pm:scene-deep-ready', { detail:{ scene } })); }catch(e){ console.warn('[viewer.patch] dispatch deep-ready failed', e); }
+
 
     const box = new THREE.Box3().setFromObject(gltf.scene);
     const size = box.getSize(new THREE.Vector3()).length();

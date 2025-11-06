@@ -371,3 +371,18 @@
   })();
 
 })();
+
+
+// ---- LociMyu patch: event-first populate ----
+(function __lm_installDeepReadyListener(){
+  if (window.__lm_mat_orch_ready_listener_installed) return;
+  window.__lm_mat_orch_ready_listener_installed = true;
+  window.addEventListener('pm:scene-deep-ready', (e) => {
+    try{
+      console.log('[mat-orch] pm:scene-deep-ready', !!(e && e.detail && e.detail.scene));
+      if (typeof populateSelect === 'function') populateSelect();
+      if (typeof bindUIHandlers === 'function') bindUIHandlers();
+    }catch(err){ console.warn('[mat-orch] deep-ready handler error', err); }
+  });
+})();    
+
