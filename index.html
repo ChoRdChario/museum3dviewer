@@ -276,103 +276,173 @@
     <script type="module" src="./materials.sheet.bridge.js"></script>
     <script type="module" src="./material.orchestrator.js"></script>
 
-<!-- lm-dx v4.3: robust material panel anchoring & click passthrough -->
+<!-- lm-compat v4.4: ensure material UI anchored + populate dropdown after GLB deep-ready -->
 <script>
 (() => {
-  const TAG='[lm-dx v4.3]'; const log=(...a)=>console.log(TAG,...a), warn=(...a)=>console.warn(TAG,...a);
-  const doc = document;
-  const right = doc.querySelector('#right, aside, .right, .sidebar') || doc.body;
+  const TAG = '[lm-compat v4.4]';
+  const log = (...a)=>console.log(TAG, ...a);
+  const warn = (...a)=>console.warn(TAG, ...a);
 
-  // -------- 1) Minimal click passthrough for critical controls --------
-  function detoxClickable(target){
-    if (!target) return {disabled:0,target:null};
-    const r = target.getBoundingClientRect();
-    const p = {x: r.left + r.width*0.5, y: r.top + Math.min(16,r.height/2)};
-    const chain = doc.elementsFromPoint(p.x, p.y);
-    const idx = chain.indexOf(target);
-    const blockers = (idx===-1?chain:chain.slice(0,idx)).filter(e=>{
-      const cs=getComputedStyle(e), pos=cs.position;
-      const fixedLike = pos==='fixed'||pos==='absolute'||pos==='sticky';
-      return fixedLike && cs.pointerEvents!=='none' && right.contains(e);
+  // ---------- 1) Ensure Material panel has anchors (#materialSelect, #opacityRange) ----------
+  function ensureMaterialPanelAnchors(){
+    const right = document.querySelector('#right, aside, .right, .sidebar') || document.body;
+
+    // try find an existing material panel
+    let panel =
+      right.querySelector('#panel-material, [role="tabpanel"][data-tab="material"], [data-panel="material"]') ||
+      [...right.querySelectorAll('section,.card,.panel,.group')].find(c => /per-?material.*opacity|chroma|double-?sided|unlit/i.test((c.textContent||'').toLowerCase()));
+
+    // synthesize when missing
+    if (!panel) {
+      panel = document.createElement('section');
+      panel.id = 'panel-material';
+      panel.className = 'lm-panel-material card';
+      panel.style.marginTop = '8px';
+      // place it under the tab content area if possible
+      const tabs = right.querySelector('[role="tablist"], .tabs, .tabbar, .tab-content') || right;
+      tabs.appendChild(panel);
+      log('synthesized panel');
+    }
+
+    // remove wrong placements under the tab button (safety)
+    const tabBtn = document.getElementById('tab-material');
+    if (tabBtn) {
+      tabBtn.querySelectorAll('#materialSelect,#opacityRange').forEach(n => n.remove());
+    }
+
+    // ensure anchors inside panel
+    let sel = panel.querySelector('#materialSelect');
+    if (!sel) {
+      sel = document.createElement('select');
+      sel.id = 'materialSelect';
+      sel.style.width = '100%';
+      sel.ariaLabel = 'Select material';
+      panel.appendChild(sel);
+    }
+    let rng = panel.querySelector('#opacityRange');
+    if (!rng) {
+      rng = document.createElement('input');
+      rng.type = 'range';
+      rng.id = 'opacityRange';
+      rng.min = '0'; rng.max = '1'; rng.step = '0.01'; rng.value = '1.00';
+      rng.style.width = '100%';
+      rng.ariaLabel = 'Material opacity';
+      panel.appendChild(rng);
+    }
+
+    // if anchors exist elsewhere, move them in
+    ['materialSelect','opacityRange'].forEach(id => {
+      const node = document.getElementById(id);
+      if (node && !panel.contains(node)) panel.appendChild(node);
     });
-    blockers.forEach(e=>{ e.dataset.__pe_before=getComputedStyle(e).pointerEvents; e.style.pointerEvents='none'; e.classList.add('lm-pe-none'); });
-    target.style.pointerEvents='auto'; target.disabled=false;
-    log('detoxClickable',{disabled:blockers.length,target});
-    return {disabled:blockers.length,target};
-  }
-  detoxClickable(doc.getElementById('glbUrl'));
-  detoxClickable(doc.getElementById('auth-signin'));
-  detoxClickable(doc.getElementById('btnGlb'));
 
-  // -------- 2) Find Material tab & "is active?" helper --------
-  function findMaterialTabBtn() {
-    const idBtn = doc.getElementById('tab-material');
-    if (idBtn) return idBtn;
-    const btns = [...right.querySelectorAll('button,[role="tab"],.tab,nav button,header button')];
-    const m = btns.find(b => (b.textContent||'').trim().toLowerCase() === 'material');
-    return m || null;
-  }
-  const materialTabBtn = findMaterialTabBtn();
-  function isMaterialActive() {
-    const b = materialTabBtn;
-    if (!b) return true; // fallback
-    const cs = b.getAttribute('aria-selected');
-    if (cs) return cs === 'true';
-    return b.classList.contains('active') || b.classList.contains('selected');
+    log('material controls anchored in panel', panel);
+    // nudge orchestrator listeners, if any
+    window.dispatchEvent(new Event('lm:mat-ui-ready', { bubbles: true }));
+    return { panel, sel, rng };
   }
 
-  // -------- 3) Resolve Material "panel" candidate --------
-  function visible(el){ try{ return !!el && el.offsetParent !== null; } catch(_){ return false; } }
-  const tabBar = right.querySelector('[role="tablist"], .tabs, nav, header') || right;
-  const candidates = [
-    right.querySelector('#panel-material, [role="tabpanel"][data-tab="material"], [data-panel="material"]'),
-    // Any section/card below tab bar that includes known Material labels:
-    ...[...right.querySelectorAll('section,.card,.panel,.group')]
-      .filter(c => {
-        const r=c.getBoundingClientRect?.(); if(!r) return false;
-        if (tabBar && r.top < (tabBar.getBoundingClientRect?.().bottom||0)) return false;
-        const t=(c.textContent||'').toLowerCase();
-        return /per-?material/.test(t) || /opacity/.test(t) || /chroma key|double-?sided|unlit/.test(t);
-      })
-  ].filter(Boolean);
-  let panel = candidates.find(visible) || candidates[0] || null;
+  // ---------- 2) Populate materials only after GLB deep-ready ----------
+  const isGLBName = (n) => {
+    if (!n) return false;
+    if (/^mesh.*material$/i.test(n)) return false;
+    if (/^material(\.\d+)?$/i.test(n)) return false;
+    if (n.startsWith('__') || n.startsWith('LM_')) return false;
+    return true;
+  };
 
-  // If still not found, synthesize a dedicated panel right below the tab bar.
-  if (!panel && tabBar){
-    panel = doc.createElement('section');
-    panel.id = 'panel-material';
-    panel.className = 'lm-panel-material card';
-    panel.style.marginTop = '8px';
-    // Show only when Material tab active (best-effort)
-    const style = doc.createElement('style');
-    style.textContent = `
-      #panel-material { display: ${isMaterialActive() ? 'block' : 'none'}; }
-    `;
-    doc.head.appendChild(style);
-    tabBar.insertAdjacentElement('afterend', panel);
-    log('synthesized panel');
-  }
-  if (!panel){ warn('material panel/card not found'); return; }
-
-  // -------- 4) Ensure anchors inside the panel --------
-  function ensureAnchors(dst){
-    let sel = dst.querySelector('#materialSelect');
-    if (!sel) { sel = doc.createElement('select'); sel.id='materialSelect'; sel.style.width='100%'; dst.appendChild(sel); }
-    let rng = dst.querySelector('#opacityRange');
-    if (!rng) { rng = doc.createElement('input'); rng.type='range'; rng.id='opacityRange'; rng.min='0'; rng.max='1'; rng.step='0.01'; rng.value='1.0'; rng.style.width='100%'; dst.appendChild(rng); }
-    return {sel,rng};
+  function getScene() {
+    try {
+      if (typeof window.getScene === 'function') return window.getScene();
+    } catch (_) {}
+    return window.__lm_scene || null;
   }
 
-  // Remove mistaken insertions under the tab *button*
-  const tabBtn = doc.getElementById('tab-material');
-  if (tabBtn) tabBtn.querySelectorAll('#materialSelect,#opacityRange').forEach(n=>n.remove());
+  function collectByName(scene) {
+    const map = new Map();
+    try {
+      scene?.traverse?.(o => {
+        if (!o?.isMesh) return;
+        (Array.isArray(o.material) ? o.material : [o.material]).forEach(m => {
+          const name = (m?.name || '').trim();
+          if (!isGLBName(name)) return;
+          if (!map.has(name)) map.set(name, []);
+          map.get(name).push(m);
+        });
+      });
+    } catch (e) { warn('traverse failed', e); }
+    return map;
+  }
 
-  const {sel, rng} = ensureAnchors(panel);
-  ['materialSelect','opacityRange'].forEach(id=>{ const n=doc.getElementById(id); if(n && !panel.contains(n)) panel.appendChild(n); });
+  function populateSelect(sel, nameMap) {
+    sel.innerHTML = '';
+    const names = [...nameMap.keys()].sort((a,b)=>a.localeCompare(b, 'ja'));
+    if (!names.length) {
+      const opt = document.createElement('option');
+      opt.value = ''; opt.textContent = '(no GLB materials)';
+      sel.appendChild(opt);
+      return 0;
+    }
+    for (const nm of names) {
+      const opt = document.createElement('option');
+      opt.value = nm; opt.textContent = nm;
+      sel.appendChild(opt);
+    }
+    return names.length;
+  }
 
-  log('material controls anchored in panel', panel);
-  // Nudge orchestrator
-  window.dispatchEvent(new Event('lm:mat-ui-ready',{bubbles:true}));
+  function wire(scene, sel, rng, nameMap) {
+    const apply = () => {
+      const key = sel.value; if (!key) return;
+      const v = parseFloat(rng.value);
+      const mats = nameMap.get(key) || [];
+      for (const m of mats) {
+        m.transparent = (v < 1.0) || m.transparent;
+        m.opacity = v;
+        if ('needsUpdate' in m) m.needsUpdate = true;
+      }
+      // tell sheet bridge (if alive)
+      window.dispatchEvent(new CustomEvent('lm:material-opacity-changed', {
+        detail: { materialKey: key, value: v }
+      }));
+    };
+    rng.addEventListener('input', apply);
+    sel.addEventListener('change', () => rng.dispatchEvent(new Event('input')));
+    // initial apply
+    rng.dispatchEvent(new Event('input'));
+  }
+
+  let lastHydrate = 0;
+  async function hydrate(sceneCandidate) {
+    const { sel, rng } = ensureMaterialPanelAnchors();
+    if (!sel || !rng) return warn('controls missing');
+
+    const scene = sceneCandidate || getScene();
+    if (!scene) return warn('scene not ready');
+
+    // cheap mesh check
+    let hasMesh = false;
+    try { scene.traverse(o => { if (o?.isMesh) hasMesh = true; }); } catch(_){}
+    if (!hasMesh) return warn('scene has no meshes yet');
+
+    const nameMap = collectByName(scene);
+    const n = populateSelect(sel, nameMap);
+    if (!n) return warn('no GLB materials');
+
+    wire(scene, sel, rng, nameMap);
+    lastHydrate++;
+    log(`materials populated ${n} (v${lastHydrate})`);
+  }
+
+  // react to deep-ready and to UI-ready
+  window.addEventListener('pm:scene-deep-ready', (e) => hydrate(e?.detail?.scene || null), { capture: true });
+  window.addEventListener('lm:mat-ui-ready', () => hydrate(null), { capture: true });
+
+  // run once after load (handles already-ready cases)
+  document.addEventListener('DOMContentLoaded', () => {
+    ensureMaterialPanelAnchors();
+    setTimeout(() => hydrate(null), 0);
+  });
 })();
 </script>
 </body>
