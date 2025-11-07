@@ -376,8 +376,8 @@
 // ---- LociMyu patch: ensure Material UI exists (auto-inject if missing) ----
 function __lm_ensureMaterialUI(){
   try{
-    let sel = document.getElementById('materialSelect');
-    let rng = document.getElementById('opacityRange');
+    let sel = $id('materialSelect');
+    let rng = $id('opacityRange');
     if (sel && rng) return { sel, rng };
     // Try to locate a right pane container
     let right = document.getElementById('right') || document.querySelector('#right, .right, aside') || document.body;
@@ -400,8 +400,8 @@ function __lm_ensureMaterialUI(){
       `;
       right.prepend(panel);
     }
-    sel = document.getElementById('materialSelect');
-    rng = document.getElementById('opacityRange');
+    sel = $id('materialSelect');
+    rng = $id('opacityRange');
     return { sel, rng };
   }catch(e){
     console.warn('[mat-orch] auto-inject UI failed', e);
@@ -456,3 +456,7 @@ function __lm_ensureMaterialUI(){
   });
 })();    
 
+
+// [lm] strict UI scope to #pane-material
+const __root = document.getElementById('pane-material') || document;
+const $id = (id)=> (__root.querySelector('#'+id));
