@@ -1,82 +1,110 @@
-/* caption.ui.patch.js — restore caption pane DOM (non-invasive) */
-(() => {
-  const TAG = "[cap-ui]";
-  const log = (...a)=>console.log(TAG, ...a);
-  const warn = (...a)=>console.warn(TAG, ...a);
+(function(){
+  const TAG='[cap-ui v2]';
+  const log=(...a)=>console.log(TAG,...a);
+  const warn=(...a)=>console.warn(TAG,...a);
 
-  // Find right pane & caption tab panel
-  const right =
-    document.getElementById("right") ||
-    document.querySelector("#right,aside,.right,.sidebar") ||
-    document.body;
+  // Find caption pane
+  const pane = document.querySelector('#pane-caption.pane') || document.getElementById('pane-caption');
+  if(!pane){
+    return warn('pane-caption not found; abort');
+  }
 
-  const pane =
-    document.getElementById("pane-caption") ||
-    right.querySelector('#pane-caption,[data-panel="caption"],[role="tabpanel"][data-tab="caption"]');
+  // Ensure root container
+  let root = pane.querySelector('#caption-root');
+  if(!root){
+    root = document.createElement('div');
+    root.id = 'caption-root';
+    pane.appendChild(root);
+    log('created #caption-root');
+  } else {
+    log('#caption-root present');
+  }
 
-  if (!pane) return warn("pane-caption not found");
+  // Helper: create element with attributes
+  const el = (tag, attrs={}, text='') => {
+    const n = document.createElement(tag);
+    Object.entries(attrs).forEach(([k,v])=>{
+      if (k === 'class') n.className = v;
+      else if (k === 'for') n.htmlFor = v;
+      else n.setAttribute(k,v);
+    });
+    if (text) n.textContent = text;
+    return n;
+  };
 
-  // If app already rendered, do nothing
-  if (pane.querySelector("#caption-root")) return log("caption-root already present");
+  // Expected structure definitions (IDs only; styles are provided by existing CSS)
+  const expected = [
+    'pinColorRow',
+    'filterRow',
+    'captionList',
+    'titleBodyRow',
+    'imageStripRow'
+  ];
 
-  // Build DOM expected by existing app logic (IDs kept stable)
-  const root = document.createElement("div");
-  root.id = "caption-root";
-  root.className = "lm-caption-root";
+  // Build missing blocks minimally
+  const ensureBlocks = () => {
+    // Pin color row
+    if(!root.querySelector('#pinColorRow')){
+      const row = el('div', {id:'pinColorRow'});
+      const label = el('div', {class:'subtle'}, 'Pin color');
+      const chips = el('div', {id:'pinColorChips'});
+      // 10 sample color chips (UI script may re-render later)
+      const colors = ['#ffb84d','#ffd966','#ffe599','#cfe2f3','#b4a7d6','#d5a6bd','#f4cccc','#a2c4c9','#b6d7a8','#ead1dc'];
+      colors.forEach((c,i)=>{
+        const b = el('button', {type:'button', class:'chip', 'data-color':c, title:c});
+        b.style.width='18px'; b.style.height='18px'; b.style.borderRadius='999px'; b.style.border='1px solid rgba(255,255,255,.2)'; b.style.marginRight='6px'; b.style.background=c;
+        chips.appendChild(b);
+      });
+      row.appendChild(label);
+      row.appendChild(chips);
+      root.appendChild(row);
+      log('built pinColorRow');
+    }
+    // Filter row
+    if(!root.querySelector('#filterRow')){
+      const row = el('div',{id:'filterRow'});
+      const label = el('div', {class:'subtle'}, 'Filter');
+      const controls = el('div', {id:'filterControls'});
+      controls.appendChild(el('button',{id:'filterAll',type:'button',class:'btn-xs'},'All'));
+      controls.appendChild(el('button',{id:'filterNone',type:'button',class:'btn-xs'},'None'));
+      const colors = ['peach','lemon','mint','sky','violet','lav','pink','teal','lime','rose'];
+      const colorWrap = el('span',{id:'filterColors'});
+      colors.forEach((name,i)=>{
+        const b = el('button',{type:'button',class:'chip', 'data-tag':name, title:name});
+        b.style.width='18px'; b.style.height='18px'; b.style.borderRadius='999px'; b.style.border='1px solid rgba(255,255,255,.2)'; b.style.marginLeft='6px';
+        colorWrap.appendChild(b);
+      });
+      controls.appendChild(colorWrap);
+      row.appendChild(label);
+      row.appendChild(controls);
+      root.appendChild(row);
+      log('built filterRow');
+    }
+    // Caption list
+    if(!root.querySelector('#captionList')){
+      const list = el('div',{id:'captionList', style:'min-height:180px; border:1px solid rgba(255,255,255,.08); border-radius:8px; padding:6px; overflow:auto;'});
+      root.appendChild(list);
+      log('built captionList');
+    }
+    // Title / Body
+    if(!root.querySelector('#titleBodyRow')){
+      const wrap = el('div',{id:'titleBodyRow', style:'margin-top:8px;'});
+      const title = el('input',{id:'capTitle', type:'text', placeholder:'Title'});
+      const body = el('textarea',{id:'capBody', placeholder:'Body', rows:'4', style:'margin-top:6px;'});
+      wrap.appendChild(title); wrap.appendChild(body);
+      root.appendChild(wrap);
+      log('built title/body');
+    }
+    // Image strip
+    if(!root.querySelector('#imageStripRow')){
+      const wrap = el('div',{id:'imageStripRow', style:'margin-top:8px;'});
+      const btn = el('button',{id:'btnRefreshImages', type:'button', class:'btn-sm'}, 'Refresh images');
+      const strip = el('div',{id:'imageStrip', style:'margin-top:6px; display:flex; gap:8px; flex-wrap:wrap;'});
+      wrap.appendChild(btn); wrap.appendChild(strip);
+      root.appendChild(wrap);
+      log('built image strip row');
+    }
+  };
 
-  root.innerHTML = `
-  <div class="field">
-    <label class="label">Pin color</label>
-    <div id="pinColorRow" class="chip-row" aria-label="pin color chips"></div>
-  </div>
-
-  <div class="field">
-    <label class="label">Filter</label>
-    <div id="filterRow" class="filter-row">
-      <button id="filterAll" class="btn small" type="button">All</button>
-      <button id="filterNone" class="btn small" type="button">None</button>
-      <div id="filterColors" class="chip-row" aria-label="color filters"></div>
-    </div>
-  </div>
-
-  <div class="field">
-    <label class="label">Caption list</label>
-    <div id="captionList" class="list" role="listbox" aria-label="captions"></div>
-  </div>
-
-  <div class="field two-cols">
-    <div>
-      <label class="label">Title</label>
-      <input id="capTitle" type="text" class="input" placeholder="Title">
-    </div>
-    <div>
-      <label class="label">Body</label>
-      <textarea id="capBody" class="textarea" rows="3" placeholder="Body"></textarea>
-    </div>
-  </div>
-
-  <div class="field">
-    <label class="label">Images (auto from GLB folder)</label>
-    <button id="btnRefreshImages" class="btn" type="button">Refresh images</button>
-    <div id="imageStrip" class="image-strip" aria-label="images"></div>
-  </div>
-  `;
-
-  pane.appendChild(root);
-  log("caption-root injected into", pane);
-
-  // Minimal styles to avoid layout breakage; app CSS can override
-  const css = document.createElement("style");
-  css.textContent = `
-    .lm-caption-root { display: grid; gap: 10px; }
-    .field .label { display:block; font-size:.85rem; opacity:.8; margin-bottom:4px; }
-    .chip-row { display: flex; gap: 6px; flex-wrap: wrap; }
-    .filter-row { display:flex; gap:8px; align-items:center; flex-wrap: wrap; }
-    .list { min-height: 120px; max-height: 260px; overflow: auto; background: rgba(255,255,255,.03); border-radius: 8px; padding: 6px; }
-    .two-cols { display:grid; grid-template-columns: 1fr; gap:8px; }
-    .input, .textarea { width:100%; }
-    .btn.small { padding: 2px 8px; font-size: .8rem; }
-    .image-strip { display:flex; gap:8px; overflow:auto; padding:6px 0; }
-  `;
-  document.head.appendChild(css);
+  ensureBlocks();
 })();
