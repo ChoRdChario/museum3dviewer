@@ -276,169 +276,204 @@
     <script type="module" src="./materials.sheet.bridge.js"></script>
     <script type="module" src="./material.orchestrator.js"></script>
 
-<!-- ===== Click Enable Shim for GLB URL input (v1) ===== -->
+<!-- lm inline patch: input focus + GLB loader shim + material v7 lazy (no extra UI) -->
 <script>
 (() => {
-  const TAG = '[glb-url-click-shim]';
-  const log  = (...a)=>console.log(TAG, ...a);
+  const TAG = '[lm-inline]';
+  const log = (...a)=>console.log(TAG, ...a);
   const warn = (...a)=>console.warn(TAG, ...a);
 
-  function outline(el, color='rgba(0,255,255,.35)') {
-    if (!el) return;
-    el.style.outline = `2px solid ${color}`;
-    el.style.outlineOffset = '0px';
+  function once(target, type, handler, opts) {
+    const key = '__lm_once_' + type;
+    if (target[key]) return;
+    target[key] = true;
+    target.addEventListener(type, handler, opts||false);
   }
 
-  function enableUrlField() {
-    const right = document.querySelector('#right') ||
-                  document.querySelector('aside, .right, .sidebar') ||
-                  document.body;
-
-    if (!right) { warn('right pane not found'); return; }
-
+  function enableUrlInput() {
+    const right = document.querySelector('#right') || document.querySelector('aside, .right, .sidebar');
+    if (!right) return null;
     // Prefer explicit id first
-    let urlInput = right.querySelector('#glbUrl');
-    if (!urlInput) {
-      urlInput = [...right.querySelectorAll('input[type="text"], input[type="url"], input:not([type])')]
-        .find(i => (i.placeholder||'').toLowerCase().includes('glb'));
-    }
-    if (!urlInput) { warn('glb url input not found'); return; }
-
-    // Make it interactable
-    urlInput.disabled = false;
-    urlInput.readOnly = false;
-    urlInput.style.pointerEvents = 'auto';
-    urlInput.style.userSelect = 'text';
-    urlInput.tabIndex = 0;
-
-    // Lift nearest wrapper to front to avoid overlay capture
-    const wrap = urlInput.closest('section, .card, .panel, .group, form, div') || urlInput.parentElement;
-    if (wrap) {
-      const cs = getComputedStyle(wrap);
-      if (cs.position === 'static') wrap.style.position = 'relative';
-      wrap.style.zIndex = '9999';
-    }
-
-    // If something sits above, disable its pointer events (limited scope)
-    const r = urlInput.getBoundingClientRect();
-    const probePt = { x: r.left + Math.min(20, r.width/2), y: r.top + Math.min(12, r.height/2) };
-    const chain = document.elementsFromPoint(probePt.x, probePt.y);
-    let disabled = 0;
-    for (const el of chain) {
-      if (el === urlInput) break;
-      if (!right.contains(el)) continue;
-      const cs = getComputedStyle(el);
-      const blocks = cs.pointerEvents !== 'none' && (cs.position === 'fixed' || cs.position === 'absolute' || cs.position === 'sticky');
-      if (blocks) {
-        el.dataset.__pe_before = cs.pointerEvents;
-        el.style.pointerEvents = 'none';
-        el.classList.add('lm-pointer-e-none');
-        disabled++;
-        if (disabled >= 4) break; // be conservative
+    let url = right.querySelector('#glbUrl');
+    if (!url) {
+      // choose first plausible text/url input in the header area near Load button
+      const loadBtn = [...right.querySelectorAll('button, .btn, [role="button"]')].find(b => (b.textContent||'').trim().toLowerCase()==='load');
+      if (loadBtn) {
+        const box = loadBtn.closest('section, .card, .panel, .group, form, div') || right;
+        url = box.querySelector('input[type="text"], input[type="url"], input:not([type])');
+      } else {
+        url = right.querySelector('input[type="text"], input[type="url"], input:not([type])');
       }
     }
-    outline(urlInput);
-    log('url input enabled; overlays disabled:', disabled);
-  }
+    if (!url) return null;
 
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', enableUrlField, { once: true });
-  } else {
-    enableUrlField();
+    // make clickable
+    url.disabled = false;
+    url.readOnly = false;
+    url.style.pointerEvents = 'auto';
+    // bring to front slightly
+    const wrap = url.closest('section, .card, .panel, .group, form, div') || url.parentElement;
+    if (wrap && getComputedStyle(wrap).position === 'static') wrap.style.position = 'relative';
+    if (wrap) wrap.style.zIndex = (parseInt(getComputedStyle(wrap).zIndex||'0',10) < 5) ? '5' : getComputedStyle(wrap).zIndex;
+    return url;
   }
-})();
-</script>
-<!-- ===== /Click Enable Shim ===== -->
-
-<!-- ===== GLB URL robust loader shim (v1) ===== -->
-<script>
-(() => {
-  const TAG = '[glb-loader-shim]';
-  const log  = (...a)=>console.log(TAG, ...a);
-  const warn = (...a)=>console.warn(TAG, ...a);
 
   function parseGlbInput(raw) {
-    const s = (raw || '').trim();
-    if (!s) return null;
-    if (/^https?:\/\//i.test(s)) {
-      let m = s.match(/\/file\/d\/([a-zA-Z0-9_-]{10,})/);
-      if (m) return { kind: 'drive', fileId: m[1] };
-      m = s.match(/[?&]id=([a-zA-Z0-9_-]{10,})/);
-      if (m) return { kind: 'drive', fileId: m[1] };
-      m = s.match(/\/uc\?id=([a-zA-Z0-9_-]{10,})/);
-      if (m) return { kind: 'drive', fileId: m[1] };
-      return { kind: 'http', url: s };
-    }
-    if (/^[a-zA-Z0-9_-]{10,}$/.test(s)) {
-      return { kind: 'id', fileId: s };
-    }
-    return null;
-  }
-
-  async function callExistingLoader(payload) {
-    const fileId = payload.fileId || null;
-    const url    = payload.url    || null;
-
-    if (typeof window.doLoad === 'function') {
-      try {
-        if (fileId && window.doLoad.length >= 1) return await window.doLoad(fileId);
-        if ((fileId || url) && window.doLoad.length === 0) {
-          const inp = document.getElementById('glbUrl');
-          if (inp) inp.value = fileId || url;
-          return await window.doLoad();
-        }
-      } catch (e) { warn('doLoad failed', e); }
-    }
-    if (fileId && typeof window.loadFromDrive === 'function') {
-      try { return await window.loadFromDrive(fileId); } catch (e) { warn('loadFromDrive failed', e); }
-    }
-    if (url && typeof window.loadGLB === 'function') {
-      try { return await window.loadGLB(url); } catch (e) { warn('loadGLB failed', e); }
-    }
-    const inp = document.getElementById('glbUrl');
-    if (inp) inp.value = fileId || url || '';
-    throw new Error('No suitable loader function found.');
-  }
-
-  function bindUI() {
-    const root = document.querySelector('#right') ||
-                 document.querySelector('aside, .right, .sidebar') ||
-                 document.body;
-    const urlInput = root && (root.querySelector('#glbUrl') || root.querySelector('input[type="url"], input[type="text"], input:not([type])'));
-    const loadBtn  = root && [...root.querySelectorAll('button, .btn, [role="button"]')].find(b => (b.textContent||'').trim().toLowerCase() === 'load');
-    if (!urlInput || !loadBtn) { warn('controls not found', {url:!!urlInput, load:!!loadBtn}); return; }
-
-    const run = async (e) => {
-      e?.preventDefault?.();
-      const src = parseGlbInput(urlInput.value);
-      if (!src) { warn('invalid GLB input'); urlInput.focus(); return; }
-      log('parsed', src);
-      try {
-        await callExistingLoader(src);
-        setTimeout(() => {
-          const scene = (typeof getScene === 'function' && getScene()) || window.__lm_scene || null;
-          window.__lm_last_deep_scene = scene || null;
-          window.dispatchEvent(new CustomEvent('pm:scene-deep-ready', { detail: { scene } }));
-          log('pm:scene-deep-ready emitted');
-        }, 0);
-      } catch (err) { warn('load failed', err); }
+    if (!raw) return {kind:'empty'};
+    const s = String(raw).trim();
+    const driveIdFromUrl = (u)=>{
+      // /file/d/<id>/, ?id=<id>, /uc?id=<id>
+      let m = u.match(/\/file\/d\/([\w-]{20,})/);
+      if (m) return m[1];
+      m = u.match(/[?&]id=([\w-]{20,})/);
+      if (m) return m[1];
+      m = u.match(/[?&]export=download&confirm=[^&]+&id=([\w-]{20,})/);
+      if (m) return m[1];
+      return null;
     };
-
-    loadBtn.addEventListener('click', run, { capture: true });
-    urlInput.addEventListener('keydown', (ev)=>{ if (ev.key === 'Enter') run(ev); });
-    urlInput.style.pointerEvents = 'auto';
-    urlInput.disabled = false;
-    log('bound to UI');
+    if (/^https?:\/\//i.test(s)) {
+      const id = driveIdFromUrl(s);
+      if (id) return {kind:'drive', fileId:id};
+      return {kind:'url', url:s};
+    }
+    if (/^[\w-]{20,}$/.test(s)) return {kind:'drive', fileId:s};
+    return {kind:'unknown', raw:s};
   }
 
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', bindUI, { once: true });
-  } else {
-    bindUI();
+  function bindLoader() {
+    const right = document.querySelector('#right') || document.querySelector('aside, .right, .sidebar');
+    if (!right) return;
+    const loadBtn = [...right.querySelectorAll('button, .btn, [role="button"]')].find(b => (b.textContent||'').trim().toLowerCase()==='load');
+    const url = enableUrlInput();
+    if (!loadBtn || !url) return;
+
+    async function run() {
+      const parsed = parseGlbInput(url.value);
+      console.log('[glb-loader-shim] parsed', parsed);
+      try {
+        if (parsed.kind==='drive' && typeof window.doLoad==='function') {
+          window.doLoad(parsed.fileId);
+        } else if (parsed.kind==='drive' && typeof window.loadFromDrive==='function') {
+          window.loadFromDrive(parsed.fileId);
+        } else if (parsed.kind==='url' && typeof window.loadGLB==='function') {
+          window.loadGLB(parsed.url);
+        } else if (typeof window.doLoad==='function') {
+          // Fallback: some builds read #glbUrl from DOM
+          window.doLoad();
+        } else {
+          console.warn('[glb-loader-shim] invalid GLB input');
+          return;
+        }
+      } catch (e) {
+        console.warn('[glb-loader-shim] load error', e);
+      }
+      // fire deep-ready if viewer doesn't
+      setTimeout(() => {
+        if (!window.__lm_last_deep_scene) {
+          const s = (typeof window.getScene==='function' && window.getScene()) || window.__lm_scene || null;
+          window.dispatchEvent(new CustomEvent('pm:scene-deep-ready', {detail:{scene:s}}));
+          console.log('[glb-loader-shim] pm:scene-deep-ready emitted');
+        }
+      }, 1200);
+    }
+
+    if (!loadBtn.dataset.lmBound) {
+      loadBtn.dataset.lmBound = '1';
+      loadBtn.addEventListener('click', run);
+    }
+    once(url, 'keydown', (e)=>{ if (e.key==='Enter') run(); });
+    console.log('[glb-loader-shim] bound to UI');
   }
+
+  // ---- Material v7 lazy: listen deep-ready, then populate select with GLB-only names ----
+  function installMaterialV7Lazy() {
+    const isGLBName = (n) => {
+      if (!n) return false;
+      if (/^mesh.*material$/i.test(n)) return false;
+      if (/^material(\.\d+)?$/i.test(n)) return false;
+      if (n.startsWith('__') || n.startsWith('LM_')) return false;
+      return true;
+    };
+    function findControls(){
+      const root = document.querySelector('#tab-material, [data-tab="material"], .tab-material') || document.querySelector('#right, aside, .right, .sidebar') || document.body;
+      const cards = [...root.querySelectorAll('[data-section="perMaterialOpacity"], #lm-per-material, section, .card, .panel, .group')];
+      for (const c of cards) {
+        const sel = c.querySelector('select');
+        const rng = c.querySelector('input[type="range"]');
+        if (sel && rng) return {sel, rng, card:c};
+      }
+      return {sel: document.getElementById('materialSelect') || null, rng: document.getElementById('opacityRange') || null};
+    }
+    function collectByName(scene){
+      const map = new Map();
+      scene?.traverse?.(o=>{
+        if (!o?.isMesh) return;
+        (Array.isArray(o.material)?o.material:[o.material]).forEach(m=>{
+          const name = (m?.name||'').trim();
+          if (!isGLBName(name)) return;
+          if (!map.has(name)) map.set(name, []);
+          map.get(name).push(m);
+        });
+      });
+      return map;
+    }
+    function populate(sel, nameMap){
+      sel.innerHTML = '';
+      const names = [...nameMap.keys()].sort((a,b)=>a.localeCompare(b,'ja'));
+      if (!names.length) {
+        const opt = document.createElement('option'); opt.value=''; opt.textContent='(no GLB materials)';
+        sel.appendChild(opt); return 0;
+      }
+      for (const n of names) {
+        const opt = document.createElement('option'); opt.value = n; opt.textContent = n;
+        sel.appendChild(opt);
+      }
+      return names.length;
+    }
+    function wire(scene, sel, rng, nameMap){
+      const apply = ()=>{
+        const key = sel.value; if (!key) return;
+        const v = parseFloat(rng.value);
+        for (const m of (nameMap.get(key)||[])) {
+          m.transparent = (v < 1.0) || m.transparent;
+          m.opacity = v;
+          if ('needsUpdate' in m) m.needsUpdate = true;
+        }
+        const valNode = sel.closest('section, .card, .panel')?.querySelector('#pm-opacity-value, .value, .readout');
+        if (valNode) valNode.textContent = v.toFixed(2);
+        window.dispatchEvent(new CustomEvent('lm:material-opacity-changed', {detail:{materialKey:key, value:v}}));
+      };
+      sel.addEventListener('change', ()=> rng.dispatchEvent(new Event('input')));
+      rng.addEventListener('input', apply);
+      rng.addEventListener('change', apply);
+      rng.dispatchEvent(new Event('input'));
+    }
+    async function hydrateFromScene(scene){
+      const {sel, rng} = findControls();
+      if (!sel || !rng) { console.warn('[lm-mat-v7] controls missing'); return; }
+      await Promise.resolve();
+      const map = collectByName(scene);
+      const n = populate(sel, map);
+      if (!n) { console.warn('[lm-mat-v7] no GLB materials'); return; }
+      wire(scene, sel, rng, map);
+      console.log('[lm-mat-v7] materials populated', n);
+    }
+    window.addEventListener('pm:scene-deep-ready', (e)=>{
+      const scene = e?.detail?.scene || (typeof window.getScene==='function' && window.getScene()) || window.__lm_scene || null;
+      if (!scene) return;
+      hydrateFromScene(scene);
+    });
+    console.log('[lm-mat-v7] idle; waiting for GLB deep-ready');
+  }
+
+  // boot
+  document.addEventListener('DOMContentLoaded', () => {
+    enableUrlInput();
+    bindLoader();
+    installMaterialV7Lazy();
+  });
 })();
 </script>
-<!-- ===== /GLB URL robust loader shim ===== -->
 
 </body>
 </html>
