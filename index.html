@@ -276,186 +276,169 @@
     <script type="module" src="./materials.sheet.bridge.js"></script>
     <script type="module" src="./material.orchestrator.js"></script>
 
+<!-- ===== Click Enable Shim for GLB URL input (v1) ===== -->
 <script>
-/* ==== LociMyu Material Bridge v7d (native/custom UI 両対応) ==== */
 (() => {
-  const TAG='[lm-mat-v7d]';
-  const log=(...a)=>console.log(TAG,...a);
-  const warn=(...a)=>console.warn(TAG,...a);
+  const TAG = '[glb-url-click-shim]';
+  const log  = (...a)=>console.log(TAG, ...a);
+  const warn = (...a)=>console.warn(TAG, ...a);
 
-  function findMaterialPane(){
-    const root =
-      document.querySelector('#tab-material,[data-tab="material"],.tab-material,.material-tab') ||
-      document.getElementById('right') ||
-      document.querySelector('aside,.right,#sidebar,.sidebar') ||
-      document.body;
-    const cards = [
-      ...root.querySelectorAll('[data-section="perMaterialOpacity"], #lm-per-material, .card, .panel, section, .group')
-    ];
-    const ranked = cards.sort((a,b)=>{
-      const ta=(a.textContent||'').toLowerCase();
-      const tb=(b.textContent||'').toLowerCase();
-      const sa = (/(^|\b)per-?material(\b|$)/.test(ta)?2:0) + (/(^|\b)select material(\b|$)/.test(ta)?3:0);
-      const sb = (/(^|\b)per-?material(\b|$)/.test(tb)?2:0) + (/(^|\b)select material(\b|$)/.test(tb)?3:0);
-      return sb-sa;
-    });
-    return ranked[0] || root;
+  function outline(el, color='rgba(0,255,255,.35)') {
+    if (!el) return;
+    el.style.outline = `2px solid ${color}`;
+    el.style.outlineOffset = '0px';
   }
 
-  function getControls(){
-    const pane = findMaterialPane();
-    let sel = pane.querySelector('#materialSelect, select');
-    let selButton = null;
-    if (!sel) {
-      selButton = pane.querySelector('button[role="combobox"], [aria-haspopup="listbox"], .select button');
+  function enableUrlField() {
+    const right = document.querySelector('#right') ||
+                  document.querySelector('aside, .right, .sidebar') ||
+                  document.body;
+
+    if (!right) { warn('right pane not found'); return; }
+
+    // Prefer explicit id first
+    let urlInput = right.querySelector('#glbUrl');
+    if (!urlInput) {
+      urlInput = [...right.querySelectorAll('input[type="text"], input[type="url"], input:not([type])')]
+        .find(i => (i.placeholder||'').toLowerCase().includes('glb'));
     }
-    let rng = pane.querySelector('#opacityRange, input[type="range"]');
-    let rngRole = null;
-    if (!rng){
-      rngRole = pane.querySelector('[role="slider"]');
+    if (!urlInput) { warn('glb url input not found'); return; }
+
+    // Make it interactable
+    urlInput.disabled = false;
+    urlInput.readOnly = false;
+    urlInput.style.pointerEvents = 'auto';
+    urlInput.style.userSelect = 'text';
+    urlInput.tabIndex = 0;
+
+    // Lift nearest wrapper to front to avoid overlay capture
+    const wrap = urlInput.closest('section, .card, .panel, .group, form, div') || urlInput.parentElement;
+    if (wrap) {
+      const cs = getComputedStyle(wrap);
+      if (cs.position === 'static') wrap.style.position = 'relative';
+      wrap.style.zIndex = '9999';
     }
-    if (sel) sel.id = 'materialSelect';
-    if (rng) rng.id = 'opacityRange';
-    const ok = ( (sel||selButton) && (rng||rngRole) );
-    return { pane, sel, selButton, rng, rngRole, ok };
-  }
 
-  const isGLBName = (n) => {
-    if (!n) return false;
-    if (/^mesh.*material$/i.test(n)) return false;
-    if (/^material(\.\d+)?$/i.test(n)) return false;
-    if (n.startsWith('__') || n.startsWith('LM_')) return false;
-    return true;
-  };
-  function collectByName(scene){
-    const map = new Map();
-    scene?.traverse?.(o=>{
-      if (!o?.isMesh) return;
-      (Array.isArray(o.material)?o.material:[o.material]).forEach(m=>{
-        const name = (m?.name||'').trim();
-        if (!isGLBName(name)) return;
-        if (!map.has(name)) map.set(name, []);
-        map.get(name).push(m);
-      });
-    });
-    return map;
-  }
-
-  function populateSelect({sel, selButton}, nameMap){
-    const names = [...nameMap.keys()].sort((a,b)=>a.localeCompare(b,'ja'));
-    if (sel) {
-      sel.innerHTML = '';
-      if (!names.length){
-        const opt = document.createElement('option');
-        opt.value=''; opt.textContent='(no GLB materials)';
-        sel.appendChild(opt);
-        return 0;
+    // If something sits above, disable its pointer events (limited scope)
+    const r = urlInput.getBoundingClientRect();
+    const probePt = { x: r.left + Math.min(20, r.width/2), y: r.top + Math.min(12, r.height/2) };
+    const chain = document.elementsFromPoint(probePt.x, probePt.y);
+    let disabled = 0;
+    for (const el of chain) {
+      if (el === urlInput) break;
+      if (!right.contains(el)) continue;
+      const cs = getComputedStyle(el);
+      const blocks = cs.pointerEvents !== 'none' && (cs.position === 'fixed' || cs.position === 'absolute' || cs.position === 'sticky');
+      if (blocks) {
+        el.dataset.__pe_before = cs.pointerEvents;
+        el.style.pointerEvents = 'none';
+        el.classList.add('lm-pointer-e-none');
+        disabled++;
+        if (disabled >= 4) break; // be conservative
       }
-      for (const n of names){
-        const opt = document.createElement('option');
-        opt.value=n; opt.textContent=n;
-        sel.appendChild(opt);
-      }
-      return names.length;
     }
-    if (selButton){
-      selButton.textContent = names[0] || '— Select material —';
-      selButton.dataset.lmChoices = JSON.stringify(names);
-      return names.length;
-    }
-    return 0;
+    outline(urlInput);
+    log('url input enabled; overlays disabled:', disabled);
   }
 
-  function readSelected({sel, selButton}){
-    if (sel) return sel.value;
-    if (selButton){
-      return selButton.getAttribute('data-lm-selected') || selButton.textContent?.trim() || '';
-    }
-    return '';
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', enableUrlField, { once: true });
+  } else {
+    enableUrlField();
   }
-  function onSelectChange({sel, selButton}, cb){
-    if (sel) sel.addEventListener('change', ()=>cb(sel.value));
-    if (selButton){
-      const observer = new MutationObserver(()=>cb(readSelected({sel,selButton})));
-      observer.observe(selButton, {attributes:true, attributeFilter:['data-lm-selected','aria-activedescendant']});
-    }
-  }
-  function getRangeValue({rng, rngRole}){
-    if (rng) return parseFloat(rng.value);
-    if (rngRole) return parseFloat(rngRole.getAttribute('aria-valuenow') || '1');
-    return 1;
-  }
-  function onRangeInput({rng, rngRole}, cb, cbCommit){
-    if (rng){
-      rng.addEventListener('input', ()=>cb(parseFloat(rng.value)));
-      ['change','pointerup','mouseup','touchend'].forEach(ev=>rng.addEventListener(ev, ()=>cbCommit(parseFloat(rng.value))));
-      return;
-    }
-    if (rngRole){
-      const mo = new MutationObserver(()=>cb(getRangeValue({rng:null, rngRole})));
-      mo.observe(rngRole, {attributes:true, attributeFilter:['aria-valuenow']});
-      ['keyup','pointerup','mouseup','touchend'].forEach(ev=>rngRole.addEventListener(ev, ()=>cbCommit(getRangeValue({rng:null, rngRole}))));
-    }
-  }
-
-  function commitToSheet(materialKey, value){
-    window.dispatchEvent(new CustomEvent('lm:material-opacity-changed', {
-      detail: { materialKey, value }
-    }));
-    window.dispatchEvent(new CustomEvent('lm:material-opacity-commit', {
-      detail: { materialKey, value }
-    }));
-    const b = window.materialsSheetBridge;
-    if (b?.saveOpacity) {
-      try { b.saveOpacity(materialKey, value); } catch(e){ console.warn('[lm-mat-v7d] saveOpacity failed', e); }
-    }
-  }
-
-  async function hydrate(scene){
-    const ui = getControls();
-    if (!ui.ok){ warn('controls missing'); return; }
-    await Promise.resolve();
-    const nameMap = collectByName(scene);
-    const n = populateSelect(ui, nameMap);
-    if (!n){ warn('no GLB materials'); return; }
-
-    const apply = ()=>{
-      const key = (readSelected(ui) || '').trim();
-      if (!key) return;
-      const v = getRangeValue(ui);
-      const mats = nameMap.get(key) || [];
-      for (const m of mats){
-        m.transparent = (v < 1.0) || m.transparent;
-        m.opacity = v;
-        if ('needsUpdate' in m) m.needsUpdate = true;
-      }
-      const pane = document.querySelector('#tab-material,[data-tab="material"],.tab-material,.material-tab') || document;
-      const readout = pane.querySelector('#pm-opacity-value,.value,.readout');
-      if (readout) readout.textContent = Number.isFinite(v)? v.toFixed(2): '';
-    };
-    const commit = ()=>{
-      const key = (readSelected(ui) || '').trim();
-      if (!key) return;
-      const v = getRangeValue(ui);
-      commitToSheet(key, v);
-      log('committed', {key, v});
-    };
-
-    onRangeInput(ui, apply, commit);
-    onSelectChange(ui, _=>{ apply(); commit(); });
-    apply();
-    log('materials populated', n);
-  }
-
-  const deepReady = (e)=>{
-    const sc = e?.detail?.scene || window.__lm_scene || (typeof getScene==='function' && getScene()) || null;
-    if (!sc){ warn('deep-ready without scene'); return; }
-    hydrate(sc);
-  };
-  window.addEventListener('pm:scene-deep-ready', deepReady);
-  window.addEventListener('lm:scene-deep-ready', deepReady);
-  log('idle; waiting for GLB deep-ready');
 })();
 </script>
+<!-- ===== /Click Enable Shim ===== -->
+
+<!-- ===== GLB URL robust loader shim (v1) ===== -->
+<script>
+(() => {
+  const TAG = '[glb-loader-shim]';
+  const log  = (...a)=>console.log(TAG, ...a);
+  const warn = (...a)=>console.warn(TAG, ...a);
+
+  function parseGlbInput(raw) {
+    const s = (raw || '').trim();
+    if (!s) return null;
+    if (/^https?:\/\//i.test(s)) {
+      let m = s.match(/\/file\/d\/([a-zA-Z0-9_-]{10,})/);
+      if (m) return { kind: 'drive', fileId: m[1] };
+      m = s.match(/[?&]id=([a-zA-Z0-9_-]{10,})/);
+      if (m) return { kind: 'drive', fileId: m[1] };
+      m = s.match(/\/uc\?id=([a-zA-Z0-9_-]{10,})/);
+      if (m) return { kind: 'drive', fileId: m[1] };
+      return { kind: 'http', url: s };
+    }
+    if (/^[a-zA-Z0-9_-]{10,}$/.test(s)) {
+      return { kind: 'id', fileId: s };
+    }
+    return null;
+  }
+
+  async function callExistingLoader(payload) {
+    const fileId = payload.fileId || null;
+    const url    = payload.url    || null;
+
+    if (typeof window.doLoad === 'function') {
+      try {
+        if (fileId && window.doLoad.length >= 1) return await window.doLoad(fileId);
+        if ((fileId || url) && window.doLoad.length === 0) {
+          const inp = document.getElementById('glbUrl');
+          if (inp) inp.value = fileId || url;
+          return await window.doLoad();
+        }
+      } catch (e) { warn('doLoad failed', e); }
+    }
+    if (fileId && typeof window.loadFromDrive === 'function') {
+      try { return await window.loadFromDrive(fileId); } catch (e) { warn('loadFromDrive failed', e); }
+    }
+    if (url && typeof window.loadGLB === 'function') {
+      try { return await window.loadGLB(url); } catch (e) { warn('loadGLB failed', e); }
+    }
+    const inp = document.getElementById('glbUrl');
+    if (inp) inp.value = fileId || url || '';
+    throw new Error('No suitable loader function found.');
+  }
+
+  function bindUI() {
+    const root = document.querySelector('#right') ||
+                 document.querySelector('aside, .right, .sidebar') ||
+                 document.body;
+    const urlInput = root && (root.querySelector('#glbUrl') || root.querySelector('input[type="url"], input[type="text"], input:not([type])'));
+    const loadBtn  = root && [...root.querySelectorAll('button, .btn, [role="button"]')].find(b => (b.textContent||'').trim().toLowerCase() === 'load');
+    if (!urlInput || !loadBtn) { warn('controls not found', {url:!!urlInput, load:!!loadBtn}); return; }
+
+    const run = async (e) => {
+      e?.preventDefault?.();
+      const src = parseGlbInput(urlInput.value);
+      if (!src) { warn('invalid GLB input'); urlInput.focus(); return; }
+      log('parsed', src);
+      try {
+        await callExistingLoader(src);
+        setTimeout(() => {
+          const scene = (typeof getScene === 'function' && getScene()) || window.__lm_scene || null;
+          window.__lm_last_deep_scene = scene || null;
+          window.dispatchEvent(new CustomEvent('pm:scene-deep-ready', { detail: { scene } }));
+          log('pm:scene-deep-ready emitted');
+        }, 0);
+      } catch (err) { warn('load failed', err); }
+    };
+
+    loadBtn.addEventListener('click', run, { capture: true });
+    urlInput.addEventListener('keydown', (ev)=>{ if (ev.key === 'Enter') run(ev); });
+    urlInput.style.pointerEvents = 'auto';
+    urlInput.disabled = false;
+    log('bound to UI');
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', bindUI, { once: true });
+  } else {
+    bindUI();
+  }
+})();
+</script>
+<!-- ===== /GLB URL robust loader shim ===== -->
+
 </body>
 </html>
