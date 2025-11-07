@@ -267,23 +267,27 @@
 <!-- Event bridge: emit lm:sheet-context / lm:sheet-changed (Approach A) -->
 <script defer="" src="./sheet.ctx.bridge.js"></script>
 <!-- Keep existing modules (they listen to our custom events if needed) -->
-<!-- LociMyu material bridge stack -->
+<script src="./viewer.bridge.module.js" type="module"></script>
+<script src="./material.orchestrator.js" type="module"></script>
+
+    <!-- LociMyu material bridge stack -->
     <!-- LociMyu: scene bridge + sheet bridge + orchestrator (order matters) -->
     <script type="module" src="./viewer.bridge.module.js"></script>
     <script type="module" src="./materials.sheet.bridge.js"></script>
     <script type="module" src="./material.orchestrator.js"></script>
 
 <!-- lm-inline v9: URL入力とGLBロード配線、Material vNext 安定化、浮遊UI抑止 -->
-<style id="lm-inline-v10-style">
+<style id="lm-inline-v9-style">
   #glbUrl, input[placeholder*="GLB URL" i], input[placeholder*="Drive fileId" i] {
     pointer-events: auto !important;
   }
-  #right .lm-z1 { position: relative; z-index: 9999; }
+  #right .lm-z1 { position: relative; z-index: 1; }
   .lm-rogue-mat { display: none !important; }
 </style>
 
-<script>(() => {
-  const TAG = '[lm-inline v10]';
+<script>
+(() => {
+  const TAG = '[lm-inline v9]';
   const log  = (...a)=>console.log(TAG, ...a);
   const warn = (...a)=>console.warn(TAG, ...a);
 
@@ -292,16 +296,15 @@
     else document.addEventListener('DOMContentLoaded', fn, { once:true });
   }
 
-  function enableUrlInputWide(){
+  function enableUrlInput(){
     const right = document.querySelector('#right') || document.querySelector('aside, .right, .sidebar') || document.body;
     const url = document.querySelector('#glbUrl, input[placeholder*="GLB URL" i], input[placeholder*="Drive fileId" i]');
     if (!right || !url){ warn('url input not found'); return; }
 
     const wrap = url.closest('section, .card, .panel, .group, form, div') || url.parentElement;
     if (wrap){
-      const cs = getComputedStyle(wrap);
-      if (cs.position === 'static') wrap.style.position = 'relative';
-      wrap.style.zIndex = '9999';
+      if (getComputedStyle(wrap).position === 'static') wrap.style.position = 'relative';
+      wrap.classList.add('lm-z1');
     }
     url.disabled = false;
     url.readOnly = false;
@@ -309,34 +312,27 @@
     url.tabIndex = 0;
 
     const r = url.getBoundingClientRect();
-    const y = r.top + Math.min(16, r.height/2);
-    const samples = 28;
+    const pt = { x: r.left + Math.min(120, r.width/2), y: r.top + 12 };
+    const chain = document.elementsFromPoint(pt.x, pt.y);
     let killed = 0;
-    for (let i=0;i<=samples;i++){
-      const x = r.left + (r.width * i / samples);
-      const chain = document.elementsFromPoint(x, y);
-      const idx = chain.indexOf(url);
-      const blockers = (idx === -1 ? chain : chain.slice(0, idx)).filter(el => {
-        if (!right.contains(el)) return false;
-        const cs = getComputedStyle(el);
-        const fixedLike = cs.position === 'fixed' || cs.position === 'absolute' || cs.position === 'sticky';
-        return fixedLike && cs.pointerEvents !== 'none' && parseInt(cs.zIndex||'0',10) >= 10;
-      });
-      for (const el of blockers){
-        if (el.dataset.__pe_disabled) continue;
-        el.dataset.__pe_disabled = '1';
+    for (const el of chain){
+      if (!right.contains(el)) continue;
+      const cs = getComputedStyle(el);
+      const fixedLike = cs.position === 'fixed' || cs.position === 'absolute' || cs.position === 'sticky';
+      if (fixedLike && cs.pointerEvents !== 'none' && parseInt(cs.zIndex||'0',10) >= 10 && el !== url){
         el.style.pointerEvents = 'none';
         killed++;
       }
+      if (el === url) break;
     }
-    log('url input enabled (wide); overlays disabled:', killed);
+    log('url input enabled; overlays disabled:', killed);
   }
 
   function hideRogueMaterialUI(){
     const right = document.querySelector('#right, aside, .right, .sidebar') || document.body;
-    const nodes = [...document.querySelectorAll('section, .card, .panel, .group, .mat-card')];
+    const rigs = [...document.querySelectorAll('section, .card, .panel, .group')];
     let hid = 0;
-    for (const el of nodes){
+    for (const el of rigs){
       if (right.contains(el)) continue;
       const hasSelect = !!el.querySelector('select');
       const hasRange  = !!el.querySelector('input[type="range"]');
@@ -346,7 +342,7 @@
       const cs = getComputedStyle(el);
       const floaty = (cs.position === 'fixed' || cs.position === 'absolute' || cs.position === 'sticky');
       if (floaty){
-        el.style.display = 'none';
+        el.classList.add('lm-rogue-mat');
         hid++;
       }
     }
@@ -362,10 +358,10 @@
     function parseInput(v){
       const s = (v||'').trim();
       if (!s) return { kind:'empty' };
-      const m = s.match(/[-\\w]{25,}/);
-      if (/drive\\.google\\.com/.test(s) && m) return { kind:'drive', fileId: m[0] };
-      if (/\\.glb(\\?.*)?$/i.test(s)) return { kind:'glb', href: s };
-      if (/^[-\\w]{25,}$/.test(s)) return { kind:'drive', fileId: s };
+      const m = s.match(/[-\w]{25,}/);
+      if (/drive\.google\.com/.test(s) && m) return { kind:'drive', fileId: m[0] };
+      if (/\.glb(\?.*)?$/i.test(s)) return { kind:'glb', href: s };
+      if (/^[-\w]{25,}$/.test(s)) return { kind:'drive', fileId: s };
       return { kind:'unknown', raw:s };
     }
 
@@ -389,30 +385,35 @@
     loadBtn.addEventListener('click', (e)=>{ setTimeout(run, 0); });
     url.addEventListener('keydown', (e)=>{ if (e.key === 'Enter'){ e.preventDefault(); run(); }});
 
-    let heralded = false;
-    const herald = () => {
-      if (heralded) return;
-      heralded = true;
-      window.dispatchEvent(new CustomEvent('pm:scene-deep-ready', { detail:{ scene: (window.__lm_scene||null), auto:true } }));
+    let fired = false;
+    const fireOnce = () => {
+      if (fired) return;
+      fired = true;
+      window.dispatchEvent(new CustomEvent('pm:scene-deep-ready', { detail:{ scene: (window.__lm_scene||null) } }));
       log('pm:scene-deep-ready emitted (shim)');
     };
-    window.addEventListener('lm:viewer-ready', herald, { once:true });
+    window.addEventListener('lm:viewer-ready', fireOnce, { once:true });
   }
 
-  function bindMaterialVNextScoped(){
-    const pane = document.querySelector('#pane-material');
+  function bindMaterialVNext(){
+    const right = document.querySelector('#right') || document.querySelector('aside, .right, .sidebar') || document.body;
 
     function findControls(){
-      const sel = pane?.querySelector('#pm-material, select');
-      const rng = pane?.querySelector('#pm-opacity-range, input[type="range"]');
-      const val = pane?.querySelector('#pm-opacity-val, output');
-      return { sel, rng, val };
+      const cards = [
+        ...right.querySelectorAll('[data-section="perMaterialOpacity"], #lm-per-material, section, .card, .panel, .group')
+      ];
+      for (const c of cards){
+        const sel = c.querySelector('select');
+        const rng = c.querySelector('input[type="range"]');
+        if (sel && rng) return { sel, rng, card:c };
+      }
+      return { sel:null, rng:null };
     }
 
     function isGLBName(n){
       if (!n) return false;
       if (/^mesh.*material$/i.test(n)) return false;
-      if (/^material(\\.\\d+)?$/i.test(n)) return false;
+      if (/^material(\.\d+)?$/i.test(n)) return false;
       if (n.startsWith('__') || n.startsWith('LM_')) return false;
       return true;
     }
@@ -444,7 +445,7 @@
       return names.length;
     }
 
-    function wire(scene, sel, rng, val, nameMap){
+    function wire(scene, sel, rng, nameMap){
       const apply = ()=>{
         const key = sel.value; if (!key) return;
         const v = parseFloat(rng.value);
@@ -454,7 +455,6 @@
           m.opacity = v;
           if ('needsUpdate' in m) m.needsUpdate = true;
         }
-        if (val) val.textContent = v.toFixed(2);
         window.dispatchEvent(new CustomEvent('lm:material-opacity-changed', { detail:{ materialKey:key, value:v } }));
       };
       rng.addEventListener('input', apply);
@@ -462,39 +462,246 @@
       rng.dispatchEvent(new Event('input'));
     }
 
-    function getScene(){
-      return (typeof window.getScene==='function' && window.getScene()) || window.__lm_scene || null;
-    }
-
-    function hasMeshes(scene){
-      let has=false; try{ scene?.traverse?.(o=>{ if (o?.isMesh) has=true; }); }catch(_){}
-      return has;
-    }
-
     async function hydrate(scene){
-      const { sel, rng, val } = findControls();
+      const { sel, rng } = findControls();
       if (!sel || !rng){ warn('material controls missing'); return; }
-      const sc = scene || getScene();
-      if (!sc || !hasMeshes(sc)){ warn('scene not ready/meshes missing'); return; }
       await Promise.resolve();
-      const nameMap = collectByName(sc);
+      const nameMap = collectByName(scene);
       const n = populate(sel, nameMap);
       if (!n){ log('no GLB materials'); return; }
-      wire(sc, sel, rng, val, nameMap);
+      wire(scene, sel, rng, nameMap);
       log('materials populated', n);
     }
 
     window.addEventListener('pm:scene-deep-ready', (e)=>{
-      hydrate(e?.detail?.scene || null);
+      const scene = e?.detail?.scene || window.__lm_scene || null;
+      if (!scene){ warn('deep-ready without scene'); return; }
+      hydrate(scene);
     });
   }
 
   onReady(() => {
     hideRogueMaterialUI();
-    enableUrlInputWide();
+    enableUrlInput();
     bindGlbLoader();
-    bindMaterialVNextScoped();
+    bindMaterialVNext();
   });
-})();</script>
+})();
+</script>
+
+<!-- lm-inline v11: GLB loader wire + material populate (safe, no extra UI) -->
+<script>
+(() => {
+  const TAG = '[lm-inline v11]';
+  const log  = (...a)=>console.log(TAG, ...a);
+  const warn = (...a)=>console.warn(TAG, ...a);
+
+  // ---------- URL input & Load button binding ----------
+  function findRightPane() {
+    return document.querySelector('#right') ||
+           document.querySelector('aside, .right, .sidebar') || document.body;
+  }
+
+  function findUrlAndLoad() {
+    const root = findRightPane();
+    const url = document.querySelector('#glbUrl') ||
+      root.querySelector('input[type="text"], input:not([type]), input[type="url"]');
+    // Pick a nearby "Load" button (same card/section)
+    let load = null;
+    if (url) {
+      const card = url.closest('section, .card, .panel, .group, form, div') || root;
+      load = [...card.querySelectorAll('button,.btn,[role="button"]')]
+        .find(b => (b.textContent||'').trim().toLowerCase() === 'load') || null;
+    }
+    if (!load) {
+      // fallback: any Load within right pane
+      load = [...root.querySelectorAll('button,.btn,[role="button"]')]
+        .find(b => (b.textContent||'').trim().toLowerCase() === 'load') || null;
+    }
+    return {url, load};
+  }
+
+  function parseGlbInput(v) {
+    const t = (v||'').trim();
+    if (!t) return {kind:'empty'};
+    // Drive fileId
+    const m = t.match(/[-\w]{25,}/);
+    if (/drive\.google\.com|id=/.test(t) && m) return {kind:'drive', fileId:m[0]};
+    if (/^[\w-]{25,}$/.test(t)) return {kind:'drive', fileId:t};
+    // direct GLB
+    if (/\.glb(\?.*)?$/i.test(t)) return {kind:'url', url:t};
+    return {kind:'unknown', raw:t};
+  }
+
+  function ensureClickableUrl(url) {
+    if (!url) return;
+    url.disabled = false;
+    url.readOnly = false;
+    url.style.pointerEvents = 'auto';
+    // bring to front carefully
+    const wrap = url.closest('section, .card, .panel, .group, form, div') || url.parentElement;
+    if (wrap) {
+      const cs = getComputedStyle(wrap);
+      if (cs.position === 'static') wrap.style.position = 'relative';
+      wrap.style.zIndex = '10';
+    }
+  }
+
+  function wireGlbLoader() {
+    const {url, load} = findUrlAndLoad();
+    ensureClickableUrl(url);
+    if (!url || !load) { warn('url/load not found'); return; }
+
+    const run = () => {
+      const parsed = parseGlbInput(url.value);
+      log('glb parsed', parsed);
+      if (parsed.kind === 'drive' && window.doLoad) {
+        try { window.doLoad(parsed.fileId); } catch(e){ warn('doLoad failed', e); }
+      } else if (parsed.kind === 'url' && window.doLoadUrl) {
+        try { window.doLoadUrl(parsed.url); } catch(e){ warn('doLoadUrl failed', e); }
+      } else if (window.doLoad) {
+        // let the app handle raw value; some builds expect full URL
+        try { window.doLoad(url.value); } catch(e){ warn('doLoad(raw) failed', e); }
+      } else {
+        warn('no loader API available');
+      }
+    };
+
+    // prevent duplicate bindings
+    load.__lm_wired || load.addEventListener('click', run, {passive:true});
+    load.__lm_wired = true;
+    url.__lm_wired  || url.addEventListener('keydown', (e)=>{
+      if (e.key === 'Enter') { e.preventDefault(); run(); }
+    });
+    url.__lm_wired = true;
+
+    log('glb loader wired');
+  }
+
+  // ---------- Material populate (name-based) ----------
+  const isGLBName = (n)=>{
+    if (!n) return false;
+    if (/^mesh.*material$/i.test(n)) return false;
+    if (/^material(\.\d+)?$/i.test(n)) return false;
+    if (n.startsWith('__') || n.startsWith('LM_')) return false;
+    return true;
+  };
+
+  function findMaterialControlsStrict() {
+    const root = findRightPane();
+    // Pane "Material" only
+    const pane =
+      root.querySelector('#pane-material, [data-tab="material"], .tab-material') || root;
+    // Try to find card that contains "Per-material opacity"
+    const cards = [...pane.querySelectorAll('section,.card,.panel,.group')];
+    const card = cards.find(c => /per[\s-]?material.*opacity/i.test(c.textContent||'')) || pane;
+    const sel = card.querySelector('select') || document.getElementById('materialSelect');
+    const rng = card.querySelector('input[type="range"]') || document.getElementById('opacityRange');
+    return {pane, card, sel, rng};
+  }
+
+  function collectByName(scene){
+    const map = new Map();
+    scene?.traverse?.(o=>{
+      if (!o?.isMesh) return;
+      (Array.isArray(o.material)?o.material:[o.material]).forEach(m=>{
+        const name = (m?.name||'').trim();
+        if (!isGLBName(name)) return;
+        if (!map.has(name)) map.set(name, []);
+        map.get(name).push(m);
+      });
+    });
+    return map;
+  }
+
+  function populateSelect(sel, nameMap){
+    if (!sel) return 0;
+    sel.innerHTML = '';
+    const names = [...nameMap.keys()].sort((a,b)=>a.localeCompare(b, 'ja'));
+    if (!names.length) {
+      const opt = document.createElement('option');
+      opt.value=''; opt.textContent='(no GLB materials)';
+      sel.appendChild(opt); return 0;
+    }
+    for (const nm of names){
+      const opt = document.createElement('option');
+      opt.value = nm; opt.textContent = nm;
+      sel.appendChild(opt);
+    }
+    return names.length;
+  }
+
+  function wireOpacity(scene, sel, rng, nameMap){
+    if (!sel || !rng) return;
+    const apply = ()=>{
+      const key = sel.value; if (!key) return;
+      const v = parseFloat(rng.value);
+      const mats = nameMap.get(key) || [];
+      for (const m of mats){
+        m.transparent = (v < 1.0) || m.transparent;
+        m.opacity = v;
+        if ('needsUpdate' in m) m.needsUpdate = true;
+      }
+      // persistence event (picked up by materials.sheet.bridge.js)
+      window.dispatchEvent(new CustomEvent('lm:material-opacity-changed', {
+        detail: { materialKey: key, value: v }
+      }));
+    };
+    rng.addEventListener('input', apply);
+    sel.addEventListener('change', ()=>rng.dispatchEvent(new Event('input')));
+    rng.dispatchEvent(new Event('input'));
+  }
+
+  let deepReadyOnce = false;
+  async function hydrateFromScene(sceneCandidate){
+    const {sel, rng} = findMaterialControlsStrict();
+    if (!sel || !rng) { warn('material controls missing'); return; }
+
+    const scene = sceneCandidate ||
+      (typeof getScene==='function' && getScene()) ||
+      window.__lm_scene || null;
+    if (!scene) { warn('scene not ready'); return; }
+
+    // quick mesh check
+    let hasMesh=false; try{ scene.traverse(o=>{ if(o?.isMesh) hasMesh=true; }); }catch(_){}
+    if (!hasMesh) { warn('scene has no meshes yet'); return; }
+
+    const nameMap = collectByName(scene);
+    const n = populateSelect(sel, nameMap);
+    if (!n) { log('no GLB materials'); return; }
+    wireOpacity(scene, sel, rng, nameMap);
+    log('materials populated', n);
+  }
+
+  function installDeepReadyListener(){
+    // If app dispatches pm:scene-deep-ready, hook it
+    window.addEventListener('pm:scene-deep-ready', (e)=>{
+      deepReadyOnce = true;
+      log('pm:scene-deep-ready observed');
+      setTimeout(()=>hydrateFromScene(e?.detail?.scene || null), 0);
+    }, {once:false});
+    // Fallback polling (if event not fired)
+    const tid = setInterval(()=>{
+      if (deepReadyOnce) { clearInterval(tid); return; }
+      const s = (typeof getScene==='function' && getScene()) || window.__lm_scene || null;
+      if (!s) return;
+      let hasMesh=false; try{s.traverse(o=>{if(o?.isMesh) hasMesh=true;});}catch(_){}
+      if (hasMesh) {
+        clearInterval(tid);
+        log('deep-ready (polled)');
+        hydrateFromScene(s);
+      }
+    }, 600);
+  }
+
+  // ---------- init ----------
+  document.addEventListener('DOMContentLoaded', () => {
+    // do not create any new UI. Only wire.
+    wireGlbLoader();
+    installDeepReadyListener();
+  });
+})();
+</script>
+
 </body>
 </html>
