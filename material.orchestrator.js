@@ -1,94 +1,79 @@
-/**
- * material.orchestrator.js — Minimal, side‑effect free
- * - DO NOT create/clone/move UI.
- * - Bind only to the canonical material pane (#pane-material).
- * - No global patching; bail out silently if not found.
- */
-
+/* material.orchestrator.js (min-safe vA3.3) */
 (() => {
-  const TAG = "[mat-orch:min]";
-  const log  = (...a)=>console.log(TAG, ...a);
-  const warn = (...a)=>console.warn(TAG, ...a);
+  const TAG='[mat-orch:min]';
+  const log=(...a)=>console.log(TAG,...a), warn=(...a)=>console.warn(TAG,...a);
 
-  // Guard: run after DOM ready
-  if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", init, { once: true });
-  } else {
-    init();
-  }
+  // --- DOM binding (pane-local) ---
+  const pane = document.querySelector('#pane-material.pane');
+  if (!pane) return warn('pane not found (#pane-material)');
+  const sel = pane.querySelector('#materialSelect');
+  const rng = pane.querySelector('#opacityRange');
+  if (!sel || !rng) return warn('controls missing in pane');
 
-  function qPane() {
-    // Only accept the *pane*, never the tab button
-    const right = document.querySelector("#right, aside, .right, .sidebar") || document.body;
-    const pane = right.querySelector("#pane-material, #panel-material, [role='tabpanel'][data-tab='material'], [data-panel='material']");
-    return pane || null;
-  }
+  log('UI found', {pane, select:sel, opacity:rng, doubleSided:null, unlit:null});
 
-  function findUI() {
-    const pane = qPane();
-    if (!pane) return null;
-    const sel = pane.querySelector("select#materialSelect") || pane.querySelector("select[name='materialSelect']");
-    const rng = pane.querySelector("input#opacityRange[type='range']") || pane.querySelector("input[type='range']#opacityRange");
-    const doubleSided = pane.querySelector("input[type='checkbox']#doubleSided") || null;
-    const unlit = pane.querySelector("input[type='checkbox']#unlitLike") || null;
+  // --- state ---
+  let materialKeys = [];    // ['Hull','Glass',...]
+  let currentKey = null;
 
-    // If the select exists but is not visible (collapsed tab), skip until visible
-    if (sel) {
-      const cs = getComputedStyle(sel);
-      if (cs.display === "none" || cs.visibility === "hidden") {
-        warn("select present but invisible (collapsed?)");
-        return null;
-      }
+  // --- helpers ---
+  function setOptions(keys){
+    materialKeys = Array.isArray(keys) ? keys : [];
+    sel.innerHTML = '';
+    const opt0 = document.createElement('option');
+    opt0.value=''; opt0.textContent='— Select —';
+    sel.appendChild(opt0);
+    for (const k of materialKeys){
+      const o = document.createElement('option');
+      o.value = k; o.textContent = k;
+      sel.appendChild(o);
     }
-    return { pane, select: sel, opacity: rng, doubleSided, unlit };
+    log('options populated', materialKeys);
   }
 
-  // PUBLIC: a very small API for other bridges (optional use)
-  window.__lm_mat_orch_min = {
-    getUI: findUI,
-    getPane: qPane,
-  };
-
-  function bindOnce(ui) {
-    // No UI? nothing to do
-    if (!ui || !ui.select || !ui.opacity) return;
-
-    // Example: re-emit when opacity changes (no sheet write here)
-    const apply = () => {
-      const key = ui.select.value || "";
-      const v = parseFloat(ui.opacity.value || "1");
-      window.dispatchEvent(new CustomEvent("lm:material-opacity-ui", { detail: { key, value: v } }));
+  async function fetchMaterialKeys(){
+    // 1) bridge API があれば使う
+    if (window.viewerBridge?.getMaterialKeys){
+      try { setOptions(await window.viewerBridge.getMaterialKeys()); return; }
+      catch(e){ warn('bridge.getMaterialKeys failed', e); }
+    }
+    // 2) 要求イベントを投げて他モジュールに任せる（任意対応）
+    let resolved = false;
+    const onRecv = (ev) => {
+      if (resolved) return;
+      const arr = ev.detail?.keys;
+      if (Array.isArray(arr) && arr.length){ resolved = true; setOptions(arr); }
+      window.removeEventListener('lm:material-keys', onRecv);
     };
-    ui.opacity.addEventListener("input", apply, { passive: true });
-    ui.select.addEventListener("change", apply, { passive: true });
-    // Initial echo
-    apply();
-    log("UI bound");
+    window.addEventListener('lm:material-keys', onRecv, {once:true});
+    window.dispatchEvent(new CustomEvent('lm:req-material-keys'));
+    // 3) 最後の保険：何もしない（UIは空のまま）
   }
 
-  function init() {
-    // Find once; then also observe the pane for late‑rendered widgets
-    let ui = findUI();
-    if (ui) {
-      log("UI found", ui);
-      bindOnce(ui);
-      return;
+  function applyOpacity(key, value){
+    if (!key) return;
+    // viewerBridge に丸投げ（既存側で material 不透明度を適用）
+    if (window.viewerBridge?.setMaterialOpacity){
+      try { window.viewerBridge.setMaterialOpacity(key, value); }
+      catch(e){ warn('setMaterialOpacity failed', e); }
     }
-
-    // Observe only the material *pane* area, not the whole document
-    const pane = qPane();
-    if (!pane) {
-      warn("material pane not found; idle");
-      return;
-    }
-    const mo = new MutationObserver(() => {
-      const u = findUI();
-      if (u && u.select && u.opacity) {
-        bindOnce(u);
-        mo.disconnect();
-      }
-    });
-    mo.observe(pane, { childList: true, subtree: true });
-    log("waiting for UI in pane");
   }
+
+  // --- wire ---
+  sel.addEventListener('change', () => {
+    currentKey = sel.value || null;
+    if (currentKey) applyOpacity(currentKey, parseFloat(rng.value||'1'));
+  });
+  rng.addEventListener('input', () => {
+    if (currentKey) applyOpacity(currentKey, parseFloat(rng.value||'1'));
+  });
+
+  // scene-ready で材料名を投入
+  function onSceneReady(){ fetchMaterialKeys(); }
+  window.addEventListener('lm:scene-ready', onSceneReady);
+
+  // すでにシーンができている場合もある
+  setTimeout(fetchMaterialKeys, 0);
+
+  log('UI bound');
 })();
