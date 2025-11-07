@@ -276,373 +276,103 @@
     <script type="module" src="./materials.sheet.bridge.js"></script>
     <script type="module" src="./material.orchestrator.js"></script>
 
-<script type="module">
-/* ===== LociMyu Material vNext (auto-bind + GLB-only + Sheets bridge) ===== */
-(() => {
-  const LOG_PREFIX = '[lm-mat-vNext]';
-  const log = (...a)=>console.log(LOG_PREFIX, ...a);
-  const warn = (...a)=>console.warn(LOG_PREFIX, ...a);
-
-  // ---- tiny event bus helpers ------------------------------------------------
-  const once = (target, type, opts={}) =>
-    new Promise(res => target.addEventListener(type, e => res(e), { once: true, ...opts }));
-
-  // ---- 1) Robust UI binding (find select/range even if ids missing) ---------
-  function findMaterialPaneRoot() {
-    return document.querySelector('#tab-material, [data-tab="material"], .tab-material, .material-tab')
-        || document.getElementById('right')
-        || document.querySelector('aside, .right, #sidebar, .sidebar')
-        || document.body;
-  }
-
-  function searchControls(root) {
-    // Strategy A: explicit ids
-    let sel = root.querySelector('#materialSelect');
-    let rng = root.querySelector('#opacityRange');
-    if (sel && rng) return { sel, rng, card: sel.closest('.card,.panel,section,.group') || root };
-
-    // Strategy B: first select + first range in same card-like container
-    const containers = [...root.querySelectorAll('[data-section="perMaterialOpacity"], #lm-per-material, .card, .panel, section, .group')];
-    for (const c of containers) {
-      const s = c.querySelector('select');
-      const r = c.querySelector('input[type="range"]');
-      if (s && r) return { sel: s, rng: r, card: c };
-    }
-
-    // Strategy C: label text heuristics around "Per‑material opacity" / help text
-    const all = document.evaluate(
-      ".//*[contains(translate(normalize-space(.),'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz'),'per-material opacity')]",
-      root, null, XPathResult.ORDERED_NODE_SNAPSHOT_TYPE, null
-    );
-    for (let i = 0; i < all.snapshotLength; i++) {
-      const node = all.snapshotItem(i);
-      const card = node.closest('.card,.panel,section,.group') || node.parentElement;
-      if (!card) continue;
-      const s = card.querySelector('select');
-      const r = card.querySelector('input[type=\"range\"]');
-      if (s && r) return { sel: s, rng: r, card };
-    }
-
-    // Strategy D: any select/range under root
-    const sAny = root.querySelector('select');
-    const rAny = root.querySelector('input[type="range"]');
-    if (sAny && rAny) return { sel: sAny, rng: rAny, card: root };
-
-    return { sel: null, rng: null, card: null };
-  }
-
-  function ensureControls({ retryMs = 250, totalMs = 6000 } = {}) {
-    const t0 = performance.now();
-    const root = findMaterialPaneRoot();
-
-    return new Promise(async (resolve) => {
-      while (performance.now() - t0 < totalMs) {
-        const { sel, rng, card } = searchControls(root);
-        if (sel && rng) {
-          sel.id = 'materialSelect';
-          rng.id = 'opacityRange';
-          // remove any autogen placeholder panel if present
-          document.getElementById('lm-material-panel-autogen')?.remove();
-          return resolve({ sel, rng, card });
-        }
-        // Wait for DOM changes (tabs switching etc.)
-        await new Promise(r => setTimeout(r, retryMs));
-      }
-      resolve({ sel: null, rng: null, card: null });
-    });
-  }
-
-  // ---- 2) Scene readiness ----------------------------------------------------
-  function hasMeshes(scene) {
-    let n = 0;
-    try { scene?.traverse?.(o => { if (o?.isMesh) n++; }); } catch {}
-    return n > 0;
-  }
-
-  async function waitForScene({ timeoutMs = 12000 } = {}) {
-    const t0 = performance.now();
-
-    // already published deep scene
-    if (window.__lm_last_deep_scene && hasMeshes(window.__lm_last_deep_scene)) {
-      return window.__lm_last_deep_scene;
-    }
-
-    while (performance.now() - t0 < timeoutMs) {
-      const s = (typeof window.getScene === 'function' && window.getScene()) || window.__lm_scene || null;
-      if (s && hasMeshes(s)) return s;
-
-      // race with deep-ready
-      const p = new Promise(res => {
-        const cb = e => { window.removeEventListener('pm:scene-deep-ready', cb); res(e?.detail?.scene || null); };
-        window.addEventListener('pm:scene-deep-ready', cb, { once: true });
-        setTimeout(() => { try { window.removeEventListener('pm:scene-deep-ready', cb); } catch {} ; res(null); }, 300);
-      });
-      const ev = await p;
-      if (ev && hasMeshes(ev)) return ev;
-    }
-    return null;
-  }
-
-  // ---- 3) GLB-only material collection (by name) -----------------------------
-  function isGLBMaterial(m) {
-    if (!m) return false;
-    const n = (m.name || '').trim();
-    if (!n) return false;                       // unnamed -> likely generated
-    if (/^mesh.*material$/i.test(n)) return false;
-    if (/^material(\.\d+)?$/i.test(n)) return false;
-    if (n.startsWith('__') || n.startsWith('LM_')) return false;
-    return true;
-  }
-
-  function collectMaterialsByName(scene) {
-    const map = new Map(); // name -> material[]
-    scene?.traverse?.(o => {
-      if (!o?.isMesh) return;
-      (Array.isArray(o.material) ? o.material : [o.material]).forEach(m => {
-        if (!isGLBMaterial(m)) return;
-        const key = m.name.trim();
-        (map.get(key) || map.set(key, []).get(key)).push(m);
-      });
-    });
-    return map;
-  }
-
-  // ---- 4) Populate + wire ----------------------------------------------------
-  function populateSelect(sel, nameMap) {
-    sel.innerHTML = '';
-    const names = [...nameMap.keys()].sort((a, b) => a.localeCompare(b, 'ja'));
-    if (names.length === 0) {
-      const opt = document.createElement('option'); opt.value = ''; opt.textContent = '(no GLB materials)'; sel.appendChild(opt);
-      return 0;
-    }
-    for (const name of names) {
-      const opt = document.createElement('option'); opt.value = name; opt.textContent = name; sel.appendChild(opt);
-    }
-    return names.length;
-  }
-
-  // Sheets bridge: queue + best-effort method names
-  const sheetsQueue = [];
-  function tryFlushSheets() {
-    const br = window.materialsSheetBridge;
-    if (!br) return false;
-    while (sheetsQueue.length) {
-      const { key, val } = sheetsQueue.shift();
-      if (typeof br.saveOpacity === 'function')      br.saveOpacity(key, val);
-      else if (typeof br.persistOpacity === 'function') br.persistOpacity(key, val);
-      else if (typeof br.setOpacity === 'function')  br.setOpacity(key, val);
-      else {
-        // final fallback: emit event for anyone listening
-        window.dispatchEvent(new CustomEvent('lm:material-opacity-commit', { detail: { materialKey: key, value: val } }));
-      }
-    }
-    return true;
-  }
-  // listen to context ready to flush
-  window.addEventListener('lm:sheet-context', () => setTimeout(tryFlushSheets, 0));
-  // and also poll a little after boot
-  setTimeout(tryFlushSheets, 1500);
-
-  function wireHandlers(scene, sel, rng, nameMap) {
-    const applyOpacity = () => {
-      const name = sel.value; if (!name) return;
-      const v = parseFloat(rng.value);
-      const mats = nameMap.get(name) || [];
-      for (const m of mats) {
-        m.transparent = (v < 1.0) || m.transparent;
-        m.opacity = v;
-        if ('needsUpdate' in m) m.needsUpdate = true;
-      }
-      // Reflect to any numeric readout if present
-      const disp = document.getElementById('pm-opacity-value') || rng.closest('label,div')?.querySelector('.value,.readout');
-      if (disp) { try { disp.textContent = v.toFixed(2); } catch {} }
-
-      // Persist request
-      const entry = { key: name, val: v };
-      sheetsQueue.push(entry);
-      tryFlushSheets();
-
-      // Public event for other listeners
-      window.dispatchEvent(new CustomEvent('lm:material-opacity-changed', { detail: { materialKey: name, value: v } }));
-    };
-
-    rng.addEventListener('input', applyOpacity);
-    sel.addEventListener('change', () => rng.dispatchEvent(new Event('input')));
-    // initial apply
-    rng.dispatchEvent(new Event('input'));
-  }
-
-  async function hydrateOnce() {
-    const { sel, rng } = await ensureControls();
-    if (!sel || !rng) { warn('controls missing'); return false; }
-
-    const scene = await waitForScene();
-    if (!scene) { warn('scene unavailable'); return false; }
-
-    const nameMap = collectMaterialsByName(scene);
-    const n = populateSelect(sel, nameMap);
-    wireHandlers(scene, sel, rng, nameMap);
-    log('materials populated (GLB-only)', n);
-    // notify list as well
-    window.dispatchEvent(new CustomEvent('lm:materials-populated', { detail: { names: [...nameMap.keys()] } }));
-    return n > 0;
-  }
-
-  // ---- boot once + rehydrate on deep-ready -----------------------------------
-  (async () => {
-    await hydrateOnce();
-    window.addEventListener('pm:scene-deep-ready', () => setTimeout(() => { hydrateOnce(); }, 0));
-  })();
-})();
-</script>
-
-<!-- lm-dx v4 (safe) -->
+<!-- lm-dx v4.3: robust material panel anchoring & click passthrough -->
 <script>
 (() => {
-  const TAG = '[lm-dx v4]';
-  const log  = (...a)=>console.log(TAG, ...a);
-  const warn = (...a)=>console.warn(TAG, ...a);
+  const TAG='[lm-dx v4.3]'; const log=(...a)=>console.log(TAG,...a), warn=(...a)=>console.warn(TAG,...a);
+  const doc = document;
+  const right = doc.querySelector('#right, aside, .right, .sidebar') || doc.body;
 
-  const right =
-    document.querySelector('#right') ||
-    document.querySelector('aside,.right,.sidebar') ||
-    document.body;
+  // -------- 1) Minimal click passthrough for critical controls --------
+  function detoxClickable(target){
+    if (!target) return {disabled:0,target:null};
+    const r = target.getBoundingClientRect();
+    const p = {x: r.left + r.width*0.5, y: r.top + Math.min(16,r.height/2)};
+    const chain = doc.elementsFromPoint(p.x, p.y);
+    const idx = chain.indexOf(target);
+    const blockers = (idx===-1?chain:chain.slice(0,idx)).filter(e=>{
+      const cs=getComputedStyle(e), pos=cs.position;
+      const fixedLike = pos==='fixed'||pos==='absolute'||pos==='sticky';
+      return fixedLike && cs.pointerEvents!=='none' && right.contains(e);
+    });
+    blockers.forEach(e=>{ e.dataset.__pe_before=getComputedStyle(e).pointerEvents; e.style.pointerEvents='none'; e.classList.add('lm-pe-none'); });
+    target.style.pointerEvents='auto'; target.disabled=false;
+    log('detoxClickable',{disabled:blockers.length,target});
+    return {disabled:blockers.length,target};
+  }
+  detoxClickable(doc.getElementById('glbUrl'));
+  detoxClickable(doc.getElementById('auth-signin'));
+  detoxClickable(doc.getElementById('btnGlb'));
 
-  const tabBar =
-    right && (right.querySelector('nav,.tabs,[role="tablist"],.tabbar') || null);
-
-  const tabMaterial =
-    document.querySelector('#tab-material') ||
-    (right && (right.querySelector('[data-tab="material"], .tab-material, section#material, #material-tab') || null));
-
-  // 1) Hide rogue material UI outside tab-material (and above tabbar)
-  try {
-    if (right && tabBar) {
-      const top = tabBar.getBoundingClientRect().top;
-      const cards = [...right.querySelectorAll('section,.card,.panel,.group,div')]
-        .filter(c => {
-          if (tabMaterial && tabMaterial.contains(c)) return false;
-          const hasControls = !!(c.querySelector('select') && c.querySelector('input[type="range"]'));
-          if (!hasControls) return false;
-          const text = (c.textContent||'').toLowerCase();
-          const looksLikeMat = /material|opacity|double[-\s]?sided|chroma/.test(text);
-          return looksLikeMat;
-        });
-      let hidden = 0;
-      for (const c of cards) {
-        const r = c.getBoundingClientRect();
-        if (r.top < top - 8) {
-          c.dataset.__lm_dx_hidden = '1';
-          c.style.display = 'none';
-          hidden++;
-        }
-      }
-      log('rogue material cards hidden', hidden);
-    }
-  } catch (e) { warn('hide rogue cards error', e); }
-
-  // 2) Click passthrough for URL / Sign in / Load
-  function detoxClickable(el){
-    if (!el) return {disabled:0,target:null};
-    const rightRoot = right || document;
-    const r = el.getBoundingClientRect();
-    const pt = { x: r.left + r.width*0.5, y: r.top + Math.min(14, r.height/2) };
-    const chain = document.elementsFromPoint(pt.x, pt.y);
-    let disabled = 0;
-    for (const e of chain) {
-      if (!rightRoot.contains(e)) continue;
-      if (e === el) break;
-      const cs = getComputedStyle(e);
-      const fixedLike = cs.position === 'fixed' || cs.position === 'absolute' || cs.position === 'sticky';
-      const blocks = fixedLike && cs.pointerEvents !== 'none' && parseInt(cs.zIndex||'0',10) >= 10;
-      if (blocks) { e.style.pointerEvents = 'none'; e.classList.add('lm-pe-none'); disabled++; }
-    }
-    if (rightRoot && getComputedStyle(rightRoot).pointerEvents === 'none') {
-      rightRoot.style.pointerEvents = 'auto';
-    }
-    log('detoxClickable', {disabled, target: el});
-    return {disabled, target: el};
+  // -------- 2) Find Material tab & "is active?" helper --------
+  function findMaterialTabBtn() {
+    const idBtn = doc.getElementById('tab-material');
+    if (idBtn) return idBtn;
+    const btns = [...right.querySelectorAll('button,[role="tab"],.tab,nav button,header button')];
+    const m = btns.find(b => (b.textContent||'').trim().toLowerCase() === 'material');
+    return m || null;
+  }
+  const materialTabBtn = findMaterialTabBtn();
+  function isMaterialActive() {
+    const b = materialTabBtn;
+    if (!b) return true; // fallback
+    const cs = b.getAttribute('aria-selected');
+    if (cs) return cs === 'true';
+    return b.classList.contains('active') || b.classList.contains('selected');
   }
 
-  const urlInput = document.querySelector('#glbUrl') ||
-    (right && (right.querySelector('input[type="text"],input:not([type]),input[type="url"]') || null));
+  // -------- 3) Resolve Material "panel" candidate --------
+  function visible(el){ try{ return !!el && el.offsetParent !== null; } catch(_){ return false; } }
+  const tabBar = right.querySelector('[role="tablist"], .tabs, nav, header') || right;
+  const candidates = [
+    right.querySelector('#panel-material, [role="tabpanel"][data-tab="material"], [data-panel="material"]'),
+    // Any section/card below tab bar that includes known Material labels:
+    ...[...right.querySelectorAll('section,.card,.panel,.group')]
+      .filter(c => {
+        const r=c.getBoundingClientRect?.(); if(!r) return false;
+        if (tabBar && r.top < (tabBar.getBoundingClientRect?.().bottom||0)) return false;
+        const t=(c.textContent||'').toLowerCase();
+        return /per-?material/.test(t) || /opacity/.test(t) || /chroma key|double-?sided|unlit/.test(t);
+      })
+  ].filter(Boolean);
+  let panel = candidates.find(visible) || candidates[0] || null;
 
-  const btnSignin = document.querySelector('#auth-signin') ||
-    (right && ([...right.querySelectorAll('button,.btn,[role="button"]')].find(b=>(b.textContent||'').trim().toLowerCase()==='sign in') || null));
+  // If still not found, synthesize a dedicated panel right below the tab bar.
+  if (!panel && tabBar){
+    panel = doc.createElement('section');
+    panel.id = 'panel-material';
+    panel.className = 'lm-panel-material card';
+    panel.style.marginTop = '8px';
+    // Show only when Material tab active (best-effort)
+    const style = doc.createElement('style');
+    style.textContent = `
+      #panel-material { display: ${isMaterialActive() ? 'block' : 'none'}; }
+    `;
+    doc.head.appendChild(style);
+    tabBar.insertAdjacentElement('afterend', panel);
+    log('synthesized panel');
+  }
+  if (!panel){ warn('material panel/card not found'); return; }
 
-  const btnLoad = document.querySelector('#btnGlb') ||
-    (right && ([...right.querySelectorAll('button,.btn,[role="button"]')].find(b=>(b.textContent||'').trim().toLowerCase()==='load') || null));
+  // -------- 4) Ensure anchors inside the panel --------
+  function ensureAnchors(dst){
+    let sel = dst.querySelector('#materialSelect');
+    if (!sel) { sel = doc.createElement('select'); sel.id='materialSelect'; sel.style.width='100%'; dst.appendChild(sel); }
+    let rng = dst.querySelector('#opacityRange');
+    if (!rng) { rng = doc.createElement('input'); rng.type='range'; rng.id='opacityRange'; rng.min='0'; rng.max='1'; rng.step='0.01'; rng.value='1.0'; rng.style.width='100%'; dst.appendChild(rng); }
+    return {sel,rng};
+  }
 
-  detoxClickable(urlInput);
-  detoxClickable(btnSignin);
-  detoxClickable(btnLoad);
+  // Remove mistaken insertions under the tab *button*
+  const tabBtn = doc.getElementById('tab-material');
+  if (tabBtn) tabBtn.querySelectorAll('#materialSelect,#opacityRange').forEach(n=>n.remove());
 
-  // 3) Sign in shim (capture)
-  try {
-    if (btnSignin && !btnSignin.dataset.__lm_dx_bound) {
-      btnSignin.dataset.__lm_dx_bound = '1';
-      btnSignin.addEventListener('click', (e) => {
-        log('signin click captured');
-        try {
-          if (typeof window.__lm_signin === 'function') return;
-          const tc = window.__lm_tokenClient || window.tokenClient;
-          if (tc?.requestAccessToken) return;
-          const cid = window.LM_CLIENT_ID || window.__lm_client_id || (window.__LM && window.__LM.client_id);
-          if (cid && window.google?.accounts?.oauth2) {
-            const scopes = (window.LM_SCOPES || 'https://www.googleapis.com/auth/drive.readonly https://www.googleapis.com/auth/spreadsheets');
-            const t = window.google.accounts.oauth2.initTokenClient({ client_id: cid, scope: scopes, callback: (r)=>log('GIS callback', r) });
-            window.__lm_tokenClient = t;
-          } else {
-            warn('GIS/tokenClient not ready; cannot sign in yet');
-          }
-        } catch (err) {
-          warn('signin shim error', err);
-        }
-      }, {capture:true});
-      log('signin shim bound');
-    }
-  } catch(e) { warn('signin bind error', e); }
+  const {sel, rng} = ensureAnchors(panel);
+  ['materialSelect','opacityRange'].forEach(id=>{ const n=doc.getElementById(id); if(n && !panel.contains(n)) panel.appendChild(n); });
 
-  // 4) Ensure per-material controls exist inside #tab-material
-  try {
-    if (tabMaterial) {
-      const hasSelect = tabMaterial.querySelector('#materialSelect, select');
-      const hasRange  = tabMaterial.querySelector('#opacityRange, input[type="range"]');
-      if (!hasSelect || !hasRange) {
-        const anchorId = 'lm-per-material-anchor';
-        let anchor = tabMaterial.querySelector('#'+anchorId);
-        if (!anchor) {
-          anchor = document.createElement('section');
-          anchor.id = anchorId;
-          anchor.dataset.section = 'perMaterialOpacity';
-          anchor.style.minHeight = '1px';
-          anchor.style.margin = '0';
-          anchor.style.padding = '0';
-          tabMaterial.appendChild(anchor);
-        }
-        if (!hasSelect) {
-          const sel = document.createElement('select');
-          sel.id = 'materialSelect';
-          sel.style.width = '100%';
-          anchor.appendChild(sel);
-        }
-        if (!hasRange) {
-          const rng = document.createElement('input');
-          rng.type = 'range'; rng.id = 'opacityRange';
-          rng.min = '0'; rng.max = '1'; rng.step = '0.01'; rng.value = '1';
-          rng.style.width = '100%';
-          anchor.appendChild(rng);
-        }
-        log('material controls anchor ensured (inside #tab-material)');
-      }
-    }
-  } catch(e) { warn('ensure controls error', e); }
-
-  window.addEventListener('pm:scene-deep-ready', (e)=>{
-    const auto = !!(e?.detail && e.detail.auto);
-    log('pm:scene-deep-ready', {auto});
-  }, {capture:true});
-
+  log('material controls anchored in panel', panel);
+  // Nudge orchestrator
+  window.dispatchEvent(new Event('lm:mat-ui-ready',{bubbles:true}));
 })();
 </script>
 </body>
