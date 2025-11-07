@@ -84,28 +84,18 @@
   }
 
   function findUI(){
-    const root = findMaterialRoot();
-    state.ui.root = root;
-
-    // Broadened selector set for the select
-    const selectCand = [
-      '#pm-material',
-      '#materialSelect', '#mat-select', '#matKeySelect',
-      'select[aria-label="Select material"]',
-      'select[name="material" i]',
-      'select[id*="material" i]',
-      'select',
-    ];
-
-    const rangeCand = ['#opacityRange', '#matOpacity', 'input[type="range"]'];
-    const dsCand    = ['#doubleSided', '#matDoubleSided', 'input[type="checkbox"][name*="double" i]'];
-    const unCand    = ['#unlit', '#matUnlit', 'input[type="checkbox"][name*="unlit" i]'];
-
-    const pickFirst = (cands)=>{
-      for (const sel of cands){
-        const list = qsAllDeep(root, sel);
-        if (list.length) return list[0];
-      }
+  // Strictly bind to the real panel contents, not the tab button.
+  const panel = document.querySelector('#pane-material');
+  if (!panel) {
+    warn('material panel not found (#pane-material)');
+    return null;
+  }
+  const select = panel.querySelector('#materialSelect');
+  const opacity = panel.querySelector('#opacityRange');
+  const doubleSided = panel.querySelector('#doubleSided');
+  const unlit = panel.querySelector('#unlitLike');
+  return { root: panel, select, opacity, doubleSided, unlit };
+}
       return null;
     };
 
@@ -375,38 +365,11 @@
 
 // ---- LociMyu patch: ensure Material UI exists (auto-inject if missing) ----
 function __lm_ensureMaterialUI(){
-  try{
-    let sel = $id('materialSelect');
-    let rng = $id('opacityRange');
-    if (sel && rng) return { sel, rng };
-    // Try to locate a right pane container
-    let right = document.getElementById('right') || document.querySelector('#right, .right, aside') || document.body;
-    const panelId = 'lm-material-panel-autogen';
-    let panel = document.getElementById(panelId);
-    if (!panel){
-      panel = document.createElement('div');
-      panel.id = panelId;
-      panel.className = 'panel';
-      panel.style.margin = '12px 0';
-      panel.style.padding = '12px';
-      panel.style.border = '1px solid #2a2f36';
-      panel.style.borderRadius = '10px';
-      panel.innerHTML = `
-        <h4 style="margin:0 0 8px">Material</h4>
-        <label style="display:block;margin:8px 0 6px;font-size:12px;opacity:.8">Select</label>
-        <select id="materialSelect" style="width:100%;padding:6px;background:#1a1d21;color:#e6e6e6;border:1px solid #2a2f36;border-radius:8px"></select>
-        <label for="opacityRange" style="display:block;margin:12px 0 6px;font-size:12px;opacity:.8">Opacity</label>
-        <input id="opacityRange" type="range" min="0" max="1" step="0.01" value="1" style="width:100%">
-      `;
-      right.prepend(panel);
-    }
-    sel = $id('materialSelect');
-    rng = $id('opacityRange');
-    return { sel, rng };
-  }catch(e){
-    console.warn('[mat-orch] auto-inject UI failed', e);
-    return { sel: null, rng: null };
-  }
+  // Simplified: never create UI. Only return existing controls inside #pane-material.
+  const root = document.querySelector('#pane-material');
+  const sel  = root ? root.querySelector('#materialSelect') : document.getElementById('materialSelect');
+  const rng  = root ? root.querySelector('#opacityRange')   : document.getElementById('opacityRange');
+  return { select: sel||null, opacity: rng||null, doubleSided: null, unlit: null, root: root||null };
 }
 
 
@@ -456,7 +419,3 @@ function __lm_ensureMaterialUI(){
   });
 })();    
 
-
-// [lm] strict UI scope to #pane-material
-const __root = document.getElementById('pane-material') || document;
-const $id = (id)=> (__root.querySelector('#'+id));
