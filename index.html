@@ -145,6 +145,8 @@
 #pm-chroma .tol-row { display: flex; flex-wrap: wrap; gap: 8px; }
 #pm-chroma .feather-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
 </style>
+
+<style>#right .card, #right [role="tabpanel"] { pointer-events:auto !important; }</style>
 </head>
 <body>
 <div id="app">
@@ -169,6 +171,17 @@
 <nav class="tabs" role="tablist">
 <button aria-selected="true" data-tab="caption" id="tab-caption" role="tab">Caption</button>
 <button aria-selected="false" data-tab="material" id="tab-material" role="tab">Material</button>
+<section id="panel-material" class="card" style="margin-top:8px;">
+  <div class="row">
+    <label for="materialSelect" class="sr-only">Select material</label>
+    <select id="materialSelect" style="width:100%"></select>
+  </div>
+  <div class="row" style="margin-top:6px;">
+    <input id="opacityRange" type="range" min="0" max="1" step="0.01" value="1.0" style="width:100%">
+    <small class="hint">This does not change global opacity above.</small>
+  </div>
+</section>
+
 <button aria-selected="false" data-tab="views" id="tab-views" role="tab">Views</button>
 </nav>
 <!-- Caption pane (unchanged structure) -->
@@ -261,40 +274,22 @@
     })();
   </script>
 <!-- Boot runtime -->
-
+<script src="./boot.esm.cdn.js" type="module"></script>
 <link href="app.sheet-rename.css" rel="stylesheet"/>
 <script src="sheet-rename.module.js" type="module"></script>
 <!-- Event bridge: emit lm:sheet-context / lm:sheet-changed (Approach A) -->
-
+<script defer="" src="./sheet.ctx.bridge.js"></script>
 <!-- Keep existing modules (they listen to our custom events if needed) -->
-
-
+<script src="./viewer.bridge.module.js" type="module"></script>
+<script src="./material.orchestrator.js" type="module"></script>
 
     <!-- LociMyu material bridge stack -->
     <!-- LociMyu: scene bridge + sheet bridge + orchestrator (order matters) -->
     <script type="module" src="./viewer.bridge.module.js"></script>
-    
+    <script type="module" src="./materials.sheet.bridge.js"></script>
     <script type="module" src="./material.orchestrator.js"></script>
 
-<section id="panel-material" class="card" data-section="perMaterialOpacity">
-  <div class="row">
-    <label for="materialSelect">Select</label>
-    <select id="materialSelect" style="width:100%"></select>
-  </div>
-  <div class="row" style="margin-top:8px">
-    <label for="opacityRange">Select material</label>
-    <input id="opacityRange" type="range" min="0" max="1" step="0.01" value="1.0" style="width:100%">
-    <small class="help">This does not change global opacity above.</small>
-    <div class="readout"><span id="pm-opacity-value">1.00</span></div>
-  </div>
-</section>
+<!-- lm-dx v4.3: robust material panel anchoring & click passthrough -->
 
-
-<!-- LociMyu core script order (locked) -->
-<script defer src="./boot.esm.cdn.js" type="module"></script>
-<script defer src="./viewer.bridge.module.js" type="module"></script>
-<script defer="" src="./sheet.ctx.bridge.js"></script>
-<script defer type="module" src="./materials.sheet.bridge.js"></script>
-<script defer src="./material.orchestrator.js" type="module"></script>
 </body>
 </html>
