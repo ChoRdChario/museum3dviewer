@@ -14,26 +14,51 @@
     }
   }</script>
 
-  <!-- Minimal styles to keep the original UI intact -->
+  <!-- Minimal styles to keep the original UI intact (tuned for narrower panel) -->
   <style>
-    :root{--bg:#0f1115;--panel:#0b0d11;--line:#1f2937;--acc:#94a3b8;--text:#cbd5e1;}
-    html,body{height:100%;margin:0;background:var(--bg);color:var(--text);font:14px/1.4 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;}
+    :root{
+      --bg:#0f1115;--panel:#0b0d11;--line:#1f2937;--acc:#94a3b8;--text:#cbd5e1;
+      --ui-w: 320px;            /* ← パネル幅を統一して狭める */
+      --ui-pad: 10px;           /* パネル内パディングを少し詰める */
+      --card-pad: 10px;         /* カードの内側余白を調整 */
+      --row-gap: 8px;           /* 行間をややコンパクトに */
+      --grid-gap: 10px;
+    }
+    html,body{
+      height:100%;margin:0;background:var(--bg);color:var(--text);
+      font:14px/1.4 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+    }
     #app{display:flex;height:100%;}
     #stage{flex:1;position:relative;background:#0a0d12;}
-    #ui{width:360px;max-width:360px;min-width:320px;border-left:1px solid var(--line);display:flex;flex-direction:column;overflow:hidden;}
-    header#topbar{display:flex;justify-content:space-between;align-items:center;padding:8px 12px;border-bottom:1px solid var(--line);}
+    #ui{
+      width:var(--ui-w); max-width:var(--ui-w); min-width:var(--ui-w);
+      border-left:1px solid var(--line);
+      display:flex; flex-direction:column; overflow:hidden; /* 横スクロール抑止 */
+    }
+    header#topbar{
+      display:flex; justify-content:space-between; align-items:center;
+      padding:8px 12px; border-bottom:1px solid var(--line);
+    }
     header #brand{font-weight:600;opacity:.85}
-    button,select,input{background:#111827;border:1px solid var(--line);color:var(--text);border-radius:8px;padding:6px 8px}
-    input[type="text"]{width:100%;box-sizing:border-box}
-    .row{display:flex;gap:8px;align-items:center}
+    button,select,input{
+      background:#111827;border:1px solid var(--line);color:var(--text);
+      border-radius:8px;padding:6px 8px; box-sizing:border-box;
+    }
+    input[type="text"]{width:100%}
+    .row{display:flex;gap:var(--row-gap);align-items:center}
     .row > *{flex:1}
     .tabs{display:flex;border-bottom:1px solid var(--line)}
-    .tabs button{flex:1;border:0;border-bottom:2px solid transparent;padding:8px 12px;background:transparent;color:var(--acc);cursor:pointer}
+    .tabs button{
+      flex:1;border:0;border-bottom:2px solid transparent;padding:8px 12px;
+      background:transparent;color:var(--acc);cursor:pointer
+    }
     .tabs button[aria-selected="true"]{color:var(--text);border-bottom-color:#64748b}
-    .pane{display:none;padding:12px;overflow:auto;max-width:100%;box-sizing:border-box}
+    .pane{
+      display:none;padding:var(--ui-pad);overflow:auto;max-width:100%;box-sizing:border-box
+    }
     .pane[data-active="true"]{display:block}
     #gl{width:100%;height:100%;display:block}
-    .pad{padding:12px}
+    .pad{padding:var(--ui-pad)}
     .grp{margin:10px 0}
     .hint{opacity:.7;font-size:12px}
     .chips{display:flex;flex-wrap:wrap;gap:6px}
@@ -41,12 +66,20 @@
     #caption-list{height:160px;overflow:auto;border:1px solid var(--line);border-radius:8px}
 
     /* Material pane layout */
-    .mat-grid{display:grid;grid-template-columns:1fr;gap:12px;max-width:100%}
-    .mat-card{border:1px solid var(--line);border-radius:12px;padding:12px;background:#0c1016}
-    .mat-card h4{margin:0 0 8px 0;font-size:13px;opacity:.8}
+    .mat-grid{
+      display:grid;grid-template-columns:1fr;gap:var(--grid-gap);max-width:100%
+    }
+    .mat-card{
+      border:1px solid var(--line);border-radius:12px;padding:var(--card-pad);background:#0c1016
+    }
+    .mat-card h4{margin:0 0 6px 0;font-size:13px;opacity:.8}
     .mat-row{display:grid;grid-template-columns:auto 1fr;gap:10px;align-items:center}
     .nowrap{white-space:nowrap}
-    #pm-opacity{display:grid;grid-template-columns:1fr auto 48px;gap:10px;align-items:center}
+    #pm-opacity{
+      display:grid;grid-template-columns:1fr auto 44px;gap:8px;align-items:center
+    }
+    #pm-opacity select{min-width:0}            /* 狭い幅でも収まるように */
+    #pm-opacity input[type="range"]{width:100%}
     #pm-opacity output{min-width:3ch;text-align:right;opacity:.8}
     #ui *{max-width:100%}
     #ui{overflow-x:hidden}
@@ -100,7 +133,7 @@
       <section id="pane-material" class="pane" data-pane="material">
         <div class="mat-grid">
           <div class="mat-card">
-            <h4>Per‑material opacity (saved per sheet)</h4>
+            <h4>Per-material opacity (saved per sheet)</h4>
             <div id="pm-opacity">
               <select id="pm-material" aria-label="Select material">
                 <option value="">— Select material —</option>
@@ -114,8 +147,8 @@
           <div class="mat-card">
             <h4>Shading</h4>
             <div class="row">
-              <label class="nowrap"><input type="checkbox" id="pm-flag-doublesided"/> Double‑sided</label>
-              <label class="nowrap"><input type="checkbox" id="pm-flag-unlit"/> Unlit‑like</label>
+              <label class="nowrap"><input type="checkbox" id="pm-flag-doublesided"/> Double-sided</label>
+              <label class="nowrap"><input type="checkbox" id="pm-flag-unlit"/> Unlit-like</label>
             </div>
           </div>
 
@@ -172,8 +205,13 @@
     (function(){
       const url = './content.js';
       fetch(url,{method:'HEAD'}).then(r=>{
-        if(r && r.ok){ const s=document.createElement('script'); s.src=url; s.defer=true; s.onload=()=>console.log('[VSC] Content script initialized'); document.head.appendChild(s); }
-        else{ console.log('[VSC] content.js not present (skipped)'); }
+        if(r && r.ok){
+          const s=document.createElement('script'); s.src=url; s.defer=true;
+          s.onload=()=>console.log('[VSC] Content script initialized');
+          document.head.appendChild(s);
+        }else{
+          console.log('[VSC] content.js not present (skipped)');
+        }
       }).catch(()=>console.log('[VSC] content.js check skipped'));
     })();
   </script>

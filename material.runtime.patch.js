@@ -1,31 +1,52 @@
-// material.runtime.patch.js v3.1
+
+// material.runtime.patch.js v3.2 (UI-only & events)
+// - Keeps IDs stable, updates number readout, and emits input/change events.
+// - No DOM duplication; expects existing Material pane with these IDs:
+//   #pm-material (select), #pm-opacity-range (range), #pm-opacity-val (output)
 (function(){
-  const TAG='[mat-rt v3.1]';
-  const $ = sel => document.querySelector(sel);
-  const ui = {
-    select: $('#pm-material'),
-    range: $('#pm-opacity-range'),
-    out:   $('#pm-opacity-val')
-  };
-  if(!ui.select || !ui.range || !ui.out){ console.warn(TAG,'ui not ready'); return; }
-  console.log(TAG,'ready');
+  const TAG='[mat-rt v3.2]';
+  function $(id){ return document.getElementById(id); }
 
-  // reflect range to output immediately
-  const reflect = (v) => { ui.out.textContent = Number(v).toFixed(2); };
-  ui.range.addEventListener('input', e => reflect(e.target.value), {passive:true});
-  reflect(ui.range.value);
+  function arm(){
+    const sel = $('pm-material');
+    const rng = $('pm-opacity-range');
+    const out = $('pm-opacity-val');
+    if(!sel || !rng || !out){ return false; }
 
-  // helper: emit a single custom event used by orchestrator/sheet bridge
-  function emit(name, detail){ window.dispatchEvent(new CustomEvent(name,{detail,bubbles:false})); }
-  ui.select.addEventListener('change', ()=>{
-    emit('lm:pm-material-selected', { name: ui.select.value });
-  });
-  ui.range.addEventListener('input', ()=>{
-    const v = parseFloat(ui.range.value);
-    emit('lm:pm-opacity-input', { name: ui.select.value, opacity: v });
-  });
-  ui.range.addEventListener('change', ()=>{
-    const v = parseFloat(ui.range.value);
-    emit('lm:pm-opacity-change', { name: ui.select.value, opacity: v });
-  });
-})();
+    const syncOut = () => { out.value = Number(rng.value).toFixed(2); };
+
+    // read persisted value attribute if present
+    syncOut();
+
+    // input: live preview
+    rng.addEventListener('input', () => {
+      syncOut();
+      window.dispatchEvent(new CustomEvent('lm:pm-opacity-input', {
+        detail: { value: Number(rng.value) }
+      }));
+    }, {passive:true});
+
+    // change: commit intent
+    rng.addEventListener('change', () => {
+      window.dispatchEvent(new CustomEvent('lm:pm-opacity-change', {
+        detail: { value: Number(rng.value) }
+      }));
+    });
+
+    // material select
+    sel.addEventListener('change', () => {
+      window.dispatchEvent(new CustomEvent('lm:pm-material-selected', {
+        detail: { key: sel.value, label: sel.options[sel.selectedIndex]?.text || sel.value }
+      }));
+    });
+
+    console.log(TAG, 'ready');
+    return true;
+  }
+
+  const ok = arm();
+  if(!ok){
+    // try once after load
+    window.addEventListener('load', arm, {once:true});
+  }
+})(); 

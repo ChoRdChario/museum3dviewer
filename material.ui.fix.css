@@ -1,0 +1,39 @@
+
+/* material.ui.fix.css v1.0
+   Constrains Material pane width and prevents horizontal overflow.
+   Non-destructive: only targets #panel-material subtree.
+*/
+#panel-material {
+  max-width: 360px;            /* keep the card slim on the right */
+  overflow-x: hidden;
+}
+
+#panel-material .pm-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+#panel-material .pm-grow {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+#panel-material select,
+#panel-material input[type="range"],
+#panel-material input[type="checkbox"] {
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+#panel-material output.pm-val {
+  width: 3.5em;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+#panel-material .pm-section + .pm-section {
+  margin-top: 10px;
+}
