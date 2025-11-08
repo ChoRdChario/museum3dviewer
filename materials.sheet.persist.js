@@ -1,115 +1,92 @@
-// materials.sheet.persist.js
-// LociMyu per-material persistence (Sheets/local) — v1.4
+// materials.sheet.persist.js v1.5
+// Responsibilities:
+// - Keep __LM_MATERIALS sheet present with headers A:M
+// - Upsert row by materialKey writing B..M including flags
+// - Read row by key to sync UI
+//
+// Public API (attached to window.__LM_MAT_PERSIST):
+//   ensure()             -> ensure sheet + headers
+//   upsert(payload)      -> write one row (B..M); creates new row if needed
+//   readByKey(key)       -> {hit, rowNumber, values:{opacity, doubleSided, unlitLike, ...}}
+//   ctx()                -> current ctx
+//
 (function(){
-  const TAG = '[mat-sheet-persist v1.4]';
-  const log = (...a)=>console.log(TAG, ...a);
-  const warn = (...a)=>console.warn(TAG, ...a);
-  const err  = (...a)=>console.error(TAG, ...a);
+  const LOG_TAG = '[mat-sheet-persist v1.5]';
+  const MAT_SHEET = '__LM_MATERIALS';
 
-  // Public surface
-  const API = { ctx:null, ensure: ensureSheetAndHeaders, upsert };
+  function log(...args){ console.log(LOG_TAG, ...args); }
+  function warn(...args){ console.warn(LOG_TAG, ...args); }
 
-  // Expose version and API
-  window.__LM_MAT_PERSIST_VERSION__ = '1.4';
-  window.__LM_MAT_PERSIST = API;
-  log('loaded');
-
-  // Listen sheet context
-  window.addEventListener('lm:sheet-context', (e)=>{
-    const ctx = e?.detail || window.__LM_SHEET_CTX || null;
-    if (ctx && ctx.spreadsheetId) {
-      API.ctx = { spreadsheetId: ctx.spreadsheetId, sheetGid: ctx.sheetGid || 0 };
-      log('ctx set', API.ctx);
-      ensureSheetAndHeaders().catch(err);
-    } else {
-      warn('ensureSheet error: no spreadsheetId in __LM_SHEET_CTX');
-    }
-  });
-
-  // Try ensure on auth-ready too (in case context was set before)
-  window.addEventListener('lm:auth-ready', ()=> {
-    if (API.ctx?.spreadsheetId) ensureSheetAndHeaders().catch(err);
-  });
+  function getCtx(){
+    const c = window.__LM_SHEET_CTX;
+    if (!c || !c.spreadsheetId) throw new Error('no spreadsheetId in __LM_SHEET_CTX');
+    return c;
+  }
 
   async function fetchJSONAuth(url, init={}){
-    if (typeof window.__lm_fetchJSONAuth !== 'function'){
-      // Wait briefly for shim injection
-      await new Promise(r => setTimeout(r, 50));
-      if (typeof window.__lm_fetchJSONAuth !== 'function'){
-        throw new Error('__lm_fetchJSONAuth not present');
-      }
-    }
+    if (typeof window.__lm_fetchJSONAuth !== 'function') throw new Error('__lm_fetchJSONAuth not present');
     return window.__lm_fetchJSONAuth(url, init);
   }
 
-  async function ensureSheetAndHeaders(){
-    const sheetId = API.ctx?.spreadsheetId;
-    if (!sheetId) throw new Error('no spreadsheetId in __LM_SHEET_CTX');
-
-    // Check sheets
-    const meta = await fetchJSONAuth(`https://sheets.googleapis.com/v4/spreadsheets/${sheetId}`);
-    const titles = (meta.sheets||[]).map(s => s.properties.title);
-    const MAT_SHEET = '__LM_MATERIALS';
-
-    if (!titles.includes(MAT_SHEET)){
-      try {
-        await fetchJSONAuth(
-          `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}:batchUpdate`,
-          { method:'POST', body:{ requests:[{ addSheet:{ properties:{ title: MAT_SHEET } } }] } }
-        );
-        log('created sheet & headers');
-      } catch (e){
-        // Allow "already exists" error to pass
-        err(e);
-      }
-    } else {
-      log('sheet exists');
-    }
-
-    // Ensure headers A..M (reserve future columns)
+  async function ensureHeaders(spreadsheetId){
     const headers = [
       'materialKey','opacity','doubleSided','unlitLike',
       'chromaEnable','chromaColor','chromaTolerance','chromaFeather',
       'roughness','metalness','emissiveHex',
       'updatedAt','updatedBy'
-    ];
+    ]; // A..M
     await fetchJSONAuth(
-      `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${encodeURIComponent('__LM_MATERIALS!A1:M1')}?valueInputOption=RAW`,
+      `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(MAT_SHEET+'!A1:M1')}?valueInputOption=RAW`,
       { method:'PUT', body:{ values:[headers] } }
     );
     log('headers ensured A:M');
   }
 
-  // Upsert a row for a given materialKey
-  async function upsert(payload){
-    const sheetId = API.ctx?.spreadsheetId;
-    if (!sheetId) throw new Error('no spreadsheetId in __LM_SHEET_CTX');
+  async function ensureSheet(){
+    const { spreadsheetId } = getCtx();
+    const meta = await fetchJSONAuth(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}`);
+    const titles = (meta.sheets||[]).map(s => s.properties.title);
+    if (!titles.includes(MAT_SHEET)){
+      await fetchJSONAuth(
+        `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}:batchUpdate`,
+        { method:'POST', body:{ requests:[{ addSheet:{ properties:{ title: MAT_SHEET } } }] } }
+      );
+      log('created sheet & headers');
+    }else{
+      log('sheet exists');
+    }
+    await ensureHeaders(spreadsheetId);
+  }
 
+  async function upsert(payload){
+    const { spreadsheetId } = getCtx();
     const {
       materialKey, opacity,
       doubleSided=false, unlitLike=false,
-      chromaEnable=false, chromaColor='#000000', chromaTolerance=0, chromaFeather=0,
-      roughness='', metalness='', emissiveHex='', updatedBy='mat-ui'
+      chromaEnable=false, chromaColor='#000000',
+      chromaTolerance=0, chromaFeather=0,
+      roughness='', metalness='', emissiveHex='',
+      updatedBy='mat-ui'
     } = payload || {};
     if (!materialKey) throw new Error('materialKey required');
 
-    // Make sure header exists before writing any row
-    await ensureSheetAndHeaders();
+    // Ensure headers at least once per session (cheap PUT)
+    await ensureHeaders(spreadsheetId);
 
-    // Read column A keys
+    // Find or create row by key in column A
     const colA = await fetchJSONAuth(
-      `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${encodeURIComponent('__LM_MATERIALS!A:A')}`
+      `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(MAT_SHEET+'!A:A')}`
     );
-    const rows = colA.values || []; // [[header],[key],...]
+    const rows = colA.values || [];
     let rowIndex = rows.findIndex(r => (r[0]||'') === materialKey);
     let rowNumber;
-    if (rowIndex <= 0) {
+    if (rowIndex <= 0){
       rowNumber = rows.length + 1;
       await fetchJSONAuth(
-        `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${encodeURIComponent(`__LM_MATERIALS!A${rowNumber}:A${rowNumber}`)}?valueInputOption=RAW`,
+        `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(`${MAT_SHEET}!A${rowNumber}:A${rowNumber}`)}?valueInputOption=RAW`,
         { method:'PUT', body:{ values:[[materialKey]] } }
       );
-    } else {
+    }else{
       rowNumber = rowIndex + 1;
     }
 
@@ -128,11 +105,71 @@
       iso,
       updatedBy
     ];
-    const rangeBM = `__LM_MATERIALS!B${rowNumber}:M${rowNumber}`;
+    const rangeBM = `${MAT_SHEET}!B${rowNumber}:M${rowNumber}`;
     await fetchJSONAuth(
-      `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${encodeURIComponent(rangeBM)}?valueInputOption=RAW`,
+      `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(rangeBM)}?valueInputOption=RAW`,
       { method:'PUT', body:{ values:[rowValues] } }
     );
-    log('persisted', {rowNumber, materialKey, opacity});
+    log('persisted', {rowNumber, materialKey, opacity, doubleSided, unlitLike});
+    return { rowNumber };
   }
+
+  async function readByKey(materialKey){
+    const { spreadsheetId } = getCtx();
+    if (!materialKey) return { hit:0, rowNumber: -1, values:null };
+    // Read row range A:M and parse
+    // First find the row index via A:A
+    const colA = await fetchJSONAuth(
+      `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(MAT_SHEET+'!A:A')}`
+    );
+    const rows = colA.values || [];
+    const rowIndex = rows.findIndex(r => (r[0]||'') === materialKey);
+    if (rowIndex <= 0){
+      return { hit:0, rowNumber:-1, values:null };
+    }
+    const rowNumber = rowIndex + 1;
+    const range = `${MAT_SHEET}!A${rowNumber}:M${rowNumber}`;
+    const resp = await fetchJSONAuth(
+      `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}`
+    );
+    const vs = (resp.values && resp.values[0]) || [];
+    const get = (i, d='') => (vs[i] ?? d);
+    const truthy = (s) => String(s).toUpperCase() === 'TRUE';
+
+    const values = {
+      materialKey: get(0,''),
+      opacity: parseFloat(get(1,'1')),
+      doubleSided: truthy(get(2,'FALSE')),
+      unlitLike: truthy(get(3,'FALSE')),
+      chromaEnable: truthy(get(4,'FALSE')),
+      chromaColor: get(5,''),
+      chromaTolerance: parseFloat(get(6,'0')),
+      chromaFeather: parseFloat(get(7,'0')),
+      roughness: get(8,''),
+      metalness: get(9,''),
+      emissiveHex: get(10,''),
+      updatedAt: get(11,''),
+      updatedBy: get(12,'')
+    };
+    log('read', {rowNumber, values});
+    return { hit:1, rowNumber, values };
+  }
+
+  // Wire sheet-context so we can log ctx
+  window.addEventListener('lm:sheet-context', (e) => {
+    const d = e && e.detail;
+    if (d && d.spreadsheetId){
+      log('ctx set', d);
+    }else{
+      warn('bad sheet-context detail', d);
+    }
+  });
+
+  window.__LM_MAT_PERSIST = {
+    ensure: ensureSheet,
+    upsert,
+    readByKey,
+    ctx: () => { try { return getCtx(); } catch { return null; } }
+  };
+  log('loaded');
 })();
