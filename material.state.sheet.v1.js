@@ -11,6 +11,14 @@
   ];
 
   const $ = s => document.querySelector(s);
+  // Global runtime flags and index for restoration
+  window.__lm_restoringMaterial = window.__lm_restoringMaterial ?? false;
+  window.__lm_currentMaterialKey = window.__lm_currentMaterialKey ?? null;
+  window.__lm_materialIndex = window.__lm_materialIndex ?? new Map();
+  function idxKey(sid,gid,mat){ return `${sid}:${gid}:${mat}`; }
+  function idxSet(ctx, row){ if (!row?.materialKey) return; window.__lm_materialIndex.set(idxKey(ctx.spreadsheetId, ctx.sheetGid, row.materialKey), row); }
+  function idxGet(ctx, mat){ return window.__lm_materialIndex.get(idxKey(ctx.spreadsheetId, ctx.sheetGid, mat)) || null; }
+
   const ui = {
     sel:  $('#materialSelect, #pm-material'),
     rng:  $('#opacityRange, #pm-opacity-range'),
@@ -111,7 +119,7 @@
     a.doubleSided===b.doubleSided && a.unlit===b.unlit;
 
   async function schedule(){
-    if (window.__lm_restoringMaterial) { return; }
+    if (window.__lm_restoringMaterial) return;
     const s = snapshot(); if (!s) return;
     if (same(s,last)) return;
     last = s;
@@ -122,29 +130,48 @@
   }
 
   function arm(){
-    // select change no-save (guarded)
-    // ui.sel && ui.sel.addEventListener('change', schedule, false);
+    ui.sel  && ui.sel.addEventListener('change', onSelectRestore, false);
     ui.rng  && ui.rng.addEventListener('input',  schedule, false);
     ui.dbl  && ui.dbl.addEventListener('change', schedule, false);
     ui.unlit&& ui.unlit.addEventListener('change', schedule, false);
     log('armed');
   }
 
-  
-
-  // === expose debounced control for other modules (v6.12) ===
-  window.lmCancelPendingSave = function(){ if (timer){ clearTimeout(timer); timer = 0; } };
-  window.lmScheduleSave = function(materialKey, partial){
-    // Update only opacity for now; mirror UI then call schedule()
-    try{
-      if (ui.rng && typeof partial?.opacity === 'number') {
-        // do not trigger input handler here; orchestrator will handle viewer apply
-        ui.rng.value = String(partial.opacity);
-      }
-    }catch(_){}
-    schedule();
-  };
-
   window.addEventListener('lm:glb-loaded', ()=>setTimeout(schedule,0));
   setTimeout(arm, 0);
-})(
+})();
+
+
+  async function rebuildIndex(){
+    if (!ctx.spreadsheetId) return;
+    try{
+      const all = await readAll(ctx.spreadsheetId);
+      window.__lm_materialIndex = new Map();
+      for(const row of all.rows){
+        idxSet(ctx, row);
+      }
+      log('index rebuilt', window.__lm_materialIndex.size);
+    }catch(e){ warn('index build failed', e); }
+  }
+
+  async function onSelectRestore(){
+    if (!ui.sel) return;
+    window.__lm_currentMaterialKey = ui.sel.value;
+    window.__lm_restoringMaterial = true;
+    try{
+      const snap = idxGet(ctx, ui.sel.value) || { opacity: 1 };
+      if (ui.rng){ ui.rng.value = String(snap.opacity ?? 1); }
+      if (window.viewerBridge?.setMaterialOpacity && typeof snap.opacity !== 'undefined'){
+        window.viewerBridge.setMaterialOpacity(ui.sel.value, Number(snap.opacity ?? 1));
+      }
+      log('restore', ui.sel.value, snap.opacity);
+    }finally{
+      window.__lm_restoringMaterial = false;
+    }
+  }
+
+  // Rebuild index on sheet-context
+  window.addEventListener('lm:sheet-context', ()=>{ setTimeout(rebuildIndex, 0); });
+
+  // Initial restore when conditions are likely ready
+  window.addEventListener('lm:glb-loaded', ()=>{ setTimeout(()=>{ if (ui.sel && ui.sel.value) onSelectRestore(); }, 0); });

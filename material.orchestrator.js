@@ -6,43 +6,11 @@
   // --- DOM binding (pane-local) ---
   const pane = document.querySelector('#pane-material.pane');
   if (!pane) return warn('pane not found (#pane-material)');
-  const sel = pane.querySelector('#pm-material, #materialSelect');
-  const rng = pane.querySelector('#pm-opacity-range, #opacityRange');
+  const sel = pane.querySelector('#materialSelect');
+  const rng = pane.querySelector('#opacityRange');
   if (!sel || !rng) return warn('controls missing in pane');
 
   log('UI found', {pane, select:sel, opacity:rng, doubleSided:null, unlit:null});
-  // restoring guard and current key (shared globals)
-  window.__lm_restoringMaterial = window.__lm_restoringMaterial ?? false;
-  window.__lm_currentMaterialKey = window.__lm_currentMaterialKey ?? null;
-
-  function getSheetCtx(){
-    return { spreadsheetId: window.currentSpreadsheetId || window.spreadsheetId || null,
-             sheetGid: (typeof window.currentSheetId !== 'undefined') ? window.currentSheetId : null };
-  }
-  function getModelKey(){ return 'NOMODEL'; }
-  function restoreSnapshotFor(key){
-    const ctx = getSheetCtx();
-    const snap = (window.lmLookupMaterialSnapshot && window.lmLookupMaterialSnapshot(ctx, getModelKey(), key)) || { opacity: 1.0 };
-    // silent UI update
-    try {
-      const orig = rng.oninput; rng.oninput = null;
-      rng.value = String(typeof snap.opacity==='number'? snap.opacity : 1.0);
-      rng.oninput = orig;
-    } catch(_){}
-    // viewer apply
-    applyOpacity(key, parseFloat(rng.value||'1'));
-    console.log('[mat-orch] restore', key, 'opacity=', rng.value);
-  }
-  async function rebuildIndex(){
-    try{
-      const sid = getSheetCtx().spreadsheetId;
-      if (!sid || !window.materialsSheetBridge?.loadAll) return;
-      const map = await window.materialsSheetBridge.loadAll(sid);
-      const rows = Array.from(map.values());
-      window.lmBuildMaterialIndex && window.lmBuildMaterialIndex(rows);
-    }catch(e){ console.warn('[mat-orch] index build failed', e); }
-  }
-
 
   // --- state ---
   let materialKeys = [];    // ['Hull','Glass',...]
@@ -92,41 +60,17 @@
   }
 
   // --- wire ---
-  sel.addEventListener('change', async () => {
-    const next = sel.value || null;
-    if (!next) return;
-    window.lmCancelPendingSave && window.lmCancelPendingSave();
-    window.__lm_currentMaterialKey = next;
-    window.__lm_restoringMaterial = true;
-    restoreSnapshotFor(next);
-    window.__lm_restoringMaterial = false;
+  sel.addEventListener('change', () => {
+    currentKey = sel.value || null;
+    if (currentKey) applyOpacity(currentKey, parseFloat(rng.value||'1'));
   });
   rng.addEventListener('input', () => {
-    const k = window.__lm_currentMaterialKey; if (!k) return;
-    if (window.__lm_restoringMaterial) return; // ignore during restore
-    const v = parseFloat(rng.value||'1');
-    applyOpacity(k, v);
-    window.lmScheduleSave && window.lmScheduleSave(k, { opacity: v });
+    if (currentKey) applyOpacity(currentKey, parseFloat(rng.value||'1'));
   });
 
-  
-  // Barrier for initial restore
-  const ready = { scene:false, glb:false, sheet:false };
-  function tryInitial(){
-    if (ready.scene && ready.glb && ready.sheet && !tryInitial.__done){
-      tryInitial.__done = true;
-      // rebuild index then restore current selection
-      rebuildIndex().then(()=>{
-        const k = sel.value || (sel.options && sel.options[0] && sel.options[0].value) || null;
-        if (k){ window.__lm_currentMaterialKey = k; window.__lm_restoringMaterial = true; restoreSnapshotFor(k); window.__lm_restoringMaterial = false; }
-      });
-    }
-  }
-  window.addEventListener('lm:sheet-context', ()=>{ ready.sheet = true; tryInitial(); rebuildIndex(); });
-// scene-ready で材料名を投入
-  function onSceneReady(){ fetchMaterialKeys(); ready.scene = true; tryInitial(); }
+  // scene-ready で材料名を投入
+  function onSceneReady(){ fetchMaterialKeys(); }
   window.addEventListener('lm:scene-ready', onSceneReady);
-  window.addEventListener('lm:glb-loaded', ()=>{ ready.glb = true; tryInitial(); });
 
   // すでにシーンができている場合もある
   setTimeout(fetchMaterialKeys, 0);

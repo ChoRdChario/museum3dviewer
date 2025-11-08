@@ -80,12 +80,14 @@
     let target = sheets.find(s => s?.properties?.title === S.title);
     if (!target){
       // なければ追加
-      const res = await fjson(`https://sheets.googleapis.com/v4/spreadsheets/${S.spreadsheetId}:batchUpdate`, {
+      let res;
+      try{ res = await fjson(`https://sheets.googleapis.com/v4/spreadsheets/${S.spreadsheetId}:batchUpdate`, {
         method:'POST',
         body: JSON.stringify({
           requests: [{ addSheet: { properties: { title: S.title } } }]
         })
       });
+      }catch(e){ console.warn('[mat-sheet] addSheet batchUpdate warn, retry once', e); res = await fjson(`https://sheets.googleapis.com/v4/spreadsheets/${S.spreadsheetId}:batchUpdate`, { method:'POST', body: JSON.stringify({ requests: [{ addSheet: { properties: { title: S.title } } }] }) }); }
       target = res?.replies?.[0]?.addSheet || null;
       log('sheet created:', S.title);
     }

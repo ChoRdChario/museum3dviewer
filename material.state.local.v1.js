@@ -63,6 +63,9 @@
 
   // Persist to localStorage & emit save event (for Sheets bridge)
   const pushSave = debounce(() => {
+    // If Sheet context is present, prefer Sheet bridge (skip local cache to avoid confusion)
+    const ctx = (window.getCurrentSheetCtx && window.getCurrentSheetCtx()) || window.__lm_sheetCtx || {};
+
     const st = readUi();
     if (!st.materialKey) { return; } // nothing selected
     const all = loadAll();
@@ -75,8 +78,7 @@
       updatedAt: st.updatedAt,
       updatedBy: 'local', // placeholder
     };
-    saveAll(all);
-    log('saved local', ns, st.materialKey, all[ns][st.materialKey]);
+    if (!ctx || !ctx.spreadsheetId){ saveAll(all); log('saved local', ns, st.materialKey, all[ns][st.materialKey]); }
 
     // Emit event for upstream persistence
     const detail = {
