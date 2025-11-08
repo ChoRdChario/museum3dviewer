@@ -65,20 +65,27 @@ console.log('[mat-orch v2.1] load');
 
   const qS = (sel, root=document) => root.querySelector(sel);
 
+  /* v2.3 DOM-unify */
+  const findSelectEl = () => {
+    const panel = document.querySelector('#panel-material #pm-opacity') || document.querySelector('#pane-material #pm-opacity') || document.getElementById('panel-material') || document.getElementById('pane-material') || document;
+    return panel.querySelector('#materialSelect') || panel.querySelector('#pm-material') || panel.querySelector('select');
+  };
+  const findRangeEl = () => {
+    const panel = document.querySelector('#panel-material #pm-opacity') || document.querySelector('#pane-material #pm-opacity') || document;
+    return panel.querySelector('#materialOpacity') || panel.querySelector('#pm-opacity-range') || panel.querySelector('input[type="range"]');
+  };
+  const findValueEl = () => {
+    const panel = document.querySelector('#panel-material #pm-opacity') || document.querySelector('#pane-material #pm-opacity') || document;
+    return panel.querySelector('#pm-opacity-value') || null;
+  };
+
+
   const getPanel = () =>
     document.getElementById(PANEL_ID) || document.querySelector('#panel-material #pm-opacity') || document.querySelector('#pane-material #pm-opacity');
 
-  const getSelect = () => {
-    const p = getPanel();
-    if (!p) return null;
-    return qS('#' + SELECT_ID, p) || qS('select', p);
-  };
+  const getSelect = () => findSelectEl();
 
-  const getRange = () => {
-    const p = getPanel();
-    if (!p) return null;
-    return qS('#' + RANGE_ID, p) || qS('input[type="range"]', p);
-  };
+  const getRange = () => findRangeEl();
 
   const applyOpacity = (name, value) => {
     if (!state.index.size) buildIndex();
@@ -116,7 +123,7 @@ console.log('[mat-orch v2.1] load');
     if (!range.__lm_mat_oninput) {
       range.__lm_mat_oninput = true;
       range.addEventListener('input', onInput);
-      range.addEventListener('change', onInput);
+      if(!range.dataset._bound){ range.dataset._bound='1'; range.addEventListener('change', onInput);
     }
     if (!sel.__lm_mat_onchange) {
       sel.__lm_mat_onchange = true;
@@ -128,6 +135,7 @@ console.log('[mat-orch v2.1] load');
     console.log('[mat-orch v2.1] UI bound');
     return true;
   };
+
 
   const boot = () => {
     if (wireUI()) return true;
