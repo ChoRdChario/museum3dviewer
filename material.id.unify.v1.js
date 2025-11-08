@@ -1,80 +1,78 @@
-
-/*! material.id.unify.v1.js
- * Purpose: eliminate ID mismatch and wrong-parent issues for Material UI.
- * Canonical IDs: #materialSelect, #opacityRange (both inside #pane-material)
- * Safe, minimal, no styling changes, no extra listeners.
- */
+// material.id.unify.v1.js  — drop-in, guarded version
 (() => {
   const TAG='[mat-id-unify]';
-  const log=(...a)=>console.log(TAG,...a);
-  const warn=(...a)=>console.warn(TAG,...a);
+  const log=(...a)=>console.log(TAG,...a), warn=(...a)=>console.warn(TAG,...a);
 
-  function ensureOnce(){
-    const root = document.getElementById('pane-material') || document.querySelector('#pane-material, [role="tabpanel"][data-tab="material"], [data-panel="material"]');
-    if (!root) return false;
+  // Try to resolve canonical panel where the modern Material UI should live
+  const root = document.querySelector('#panel-material') || (() => {
+    const tabBar = document.querySelector('#right [role="tablist"], #right .tabs, #right nav, #right header') || document.querySelector('#right') || document.body;
+    const s = document.createElement('section');
+    s.id = 'panel-material';
+    s.className = 'lm-panel-material card';
+    s.style.marginTop = '8px';
+    tabBar && tabBar.insertAdjacentElement('afterend', s);
+    log('synthesized #panel-material');
+    return s;
+  })();
 
-    // 1) Resolve/select node for material dropdown
-    let sel = document.getElementById('materialSelect') 
-           || document.getElementById('pm-material') 
-           || root.querySelector('select[aria-label*="material" i]');
+  const legacyPane = document.querySelector('#pane-material');
 
-    if (!sel) {
-      // Create minimal select if truly missing
-      sel = document.createElement('select');
-      sel.id = 'materialSelect';
-      sel.style.width = '100%';
-      root.appendChild(sel);
-    }
-
-    // 2) Resolve range (opacity)
-    let rng = document.getElementById('opacityRange') 
-           || document.getElementById('pm-opacity-range') 
-           || root.querySelector('input[type="range"]#opacityRange') 
-           || root.querySelector('input[type="range"]');
-
-    if (!rng) {
-      rng = document.createElement('input');
-      rng.type = 'range';
-      rng.id = 'opacityRange';
-      rng.min = '0'; rng.max = '1'; rng.step = '0.01'; rng.value = '1.0';
-      rng.style.width = '100%';
-      root.appendChild(rng);
-    }
-
-    // 3) Canonicalize IDs (rename legacy)
-    if (sel.id !== 'materialSelect') sel.id = 'materialSelect';
-    if (rng.id !== 'opacityRange')   rng.id = 'opacityRange';
-
-    // 4) Ensure controls live under #pane-material (move if necessary)
-    if (!root.contains(sel)) root.appendChild(sel);
-    if (!root.contains(rng)) root.appendChild(rng);
-
-    // 5) Make sure they are visible (in case of display:none via mistaken inheritance)
-    if (sel.style.display === 'none') sel.style.display = '';
-    if (rng.style.display === 'none') rng.style.display = '';
-
-    // 6) Nudge any listeners waiting for UI readiness
-    try { window.dispatchEvent(new Event('lm:mat-ui-ready')); } catch(_){}
-
-    log('unified', { selectParent: sel.parentElement && (sel.parentElement.id || sel.parentElement.className || sel.parentElement.tagName),
-                     rangeParent:  rng.parentElement && (rng.parentElement.id || rng.parentElement.className || rng.parentElement.tagName) });
-    return true;
+  // === guard: if modern anchors already exist under #panel-material, skip synthesize/mirroring
+  const hasModern = !!(root && (root.querySelector('#materialSelect') || root.querySelector('#opacityRange')));
+  // Also remove accidentally inserted modern anchors under legacy containers
+  if (legacyPane) {
+    legacyPane.querySelectorAll('#materialSelect,#opacityRange').forEach(n => n.remove());
   }
 
-  // Run after DOM, and retry a few times to catch late mounts.
-  const kick = () => {
-    let tries = 0;
-    const MAX = 10;
-    const timer = setInterval(() => {
-      if (ensureOnce() || ++tries >= MAX) clearInterval(timer);
-    }, 150);
-    // Also try immediately
-    ensureOnce();
-  };
+  // One-time CSS to hide old pm-* controls if they exist
+  (function injectCSS(){
+    const cssId = '__lm_mat_unify_css__';
+    if (document.getElementById(cssId)) return;
+    const st = document.createElement('style');
+    st.id = cssId;
+    st.textContent = `
+      #pane-material select#pm-material,
+      #pane-material input#pm-opacity-range { display:none !important; }
+    `;
+    document.head.appendChild(st);
+  })();
 
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', kick, {once:true});
-  } else {
-    kick();
+  if (hasModern) {
+    log('modern anchors present -> skip synthesize');
+    return;
   }
+
+  // ---- create canonical anchors once (only if missing) ----
+  function ensure(id, maker) {
+    let n = root.querySelector('#' + id);
+    if (!n) {
+      n = maker();
+      n.id = id;
+      root.appendChild(n);
+      log('created', '#' + id, 'under #panel-material');
+    }
+    return n;
+  }
+
+  ensure('materialSelect', () => {
+    const el = document.createElement('select');
+    el.setAttribute('aria-label','Select material');
+    el.style.width = '100%';
+    return el;
+  });
+
+  ensure('opacityRange', () => {
+    const el = document.createElement('input');
+    el.type='range'; el.min='0'; el.max='1'; el.step='0.01'; el.value='1.0';
+    el.style.width='100%';
+    return el;
+  });
+
+  log('unified', {
+    selectParent: (document.getElementById('materialSelect')||{}).parentElement?.id || null,
+    rangeParent:  (document.getElementById('opacityRange')||{}).parentElement?.id  || null
+  });
+
+  // Nudge orchestrators waiting for anchors
+  try { window.dispatchEvent(new Event('lm:mat-ui-ready', {bubbles:true})); } catch(_){}
 })();
