@@ -4,13 +4,22 @@
   const log=(...a)=>console.log(TAG,...a), warn=(...a)=>console.warn(TAG,...a);
 
   // --- DOM binding (pane-local) ---
-  const pane = document.querySelector('#pane-material.pane');
-  if (!pane) return warn('pane not found (#pane-material)');
+  const pane = document.querySelector('#pane-material.pane') || document.querySelector('#panel-material');
+  if (!pane) return warn('pane not found (#pane-material/#panel-material)');
   const sel = pane.querySelector('#materialSelect');
   const rng = pane.querySelector('#opacityRange');
-  if (!sel || !rng) return warn('controls missing in pane');
+  if (!sel || !rng){
+    let tries=0; const tm = setInterval(()=>{
+      sel = pane.querySelector('#pm-material, #materialSelect') || document.querySelector('#pm-material, #materialSelect');
+      rng = pane.querySelector('#pm-opacity-range, #opacityRange') || document.querySelector('#pm-opacity-range, #opacityRange');
+      tries++;
+      if (sel && rng){ clearInterval(tm); function bind(){ log('UI found', {pane, select: sel, opacity: rng, doubleSided: null, unlit: null}); bind(); }
+      else if (tries>60){ clearInterval(tm); warn('controls not found after retry'); }
+    }, 250);
+    return;
+  }
 
-  log('UI found', {pane, select:sel, opacity:rng, doubleSided:null, unlit:null});
+  function bind(){ log('UI found', {pane, select:sel, opacity:rng, doubleSided:null, unlit:null});
 
   // --- state ---
   let materialKeys = [];    // ['Hull','Glass',...]
@@ -75,5 +84,5 @@
   // すでにシーンができている場合もある
   setTimeout(fetchMaterialKeys, 0);
 
-  log('UI bound');
+  log('UI bound'); }
 })();

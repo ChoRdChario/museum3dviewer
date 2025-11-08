@@ -63,6 +63,9 @@
 
   // Persist to localStorage & emit save event (for Sheets bridge)
   const pushSave = debounce(() => {
+    const ctx = (window.getCurrentSheetCtx && window.getCurrentSheetCtx()) || window.__lm_sheetCtx || {};
+    // Skip local saves entirely when no sheet context yet to avoid NOSPREAD:NOGID spam
+    if (!ctx || !ctx.spreadsheetId) { return; }
     // If Sheet context is present, prefer Sheet bridge (skip local cache to avoid confusion)
     const ctx = (window.getCurrentSheetCtx && window.getCurrentSheetCtx()) || window.__lm_sheetCtx || {};
 
