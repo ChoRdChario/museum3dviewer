@@ -1,82 +1,70 @@
+// materials.ui.wire.js
+// Bind Material pane controls to persistence — v1.2
+const TAG = '[mat-ui-wire v1.2]';
+const log = (...a)=>console.log(TAG, ...a);
+const warn = (...a)=>console.warn(TAG, ...a);
 
-/*!
- * materials.ui.wire.js v1.2
- * - Binds to #pm-material / #pm-opacity-range
- * - Debounced persist using LM_MaterialsPersist.upsert()
- * - Waits for auth helper and sheet-context
- */
-(function(){
-  const LOG = (...a)=>console.log('[mat-ui-wire v1.2]', ...a);
-  const WARN = (...a)=>console.warn('[mat-ui-wire v1.2]', ...a);
+function $(sel){ return document.querySelector(sel); }
 
-  function waitAuthHelper(timeoutMs=15000){
-    if (typeof window.__lm_fetchJSONAuth === 'function') return Promise.resolve();
-    return new Promise((resolve,reject)=>{
-      const t0 = performance.now();
-      const iv = setInterval(()=>{
-        if (typeof window.__lm_fetchJSONAuth === 'function'){
-          clearInterval(iv); resolve();
-        } else if (performance.now() - t0 > timeoutMs){
-          clearInterval(iv); reject(new Error('__lm_fetchJSONAuth not present'));
-        }
-      }, 50);
-    });
-  }
+function getCurrentValues(){
+  const sel  = $('#pm-material');
+  const rng  = $('#pm-opacity-range');
+  const ds   = $('#pm-flag-doublesided');
+  const un   = $('#pm-flag-unlit');
+  return {
+    materialKey: sel?.value || sel?.selectedOptions?.[0]?.value || '',
+    opacity: rng ? parseFloat(rng.value) : 1,
+    doubleSided: !!(ds && ds.checked),
+    unlitLike: !!(un && un.checked),
+  };
+}
 
-  function waitCtx(timeoutMs=15000){
-    // quick path: if ctx already present
-    const ok = (window.__LM_SHEET_CTX && window.__LM_SHEET_CTX.spreadsheetId);
-    if (ok) return Promise.resolve(window.__LM_SHEET_CTX);
-    return new Promise((resolve,reject)=>{
-      const t0 = performance.now();
-      const on = (e)=>{
-        const c = (e && e.detail) || window.__LM_SHEET_CTX;
-        if (c && c.spreadsheetId){ cleanup(); resolve(c); }
-      };
-      const cleanup = ()=>{
-        window.removeEventListener('lm:sheet-context', on, true);
-      };
-      window.addEventListener('lm:sheet-context', on, true);
-      setTimeout(()=>{ cleanup(); reject(new Error('sheet-context timeout')); }, timeoutMs);
-    });
-  }
+function setOpacityOutput(){
+  const out = $('#pm-opacity-val');
+  const rng = $('#pm-opacity-range');
+  if (out && rng) out.textContent = Number.parseFloat(rng.value).toFixed(2);
+}
 
-  (async function init(){
-    try{
-      await waitAuthHelper().catch(()=>{});
-      await waitCtx().catch(()=>{});
-    }catch(e){ WARN('pre-wait failed', e); }
-
-    const sel = document.querySelector('#pm-material');
-    const rng = document.querySelector('#pm-opacity-range');
-    if (!sel || !rng){
-      WARN('UI not found', {sel: !!sel, rng: !!rng});
+async function handler(){
+  try {
+    if (!window.__LM_MAT_PERSIST || typeof window.__LM_MAT_PERSIST.upsert !== 'function'){
+      warn('persist not ready');
       return;
     }
+    const vals = getCurrentValues();
+    if (!vals.materialKey) return;
+    await window.__LM_MAT_PERSIST.upsert(vals);
+  } catch(e){
+    warn('persist failed', e);
+  }
+}
 
-    // ensure we have persist
-    const P = window.LM_MaterialsPersist;
-    if (!P || typeof P.upsert !== 'function'){
-      WARN('LM_MaterialsPersist missing');
-      return;
-    }
+function wire(){
+  const sel  = $('#pm-material');
+  const rng  = $('#pm-opacity-range');
+  const ds   = $('#pm-flag-doublesided');
+  const un   = $('#pm-flag-unlit');
 
-    let timer;
-    const handler = async ()=>{
-      const key = sel.value || sel.selectedOptions?.[0]?.value || '';
-      if (!key) return;
-      const opacity = parseFloat(rng.value);
-      try{
-        await P.upsert({ materialKey:key, opacity });
-      }catch(err){ WARN('persist failed', err); }
-    };
-    const debounced = ()=>{ clearTimeout(timer); timer = setTimeout(handler, 150); };
+  if (!sel || !rng){
+    warn('controls missing', {sel:!!sel, rng:!!rng});
+    return;
+  }
+  let t;
+  const debounced = () => { clearTimeout(t); t = setTimeout(handler, 120); };
 
-    rng.addEventListener('input', debounced, {passive:true});
-    rng.addEventListener('change', debounced, {passive:true});
-    rng.addEventListener('pointerup', debounced, {passive:true});
-    sel.addEventListener('change', handler, {passive:true});
+  rng.addEventListener('input', ()=>{ setOpacityOutput(); debounced(); }, {passive:true});
+  rng.addEventListener('change', debounced, {passive:true});
+  rng.addEventListener('pointerup', debounced, {passive:true});
+  sel.addEventListener('change', handler, {passive:true});
+  ds  && ds.addEventListener('change', handler, {passive:true});
+  un  && un.addEventListener('change', handler, {passive:true});
 
-    LOG('wired');
-  })();
-})();
+  setOpacityOutput();
+  log('wired');
+}
+
+if (document.readyState === 'loading'){
+  document.addEventListener('DOMContentLoaded', wire, {once:true});
+} else {
+  wire();
+}
