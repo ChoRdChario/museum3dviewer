@@ -1,54 +1,34 @@
-/*! material.dropdown.patch.js v3.1 (scene→dropdown population, once) */
+// material.dropdown.patch.js v3.1
 (function(){
   const TAG='[mat-dd v3.1]';
-  if (window.__LM_DD_DONE) { console.debug(TAG,'already done'); return; }
+  const $ = s => document.querySelector(s);
+  const sel = $('#pm-material');
+  if(!sel){ console.warn(TAG,'select not found'); return; }
 
-  function populateFromScene(scene){
-    const ui = window.__LM_MAT_UI;
-    if (!ui || !ui.__ready) return console.warn(TAG,'UI not ready');
-    const sel = ui.select;
-    if (!sel) return;
+  function unique(arr){ return [...new Set(arr)].filter(Boolean); }
 
-    // Keep placeholder only
-    [...sel.querySelectorAll('option')].forEach((o,i)=>{ if(i>0) o.remove(); });
-
-    const names = new Set();
+  function populateFromScene(){
+    const scene = window.__LM_SCENE;
+    if(!scene){ return false; }
+    const names = [];
     scene.traverse(obj=>{
-      const mats = obj && obj.material ? (Array.isArray(obj.material)?obj.material:[obj.material]) : null;
-      if (!mats) return;
-      mats.forEach(m=>{
-        if (!m) return;
-        if (!m.name) m.name = `Material_${m.uuid.slice(0,8)}`;
-        if (names.has(m.name)) return;
-        names.add(m.name);
-        const opt = document.createElement('option');
-        opt.value = m.name;
-        opt.textContent = m.name;
-        sel.appendChild(opt);
-      });
+      const mats = obj.material ? (Array.isArray(obj.material)?obj.material:[obj.material]) : [];
+      mats.forEach(m=>{ if(m && m.name) names.push(m.name); });
     });
-    console.debug(TAG,'populated', sel.options.length-1);
+    const list = unique(names).sort((a,b)=>String(a).localeCompare(String(b)));
+    const cur = sel.value;
+    sel.innerHTML = '<option value="">— Select material —</option>' + list.map(n=>`<option value="${n}">${n}</option>`).join('');
+    if(list.includes(cur)) sel.value = cur;
+    console.log(TAG,'populated', list.length);
+    return true;
   }
 
-  // Prefer custom signal, else fallback polling
-  function arm(){
-    if (!window.__LM_MAT_UI) return;
-    if (window.__LM_SCENE) { populateFromScene(window.__LM_SCENE); window.__LM_DD_DONE=true; return; }
-    let tries = 60;
-    const iv = setInterval(()=>{
-      if (window.__LM_SCENE) {
-        clearInterval(iv);
-        populateFromScene(window.__LM_SCENE);
-        window.__LM_DD_DONE = true;
-      } else if (--tries<=0){ clearInterval(iv); console.warn(TAG,'scene not available'); }
-    }, 250);
+  // attempt immediately, then after GLB load signal
+  if(!populateFromScene()){
+    const onScene = ()=>{ populateFromScene(); window.removeEventListener('lm:scene-ready', onScene); };
+    window.addEventListener('lm:scene-ready', onScene, {once:true});
   }
 
-  window.addEventListener('lm:scene-ready', (ev)=>{
-    window.__LM_SCENE = ev.detail && ev.detail.scene || window.__LM_SCENE;
-    arm();
-  }, { once:true });
-
-  // also try immediately
-  arm();
+  // repopulate when our helper signal says GLB loaded
+  window.addEventListener('lm:glb-detected', populateFromScene);
 })();

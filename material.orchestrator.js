@@ -1,96 +1,59 @@
-/*! material.orchestrator.js v3.1 (UI↔Scene wiring, durable) */
+// material.orchestrator.js v3.1
 (function(){
   const TAG='[mat-orch v3.1]';
-  if (window.__LM_ORCH_READY) { console.debug(TAG,'already ready'); return; }
+  const $ = s => document.querySelector(s);
+  const ui = {
+    select: $('#pm-material'),
+    range:  $('#pm-opacity-range'),
+    out:    $('#pm-opacity-val')
+  };
+  if(!ui.select || !ui.range || !ui.out){ console.warn(TAG,'ui missing'); return; }
+  console.log(TAG,'ready');
 
-  function q(){ return window.__LM_MAT_UI && window.__LM_MAT_UI.__ready ? window.__LM_MAT_UI : null; }
   function getScene(){ return window.__LM_SCENE || null; }
 
-  function ensureMatProps(mat, opacity){
-    // Half‑transparent friendly settings
-    mat.transparent = true;
-    mat.opacity = opacity;
-    if (opacity >= 0.999) {
-      mat.depthWrite = true;
-      mat.alphaTest = 0;
-    } else {
-      mat.depthWrite = false;
-      mat.alphaTest = 0.01;
-    }
-    mat.needsUpdate = true;
-  }
-
-  function applyOpacityForName(name, opacity){
-    const scene = getScene(); if (!scene || !name) return;
+  function updateUIFromMaterial(name){
+    const scene = getScene();
+    if(!scene || !name){ return; }
+    let value = 1.0;
     scene.traverse(obj=>{
-      const mats = obj && obj.material ? (Array.isArray(obj.material)?obj.material:[obj.material]) : null;
-      if (!mats) return;
-      mats.forEach(m=>{ if (m && m.name === name) ensureMatProps(m, opacity); });
-    });
-    // notify sheet bridge (if present)
-    try{
-      window.dispatchEvent(new CustomEvent('lm:material-opacity-change', { detail: { materialKey: name, opacity } }));
-    }catch(e){ /* noop */ }
-  }
-
-  function syncUIFromScene(name){
-    const ui = q(); const scene = getScene();
-    if (!ui || !scene || !name) return;
-    let foundOp = null;
-    scene.traverse(obj=>{
-      const mats = obj && obj.material ? (Array.isArray(obj.material)?obj.material:[obj.material]) : null;
-      if (!mats) return;
+      const mats = obj.material ? (Array.isArray(obj.material)?obj.material:[obj.material]) : [];
       mats.forEach(m=>{
-        if (m && m.name === name && foundOp === null){
-          foundOp = typeof m.opacity === 'number' ? m.opacity : 1;
+        if(m && m.name === name){ value = (typeof m.opacity==='number'?m.opacity:1.0); }
+      });
+    });
+    ui.range.value = value;
+    ui.out.textContent = Number(value).toFixed(2);
+  }
+
+  function applyOpacity(name, value){
+    const scene = getScene();
+    if(!scene || !name){ return; }
+    scene.traverse(obj=>{
+      const mats = obj.material ? (Array.isArray(obj.material)?obj.material:[obj.material]) : [];
+      mats.forEach(m=>{
+        if(m && m.name === name){
+          m.opacity = value;
+          m.transparent = true;      // keep transparent path stable
+          m.depthWrite = value >= 0.999;
+          m.needsUpdate = true;
         }
       });
     });
-    if (foundOp === null) foundOp = 1;
-    ui.range.value = String(foundOp);
-    ui.out.textContent = Number(foundOp).toFixed(2);
   }
 
-  function wire(){
-    const ui = q(); if (!ui) return console.warn(TAG,'UI not ready');
-    const sel = ui.select, rng = ui.range, out = ui.out;
-    if (!sel || !rng || !out) return console.warn(TAG,'controls missing');
-
-    sel.addEventListener('change', ()=>{
-      syncUIFromScene(sel.value || null);
-    });
-
-    rng.addEventListener('input', ()=>{
-      const op = Math.max(0, Math.min(1, parseFloat(rng.value)));
-      out.textContent = (isFinite(op)?op:1).toFixed(2);
-      if (sel.value) applyOpacityForName(sel.value, isFinite(op)?op:1);
-    }, { passive:true });
-
-    // If both scene and a selection exist on first wire, sync once
-    if (getScene() && sel.value) syncUIFromScene(sel.value);
-    console.debug(TAG,'ready');
-    window.__LM_ORCH_READY = true;
-  }
-
-  function arm(){
-    if (!window.__LM_MAT_UI || !window.__LM_MAT_UI.__ready){ return; }
-    wire();
-  }
-
-  // Scene signal makes initial sync more reliable, but we can wire without it
-  window.addEventListener('lm:scene-ready', (ev)=>{
-    window.__LM_SCENE = ev.detail && ev.detail.scene || window.__LM_SCENE;
-    // When scene arrives and a material already selected, reflect its value
-    const ui = q();
-    if (ui && ui.select && ui.select.value) syncUIFromScene(ui.select.value);
+  // event wiring
+  window.addEventListener('lm:pm-material-selected', (e)=>{
+    updateUIFromMaterial(e.detail?.name || '');
   });
 
-  // try immediately
-  arm();
+  window.addEventListener('lm:pm-opacity-input', (e)=>{
+    const {name, opacity} = e.detail || {};
+    applyOpacity(name, opacity);
+  });
 
-  // fallback if UI arrived after this file
-  let tries=40; const iv=setInterval(()=>{
-    if (window.__LM_MAT_UI && window.__LM_MAT_UI.__ready){ clearInterval(iv); arm(); }
-    else if(--tries<=0){ clearInterval(iv); }
-  }, 250);
+  // when scene becomes ready, try to sync current selection
+  const trySync = ()=>{ if(ui.select.value) updateUIFromMaterial(ui.select.value); };
+  window.addEventListener('lm:scene-ready', trySync);
+  window.addEventListener('lm:glb-detected', trySync);
 })();
