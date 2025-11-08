@@ -1,110 +1,83 @@
 
 /* material.runtime.patch.js
- * LociMyu – runtime wiring for Material tab (opacity / double-sided / unlit-like)
- * - No dependency on global THREE reference (uses numeric side enums)
- * - Works with either #materialSelect or #pm-material and #opacityRange
- * - Safe to drop in; doesn't mutate existing UI layout
+ * v1.1 — Apply UI changes (opacity / double-sided / unlit-like) to actual materials without relying on global THREE
+ * Requires: a <select id="materialSelect"> and <input id="opacityRange"> somewhere in #pane-material
  */
 (() => {
-  const TAG='[mat-rt]';
-  const log=(...a)=>console.log(TAG, ...a);
-  const warn=(...a)=>console.warn(TAG, ...a);
+  const TAG='[mat-rt]'; const log=(...a)=>console.log(TAG, ...a), warn=(...a)=>console.warn(TAG, ...a);
+  const FRONT_SIDE = 0, DOUBLE_SIDE = 2;
 
-  // numeric enums to avoid depending on global THREE
-  const FRONT_SIDE = 0;
-  const BACK_SIDE = 1;
-  const DOUBLE_SIDE = 2;
-
-  // ---- resolve UI ----
-  const doc = document;
-  const sel = doc.querySelector('#materialSelect, #pm-material');
-  const rng = doc.querySelector('#opacityRange');
-  const chkDouble = doc.querySelector('#doubleSided');
-  const chkUnlit  = doc.querySelector('#unlitLike');
-
-  const scene =
-    window.__LM_SCENE || window.__lm_scene ||
-    (window.viewer && window.viewer.scene) ||
-    (window.viewerBridge && window.viewerBridge.getScene && window.viewerBridge.getScene());
-
-  if (!sel || !rng || !scene) {
-    return warn('missing:', {select: !!sel, range: !!rng, scene: !!scene});
+  function qs(sel){ return document.querySelector(sel); }
+  function getScene(){
+    return window.__LM_SCENE || window.__lm_scene ||
+           (window.viewer && window.viewer.scene) ||
+           (window.viewerBridge && window.viewerBridge.getScene && window.viewerBridge.getScene()) ||
+           null;
   }
 
-  // ---- index materials by name ----
-  function buildIndex(){
+  // Build name -> materials[] index
+  function buildIndex(scene){
     const byName = new Map();
-    scene.traverse(o=>{
+    scene && scene.traverse && scene.traverse(o => {
       if (!o || !o.isMesh || !o.material) return;
       const mats = Array.isArray(o.material) ? o.material : [o.material];
-      mats.forEach(m=>{
+      for (const m of mats){
         const name = (m && m.name ? String(m.name).trim() : '');
-        if (!name) return;
+        if (!name) continue;
         if (!byName.has(name)) byName.set(name, []);
         byName.get(name).push(m);
-      });
+      }
     });
     return byName;
   }
-  let INDEX = buildIndex();
-  log('indexed', {keys:[...INDEX.keys()], count:[...INDEX.values()].reduce((a,v)=>a+v.length,0)});
 
-  // ---- apply helpers ----
-  function applyOpacity(key, v){
-    const mats = INDEX.get(key) || [];
+  // Apply helpers
+  function applyOpacity(mats, v){
     let touched = 0;
-    mats.forEach(m=>{
-      if (!m) return;
-      const wantsTransparent = (v < 1.0);
-      if (wantsTransparent && m.transparent !== true) m.transparent = true;
-      if (typeof m.depthWrite === 'boolean') m.depthWrite = !wantsTransparent;
-      if (typeof m.opacity === 'number') {
-        m.opacity = v;
-        if ('needsUpdate' in m) m.needsUpdate = true;
-        touched++;
-      }
-    });
-    log('applyOpacity', {key, v, touched, mats: mats.length});
+    for (const m of mats){
+      if (!m) continue;
+      const tr = v < 1.0;
+      if (tr && m.transparent !== true) m.transparent = true;
+      if (typeof m.depthWrite === 'boolean') m.depthWrite = !tr;
+      if (typeof m.opacity === 'number') m.opacity = v; else continue;
+      if ('needsUpdate' in m) m.needsUpdate = true;
+      touched++;
+    }
+    return touched;
   }
-
-  function applyDoubleSided(key, on){
-    const mats = INDEX.get(key) || [];
+  function applySide(mats, on){
     let touched = 0;
-    mats.forEach(m=>{
-      if (!m) return;
+    for (const m of mats){
+      if (!m) continue;
       m.side = on ? DOUBLE_SIDE : FRONT_SIDE;
       if ('needsUpdate' in m) m.needsUpdate = true;
       touched++;
-    });
-    log('applyDoubleSided', {key, on, touched});
+    }
+    return touched;
   }
-
-  function applyUnlitLike(key, on){
-    const mats = INDEX.get(key) || [];
+  function applyUnlitLike(mats, on){
     let touched = 0;
-    mats.forEach(m=>{
-      if (!m) return;
+    for (const m of mats){
+      if (!m) continue;
       const ud = (m.userData ||= {});
-      if (!ud.__lm_litBackup) {
+      if (!ud.__lm_litBackup){
         ud.__lm_litBackup = {
-          emissive: m.emissive ? (m.emissive.clone ? m.emissive.clone() : null) : null,
+          emissive: m.emissive ? (m.emissive.clone?.() || m.emissive) : null,
           emissiveIntensity: m.emissiveIntensity,
           metalness: m.metalness,
           roughness: m.roughness,
           toneMapped: m.toneMapped
         };
       }
-      if (on) {
-        if (m.color && m.emissive) {
-          if (m.emissive.copy) m.emissive.copy(m.color);
-        }
+      if (on){
+        if (m.color && m.emissive){ m.emissive.copy ? m.emissive.copy(m.color) : (m.emissive = m.color.clone?.() || m.color); }
         if (typeof m.emissiveIntensity === 'number') m.emissiveIntensity = 1.0;
         if (typeof m.metalness === 'number') m.metalness = 0.0;
         if (typeof m.roughness === 'number') m.roughness = 1.0;
         if ('toneMapped' in m) m.toneMapped = false;
-      } else if (ud.__lm_litBackup) {
+      } else if (ud.__lm_litBackup){
         const b = ud.__lm_litBackup;
-        if (m.emissive && b.emissive && m.emissive.copy) m.emissive.copy(b.emissive);
+        if (m.emissive && b.emissive){ m.emissive.copy ? m.emissive.copy(b.emissive) : (m.emissive = b.emissive); }
         if (typeof b.emissiveIntensity === 'number') m.emissiveIntensity = b.emissiveIntensity;
         if (typeof b.metalness === 'number') m.metalness = b.metalness;
         if (typeof b.roughness === 'number') m.roughness = b.roughness;
@@ -112,45 +85,52 @@
       }
       if ('needsUpdate' in m) m.needsUpdate = true;
       touched++;
-    });
-    log('applyUnlitLike', {key, on, touched});
+    }
+    return touched;
   }
 
-  // ---- wire events ----
-  const currentKey = () => (sel.value || '').trim();
+  // Wire once
+  let wired = false, INDEX = null;
+  function wire(){
+    if (wired) return;
+    const sel = qs('#materialSelect, #pm-material');
+    const rng = qs('#opacityRange');
+    const chkDouble = qs('#doubleSided');
+    const chkUnlit  = qs('#unlitLike');
+    const scene = getScene();
+    const missing = { select: !sel, range: !rng, scene: !scene };
+    if (missing.select || missing.range || missing.scene){
+      return warn('missing:', missing);
+    }
+    INDEX = buildIndex(scene);
+    const currentKey = () => (sel.value || '').trim();
+    const matsOf = () => INDEX.get(currentKey()) || [];
 
-  function onOpacityInput(){
-    const key = currentKey();
-    if (!key) return;
-    const v = parseFloat(rng.value);
-    applyOpacity(key, v);
+    rng.addEventListener('input', () => {
+      const v = parseFloat(rng.value || '1') || 1;
+      applyOpacity(matsOf(), v);
+    }, false);
+    sel.addEventListener('change', () => rng.dispatchEvent(new Event('input')), false);
+    chkDouble && chkDouble.addEventListener('change', () => applySide(matsOf(), !!chkDouble.checked), false);
+    chkUnlit  && chkUnlit.addEventListener('change', () => applyUnlitLike(matsOf(), !!chkUnlit.checked), false);
+
+    // expose helpers
+    window.__lm_mat_rt = {
+      reindex(){ INDEX = buildIndex(getScene()); return INDEX; },
+      applyOpacity(key, v){ return applyOpacity(INDEX.get(key)||[], v);},
+      applySide(key, on){ return applySide(INDEX.get(key)||[], on);},
+      applyUnlitLike(key, on){ return applyUnlitLike(INDEX.get(key)||[], on);},
+    };
+
+    wired = true;
+    log('wired');
   }
 
-  function onDoubleChange(){
-    const key = currentKey();
-    if (!key || !chkDouble) return;
-    applyDoubleSided(key, !!chkDouble.checked);
-  }
+  // multi-trigger
+  setTimeout(wire, 250);
+  window.addEventListener('lm:mat-ui-ready', () => setTimeout(wire, 50));
+  window.addEventListener('lm:scene-ready',   () => setTimeout(() => { window.__lm_mat_rt && window.__lm_mat_rt.reindex(); wire(); }, 100));
 
-  function onUnlitChange(){
-    const key = currentKey();
-    if (!key || !chkUnlit) return;
-    applyUnlitLike(key, !!chkUnlit.checked);
-  }
-
-  // 防御: 既に同じハンドラがいる場合も二重適用しない（名前空間用プロパティ）
-  if (!rng.__lm_wired) {
-    rng.addEventListener('input', onOpacityInput, false);
-    sel.addEventListener('change', ()=>rng.dispatchEvent(new Event('input')), false);
-    chkDouble && chkDouble.addEventListener('change', onDoubleChange, false);
-    chkUnlit  && chkUnlit.addEventListener('change',  onUnlitChange,  false);
-    rng.__lm_wired = true;
-  }
-
-  // 初期一発
-  setTimeout(()=>rng.dispatchEvent(new Event('input')), 0);
-
-  // expose for debugging
-  window.__lm_mat_rt = {reindex: () => (INDEX = buildIndex(), log('reindex', {keys:[...INDEX.keys()]}), INDEX),
-    applyOpacity, applyDoubleSided, applyUnlitLike};
+  // As a fallback, retry until success
+  let tries=0, t = setInterval(() => { wire(); if (++tries>80) clearInterval(t); }, 250);
 })();
