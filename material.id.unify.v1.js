@@ -1,28 +1,29 @@
-// material.id.unify.v1.js  v1.6 (always-on, safe)
+// material.id.unify.v1.js  v1.7 (robust, idempotent)
 (function () {
   try {
     const panel = document.querySelector('#panel-material');
     if (!panel) { console.warn('[mat-id-unify] panel not found'); return; }
 
-    // Find the "Per‑material opacity" section robustly
-    const opacitySection = Array.from(panel.querySelectorAll('section,fieldset,div'))
-      .find(el => /Per\s*-\s*material\s*opacity/i.test(el.textContent || ''));
+    // Heuristic: pick the section that contains a range slider and mentions "opacity"
+    const sections = Array.from(panel.querySelectorAll('section, fieldset, div'));
+    const opacitySection = sections.find(el => {
+      const hasRange = !!el.querySelector('input[type="range"]');
+      const txt = (el.textContent || '').toLowerCase();
+      return hasRange && txt.includes('opacity');
+    });
 
     if (!opacitySection) { console.warn('[mat-id-unify] opacity section not found'); return; }
 
-    // Dropdown
+    // Dropdown (first select inside the section)
     const dd = opacitySection.querySelector('select');
     if (dd && !dd.id) dd.id = 'pm-material';
 
-    // Range (prefer inside section; fall back to any in panel)
+    // Range slider
     let range = opacitySection.querySelector('input[type="range"]');
-    if (!range) {
-      range = panel.querySelector('section input[type="range"], fieldset input[type="range"]');
-    }
-    if (range && !range.id) range.id = 'pm-opacity-range';
+    if (range && !range.id) range.id = 'pm-opacity';
 
-    // Value display
-    let value = opacitySection.querySelector('#pm-opacity-value, [data-lm="pm-opacity-value"], output, .value, .pm-opacity-value');
+    // Numeric readout (span placed after the range). Create if missing.
+    let value = opacitySection.querySelector('#pm-opacity-value, [data-lm="pm-opacity-value"], output, .pm-opacity-value');
     if (!value) {
       value = document.createElement('span');
       value.id = 'pm-opacity-value';
@@ -31,7 +32,7 @@
       else opacitySection.appendChild(value);
     } else if (!value.id) value.id = 'pm-opacity-value';
 
-    console.log('[mat-id-unify v1.6] unified', { dd: !!dd, range: !!range, value: !!value });
+    console.log('[mat-id-unify v1.7] unified', { dd: !!dd, range: !!range, value: !!value });
   } catch (e) {
     console.warn('[mat-id-unify] error', e);
   }
