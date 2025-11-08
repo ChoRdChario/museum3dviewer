@@ -1,110 +1,109 @@
-/*! material.orchestrator.js - v6.6 hotfix M2
- * Binds Material tab UI, keeps the single slider in the right place,
- * fixes 0.00 handling, and emits change events for sheet sync.
- */
-(function(){
-  const log = (...a)=>console.log('[mat-orch]', ...a);
-  const warn = (...a)=>console.warn('[mat-orch]', ...a);
 
-  function qs(sel, root=document){ return root.querySelector(sel); }
-  function qsa(sel, root=document){ return Array.from(root.querySelectorAll(sel)); }
+/*! [mat-orch v2.0] orchestrator: bind UI and apply to scene */
+(() => {
+  const log = (...a) => console.log("[mat-orch]", ...a);
+  const warn = (...a) => console.warn("[mat-orch] warn", ...a);
 
-  // --- Locate UI ---
-  const pane = qs('#pane-material') || qs('#panel-material') || qs('section.lm-panel-material');
-  if(!pane){ return warn('pane not found'); }
+  // Singleton
+  if (window.__LM_MAT_ORCH_ONCE) return;
+  window.__LM_MAT_ORCH_ONCE = true;
 
-  // Old ghost sliders sometimes remain in DOM; remove everything except the canonical one we mount.
-  function cleanupGhosts(){
-    const ranges = qsa('input[type="range"]', pane);
-    ranges.forEach(r => {
-      if(r.id !== 'opacityRange' && r.dataset.lm !== 'keep'){
-        r.closest('.pm-opacity') ? r.remove() : null;
+  let scene = null;
+  /** name -> Set<THREE.Material> */
+  const nameMap = new Map();
+
+  function bindScene(s) {
+    if (!s || scene === s) return;
+    scene = s;
+    indexMaterials();
+  }
+
+  function indexMaterials() {
+    nameMap.clear();
+    if (!scene || !scene.traverse) return;
+    scene.traverse(obj => {
+      const mats = [];
+      if (obj.material) {
+        if (Array.isArray(obj.material)) mats.push(...obj.material);
+        else mats.push(obj.material);
+      }
+      for (const m of mats) {
+        if (!m || !m.name) continue;
+        if (!nameMap.has(m.name)) nameMap.set(m.name, new Set());
+        nameMap.get(m.name).add(m);
       }
     });
-    // remove bottom stray containers produced by earlier injections
-    qsa('#pm-opacity-legacy, .pm-ghost, .lm-ghost', pane).forEach(n=>n.remove());
-  }
-  cleanupGhosts();
-
-  // canonical container (created by recent synth panel)
-  let select = qs('#materialSelect', pane);
-  let range  = qs('#opacityRange', pane);
-  if(!select || !range){
-    return warn('UI missing', {select: !!select, range: !!range, pane});
+    log("indexed materials", [...nameMap.keys()]);
   }
 
-  // Ensure value label exists right next to the slider
-  let valueBadge = qs('#opacityValue', pane);
-  if(!valueBadge){
-    valueBadge = document.createElement('span');
-    valueBadge.id = 'opacityValue';
-    valueBadge.className = 'lm-number-badge';
-    valueBadge.style.marginLeft = '8px';
-    valueBadge.style.minWidth = '3.5ch';
-    valueBadge.style.display = 'inline-block';
-    range.after(valueBadge);
-  }
-
-  function setBadge(val){
-    // use nullish coalescing so 0 is respected
-    const v = (val ?? Number(range.value) ?? 1);
-    valueBadge.textContent = v.toFixed(2);
-  }
-
-  // restore persisted value (if any) on startup
-  function restoreIfAny(){
-    const mkey = select?.value;
-    if(!mkey) return;
-    const ev = new CustomEvent('lm:material-restore-request', {detail:{materialKey:mkey}});
-    window.dispatchEvent(ev);
-  }
-
-  // --- State save + view apply --------------------------------------------
-  function currentCtx(){
-    // sheet.ctx.bridge.js is expected to have populated window.__lm_sheet_ctx
-    const c = (window.__lm_sheet_ctx || {});
-    return { spreadsheetId: c.spreadsheetId || null, sheetGid: c.sheetGid ?? null };
-  }
-
-  async function saveOpacity(val){
-    const v = Number(val);
-    // never coerce 0 to fallback
-    const opacity = Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : 1;
-    const materialKey = select.value;
-    const ctx = currentCtx();
-
-    // persist locally (module provided in material.state.local.v1.js) if present
-    try{
-      if(window.__lm_material_state && typeof window.__lm_material_state.save === 'function'){
-        window.__lm_material_state.save(ctx, materialKey, {opacity});
+  function applyOpacityByName(matName, value) {
+    if (!matName) return;
+    if (!nameMap.size) indexMaterials();
+    const set = nameMap.get(matName);
+    if (!set) return;
+    const v = Math.max(0, Math.min(1, Number(value)));
+    for (const m of set) {
+      try {
+        if ("opacity" in m) m.opacity = v;
+        if ("transparent" in m) m.transparent = v < 1;
+        if ("depthWrite" in m) m.depthWrite = v >= 1 ? true : m.depthWrite;
+        if ("alphaTest" in m && v === 0) m.alphaTest = 0; // keep default
+        m.needsUpdate = true;
+      } catch (e) {
+        console.warn("[mat-orch] apply failed", m?.name, e);
       }
-    }catch(e){ console.warn('[mat-orch] local state save skipped', e); }
-
-    // notify listeners (viewer + sheet bridge)
-    const detail = { materialKey, opacity, ...ctx, updatedAt: new Date().toISOString(), updatedBy: 'local' };
-    window.dispatchEvent(new CustomEvent('lm:material-opacity-changed', {detail}));
-
-    setBadge(opacity);
+    }
   }
 
-  // --- Wiring --------------------------------------------------------------
-  select.addEventListener('change', () => {
-    // When material changes, badge should reflect currently selected slider value (no global opacity)
-    setBadge(Number(range.value));
-    // bubble a select-changed event for any listener to re-bind
-    const ctx = currentCtx();
-    window.dispatchEvent(new CustomEvent('lm:material-select-changed', {detail:{materialKey: select.value, ...ctx}}));
-  });
+  function selectedMaterialName() {
+    const dd = document.getElementById("materialSelect");
+    if (dd && dd.value) return dd.value;
+    const dd2 = document.querySelector("#pm-opacity select");
+    return dd2 && dd2.value;
+  }
 
-  ['input','change'].forEach(ev => range.addEventListener(ev, (e)=>{
-    // use valueAsNumber to keep precision and preserve 0
-    const v = Number.isFinite(e.target.valueAsNumber) ? e.target.valueAsNumber : Number(e.target.value);
-    saveOpacity(v);
-  }));
+  function wireUI() {
+    // prefer pm-opacity group
+    const range = document.querySelector("#pm-opacity input[type=range]") || document.getElementById("opacityRange");
+    if (!range) { warn("range not found"); return; }
+    const sel = document.getElementById("materialSelect") || document.querySelector("#pm-opacity select");
 
-  // initial paint
-  setBadge(Number(range.value));
-  log('UI bound');
-  // try to restore selection-specific data
-  setTimeout(restoreIfAny, 0);
+    const onInput = () => {
+      const name = sel?.value || selectedMaterialName();
+      applyOpacityByName(name, range.value ?? 1);
+    };
+    range.addEventListener("input", onInput, { passive: true });
+    sel && sel.addEventListener("change", onInput);
+
+    // Kick once
+    onInput();
+    log("UI bound");
+  }
+
+  function arm() {
+    // Listen a variety of viewer events from prior builds
+    window.addEventListener("lm:scene-ready", (ev) => bindScene(ev.detail?.scene || ev.detail));
+    window.addEventListener("lm:scene-stable", (ev) => bindScene(ev.detail?.scene || ev.detail));
+
+    // Soft polling fallback (in case bridge didn't dispatch)
+    let tries = 0;
+    const t = setInterval(() => {
+      tries++;
+      const s = (window.__lm_viewer && window.__lm_viewer.scene) || (window.viewer && window.viewer.scene);
+      if (s) {
+        bindScene(s);
+        clearInterval(t);
+      }
+      if (tries > 100) clearInterval(t);
+    }, 200);
+
+    // Wire UI when DOM is ready
+    if (document.readyState === "loading") {
+      document.addEventListener("DOMContentLoaded", wireUI);
+    } else {
+      setTimeout(wireUI, 0);
+    }
+  }
+
+  arm();
 })();
