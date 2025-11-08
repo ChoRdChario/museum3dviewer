@@ -1,104 +1,115 @@
-/* material.dropdown.patch.js v3.5.2
- * - 確実読込：HTML へ 1 行追加するだけ
- * - 順序無依存：イベント/再試行で自己回復
- * - フィルタ済み：UUID名やThreeの既定名は除外
- * - グローバル公開：__LM_MAT_DD_VERSION__, __LM_materialDropdownPopulate()
+/* material.dropdown.patch.js v3.5.3
+ * Purpose: populate the per-material dropdown once, reliably,
+ * after both the scene and the canonical UI are ready.
+ * Guards against double execution and DOM races.
  */
-(() => {
-  const TAG = '[mat-dd v3.5.2]';
-  if (window.__LM_MAT_DD_VERSION__) {
-    console.debug(TAG, 'already loaded');
+(function(){
+  const TAG = '[mat-dd v3.5.3]';
+  if (window.__LM_MAT_DD_VERSION__ && window.__LM_MAT_DD_VERSION__ >= '3.5.3') {
+    console.log(TAG, 'already loaded');
     return;
   }
-  window.__LM_MAT_DD_VERSION__ = '3.5.2';
+  window.__LM_MAT_DD_VERSION__ = '3.5.3';
 
-  const UUID_RE = /^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;
-  const AUTO_RE = /^(?:Mesh)?(?:Basic|Lambert|Phong|Standard|Physical|Toon)Material$/i;
+  // Helper: find canonical select element
+  function locateSelect(doc){
+    return doc.getElementById('pm-material')
+        || doc.querySelector('#pm-opacity select')
+        || null;
+  }
 
-  const pickDropdown = () =>
-    document.querySelector('#pm-material')
-    || document.querySelector('#pm-opacity select')
-    || document.querySelector('[data-lm="mat-select"]')
-    || document.querySelector('section.lm-panel-material select');
-
-  const getScene = () => window.__LM_SCENE || window.viewer?.scene || null;
-
-  function collectMaterialNames(scene) {
+  // Helper: collect filtered material names from the scene
+  function collectMaterialNames(scene){
+    const UUID = /^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;
+    const AUTO = /^(?:Mesh)?(?:Basic|Lambert|Phong|Standard|Physical|Toon)Material$/i;
     const keep = new Set();
-    scene?.traverse(o => {
+    if (!scene) return [];
+
+    scene.traverse(o => {
       if (!o.isMesh || !o.material) return;
       const arr = Array.isArray(o.material) ? o.material : [o.material];
       for (const m of arr) {
         const name = (m.name || '').trim();
-        if (!name) continue;                 // 無名は除外
-        if (UUID_RE.test(name)) continue;    // UUID名は除外
-        if (AUTO_RE.test(name)) continue;    // Three既定名は除外
+        if (!name) continue;
+        if (UUID.test(name)) continue;      // ignore UUID-only
+        if (AUTO.test(name)) continue;      // ignore auto default names
         keep.add(name);
       }
     });
-    return Array.from(keep).sort();
+    return Array.from(keep).sort((a,b) => a.localeCompare(b));
   }
 
-  let inflight = false;
+  // Populate once
+  let populated = false;
+  function populateOnce(){
+    if (populated) return;
+    const doc = document;
+    const sel = locateSelect(doc);
+    const scene = window.__LM_SCENE || window.viewer?.scene;
+    if (!sel || !scene) return;
 
-  async function populateOnce() {
-    if (inflight) return false;
-    inflight = true;
-    try {
-      const dd = pickDropdown();
-      const scene = getScene();
-      if (!dd || !scene) return false;
-
-      const names = collectMaterialNames(scene);
-      if (!names.length) return false;
-
-      // 変更がないならスキップ（ちらつき防止）
-      const curr = Array.from(dd.options).map(o => o.value);
-      const next = [''].concat(names);
-      const same = curr.length === next.length && curr.every((v,i)=>v===next[i]);
-      if (same) return true;
-
-      dd.innerHTML =
-        '<option value="">-- Select material --</option>' +
-        names.map(n => `<option value="${n}">${n}</option>`).join('');
-
-      // 監査用属性
-      dd.dataset.lmMatCount = String(names.length);
-      dd.dataset.lmMatStamp = String(Date.now());
-
-      console.debug(TAG, 'populated', names.length);
-      window.dispatchEvent(new CustomEvent('lm:materials-populated', {
-        detail: { count: names.length, names }
-      }));
-      return true;
-    } finally {
-      inflight = false;
+    const names = collectMaterialNames(scene);
+    if (!names.length) {
+      console.log(TAG, 'no material names to populate (scene ready but empty set)');
+      return;
     }
+
+    const opts = ['<option value="">-- Select material --</option>']
+      .concat(names.map(n => `<option value="${n}">${n}</option>`));
+
+    sel.innerHTML = opts.join('');
+    populated = true;
+    console.log(TAG, 'populated', names.length);
+    window.dispatchEvent(new CustomEvent('lm:mat-dd-populated', { detail: { count: names.length, names }}));
   }
 
-  // 露出：手動トリガ可能
-  window.__LM_materialDropdownPopulate = async () => {
-    const ok = await populateOnce();
-    if (!ok) console.debug(TAG, 'deferred (conditions not ready)');
-    return ok;
-  };
-
-  // 自動実行：イベント＋指数バックオフ
-  function armAuto() {
-    // 主要イベントで都度試行
-    ['DOMContentLoaded', 'load', 'lm:glb-detected', 'lm:scene-stabilized']
-      .forEach(ev => window.addEventListener(ev, () => populateOnce()));
-
-    // バックオフ再試行（最大 8 回）
-    (async () => {
-      for (let i = 1; i <= 8; i++) {
-        const ok = await populateOnce();
-        if (ok) break;
-        await new Promise(r => setTimeout(r, 250 * i)); // 250,500,750,...
+  // Robust readiness: wait for both UI and scene with retries
+  function whenReady(cb){
+    const start = performance.now();
+    let tries = 0;
+    const tick = () => {
+      tries++;
+      const hasUI = !!locateSelect(document);
+      const scene = window.__LM_SCENE || window.viewer?.scene;
+      let meshes = 0, mats = 0;
+      if (scene) {
+        scene.traverse(o => {
+          if (!o.isMesh || !o.material) return;
+          meshes++;
+          mats += (Array.isArray(o.material) ? o.material : [o.material]).length;
+        });
       }
-    })();
+      const ok = hasUI && meshes > 0 && mats > 0;
+      if (ok) {
+        cb();
+      } else {
+        const elapsed = performance.now() - start;
+        if (elapsed > 5000) { // give up after 5s
+          console.log(TAG, 'ready wait timeout', {hasUI, meshes, mats, tries});
+          return;
+        }
+        const delay = Math.min(100 + tries*100, 600);
+        setTimeout(tick, delay);
+      }
+    };
+    tick();
   }
 
-  armAuto();
-  console.debug(TAG, 'armed');
+  // Event wiring: populate once after glb detected OR scene stabilized
+  function arm(){
+    if (arm.armed) return; arm.armed = true;
+    console.log(TAG, 'armed');
+    // Fast path if things are already ready
+    whenReady(populateOnce);
+
+    // Listen to our custom signals as safety nets
+    window.addEventListener('lm:glb-detected', () => whenReady(populateOnce), { once: true });
+    window.addEventListener('lm:scene-stabilized', () => whenReady(populateOnce), { once: true });
+
+    // Also re-arm on sheet-context change if still not populated (rare)
+    window.addEventListener('lm:sheet-context', () => { if (!populated) whenReady(populateOnce); });
+  }
+
+  // Kick
+  arm();
 })();
