@@ -1,161 +1,148 @@
+// material.orchestrator.js  v2.4 (clean wire)
+(function () {
+  console.log('[mat-orch v2.4] load');
 
-/*! material.orchestrator.js v2.3 clean */
-(() => {
-  console.log('[mat-orch v2.3] load');
-  const w = window;
-  const d = document;
+  const $ = (sel, root=document) => root.querySelector(sel);
+  const $all = (sel, root=document) => Array.from(root.querySelectorAll(sel));
 
-  // DOM getters (canonical ids)
-  const $ = (sel) => d.querySelector(sel);
-  const el = {
-    select: $('#pm-material'),
-    range:  $('#pm-opacity-range'),
-    out:    $('#pm-opacity-val'),
+  const panel = $('#panel-material');
+  if (!panel) {
+    console.warn('[mat-orch] panel-material not found');
+    return;
+  }
+
+  // ===== UI pickers (robust selector fallback) =====
+  const dd = $('#pm-material, #panel-material select, [data-lm="pm-material"]', panel);
+  const range = $('#pm-opacity-range, #pm-opacity input[type="range"], [data-lm="pm-opacity-range"]', panel);
+  const value = $('#pm-opacity-value, #pm-opacity .value, [data-lm="pm-opacity-value"]', panel);
+
+  if (!dd || !range) {
+    console.warn('[mat-orch] pm controls missing', {hasDd: !!dd, hasRange: !!range});
+    return;
+  }
+
+  // number表示が無いUIでも壊れないように
+  const setValueText = (v) => {
+    if (value) value.textContent = (Math.round(v * 100) / 100).toFixed(2);
   };
 
-  // State
+  // ===== Scene hook =====
   let scene = null;
   let materialsByName = new Map();
-  let currentName = '';
 
-  function clamp01(x){ x = Number(x); return isFinite(x) ? Math.max(0, Math.min(1, x)) : 1; }
-
-  function findScene() {
-    // Try a few known hooks
-    if (w.__LM_SCENE && w.__LM_SCENE.isScene) return w.__LM_SCENE;
-    if (w.viewerBridge && typeof w.viewerBridge.getScene === 'function') return w.viewerBridge.getScene();
-    if (w.viewer_bridge && w.viewer_bridge.scene) return w.viewer_bridge.scene;
-    // three.js scenes heuristics
-    for (const k in w) {
-      const v = w[k];
-      if (v && v.isScene) return v;
-    }
-    return null;
-  }
-
-  function indexMaterials(sc) {
+  const collectMaterials = () => {
     materialsByName.clear();
-    sc.traverse((obj) => {
-      const m = obj.material;
-      if (!m) return;
-      const add = (mat) => {
-        const key = mat.name || `material#${materialsByName.size+1}`;
-        if (!materialsByName.has(key)) materialsByName.set(key, mat);
+    if (!scene) return;
+    scene.traverse(obj => {
+      const applyMat = (m) => {
+        if (!m || !m.name) return;
+        if (!materialsByName.has(m.name)) materialsByName.set(m.name, []);
+        materialsByName.get(m.name).push(m);
       };
-      if (Array.isArray(m)) m.forEach(add); else add(m);
-    });
-  }
-
-  function populateDropdown() {
-    const sel = el.select;
-    if (!sel) return;
-    sel.innerHTML = '<option value="">— Select material —</option>';
-    const names = Array.from(materialsByName.keys()).sort((a,b)=>a.localeCompare(b));
-    for (const name of names) {
-      const opt = d.createElement('option');
-      opt.value = name; opt.textContent = name;
-      sel.appendChild(opt);
-    }
-    // keep current if exists
-    if (currentName && materialsByName.has(currentName)) sel.value = currentName;
-  }
-
-  function reflectOpacityUI(op) {
-    if (el.range) el.range.value = String(op.toFixed(2));
-    if (el.out)   el.out.textContent = op.toFixed(2);
-  }
-
-  function getSelectedMaterial() {
-    const name = el.select?.value || currentName;
-    currentName = name;
-    return materialsByName.get(name) || null;
-  }
-
-  function applyOpacity(op) {
-    const mat = getSelectedMaterial();
-    if (!mat) return;
-    op = clamp01(op);
-    mat.transparent = op < 0.999;
-    mat.opacity = op;
-    if ('depthWrite' in mat) mat.depthWrite = op >= 0.999;
-    if (mat.needsUpdate !== undefined) mat.needsUpdate = true;
-    reflectOpacityUI(op);
-    // Notify listeners
-    w.dispatchEvent(new CustomEvent('lm:mat-opacity', { detail: { name: currentName, opacity: op } }));
-  }
-
-  function onRange() {
-    const val = clamp01(parseFloat(el.range.value || '1'));
-    applyOpacity(val);
-    saveLocal();
-  }
-
-  function onSelect() {
-    const mat = getSelectedMaterial();
-    if (!mat) return;
-    const op = clamp01(Number(mat.opacity ?? 1));
-    reflectOpacityUI(op);
-    saveLocal();
-  }
-
-  // Local storage per-sheet
-  let sheetCtx = { spreadsheetId: null, sheetGid: null };
-  function storageKey() {
-    const sid = sheetCtx.spreadsheetId || 'no-sheet';
-    const gid = sheetCtx.sheetGid != null ? sheetCtx.sheetGid : 'no-gid';
-    return `lm:mat:opacity:${sid}:${gid}`;
-  }
-
-  function saveLocal() {
-    try {
-      const key = storageKey();
-      const data = JSON.stringify({ name: currentName, opacity: Number(el.range?.value ?? 1) });
-      localStorage.setItem(key, data);
-      console.log('[mat-orch v2.3] local saved', key, data);
-    } catch (e) { console.warn('[mat-orch] local save failed', e); }
-  }
-
-  function loadLocal() {
-    try {
-      const raw = localStorage.getItem(storageKey());
-      if (!raw) return;
-      const {name, opacity} = JSON.parse(raw);
-      if (name && materialsByName.has(name)) {
-        currentName = name;
-        el.select.value = name;
-        applyOpacity(clamp01(opacity ?? 1));
+      if (obj.material) {
+        if (Array.isArray(obj.material)) obj.material.forEach(applyMat);
+        else applyMat(obj.material);
       }
-    } catch (e) { console.warn('[mat-orch] local load failed', e); }
-  }
+    });
+  };
 
-  function bindUI() {
-    if (el.range) el.range.addEventListener('input', onRange);
-    if (el.select) el.select.addEventListener('change', onSelect);
-    console.log('[mat-orch v2.3] UI bound');
-  }
+  const populateDropdown = () => {
+    if (!dd) return;
+    const current = dd.value;
+    dd.innerHTML = '';
+    const names = [...materialsByName.keys()].sort();
+    names.forEach(n => {
+      const opt = document.createElement('option');
+      opt.value = n;
+      opt.textContent = n;
+      dd.appendChild(opt);
+    });
+    if (names.length) {
+      dd.value = names.includes(current) ? current : names[0];
+    }
+  };
 
-  // Boot
-  function bootOnce() {
-    scene = findScene();
-    if (!scene) { console.warn('[mat-orch] scene not ready'); return; }
-    indexMaterials(scene);
+  const applyOpacity = (name, v) => {
+    const list = materialsByName.get(name) || [];
+    list.forEach(mat => {
+      mat.opacity = v;
+      // 透明度 < 1 は透過を必須に
+      mat.transparent = v < 0.999;
+      // 透過時のZ書き込みは基本オフ（モデル次第）
+      if ('depthWrite' in mat) mat.depthWrite = v >= 0.999;
+      mat.needsUpdate = true;
+    });
+  };
+
+  const onChange = () => {
+    const name = dd.value;
+    const v = Number(range.value);
+    setValueText(v);
+    applyOpacity(name, v);
+    // Sheets へ通知イベント（bridge が拾う）
+    window.dispatchEvent(new CustomEvent('lm:mat-opacity', {
+      detail: {
+        spreadsheetId: currentSheet?.spreadsheetId || null,
+        sheetGid: currentSheet?.sheetGid ?? null,
+        materialKey: name,
+        opacity: v,
+        updatedAt: new Date().toISOString(),
+        updatedBy: 'ui'
+      }
+    }));
+  };
+
+  // ===== Sheet context (ローカル復元用) =====
+  let currentSheet = null;
+  const localKey = () => currentSheet
+    ? `lm:mat:opacity:${currentSheet.spreadsheetId}:${currentSheet.sheetGid}`
+    : null;
+
+  const saveLocal = () => {
+    const k = localKey();
+    if (!k) return;
+    const obj = { material: dd.value, opacity: Number(range.value), at: Date.now() };
+    try { localStorage.setItem(k, JSON.stringify(obj)); } catch {}
+  };
+  const loadLocal = () => {
+    const k = localKey();
+    if (!k) return false;
+    try {
+      const obj = JSON.parse(localStorage.getItem(k) || 'null');
+      if (!obj) return false;
+      if (obj.material && materialsByName.has(obj.material)) dd.value = obj.material;
+      if (typeof obj.opacity === 'number') {
+        range.value = String(obj.opacity);
+        setValueText(obj.opacity);
+      }
+      return true;
+    } catch { return false; }
+  };
+
+  dd.addEventListener('change', () => { onChange(); saveLocal(); });
+  range.addEventListener('input', () => { onChange(); });
+  range.addEventListener('change', () => { saveLocal(); });
+
+  // ===== Scene / Sheet events =====
+  window.addEventListener('lm:scene-ready', (e) => {
+    scene = e.detail?.scene || window.__lm_scene || scene;
+    collectMaterials();
     populateDropdown();
-    bindUI();
-    loadLocal();
-  }
-
-  // Event wiring
-  w.addEventListener('lm:scene-ready', bootOnce, { once: true });
-  w.addEventListener('lm:sheet-context', (e) => {
-    const { spreadsheetId, sheetGid } = e.detail || {};
-    sheetCtx.spreadsheetId = spreadsheetId;
-    sheetCtx.sheetGid = sheetGid;
-    // reload to reflect per-sheet
-    loadLocal();
+    // デフォルト状態で同期
+    if (!loadLocal()) {
+      // 初期値（UIが1.0など既定値の場合でも明示反映）
+      setValueText(Number(range.value));
+      onChange();
+    }
+    console.log('[mat-orch v2.4] scene bound. materials:', materialsByName.size);
   });
 
-  // Fallback retry if event missed
-  if (document.readyState !== 'loading') setTimeout(bootOnce, 0);
-  else d.addEventListener('DOMContentLoaded', () => setTimeout(bootOnce, 0));
+  window.addEventListener('lm:sheet-context', (e) => {
+    currentSheet = { spreadsheetId: e.detail?.spreadsheetId, sheetGid: e.detail?.sheetGid };
+    // シートが変わったらローカル復元を試す
+    loadLocal();
+    console.log('[mat-orch v2.4] sheet-context', currentSheet);
+  });
 
+  console.log('[mat-orch v2.4] UI bound');
 })();

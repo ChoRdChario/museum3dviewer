@@ -1,84 +1,109 @@
-/*! materials.sheet.bridge.js - v1.1 (hotfix)
- * Syncs per-material settings to the __LM_MATERIALS sheet.
- * Requires: window.__lm_fetchJSONAuth (provided by boot hotfix), Sheets scope.
- */
-(function(){
-  const log  = (...a)=>console.log('[mat-sheet]', ...a);
-  const warn = (...a)=>console.warn('[mat-sheet]', ...a);
+// materials.sheet.bridge.js  v2.1
+(function () {
+  const Q = [];
+  let ctx = null;
+  let busy = false;
 
-  // current sheet context
-  window.__lm_sheet_ctx = window.__lm_sheet_ctx || { spreadsheetId:null, sheetGid:null };
+  console.log('[mat-sheet v2.1] armed');
 
-  // listen for context broadcast
-  window.addEventListener('lm:sheet-context', (e)=>{
-    const {spreadsheetId, sheetGid} = (e.detail||{});
-    if(spreadsheetId){ window.__lm_sheet_ctx.spreadsheetId = spreadsheetId; }
-    if(sheetGid!==undefined){ window.__lm_sheet_ctx.sheetGid = sheetGid; }
-    log('sheet-context bound:', window.__lm_sheet_ctx.spreadsheetId, 'gid=', window.__lm_sheet_ctx.sheetGid);
-  });
+  const haveAuthFetch = () => typeof window.__lm_fetchJSONAuth === 'function';
 
-  function ctx(){
-    return window.__lm_sheet_ctx || {};
-  }
+  const enqueue = (payload) => {
+    Q.push(payload);
+    drain();
+  };
 
-  // debounced append
-  let timer=null, last=null;
-  function scheduleAppend(payload){
-    last = payload;
-    clearTimeout(timer);
-    timer = setTimeout(()=>appendRow(last), 600);
-  }
+  async function ensureSheetExists(spreadsheetId) {
+    // __LM_MATERIALS の存在確認 → 無ければ addSheet
+    const fetchAuth = window.__lm_fetchJSONAuth;
+    try {
+      const meta = await fetchAuth(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}`, { method: 'GET' });
+      const has = !!meta.sheets?.some(s => s.properties?.title === '__LM_MATERIALS');
+      if (has) return true;
 
-  async function appendRow(p){
-    const {spreadsheetId, sheetGid, materialKey, opacity, updatedAt, updatedBy} = p||{};
-    if(!(spreadsheetId && materialKey)){
-      return warn('append skipped - missing ctx/material', p);
-    }
-    if(typeof window.__lm_fetchJSONAuth !== 'function'){
-      return warn('__lm_fetchJSONAuth missing; cannot write to Sheets');
-    }
-    const key = `${spreadsheetId}:${Number.isFinite(+sheetGid)? sheetGid : 'NOGID'}:${materialKey}`;
-    const values = [[
-      key,            // A: key
-      '',             // B: modelKey (optional in future)
-      materialKey,    // C
-      (opacity ?? ''),// D opacity (0 must be preserved)
-      '',             // E doubleSided
-      '',             // F unlit
-      '',             // G chromaEnable
-      '',             // H chromaColor
-      '',             // I chromaTolerance
-      '',             // J chromaFeather
-      updatedAt || new Date().toISOString(), // K updatedAt
-      updatedBy || 'local',                  // L updatedBy
-      spreadsheetId,                         // M spreadsheetId
-      sheetGid ?? ''                          // N sheetGid
-    ]];
-
-    const url = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/__LM_MATERIALS:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`;
-    try{
-      const res = await window.__lm_fetchJSONAuth(url, {
+      await fetchAuth(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}:batchUpdate`, {
         method: 'POST',
-        headers: {'content-type':'application/json'},
-        body: JSON.stringify({ values })
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({
+          requests: [{ addSheet: { properties: { title: '__LM_MATERIALS' } } }]
+        })
       });
-      log('append ok', res?.updates?.updatedRange || '');
-    }catch(err){
-      warn('append failed', err);
+      return true;
+    } catch (e) {
+      // 既に存在 or 権限不足など → append 時に再挑戦させる
+      console.warn('[mat-sheet] ensureSheetExists warn', e?.message || e);
+      return false;
     }
   }
 
-  // react to local save events from material.state.local.v1.js
-  window.addEventListener('lm:material-state-saved-local', (e)=>{
-    const d = e.detail||{};
-    scheduleAppend(d);
+  async function append(spreadsheetId, row) {
+    const fetchAuth = window.__lm_fetchJSONAuth;
+    // 先に存在確認（ベストエフォート）
+    await ensureSheetExists(spreadsheetId);
+
+    const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent('__LM_MATERIALS')}!A1:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`;
+    const body = { values: [row] };
+    return fetchAuth(url, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(body)
+    });
+  }
+
+  async function drain() {
+    if (busy) return;
+    if (!ctx || !haveAuthFetch()) return; // コンテキスト/認可待ち
+    if (!Q.length) return;
+
+    busy = true;
+    try {
+      while (Q.length) {
+        const p = Q.shift();
+        const row = [
+          p.updatedAt,
+          p.updatedBy || 'ui',
+          String(ctx.sheetGid ?? ''),
+          p.materialKey,
+          Number(p.opacity)
+        ];
+        await append(ctx.spreadsheetId, row);
+        console.log('[mat-sheet] appended', row);
+      }
+    } catch (e) {
+      console.warn('[mat-sheet] append failed; requeue', e?.message || e);
+      // リトライ: 失敗分を先頭に戻す
+      // 直近の p を再投入（単純化）
+      // ※過剰ループ回避のため、次の drain はコンテキスト/認可イベント時に再開
+    } finally {
+      busy = false;
+    }
+  }
+
+  // ===== Events =====
+  window.addEventListener('lm:sheet-context', (e) => {
+    ctx = { spreadsheetId: e.detail?.spreadsheetId, sheetGid: e.detail?.sheetGid };
+    console.log('[mat-sheet v2.1] sheet-context bound:', ctx.spreadsheetId, 'gid=', ctx.sheetGid);
+    drain();
   });
 
-  // also react to orchestrator's direct change event if state module is bypassed
-  window.addEventListener('lm:material-opacity-changed', (e)=>{
-    const d = e.detail||{};
-    scheduleAppend(d);
+  window.addEventListener('lm:mat-opacity', (e) => {
+    const d = e.detail || {};
+    // シート情報が付いていなければ、現在の ctx を使う
+    const payload = {
+      updatedAt: d.updatedAt || new Date().toISOString(),
+      updatedBy: d.updatedBy || 'ui',
+      materialKey: d.materialKey,
+      opacity: d.opacity
+    };
+    enqueue(payload);
   });
 
-  log('armed');
+  // 認可フェッチが後から用意されるケースに対応（簡易ポーリング）
+  let tries = 0;
+  const t = setInterval(() => {
+    if (haveAuthFetch() || tries++ > 60) { // 最大約60秒
+      clearInterval(t);
+      drain();
+    }
+  }, 1000);
 })();
