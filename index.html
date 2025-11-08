@@ -1,7 +1,12 @@
 <!DOCTYPE html>
 <html lang="ja">
 <head>
-  <!-- ESM import map for THREE (and addons) -->
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>LociMyu v6.6 (ESM/CDN)</title>
+  <link rel="icon" href="data:,"/>
+
+  <!-- THREE import map (must be before any module that imports 'three') -->
   <script id="lm-importmap-three" type="importmap">{
     "imports": {
       "three": "https://unpkg.com/three@0.159.0/build/three.module.js",
@@ -9,84 +14,51 @@
     }
   }</script>
 
-  <!-- Minimal fallback styles while leader.css/app.css are missing -->
-  <style id="lm-fallback-style">
-    :root { color-scheme: dark; }
-    body { margin:0; background:#111; color:#e6e6e6; font:14px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif; }
-    #right { width:360px; max-width:38vw; padding:12px; box-sizing:border-box; }
-    .panel { background:#16181b; border:1px solid #272a30; border-radius:10px; padding:12px; margin:12px 0; }
-    .panel h4 { margin:0 0 8px; font-weight:600; opacity:.9; }
-    select, input[type="text"], input[type="color"] {
-      background:#0f1317; color:#e6e6e6; border:1px solid #2a2f36; border-radius:8px; padding:8px 10px;
-    }
-    input[type="range"] { width:100%; }
-    .row { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
-    .row .grow { flex:1 1 180px; }
-    .muted { color:#9aa4af; font-size:12px; }
-    /* Hide legacy synthesized panel to avoid duplication */
-    #panel-material.lm-panel-material.card{display:none;}
-    #panel-material{display:none !important;}
-    #pane-material .card{width:100%;box-sizing:border-box;}
-    #pane-material .controls{overflow:visible;}
-  </style>
-
-  <!-- Optional loader for content.js to avoid 404 noise -->
-  <script id="lm-optional-contentjs">
-  (function(){
-    try {
-      var url = './content.js';
-      fetch(url, {method:'HEAD'}).then(function(r){
-        if (r && r.ok) {
-          var s = document.createElement('script');
-          s.src = url; s.defer = true;
-          s.onload = function(){ console.log('[VSC] Content script initialized (optional)'); };
-          document.head.appendChild(s);
-        } else {
-          console.log('[VSC] content.js not present (skipped)');
-        }
-      }).catch(function(){ console.log('[VSC] content.js check skipped'); });
-    } catch(e){
-      console.log('[VSC] content.js loader error', e);
-    }
-  })();
-  </script>
-
-  <meta charset="utf-8"/>
-  <meta name="viewport" content="width=device-width,initial-scale=1"/>
-  <title>LociMyu v6.6 (ESM/CDN)</title>
-  <link rel="icon" href="data:,"/>
-
-  <!-- Google OAuth (keys are read by boot.esm.cdn.js) -->
-  <meta name="google-oauth-client_id" content="595200751510-ncahnf7edci6b9925becn5to49r6cguv.apps.googleusercontent.com"/>
-  <meta name="google-api-key" content="AIzaSyCUnTCr5yWUWPdEXST9bKP1LpgawU5rIbI"/>
-  <script defer async src="https://accounts.google.com/gsi/client"></script>
-
+  <!-- Minimal styles to keep the original UI intact (tuned for narrower panel) -->
   <style>
     :root{
-      --bg:#0f1115; --panel:#0b0d11; --line:#1f2937; --acc:#94a3b8; --text:#cbd5e1; --sel:#60a5fa;
+      --bg:#0f1115;--panel:#0b0d11;--line:#1f2937;--acc:#94a3b8;--text:#cbd5e1;
+      --ui-w: 320px;            /* ← パネル幅を統一して狭める */
+      --ui-pad: 10px;           /* パネル内パディングを少し詰める */
+      --card-pad: 10px;         /* カードの内側余白を調整 */
+      --row-gap: 8px;           /* 行間をややコンパクトに */
+      --grid-gap: 10px;
     }
-    html,body{height:100%;margin:0;background:var(--bg);color:var(--text);
-      font:14px/1.4 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;}
+    html,body{
+      height:100%;margin:0;background:var(--bg);color:var(--text);
+      font:14px/1.4 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+    }
     #app{display:flex;height:100%;}
-    #stage{flex:1;position:relative;background:var(--panel);}
-    #ui{width:360px;max-width:360px;min-width:320px;border-left:1px solid var(--line);
-        display:flex;flex-direction:column;overflow:hidden;}
-    header#topbar{display:flex;justify-content:space-between;align-items:center;
-      padding:8px 12px;border-bottom:1px solid var(--line);}
+    #stage{flex:1;position:relative;background:#0a0d12;}
+    #ui{
+      width:var(--ui-w); max-width:var(--ui-w); min-width:var(--ui-w);
+      border-left:1px solid var(--line);
+      display:flex; flex-direction:column; overflow:hidden; /* 横スクロール抑止 */
+    }
+    header#topbar{
+      display:flex; justify-content:space-between; align-items:center;
+      padding:8px 12px; border-bottom:1px solid var(--line);
+    }
     header #brand{font-weight:600;opacity:.85}
-    button,select,input{background:#111827;border:1px solid var(--line);color:var(--text);
-      border-radius:8px;padding:6px 8px}
-    input[type="text"]{width:100%;box-sizing:border-box}
-    .row{display:flex;gap:8px;align-items:center}
+    button,select,input{
+      background:#111827;border:1px solid var(--line);color:var(--text);
+      border-radius:8px;padding:6px 8px; box-sizing:border-box;
+    }
+    input[type="text"]{width:100%}
+    .row{display:flex;gap:var(--row-gap);align-items:center}
     .row > *{flex:1}
     .tabs{display:flex;border-bottom:1px solid var(--line)}
-    .tabs button{flex:1;border:0;border-bottom:2px solid transparent;padding:8px 12px;
-      background:transparent;color:var(--acc);cursor:pointer}
+    .tabs button{
+      flex:1;border:0;border-bottom:2px solid transparent;padding:8px 12px;
+      background:transparent;color:var(--acc);cursor:pointer
+    }
     .tabs button[aria-selected="true"]{color:var(--text);border-bottom-color:#64748b}
-    .pane{display:none;padding:12px;overflow:auto;max-width:100%;box-sizing:border-box}
+    .pane{
+      display:none;padding:var(--ui-pad);overflow:auto;max-width:100%;box-sizing:border-box
+    }
     .pane[data-active="true"]{display:block}
     #gl{width:100%;height:100%;display:block}
-    .pad{padding:12px}
+    .pad{padding:var(--ui-pad)}
     .grp{margin:10px 0}
     .hint{opacity:.7;font-size:12px}
     .chips{display:flex;flex-wrap:wrap;gap:6px}
@@ -94,37 +66,23 @@
     #caption-list{height:160px;overflow:auto;border:1px solid var(--line);border-radius:8px}
 
     /* Material pane layout */
-    .mat-grid{display:grid;grid-template-columns: 1fr; gap:12px; max-width:100%}
-    .mat-card{border:1px solid var(--line);border-radius:12px;padding:12px;background:#0c1016}
-    .mat-card h4{margin:0 0 8px 0;font-size:13px;opacity:.8}
+    .mat-grid{
+      display:grid;grid-template-columns:1fr;gap:var(--grid-gap);max-width:100%
+    }
+    .mat-card{
+      border:1px solid var(--line);border-radius:12px;padding:var(--card-pad);background:#0c1016
+    }
+    .mat-card h4{margin:0 0 6px 0;font-size:13px;opacity:.8}
     .mat-row{display:grid;grid-template-columns:auto 1fr;gap:10px;align-items:center}
     .nowrap{white-space:nowrap}
-    .full{text-align:left;width:100%}
-    .inline{display:flex;gap:14px;align-items:center;flex-wrap:wrap}
-    #pm-opacity{display:grid;grid-template-columns: 1fr auto 48px;gap:10px;align-items:center}
+    #pm-opacity{
+      display:grid;grid-template-columns:1fr auto 44px;gap:8px;align-items:center
+    }
+    #pm-opacity select{min-width:0}            /* 狭い幅でも収まるように */
+    #pm-opacity input[type="range"]{width:100%}
     #pm-opacity output{min-width:3ch;text-align:right;opacity:.8}
-    /* Prevent horizontal scroll in the right panel */
     #ui *{max-width:100%}
     #ui{overflow-x:hidden}
-  </style>
-
-  <style id="lm-material-layout-fix">
-    /* ===== Material pane: overflow & wrapping fixes ===== */
-    #pane-material .scroller { overflow-x: hidden; }
-    #pane-material .mat-card { display:flex; flex-direction:column; gap:10px; }
-    #pane-material .row,
-    #pane-material .inline,
-    #pane-material .pair,
-    #pane-material .controls { display:flex; flex-wrap:wrap; gap:8px; }
-    #pane-material .row > *, #pane-material .controls > * { min-width:0; }
-    #pane-material select,
-    #pane-material input[type="range"],
-    #pm-material, #pm-chroma-tol, #pm-chroma-feather {
-      flex:1 1 100%; width:100%; max-width:100%;
-    }
-    #pane-material .btn, #pane-material .switch, #pane-material .mini { flex:0 0 auto; }
-    #pm-chroma .tol-row { display:flex; flex-wrap:wrap; gap:8px; }
-    #pm-chroma .feather-row { display:flex; flex-wrap:wrap; gap:8px; margin-top:6px; }
   </style>
 </head>
 <body>
@@ -155,20 +113,10 @@
         <button id="tab-views" role="tab" data-tab="views" aria-selected="false">Views</button>
       </nav>
 
-      <!-- Caption pane (unchanged structure) -->
       <section id="pane-caption" class="pane" data-pane="caption" data-active="true">
-        <div class="grp">
-          <div class="hint">Pin color</div>
-          <div id="pinColorChips" class="chips"></div>
-        </div>
-        <div class="grp">
-          <div class="hint">Filter</div>
-          <div id="pinFilterChips" class="chips"></div>
-        </div>
-        <div class="grp">
-          <div class="hint">Caption list</div>
-          <div id="caption-list"></div>
-        </div>
+        <div class="grp"><div class="hint">Pin color</div><div id="pinColorChips" class="chips"></div></div>
+        <div class="grp"><div class="hint">Filter</div><div id="pinFilterChips" class="chips"></div></div>
+        <div class="grp"><div class="hint">Caption list</div><div id="caption-list"></div></div>
         <div class="grp">
           <div class="hint">Title / Body</div>
           <input id="caption-title" placeholder="Title"/>
@@ -177,18 +125,15 @@
         <div class="grp">
           <div class="hint">Images (auto from GLB folder)</div>
           <div id="images-grid"></div>
-          <div class="row" style="margin-top:8px">
-            <button id="btnRefreshImages" class="full">Refresh images</button>
-          </div>
+          <div class="row" style="margin-top:8px"><button id="btnRefreshImages" class="full">Refresh images</button></div>
           <div id="images-status" class="hint" style="margin-top:6px"></div>
         </div>
       </section>
 
-      <!-- Material pane (refined) -->
       <section id="pane-material" class="pane" data-pane="material">
         <div class="mat-grid">
           <div class="mat-card">
-            <h4>Per‑material opacity (saved per sheet)</h4>
+            <h4>Per-material opacity (saved per sheet)</h4>
             <div id="pm-opacity">
               <select id="pm-material" aria-label="Select material">
                 <option value="">— Select material —</option>
@@ -201,35 +146,27 @@
 
           <div class="mat-card">
             <h4>Shading</h4>
-            <div class="inline">
-              <label class="nowrap"><input type="checkbox" id="pm-flag-doublesided"/> Double‑sided</label>
-              <label class="nowrap"><input type="checkbox" id="pm-flag-unlit"/> Unlit‑like</label>
+            <div class="row">
+              <label class="nowrap"><input type="checkbox" id="pm-flag-doublesided"/> Double-sided</label>
+              <label class="nowrap"><input type="checkbox" id="pm-flag-unlit"/> Unlit-like</label>
             </div>
           </div>
 
           <div class="mat-card">
             <h4>Chroma key</h4>
-            <div class="inline" style="margin-bottom:8px">
+            <div class="row" style="margin-bottom:8px">
               <label class="nowrap"><input type="checkbox" id="pm-chroma-enable"/> Enable</label>
               <input id="pm-chroma-color" type="color" aria-label="Color" value="#000000"/>
             </div>
-            <div class="mat-row" style="margin-bottom:6px">
-              <span class="nowrap">Tolerance</span>
-              <input id="pm-chroma-tol" type="range" min="0" max="1" step="0.01" value="0.10"/>
-            </div>
-            <div class="mat-row">
-              <span class="nowrap">Feather</span>
-              <input id="pm-chroma-feather" type="range" min="0" max="1" step="0.01" value="0.00"/>
-            </div>
+            <div class="mat-row" style="margin-bottom:6px"><span class="nowrap">Tolerance</span><input id="pm-chroma-tol" type="range" min="0" max="1" step="0.01" value="0.10"/></div>
+            <div class="mat-row"><span class="nowrap">Feather</span><input id="pm-chroma-feather" type="range" min="0" max="1" step="0.01" value="0.00"/></div>
           </div>
         </div>
       </section>
 
       <section id="pane-views" class="pane" data-pane="views">
-        <div class="grp">
-          <button id="view-save">Save view</button>
-          <div class="row"><label><input id="proj-ortho" type="checkbox"> Orthographic</input></label></div>
-        </div>
+        <div class="grp"><button id="view-save">Save view</button></div>
+        <div class="row"><label><input id="proj-ortho" type="checkbox"> Orthographic</label></div>
         <div id="views-preset-list"></div>
       </section>
     </aside>
@@ -247,90 +184,69 @@
     })();
   </script>
 
-  <!-- Boot runtime (ESM) -->
+  <!-- App boot & bridges (original stack) -->
   <script type="module" src="./boot.esm.cdn.js"></script>
   <link rel="stylesheet" href="app.sheet-rename.css"/>
   <script type="module" src="sheet-rename.module.js"></script>
-
-  <!-- Sheet context event bridge (classic defer ok) -->
   <script defer src="./sheet.ctx.bridge.js"></script>
 
-  <!-- ===== LociMyu material bridge stack (order matters) ===== -->
+  <!-- Viewer & sheet bridge (must be before orchestrator/dropdown so scene is known) -->
   <script type="module" src="./viewer.bridge.module.js"></script>
   <script type="module" src="./materials.sheet.bridge.js"></script>
-  <!-- NEW: persist layer for per-material settings (sheets/local) -->
-  <script type="module" src="./materials.sheet.persist.js"></script>
 
-  <!-- Runtime/UI helpers (non-module so they expose globals) -->
+  <!-- Material stack: runtime UI helpers, dropdown, orchestrator -->
   <script src="./material.runtime.patch.js"></script>
   <script src="./glb.load.signal.js"></script>
-  <script src="./material.dropdown.patch.js?v=3.5.2"></script>
+  <script src="./material.dropdown.patch.js"></script>
+  <script src="./material.orchestrator.js"></script>
 
-  <!-- Orchestrator runs after dropdown/runtime is ready -->
-  <script type="module" src="./material.orchestrator.js"></script>
-
-  <!-- lm-dx v4.3: keep only the click-detox; skip legacy material anchors -->
+  <!-- Optional VSCode content script loader (silences 404) -->
   <script>
-  (() => {
-    const TAG='[lm-dx v4.3]'; const log=(...a)=>console.log(TAG,...a);
-    const doc = document;
-    const right = doc.querySelector('#right, aside, .right, .sidebar') || doc.body;
+    (function(){
+      const url = './content.js';
+      fetch(url,{method:'HEAD'}).then(r=>{
+        if(r && r.ok){
+          const s=document.createElement('script'); s.src=url; s.defer=true;
+          s.onload=()=>console.log('[VSC] Content script initialized');
+          document.head.appendChild(s);
+        }else{
+          console.log('[VSC] content.js not present (skipped)');
+        }
+      }).catch(()=>console.log('[VSC] content.js check skipped'));
+    })();
+  </script>
 
-    function detoxClickable(target){
-      if (!target) return {disabled:0,target:null};
-      const r = target.getBoundingClientRect();
-      const p = {x: r.left + r.width*0.5, y: r.top + Math.min(16,r.height/2)};
-      const chain = doc.elementsFromPoint(p.x, p.y);
-      const idx = chain.indexOf(target);
-      const blockers = (idx===-1?chain:chain.slice(0,idx)).filter(e=>{
-        const cs=getComputedStyle(e), pos=cs.position;
-        const fixedLike = pos==='fixed'||pos==='absolute'||pos==='sticky';
-        return fixedLike && cs.pointerEvents!=='none' && right.contains(e);
-      });
-      blockers.forEach(e=>{ e.dataset.__pe_before=getComputedStyle(e).pointerEvents; e.style.pointerEvents='none'; e.classList.add('lm-pe-none'); });
-      target.style.pointerEvents='auto'; target.disabled=false;
-      log('detoxClickable',{disabled:blockers.length,target});
-      return {disabled:blockers.length,target};
+  <!-- LM MATERIALS: begin (v2025-11-09) -->
+  <script>
+  // __lm_fetchJSONAuth v2 (idempotent)
+  window.__lm_fetchJSONAuth = window.__lm_fetchJSONAuth || (async (url, init = {}) => {
+    const { ensureToken, getAccessToken } = await import('./gauth.module.js');
+    const tok = (await ensureToken?.()) || (await getAccessToken?.());
+    if (!tok) throw new Error('no token');
+    const headers = new Headers(init.headers || {});
+    if (!headers.has('Authorization')) headers.set('Authorization', `Bearer ${tok}`);
+    let body = init.body;
+    const isSendable = typeof body === 'string' || body instanceof Blob || body instanceof FormData ||
+                       body instanceof URLSearchParams || body instanceof ArrayBuffer;
+    if (body != null && !isSendable) {
+      body = JSON.stringify(body);
+      if (!headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
     }
-    detoxClickable(doc.getElementById('glbUrl'));
-    detoxClickable(doc.getElementById('auth-signin'));
-    detoxClickable(doc.getElementById('btnGlb'));
-    // NOTE: do NOT synthesize or move material controls here; canonical pane exists.
-  })();
+    const res = await fetch(url, { ...init, headers, body });
+    if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text()}`);
+    const ct = res.headers.get('content-type') || '';
+    return ct.includes('application/json') ? res.json() : res.text();
+  });
+  console.log('[inject] __lm_fetchJSONAuth ready');
   </script>
 
-  <!-- === LociMyu: Auth Fetch Shim (v2) + Persist Loader + UI Wire === -->
-  <script type="module">
-    // Authenticated JSON fetch shim (v2)
-    window.__lm_fetchJSONAuth = window.__lm_fetchJSONAuth || (async (url, init = {}) => {
-      const { ensureToken, getAccessToken } = await import('./gauth.module.js');
-      const tok = (await ensureToken?.()) || (await getAccessToken?.());
-      if (!tok) throw new Error('no token');
+  <!-- Persist (Sheets) must load first -->
+  <script src="./materials.sheet.persist.js?v=1.5"></script>
+  <!-- Render applier (doubleSided / unlitLike / opacity & safety defaults) -->
+  <script src="./materials.render.apply.js?v=1.0"></script>
+  <!-- UI wire (binds #pm-material / #pm-opacity-range / #pm-doubleSided / #pm-unlitLike) -->
+  <script src="./materials.ui.wire.js?v=1.5"></script>
+  <!-- LM MATERIALS: end -->
 
-      const headers = new Headers(init.headers || {});
-      if (!headers.has('Authorization')) headers.set('Authorization', `Bearer ${tok}`);
-
-      let body = init.body;
-      const isSendable = typeof body === 'string' || body instanceof Blob || body instanceof FormData ||
-                         body instanceof URLSearchParams || body instanceof ArrayBuffer;
-      if (body != null && !isSendable) {
-        body = JSON.stringify(body);
-        if (!headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
-      }
-      const res = await fetch(url, { ...init, headers, body });
-      if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text()}`);
-      const ct = res.headers.get('content-type') || '';
-      return ct.includes('application/json') ? res.json() : res.text();
-    });
-    console.log('[inject] __lm_fetchJSONAuth ready');
-  </script>
-
-  <!-- Persist runtime (ensures __LM_MATERIALS and headers) -->
-  <script defer src="./materials.sheet.persist.js"></script>
-
-  <!-- UI wiring (binds #pm-material & #pm-opacity-range to Sheets) -->
-  <script type="module" src="./materials.ui.wire.js"></script>
-  <!-- === /LociMyu injection === -->
-  <script type="module" src="./materials.render.apply.js"></script>
 </body>
 </html>
