@@ -1,62 +1,54 @@
-/* material.dropdown.patch.js v3.0 (single-run)
- * Purpose: Populate #pm-material from THREE scene once scene is ready
- * Strategy: listen for 'lm:scene-ready' (from viewer.bridge) or immediate if window.__LM_SCENE exists
- */
+/*! material.dropdown.patch.js v3.1 (scene→dropdown population, once) */
 (function(){
-  const TAG='[mat-dd v3.0]';
-  if (window.__LM_DD_DONE){ console.log(TAG,'already populated'); return; }
+  const TAG='[mat-dd v3.1]';
+  if (window.__LM_DD_DONE) { console.debug(TAG,'already done'); return; }
 
-  function collectMaterials(scene){
+  function populateFromScene(scene){
+    const ui = window.__LM_MAT_UI;
+    if (!ui || !ui.__ready) return console.warn(TAG,'UI not ready');
+    const sel = ui.select;
+    if (!sel) return;
+
+    // Keep placeholder only
+    [...sel.querySelectorAll('option')].forEach((o,i)=>{ if(i>0) o.remove(); });
+
     const names = new Set();
-    scene.traverse(obj => {
-      if (!obj.isMesh || !obj.material) return;
-      const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
-      mats.forEach(m => {
-        let name = (m && m.name) ? String(m.name) : '';
-        if (!name) {
-          // assign a stable generated name if missing
-          name = `Material_${(m.uuid||Math.random().toString(36).slice(2)).slice(0,8)}`;
-          try { m.name = name; } catch(_){}
-        }
-        names.add(name);
-      });
-    });
-    return Array.from(names).sort((a,b)=>a.localeCompare(b));
-  }
-
-  function populate(){
-    try{
-      const ui = window.__LM_MAT_UI || {};
-      const sel = (ui.select) || document.getElementById('pm-material');
-      if (!sel){ console.warn(TAG,'select missing'); return; }
-      const scene = window.__LM_SCENE;
-      if (!scene){ console.warn(TAG,'scene missing'); return; }
-      const list = collectMaterials(scene);
-      // Preserve first placeholder
-      const firstIsPlaceholder = sel.options.length && !sel.options[0].value;
-      sel.innerHTML = firstIsPlaceholder ? sel.options[0].outerHTML : '<option value="">— Select material —</option>';
-      list.forEach(name => {
+    scene.traverse(obj=>{
+      const mats = obj && obj.material ? (Array.isArray(obj.material)?obj.material:[obj.material]) : null;
+      if (!mats) return;
+      mats.forEach(m=>{
+        if (!m) return;
+        if (!m.name) m.name = `Material_${m.uuid.slice(0,8)}`;
+        if (names.has(m.name)) return;
+        names.add(m.name);
         const opt = document.createElement('option');
-        opt.value = name; opt.textContent = name;
+        opt.value = m.name;
+        opt.textContent = m.name;
         sel.appendChild(opt);
       });
-      window.__LM_DD_DONE = true;
-      console.log(TAG,'populated', list.length);
-      window.dispatchEvent(new CustomEvent('lm:materials-populated', { detail:{ count:list.length } }));
-    }catch(e){
-      console.warn(TAG,'populate error', e);
-    }
+    });
+    console.debug(TAG,'populated', sel.options.length-1);
   }
 
-  function tryPopulate(){
-    if (window.__LM_SCENE) populate();
+  // Prefer custom signal, else fallback polling
+  function arm(){
+    if (!window.__LM_MAT_UI) return;
+    if (window.__LM_SCENE) { populateFromScene(window.__LM_SCENE); window.__LM_DD_DONE=true; return; }
+    let tries = 60;
+    const iv = setInterval(()=>{
+      if (window.__LM_SCENE) {
+        clearInterval(iv);
+        populateFromScene(window.__LM_SCENE);
+        window.__LM_DD_DONE = true;
+      } else if (--tries<=0){ clearInterval(iv); console.warn(TAG,'scene not available'); }
+    }, 250);
   }
 
-  window.addEventListener('lm:scene-ready', populate, { once:true });
-  // In some boots viewer.bridge fires earlier; try immediate populate as well
-  if (document.readyState === 'complete' || document.readyState === 'interactive') {
-    setTimeout(tryPopulate, 0);
-  } else {
-    window.addEventListener('DOMContentLoaded', tryPopulate, { once:true });
-  }
+  window.addEventListener('lm:scene-ready', (ev)=>{
+    window.__LM_SCENE = ev.detail && ev.detail.scene || window.__LM_SCENE;
+    arm();
+  }, { once:true });
+
+  // also try immediately
+  arm();
 })();
