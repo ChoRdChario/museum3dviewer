@@ -1,14 +1,25 @@
-// material.dropdown.patch.js  v3.5
+/* material.dropdown.patch.js v3.5.2
+ * - 確実読込：HTML へ 1 行追加するだけ
+ * - 順序無依存：イベント/再試行で自己回復
+ * - フィルタ済み：UUID名やThreeの既定名は除外
+ * - グローバル公開：__LM_MAT_DD_VERSION__, __LM_materialDropdownPopulate()
+ */
 (() => {
-  const TAG = '[mat-dd v3.5]';
+  const TAG = '[mat-dd v3.5.2]';
+  if (window.__LM_MAT_DD_VERSION__) {
+    console.debug(TAG, 'already loaded');
+    return;
+  }
+  window.__LM_MAT_DD_VERSION__ = '3.5.2';
 
-  // ---- helpers ------------------------------------------------------------
-  const UUID = /^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;
-  const AUTO = /^(?:Mesh)?(?:Basic|Lambert|Phong|Standard|Physical|Toon)Material$/i;
+  const UUID_RE = /^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;
+  const AUTO_RE = /^(?:Mesh)?(?:Basic|Lambert|Phong|Standard|Physical|Toon)Material$/i;
 
-  const getSelectEl = () =>
+  const pickDropdown = () =>
     document.querySelector('#pm-material')
-    || document.querySelector('#pm-opacity select');
+    || document.querySelector('#pm-opacity select')
+    || document.querySelector('[data-lm="mat-select"]')
+    || document.querySelector('section.lm-panel-material select');
 
   const getScene = () => window.__LM_SCENE || window.viewer?.scene || null;
 
@@ -19,68 +30,75 @@
       const arr = Array.isArray(o.material) ? o.material : [o.material];
       for (const m of arr) {
         const name = (m.name || '').trim();
-        if (!name) continue;
-        if (UUID.test(name)) continue;        // UUID っぽい名前は除外
-        if (AUTO.test(name)) continue;        // Three の自動名は除外
+        if (!name) continue;                 // 無名は除外
+        if (UUID_RE.test(name)) continue;    // UUID名は除外
+        if (AUTO_RE.test(name)) continue;    // Three既定名は除外
         keep.add(name);
       }
     });
-    return [...keep].sort();
+    return Array.from(keep).sort();
   }
 
-  function populateOnce() {
-    const el = getSelectEl();
-    const scene = getScene();
-    if (!el || !scene) return { ok:false, reason: !el ? 'no-select' : 'no-scene', count:0 };
+  let inflight = false;
 
-    const names = collectMaterialNames(scene);
-    // 0件は「まだ早い」ことが多いので、この時点では lastKey を更新しない
-    if (names.length === 0) {
-      return { ok:false, reason:'empty', count:0 };
+  async function populateOnce() {
+    if (inflight) return false;
+    inflight = true;
+    try {
+      const dd = pickDropdown();
+      const scene = getScene();
+      if (!dd || !scene) return false;
+
+      const names = collectMaterialNames(scene);
+      if (!names.length) return false;
+
+      // 変更がないならスキップ（ちらつき防止）
+      const curr = Array.from(dd.options).map(o => o.value);
+      const next = [''].concat(names);
+      const same = curr.length === next.length && curr.every((v,i)=>v===next[i]);
+      if (same) return true;
+
+      dd.innerHTML =
+        '<option value="">-- Select material --</option>' +
+        names.map(n => `<option value="${n}">${n}</option>`).join('');
+
+      // 監査用属性
+      dd.dataset.lmMatCount = String(names.length);
+      dd.dataset.lmMatStamp = String(Date.now());
+
+      console.debug(TAG, 'populated', names.length);
+      window.dispatchEvent(new CustomEvent('lm:materials-populated', {
+        detail: { count: names.length, names }
+      }));
+      return true;
+    } finally {
+      inflight = false;
     }
-
-    const key = names.join('|');
-    if (window.__LM_MAT_DD_LASTKEY__ === key && el.options.length > 1) {
-      // 既に同一内容が入っている
-      return { ok:true, reason:'same', count: el.options.length-1 };
-    }
-
-    // UI 反映
-    el.innerHTML =
-      '<option value=\"\">-- Select material --</option>' +
-      names.map(n => `<option value=\"${n}\">${n}</option>`).join('');
-    window.__LM_MAT_DD_LASTKEY__ = key;
-
-    console.log(TAG, 'populated', names.length);
-    return { ok:true, reason:'populated', count:names.length };
   }
 
-  // ---- main: immediate try + backoff + event hooks -----------------------
-  async function ensurePopulated() {
-    // 即時試行
-    let r = populateOnce();
-    if (r.ok || r.reason === 'no-select') return;
+  // 露出：手動トリガ可能
+  window.__LM_materialDropdownPopulate = async () => {
+    const ok = await populateOnce();
+    if (!ok) console.debug(TAG, 'deferred (conditions not ready)');
+    return ok;
+  };
 
-    // バックオフ再試行（シーンが安定するまで）
-    for (let i=1; i<=8; i++) {
-      await new Promise(res => setTimeout(res, 250*i));
-      r = populateOnce();
-      if (r.ok) return;
-    }
-    // ここまで来ても 0 件なら、イベント経由に委ねる
+  // 自動実行：イベント＋指数バックオフ
+  function armAuto() {
+    // 主要イベントで都度試行
+    ['DOMContentLoaded', 'load', 'lm:glb-detected', 'lm:scene-stabilized']
+      .forEach(ev => window.addEventListener(ev, () => populateOnce()));
+
+    // バックオフ再試行（最大 8 回）
+    (async () => {
+      for (let i = 1; i <= 8; i++) {
+        const ok = await populateOnce();
+        if (ok) break;
+        await new Promise(r => setTimeout(r, 250 * i)); // 250,500,750,...
+      }
+    })();
   }
 
-  // 初期化（ページロード後すぐ）
-  ensurePopulated();
-
-  // イベント：glb 検出（フォールバック）
-  window.addEventListener('lm:glb-detected', () => {
-    // すぐは早いことがあるので少し後に
-    setTimeout(ensurePopulated, 200);
-  });
-
-  // イベント：シーン安定化（本命）
-  window.addEventListener('lm:scene-stabilized', () => {
-    ensurePopulated();
-  });
+  armAuto();
+  console.debug(TAG, 'armed');
 })();
