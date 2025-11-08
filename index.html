@@ -4,192 +4,60 @@
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <title>LociMyu v6.6</title>
+
+  <!-- Import map MUST come before any module scripts -->
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://unpkg.com/three@0.159.0/build/three.module.js",
+      "three/addons/": "https://unpkg.com/three@0.159.0/examples/jsm/"
+    }
+  }
+  </script>
+
   <style>
-    :root { color-scheme: dark; }
-    body { margin:0; background:#0f1115; color:#e5e7eb; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji","Segoe UI Emoji"; }
-    .app { display:grid; grid-template-columns: 1fr 420px; min-height:100vh; }
-    #stage { position:relative; }
-    #right { padding:16px 16px 24px; border-left:1px solid #1f2430; background:#0f1115; }
-    .tabs { display:flex; gap:8px; align-items:center; border-bottom:1px solid #1f2430; padding-bottom:8px; margin-bottom:8px; }
-    .tabs button { appearance:none; border:1px solid #2c3342; background:#121620; color:#e5e7eb; padding:8px 10px; border-radius:8px; cursor:pointer; font-weight:600; line-height:1; }
-    .tabs button[aria-selected="true"] { background:#182033; border-color:#3a4760; }
-    .pane { display:none; }
-    .pane[aria-hidden="false"] { display:block; }
-    /* Material panel */
-    #pane-material .group { border:1px solid #1f2430; border-radius:10px; padding:12px; margin-top:10px; background:#0e121a; }
-    #pane-material h4 { margin:0 0 4px; font-size:13px; font-weight:700; opacity:.9; }
-    #pane-material .sub { font-size:12px; opacity:.7; margin:2px 0 8px; }
-    #materialSelect, #opacityRange { width:100%; }
-    /* guard: nothing should appear inside the tab buttons */
-    #tab-caption > *, #tab-material > *, #tab-views > * { display:none !important; }
+    html,body{height:100%;background:#0e0f12;color:#dfe3ea;margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial;}
+    #app{display:grid;grid-template-columns:1fr 360px;height:100%;}
+    #viewer{background:#0e0f12;}
+    #right{border-left:1px solid rgba(255,255,255,.06);padding:8px 12px;overflow:auto}
+    .tabs{display:flex;gap:8px;margin:8px 0}
+    .tabs button{background:#15171c;color:#dfe3ea;border:1px solid rgba(255,255,255,.08);padding:6px 10px;border-radius:8px;cursor:pointer}
+    .pane{border:1px solid rgba(255,255,255,.08);border-radius:10px;padding:10px;margin-top:8px;background:#0f1115}
+    .chip{width:18px;height:18px;border-radius:9px;border:none;margin-right:6px;cursor:pointer}
+    .btn{background:#1b1f27;border:1px solid rgba(255,255,255,.12);color:#dfe3ea;padding:6px 10px;border-radius:8px;cursor:pointer}
+    .input{width:100%;background:#141720;border:1px solid rgba(255,255,255,.12);color:#dfe3ea;padding:6px 8px;border-radius:8px;margin:6px 0}
   </style>
 </head>
 <body>
-  <div class="app">
-    <main id="stage">
-      <!-- the viewer canvas is created by the app scripts -->
-    </main>
-
+  <div id="app">
+    <main id="viewer"></main>
     <aside id="right">
-      <div class="topbar" style="display:flex; gap:8px; align-items:center; margin-bottom:10px;">
-        <input id="glbUrl" placeholder="https://drive.google.com/… or GLB URL" style="flex:1 1 auto; min-width:140px; padding:8px 10px; border-radius:8px; border:1px solid #2c3342; background:#0f1115; color:#e5e7eb;"/>
-        <button id="btnGlb" style="padding:8px 10px; border-radius:8px; border:1px solid #2c3342; background:#121620; color:#e5e7eb;">Load</button>
-        <button id="auth-signin" style="padding:8px 10px; border-radius:8px; border:1px solid #2c3342; background:#121620; color:#e5e7eb;">Sign in</button>
+      <div class="tabs" role="tablist">
+        <button id="tab-caption" role="tab" aria-selected="true">Caption</button>
+        <button id="tab-material" role="tab" aria-selected="false">Material</button>
+        <button id="tab-views" role="tab" aria-selected="false">Views</button>
       </div>
 
-      <div class="sheetbar" style="display:flex; gap:8px; align-items:center; margin-bottom:8px;">
-        <select id="sheetA" style="flex:0 0 auto; padding:6px 8px; border-radius:8px; border:1px solid #2c3342; background:#0f1115; color:#e5e7eb;">
-          <option>シート1</option>
-        </select>
-        <button id="pickSheet" title="Select sheet…" style="padding:8px; border-radius:8px; border:1px solid #2c3342; background:#121620; color:#e5e7eb;">🔍</button>
-        <select id="sheetB" style="flex:0 0 auto; padding:6px 8px; border-radius:8px; border:1px solid #2c3342; background:#0f1115; color:#e5e7eb;">
-          <option>シート1</option>
-        </select>
-        <button id="btnCreate" style="margin-left:auto; padding:8px 10px; border-radius:8px; border:1px solid #2c3342; background:#121620; color:#e5e7eb;">Create</button>
-      </div>
-
-      <div class="tabs" role="tablist" aria-label="Panels">
-        <button id="tab-caption" role="tab" aria-controls="pane-caption" aria-selected="true">Caption</button>
-        <button id="tab-material" role="tab" aria-controls="pane-material" aria-selected="false">Material</button>
-        <button id="tab-views" role="tab" aria-controls="pane-views" aria-selected="false">Views</button>
-      </div>
-
-      <!-- PANES -->
-      <section id="pane-caption" class="pane" role="tabpanel" aria-hidden="false" aria-labelledby="tab-caption">
-        <!-- 既存アプリがこの中にUIを描画します -->
-        <div id="caption-root-placeholder" class="group" style="opacity:.7;">Caption panel (existing UI remains controlled by app scripts)</div>
+      <section id="pane-caption" class="pane" role="tabpanel" aria-labelledby="tab-caption">
+        Caption panel (existing UI remains controlled by app scripts)
       </section>
 
-      <section id="pane-material" class="pane" role="tabpanel" aria-hidden="true" aria-labelledby="tab-material">
-        <div class="group">
-          <h4>Select material</h4>
-          <div class="sub">This does not change global opacity above.</div>
-          <select id="materialSelect" aria-label="Select material"></select>
-        </div>
-
-        <div class="group">
-          <h4>Opacity</h4>
-          <input id="opacityRange" type="range" min="0" max="1" step="0.01" value="1.0"/>
-        </div>
-
-        <div class="group">
-          <h4>Shading</h4>
-          <label><input type="checkbox" id="doubleSided"/> Double-sided</label>
-          <label style="margin-left:14px;"><input type="checkbox" id="unlitLike"/> Unlit-like</label>
-        </div>
-
-        <div class="group">
-          <h4>Chroma key</h4>
-          <label><input type="checkbox" id="ckEnable"/> Enable</label>
-          <div style="margin-top:8px;">Tolerance</div>
-          <input type="range" id="ckTolerance" min="0" max="1" step="0.01" value="0.5"/>
-          <div style="margin-top:8px;">Feather</div>
-          <input type="range" id="ckFeather" min="0" max="1" step="0.01" value="0.5"/>
-        </div>
-      </section>
-
-      <section id="pane-views" class="pane" role="tabpanel" aria-hidden="true" aria-labelledby="tab-views">
-        <div class="group" style="opacity:.7;">Views (reserved)</div>
+      <section id="pane-material" class="pane" role="tabpanel" aria-labelledby="tab-material" hidden>
+        <!-- Anchors ensured by lm-inline v9 / orchestrator -->
       </section>
     </aside>
   </div>
 
-  <!-- App scripts (unchanged order) -->
+  <!-- App boot & modules -->
   <script type="module" src="./boot.esm.cdn.js"></script>
   <script type="module" src="./viewer.bridge.module.js"></script>
   <script type="module" src="./materials.sheet.bridge.js"></script>
+  <script type="module" src="./material.orchestrator.js"></script>
 
-  <!-- Adapter to normalize viewer API -->
-  <script>
-  (function(){
-    const g = window;
-    if (!g.viewerBridge) g.viewerBridge = {};
-    if (!g.viewerBridge.getMaterialKeys) {
-      g.viewerBridge.getMaterialKeys = async function getMaterialKeys(){
-        // 1) listMaterials() if exists
-        try {
-          if (typeof g.listMaterials === 'function') {
-            const arr = g.listMaterials() || [];
-            const names = arr.map(it => it?.name || it?.materialKey).filter(Boolean);
-            if (names.length) return Array.from(new Set(names)).sort();
-          }
-        } catch(e){}
-        // 2) scene traverse
-        try {
-          const scene = g.__LM_SCENE || g.viewer?.scene;
-          const keys = new Set();
-          if (scene && typeof scene.traverse === 'function') {
-            scene.traverse(obj => {
-              if (!obj || !obj.material) return;
-              const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
-              mats.forEach(m => { if (m && m.name) keys.add(m.name); });
-            });
-          }
-          return Array.from(keys).sort();
-        } catch(e){}
-        return [];
-      };
-    }
-  })();
-  </script>
+  <!-- Restore Caption scaffold -->
+  <script src="./caption.ui.patch.js"></script>
 
-  <!-- Minimal orchestrator (targets only pane-material) -->
-  <script>
-  (function(){
-    const TAG='[mat-orch:min]'; const log=(...a)=>console.log(TAG,...a);
-    const pane = document.getElementById('pane-material');
-    const tabCap = document.getElementById('tab-caption');
-    const tabMat = document.getElementById('tab-material');
-    const tabViews = document.getElementById('tab-views');
-    const panes = {
-      caption: document.getElementById('pane-caption'),
-      material: pane,
-      views: document.getElementById('pane-views')
-    };
-    function show(which){
-      Object.entries(panes).forEach(([k,el]) => {
-        const sel = (k===which);
-        el.setAttribute('aria-hidden', String(!sel));
-        const btn = k==='caption'?tabCap : k==='material'?tabMat : tabViews;
-        btn?.setAttribute('aria-selected', String(sel));
-      });
-    }
-    tabCap?.addEventListener('click',()=>show('caption'));
-    tabMat?.addEventListener('click',()=>show('material'));
-    tabViews?.addEventListener('click',()=>show('views'));
-
-    const sel = pane.querySelector('#materialSelect');
-    const rng = pane.querySelector('#opacityRange');
-
-    async function populate(){
-      const keys = await (window.viewerBridge?.getMaterialKeys?.() || Promise.resolve([]));
-      sel.innerHTML = '';
-      const opt0 = document.createElement('option');
-      opt0.value = ''; opt0.textContent = '— Select —';
-      sel.appendChild(opt0);
-      keys.forEach(k => {
-        const o = document.createElement('option');
-        o.value = k; o.textContent = k; sel.appendChild(o);
-      });
-      log('materials populated:', keys.length);
-    }
-
-    // initial + after scene-ready
-    setTimeout(populate, 300);
-    window.addEventListener('lm:scene-ready', () => setTimeout(populate, 200));
-
-    log('UI bound');
-  })();
-  </script>
-
-  <!-- Guard: ensure nothing gets appended under the Material tab button -->
-  <script>
-    (function(){
-      const b = document.getElementById('tab-material');
-      if (!b) return;
-      const bad = b.querySelectorAll('select,input,div,section,style,script');
-      bad.forEach(n => n.remove());
-    })();
-  </script>
+  <!-- Material panel anchoring & click passthrough -->
+  <script src="./lm-inline.v9.js"></script>
 </body>
 </html>
