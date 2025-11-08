@@ -1,117 +1,65 @@
-
 // materials.ui.wire.js
-// Wires material select & opacity slider to Google Sheets (__LM_MATERIALS).
-// Requires window.__lm_fetchJSONAuth (v2 shim) and materials.sheet.persist.js to be loaded.
+// v1.1 — binds #pm-material & #pm-opacity-range to Sheets via LM_MaterialsPersist
 
-const SHEET_ID  = (window.__LM_SHEET_CTX?.spreadsheetId) || '19tNgby-h-2BeSRuDArQaJTm5EKpmh2Myzi5ONPyZAT8';
-const MAT_SHEET = '__LM_MATERIALS';
+(function(){
+  const TAG='[mat-ui-wire v1.1]';
+  const log=(...a)=>console.log(TAG,...a);
+  const warn=(...a)=>console.warn(TAG,...a);
 
-async function ensureHeaders() {
-  const headers = [
-    'materialKey','opacity','doubleSided','unlitLike',
-    'chromaEnable','chromaColor','chromaTolerance','chromaFeather',
-    'roughness','metalness','emissiveHex',
-    'updatedAt','updatedBy'
-  ];
-  await __lm_fetchJSONAuth(
-    `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${encodeURIComponent(MAT_SHEET+'!A1:M1')}?valueInputOption=RAW`,
-    { method: 'PUT', body: { values: [headers] } }
-  );
-}
+  function $(sel){ return document.querySelector(sel); }
 
-async function upsertMaterialRow(payload) {
-  const {
-    materialKey, opacity, doubleSided=false, unlitLike=false,
-    chromaEnable=false, chromaColor='#000000', chromaTolerance=0, chromaFeather=0,
-    roughness='', metalness='', emissiveHex='', updatedBy='mat-ui'
-  } = payload;
+  function wait(ms){ return new Promise(r=>setTimeout(r,ms)); }
 
-  const colA = await __lm_fetchJSONAuth(
-    `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${encodeURIComponent(MAT_SHEET+'!A:A')}`
-  );
-  const rows = colA.values || [];
-  let rowIndex = rows.findIndex(r => (r[0]||'') === materialKey);
-  let rowNumber;
-  if (rowIndex <= 0) {
-    rowNumber = rows.length + 1;
-    await __lm_fetchJSONAuth(
-      `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${encodeURIComponent(`${MAT_SHEET}!A${rowNumber}:A${rowNumber}`)}?valueInputOption=RAW`,
-      { method:'PUT', body:{ values:[[materialKey]] } }
-    );
-  } else {
-    rowNumber = rowIndex + 1;
-  }
-
-  const iso = new Date().toISOString();
-  const rowValues = [
-    opacity ?? '',
-    (doubleSided ? 'TRUE' : 'FALSE'),
-    (unlitLike ? 'TRUE' : 'FALSE'),
-    (chromaEnable ? 'TRUE' : 'FALSE'),
-    chromaColor || '',
-    String(chromaTolerance ?? ''),
-    String(chromaFeather ?? ''),
-    String(roughness ?? ''),
-    String(metalness ?? ''),
-    emissiveHex || '',
-    iso,
-    updatedBy
-  ];
-  const rangeBM = `${MAT_SHEET}!B${rowNumber}:M${rowNumber}`;
-  await __lm_fetchJSONAuth(
-    `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${encodeURIComponent(rangeBM)}?valueInputOption=RAW`,
-    { method:'PUT', body:{ values:[rowValues] } }
-  );
-  console.log('[persist] wrote', { rowNumber, materialKey, rowValues });
-}
-
-// Install wire once UI is present
-(function installWireOnce() {
-  let installed = false;
-
-  async function tryInstall() {
-    if (installed) return;
-    const sel = document.querySelector('#pm-material') || document.querySelector('#materialSelect');
-    const rng = document.querySelector('#pm-opacity-range') || document.querySelector('#opacityRange');
-    if (!sel || !rng) return;
-
-    if (typeof window.__lm_fetchJSONAuth !== 'function') {
-      console.warn('[wire] __lm_fetchJSONAuth missing; postpone');
-      return;
+  async function ensureReady(){
+    // Wait a frame to allow persist script to attach
+    for (let i=0;i<30;i++){
+      if (window.LM_MaterialsPersist) return true;
+      await wait(100);
     }
-
-    installed = true;
-    try { await ensureHeaders(); } catch (e) { console.warn('[wire] ensureHeaders warn', e); }
-
-    const lastSent = new Map();
-    const send = async () => {
-      const materialKey = sel.value || sel.selectedOptions?.[0]?.value || '';
-      if (!materialKey) return;
-      const payload = {
-        materialKey,
-        opacity: parseFloat(rng.value),
-        doubleSided:false, unlitLike:false,
-        chromaEnable:false, chromaColor:'#000000',
-        chromaTolerance:0, chromaFeather:0,
-        roughness:'', metalness:'', emissiveHex:'',
-        updatedBy:'mat-ui'
-      };
-      const sig = JSON.stringify(payload);
-      if (lastSent.get(materialKey) === sig) return;
-      lastSent.set(materialKey, sig);
-      await upsertMaterialRow(payload);
-    };
-
-    let t; const debounced = () => { clearTimeout(t); t = setTimeout(send, 150); };
-    rng.addEventListener('input', debounced,  { passive:true });
-    rng.addEventListener('change', debounced, { passive:true });
-    rng.addEventListener('pointerup', debounced, { passive:true });
-    sel.addEventListener('change', send, { passive:true });
-
-    console.log('[bind] materials persist attached');
+    throw new Error('LM_MaterialsPersist not ready');
   }
 
-  const iv = setInterval(tryInstall, 300);
-  window.addEventListener('load', tryInstall, { once:true });
-  window.addEventListener('lm:mat-ui-ready', tryInstall);
+  function bindUI(){
+    const sel = $('#pm-material');
+    const rng = $('#pm-opacity-range');
+    const out = $('#pm-opacity-val');
+
+    if (!sel || !rng) { warn('UI not found', {sel:!!sel, rng:!!rng}); return; }
+
+    // show live value
+    const show = () => { if (out) out.value = Number(rng.value).toFixed(2); };
+    rng.addEventListener('input', show, {passive:true});
+    show();
+
+    let t;
+    const handler = async () => {
+      const key = sel.value || sel.selectedOptions?.[0]?.value || '';
+      if (!key) return;
+      try {
+        await window.LM_MaterialsPersist.upsert({
+          materialKey: key,
+          opacity: parseFloat(rng.value)
+        });
+      } catch(e) {
+        warn('persist failed', e);
+      }
+    };
+    const debounced = () => { clearTimeout(t); t = setTimeout(handler, 150); };
+
+    rng.addEventListener('input', debounced, {passive:true});
+    rng.addEventListener('change', debounced, {passive:true});
+    rng.addEventListener('pointerup', debounced, {passive:true});
+    sel.addEventListener('change', handler, {passive:true});
+
+    log('wired');
+  }
+
+  (async () => {
+    try {
+      await ensureReady();
+      bindUI();
+    } catch(e){
+      warn('init failed', e);
+    }
+  })();
 })();
