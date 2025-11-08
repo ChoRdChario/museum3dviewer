@@ -78,7 +78,7 @@
     #pm-opacity{
       display:grid;grid-template-columns:1fr auto 44px;gap:8px;align-items:center
     }
-    #pm-opacity select{min-width:0}            /* 狭い幅でも収まるように */
+    #pm-opacity select{min-width:0}
     #pm-opacity input[type="range"]{width:100%}
     #pm-opacity output{min-width:3ch;text-align:right;opacity:.8}
     #ui *{max-width:100%}
@@ -99,7 +99,7 @@
       <div class="pad" style="border-bottom:1px solid var(--line)">
         <div class="row">
           <input id="glbUrl" type="text" placeholder="Drive fileId / GLB URL"/>
-          <button id="btnGlb">Load</button>
+        <button id="btnGlb">Load</button>
         </div>
         <div class="row" style="margin-top:8px">
           <select id="save-target-sheet"><option value="">Select sheet…</option></select>
@@ -200,6 +200,56 @@
   <script src="./material.dropdown.patch.js"></script>
   <script src="./material.orchestrator.js"></script>
 
+  <!-- ▼ 追加：Three.js 側で生成されたマテリアルを UI から除外する軽量フィルタ -->
+  <script>
+    (function(){
+      const UUID_RE=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      const THREE_MAT_RE=/^Mesh(?:Basic|Lambert|Phong|Standard|Physical)Material$/i;
+
+      function applyMaterialFilter(){
+        const sel=document.getElementById('pm-material');
+        if(!sel) return;
+        let removed=0;
+
+        // 後ろから消す
+        for(let i=sel.options.length-1;i>=0;i--){
+          const opt=sel.options[i];
+          const val=(opt.value||'').trim();
+          const txt=(opt.textContent||'').trim();
+          const name=val || txt;
+
+          if(
+            !name ||                       // 空
+            UUID_RE.test(name) ||          // UUID風
+            THREE_MAT_RE.test(name)        // 典型的な Three の自動名
+          ){
+            sel.remove(i);
+            removed++;
+          }
+        }
+        // 先頭にプレースホルダを確実に残す
+        if(!sel.options.length || sel.options[0].value!==''){
+          const p=document.createElement('option');
+          p.value=''; p.textContent='— Select material —';
+          sel.insertBefore(p, sel.options[0]||null);
+        }
+        if(removed) console.log('[mat-dd filter] removed', removed, 'options; left', sel.options.length-1);
+      }
+
+      // GLB検出後（ドロップダウン投入の直後）に一回実行
+      document.addEventListener('lm:glb-detected', ()=> setTimeout(applyMaterialFilter, 0));
+
+      // その後の再投入にも追従（select 子要素の変化を監視）
+      document.addEventListener('DOMContentLoaded', ()=>{
+        const sel=document.getElementById('pm-material');
+        if(!sel) return;
+        const mo=new MutationObserver(()=>applyMaterialFilter());
+        mo.observe(sel,{childList:true});
+      });
+    })();
+  </script>
+  <!-- ▲ 追加ここまで -->
+
   <!-- Optional VSCode content script loader (silences 404) -->
   <script>
     (function(){
@@ -217,3 +267,4 @@
   </script>
 </body>
 </html>
+

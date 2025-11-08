@@ -1,41 +1,17 @@
 
-// material.dropdown.patch.js v3.2
-// Populate #pm-material from scene once it stabilizes (idempotent)
+/* material.dropdown.patch.js v3.3f */
 (function(){
-  const TAG='[mat-dd v3.2]';
-  const seen = new Set();
-
-  function populate(){
-    const sel = document.getElementById('pm-material');
-    const scene = window.__LM_SCENE;
-    if(!sel || !scene) return;
-
-    const names = new Set();
-    scene.traverse(o=>{
-      if(!o.isMesh || !o.material) return;
-      const mats = Array.isArray(o.material)? o.material : [o.material];
-      mats.forEach(m=>{
-        const name = m.name && String(m.name).trim() || m.uuid;
-        names.add(name);
-      });
-    });
-
-    // idempotent: only add missing
-    const existing = new Set(Array.from(sel.options).map(o=>o.value));
-    names.forEach(n=>{
-      if(existing.has(n)) return;
-      const opt = document.createElement('option');
-      opt.value = n;
-      opt.textContent = n;
-      sel.appendChild(opt);
-    });
-
-    console.log(TAG, 'populated', sel.options.length);
+  const TAG='[mat-dd v3.3f]';
+  function origin(){ const o=window.__LM_MAT_ORIGIN; return (o&&o.locked)?o:null; }
+  function uniqueByName(arr){ const seen=new Set(), out=[]; for(const it of arr){ const k=it.name||it.uuid; if(seen.has(k)) continue; seen.add(k); out.push(it);} return out;}
+  function populate(select){
+    const o=origin(); if(!o) return 0;
+    const list=uniqueByName(o.items.slice().sort((a,b)=> (a.name||'').localeCompare(b.name||'')));
+    while(select.firstChild) select.removeChild(select.firstChild);
+    const ph=document.createElement('option'); ph.value=''; ph.textContent='— Select material —'; select.appendChild(ph);
+    for(const {uuid,name} of list){ const opt=document.createElement('option'); opt.value=uuid; opt.textContent=name; select.appendChild(opt); }
+    console.debug(TAG,'populated',list.length); return list.length;
   }
-
-  // hooks
-  window.addEventListener('lm:scene-ready', populate);
-  window.addEventListener('lm:glb-detected', populate);
-  // also attempt after load
-  window.addEventListener('load', ()=> setTimeout(populate, 0), {once:true});
+  function run(){ const sel=document.getElementById('mat-select'); if(!sel) return; const n=populate(sel); if(n===0){ window.addEventListener('lm:glb-detected',()=>setTimeout(()=>populate(sel),0),{once:true}); } }
+  if(document.readyState==='loading'){ document.addEventListener('DOMContentLoaded',run,{once:true}); } else { run(); }
 })();
