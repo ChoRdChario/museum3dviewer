@@ -1,79 +1,45 @@
-// viewer.bridge.addon.js — minimal, non-invasive bridge to match orchestrator expectations
+/* viewer.bridge.addon.js (safe augment) */
 (() => {
   const TAG='[viewer-bridge:addon]';
-  const log=(...a)=>console.log(TAG, ...a);
+  const log=(...a)=>console.log(TAG,...a);
+  window.viewerBridge = window.viewerBridge || {};
 
-  // Respect existing object; add only missing members
-  const vb = (window.viewerBridge = window.viewerBridge || {});
-
-  // 1) Unified material listing
-  if (typeof vb.getMaterialKeys !== 'function') {
-    vb.getMaterialKeys = async () => {
-      // Prefer existing helper if present
-      if (typeof window.listMaterials === 'function') {
-        const arr = window.listMaterials() || [];
-        const keys = arr.map(x => x?.name ?? x?.materialKey).filter(Boolean);
-        // uniq + sort
-        return Array.from(new Set(keys)).sort((a,b)=>a.localeCompare(b,'ja'));
-      }
-      // Fallback: direct scene traversal
-      const scene =
-        window.__LM_SCENE ||
-        window.__lm_scene  ||
-        window.viewer?.scene ||
-        (typeof window.getScene === 'function' ? window.getScene() : null);
-
-      const keys = new Set();
-      try {
-        scene?.traverse?.(o => {
-          if (!o?.isMesh) return;
-          const mats = Array.isArray(o.material) ? o.material : (o.material ? [o.material] : []);
-          for (const m of mats) {
-            const n = (m?.name || '').trim();
-            if (!n) continue;
-            // Keep generated names too; user may rename later
-            keys.add(n);
-          }
+  if (!window.viewerBridge.getMaterialKeys){
+    window.viewerBridge.getMaterialKeys = async function(){
+      const names = new Set();
+      try{
+        const scene = window.viewer?.scene;
+        scene?.traverse?.(obj=>{
+          const m = obj.material;
+          if (!m) return;
+          const put = (mm)=> mm?.name && names.add(mm.name);
+          if (Array.isArray(m)) m.forEach(put); else put(m);
         });
-      } catch {}
-      return Array.from(keys).sort((a,b)=>a.localeCompare(b,'ja'));
+      }catch(e){ console.warn(TAG, 'getMaterialKeys failed', e); }
+      const arr = [...names].sort();
+      log('getMaterialKeys ->', arr);
+      return arr;
     };
-    log('getMaterialKeys added');
   }
 
-  // 2) Opacity setter expected by orchestrator
-  if (typeof vb.setMaterialOpacity !== 'function') {
-    vb.setMaterialOpacity = (key, value) => {
-      const scene =
-        window.__LM_SCENE ||
-        window.__lm_scene  ||
-        window.viewer?.scene ||
-        (typeof window.getScene === 'function' ? window.getScene() : null);
-
-      if (!scene || !key) return;
-      try {
-        scene.traverse(o => {
-          if (!o?.isMesh) return;
-          const mats = Array.isArray(o.material) ? o.material : (o.material ? [o.material] : []);
-          for (const m of mats) {
-            if (!m || m.name !== key) continue;
-            if ('opacity' in m) m.opacity = value;
-            if ('transparent' in m) m.transparent = value < 1.0 || m.transparent;
-            if ('needsUpdate' in m) m.needsUpdate = true;
-          }
+  if (!window.viewerBridge.setMaterialOpacity){
+    window.viewerBridge.setMaterialOpacity = function(key, value){
+      try{
+        const v = Math.max(0, Math.min(1, +value || 0));
+        const scene = window.viewer?.scene;
+        scene?.traverse?.(obj=>{
+          const m = obj.material;
+          if (!m) return;
+          const apply = (mm)=>{
+            if (mm?.name !== key) return;
+            mm.transparent = v < 1 || mm.transparent;
+            mm.opacity = v;
+            mm.needsUpdate = true;
+          };
+          if (Array.isArray(m)) m.forEach(apply); else apply(m);
         });
-        log('setMaterialOpacity done for', key, value);
-      } catch {}
-    };
-    log('setMaterialOpacity added');
-  }
-
-  // 3) (Optional) expose a small debug helper
-  if (typeof vb.debugListMaterials !== 'function') {
-    vb.debugListMaterials = async () => {
-      const keys = await vb.getMaterialKeys();
-      console.table(keys.map(k => ({key:k})));
-      return keys;
+        log('setMaterialOpacity', key, value);
+      }catch(e){ console.warn(TAG, 'setMaterialOpacity failed', e); }
     };
   }
 })();
