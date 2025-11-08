@@ -1,70 +1,88 @@
-/* material.orchestrator.js v3.3
- * Wires UI <-> Three.js materials and keeps sheet bridge hooks intact.
- * Minor update: now reads from window.__LM_ORIGINAL_MATS if available.
- */
+
+// material.orchestrator.js v3.2
+// Wires UI (range/select) to scene materials and emits persist signals.
 (function(){
-  const TAG='[mat-orch v3.3]';
-  console.log(TAG, 'ready');
+  const TAG='[mat-orch v3.2]';
+  let currentKey = null;
+  let sheetCtx = null; // {spreadsheetId, sheetGid}
 
-  // UI refs
-  const sel = document.getElementById('pm-material');
-  const rng = document.getElementById('pm-opacity-range');
-  const out = document.getElementById('pm-opacity-val');
+  function $(id){ return document.getElementById(id); }
 
-  if(!sel || !rng || !out){ console.warn(TAG, 'controls missing'); return; }
+  // listen sheet context for later save signals
+  window.addEventListener('lm:sheet-context', (e)=>{
+    sheetCtx = e?.detail || null;
+  });
 
-  function getMaterialByName(name){
-    if (!name) return null;
-    const map = window.__LM_ORIGINAL_MATS;
-    if (map && map.has(name)) return map.get(name);
+  // helper to visit materials by key
+  function visitMaterialsByKey(key, fn){
+    const scene = window.__LM_SCENE;
+    if(!scene || !key) return 0;
+    let count = 0;
+    scene.traverse(o=>{
+      if(!o.isMesh || !o.material) return;
+      const mats = Array.isArray(o.material)? o.material : [o.material];
+      mats.forEach(m=>{
+        const name = m.name && String(m.name).trim() || m.uuid;
+        if(name === key){
+          count++;
+          fn(m, o);
+        }
+      });
+    });
+    return count;
+  }
 
-    // Fallback: traverse scene
-    const scene = window.__LM_SCENE || (window.viewer && window.viewer.scene);
-    let found = null;
-    if (scene){
-      scene.traverse(obj=>{
-        if(found || !obj.isMesh) return;
-        const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
-        for (const m of mats){ if (m && m.name === name){ found = m; break; } }
+  // ensure UI reflects actual material value
+  function syncUIFromScene(key){
+    const rng = $('pm-opacity-range');
+    const out = $('pm-opacity-val');
+    if(!rng || !out) return;
+
+    let val = 1.0;
+    let found = false;
+    visitMaterialsByKey(key, (m)=>{
+      val = (typeof m.opacity==='number') ? m.opacity : 1.0;
+      found = true;
+    });
+    if(found){
+      rng.value = String(val);
+      out.value = Number(val).toFixed(2);
+    }
+  }
+
+  // live apply
+  window.addEventListener('lm:pm-opacity-input', (e)=>{
+    const v = Math.min(1, Math.max(0, Number(e.detail?.value ?? 1)));
+    if(currentKey){
+      visitMaterialsByKey(currentKey, (m)=>{
+        m.opacity = v;
+        m.transparent = true;
+        m.depthWrite = v >= 0.999;
+        m.needsUpdate = true;
       });
     }
-    return found;
-  }
+  });
 
-  function applyOpacity(m, value){
-    if(!m) return;
-    const v = Math.max(0, Math.min(1, Number(value)));
-    m.opacity = v;
-    m.transparent = true;
-    m.depthWrite = v >= 0.999;
-    m.alphaTest = v < 0.99 ? 0.001 : 0;
-    m.needsUpdate = true;
-  }
-
-  function updateOut(){
-    const v = Number(rng.value);
-    out.textContent = v.toFixed(2);
-  }
-
-  function onChange(){
-    const name = sel.value;
-    const m = getMaterialByName(name);
-    applyOpacity(m, rng.value);
-    updateOut();
-
-    // Notify sheet bridge (if present)
-    try {
-      window.dispatchEvent(new CustomEvent('lm:mat-opacity', {
-        detail: { materialKey: name, opacity: Number(rng.value) }
+  // commit + persist signal
+  window.addEventListener('lm:pm-opacity-change', (e)=>{
+    const v = Math.min(1, Math.max(0, Number(e.detail?.value ?? 1)));
+    if(currentKey){
+      // fire a generic upsert event that a bridge can persist
+      window.dispatchEvent(new CustomEvent('lm:materials-upsert', {
+        detail: {
+          key: currentKey,
+          changes: { opacity: v },
+          sheetContext: sheetCtx,
+          updatedAt: new Date().toISOString()
+        }
       }));
-    } catch(e){ /* no-op */ }
-  }
+    }
+  });
 
-  sel.addEventListener('change', onChange, {passive:true});
-  rng.addEventListener('input', onChange, {passive:true});
-  rng.addEventListener('change', onChange, {passive:true});
+  window.addEventListener('lm:pm-material-selected', (e)=>{
+    currentKey = e?.detail?.key || null;
+    if(currentKey) syncUIFromScene(currentKey);
+  });
 
-  // Initialize displayed value
-  updateOut();
-
+  console.log(TAG, 'ready');
 })();
