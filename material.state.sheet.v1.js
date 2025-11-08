@@ -111,6 +111,7 @@
     a.doubleSided===b.doubleSided && a.unlit===b.unlit;
 
   async function schedule(){
+    if (window.__lm_restoringMaterial) { return; }
     const s = snapshot(); if (!s) return;
     if (same(s,last)) return;
     last = s;
@@ -121,13 +122,29 @@
   }
 
   function arm(){
-    ui.sel  && ui.sel.addEventListener('change', schedule, false);
+    // select change no-save (guarded)
+    // ui.sel && ui.sel.addEventListener('change', schedule, false);
     ui.rng  && ui.rng.addEventListener('input',  schedule, false);
     ui.dbl  && ui.dbl.addEventListener('change', schedule, false);
     ui.unlit&& ui.unlit.addEventListener('change', schedule, false);
     log('armed');
   }
 
+  
+
+  // === expose debounced control for other modules (v6.12) ===
+  window.lmCancelPendingSave = function(){ if (timer){ clearTimeout(timer); timer = 0; } };
+  window.lmScheduleSave = function(materialKey, partial){
+    // Update only opacity for now; mirror UI then call schedule()
+    try{
+      if (ui.rng && typeof partial?.opacity === 'number') {
+        // do not trigger input handler here; orchestrator will handle viewer apply
+        ui.rng.value = String(partial.opacity);
+      }
+    }catch(_){}
+    schedule();
+  };
+
   window.addEventListener('lm:glb-loaded', ()=>setTimeout(schedule,0));
   setTimeout(arm, 0);
-})();
+})(
