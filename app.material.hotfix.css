@@ -1,5 +1,9 @@
-/* app.material.hotfix.css (optional) */
-#pm-opacity input[type="range"]{
-  pointer-events: auto;
-  touch-action: pan-y;
-}
+/* app.material.hotfix.css
+   Minimal, safe styles to keep the Material card consistent.
+*/
+.pm-card.card { padding: 10px; }
+.pm-row { display:flex; gap: 12px; align-items:center; margin-top: 8px; }
+.pm-title { font-weight: 600; margin-bottom: 6px; }
+.pm-select { width: 100%; }
+.pm-range { width: 100%; }
+.small { opacity: 0.7; font-size: 12px; }
