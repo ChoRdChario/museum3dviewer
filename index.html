@@ -258,8 +258,6 @@
   <!-- ===== LociMyu material bridge stack (order matters) ===== -->
   <script type="module" src="./viewer.bridge.module.js"></script>
   <script type="module" src="./materials.sheet.bridge.js"></script>
-  <!-- NEW: persist layer for per-material settings (sheets/local) -->
-  <script type="module" src="./materials.sheet.persist.js"></script>
 
   <!-- Runtime/UI helpers (non-module so they expose globals) -->
   <script src="./material.runtime.patch.js"></script>
@@ -268,6 +266,37 @@
 
   <!-- Orchestrator runs after dropdown/runtime is ready -->
   <script type="module" src="./material.orchestrator.js"></script>
+
+  <!-- NEW: persist layer for per-material settings (sheets/local)
+       Load only after __lm_fetchJSONAuth is available -->
+  <script>
+  (function(){
+    const SRC = './materials.sheet.persist.js';
+    const TAG = '[persist-loader]';
+    function hasAuth(){ return typeof window.__lm_fetchJSONAuth === 'function'; }
+    function inject(){
+      const s = document.createElement('script');
+      s.type = 'module';
+      s.src = SRC;
+      s.onload = () => console.log(TAG,'loaded', SRC);
+      s.onerror = (e) => console.warn(TAG,'failed to load', SRC, e);
+      document.currentScript.after(s);
+    }
+    if (hasAuth()) { inject(); }
+    else {
+      let tries = 0, max = 60; // ~15s
+      const id = setInterval(() => {
+        tries++;
+        if (hasAuth()) { clearInterval(id); inject(); }
+        else if (tries >= max) { clearInterval(id); console.warn(TAG,'__lm_fetchJSONAuth not present'); }
+      }, 250);
+      window.addEventListener('lm:auth-ready', () => {
+        if (!hasAuth()) return;
+        clearInterval(id); inject();
+      }, { once: true });
+    }
+  })();
+  </script>
 
   <!-- lm-dx v4.3: keep only the click-detox; skip legacy material anchors -->
   <script>
