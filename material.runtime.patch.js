@@ -1,129 +1,115 @@
-// material.runtime.patch.js
-// v2.1 - enforce single opacity UI (select + range + readout) under #pm-opacity
-// Also guards duplicate event wiring and stale legacy controls.
-console.log('[mat-rt v2.1] start');
+// material.runtime.patch.js  v2.2  (drop-in replacement)
+// LociMyu Material Panel runtime normalizer
+// - Prevents UI duplication loops by disconnecting observer while mutating
+// - Limits normalization to #pm-opacity (or #pane-material fallback)
+// - Auto-disconnects after UI stabilizes (idle 800ms)
+// - Singleton guard + kill switch
 
-(() => {
-  const PANEL_ID = 'pm-opacity';
-  const RANGE_ID = 'materialOpacity';
-  const SELECT_ID = 'materialSelect';
-  const READOUT_CLASS = 'mat-op-readout';
+(function(){
+  try {
+    console.log('[mat-rt v2.2] start');
 
-  // Singleton guard per page
-  if (window.__lm_mat_rt_v21) {
-    console.log('[mat-rt v2.1] already active');
-    return;
-  }
-  window.__lm_mat_rt_v21 = true;
+    // --- global kill switch (set window.__LM_DISABLE_MAT_RT = true to disable) ---
+    if (window.__LM_DISABLE_MAT_RT) { console.warn('[mat-rt] disabled'); return; }
 
-  const ensureStructure = () => {
-    const panel = document.getElementById(PANEL_ID) || document.querySelector('#panel-material #pm-opacity') || document.querySelector('#pane-material #pm-opacity');
-    if (!panel) return;
+    // --- singleton guard ---
+    const NS = '__lm_mat_rt';
+    if (window[NS]?.armed) { console.log('[mat-rt] already armed'); return; }
+    window[NS] = { armed:true };
 
-    // Remove legacy duplicate blocks that might have been injected before
-    // Keep the first range + first select. Remove others.
-    const ranges = panel.querySelectorAll('input[type="range"]');
-    for (let i = 0; i < ranges.length; i++) {
-      const r = ranges[i];
-      // normalize attributes
-      r.min = r.min || "0";
-      r.max = r.max || "1";
-      r.step = r.step || "0.01";
-      r.id = r.id || RANGE_ID;
-      r.removeAttribute('disabled');
-      r.style.pointerEvents = 'auto';
-      r.style.touchAction = 'none';
-      if (i > 0) {
-        r.parentElement && r.parentElement.removeChild(r);
-      }
-    }
+    // --- resolve host ---
+    const host =
+      document.getElementById('pm-opacity') ||
+      document.getElementById('pane-material') ||
+      document.getElementById('panel-material');
+    if (!host) { console.warn('[mat-rt] host not found'); return; }
 
-    const selects = panel.querySelectorAll('select');
-    for (let i = 0; i < selects.length; i++) {
-      const s = selects[i];
-      s.id = s.id || SELECT_ID;
-      s.removeAttribute('disabled');
-      if (i > 0) {
-        s.parentElement && s.parentElement.removeChild(s);
-      }
-    }
+    let busy = FalseToFalse(false);
+    let idleTimer = null;
+    const OBS_CFG = { childList: true, subtree: true };
 
-    // Readout badge (single)
-    let readout = panel.querySelector('.' + READOUT_CLASS);
-    if (!readout) {
-      readout = document.createElement('div');
-      readout.className = READOUT_CLASS;
-      readout.textContent = '';
-      // place directly under panel header block if exists, else append
-      panel.appendChild(readout);
-    }
+    const observer = new MutationObserver((muts) => {
+      if (busy) return;
+      busy = true;
 
-    // If range exists, keep its sibling numeric badge unique
-    const updateReadout = () => {
-      const range = panel.querySelector('#' + RANGE_ID) || panel.querySelector('input[type="range"]');
-      if (!range) return;
-      const v = (Number(range.value)).toFixed(2);
-      readout.textContent = v;
-    };
-    updateReadout();
+      // Stop observing while we touch the DOM to avoid feedback loops
+      observer.disconnect();
+      try {
+        normalizeOnce();
+      } catch (err) {
+        console.warn('[mat-rt] normalize error', err);
+      } finally {
+        // re-arm on next frame to avoid same-frame retriggers
+        requestAnimationFrame(() => {
+          try { observer.observe(host, OBS_CFG); } catch(_) {}
+          busy = false;
 
-    // Wire once
-    const range = panel.querySelector('#' + RANGE_ID) || panel.querySelector('input[type="range"]');
-    if (range && !range.__lm_rt_bound) {
-      range.__lm_rt_bound = true;
-      range.addEventListener('input', updateReadout, {passive:true});
-    }
-
-    // Clean up any stray numeric texts showing the same value under pm-opacity (old UI)
-    const numericBadges = panel.querySelectorAll('span,div');
-    let keptOne = false;
-    numericBadges.forEach(el => {
-      if (el === readout) return;
-      const t = (el.textContent || '').trim();
-      if (/^0?\.\d{1,3}$|^1(\.0+)?$/.test(t)) {
-        if (!keptOne) {
-          // keep only the generated readout, remove others
-          if (el.parentElement) el.parentElement.removeChild(el);
-          keptOne = true;
-        } else {
-          if (el.parentElement) el.parentElement.removeChild(el);
-        }
+          // Stabilize: if no further changes for 800ms, disconnect
+          clearTimeout(idleTimer);
+          idleTimer = setTimeout(() => {
+            try { observer.disconnect(); } catch(_) {}
+            console.log('[mat-rt v2.2] stabilized; observer disconnected');
+          }, 800);
+        });
       }
     });
 
-    // Remove any duplicated field rows that might be produced by previous injections
-    const rows = panel.querySelectorAll('.field, .row, .lm-row');
-    const seen = new Set();
-    rows.forEach(r => {
-      const sig = r.innerHTML.replace(/\s+/g,' ').slice(0,160);
-      if (seen.has(sig)) {
-        r.remove();
-      } else {
-        seen.add(sig);
+    // initial normalize + observe
+    normalizeOnce();
+    observer.observe(host, OBS_CFG);
+    console.log('[mat-rt v2.2] wired');
+
+    // ---- helpers ----
+    function FalseToFalse(v){ return !!v; } // tiny helper to keep terseness
+
+    function normalizeOnce(){
+      // Work area is the opacity block; if missing, fall back to host
+      const area =
+        document.getElementById('pm-opacity') ||
+        host;
+
+      if (!area) return;
+
+      // 1) select (material dropdown): keep first, remove extras
+      pruneExtras(area.querySelectorAll('select'), 1, 'selects');
+
+      // 2) range (opacity slider): keep first, remove extras
+      pruneExtras(area.querySelectorAll('input[type="range"]'), 1, 'ranges');
+
+      // 3) numeric readout(s): keep first
+      pruneExtras(
+        area.querySelectorAll('.pm-readout, output[data-role="opacity"], .lm-op-readout'),
+        1,
+        'readouts'
+      );
+
+      // 4) attribute hygiene for the kept range
+      const range = area.querySelector('input[type="range"]');
+      if (range) {
+        if (range.min !== '0') range.min = '0';
+        if (range.max !== '1') range.max = '1';
+        if (range.step !== '0.01') range.step = '0.01';
       }
-    });
-  };
 
-  const mo = new MutationObserver(() => {
-    ensureStructure();
-  });
+      // 5) avoid accidental CSS overlay issues
+      // ensure pointer events are on for range
+      if (range) {
+        const s = range.style;
+        if (s && s.pointerEvents !== 'auto') s.pointerEvents = 'auto';
+      }
+    }
 
-  const arm = () => {
-    const target = document.getElementById(PANEL_ID) || document.querySelector('#panel-material') || document.querySelector('#pane-material');
-    if (!target) return false;
-    mo.observe(target, {childList:true, subtree:true});
-    ensureStructure();
-    console.log('[mat-rt v2.1] wired');
-    return true;
-  };
+    function pruneExtras(nodeList, keepCount, label){
+      const nodes = Array.from(nodeList);
+      if (nodes.length <= keepCount) return;
+      const keep = nodes.slice(0, keepCount);
+      const extras = nodes.slice(keepCount);
+      extras.forEach(n => { try { n.remove(); } catch(_) {} });
+      console.log(`[mat-rt] pruned extra ${label}:`, extras.length);
+      return keep[0] || null;
+    }
 
-  // Try now; also on DOMContentLoaded
-  if (!arm()) {
-    document.addEventListener('DOMContentLoaded', arm, {once:true});
-    // soft poll (short time) in case UI is synthesized after boot
-    let tries = 0;
-    const id = setInterval(() => {
-      if (arm() || ++tries > 40) clearInterval(id);
-    }, 100);
+  } catch (e) {
+    console.warn('[mat-rt] fatal', e);
   }
 })();

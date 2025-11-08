@@ -1,10 +1,5 @@
-/* app.material.hotfix.css - v2.1 */
-#pm-opacity input[type="range"] {
-  pointer-events: auto !important;
-  touch-action: none !important;
-}
-#pm-opacity .mat-op-readout {
-  margin-top: 6px;
-  font-size: 12px;
-  opacity: 0.8;
+/* app.material.hotfix.css (optional) */
+#pm-opacity input[type="range"]{
+  pointer-events: auto;
+  touch-action: pan-y;
 }
