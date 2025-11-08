@@ -1,65 +1,82 @@
-// materials.ui.wire.js
-// v1.1 — binds #pm-material & #pm-opacity-range to Sheets via LM_MaterialsPersist
 
+/*!
+ * materials.ui.wire.js v1.2
+ * - Binds to #pm-material / #pm-opacity-range
+ * - Debounced persist using LM_MaterialsPersist.upsert()
+ * - Waits for auth helper and sheet-context
+ */
 (function(){
-  const TAG='[mat-ui-wire v1.1]';
-  const log=(...a)=>console.log(TAG,...a);
-  const warn=(...a)=>console.warn(TAG,...a);
+  const LOG = (...a)=>console.log('[mat-ui-wire v1.2]', ...a);
+  const WARN = (...a)=>console.warn('[mat-ui-wire v1.2]', ...a);
 
-  function $(sel){ return document.querySelector(sel); }
-
-  function wait(ms){ return new Promise(r=>setTimeout(r,ms)); }
-
-  async function ensureReady(){
-    // Wait a frame to allow persist script to attach
-    for (let i=0;i<30;i++){
-      if (window.LM_MaterialsPersist) return true;
-      await wait(100);
-    }
-    throw new Error('LM_MaterialsPersist not ready');
+  function waitAuthHelper(timeoutMs=15000){
+    if (typeof window.__lm_fetchJSONAuth === 'function') return Promise.resolve();
+    return new Promise((resolve,reject)=>{
+      const t0 = performance.now();
+      const iv = setInterval(()=>{
+        if (typeof window.__lm_fetchJSONAuth === 'function'){
+          clearInterval(iv); resolve();
+        } else if (performance.now() - t0 > timeoutMs){
+          clearInterval(iv); reject(new Error('__lm_fetchJSONAuth not present'));
+        }
+      }, 50);
+    });
   }
 
-  function bindUI(){
-    const sel = $('#pm-material');
-    const rng = $('#pm-opacity-range');
-    const out = $('#pm-opacity-val');
+  function waitCtx(timeoutMs=15000){
+    // quick path: if ctx already present
+    const ok = (window.__LM_SHEET_CTX && window.__LM_SHEET_CTX.spreadsheetId);
+    if (ok) return Promise.resolve(window.__LM_SHEET_CTX);
+    return new Promise((resolve,reject)=>{
+      const t0 = performance.now();
+      const on = (e)=>{
+        const c = (e && e.detail) || window.__LM_SHEET_CTX;
+        if (c && c.spreadsheetId){ cleanup(); resolve(c); }
+      };
+      const cleanup = ()=>{
+        window.removeEventListener('lm:sheet-context', on, true);
+      };
+      window.addEventListener('lm:sheet-context', on, true);
+      setTimeout(()=>{ cleanup(); reject(new Error('sheet-context timeout')); }, timeoutMs);
+    });
+  }
 
-    if (!sel || !rng) { warn('UI not found', {sel:!!sel, rng:!!rng}); return; }
+  (async function init(){
+    try{
+      await waitAuthHelper().catch(()=>{});
+      await waitCtx().catch(()=>{});
+    }catch(e){ WARN('pre-wait failed', e); }
 
-    // show live value
-    const show = () => { if (out) out.value = Number(rng.value).toFixed(2); };
-    rng.addEventListener('input', show, {passive:true});
-    show();
+    const sel = document.querySelector('#pm-material');
+    const rng = document.querySelector('#pm-opacity-range');
+    if (!sel || !rng){
+      WARN('UI not found', {sel: !!sel, rng: !!rng});
+      return;
+    }
 
-    let t;
-    const handler = async () => {
+    // ensure we have persist
+    const P = window.LM_MaterialsPersist;
+    if (!P || typeof P.upsert !== 'function'){
+      WARN('LM_MaterialsPersist missing');
+      return;
+    }
+
+    let timer;
+    const handler = async ()=>{
       const key = sel.value || sel.selectedOptions?.[0]?.value || '';
       if (!key) return;
-      try {
-        await window.LM_MaterialsPersist.upsert({
-          materialKey: key,
-          opacity: parseFloat(rng.value)
-        });
-      } catch(e) {
-        warn('persist failed', e);
-      }
+      const opacity = parseFloat(rng.value);
+      try{
+        await P.upsert({ materialKey:key, opacity });
+      }catch(err){ WARN('persist failed', err); }
     };
-    const debounced = () => { clearTimeout(t); t = setTimeout(handler, 150); };
+    const debounced = ()=>{ clearTimeout(timer); timer = setTimeout(handler, 150); };
 
     rng.addEventListener('input', debounced, {passive:true});
     rng.addEventListener('change', debounced, {passive:true});
     rng.addEventListener('pointerup', debounced, {passive:true});
     sel.addEventListener('change', handler, {passive:true});
 
-    log('wired');
-  }
-
-  (async () => {
-    try {
-      await ensureReady();
-      bindUI();
-    } catch(e){
-      warn('init failed', e);
-    }
+    LOG('wired');
   })();
 })();
