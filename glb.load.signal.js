@@ -1,51 +1,50 @@
-// glb.load.signal.js
-// Guarantees a 'lm:glb-loaded' event after the user clicks Load and the scene gains meshes.
+
+/* glb.load.signal.js — v1.1 (quiet)
+ * Purpose: After user presses Load, detect when GLB content arrives,
+ * then emit a single lm:glb-loaded signal with timestamp.
+ */
 (() => {
-  const TAG='[glb-signal v1]';
-  const log=(...a)=>console.log(TAG,...a);
-  const btn = document.getElementById('btnGlb') || document.querySelector('button[data-action="load"], button#load');
-  let watching = false;
+  const TAG='[glb-signal v1.1]';
+  const seen = new Set();
+  function qlog(key, ...rest){ if (seen.has(key)) return; seen.add(key); console.log(TAG, key, ...rest); }
 
-  function getScene(){
-    return (
-      window.__LM_SCENE ||
-      window.__lm_scene ||
-      (window.viewer && window.viewer.scene) ||
-      (window.viewerBridge && typeof window.viewerBridge.getScene === 'function' && window.viewerBridge.getScene()) ||
-      null
-    );
+  function sceneChildCount(){
+    const s = window.__LM_SCENE || window.__lm_scene || (window.viewer && window.viewer.scene) || null;
+    return (s && s.children && s.children.length) || 0;
   }
 
-  function startWatch(){
-    if (watching) return;
-    watching = true;
-    const scene = getScene();
-    const base = (scene && scene.children ? scene.children.length : 0);
-    const t0 = Date.now();
-    const id = setInterval(() => {
-      const sc = getScene();
-      const n = (sc && sc.children ? sc.children.length : 0);
-      if (n > base + 1) {
-        clearInterval(id);
-        watching = false;
-        const detail = { before: base, after: n, ms: Date.now()-t0 };
-        log('glb detected', detail);
-        window.dispatchEvent(new CustomEvent('lm:glb-loaded', { detail }));
-      }
-    }, 200);
-    setTimeout(() => { clearInterval(id); watching = false; }, 20000);
-  }
-
-  if (btn) {
+  function onceLoadArm(){
+    const btn = document.getElementById('btnGlb') || document.querySelector('button#btnGlb,[data-action="load-glb"]');
+    if (!btn) return;
     btn.addEventListener('click', () => {
-      startWatch();
-      // safety: also dispatch a late ping in case scene already updated
-      setTimeout(startWatch, 1500);
-    }, { capture:false });
-    log('hooked to Load button');
+      const before = sceneChildCount();
+      const start = performance.now();
+      let last = before;
+      let ticks = 0;
+      const maxTicks = 600; // ~10s
+      const iv = setInterval(() => {
+        const now = sceneChildCount();
+        ticks++;
+        if (now > last && now > 2){
+          clearInterval(iv);
+          const ts = Date.now();
+          qlog('glb-detected', {before, after: now, ms: Math.round(performance.now()-start)});
+          try {
+            window.dispatchEvent(new CustomEvent('lm:glb-loaded', { detail: { before, after: now, ts } }));
+          } catch(_) {}
+        } else if (ticks >= maxTicks){
+          clearInterval(iv);
+        } else {
+          last = now;
+        }
+      }, 16); // ~60fps
+    }, { once:false });
+    qlog('armed');
+  }
+
+  if (document.readyState === 'loading'){
+    document.addEventListener('DOMContentLoaded', onceLoadArm, { once:true });
   } else {
-    log('Load button not found; falling back to scene polling');
-    // fallback: general polling for the first big mesh increase
-    startWatch();
+    onceLoadArm();
   }
 })();

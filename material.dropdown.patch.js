@@ -1,110 +1,153 @@
-// material.dropdown.patch.js  v2.1
-// Adds 'lm:glb-loaded' trigger and stronger orchestration to populate material select
-(() => {
-  const TAG = '[mat-dd-fix v2.1]';
-  const log  = (...a) => console.log(TAG, ...a);
-  const warn = (...a) => console.warn(TAG, ...a);
 
-  function getSelect() {
-    const pane = document.querySelector('#pane-material') || document;
-    return (
-      pane.querySelector('#materialSelect') ||
-      pane.querySelector('#pm-material')   ||
-      pane.querySelector('select[aria-label*="material" i]') ||
-      null
-    );
+/* material.dropdown.patch.js — v2.2 (quiet)
+ * Purpose: Populate #materialSelect reliably after GLB load,
+ *          with debounced one-shot execution and quiet logging.
+ */
+(() => {
+  const TAG = '[mat-dd-fix v2.2]';
+  // ---- quiet logger (prints at most once per message key) ----
+  const seen = new Set();
+  function qlog(key, ...rest){
+    if (seen.has(key)) return;
+    seen.add(key);
+    console.log(TAG, key, ...rest);
   }
-  function getScene() {
+  function qwarn(key, ...rest){
+    if (seen.has(key)) return;
+    seen.add(key);
+    console.warn(TAG, key, ...rest);
+  }
+
+  // ---- state guards ----
+  let armed = false;           // Avoid re-wiring listeners
+  let lastSig = 0;             // Last handled signal timestamp
+  let lastKeysHash = '';       // To avoid re-populating with same keys
+  let observer = null;         // MutationObserver reference
+
+  function hash(arr){
+    try { return String(arr.join('|')); } catch(_) { return String(arr); }
+  }
+
+  function getScene(){
     return (
       window.__LM_SCENE ||
       window.__lm_scene ||
       (window.viewer && window.viewer.scene) ||
-      (window.viewerBridge && typeof window.viewerBridge.getScene === 'function' && window.viewerBridge.getScene()) ||
+      (window.viewerBridge && window.viewerBridge.getScene && window.viewerBridge.getScene()) ||
       null
     );
   }
-  function collectMaterialKeys(scene) {
+
+  function collectMaterialKeys(scene){
     const keys = new Set();
+    if (!scene || !scene.traverse) return [];
     try {
-      if (window.viewerBridge?.getMaterialKeys) {
-        const r = window.viewerBridge.getMaterialKeys();
-        if (Array.isArray(r)) r.forEach(k => keys.add(String(k)));
-      }
-    } catch {}
-    try {
-      if (scene?.traverse) {
-        scene.traverse(o => {
-          if (!o || !o.isMesh || !o.material) return;
-          const mats = Array.isArray(o.material) ? o.material : [o.material];
-          for (const m of mats) {
-            const name = (m && m.name ? String(m.name).trim() : '');
-            if (name) keys.add(name);
-          }
+      scene.traverse(obj => {
+        const m = obj && obj.material;
+        if (!m) return;
+        const mats = Array.isArray(m) ? m : [m];
+        mats.forEach(mm => {
+          const name = (mm && mm.name ? String(mm.name).trim() : '');
+          if (name) keys.add(name);
         });
-      }
-    } catch (e) { warn('traverse failed', e); }
+      });
+    } catch (e) {
+      qwarn('collect-error', e);
+    }
     return Array.from(keys).sort();
   }
-  function populate(sel, keys) {
-    if (!sel) return 0;
-    const current = sel.value;
+
+  function getSelect(){
+    // prefer #materialSelect; fallback to pm-material
+    return (
+      document.getElementById('materialSelect') ||
+      document.getElementById('pm-material') ||
+      document.querySelector('#pane-material select, #panel-material select')
+    );
+  }
+
+  function populate(keys){
+    const sel = getSelect();
+    if (!sel) { qwarn('no-select'); return false; }
+    const newHash = hash(keys);
+    if (keys.length === 0) { qwarn('no-keys'); return false; }
+    if (newHash === lastKeysHash) { return false; } // No change
+    lastKeysHash = newHash;
+    const prev = sel.value;
     sel.innerHTML = '';
     const opt0 = document.createElement('option');
-    opt0.value = '';
-    opt0.textContent = '— Select —';
+    opt0.value = ''; opt0.textContent = '— Select —';
     sel.appendChild(opt0);
     keys.forEach(k => {
       const o = document.createElement('option');
-      o.value = k;
-      o.textContent = k;
+      o.value = k; o.textContent = k;
       sel.appendChild(o);
     });
-    if (current && keys.includes(current)) sel.value = current;
-    sel.dispatchEvent(new Event('change', { bubbles: true }));
-    log('dropdown populated:', keys.length);
-    return keys.length;
+    if (prev && keys.includes(prev)) sel.value = prev;
+    qlog('populated', keys.length);
+    return true;
   }
 
-  let tries = 0, busy = false;
-  async function attempt(reason='') {
-    if (busy) return;
-    busy = true;
-    const sel = getSelect();
+  // --- core pump ---
+  let pumpTimer = null;
+  async function pump(reason){
+    // throttle calls in a frame
+    if (pumpTimer) return;
+    pumpTimer = setTimeout(() => { pumpTimer = null; }, 0);
+
     const scene = getScene();
-    if (!sel || !scene) { busy = false; return; }
-    const n = populate(sel, collectMaterialKeys(scene));
-    if (n === 0 && tries < 10) {
-      tries++;
-      setTimeout(() => attempt('retry'), 250 + tries * 150);
-    } else if (n > 0) {
-      tries = 0;
-    }
-    busy = false;
+    if (!scene) return; // wait
+
+    const keys = collectMaterialKeys(scene);
+    const changed = populate(keys);
+    if (changed && observer) { observer.disconnect(); observer = null; }
   }
 
-  // Triggers
-  setTimeout(() => attempt('initial'), 200);
-  window.addEventListener('lm:scene-ready',  () => attempt('scene-ready'));
-  window.addEventListener('lm:materials-changed', () => attempt('materials-changed'));
-  window.addEventListener('lm:glb-loaded', () => attempt('glb-loaded')); // <— new
+  // ---- arm listeners once ----
+  function arm(){
+    if (armed) return;
+    armed = true;
 
-  const poll = setInterval(() => {
-    const sc = getScene();
-    if (!sc) return;
-    const count = sc?.children?.length || 0;
-    if (count > 2) attempt('poll');
-  }, 500);
-  setTimeout(() => clearInterval(poll), 30000);
+    // 1) our dedicated signal from glb.load.signal.js
+    window.addEventListener('lm:glb-loaded', ev => {
+      const t = (ev && ev.detail && ev.detail.ts) || Date.now();
+      if (t <= lastSig) return;
+      lastSig = t;
+      pump('glb-signal');
+    }, { passive: true });
 
-  const matTabBtn = document.getElementById('tab-material');
-  if (matTabBtn) matTabBtn.addEventListener('click', () => setTimeout(() => attempt('tab-click'), 50));
+    // 2) compatibility with existing event
+    window.addEventListener('lm:scene-ready', () => pump('scene-ready'), { passive: true });
 
-  const mo = new MutationObserver(() => {
-    const sel = getSelect();
-    if (sel && sel.options.length <= 1) attempt('dom-changed');
-  });
-  mo.observe(document.body, { childList: true, subtree: true });
-  setTimeout(() => mo.disconnect(), 30000);
+    // 3) fallback: observe scene changes once, stop after populated
+    const scene = getScene();
+    if (scene && scene.add) {
+      // three.js scenes are not DOM Nodes; use rAF retry w/ limited attempts
+      let tries = 60; // ~1s @60fps
+      (function tick(){
+        if (tries-- <= 0) return;
+        const sz = scene.children ? scene.children.length : 0;
+        if (sz > 2) pump('raf-detect');
+        window.requestAnimationFrame(tick);
+      })();
+    } else {
+      // DOM fallback: watch the pane-material subtree for the select creation
+      const pane = document.getElementById('pane-material') || document.getElementById('panel-material');
+      if (pane) {
+        observer = new MutationObserver(() => pump('dom-mutation'));
+        observer.observe(pane, {childList:true, subtree:true});
+      }
+    }
 
-  log('installed');
+    // 4) manual safety net
+    window.__lm_refreshMaterialDropdown = () => pump('manual');
+    qlog('armed');
+  }
+
+  // Auto-arm after DOM is ready
+  if (document.readyState === 'loading'){
+    document.addEventListener('DOMContentLoaded', arm, { once:true });
+  } else {
+    arm();
+  }
 })();
