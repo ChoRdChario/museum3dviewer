@@ -1,257 +1,156 @@
 
-/**
- * material.runtime.patch.js
- * v1.0
- * Purpose: Wire Material tab controls to live Three.js materials (opacity, double-sided, unlit-like stub).
- * Scope  : Non-invasive. Does NOT modify layout or existing orchestrators. Safe to drop-in.
- *
- * Assumptions:
- *  - A Material panel exists (either #pane-material or synthesized) that contains:
- *      - <select id="materialSelect">   (or #pm-material or aria-label*="material")
- *      - <input id="opacityRange" type="range" min="0" max="1" step="0.01">
- *      - <input id="doubleSided" type="checkbox">   (optional)
- *      - <input id="unlitLike"   type="checkbox">   (optional)
- *      - Optional chroma controls are ignored in this patch (left intact)
- *  - The scene is available via window.viewer?.scene or window.__LM_SCENE.
+/* material.runtime.patch.js
+ * LociMyu – runtime wiring for Material tab (opacity / double-sided / unlit-like)
+ * - No dependency on global THREE reference (uses numeric side enums)
+ * - Works with either #materialSelect or #pm-material and #opacityRange
+ * - Safe to drop in; doesn't mutate existing UI layout
  */
 (() => {
-  const TAG = "[mat-runtime]";
-  const log  = (...a) => console.log(TAG, ...a);
-  const warn = (...a) => console.warn(TAG, ...a);
+  const TAG='[mat-rt]';
+  const log=(...a)=>console.log(TAG, ...a);
+  const warn=(...a)=>console.warn(TAG, ...a);
 
-  // ---------- Helpers ----------
-  function $(root, sel) {
-    try { return root.querySelector(sel); } catch { return null; }
+  // numeric enums to avoid depending on global THREE
+  const FRONT_SIDE = 0;
+  const BACK_SIDE = 1;
+  const DOUBLE_SIDE = 2;
+
+  // ---- resolve UI ----
+  const doc = document;
+  const sel = doc.querySelector('#materialSelect, #pm-material');
+  const rng = doc.querySelector('#opacityRange');
+  const chkDouble = doc.querySelector('#doubleSided');
+  const chkUnlit  = doc.querySelector('#unlitLike');
+
+  const scene =
+    window.__LM_SCENE || window.__lm_scene ||
+    (window.viewer && window.viewer.scene) ||
+    (window.viewerBridge && window.viewerBridge.getScene && window.viewerBridge.getScene());
+
+  if (!sel || !rng || !scene) {
+    return warn('missing:', {select: !!sel, range: !!rng, scene: !!scene});
   }
-  function findPanel() {
-    return document.querySelector('#pane-material') ||
-           document.querySelector('#panel-material') ||
-           document.querySelector('section.lm-panel-material') ||
-           document.querySelector('section.pane[data-pane="material"]') ||
-           document.querySelector('section.pane:nth-of-type(2)'); // fallback
-  }
-  function findScene() {
-    return (window.viewer && window.viewer.scene) ||
-           window.__LM_SCENE ||
-           (window.viewerBridge && window.viewerBridge.getScene && window.viewerBridge.getScene()) ||
-           null;
-  }
-  function indexMaterials(scene) {
-    const map = new Map(); // name -> [materials]
-    if (!scene || !scene.traverse) return map;
-    scene.traverse(obj => {
-      const mats = obj && obj.material
-        ? (Array.isArray(obj.material) ? obj.material : [obj.material])
-        : null;
-      if (!mats) return;
-      mats.forEach(m => {
-        const key = (m && m.name) ? m.name : null;
-        if (!key) return;
-        if (!map.has(key)) map.set(key, []);
-        map.get(key).push(m);
+
+  // ---- index materials by name ----
+  function buildIndex(){
+    const byName = new Map();
+    scene.traverse(o=>{
+      if (!o || !o.isMesh || !o.material) return;
+      const mats = Array.isArray(o.material) ? o.material : [o.material];
+      mats.forEach(m=>{
+        const name = (m && m.name ? String(m.name).trim() : '');
+        if (!name) return;
+        if (!byName.has(name)) byName.set(name, []);
+        byName.get(name).push(m);
       });
     });
-    return map;
+    return byName;
   }
+  let INDEX = buildIndex();
+  log('indexed', {keys:[...INDEX.keys()], count:[...INDEX.values()].reduce((a,v)=>a+v.length,0)});
 
-  // ---------- State ----------
-  let matIndex = new Map();
-  let currentKey = "";
-  const memory = new Map(); // key -> {opacity:number, doubleSided:boolean, unlitLike:boolean}
-
-  // ---------- Wiring ----------
-  function wireOnce() {
-    const panel = findPanel();
-    if (!panel) { warn("panel not found"); return false; }
-
-    // controls (robust selectors)
-    const sel = panel.querySelector('#materialSelect') ||
-                panel.querySelector('#pm-material') ||
-                panel.querySelector('select[aria-label*="material" i]');
-    const opacity = panel.querySelector('#opacityRange') ||
-                    panel.querySelector('input[type="range"][id*="opacity" i]');
-    const chkDouble = panel.querySelector('#doubleSided') ||
-                      panel.querySelector('input[type="checkbox"][id*="double" i]');
-    const chkUnlit  = panel.querySelector('#unlitLike') ||
-                      panel.querySelector('input[type="checkbox"][id*="unlit" i]');
-
-    if (!sel || !opacity) {
-      warn("controls missing", { sel: !!sel, opacity: !!opacity });
-      return false;
-    }
-
-    // scene + index
-    const scene = findScene();
-    if (!scene) { warn("scene not ready"); return false; }
-    matIndex = indexMaterials(scene);
-    log("materials indexed", matIndex.size);
-
-    // Handlers
-    sel.addEventListener('change', () => {
-      currentKey = sel.value || "";
-      const mem = memory.get(currentKey) || {};
-      if (opacity) {
-        const v = typeof mem.opacity === "number" ? mem.opacity : 1.0;
-        opacity.value = String(v);
+  // ---- apply helpers ----
+  function applyOpacity(key, v){
+    const mats = INDEX.get(key) || [];
+    let touched = 0;
+    mats.forEach(m=>{
+      if (!m) return;
+      const wantsTransparent = (v < 1.0);
+      if (wantsTransparent && m.transparent !== true) m.transparent = true;
+      if (typeof m.depthWrite === 'boolean') m.depthWrite = !wantsTransparent;
+      if (typeof m.opacity === 'number') {
+        m.opacity = v;
+        if ('needsUpdate' in m) m.needsUpdate = true;
+        touched++;
       }
-      if (chkDouble) {
-        chkDouble.checked = !!mem.doubleSided;
+    });
+    log('applyOpacity', {key, v, touched, mats: mats.length});
+  }
+
+  function applyDoubleSided(key, on){
+    const mats = INDEX.get(key) || [];
+    let touched = 0;
+    mats.forEach(m=>{
+      if (!m) return;
+      m.side = on ? DOUBLE_SIDE : FRONT_SIDE;
+      if ('needsUpdate' in m) m.needsUpdate = true;
+      touched++;
+    });
+    log('applyDoubleSided', {key, on, touched});
+  }
+
+  function applyUnlitLike(key, on){
+    const mats = INDEX.get(key) || [];
+    let touched = 0;
+    mats.forEach(m=>{
+      if (!m) return;
+      const ud = (m.userData ||= {});
+      if (!ud.__lm_litBackup) {
+        ud.__lm_litBackup = {
+          emissive: m.emissive ? (m.emissive.clone ? m.emissive.clone() : null) : null,
+          emissiveIntensity: m.emissiveIntensity,
+          metalness: m.metalness,
+          roughness: m.roughness,
+          toneMapped: m.toneMapped
+        };
       }
-      if (chkUnlit) {
-        chkUnlit.checked = !!mem.unlitLike;
+      if (on) {
+        if (m.color && m.emissive) {
+          if (m.emissive.copy) m.emissive.copy(m.color);
+        }
+        if (typeof m.emissiveIntensity === 'number') m.emissiveIntensity = 1.0;
+        if (typeof m.metalness === 'number') m.metalness = 0.0;
+        if (typeof m.roughness === 'number') m.roughness = 1.0;
+        if ('toneMapped' in m) m.toneMapped = false;
+      } else if (ud.__lm_litBackup) {
+        const b = ud.__lm_litBackup;
+        if (m.emissive && b.emissive && m.emissive.copy) m.emissive.copy(b.emissive);
+        if (typeof b.emissiveIntensity === 'number') m.emissiveIntensity = b.emissiveIntensity;
+        if (typeof b.metalness === 'number') m.metalness = b.metalness;
+        if (typeof b.roughness === 'number') m.roughness = b.roughness;
+        if ('toneMapped' in m && typeof b.toneMapped === 'boolean') m.toneMapped = b.toneMapped;
       }
-      applyAll();
+      if ('needsUpdate' in m) m.needsUpdate = true;
+      touched++;
     });
-
-    if (opacity) {
-      opacity.addEventListener('input', () => {
-        if (!currentKey) return;
-        const v = Math.max(0, Math.min(1, parseFloat(opacity.value || "1")));
-        const mem = memory.get(currentKey) || {};
-        mem.opacity = v;
-        memory.set(currentKey, mem);
-        applyOpacity(currentKey, v);
-      });
-    }
-
-    if (chkDouble) {
-      chkDouble.addEventListener('change', () => {
-        if (!currentKey) return;
-        const on = !!chkDouble.checked;
-        const mem = memory.get(currentKey) || {};
-        mem.doubleSided = on;
-        memory.set(currentKey, mem);
-        applyDoubleSided(currentKey, on);
-      });
-    }
-
-    if (chkUnlit) {
-      chkUnlit.addEventListener('change', () => {
-        if (!currentKey) return;
-        const on = !!chkUnlit.checked;
-        const mem = memory.get(currentKey) || {};
-        mem.unlitLike = on;
-        memory.set(currentKey, mem);
-        applyUnlitLike(currentKey, on);
-      });
-    }
-
-    // Initial select to first option (if any)
-    if (!sel.value && sel.options && sel.options.length > 0) {
-      sel.selectedIndex = 0;
-      currentKey = sel.value || "";
-      applyAll();
-    } else {
-      currentKey = sel.value || "";
-      applyAll();
-    }
-
-    // expose debug refresh
-    window.__lm_reindexMaterials = () => {
-      const sc = findScene(); matIndex = indexMaterials(sc);
-      log("materials re-indexed", matIndex.size);
-    };
-
-    return true;
+    log('applyUnlitLike', {key, on, touched});
   }
 
-  // ---------- Effects ----------
-  function matsOf(key) {
-    return (key && matIndex.get(key)) || [];
-  }
-  function applyOpacity(key, v) {
-    const mats = matsOf(key);
-    mats.forEach(m => {
-      try {
-        if (typeof m.opacity === "number") {
-          m.transparent = v < 1.0 ? true : m.transparent; // keep true if already
-          m.opacity = v;
-          // optional nicer z-sort when transparent
-          if (v < 1.0) {
-            m.depthWrite = false;
-          } else {
-            m.depthWrite = true;
-          }
-          m.needsUpdate = true;
-        }
-      } catch (e) { /* ignore */ }
-    });
-  }
-  function applyDoubleSided(key, on) {
-    const mats = matsOf(key);
-    const THREE = window.THREE;
-    const front = THREE && THREE.FrontSide || 0;
-    const double = THREE && THREE.DoubleSide || 2;
-    mats.forEach(m => {
-      try {
-        if ("side" in m) {
-          m.side = on ? double : front;
-          m.needsUpdate = true;
-        }
-      } catch (e) {}
-    });
-  }
-  function applyUnlitLike(key, on) {
-    // Conservative "unlit-like": disable toneMapping & lighting contributions without replacing the material.
-    const mats = matsOf(key);
-    mats.forEach(m => {
-      try {
-        // Preserve original values once
-        if (!m.userData.__lm_unlitSaved) {
-          m.userData.__lm_unlitSaved = {
-            emissive: m.emissive ? m.emissive.clone && m.emissive.clone() : null,
-            metalness: typeof m.metalness === "number" ? m.metalness : null,
-            roughness: typeof m.roughness === "number" ? m.roughness : null,
-            toneMapped: m.toneMapped
-          };
-        }
-        if (on) {
-          if ("toneMapped" in m) m.toneMapped = false;
-          if (typeof m.metalness === "number") m.metalness = 0.0;
-          if (typeof m.roughness === "number") m.roughness = 1.0;
-          if (m.emissive && m.color) {
-            // approximate: push base color to emissive to look lit
-            m.emissive.copy ? m.emissive.copy(m.color) : null;
-          }
-        } else {
-          const sv = m.userData.__lm_unlitSaved || {};
-          if ("toneMapped" in m && sv.toneMapped != null) m.toneMapped = sv.toneMapped;
-          if (typeof m.metalness === "number" && sv.metalness != null) m.metalness = sv.metalness;
-          if (typeof m.roughness === "number" && sv.roughness != null) m.roughness = sv.roughness;
-          if (m.emissive && sv.emissive) {
-            m.emissive.copy ? m.emissive.copy(sv.emissive) : null;
-          }
-        }
-        m.needsUpdate = true;
-      } catch (e) {}
-    });
-  }
-  function applyAll() {
-    if (!currentKey) return;
-    const mem = memory.get(currentKey) || {};
-    if (typeof mem.opacity === "number") applyOpacity(currentKey, mem.opacity);
-    if (typeof mem.doubleSided === "boolean") applyDoubleSided(currentKey, mem.doubleSided);
-    if (typeof mem.unlitLike === "boolean") applyUnlitLike(currentKey, mem.unlitLike);
+  // ---- wire events ----
+  const currentKey = () => (sel.value || '').trim();
+
+  function onOpacityInput(){
+    const key = currentKey();
+    if (!key) return;
+    const v = parseFloat(rng.value);
+    applyOpacity(key, v);
   }
 
-  // ---------- Boot ----------
-  function boot() {
-    if (wireOnce()) {
-      log("wired");
-      return;
-    }
-    // retry a few times while UI/scene settle
-    let tries = 0;
-    const t = setInterval(() => {
-      tries++;
-      if (wireOnce()) { clearInterval(t); return; }
-      if (tries > 20) { clearInterval(t); warn("failed to wire controls"); }
-    }, 300);
+  function onDoubleChange(){
+    const key = currentKey();
+    if (!key || !chkDouble) return;
+    applyDoubleSided(key, !!chkDouble.checked);
   }
 
-  // trigger on load + scene ready (if any)
-  window.addEventListener('load', boot);
-  window.addEventListener('lm:scene-ready', () => setTimeout(boot, 150));
+  function onUnlitChange(){
+    const key = currentKey();
+    if (!key || !chkUnlit) return;
+    applyUnlitLike(key, !!chkUnlit.checked);
+  }
 
-  log("installed");
+  // 防御: 既に同じハンドラがいる場合も二重適用しない（名前空間用プロパティ）
+  if (!rng.__lm_wired) {
+    rng.addEventListener('input', onOpacityInput, false);
+    sel.addEventListener('change', ()=>rng.dispatchEvent(new Event('input')), false);
+    chkDouble && chkDouble.addEventListener('change', onDoubleChange, false);
+    chkUnlit  && chkUnlit.addEventListener('change',  onUnlitChange,  false);
+    rng.__lm_wired = true;
+  }
+
+  // 初期一発
+  setTimeout(()=>rng.dispatchEvent(new Event('input')), 0);
+
+  // expose for debugging
+  window.__lm_mat_rt = {reindex: () => (INDEX = buildIndex(), log('reindex', {keys:[...INDEX.keys()]}), INDEX),
+    applyOpacity, applyDoubleSided, applyUnlitLike};
 })();
