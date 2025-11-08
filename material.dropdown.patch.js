@@ -1,80 +1,86 @@
-/* material.dropdown.patch.js v3.4
- * Purpose: Populate #pm-material with scene material names AFTER GLB is loaded,
- *          excluding auto-generated/UUID-like names. Idempotent & safe to re-run.
- * Logs: [mat-dd v3.4] ...
- */
-(function () {
-  const TAG = '[mat-dd v3.4]';
-  const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-  const THREE_AUTO_RE = /^(?:Mesh)?(?:Basic|Lambert|Phong|Standard|Physical|Toon)Material$/i;
+// material.dropdown.patch.js  v3.5
+(() => {
+  const TAG = '[mat-dd v3.5]';
 
-  // Run once guard for wiring listeners (not for refresh function)
-  if (window.__LM_MAT_DD_WIRED__) {
-    // already wired; still expose refresh function below
-  } else {
-    window.addEventListener('lm:glb-detected', () => {
-      // small delay to allow viewer.bridge to finalize scene refs
-      setTimeout(refreshDropdown, 0);
-    });
-    // If scene is already there (hot reload / cache), try once on DOMContentLoaded
-    if (document.readyState !== 'loading') {
-      setTimeout(() => window.__LM_SCENE && refreshDropdown(), 0);
-    } else {
-      document.addEventListener('DOMContentLoaded', () => {
-        setTimeout(() => window.__LM_SCENE && refreshDropdown(), 0);
-      });
-    }
-    window.__LM_MAT_DD_WIRED__ = true;
-  }
+  // ---- helpers ------------------------------------------------------------
+  const UUID = /^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;
+  const AUTO = /^(?:Mesh)?(?:Basic|Lambert|Phong|Standard|Physical|Toon)Material$/i;
 
-  function collectMaterialNames() {
-    const scene = window.__LM_SCENE || (window.viewer && window.viewer.scene);
-    if (!scene) return [];
-    const set = new Set();
-    scene.traverse(o => {
+  const getSelectEl = () =>
+    document.querySelector('#pm-material')
+    || document.querySelector('#pm-opacity select');
+
+  const getScene = () => window.__LM_SCENE || window.viewer?.scene || null;
+
+  function collectMaterialNames(scene) {
+    const keep = new Set();
+    scene?.traverse(o => {
       if (!o.isMesh || !o.material) return;
-      const mats = Array.isArray(o.material) ? o.material : [o.material];
-      for (const m of mats) {
-        let name = (m && m.name || '').trim();
+      const arr = Array.isArray(o.material) ? o.material : [o.material];
+      for (const m of arr) {
+        const name = (m.name || '').trim();
         if (!name) continue;
-        if (UUID_RE.test(name)) continue;
-        if (THREE_AUTO_RE.test(name)) continue;
-        set.add(name);
+        if (UUID.test(name)) continue;        // UUID っぽい名前は除外
+        if (AUTO.test(name)) continue;        // Three の自動名は除外
+        keep.add(name);
       }
     });
-    return Array.from(set).sort((a,b)=> a.localeCompare(b));
+    return [...keep].sort();
   }
 
-  function refreshDropdown() {
-    try {
-      const dd = document.getElementById('pm-material') || document.getElementById('mat-select') || document.querySelector('#pm-opacity select, #panel-material select');
-      if (!dd) {
-        console.warn(TAG, 'dropdown element not found');
-        return;
-      }
-      const names = collectMaterialNames();
-      // rebuild options from scratch
-      dd.innerHTML = '';
-      const ph = document.createElement('option');
-      ph.value = '';
-      ph.textContent = '— Select material —';
-      dd.appendChild(ph);
-      for (const n of names) {
-        const opt = document.createElement('option');
-        opt.value = n;
-        opt.textContent = n;
-        dd.appendChild(opt);
-      }
-      console.log(TAG, 'populated', names.length);
-      // If the current value no longer exists, reset to placeholder
-      if (!names.includes(dd.value)) dd.value = '';
-      // Fire a change so orchestrator can pull latest
-      dd.dispatchEvent(new Event('change', { bubbles: true }));
-    } catch (e) {
-      console.error(TAG, 'refresh failed', e);
+  function populateOnce() {
+    const el = getSelectEl();
+    const scene = getScene();
+    if (!el || !scene) return { ok:false, reason: !el ? 'no-select' : 'no-scene', count:0 };
+
+    const names = collectMaterialNames(scene);
+    // 0件は「まだ早い」ことが多いので、この時点では lastKey を更新しない
+    if (names.length === 0) {
+      return { ok:false, reason:'empty', count:0 };
     }
+
+    const key = names.join('|');
+    if (window.__LM_MAT_DD_LASTKEY__ === key && el.options.length > 1) {
+      // 既に同一内容が入っている
+      return { ok:true, reason:'same', count: el.options.length-1 };
+    }
+
+    // UI 反映
+    el.innerHTML =
+      '<option value=\"\">-- Select material --</option>' +
+      names.map(n => `<option value=\"${n}\">${n}</option>`).join('');
+    window.__LM_MAT_DD_LASTKEY__ = key;
+
+    console.log(TAG, 'populated', names.length);
+    return { ok:true, reason:'populated', count:names.length };
   }
 
-  // Expose manual refresher for debugging
-  window.__LM_MAT_DD_REFRESH__ = refreshDropdown;
+  // ---- main: immediate try + backoff + event hooks -----------------------
+  async function ensurePopulated() {
+    // 即時試行
+    let r = populateOnce();
+    if (r.ok || r.reason === 'no-select') return;
+
+    // バックオフ再試行（シーンが安定するまで）
+    for (let i=1; i<=8; i++) {
+      await new Promise(res => setTimeout(res, 250*i));
+      r = populateOnce();
+      if (r.ok) return;
+    }
+    // ここまで来ても 0 件なら、イベント経由に委ねる
+  }
+
+  // 初期化（ページロード後すぐ）
+  ensurePopulated();
+
+  // イベント：glb 検出（フォールバック）
+  window.addEventListener('lm:glb-detected', () => {
+    // すぐは早いことがあるので少し後に
+    setTimeout(ensurePopulated, 200);
+  });
+
+  // イベント：シーン安定化（本命）
+  window.addEventListener('lm:scene-stabilized', () => {
+    ensurePopulated();
+  });
 })();
