@@ -1,0 +1,4 @@
+/* app.material.hotfix.css - v6.6 M2 */
+#pane-material .pm-opacity input[type="range"]{ flex: 1 1 auto; }
+#pane-material .lm-number-badge{ font-variant-numeric: tabular-nums; opacity: 0.85; }
+#pane-material .pm-ghost, #pane-material .lm-ghost{ display: none !important; }
