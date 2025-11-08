@@ -1,160 +1,103 @@
-
 // materials.render.apply.js
-// type: module
-import * as THREE from 'three';
+// [mat-render v1.1] apply per-material runtime shading safely
+// - Fixes 'black areas become transparent' by enforcing NormalBlending and conditional transparency
+// - Reduces z-fighting on transparent passes using depthWrite=false & polygonOffset
+// - Keeps compatibility with existing wire code via window.__LM_MAT_RENDER_APPLY__
 
-(function(){
-  const LOG = (...args)=>console.log('[mat-render v1.0]', ...args);
-  const WARN = (...args)=>console.warn('[mat-render v1.0]', ...args);
+(() => {
+  const TAG = '[mat-render v1.1]';
 
-  function getScene() {
-    // Expect window.__LM_SCENE from viewer bridge; fallback to search
-    const s = (window.__LM_SCENE && (window.__LM_SCENE.scene || window.__LM_SCENE));
-    if (s) return s;
-    // Try common places
-    if (window.viewer && window.viewer.scene) return window.viewer.scene;
-    return null;
+  function log(...args){ try{ console.log(TAG, ...args);}catch(_){/*noop*/} }
+  function warn(...args){ try{ console.warn(TAG, ...args);}catch(_){/*noop*/} }
+
+  function getScene(){
+    return (window.__LM_SCENE || window.scene);
   }
 
-  function forEachMaterial(scene, cb){
-    if (!scene) return;
-    scene.traverse(obj => {
-      if (!obj.isMesh) return;
-      const mat = obj.material;
-      if (Array.isArray(mat)) {
-        mat.forEach((m, idx)=> m && cb(obj, m, idx));
-      } else if (mat) {
-        cb(obj, mat, null);
-      }
-    });
-  }
-
-  function matchesKey(mat, key){
-    if (!key) return false;
-    return (mat.name === key) || (String(mat.name||'').endsWith(key)) || (String(mat.userData?.key||'') === key);
-  }
-
-  function ensureTransparent(material, opacity){
-    const op = (typeof opacity === 'number') ? opacity : material.opacity;
-    material.transparent = (op < 1) || material.transparent === true;
-    material.opacity = op;
-  }
-
-  function toUnlit(obj, mat, idx){
-    if (mat && (mat instanceof THREE.MeshBasicMaterial)) return mat; // already unlit
-    if (mat && mat.userData && mat.userData._origLit) return mat; // already swapped
-
-    const params = {
-      name: mat.name,
-      map: mat.map || null,
-      alphaMap: mat.alphaMap || null,
-      color: (mat.color ? mat.color.clone() : new THREE.Color(0xffffff)),
-      side: mat.side,
-      transparent: mat.transparent,
-      opacity: mat.opacity,
-      depthWrite: mat.depthWrite,
-      depthTest: mat.depthTest,
-      wireframe: mat.wireframe,
-      blending: mat.blending
-    };
-    const basic = new THREE.MeshBasicMaterial(params);
-    basic.userData._origLit = mat;
-    if (idx == null) obj.material = basic;
-    else {
-      const arr = obj.material.slice();
-      arr[idx] = basic;
-      obj.material = arr;
-    }
-    basic.needsUpdate = true;
-    return basic;
-  }
-
-  function toLit(obj, mat, idx){
-    const orig = mat?.userData?._origLit;
-    if (!orig) return mat;
-    if (idx == null) obj.material = orig;
-    else {
-      const arr = obj.material.slice();
-      arr[idx] = orig;
-      obj.material = arr;
-    }
-    orig.needsUpdate = true;
-    return orig;
-  }
-
-  function applyFlags({key, opacity, doubleSided, unlitLike}){
+  function collectTargetMaterials(key){
     const scene = getScene();
-    if (!scene) {
-      WARN('no scene yet; defer');
-      return;
-    }
-    let hit = 0;
-    forEachMaterial(scene, (obj, mat, idx)=>{
-      if (!matchesKey(mat, key)) return;
-      let target = mat;
-      if (unlitLike === true) {
-        target = toUnlit(obj, mat, idx);
-      } else if (unlitLike === false) {
-        target = toLit(obj, mat, idx);
-      }
-      if (typeof doubleSided === 'boolean') {
-        target.side = doubleSided ? THREE.DoubleSide : THREE.FrontSide;
-      }
-      if (typeof opacity === 'number' && !isNaN(opacity)) {
-        ensureTransparent(target, opacity);
-      }
-      target.needsUpdate = true;
-      obj.layers.needsUpdate = true;
-      hit++;
+    if (!scene) return [];
+    const hits = [];
+    scene.traverse(o => {
+      if (!o.isMesh) return;
+      const mats = Array.isArray(o.material) ? o.material : [o.material];
+      mats.forEach(m => {
+        if (!m) return;
+        if (m.name === key || o.name === key) hits.push({ mesh: o, mat: m });
+      });
     });
-    LOG('applied', {key, opacity, doubleSided, unlitLike, hit});
+    return hits;
   }
 
-  function currentUIState(){
-    const sel = document.querySelector('#pm-material');
-    const rng = document.querySelector('#pm-opacity-range');
-    const ds  = document.querySelector('#pm-flag-doublesided');
-    const ul  = document.querySelector('#pm-flag-unlit');
-    const key = sel?.value || sel?.selectedOptions?.[0]?.value || '';
-    const opacity = rng ? parseFloat(rng.value) : undefined;
-    const doubleSided = ds ? !!ds.checked : undefined;
-    const unlitLike   = ul ? !!ul.checked : undefined;
-    return {key, opacity, doubleSided, unlitLike};
+  function enforceBlendPolicy(mat){
+    const THREE = window.THREE || {};
+    const chromaEnabled = !!(mat.userData && mat.userData.__lm_chromaEnabled);
+    const needsTransparent = (mat.opacity ?? 1) < 0.999 || chromaEnabled;
+
+    // 1) Always use normal blending (avoid additive-like surprises)
+    mat.blending = (THREE.NormalBlending ?? 1);
+
+    // 2) Enable transparency only when needed
+    mat.transparent = !!needsTransparent;
+    if (!needsTransparent) mat.opacity = 1.0;
+
+    // 3) Avoid accidental cutout/alpha usage unless chroma is on
+    if (!chromaEnabled) {
+      mat.alphaTest = 0.0;
+      if (mat.map) mat.alphaMap = null;
+    }
+
+    // 4) Z stability for transparent objects
+    mat.depthTest  = true;
+    mat.depthWrite = !needsTransparent;      // do not write depth when transparent
+    mat.polygonOffset = needsTransparent;    // slightly pull forward transparent pass
+    mat.polygonOffsetFactor = needsTransparent ? -1 : 0;
+    mat.polygonOffsetUnits  = needsTransparent ? -1 : 0;
+
+    mat.needsUpdate = true;
   }
 
-  function wireUI(){
-    const sel = document.querySelector('#pm-material');
-    const rng = document.querySelector('#pm-opacity-range');
-    const ds  = document.querySelector('#pm-flag-doublesided');
-    const ul  = document.querySelector('#pm-flag-unlit');
-    if (!sel || !rng) { WARN('ui incomplete'); return; }
+  function applyStateToMaterial(mat, state){
+    // Basic shading toggles driven by UI/state
+    if ('doubleSided' in state) mat.side = state.doubleSided ? (window.THREE?.DoubleSide ?? 2) : (window.THREE?.FrontSide ?? 0);
+    if ('unlitLike'   in state) mat.colorWrite = true, (mat.emissive && (mat.emissiveIntensity = state.unlitLike ? 1.0 : (mat.emissiveIntensity ?? 0)));
+    // Fallback "unlit-like": push everything to emissive if requested
+    if ('unlitLike' in state) {
+      if (state.unlitLike) {
+        // A cheap unlit-like: use MeshBasicMaterial behavior by forcing lighting-independent shading
+        // We avoid material swap; instead approximate by disabling lights influence
+        mat.lights = false;
+      } else {
+        mat.lights = true;
+      }
+    }
+    if ('opacity' in state && typeof state.opacity === 'number') mat.opacity = state.opacity;
 
-    let t;
-    const fire = ()=>{
-      clearTimeout(t);
-      t = setTimeout(()=> applyFlags(currentUIState()), 60);
-    };
-
-    ['change','input','pointerup'].forEach(ev=> rng.addEventListener(ev, fire, {passive:true}));
-    ['change'].forEach(ev=> sel.addEventListener(ev, fire, {passive:true}));
-    if (ds) ds.addEventListener('change', fire, {passive:true});
-    if (ul) ul.addEventListener('change', fire, {passive:true});
-
-    // Also apply when scene becomes ready
-    window.addEventListener('lm:scene-ready', fire);
-    window.addEventListener('lm:mat-ui-ready', fire);
-    // Initial kick (may no-op if scene not ready yet)
-    setTimeout(fire, 200);
-    LOG('wired');
+    enforceBlendPolicy(mat);
   }
 
-  // Public API for other modules
-  window.__LM_MAT_RENDER = { apply: applyFlags };
+  function applyMaterialRender(state){
+    // state: { key, opacity, doubleSided, unlitLike }
+    const key = state?.key || '';
+    if (!key){ warn('missing key'); return 0; }
 
-  // Try wiring after DOM ready
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', wireUI, {once:true});
-  } else {
-    wireUI();
+    const targets = collectTargetMaterials(key);
+    if (!targets.length){ warn('no materials found for key', key); return 0; }
+
+    targets.forEach(({mat}) => applyStateToMaterial(mat, state));
+    const first = targets[0]?.mat;
+    log('applied', {
+      key,
+      opacity: first?.opacity ?? state.opacity ?? 1,
+      doubleSided: !!state.doubleSided,
+      unlitLike:   !!state.unlitLike,
+      hit: targets.length
+    });
+    return targets.length;
   }
+
+  // Stable global API used by materials.ui.wire.js
+  window.__LM_MAT_RENDER_APPLY__ = applyMaterialRender;
+
+  log('wired');
 })();
