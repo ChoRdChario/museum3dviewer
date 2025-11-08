@@ -1,242 +1,63 @@
 <!DOCTYPE html>
 <html lang="ja">
 <head>
-  <!-- ESM import map for THREE (and addons) -->
-  <script id="lm-importmap-three" type="importmap">{
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>LociMyu v6.6 (ESM/CDN)</title>
+  <link rel="icon" href="data:,"/>
+
+  <!-- Import map for THREE ESM -->
+  <script type="importmap" id="lm-importmap-three">{
     "imports": {
       "three": "https://unpkg.com/three@0.159.0/build/three.module.js",
       "three/addons/": "https://unpkg.com/three@0.159.0/examples/jsm/"
     }
   }</script>
 
-  <!-- Minimal fallback styles while leader.css/app.css are missing -->
-  <style id="lm-fallback-style">
-    :root { color-scheme: dark; }
-    body { margin:0; background:#111; color:#e6e6e6; font:14px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif; }
-    #right { width:360px; max-width:38vw; padding:12px; box-sizing:border-box; }
-    .panel { background:#16181b; border:1px solid #272a30; border-radius:10px; padding:12px; margin:12px 0; }
-    .panel h4 { margin:0 0 8px; font-weight:600; opacity:.9; }
-    select, input[type="text"], input[type="color"] {
-      background:#0f1317; color:#e6e6e6; border:1px solid #2a2f36; border-radius:8px; padding:8px 10px;
-    }
-    input[type="range"] { width:100%; }
-    .row { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
-    .row .grow { flex:1 1 180px; }
-    .muted { color:#9aa4af; font-size:12px; }
-  #panel-material.lm-panel-material.card{display:none;} #pane-material .card{width:100%;box-sizing:border-box;} #pane-material .controls{overflow:visible;} 
-#panel-material{display:none !important;} .pane .card{width:100%;box-sizing:border-box;} .pane .controls{overflow:visible;} 
-</style>
-
-  <!-- Optional loader for content.js to avoid 404 noise -->
-  <script id="lm-optional-contentjs">
-  (function(){
-    try {
-      var url = './content.js';
-      fetch(url, {method:'HEAD'}).then(function(r){
-        if (r && r.ok) {
-          var s = document.createElement('script');
-          s.src = url; s.defer = true;
-          s.onload = function(){ console.log('[VSC] Content script initialized (optional)'); };
-          document.head.appendChild(s);
-        } else {
-          console.log('[VSC] content.js not present (skipped)');
-        }
-      }).catch(function(){ console.log('[VSC] content.js check skipped'); });
-    } catch(e){
-      console.log('[VSC] content.js loader error', e);
-    }
-  })();
-  </script>
-
-  <meta charset="utf-8"/>
-  <meta name="viewport" content="width=device-width,initial-scale=1"/>
-  <title>LociMyu v6.6 (ESM/CDN)</title>
-  <link rel="icon" href="data:,"/>
-
-  <!-- Google OAuth (keys are read by boot.esm.cdn.js) -->
-  <meta name="google-oauth-client_id" content="595200751510-ncahnf7edci6b9925becn5to49r6cguv.apps.googleusercontent.com"/>
-  <meta name="google-api-key" content="AIzaSyCUnTCr5yWUWPdEXST9bKP1LpgawU5rIbI"/>
-  <script defer async src="https://accounts.google.com/gsi/client"></script>
-
   <style>
-    :root{
-      --bg:#0f1115; --panel:#0b0d11; --line:#1f2937; --acc:#94a3b8; --text:#cbd5e1; --sel:#60a5fa;
-    }
-    html,body{height:100%;margin:0;background:var(--bg);color:var(--text);
+    :root{ color-scheme:dark }
+    html,body{height:100%;margin:0;background:#0f1115;color:#cbd5e1;
       font:14px/1.4 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;}
-    #app{display:flex;height:100%;}
-    #stage{flex:1;position:relative;background:var(--panel);}
-    #ui{width:360px;max-width:360px;min-width:320px;border-left:1px solid var(--line);
-        display:flex;flex-direction:column;overflow:hidden;}
-    header#topbar{display:flex;justify-content:space-between;align-items:center;
-      padding:8px 12px;border-bottom:1px solid var(--line);}
-    header #brand{font-weight:600;opacity:.85}
-    button,select,input{background:#111827;border:1px solid var(--line);color:var(--text);
-      border-radius:8px;padding:6px 8px}
-    input[type="text"]{width:100%;box-sizing:border-box}
-    .row{display:flex;gap:8px;align-items:center}
-    .row > *{flex:1}
-    .tabs{display:flex;border-bottom:1px solid var(--line)}
+    #app{display:flex;height:100%}
+    #stage{flex:1;position:relative;background:#0b0d11}
+    #ui{width:360px;min-width:320px;max-width:360px;border-left:1px solid #1f2937;
+        display:flex;flex-direction:column;overflow:hidden}
+    .tabs{display:flex;border-bottom:1px solid #1f2937}
     .tabs button{flex:1;border:0;border-bottom:2px solid transparent;padding:8px 12px;
-      background:transparent;color:var(--acc);cursor:pointer}
-    .tabs button[aria-selected="true"]{color:var(--text);border-bottom-color:#64748b}
-    .pane{display:none;padding:12px;overflow:auto;max-width:100%;box-sizing:border-box}
+      background:transparent;color:#94a3b8;cursor:pointer}
+    .tabs button[aria-selected="true"]{color:#cbd5e1;border-bottom-color:#64748b}
+    .pane{display:none;padding:12px;overflow:auto}
     .pane[data-active="true"]{display:block}
-    #gl{width:100%;height:100%;display:block}
-    .pad{padding:12px}
-    .grp{margin:10px 0}
-    .hint{opacity:.7;font-size:12px}
-    .chips{display:flex;flex-wrap:wrap;gap:6px}
-    .chip{width:18px;height:18px;border-radius:50%;border:1px solid #0003;cursor:pointer;box-shadow:0 0 0 1px #0004 inset}
-    #caption-list{height:160px;overflow:auto;border:1px solid var(--line);border-radius:8px}
-
-    /* Material pane layout */
-    .mat-grid{display:grid;grid-template-columns: 1fr; gap:12px; max-width:100%}
-    .mat-card{border:1px solid var(--line);border-radius:12px;padding:12px;background:#0c1016}
-    .mat-card h4{margin:0 0 8px 0;font-size:13px;opacity:.8}
-    .mat-row{display:grid;grid-template-columns:auto 1fr;gap:10px;align-items:center}
-    .nowrap{white-space:nowrap}
-    .full{text-align:left;width:100%}
-    .inline{display:flex;gap:14px;align-items:center;flex-wrap:wrap}
     #pm-opacity{display:grid;grid-template-columns: 1fr auto 48px;gap:10px;align-items:center}
-    #pm-opacity output{min-width:3ch;text-align:right;opacity:.8}
-    /* Prevent horizontal scroll in the right panel */
-    #ui *{max-width:100%}
-    #ui{overflow-x:hidden}
-  #panel-material.lm-panel-material.card{display:none;} #pane-material .card{width:100%;box-sizing:border-box;} #pane-material .controls{overflow:visible;} 
-#panel-material{display:none !important;} .pane .card{width:100%;box-sizing:border-box;} .pane .controls{overflow:visible;} 
-</style>
-
-  <style id="lm-material-layout-fix">
-    /* ===== Material pane: overflow & wrapping fixes ===== */
-    #pane-material .scroller { overflow-x: hidden; }
-    #pane-material .mat-card { display:flex; flex-direction:column; gap:10px; }
-    #pane-material .row,
-    #pane-material .inline,
-    #pane-material .pair,
-    #pane-material .controls { display:flex; flex-wrap:wrap; gap:8px; }
-    #pane-material .row > *, #pane-material .controls > * { min-width:0; }
-    #pane-material select,
-    #pane-material input[type="range"],
-    #pm-material, #pm-chroma-tol, #pm-chroma-feather {
-      flex:1 1 100%; width:100%; max-width:100%;
-    }
-    #pane-material .btn, #pane-material .switch, #pane-material .mini { flex:0 0 auto; }
-    #pm-chroma .tol-row { display:flex; flex-wrap:wrap; gap:8px; }
-    #pm-chroma .feather-row { display:flex; flex-wrap:wrap; gap:8px; margin-top:6px; }
-  #panel-material.lm-panel-material.card{display:none;} #pane-material .card{width:100%;box-sizing:border-box;} #pane-material .controls{overflow:visible;} 
-#panel-material{display:none !important;} .pane .card{width:100%;box-sizing:border-box;} .pane .controls{overflow:visible;} 
-</style>
+    #pm-opacity output{min-width:3ch;text-align:right;opacity:.85}
+  </style>
 </head>
 <body>
   <div id="app">
     <div id="stage"><canvas id="gl"></canvas></div>
     <aside id="ui">
-      <header id="topbar">
-        <div id="brand">LociMyu v6.6</div>
-        <div class="row" style="gap:6px;flex:0 0 auto">
-          <button id="auth-signin">Sign in</button>
-        </div>
-      </header>
-
-      <div class="pad" style="border-bottom:1px solid var(--line)">
-        <div class="row">
-          <input id="glbUrl" type="text" placeholder="Drive fileId / GLB URL"/>
-          <button id="btnGlb">Load</button>
-        </div>
-        <div class="row" style="margin-top:8px">
-          <select id="save-target-sheet"><option value="">Select sheet…</option></select>
-          <button id="save-target-create">Create</button>
-        </div>
-      </div>
-
       <nav class="tabs" role="tablist">
         <button id="tab-caption" role="tab" data-tab="caption" aria-selected="true">Caption</button>
         <button id="tab-material" role="tab" data-tab="material" aria-selected="false">Material</button>
         <button id="tab-views" role="tab" data-tab="views" aria-selected="false">Views</button>
       </nav>
-
-      <!-- Caption pane (unchanged structure) -->
-      <section id="pane-caption" class="pane" data-pane="caption" data-active="true">
-        <div class="grp">
-          <div class="hint">Pin color</div>
-          <div id="pinColorChips" class="chips"></div>
-        </div>
-        <div class="grp">
-          <div class="hint">Filter</div>
-          <div id="pinFilterChips" class="chips"></div>
-        </div>
-        <div class="grp">
-          <div class="hint">Caption list</div>
-          <div id="caption-list"></div>
-        </div>
-        <div class="grp">
-          <div class="hint">Title / Body</div>
-          <input id="caption-title" placeholder="Title"/>
-          <input id="caption-body" placeholder="Body"/>
-        </div>
-        <div class="grp">
-          <div class="hint">Images (auto from GLB folder)</div>
-          <div id="images-grid"></div>
-          <div class="row" style="margin-top:8px">
-            <button id="btnRefreshImages" class="full">Refresh images</button>
-          </div>
-          <div id="images-status" class="hint" style="margin-top:6px"></div>
-        </div>
-      </section>
-
-      <!-- Material pane (refined) -->
+      <section id="pane-caption" class="pane" data-pane="caption" data-active="true"></section>
       <section id="pane-material" class="pane" data-pane="material">
-        <div class="mat-grid">
-          <div class="mat-card">
-            <h4>Per‑material opacity (saved per sheet)</h4>
-            <div id="pm-opacity">
-              <select id="pm-material" aria-label="Select material">
-                <option value="">— Select material —</option>
-              </select>
-              <input id="pm-opacity-range" type="range" min="0" max="1" step="0.01" value="1"/>
-              <output id="pm-opacity-val">1.00</output>
-            </div>
-            <div class="hint">Pick a material, then set its opacity. This does not change global opacity above.</div>
-          </div>
-
-          <div class="mat-card">
-            <h4>Shading</h4>
-            <div class="inline">
-              <label class="nowrap"><input type="checkbox" id="pm-flag-doublesided"/> Double‑sided</label>
-              <label class="nowrap"><input type="checkbox" id="pm-flag-unlit"/> Unlit‑like</label>
-            </div>
-          </div>
-
-          <div class="mat-card">
-            <h4>Chroma key</h4>
-            <div class="inline" style="margin-bottom:8px">
-              <label class="nowrap"><input type="checkbox" id="pm-chroma-enable"/> Enable</label>
-              <input id="pm-chroma-color" type="color" aria-label="Color" value="#000000"/>
-            </div>
-            <div class="mat-row" style="margin-bottom:6px">
-              <span class="nowrap">Tolerance</span>
-              <input id="pm-chroma-tol" type="range" min="0" max="1" step="0.01" value="0.10"/>
-            </div>
-            <div class="mat-row">
-              <span class="nowrap">Feather</span>
-              <input id="pm-chroma-feather" type="range" min="0" max="1" step="0.01" value="0.00"/>
-            </div>
+        <div class="mat-card">
+          <h4>Per‑material opacity (saved per sheet)</h4>
+          <div id="pm-opacity">
+            <select id="pm-material">
+              <option value="">— Select material —</option>
+            </select>
+            <input id="pm-opacity-range" type="range" min="0" max="1" step="0.01" value="1"/>
+            <output id="pm-opacity-val">1.00</output>
           </div>
         </div>
       </section>
-
-      <section id="pane-views" class="pane" data-pane="views">
-        <div class="grp">
-          <button id="view-save">Save view</button>
-          <div class="row"><label><input id="proj-ortho" type="checkbox"> Orthographic</input></label></div>
-        </div>
-        <div id="views-preset-list"></div>
-      </section>
+      <section id="pane-views" class="pane" data-pane="views"></section>
     </aside>
   </div>
 
-  <!-- Tabs behavior -->
   <script>
     (function(){
       const tabs = document.querySelectorAll('[role="tab"]');
@@ -248,123 +69,14 @@
     })();
   </script>
 
-  <!-- Boot runtime -->
+  <!-- Boot core (unchanged) -->
   <script type="module" src="./boot.esm.cdn.js"></script>
-  <link rel="stylesheet" href="app.sheet-rename.css"/>
-  <script type="module" src="sheet-rename.module.js"></script>
-
-  <!-- Sheet context event bridge -->
-  <script defer src="./sheet.ctx.bridge.js"></script>
-
-  <!-- ===== LociMyu material bridge stack (order matters) ===== -->
   <script type="module" src="./viewer.bridge.module.js"></script>
   <script type="module" src="./materials.sheet.bridge.js"></script>
-  <script type="module" src="./material.orchestrator.js"></script>
 
-  <!-- lm-dx v4.3: robust material panel anchoring & click passthrough (KEEP) -->
-  <script>
-  (() => {
-    const TAG='[lm-dx v4.3]'; const log=(...a)=>console.log(TAG,...a), warn=(...a)=>console.warn(TAG,...a);
-    const doc = document;
-    const right = doc.querySelector('#right, aside, .right, .sidebar') || doc.body;
-
-    function detoxClickable(target){
-      if (!target) return {disabled:0,target:null};
-      const r = target.getBoundingClientRect();
-      const p = {x: r.left + r.width*0.5, y: r.top + Math.min(16,r.height/2)};
-      const chain = doc.elementsFromPoint(p.x, p.y);
-      const idx = chain.indexOf(target);
-      const blockers = (idx===-1?chain:chain.slice(0,idx)).filter(e=>{
-        const cs=getComputedStyle(e), pos=cs.position;
-        const fixedLike = pos==='fixed'||pos==='absolute'||pos==='sticky';
-        return fixedLike && cs.pointerEvents!=='none' && right.contains(e);
-      });
-      blockers.forEach(e=>{ e.dataset.__pe_before=getComputedStyle(e).pointerEvents; e.style.pointerEvents='none'; e.classList.add('lm-pe-none'); });
-      target.style.pointerEvents='auto'; target.disabled=false;
-      log('detoxClickable',{disabled:blockers.length,target});
-      return {disabled:blockers.length,target};
-    }
-    detoxClickable(doc.getElementById('glbUrl'));
-    detoxClickable(doc.getElementById('auth-signin'));
-    detoxClickable(doc.getElementById('btnGlb'));
-
-    function findMaterialTabBtn() {
-      const idBtn = doc.getElementById('tab-material');
-      if (idBtn) return idBtn;
-      const btns = [...right.querySelectorAll('button,[role="tab"],.tab,nav button,header button')];
-      const m = btns.find(b => (b.textContent||'').trim().toLowerCase() === 'material');
-      return m || null;
-    }
-    const materialTabBtn = findMaterialTabBtn();
-    function isMaterialActive() {
-      const b = materialTabBtn;
-      if (!b) return true;
-      const cs = b.getAttribute('aria-selected');
-      if (cs) return cs === 'true';
-      return b.classList.contains('active') || b.classList.contains('selected');
-    }
-
-    function visible(el){ try{ return !!el && el.offsetParent !== null; } catch(_){ return false; } }
-    const tabBar = right.querySelector('[role="tablist"], .tabs, nav, header') || right;
-    const candidates = [
-      right.querySelector('#panel-material, [role="tabpanel"][data-tab="material"], [data-panel="material"]'),
-      ...[...right.querySelectorAll('section,.card,.panel,.group')]
-        .filter(c => {
-          const r=c.getBoundingClientRect?.(); if(!r) return false;
-          if (tabBar && r.top < (tabBar.getBoundingClientRect?.().bottom||0)) return false;
-          const t=(c.textContent||'').toLowerCase();
-          return /per-?material/.test(t) || /opacity/.test(t) || /chroma key|double-?sided|unlit/.test(t);
-        })
-    ].filter(Boolean);
-    let panel = candidates.find(visible) || candidates[0] || null;
-
-    if (!panel && tabBar){
-      panel = doc.createElement('section');
-      panel.id = 'panel-material';
-      panel.className = 'lm-panel-material card';
-      panel.style.marginTop = '8px';
-      const style = doc.createElement('style');
-      style.textContent = `#panel-material { display: ${isMaterialActive() ? 'block' : 'none'}; }`;
-      doc.head.appendChild(style);
-      tabBar.insertAdjacentElement('afterend', panel);
-      log('synthesized panel');
-    }
-    if (!panel){ warn('material panel/card not found'); return; }
-
-    function ensureAnchors(dst){
-      let sel = dst.querySelector('#materialSelect');
-      if (!sel) { sel = doc.createElement('select'); sel.id='materialSelect'; sel.style.width='100%'; dst.appendChild(sel); }
-      let rng = dst.querySelector('#opacityRange');
-      if (!rng) { rng = doc.createElement('input'); rng.type='range'; rng.id='opacityRange'; rng.min='0'; rng.max='1'; rng.step='0.01'; rng.value='1.0'; rng.style.width='100%'; dst.appendChild(rng); }
-      return {sel,rng};
-    }
-    const tabBtn = doc.getElementById('tab-material');
-    if (tabBtn) tabBtn.querySelectorAll('#materialSelect,#opacityRange').forEach(n=>n.remove());
-
-    const {sel, rng} = ensureAnchors(panel);
-    ['materialSelect','opacityRange'].forEach(id=>{ const n=doc.getElementById(id); if(n && !panel.contains(n)) panel.appendChild(n); });
-    log('material controls anchored in panel', panel);
-    window.dispatchEvent(new Event('lm:mat-ui-ready',{bubbles:true}));
-  })();
-  </script>
-
-  <!-- Material dropdown population + runtime wiring (must be loaded LAST) -->
-  <script type="module" src="./material.dropdown.patch.js"></script>
+  <!-- Material stack (ORDER IS IMPORTANT) -->
   <script src="./material.runtime.patch.js"></script>
-<script src="./glb.load.signal.js"></script>
-<script src="./material.dropdown.patch.js"></script>
-<!-- 既存の viewer / bridge / orchestrator / sheet-bridge の後ろ -->
-
-<!-- GLB完了シグナル（Loadボタン→GLB読込完了を一度だけ通知） -->
-<script src="./glb.load.signal.js"></script>
-
-<!-- マテリアルドロップダウン投入（静音・一発実行版） -->
-<script src="./material.dropdown.patch.js"></script>
-<script src="./material.id.unify.v1.js"></script>
-<script src="./material.dropdown.sync.v1.js"></script>
-
-<!-- LociMyu: material local state & save-bus (localStorage) -->
-<script src="./material.state.local.v1.js"></script>
-
+  <script src="./material.dropdown.patch.js"></script>
+  <script src="./material.orchestrator.js"></script>
 </body>
 </html>
