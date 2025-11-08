@@ -1,58 +1,72 @@
 
-// materials.fetch.auth.polyfill.js
-// Adds __lm_fetchJSONAuth if missing. Obtains a Google OAuth access token via gauth.module.js.
+/* materials.fetch.auth.polyfill.js
+ * v1.0 (LociMyu) — define __lm_fetchJSONAuth if missing.
+ */
 (() => {
-  const TAG = "[auth-polyfill v1.0]";
-  if (typeof window.__lm_fetchJSONAuth === "function") {
-    console.log(TAG, "exists (skipped)");
+  const TAG = '[auth-polyfill v1.0]';
+  if (typeof window.__lm_fetchJSONAuth === 'function') {
+    console.log(TAG, 'skip (already present)');
     return;
   }
-  async function ensureToken() {
-    // Try dynamic import of the existing auth helper
+  let _tokenCache = null;
+
+  async function getTokenViaGauth() {
     try {
-      const g = await import('./gauth.module.js');
-      if (g && typeof g.getAccessToken === 'function') {
-        const tok = await g.getAccessToken();
-        if (tok) return tok;
+      const mod = await import('./gauth.module.js');
+      if (typeof mod.getAccessToken === 'function') {
+        const t = await mod.getAccessToken();
+        if (t && typeof t === 'string') return t;
       }
-    } catch (e) {
-      console.warn(TAG, "gauth.module.js not available yet", e?.message || e);
-    }
-    // Try a very conservative fallback: GIS tokenClient if present
-    try {
-      const oauth2 = window.google?.accounts?.oauth2;
-      const scopes = (window.LM_SCOPES || '').toString() || 'https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive.readonly';
-      if (oauth2?.initTokenClient) {
-        const token = await new Promise((resolve) => {
-          const client = oauth2.initTokenClient({
-            client_id: window.__LM_CLIENT_ID || window.GOOGLE_CLIENT_ID || '',
-            scope: scopes,
-            callback: (resp) => resolve(resp?.access_token || null),
-          });
-          client.requestAccessToken({prompt: ''});
-        });
-        if (token) return token;
-      }
-    } catch (e) {
-      console.warn(TAG, "GIS fallback failed", e?.message || e);
-    }
+    } catch (_) {}
     return null;
   }
 
-  window.__lm_fetchJSONAuth = async function __lm_fetchJSONAuth(url, opts={}) {
-    const token = await ensureToken();
-    const headers = new Headers(opts.headers || {});
-    if (token) headers.set("Authorization", `Bearer ${token}`);
-    if (!headers.has("Accept")) headers.set("Accept", "application/json");
-    if (opts.body && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
-    const res = await fetch(url, {...opts, headers});
+  function getTokenViaGIS() {
+    return new Promise((resolve) => {
+      try {
+        if (!window.tokenClient) return resolve(null);
+        const client = window.tokenClient;
+        const handler = (resp) => {
+          if (resp && resp.access_token) resolve(resp.access_token);
+          else resolve(null);
+        };
+        client.callback = handler;
+        try { client.requestAccessToken({prompt: ''}); }
+        catch (_) { try { client.requestAccessToken(); } catch (__) {} }
+        setTimeout(() => resolve(null), 3000);
+      } catch (_) { resolve(null); }
+    });
+  }
+
+  async function getToken() {
+    if (_tokenCache) return _tokenCache;
+    const t1 = await getTokenViaGauth();
+    if (t1) { _tokenCache = t1; return t1; }
+    const t2 = await getTokenViaGIS();
+    if (t2) { _tokenCache = t2; return t2; }
+    return null;
+  }
+
+  async function __lm_fetchJSONAuth(url, init = {}) {
+    const token = await getToken();
+    if (!token) throw new Error('__lm_fetchJSONAuth token missing');
+    const headers = new Headers(init.headers || {});
+    headers.set('Authorization', `Bearer ${token}`);
+    if (init.body && typeof init.body === 'object' && !(init.body instanceof FormData)) {
+      headers.set('Content-Type', 'application/json');
+      init = {...init, body: JSON.stringify(init.body)};
+    }
+    const res = await fetch(url, {...init, headers});
     if (!res.ok) {
       const text = await res.text().catch(()=>'');
-      throw new Error(`HTTP ${res.status} ${res.statusText} :: ${text.slice(0,256)}`);
+      throw new Error(`fetch ${res.status} ${res.statusText} ${text}`);
     }
-    const ct = res.headers.get("content-type") || "";
-    if (ct.includes("application/json")) return await res.json();
-    return await res.text();
-  };
-  console.log(TAG, "ready");
+    const ct = res.headers.get('content-type')||'';
+    if (ct.includes('application/json')) return res.json();
+    return res.text();
+  }
+
+  window.__lm_fetchJSONAuth = __lm_fetchJSONAuth;
+  window.dispatchEvent(new Event('lm:auth-ready'));
+  console.log(TAG, 'ready');
 })();

@@ -1,174 +1,127 @@
 
-// materials.sheet.persist.js v1.1
-// Persists per-material opacity into a dedicated __LM_MATERIALS sheet (per caption sheet/spreadsheet)
+/* materials.sheet.persist.js
+ * v1.2 — create "__LM_MATERIALS" sheet if missing and persist opacity.
+ * Requires: window.__lm_fetchJSONAuth (auth-polyfill or host app)
+ */
 (() => {
-  const TAG = "[mat-sheet-persist v1.1]";
-  const SHEET_TITLE = "__LM_MATERIALS";
-  const HEADERS = ["materialKey","opacity","updatedAt","updatedBy","sheetGid"];
+  const TAG = '[mat-sheet-persist v1.2]';
+  console.log(TAG, 'loaded');
 
-  let spreadsheetId = null;
-  let sheetId = null;     // numeric sheetId for __LM_MATERIALS
-  let sheetReady = false;
+  const SHEET_TITLE = '__LM_MATERIALS';
+  const HEADERS = ['materialKey','opacity','updatedAt','updatedBy','spreadsheetId','sheetGid'];
 
-  // UI anchors (loose selectors, robust to markup changes)
-  function q(sel){ return document.querySelector(sel); }
-  function pickSelect() {
-    return q("#pm-material") || q('#pm-opacity select') || q('[data-lm="mat-select"]') || q('section.lm-panel-material select');
+  function sleep(ms){ return new Promise(r=>setTimeout(r,ms)); }
+
+  async function waitAuthFetch(maxMs=7000) {
+    if (typeof window.__lm_fetchJSONAuth === 'function') return;
+    const pEvt = new Promise(res => {
+      const h = () => { window.removeEventListener('lm:auth-ready', h); res(); };
+      window.addEventListener('lm:auth-ready', h);
+    });
+    const pPoll = (async () => {
+      const t0 = performance.now();
+      while (performance.now() - t0 < maxMs) {
+        if (typeof window.__lm_fetchJSONAuth === 'function') return;
+        await sleep(150);
+      }
+      throw new Error('__lm_fetchJSONAuth not present');
+    })();
+    await Promise.race([pEvt, pPoll]);
   }
-  function pickRange() {
-    return q('#pm-opacity input[type="range"]') || q('#opacityRange') || q('section.lm-panel-material input[type="range"]');
+
+  async function fetchJSONAuth(url, init){ 
+    await waitAuthFetch(7000); 
+    return window.__lm_fetchJSONAuth(url, init);
   }
 
-  // Simple debounce
-  function debounce(fn, ms=300){
-    let t; return (...a)=>{ clearTimeout(t); t=setTimeout(()=>fn(...a),ms); };
+  async function getSheetsMeta(spreadsheetId) {
+    const url = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}?fields=sheets.properties`;
+    return fetchJSONAuth(url, {method:'GET'});
   }
 
-  // Ensure auth fetch exists before using it
-  async function waitAuthFetch(timeoutMs=5000){
-    const t0 = Date.now();
-    while (typeof window.__lm_fetchJSONAuth !== 'function') {
-      if (Date.now() - t0 > timeoutMs) throw new Error("__lm_fetchJSONAuth not present");
-      await new Promise(r=>setTimeout(r,120));
-    }
+  async function addSheet(spreadsheetId, title) {
+    const url = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}:batchUpdate`;
+    const body = { requests: [{ addSheet: { properties: { title } } }] };
+    return fetchJSONAuth(url, {method:'POST', body});
+  }
+
+  async function putHeader(spreadsheetId, title, headers) {
+    const range = `${title}!A1:${String.fromCharCode(65 + headers.length - 1)}1`;
+    const url = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(range)}?valueInputOption=RAW`;
+    const body = { values: [headers] };
+    return fetchJSONAuth(url, {method:'PUT', body});
   }
 
   async function ensureSheet(spreadsheetId) {
-    await waitAuthFetch(8000);
-    // 1) List sheets
-    const meta = await window.__lm_fetchJSONAuth(
-      `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}?fields=sheets(properties(sheetId,title))`
-    );
-    const sheets = (meta?.sheets || []).map(s=>s.properties);
-    const found = sheets.find(p => p.title === SHEET_TITLE);
-    if (found) { sheetId = found.sheetId; sheetReady = true; return found; }
-
-    // 2) Create missing sheet + header row
-    const requests = [
-      { addSheet: { properties: { title: SHEET_TITLE, gridProperties: { frozenRowCount: 1 } } } },
-      { updateCells: {
-          range: { sheetId: null, startRowIndex: 0, endRowIndex: 1, startColumnIndex: 0, endColumnIndex: HEADERS.length },
-          rows: [ { values: HEADERS.map(h => ({ userEnteredValue: { stringValue: h }, userEnteredFormat: { textFormat: { bold: true } } })) } ],
-          fields: "userEnteredValue,userEnteredFormat.textFormat.bold"
-      } }
-    ];
-    // addSheet response sheetId is only known after the call; we do two calls for simplicity
-    const res1 = await window.__lm_fetchJSONAuth(
-      `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}:batchUpdate`,
-      { method: "POST", body: JSON.stringify({ requests: [requests[0]] }) }
-    );
-    const newSheetId = res1?.replies?.[0]?.addSheet?.properties?.sheetId;
-    if (newSheetId == null) throw new Error("addSheet failed");
-    sheetId = newSheetId;
-
-    // header write (A1:E1)
-    await window.__lm_fetchJSONAuth(
-      `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}:batchUpdate`,
-      {
-        method: "POST",
-        body: JSON.stringify({
-          requests: [{
-            updateCells: {
-              range: { sheetId: sheetId, startRowIndex: 0, endRowIndex: 1, startColumnIndex: 0, endColumnIndex: HEADERS.length },
-              rows: [{ values: HEADERS.map(h => ({ userEnteredValue: { stringValue: h }, userEnteredFormat: { textFormat: { bold: true } } })) }],
-              fields: "userEnteredValue,userEnteredFormat.textFormat.bold"
-            }
-          }]
-        })
-      }
-    );
-
-    sheetReady = true;
-    return { sheetId };
-  }
-
-  async function upsertOpacity(spreadsheetId, materialKey, opacity, sheetGid) {
-    if (!sheetReady) await ensureSheet(spreadsheetId);
-    // Read existing keys in col A
-    const rangeA = `${encodeURIComponent(SHEET_TITLE)}!A:A`;
-    const dataA = await window.__lm_fetchJSONAuth(
-      `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${rangeA}`
-    );
-    const rows = (dataA?.values || []).map(r => (r[0]||"").toString());
-    let rowIndex = rows.findIndex(v => v === materialKey);
-    const now = new Date().toISOString();
-    const user = (window.__LM_USER_EMAIL || window.__LM_USER || "unknown").toString();
-
-    if (rowIndex < 0) {
-      // append new row
-      const appendRange = `${SHEET_TITLE}!A1:E1`;
-      const body = {
-        valueInputOption: "RAW",
-        data: [{
-          range: appendRange,
-          majorDimension: "ROWS",
-          values: [[materialKey, opacity, now, user, sheetGid ?? ""]]
-        }]
-      };
-      await window.__lm_fetchJSONAuth(
-        `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values:batchUpdate`,
-        { method: "POST", body: JSON.stringify(body) }
-      );
+    const meta = await getSheetsMeta(spreadsheetId);
+    const exists = (meta?.sheets||[]).some(s => s.properties?.title === SHEET_TITLE);
+    if (!exists) {
+      await addSheet(spreadsheetId, SHEET_TITLE);
+      await putHeader(spreadsheetId, SHEET_TITLE, HEADERS);
+      console.log(TAG, 'created sheet & headers');
     } else {
-      // update existing row (rowIndex is 0-based in our array, +1 for 1-based sheet row)
-      const rowNum = rowIndex + 1;
-      const updateRange = `${SHEET_TITLE}!A${rowNum}:E${rowNum}`;
-      const body = {
-        valueInputOption: "RAW",
-        data: [{
-          range: updateRange,
-          majorDimension: "ROWS",
-          values: [[materialKey, opacity, now, user, sheetGid ?? ""]]
-        }]
+      await putHeader(spreadsheetId, SHEET_TITLE, HEADERS).catch(()=>{});
+      console.log(TAG, 'sheet exists');
+    }
+  }
+
+  async function appendOpacity(spreadsheetId, row) {
+    const url = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(SHEET_TITLE)}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`;
+    const body = { values: [row] };
+    return fetchJSONAuth(url, {method:'POST', body});
+  }
+
+  function pickUI() {
+    const sel = document.querySelector('#pm-material') 
+             || document.querySelector('#pm-opacity select')
+             || document.querySelector('[data-lm="mat-select"]')
+             || document.querySelector('section.lm-panel-material select');
+    const range = document.querySelector('#pm-range')
+             || document.querySelector('#opacityRange')
+             || document.querySelector('[data-lm="mat-range"]')
+             || document.querySelector('section.lm-panel-material input[type="range"]');
+    return {sel, range};
+  }
+
+  function debounce(fn, ms){ let t; return (...a)=>{ clearTimeout(t); t=setTimeout(()=>fn(...a), ms); }; }
+
+  // Wire when sheet-context comes in
+  (function arm() {
+    function onCtx(e){
+      const ctx = e?.detail || e;
+      const spreadsheetId = ctx?.spreadsheetId;
+      if (!spreadsheetId) return;
+      ensureSheet(spreadsheetId).catch(err=>console.warn(TAG, 'ensureSheet error:', err));
+
+      const {sel, range} = pickUI();
+      const getKey = () => (sel?.value || '').trim();
+      const getOpacity = () => {
+        const v = Number((range?.value ?? '1'));
+        return Number.isFinite(v) ? v : 1;
       };
-      await window.__lm_fetchJSONAuth(
-        `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values:batchUpdate`,
-        { method: "POST", body: JSON.stringify(body) }
-      );
-    }
-  }
-
-  // Wire UI → persist
-  function wireUI() {
-    const sel = pickSelect();
-    const rng = pickRange();
-    if (!sel || !rng) return console.warn(TAG, "UI anchors missing");
-    const persistSelected = debounce(async () => {
-      try {
-        if (!spreadsheetId) return;
-        const key = (sel.value || "").trim();
+      const debounced = debounce(async () => {
+        const key = getKey();
         if (!key) return;
-        const opacity = parseFloat(rng.value || "1") || 1;
-        await upsertOpacity(spreadsheetId, key, opacity, window.__LM_SHEET_GID || null);
-        console.log(TAG, "persisted", {key, opacity});
-      } catch (e) {
-        console.warn(TAG, "persist error:", e);
-      }
-    }, 350);
-
-    sel.addEventListener("change", persistSelected, {passive: true});
-    rng.addEventListener("change", persistSelected, {passive: true});
-    rng.addEventListener("mouseup", persistSelected, {passive: true});
-  }
-
-  // Listen for sheet-context
-  window.addEventListener("lm:sheet-context", (ev) => {
-    spreadsheetId = ev?.detail?.spreadsheetId || ev?.spreadsheetId || null;
-    window.__LM_SHEET_GID = ev?.detail?.sheetGid ?? ev?.sheetGid ?? null;
-    sheetReady = false;
-    if (spreadsheetId) {
-      ensureSheet(spreadsheetId).then(
-        ()=>console.log(TAG, "sheet bound", spreadsheetId),
-        (e)=>console.warn(TAG, "ensureSheet Error:", e)
-      );
+        const row = [
+          key,
+          getOpacity(),
+          new Date().toISOString(),
+          'viewer',
+          spreadsheetId,
+          String(ctx?.sheetGid ?? '')
+        ];
+        try {
+          await ensureSheet(spreadsheetId);
+          await appendOpacity(spreadsheetId, row);
+          console.log(TAG, 'persisted', {key, opacity: row[1]});
+        } catch (err) {
+          console.warn(TAG, 'persist error:', err);
+        }
+      }, 500);
+      sel && sel.addEventListener('change', debounced, {passive:true});
+      range && range.addEventListener('change', debounced, {passive:true});
+      range && range.addEventListener('mouseup', debounced, {passive:true});
     }
-  });
-
-  // Late wire in case UI builds after this loads
-  if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", wireUI);
-  } else {
-    wireUI();
-  }
-  console.log(TAG, "loaded");
+    window.addEventListener('lm:sheet-context', onCtx);
+  })();
 })();
