@@ -1,49 +1,47 @@
-// materials.render.apply.js
-// v1.2: Honor per-material flags and keep baseline guard compatible
+// materials.render.apply.js  v1.2-lite
 (function(){
-  const TAG='[mat-render v1.2]';
-  function log(...a){ console.log(TAG, ...a); }
+  const TAG = "[mat-render v1.2-lite]";
+  const log = (...a)=>console.log(TAG, ...a);
 
-  function applyFlags({key, opacity=1, doubleSided=false, unlitLike=false}){
-    const scene = window.__LM_SCENE || window.scene;
-    if (!scene || !key) return {hit:0};
-    let hit=0;
+  function findTargets(key){
+    const scene = (window.__LM_SCENE||window.scene);
+    const out = [];
+    if(!scene) return out;
     scene.traverse(o=>{
-      if (!o.isMesh) return;
-      const arr = Array.isArray(o.material) ? o.material : [o.material];
-      arr.forEach(m=>{
-        if (!m) return;
-        if (m.name===key || o.name===key){
-          // Base: opacity
-          m.opacity = (typeof opacity==='number') ? opacity : 1;
-          const needsTransparent = (m.opacity ?? 1) < 0.999 || !!m.userData?.__lm_chromaEnabled;
-          m.transparent = !!needsTransparent;
-          // Flags
-          m.side = doubleSided ? (window.THREE?.DoubleSide ?? 2) : (window.THREE?.FrontSide ?? 0);
-          m.color?.convertSRGBToLinear?.();
-          if (unlitLike){
-            m.emissive?.set?.(m.color ? m.color : 0xffffff);
-            if (typeof m.emissiveIntensity === 'number') m.emissiveIntensity = 1.0;
-            if (m.map && m.map.encoding !== (window.THREE?.sRGBEncoding)){ /* keep current */ }
-          } else {
-            if (m.emissive) m.emissive.set(0x000000);
-            if (typeof m.emissiveIntensity === 'number') m.emissiveIntensity = 0.0;
-          }
-          m.needsUpdate = true;
-          hit++;
-        }
+      if(!o.isMesh) return;
+      const mats = Array.isArray(o.material) ? o.material : [o.material];
+      mats.forEach(m=>{
+        if(!m) return;
+        if(m.name===key || o.name===key) out.push({mesh:o, mat:m});
       });
     });
-    window.dispatchEvent(new Event('lm:mat-apply'));
-    log('applied', {key, opacity, doubleSided, unlitLike, hit});
-    return {hit};
+    return out;
   }
 
-  // Wire to custom event used by the UI/persist layer
-  window.addEventListener('lm:mat-apply-flags', e => {
-    const d = (e && e.detail) || {};
-    applyFlags(d);
-  });
+  function applyToTargets(p){
+    const key = p.key || p.materialKey || "";
+    const targets = findTargets(key);
+    targets.forEach(({mesh, mat})=>{
+      const op = (typeof p.opacity==="number" ? p.opacity : 1);
+      mat.opacity = op;
+      mat.transparent = (op < 0.999) || !!(mat.userData && mat.userData.__lm_chromaEnabled);
+      if(typeof p.doubleSided!=="undefined"){
+        mat.side = p.doubleSided ? THREE.DoubleSide : THREE.FrontSide;
+      }
+      if(typeof p.unlitLike!=="undefined"){
+        const un = !!p.unlitLike;
+        mat.lights = !un;
+        mat.toneMapped = !un;
+        mat.colorWrite = true;
+      }
+      mat.needsUpdate = true;
+    });
+    log("applied", { key, hit: targets.length, opacity: p.opacity, doubleSided: p.doubleSided, unlitLike: p.unlitLike });
+  }
 
-  log('wired');
+  window.addEventListener("lm:mat-apply", (e)=>{
+    const p = e.detail||{};
+    applyToTargets(p);
+  });
+  log("wired");
 })();

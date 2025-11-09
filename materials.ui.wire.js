@@ -1,145 +1,96 @@
-// materials.ui.wire.js v1.5
-// Sync UI <-> sheet row per materialKey with programmatic guard
-// Elements (current IDs):
-//   - select#pm-material
-//   - input#pm-opacity-range
-//   - input#pm-double-sided (checkbox)
-//   - input#pm-unlit-like (checkbox)
-//
+/**
+ * materials.ui.wire.js
+ * v1.6
+ *
+ * - Wires UI controls to persist changes AND to reflect cache on selection.
+ * - Requires materials.sheet.persist.js (for write) and materials.sheet.hydrate.js (for read).
+ */
 (function(){
-  const LOG = '[mat-ui-wire v1.5]';
-  const Q = {
-    select: '#pm-material',
-    range:  '#pm-opacity-range',
-    ds:     '#pm-double-sided',
-    unlit:  '#pm-unlit-like',
+  const LOG_PREFIX = '[mat-ui-wire v1.6]';
+  function log(...a){ console.log(LOG_PREFIX, ...a); }
+  function warn(...a){ console.warn(LOG_PREFIX, ...a); }
+
+  const els = {
+    sel:  null, // #pm-material
+    rng:  null, // #pm-opacity-range
+    ds:   null, // #pm-double-sided
+    un:   null, // #pm-unlit-like
   };
 
-  function log(...a){ console.log(LOG, ...a); }
-  function warn(...a){ console.warn(LOG, ...a); }
-
-  const $ = (sel) => document.querySelector(sel);
-
-  // Programmatic update guard so we don't re-persist while syncing UI from sheet
-  let programmatic = false;
-  const guardRun = (fn) => {
-    programmatic = true;
-    try { fn(); } finally { programmatic = false; }
-  };
-
-  function collectUI(){
-    const sel = $(Q.select);
-    const rng = $(Q.range);
-    const ds  = $(Q.ds);
-    const un  = $(Q.unlit);
-    return {
-      key: sel && (sel.value || sel.selectedOptions?.[0]?.value || ''),
-      opacity: rng ? parseFloat(rng.value) : 1,
-      doubleSided: !!(ds && ds.checked),
-      unlitLike:   !!(un && un.checked),
+  // Persist helper (delegates to materials.sheet.persist.js API pattern)
+  async function persistCurrent(){
+    const key = els.sel?.value || els.sel?.selectedOptions?.[0]?.value || '';
+    if (!key) return;
+    const payload = {
+      materialKey: key,
+      opacity: parseFloat(els.rng?.value ?? '1'),
+      doubleSided: !!els.ds?.checked,
+      unlitLike:   !!els.un?.checked,
     };
-  }
-
-  function applyToUI(v){
-    const rng = $(Q.range);
-    const ds  = $(Q.ds);
-    const un  = $(Q.unlit);
-    guardRun(() => {
-      if (rng && typeof v.opacity === 'number') rng.value = String(v.opacity);
-      if (ds  && typeof v.doubleSided === 'boolean') ds.checked = !!v.doubleSided;
-      if (un  && typeof v.unlitLike === 'boolean')   un.checked = !!v.unlitLike;
-    });
-  }
-
-  async function syncFromSheet(materialKey){
-    const P = window.__LM_MAT_PERSIST;
-    if (!P || typeof P.readByKey !== 'function') { warn('persist API missing'); return; }
-    const r = await P.readByKey(materialKey);
-    if (r.hit){
-      applyToUI(r.values);
-      // reflect to render (no save)
-      if (window.__LM_MAT_RENDER && typeof window.__LM_MAT_RENDER.apply === 'function'){
-        window.__LM_MAT_RENDER.apply({
-          key: materialKey,
-          opacity: r.values.opacity,
-          doubleSided: r.values.doubleSided,
-          unlitLike: r.values.unlitLike
-        });
-      }
+    if (typeof window.__LM_MAT_PERSIST__?.upsert === 'function'){
+      await window.__LM_MAT_PERSIST__.upsert(payload);
     }else{
-      // defaults
-      applyToUI({opacity:1, doubleSided:false, unlitLike:false});
-      if (window.__LM_MAT_RENDER && typeof window.__LM_MAT_RENDER.apply === 'function'){
-        window.__LM_MAT_RENDER.apply({
-          key: materialKey, opacity:1, doubleSided:false, unlitLike:false
-        });
-      }
+      warn('persist API missing (__LM_MAT_PERSIST__.upsert)');
     }
+    // Let others know
+    window.dispatchEvent(new CustomEvent('lm:mat-apply', { detail: { key, values: payload } }));
   }
 
-  async function persistFromUI(){
-    if (programmatic) return; // skip programmatic updates
-    const P = window.__LM_MAT_PERSIST;
-    if (!P || typeof P.upsert !== 'function') { warn('persist API missing'); return; }
-    const v = collectUI();
-    if (!v.key) return;
-    await P.upsert({
-      materialKey: v.key,
-      opacity: v.opacity,
-      doubleSided: v.doubleSided,
-      unlitLike: v.unlitLike
-    });
-    if (window.__LM_MAT_RENDER && typeof window.__LM_MAT_RENDER.apply === 'function'){
-      window.__LM_MAT_RENDER.apply({
-        key: v.key,
-        opacity: v.opacity,
-        doubleSided: v.doubleSided,
-        unlitLike: v.unlitLike
-      });
-    }
+  // Read from cache and reflect into UI
+  function reflectFromCache(){
+    const key = els.sel?.value || els.sel?.selectedOptions?.[0]?.value || '';
+    if (!key) return;
+    const cache = window.__LM_MAT_CACHE;
+    if (!cache || typeof cache.get !== 'function') return;
+    const v = cache.get(key);
+    if (!v) return;
+    if (els.rng && v.opacity != null && !isNaN(v.opacity)) els.rng.value = String(v.opacity);
+    if (els.ds) els.ds.checked = !!v.doubleSided;
+    if (els.un) els.un.checked = !!v.unlitLike;
+    log('ui reflected from cache', { key, v });
   }
 
+  // Wire
   function wire(){
-    const sel = $(Q.select);
-    const rng = $(Q.range);
-    const ds  = $(Q.ds);
-    const un  = $(Q.unlit);
+    els.sel = document.querySelector('#pm-material');
+    els.rng = document.querySelector('#pm-opacity-range');
+    els.ds  = document.querySelector('#pm-double-sided');
+    els.un  = document.querySelector('#pm-unlit-like');
 
-    if (!sel || !rng || !ds || !un){
-      return warn('UI parts missing', {sel:!!sel, rng:!!rng, ds:!!ds, un:!!un});
+    if (!els.sel || !els.rng){
+      warn('UI parts missing', { sel: !!els.sel, rng: !!els.rng, ds: !!els.ds, un: !!els.un });
+      return;
     }
 
-    // On selection change: sync from sheet into UI (no save), render reflect
-    sel.addEventListener('change', () => {
-      const key = sel.value || sel.selectedOptions?.[0]?.value || '';
-      if (!key) return;
-      syncFromSheet(key);
+    // Initial reflect if cache ready
+    reflectFromCache();
+
+    let t;
+    const debounced = () => { clearTimeout(t); t = setTimeout(persistCurrent, 120); };
+
+    els.sel.addEventListener('change', ()=>{
+      reflectFromCache();         // selection -> first reflect UI from cache
+      debounced();                // then persist snapshot (so sheet stays aligned with UI selection)
     }, { passive:true });
 
-    // Debounced saver for range & checkboxes
-    let t;
-    const debounced = () => { clearTimeout(t); t = setTimeout(persistFromUI, 120); };
+    els.rng.addEventListener('input', debounced, { passive:true });
+    els.rng.addEventListener('change', debounced, { passive:true });
+    els.rng.addEventListener('pointerup', debounced, { passive:true });
 
-    rng.addEventListener('input', debounced, { passive:true });
-    rng.addEventListener('change', debounced, { passive:true });
-    rng.addEventListener('pointerup', debounced, { passive:true });
-    ds.addEventListener('change', debounced, { passive:true });
-    un.addEventListener('change', debounced, { passive:true });
+    if (els.ds) els.ds.addEventListener('change', debounced, { passive:true });
+    if (els.un) els.un.addEventListener('change', debounced, { passive:true });
 
-    // Initial sync (if something is preselected)
-    const initKey = sel.value || sel.selectedOptions?.[0]?.value || '';
-    if (initKey) syncFromSheet(initKey);
-
-    log('wired with selection-sync & flags');
+    log('wired');
   }
 
-  function bootstrap(){
-    if (document.readyState === 'loading'){
-      document.addEventListener('DOMContentLoaded', wire, {once:true});
-    }else{
-      wire();
-    }
-  }
+  // On materials ready / model ready -> re-reflect UI (in case values changed)
+  window.addEventListener('lm:materials-ready', reflectFromCache);
+  window.addEventListener('lm:model-ready', reflectFromCache);
 
-  bootstrap();
+  // Boot
+  if (document.readyState === 'loading'){
+    document.addEventListener('DOMContentLoaded', wire, { once:true });
+  }else{
+    setTimeout(wire, 0);
+  }
 })();
