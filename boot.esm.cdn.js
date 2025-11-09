@@ -1310,7 +1310,7 @@ onCanvasShiftPick(function(pos){
       console.log('[hotfix] __LM_MATERIALS created');
     }
     // ensure headers A1:M1
-    await fetchJSON(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encA1(spreadsheetId,'__LM_MATERIALS','A1:N1')}:?valueInputOption=RAW`, {
+    await fetchJSON(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encA1(spreadsheetId,'__LM_MATERIALS','A1:M1')}:append?valueInputOption=RAW`, {
       method:'POST',
       body:{ values:[['materialKey','opacity','doubleSided','unlitLike','chromaEnable','chromaColor','chromaTolerance','chromaFeather','roughness','metalness','emissiveHex','updatedAt','updatedBy','sheetGid']] }
     });
@@ -1461,66 +1461,151 @@ onCanvasShiftPick(function(pos){
 })();
 
 
-/* === [LM header-init guard v1] ensure A1:J1 on caption sheets (exclude __LM_*) ============
-   Runs on 'lm:sheet-context' and 'lm:sheet-changed'. If the selected sheet's first row is empty,
-   writes the standard caption header using values.update to A1:J1. Safe & idempotent.
-========================================================================================== */
+/* ==========================================================================
+ * LM overlay patch bundle (non-destructive, append-only)
+ * - Fix __LM_MATERIALS header PUT URL (no stray colon; proper encodeURIComponent)
+ * - Ensure caption header (A1:J1) is written immediately after Create (no rename required)
+ * - Exclude internal sheets (__LM_*) from caption header writes
+ * - Works alongside existing code; does not remove/replace prior logic
+ * ========================================================================== */
 (function(){
-  const TAG='[lm-header-guard v1]';
-  const initedGids = new Set();
-  async function ensureAuth(){
-    let tries=0;
-    while(typeof window.__lm_fetchJSONAuth!=='function' && tries<50){
-      await new Promise(r=>setTimeout(r,100)); tries++;
-    }
-    if(typeof window.__lm_fetchJSONAuth!=='function') throw new Error('auth_shim_missing');
-  }
-  async function getSheetTitle(spreadsheetId, sheetGid){
-    const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}?fields=sheets(properties(sheetId,title))`;
-    const json = await __lm_fetchJSONAuth(url, { method:'GET' });
-    const list = (json && json.sheets) || [];
-    const hit = list.find(s => s && s.properties && Number(s.properties.sheetId) === Number(sheetGid));
-    return hit && hit.properties && hit.properties.title || '';
-  }
-  async function firstRow(spreadsheetId, title){
-    const safeTitle = String(title).replace(/'/g, "''");
-    const rng = `'${safeTitle}'!A1:J1`;
-    const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(rng)}`;
-    try{
-      const json = await __lm_fetchJSONAuth(url, { method:'GET' });
-      const vals = (json && json.values) || [];
-      return vals[0] || null;
-    }catch(e){ return null; }
-  }
-  async function writeHeader(spreadsheetId, title){
-    const safeTitle = String(title).replace(/'/g, "''");
-    const rng = `'${safeTitle}'!A1:J1`;
-    const body = { values: [[
-      'id','title','body','color','x','y','z','imageFileId','createdAt','updatedAt'
-    ]], majorDimension:'ROWS' };
-    const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(rng)}?valueInputOption=RAW`;
-    await __lm_fetchJSONAuth(url, { method:'PUT', body });
-  }
-  async function maybeInit(detail){
-    try{
-      await ensureAuth();
-      const spreadsheetId = detail && detail.spreadsheetId;
-      const sheetGid = detail && detail.sheetGid;
-      if(!spreadsheetId || sheetGid==null) return;
-      if(initedGids.has(sheetGid)) return;
-      const title = await getSheetTitle(spreadsheetId, sheetGid);
-      if(!title || title.startsWith('__LM_')) return;
-      const row = await firstRow(spreadsheetId, title);
-      const ok = Array.isArray(row) && row.length>=10 && String(row[0]).toLowerCase()==='id';
-      if(!ok){
-        await writeHeader(spreadsheetId, title);
-        console.log(TAG, 'header written for', title, '(gid', sheetGid, ')');
+  const TAG = '[lm-overlay v1]';
+
+  // ---- Safe auth fetch (reuse if present) ---------------------------------
+  if (typeof window.__lm_fetchJSONAuth !== 'function') {
+    // Minimal shim; prefers existing getAccessToken()
+    window.__lm_fetchJSONAuth = async function(url, init){
+      const tok = (typeof getAccessToken === 'function') ? getAccessToken() : null;
+      if(!tok) throw new Error('token_missing');
+      const headers = Object.assign({}, (init && init.headers) || {}, {
+        'Authorization': 'Bearer ' + tok,
+        'Accept': 'application/json'
+      });
+      let body = init && init.body;
+      if (body && typeof body !== 'string') body = JSON.stringify(body);
+      if (body && !headers['Content-Type']) headers['Content-Type'] = 'application/json';
+      const resp = await fetch(url, Object.assign({}, init||{}, { headers, body }));
+      if (!resp.ok){
+        let txt = ''; try{ txt = await resp.text(); }catch(_){}
+        let json; try{ json = JSON.parse(txt); }catch(_){}
+        const err = new Error('HTTP '+resp.status+': '+(resp.statusText||''));
+        err.status = resp.status; err.body = json || txt;
+        throw err;
       }
-      initedGids.add(sheetGid);
+      const ct = resp.headers.get('content-type') || '';
+      return ct.includes('application/json') ? await resp.json() : await resp.text();
+    };
+    try{ console.log(TAG, 'auth shim installed'); }catch(_){}
+  }
+
+  // ---- Helpers -------------------------------------------------------------
+  async function lmGetSheetMeta(spreadsheetId){
+    const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}?fields=sheets(properties(sheetId,title))`;
+    const j = await __lm_fetchJSONAuth(url, { method:'GET' });
+    const m = new Map();
+    (j.sheets||[]).forEach(s=>{
+      const p = s && s.properties || {};
+      if (typeof p.sheetId === 'number') m.set(p.sheetId, p.title||'');
+    });
+    return m;
+  }
+
+  async function lmPutHeader(spreadsheetId, a1, cols){
+    const range = a1; // keep original quotes for range, but encode later
+    const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}?valueInputOption=RAW`;
+    const body = { range, majorDimension:'ROWS', values:[cols] };
+    return __lm_fetchJSONAuth(url, { method:'PUT', body });
+  }
+
+  function lmQuote(title){
+    return `'${String(title).replace(/'/g,"''")}'`;
+  }
+
+  // ---- Ensure __LM_MATERIALS header (idempotent) ---------------------------
+  async function ensureMaterialsHeader(spreadsheetId){
+    try{
+      const meta = await lmGetSheetMeta(spreadsheetId);
+      let matTitle = '__LM_MATERIALS';
+      // confirm it exists (created by existing logic)
+      let exists = false;
+      for(const t of meta.values()){ if (t === '__LM_MATERIALS') { exists = true; break; } }
+      if(!exists){
+        // If not present yet, stop silently; creator will run elsewhere.
+        return false;
+      }
+      const cols = [
+        'materialKey','matName','targetSheetGid','opacity','chromaColor',
+        'chromaTolerance','chromaFeather','doubleSided','unlitLike',
+        'notes','updatedAt','updatedBy','__rev','__debug'
+      ];
+      const a1 = `${lmQuote(matTitle)}!A1:N1`;
+      await lmPutHeader(spreadsheetId, a1, cols);
+      try{ console.log('[lm-materials-header] ok'); }catch(_){}
+      return true;
     }catch(e){
-      console.warn(TAG, 'skip', e && e.message || e);
+      try{ console.warn('[lm-materials-header] fail', e); }catch(_){}
+      return false;
     }
   }
-  window.addEventListener('lm:sheet-context', (ev)=> maybeInit(ev.detail || {}));
-  window.addEventListener('lm:sheet-changed', (ev)=> maybeInit(ev.detail || {}));
+
+  // ---- Caption header guard (on create / switch) ---------------------------
+  const seenGids = new Set();
+  async function writeCaptionHeaderIfNeeded(spreadsheetId, gid){
+    if (!spreadsheetId || !Number.isFinite(gid) || seenGids.has(gid)) return;
+    try{
+      const meta = await lmGetSheetMeta(spreadsheetId);
+      const title = meta.get(gid);
+      if (!title) return;
+      if (String(title).startsWith('__LM_')) return; // internal skip
+      const cols = ['id','title','body','color','x','y','z','imageFileId','createdAt','updatedAt'];
+      const a1 = `${lmQuote(title)}!A1:J1`;
+      await lmPutHeader(spreadsheetId, a1, cols);
+      seenGids.add(gid);
+      try{ console.log('[lm-header-guard v1] header written for', title, '(gid', gid,')'); }catch(_){}
+    }catch(e){
+      try{ console.warn('[lm-header-guard v1] skip', e); }catch(_){}
+    }
+  }
+
+  // ---- Event wiring --------------------------------------------------------
+  function getCtx(){
+    return (window.__LM_SHEET_CTX)||{};
+  }
+
+  // When sheet context appears/changes, ensure materials header and caption header
+  function onCtx(e){
+    const d = (e && e.detail) || getCtx();
+    if (!d || !d.spreadsheetId) return;
+    ensureMaterialsHeader(d.spreadsheetId).catch(()=>{});
+    if (Number.isFinite(d.sheetGid)){
+      writeCaptionHeaderIfNeeded(d.spreadsheetId, d.sheetGid).catch(()=>{});
+    }
+  }
+  window.addEventListener('lm:sheet-context', onCtx);
+  window.addEventListener('lm:sheet-changed', onCtx);
+
+  // Also try once on DOM ready
+  if (document.readyState === 'complete' || document.readyState === 'interactive'){
+    setTimeout(()=>onCtx({detail:getCtx()}), 0);
+  } else {
+    window.addEventListener('DOMContentLoaded', ()=> setTimeout(()=>onCtx({detail:getCtx()}),0), { once:true });
+  }
+
+  // Observe Create: option appended to sheet selector → write header immediately
+  (function observeSelect(){
+    const sel = document.querySelector('#save-target-sheet, select[data-role="sheet-target"], select#sheet-target');
+    if (!sel) return;
+    const mo = new MutationObserver((muts)=>{
+      const ctx = getCtx();
+      // Try all options; write for any unseen gid
+      const opts = Array.from(sel.querySelectorAll('option'));
+      for(const o of opts){
+        const gid = Number(o && (o.dataset && o.dataset.gid || o.value));
+        if (Number.isFinite(gid)) writeCaptionHeaderIfNeeded(ctx.spreadsheetId, gid).catch(()=>{});
+      }
+    });
+    mo.observe(sel, { childList:true, subtree:true });
+  })();
+
+  try{ console.log(TAG, 'installed'); }catch(_){}
 })();
