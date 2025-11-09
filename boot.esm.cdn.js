@@ -2,41 +2,21 @@
 // === LM: caption header helper
 
 // === LM: caption header writer (robust; waits for auth shim; uses values.update) ===
-async function lmWriteCaptionHeaderDirect(spreadsheetId, sheetTitle){
+async async function lmWriteCaptionHeaderDirect(spreadsheetId, sheetTitle){
   try{
     if(!spreadsheetId || !sheetTitle) return false;
-    // wait up to 5s for auth shim
-    let tries = 0;
-    while(typeof window.__lm_fetchJSONAuth !== 'function' && tries < 50){
-      await new Promise(r=>setTimeout(r,100));
-      tries++;
-    }
-    if(typeof window.__lm_fetchJSONAuth !== 'function'){
-      console.warn('[lm-header] __lm_fetchJSONAuth not ready'); 
-      return false;
-    }
-    const safeTitle = String(sheetTitle).replace(/'/g, "''");
+    // do not touch internal sheet
+    if (String(sheetTitle).startsWith('__LM_')) return true;
+    // wait for auth shim
+    let tries=0; while(typeof window.__lm_fetchJSONAuth!=='function' && tries<50){ await new Promise(r=>setTimeout(r,100)); tries++; }
+    if(typeof window.__lm_fetchJSONAuth!=='function') return false;
+    const safeTitle = String(sheetTitle).replace(/'/g,"''");
     const range = `'${safeTitle}'!A1:J1`;
-    const body = { values: [[
-      'id','title','body','color','x','y','z','imageFileId','createdAt','updatedAt'
-    ]], majorDimension:'ROWS' };
+    const body = { values: [[ 'id','title','body','color','x','y','z','imageFileId','createdAt','updatedAt' ]], majorDimension:'ROWS' };
     const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}?valueInputOption=RAW`;
-    try{
-      const r = await __lm_fetchJSONAuth(url, { method:'PUT', body });
-      console.log('[lm-header] values.update ok for', sheetTitle);
-      return true;
-    }catch(e){
-      console.warn('[lm-header] update failed, fallback to append', e);
-      const url2 = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`;
-      try{
-        await __lm_fetchJSONAuth(url2, { method:'POST', body });
-        console.log('[lm-header] values.append ok for', sheetTitle);
-        return true;
-      }catch(e2){
-        console.error('[lm-header] append failed', e2);
-        return false;
-      }
-    }
+    await __lm_fetchJSONAuth(url, { method:'PUT', body });
+    console.log('[lm-header] values.update ok for', sheetTitle);
+    return true;
   }catch(e){
     console.error('[lm-header] unexpected', e);
     return false;
@@ -413,16 +393,35 @@ const LOCIMYU_HEADERS = ['id','title','body','color','x','y','z','imageFileId','
 
 function colA1(i0){ let n=i0+1,s=''; while(n){ n--; s=String.fromCharCode(65+(n%26))+s; n=(n/26)|0; } return s; }
 function putValues(spreadsheetId, rangeA1, values, token){
-  const url = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(rangeA1)}?valueInputOption=RAW`;
-  return fetch(url, { method:'PUT', headers:{ Authorization:'Bearer '+token, 'Content-Type':'application/json' }, body: JSON.stringify({ values }) }).then(r=>{ if(!r.ok) throw new Error('values.update '+r.status); });
+  const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(rangeA1)}?valueInputOption=RAW`;
+  const headers = { 'Authorization':'Bearer '+token, 'Content-Type':'application/json' };
+  const body = JSON.stringify({ range: rangeA1, values, majorDimension:'ROWS' });
+  return fetch(url, { method:'PUT', headers, body }).then(r=>{
+    if(!r.ok) throw new Error('values.update '+r.status);
+    return r.json();
+  });
 }
 function appendValues(spreadsheetId, rangeA1, values, token){
-  const url = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(rangeA1)}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`;
-  return fetch(url, { method:'POST', headers:{ Authorization:'Bearer '+token, 'Content-Type':'application/json' }, body: JSON.stringify({ values }) }).then(r=>{ if(!r.ok) throw new Error('values.append '+r.status); });
+  const base = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(rangeA1)}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`;
+  const headers = { 'Authorization':'Bearer '+token, 'Content-Type':'application/json' };
+  const body = JSON.stringify({ values, majorDimension:'ROWS' });
+  return fetch(base, { method:'POST', headers, body }).then(r=>{
+    if(!r.ok) throw new Error('values.append '+r.status);
+    return r.json();
+  });
 }
 function getValues(spreadsheetId, rangeA1, token){
-  const url = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(rangeA1)}`;
-  return fetch(url, { headers:{ Authorization:'Bearer '+token } }).then(r=>{ if(!r.ok) throw new Error('values.get '+r.status); return r.json(); }).then(d=> d.values||[]);
+  const TAG='[getValues]';
+  const ranges = encodeURIComponent(rangeA1);
+  const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values:batchGet?ranges=${ranges}`;
+  const headers = { 'Authorization':'Bearer '+token };
+  return fetch(url, { headers }).then(r=>{
+    if(!r.ok) throw new Error('values.get '+r.status);
+    return r.json();
+  }).then(js=>{
+    const values = (js.valueRanges && js.valueRanges[0] && js.valueRanges[0].values) || [];
+    return values;
+  });
 }
 function isLociMyuSpreadsheet(spreadsheetId, token){
   const url=`https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}?includeGridData=true&ranges=A1:Z1&fields=sheets(properties(title,sheetId),data(rowData(values(formattedValue))))`;
@@ -1297,25 +1296,27 @@ onCanvasShiftPick(function(pos){
     return encodeURIComponent(quoted);
   }
 
-  async function ensureMaterialsSheet(spreadsheetId){
-    // check exist
-    const meta = await fetchJSON(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}`);
-    const exists = (meta.sheets||[]).some(s => s.properties.title === '__LM_MATERIALS');
-    if (!exists) {
-      // create via batchUpdate with sheetId auto
-      await fetchJSON(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}:batchUpdate`, {
-        method:'POST',
-        body:{ requests:[{ addSheet:{ properties:{ title:'__LM_MATERIALS' } } }]}
-      });
-      console.log('[hotfix] __LM_MATERIALS created');
+  async async function ensureMaterialsSheet(spreadsheetId){
+  const TAG='[hotfix]';
+  try{
+    let tries=0; while(typeof window.__lm_fetchJSONAuth!=='function' && tries<50){ await new Promise(r=>setTimeout(r,100)); tries++; }
+    const title='__LM_MATERIALS';
+    // get sheets to see if exists
+    const metaUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}?fields=sheets(properties(sheetId,title))`;
+    const meta = await __lm_fetchJSONAuth(metaUrl, { method:'GET' });
+    const has = (meta.sheets||[]).some(s=>s.properties && s.properties.title===title);
+    if(!has){
+      const addUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}:batchUpdate`;
+      await __lm_fetchJSONAuth(addUrl, { method:'POST', body:{ requests:[{ addSheet:{ properties:{ title } } }] } });
+      console.log(TAG,'__LM_MATERIALS created');
     }
-    // ensure headers A1:M1
-    await fetchJSON(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encA1(spreadsheetId,'__LM_MATERIALS','A1:M1')}:append?valueInputOption=RAW`, {
-      method:'POST',
-      body:{ values:[['materialKey','opacity','doubleSided','unlitLike','chromaEnable','chromaColor','chromaTolerance','chromaFeather','roughness','metalness','emissiveHex','updatedAt','updatedBy','sheetGid']] }
-    });
-    console.log('[hotfix] __LM_MATERIALS ensured');
+    await ensureMaterialsHeader(spreadsheetId);
+    console.log(TAG,'__LM_MATERIALS ensured');
+  }catch(e){
+    console.log(TAG,'ensureMaterialsSheet failed', e);
+    throw e;
   }
+}
 
   // Re-arm on sheet-context
   window.addEventListener('lm:sheet-context', async (e)=>{
@@ -1522,31 +1523,30 @@ onCanvasShiftPick(function(pos){
   }
 
   // ---- Ensure __LM_MATERIALS header (idempotent) ---------------------------
-  async function ensureMaterialsHeader(spreadsheetId){
+  async async function ensureMaterialsHeader(spreadsheetId){
+  const TAG='[lm-materials-header]';
+  try{
+    let tries=0; while(typeof window.__lm_fetchJSONAuth!=='function' && tries<50){ await new Promise(r=>setTimeout(r,100)); tries++; }
+    const title='__LM_MATERIALS';
+    const header = [[
+      'materialKey','matName','targetSheetGid','opacity','chromaEnable','chromaColor','chromaTolerance','chromaFeather','doubleSided','unlitLike',
+      'notes','metalness','emissiveHex','updatedAt','updatedBy','__rev','__debug','sheetGid'
+    ]];
+    // check existing A1
+    const urlGet = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values:batchGet?ranges=${encodeURIComponent(`'${title}'!A1:A1`)}`;
+    let has=false;
     try{
-      const meta = await lmGetSheetMeta(spreadsheetId);
-      let matTitle = '__LM_MATERIALS';
-      // confirm it exists (created by existing logic)
-      let exists = false;
-      for(const t of meta.values()){ if (t === '__LM_MATERIALS') { exists = true; break; } }
-      if(!exists){
-        // If not present yet, stop silently; creator will run elsewhere.
-        return false;
-      }
-      const cols = [
-        'materialKey','matName','targetSheetGid','opacity','chromaColor',
-        'chromaTolerance','chromaFeather','doubleSided','unlitLike',
-        'notes','updatedAt','updatedBy','__rev','__debug'
-      ];
-      const a1 = `${lmQuote(matTitle)}!A1:N1`;
-      await lmPutHeader(spreadsheetId, a1, cols);
-      try{ console.log('[lm-materials-header] ok'); }catch(_){}
-      return true;
-    }catch(e){
-      try{ console.warn('[lm-materials-header] fail', e); }catch(_){}
-      return false;
-    }
+      const js = await __lm_fetchJSONAuth(urlGet, { method:'GET' });
+      const v = js && js.valueRanges && js.valueRanges[0] && js.valueRanges[0].values;
+      has = !!(v && v[0] && v[0][0]);
+    }catch(_){}
+    const urlPut = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(`'${title}'!A1:Q1`)}?valueInputOption=RAW`;
+    await __lm_fetchJSONAuth(urlPut, { method:'PUT', body:{ values: header, majorDimension:'ROWS' } });
+    console.log(TAG, 'ok');
+  }catch(e){
+    console.warn(TAG,'failed', e);
   }
+}
 
   // ---- Caption header guard (on create / switch) ---------------------------
   const seenGids = new Set();
