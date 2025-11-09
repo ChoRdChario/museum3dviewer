@@ -43,7 +43,7 @@ async function lmWriteCaptionHeaderDirect(spreadsheetId, sheetTitle){
   }
 }
 
- (prevents staircase on a brand-new sheet) ===
+// (prevents staircase on a brand-new sheet) ===
 function lmWriteCaptionHeader(spreadsheetId, sheetTitle){
   try{
     const token = getAccessToken && getAccessToken();
@@ -1459,4 +1459,3 @@ onCanvasShiftPick(function(pos){
   window.addEventListener('lm:sheet-context', run);
   window.addEventListener('lm:sheet-changed', run);
 })();
-
