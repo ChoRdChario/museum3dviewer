@@ -2,7 +2,7 @@
 // === LM: caption header helper
 
 // === LM: caption header writer (robust; waits for auth shim; uses values.update) ===
-async async function lmWriteCaptionHeaderDirect(spreadsheetId, sheetTitle){
+async function lmWriteCaptionHeaderDirect(spreadsheetId, sheetTitle){
   try{
     if(!spreadsheetId || !sheetTitle) return false;
     // do not touch internal sheet
@@ -1296,7 +1296,7 @@ onCanvasShiftPick(function(pos){
     return encodeURIComponent(quoted);
   }
 
-  async async function ensureMaterialsSheet(spreadsheetId){
+  async function ensureMaterialsSheet(spreadsheetId){
   const TAG='[hotfix]';
   try{
     let tries=0; while(typeof window.__lm_fetchJSONAuth!=='function' && tries<50){ await new Promise(r=>setTimeout(r,100)); tries++; }
@@ -1523,7 +1523,7 @@ onCanvasShiftPick(function(pos){
   }
 
   // ---- Ensure __LM_MATERIALS header (idempotent) ---------------------------
-  async async function ensureMaterialsHeader(spreadsheetId){
+  async function ensureMaterialsHeader(spreadsheetId){
   const TAG='[lm-materials-header]';
   try{
     let tries=0; while(typeof window.__lm_fetchJSONAuth!=='function' && tries<50){ await new Promise(r=>setTimeout(r,100)); tries++; }
@@ -1609,3 +1609,184 @@ onCanvasShiftPick(function(pos){
 
   try{ console.log(TAG, 'installed'); }catch(_){}
 })();
+
+
+/* ===== LM Sheets & Materials Hardening Patch v1.6 (overlay, non-destructive) ===== */
+(function(){
+  const TAG='[lm-patch v1.6]';
+
+  // ---- Minimal auth shim (idempotent) ----
+  if (typeof window.__lm_fetchJSONAuth !== 'function') {
+    function __lm_fetchJSONAuth(url, init){
+      const t = (typeof getAccessToken==='function') ? getAccessToken() : null;
+      if(!t) throw new Error('token_missing');
+      const headers = Object.assign({}, (init && init.headers) || {}, {
+        'Authorization': 'Bearer ' + t,
+        'Accept': 'application/json'
+      });
+      let body = init && init.body;
+      if (body && typeof body !== 'string') body = JSON.stringify(body);
+      if (body && !headers['Content-Type']) headers['Content-Type'] = 'application/json';
+      return fetch(url, Object.assign({}, init||{}, { headers, body })).then(async r=>{
+        if(!r.ok){
+          const txt = await r.text().catch(()=>'');
+          let j; try{ j=JSON.parse(txt);}catch(_){}
+          const err = new Error('HTTP '+r.status+': '+r.statusText);
+          err.status=r.status; err.body=j||txt; throw err;
+        }
+        const ct = r.headers.get('content-type')||'';
+        return ct.includes('application/json') ? r.json() : r.text();
+      });
+    }
+    window.__lm_fetchJSONAuth = __lm_fetchJSONAuth;
+    try{ window.dispatchEvent(new CustomEvent('lm:gauth-ready')); }catch(_){}
+    console.log(TAG,'auth shim installed');
+  }
+
+  // ---- Caption header writer (skip internal sheets) ----
+  if (typeof window.lmWriteCaptionHeaderDirect !== 'function') {
+    window.lmWriteCaptionHeaderDirect = async function lmWriteCaptionHeaderDirect(spreadsheetId, sheetTitle){
+      try{
+        if(!spreadsheetId || !sheetTitle) return false;
+        if (String(sheetTitle).startsWith('__LM_')) return true; // never write into internal sheets
+        const safe = String(sheetTitle).replace(/'/g,"''");
+        const range = `'${safe}'!A1:J1`;
+        const body  = { values: [[ 'id','title','body','color','x','y','z','imageFileId','createdAt','updatedAt' ]], majorDimension:'ROWS' };
+        const url   = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}?valueInputOption=RAW`;
+        await __lm_fetchJSONAuth(url, { method:'PUT', body });
+        console.log(TAG,'lmWriteCaptionHeaderDirect ok for', sheetTitle);
+        return true;
+      }catch(e){ console.warn(TAG,'lmWriteCaptionHeaderDirect failed', e); return false; }
+    };
+  }
+
+  // ---- Resolve sheet title from GID (cache) ----
+  const __TITLE_CACHE = Object.create(null); // { [sheetId]:{gid:title} }
+  async function __refreshTitles(spreadsheetId){
+    const meta = await __lm_fetchJSONAuth(`https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}`, {method:'GET'});
+    const map = Object.create(null);
+    for(const s of (meta.sheets||[])){
+      const p = s.properties||{};
+      map[String(p.sheetId)] = p.title;
+    }
+    __TITLE_CACHE[spreadsheetId] = map;
+    return map;
+  }
+  async function __titleByGid(spreadsheetId, gid){
+    const gidStr = String(gid ?? '');
+    const cache = __TITLE_CACHE[spreadsheetId] || await __refreshTitles(spreadsheetId);
+    if (cache[gidStr]) return cache[gidStr];
+    const map = await __refreshTitles(spreadsheetId);
+    return map[gidStr];
+  }
+
+  // ---- Ensure __LM_MATERIALS exists and has header (PUT, not POST) ----
+  async function __ensureMaterialsHeader(spreadsheetId){
+    const HDR = ['materialKey','matName','targetSheetGid','opacity','chromaEnable','chromaColor','chromaTolerance','chromaFeather','doubleSided','unlitLike','roughness','metalness','emissiveHex','updatedAt','updatedBy','__rev','__debug'];
+    const range = `'__LM_MATERIALS'!A1:${String.fromCharCode(65+HDR.length-1)}1`;
+    try{
+      await __lm_fetchJSONAuth(
+        `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}?valueInputOption=RAW`,
+        { method:'PUT', body:{ values:[HDR], majorDimension:'ROWS' } }
+      );
+      console.log(TAG,'materials header ensured');
+    }catch(e){ console.warn(TAG,'materials header ensure failed', e); }
+  }
+  async function __ensureMaterialsSheet(spreadsheetId){
+    try{
+      const meta = await __lm_fetchJSONAuth(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}?fields=sheets(properties(title))`, {method:'GET'});
+      const has = (meta.sheets||[]).some(s=> (s.properties||{}).title === '__LM_MATERIALS');
+      if(!has){
+        await __lm_fetchJSONAuth(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}:batchUpdate`, {
+          method:'POST', body:{ requests:[{ addSheet:{ properties:{ title:'__LM_MATERIALS' } } }] }
+        });
+        console.log(TAG,'__LM_MATERIALS created');
+      }
+      await __ensureMaterialsHeader(spreadsheetId);
+    }catch(e){ console.warn(TAG,'ensureMaterialsSheet failed', e); }
+  }
+
+  // Fire after sheet-context is available
+  window.addEventListener('lm:sheet-context', function(ev){
+    const ctx = (ev && ev.detail) || window.__LM_SHEET_CTX || {};
+    if(!ctx.spreadsheetId) return;
+    __ensureMaterialsSheet(ctx.spreadsheetId).catch(()=>{});
+  });
+
+  // ---- Guard: never append data rows into __LM_MATERIALS (header-only) ----
+  (function guardAppendsIntoInternal(){
+    const g = window;
+    const names = ['appendValues','sheetsAppendRow'];
+    names.forEach(function(nm){
+      if(typeof g[nm] === 'function'){
+        const orig = g[nm];
+        g[nm] = function(spreadsheetId, rangeOrRow, maybeRow){
+          try{
+            let range = null;
+            if (typeof rangeOrRow === 'string') range = rangeOrRow;
+            if (Array.isArray(rangeOrRow)) {
+              // sheetsAppendRow(spreadsheetId, values[]) legacy → will be adapted by wrappers below.
+              // No internal sheet detection possible here; let wrappers fix the range later.
+            }
+            if (range && /'__LM_MATERIALS'/.test(range)) {
+              console.warn(TAG, nm, 'blocked for __LM_MATERIALS (data rows not allowed)');
+              return Promise.resolve({ blocked:true });
+            }
+          }catch(_){}
+          return orig.apply(this, arguments);
+        };
+      }
+    });
+  })();
+
+  // ---- Wrappers: fix timestamp-titled ranges after rename using current gid ----
+  (function wrapRangeHelpers(){
+    const g = window;
+    if (typeof g.getValues === 'function'){
+      const orig = g.getValues;
+      g.getValues = async function(spreadsheetIdOrRange, maybeRange){
+        try{
+          const ctx = g.__LM_SHEET_CTX || {};
+          const isSingle = (typeof spreadsheetIdOrRange === 'string') && spreadsheetIdOrRange.includes('!');
+          const spreadsheetId = isSingle ? (ctx.spreadsheetId || '') : spreadsheetIdOrRange;
+          const range = isSingle ? spreadsheetIdOrRange : (maybeRange || '');
+          if (spreadsheetId && ctx.sheetGid != null && /^'Sheet_/.test(range)){
+            const title = await __titleByGid(spreadsheetId, ctx.sheetGid);
+            const fixed = `'${String(title).replace(/'/g,"''")}'!` + range.split('!')[1];
+            return orig.call(this, spreadsheetId, fixed);
+          }
+        }catch(e){ console.warn(TAG,'getValues wrapper note', e); }
+        return orig.apply(this, arguments);
+      };
+    }
+    const pick = (typeof g.sheetsAppendRow === 'function') ? 'sheetsAppendRow'
+               : (typeof g.appendValues === 'function') ? 'appendValues' : null;
+    if (pick){
+      const orig = g[pick];
+      g[pick] = async function(spreadsheetId, rangeOrRow, rowMaybe){
+        try{
+          const ctx = g.__LM_SHEET_CTX || {};
+          let range = rangeOrRow, row = rowMaybe;
+          if (Array.isArray(rangeOrRow) && rowMaybe === undefined){
+            // legacy usage: sheetsAppendRow(spreadsheetId, [row]); infer range from gid
+            row = rangeOrRow;
+            if (ctx.sheetGid != null){
+              const title = await __titleByGid(spreadsheetId, ctx.sheetGid);
+              range = `'${String(title).replace(/'/g,"''")}'!A:Z`;
+              return orig.call(this, spreadsheetId, range, row);
+            }
+          } else if (typeof range === 'string' && ctx.sheetGid != null && /^'Sheet_/.test(range)) {
+            const title = await __titleByGid(spreadsheetId, ctx.sheetGid);
+            const suffix = range.split('!')[1] || 'A:Z';
+            const fixed = `'${String(title).replace(/'/g,"''")}'!` + suffix;
+            return orig.call(this, spreadsheetId, fixed, row);
+          }
+        }catch(e){ console.warn(TAG,'append wrapper note', e); }
+        return orig.apply(this, arguments);
+      };
+    }
+  })();
+
+  console.log(TAG,'installed');
+})();
+/* ===== /LM Sheets & Materials Hardening Patch v1.6 ===== */
