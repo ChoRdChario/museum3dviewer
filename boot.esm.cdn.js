@@ -1287,214 +1287,108 @@ onCanvasShiftPick(function(pos){
 /* === /LM Sheets Hardening Hotfix v1.3 === */
 
 
-/* === [LM sheets-fix proxy v3] order-fixed ====================================
-   • First, detect '__LM_MATERIALS'!A1:M1 + PUT  → force POST :append with headers
-   • NEVER title-rewrite any '__LM_*' internal sheets
-   • Then, for other sheets, do gid→title title rewrite (rename-safe)
-   • Finally, for any :append, normalize body to JSON 2D array
-=============================================================================== */
+/* =============================================================
+   [LM hotfix] __LM_MATERIALS startup ensure (robust & idempotent)
+   - Runs as soon as possible after this script loads.
+   - Waits for auth shim + spreadsheetId, then ensures:
+       1) __LM_MATERIALS sheet exists (create if missing)
+       2) Header row A1:M1 is appended (idempotent)
+   - Also re-runs on lm:sheet-context / lm:sheet-changed.
+   - Skips if already ensured for the same spreadsheetId.
+   ============================================================= */
 (function(){
-  const TAG='[lm-sheets-fix v3]';
-  const MAT = '__LM_MATERIALS';
-  const HDR = [['materialKey','opacity','doubleSided','unlitLike','sheetGid','updatedAt','updatedBy','chromaColor','chromaTolerance','chromaFeather','blendMode','alphaTest','notes']];
-  const TITLE_CACHE = Object.create(null);
+  const TAG = "[lm-materials-startup v1]";
+  const TITLE = "__LM_MATERIALS";
+  const HEADER = [[
+    "materialKey","opacity","doubleSided","unlitLike","sheetGid","updatedAt","updatedBy",
+    "chromaColor","chromaTolerance","chromaFeather","blendMode","alphaTest","notes"
+  ]];
+  const ensured = Object.create(null);
 
-  const _fetch = window.fetch;
-
-  function parseA1(url){
-    const m = String(url).match(/\/values\/([^?]+)/);
-    if (!m) return null;
-    try { return decodeURIComponent(m[1]); } catch(_){ return m[1]; }
-  }
-  function a1Info(a1){
-    const m = a1 && a1.match(/^'([^']+)'!(.+)$/);
-    if (!m) return null;
-    return {title:m[1], range:m[2]};
-  }
-  function swapA1(url, newA1){
-    return String(url).replace(/(\/values\/)([^?]+)/, (_,p1,p2)=> p1 + encodeURIComponent(newA1));
-  }
-  async function gidToTitle(sid, gid){
-    const key = sid+':'+gid;
-    if (TITLE_CACHE[key]) return TITLE_CACHE[key];
-    const url = `https://sheets.googleapis.com/v4/spreadsheets/${sid}?fields=sheets(properties(sheetId,title))`;
-    const meta = (typeof __lm_fetchJSONAuth === 'function')
-      ? await __lm_fetchJSONAuth(url)
-      : await fetch(url).then(r=>r.json());
-    const hit = (meta.sheets||[]).map(s=>s.properties).find(p=>String(p.sheetId)===String(gid));
-    return TITLE_CACHE[key] = hit && hit.title || null;
-  }
-  function ensureJson(init){
-    const out = Object.assign({}, init||{});
-    const h = Object.assign({}, out.headers||{});
-    if (!h['Content-Type']) h['Content-Type'] = 'application/json';
-    out.headers = h;
-    if (out.body && typeof out.body === 'string'){
-      try { out.body = JSON.parse(out.body); } catch(_){}
-    }
-    if (!out.body) out.body = {};
-    return out;
-  }
-  function ensure2DAppend(init){
-    const out = ensureJson(init);
-    const b = (typeof out.body === 'string') ? (()=>{ try{return JSON.parse(out.body);}catch(_){return {};}})() : (out.body||{});
-    let v = b.values;
-    if (!Array.isArray(v)) v = [[]];
-    if (v.length && !Array.isArray(v[0])) v = [v];
-    out.body = JSON.stringify(Object.assign({}, b, {values:v}));
-    return out;
-  }
-
-  window.fetch = async function(u, init){
-    let url = (typeof u === 'string') ? u : (u && u.url) || '';
-    let i = init;
-    try{
-      if (url.startsWith('https://sheets.googleapis.com/v4/spreadsheets/') && url.includes('/values/')) {
-        const a1 = parseA1(url);
-        const info = a1Info(a1);
-
-        // (0) Guard: if no A1 info, fall through
-        if (info){
-          const isInternal = info.title.startsWith('__LM_');
-          // (1) Handle materials header PUT BEFORE any rewrite
-          const isMatHeader = (info.title === MAT) && (/^A1:M1$/i.test(info.range));
-          if (isMatHeader && i && String(i.method).toUpperCase() === 'PUT'){
-            // PUT → POST :append with fixed header row
-            url = url.replace(/(\/values\/[^?]+)(\?valueInputOption=RAW)/, (_,p1,p2)=> p1 + ':append' + p2);
-            if (typeof u === 'string') u = url; else if (u && u.url) u.url = url;
-            const out = ensureJson(i);
-            out.method = 'POST';
-            out.body = JSON.stringify({values: HDR});
-            i = out;
-            console.log(TAG,'fixed header PUT→POST append for __LM_MATERIALS');
-          }
-
-          // (2) Title rewrite for non-internal sheets only
-          if (!isInternal){
-            const ctx = window.__LM_SHEET_CTX || {};
-            if (ctx.spreadsheetId && (ctx.sheetGid || ctx.sheetGid===0)){
-              const cur = await gidToTitle(ctx.spreadsheetId, ctx.sheetGid);
-              if (cur && info.title !== cur){
-                const newA1 = `'${cur}'!${info.range}`;
-                url = swapA1(url, newA1);
-                if (typeof u === 'string') u = url; else if (u && u.url) u.url = url;
-                console.log(TAG,'title rewrite', info.title, '→', cur);
-              }
-            }
-          }
-        }
-
-        // (3) Any :append → normalize body
-        if (/(\/values\/[^?]+:append\?)/.test(url)) {
-          i = ensure2DAppend(i);
-        }
-      }
-    }catch(e){
-      console.warn(TAG,'proxy error (continue)', e && e.message);
-    }
-    return _fetch.call(this, u, i);
-  };
-
-  console.log(TAG,'installed');
-})();
-
-
-/* === [LM caption/material ensure v2] =======================================
-   - Ensure caption header on each sheet (non __LM_*). Inserts a row 0 if needed.
-   - Ensure __LM_MATERIALS sheet exists + headers (idempotent)
-   - Fires on lm:sheet-context / lm:sheet-changed
-============================================================================= */
-(function(){
-  const TAG='[lm-ensure v2]';
-  const CAP_HDR = [['id','title','body','color','x','y','z','imageFileId','createdAt','updatedAt']];
-  const MAT = '__LM_MATERIALS';
-  const MAT_HDR = [['materialKey','opacity','doubleSided','unlitLike','sheetGid','updatedAt','updatedBy','chromaColor','chromaTolerance','chromaFeather','blendMode','alphaTest','notes']];
-  const doneMat = Object.create(null);
-  const doneCap = Object.create(null);
+  function log(){ try{ console.log.apply(console, arguments); }catch(_){ } }
+  function warn(){ try{ console.warn.apply(console, arguments); }catch(_){ } }
 
   async function fetchJSON(url, init){
-    if (typeof __lm_fetchJSONAuth === 'function') return __lm_fetchJSONAuth(url, init);
-    const r = await fetch(url, init);
-    if (!r.ok) throw new Error(`HTTP ${r.status}`);
-    return r.json();
-  }
-  function key(sid,gid){ return sid+':'+gid; }
-
-  async function gidToTitle(sid, gid){
-    const meta = await fetchJSON(`https://sheets.googleapis.com/v4/spreadsheets/${sid}?fields=sheets(properties(sheetId,title))`);
-    const p = (meta.sheets||[]).map(s=>s.properties).find(p=>String(p.sheetId)===String(gid));
-    return p && p.title || null;
+    // Prefer the app's auth shim if present
+    if (typeof window.__lm_fetchJSONAuth === "function"){
+      return await window.__lm_fetchJSONAuth(url, init);
+    }
+    // Fallback (shouldn't normally be used): public fetch
+    const res = await fetch(url, Object.assign({ headers: { "content-type":"application/json" }}, init));
+    if (!res.ok){
+      const text = await res.text().catch(()=> "");
+      throw new Error(`HTTP ${res.status}: ${text}`);
+    }
+    try { return await res.json(); } catch(_) { return {}; }
   }
 
   async function ensureMaterialsSheet(sid){
-    const k = sid;
-    if (doneMat[k]) return;
+    if (!sid) return;
+    if (ensured[sid]) return;
     try{
+      // 1) metadata check (titles only for faster response)
       const meta = await fetchJSON(`https://sheets.googleapis.com/v4/spreadsheets/${sid}?fields=sheets(properties(title))`);
-      const has = (meta.sheets||[]).some(s=>s.properties && s.properties.title===MAT);
+      const has = (meta.sheets||[]).some(s=>s && s.properties && s.properties.title === TITLE);
       if (!has){
         await fetchJSON(`https://sheets.googleapis.com/v4/spreadsheets/${sid}:batchUpdate`, {
-          method:'POST',
-          body:{ requests:[{ addSheet:{ properties:{ title: MAT } } }] }
+          method: "POST",
+          body: { requests: [{ addSheet: { properties: { title: TITLE } } }] }
         });
+        log(TAG, "created", TITLE);
       }
-      // headers (append, idempotent)
-      await fetchJSON(`https://sheets.googleapis.com/v4/spreadsheets/${sid}/values/${encodeURIComponent("'"+MAT+"'!A1:M1")}:append?valueInputOption=RAW`, {
-        method:'POST', body:{ values: MAT_HDR }
-      }).catch(()=>{});
-      doneMat[k]=true;
-      console.log(TAG,'materials ensured');
+      // 2) header append (idempotent; ignore duplicate errors)
+      const a1 = encodeURIComponent("'"+TITLE+"'!A1:M1");
+      try{
+        await fetchJSON(`https://sheets.googleapis.com/v4/spreadsheets/${sid}/values/${a1}:append?valueInputOption=RAW`, {
+          method: "POST",
+          body: { values: HEADER }
+        });
+        log(TAG, "header ensured");
+      }catch(e){
+        // If header already exists Google may still return 200; if not, we ignore duplicates safely
+        warn(TAG, "header append warn:", (e && e.message) || e);
+      }
+      ensured[sid] = true;
+      log(TAG, "ensured for", sid);
     }catch(e){
-      console.warn(TAG,'materials ensure fail (continue)', e.message||e);
+      warn(TAG, "ensure failed (will retry on next ctx):", (e && e.message) || e);
     }
   }
 
-  async function ensureCaptionHeader(sid, gid){
-    const k = key(sid,gid);
-    if (doneCap[k]) return;
-    try{
-      const title = await gidToTitle(sid,gid);
-      if (!title || title.startsWith('__LM_')) return;
-
-      // read first row
-      const a1 = `'${title}'!A1:J1`;
-      const got = await fetchJSON(`https://sheets.googleapis.com/v4/spreadsheets/${sid}/values/${encodeURIComponent(a1)}`)
-        .catch(()=>({values:[]}));
-      const row = (got.values && got.values[0]) || [];
-      const isHeader = row[0]==='id' && row[3]==='color';
-      const firstCell = row[0] || '';
-
-      if (!isHeader){
-        // if first row seems to contain data (e.g., starts with "pin_"), insert one row at top
-        if (firstCell && firstCell.startsWith('pin_')){
-          await fetchJSON(`https://sheets.googleapis.com/v4/spreadsheets/${sid}:batchUpdate`, {
-            method:'POST',
-            body:{ requests:[{ insertDimension:{ range:{ sheetId: Number(gid), dimension:'ROWS', startIndex:0, endIndex:1 }, inheritFromBefore:false } }] }
-          }).catch(()=>{});
+  // Waiters
+  function nowSid(){
+    return (window.__LM_SHEET_CTX && window.__LM_SHEET_CTX.spreadsheetId) || window.currentSpreadsheetId || null;
+  }
+  function waitForReady(maxMs=15000){
+    return new Promise(resolve=>{
+      const t0 = Date.now();
+      const id = setInterval(()=>{
+        const sid = nowSid();
+        const hasShim = (typeof window.__lm_fetchJSONAuth === "function");
+        if (sid && hasShim){
+          clearInterval(id); resolve(sid); return;
         }
-        // write header
-        await fetchJSON(`https://sheets.googleapis.com/v4/spreadsheets/${sid}/values/${encodeURIComponent(`'${title}'!A1:J1`)}`+`?valueInputOption=RAW`, {
-          method:'PUT',
-          body:{ values: CAP_HDR }
-        });
-        console.log(TAG,'caption header ensured on', title);
-      }
-      doneCap[k]=true;
-    }catch(e){
-      console.warn(TAG,'caption header ensure fail (continue)', e.message||e);
-    }
+        if (Date.now() - t0 > maxMs){
+          clearInterval(id); resolve(sid); // may be null; handler will skip
+        }
+      }, 250);
+    });
   }
 
-  function onCtx(detail){
-    const sid = detail && detail.spreadsheetId;
-    const gid = detail && detail.sheetGid;
-    if (!sid) return;
-    ensureMaterialsSheet(sid);
-    if (gid===undefined || gid===null) return;
-    ensureCaptionHeader(sid,gid);
-  }
+  // Fire at startup (once)
+  (async function bootKick(){
+    log(TAG, "armed");
+    const sid = await waitForReady(20000);
+    if (sid) ensureMaterialsSheet(sid);
+  })();
 
-  window.addEventListener('lm:sheet-context', e=> onCtx(e.detail));
-  window.addEventListener('lm:sheet-changed', e=> onCtx(e.detail));
-  console.log(TAG,'armed');
+  // Also on context updates
+  window.addEventListener("lm:sheet-context", e=>{
+    const sid = e && e.detail && e.detail.spreadsheetId;
+    if (sid) ensureMaterialsSheet(sid);
+  }, { passive:true });
+  window.addEventListener("lm:sheet-changed", e=>{
+    const sid = e && e.detail && e.detail.spreadsheetId;
+    if (sid) ensureMaterialsSheet(sid);
+  }, { passive:true });
 })();
