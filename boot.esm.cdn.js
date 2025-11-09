@@ -1,5 +1,49 @@
 
-// === LM: caption header helper (prevents staircase on a brand-new sheet) ===
+// === LM: caption header helper
+
+// === LM: caption header writer (robust; waits for auth shim; uses values.update) ===
+async function lmWriteCaptionHeaderDirect(spreadsheetId, sheetTitle){
+  try{
+    if(!spreadsheetId || !sheetTitle) return false;
+    // wait up to 5s for auth shim
+    let tries = 0;
+    while(typeof window.__lm_fetchJSONAuth !== 'function' && tries < 50){
+      await new Promise(r=>setTimeout(r,100));
+      tries++;
+    }
+    if(typeof window.__lm_fetchJSONAuth !== 'function'){
+      console.warn('[lm-header] __lm_fetchJSONAuth not ready'); 
+      return false;
+    }
+    const safeTitle = String(sheetTitle).replace(/'/g, "''");
+    const range = `'${safeTitle}'!A1:J1`;
+    const body = { values: [[
+      'id','title','body','color','x','y','z','imageFileId','createdAt','updatedAt'
+    ]], majorDimension:'ROWS' };
+    const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}?valueInputOption=RAW`;
+    try{
+      const r = await __lm_fetchJSONAuth(url, { method:'PUT', body });
+      console.log('[lm-header] values.update ok for', sheetTitle);
+      return true;
+    }catch(e){
+      console.warn('[lm-header] update failed, fallback to append', e);
+      const url2 = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`;
+      try{
+        await __lm_fetchJSONAuth(url2, { method:'POST', body });
+        console.log('[lm-header] values.append ok for', sheetTitle);
+        return true;
+      }catch(e2){
+        console.error('[lm-header] append failed', e2);
+        return false;
+      }
+    }
+  }catch(e){
+    console.error('[lm-header] unexpected', e);
+    return false;
+  }
+}
+
+ (prevents staircase on a brand-new sheet) ===
 function lmWriteCaptionHeader(spreadsheetId, sheetTitle){
   try{
     const token = getAccessToken && getAccessToken();
