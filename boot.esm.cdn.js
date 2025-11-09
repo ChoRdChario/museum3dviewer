@@ -123,6 +123,21 @@ function onSigned(signed){
 }
 setupAuth($('auth-signin'), onSigned, { clientId: __LM_CLIENT_ID, apiKey: __LM_API_KEY, scopes: __LM_SCOPES });
 
+
+
+
+// === [LM] A1 helpers (quoted + encoder) ===
+function buildA1Quoted(sheetName, a1Part){
+  const escapedName = String(sheetName).replace(/'/g, "''");
+  return `'${escapedName}'!${a1Part}`;
+}
+function encodeA1(a1){
+  return encodeURIComponent(a1);
+}
+function __lm_extractSheetName(a1){
+  const m = String(a1).match(/^'?([^'!]*)'?!/);
+  return m ? m[1].replace(/''/g,"'") : String(a1).split('!')[0].replace(/^'/,'').replace(/'$/,''); 
+}
 function ensureToken() {
   const t = getAccessToken();
   if (!t) {
@@ -392,8 +407,9 @@ onPinSelect((id)=> selectCaption(id));
 const LOCIMYU_HEADERS = ['id','title','body','color','x','y','z','imageFileId','createdAt','updatedAt'];
 
 function colA1(i0){ let n=i0+1,s=''; while(n){ n--; s=String.fromCharCode(65+(n%26))+s; n=(n/26)|0; } return s; }
+
 function putValues(spreadsheetId, rangeA1, values, token){
-  const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(rangeA1)}?valueInputOption=RAW`;
+  const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeA1(rangeA1)}?valueInputOption=RAW`;
   const headers = { 'Authorization':'Bearer '+token, 'Content-Type':'application/json' };
   const body = JSON.stringify({ range: rangeA1, values, majorDimension:'ROWS' });
   return fetch(url, { method:'PUT', headers, body }).then(r=>{
@@ -401,8 +417,17 @@ function putValues(spreadsheetId, rangeA1, values, token){
     return r.json();
   });
 }
+
+
 function appendValues(spreadsheetId, rangeA1, values, token){
-  const base = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(rangeA1)}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`;
+  try{
+    const sheetName = __lm_extractSheetName(rangeA1);
+    if (sheetName && sheetName.startsWith('__LM_')){
+      console.warn('[appendValues] Blocked append to protected sheet:', sheetName);
+      return Promise.resolve({ blocked: true });
+    }
+  }catch(_){}
+  const base = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeA1(rangeA1)}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`;
   const headers = { 'Authorization':'Bearer '+token, 'Content-Type':'application/json' };
   const body = JSON.stringify({ values, majorDimension:'ROWS' });
   return fetch(base, { method:'POST', headers, body }).then(r=>{
@@ -410,19 +435,17 @@ function appendValues(spreadsheetId, rangeA1, values, token){
     return r.json();
   });
 }
+
+
 function getValues(spreadsheetId, rangeA1, token){
-  const TAG='[getValues]';
-  const ranges = encodeURIComponent(rangeA1);
-  const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values:batchGet?ranges=${ranges}`;
+  const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeA1(rangeA1)}`;
   const headers = { 'Authorization':'Bearer '+token };
   return fetch(url, { headers }).then(r=>{
     if(!r.ok) throw new Error('values.get '+r.status);
     return r.json();
-  }).then(js=>{
-    const values = (js.valueRanges && js.valueRanges[0] && js.valueRanges[0].values) || [];
-    return values;
-  });
+  }).then(js=> js.values || []);
 }
+
 function isLociMyuSpreadsheet(spreadsheetId, token){
   const url=`https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}?includeGridData=true&ranges=A1:Z1&fields=sheets(properties(title,sheetId),data(rowData(values(formattedValue))))`;
   return fetch(url, { headers:{ Authorization:'Bearer '+token } }).then(res=> res.ok ? res.json() : false).then(data=>{
@@ -947,6 +970,31 @@ if($('btnGlb')) $('btnGlb').addEventListener('click', doLoad);
 if($('glbUrl')) $('glbUrl').addEventListener('keydown', function(e){ if(e.key==='Enter') doLoad(); });
 
 // ---------- Sheet tabs & rename ----------
+
+
+// === [LM] createCaptionSheetFlow (temp → header → rename → settle) ===
+async function createCaptionSheetFlow(spreadsheetId){
+  const token = (typeof getAccessToken === 'function') ? getAccessToken() : null;
+  if(!token) throw new Error('token_missing');
+  const addUrl = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}:batchUpdate`;
+  const tempTitle = `temp_${Date.now()}`;
+  const addBody = { requests:[{ addSheet:{ properties:{ title: tempTitle } } }] };
+  const addResp = await fetch(addUrl, { method:'POST', headers:{ Authorization:'Bearer '+token, 'Content-Type':'application/json' }, body: JSON.stringify(addBody) }).then(r=>r.json());
+  const newGid = addResp && addResp.replies && addResp.replies[0] && addResp.replies[0].addSheet && addResp.replies[0].addSheet.properties && addResp.replies[0].addSheet.properties.sheetId;
+  if(newGid==null) throw new Error('addSheet returned no sheetId');
+  const header = [['id','title','body','color','x','y','z','imageFileId','createdAt','updatedAt']];
+  const headerA1 = buildA1Quoted(tempTitle,'A1:J1');
+  await putValues(spreadsheetId, headerA1, header, token);
+  await new Promise(r=>setTimeout(r, 200));
+  const finalTitle = `Sheet_${new Date().toISOString().slice(0,19).replace(/[:T]/g,'-')}`;
+  const renameBody = { requests:[{ updateSheetProperties:{ properties:{ sheetId:newGid, title: finalTitle }, fields:'title' } }] };
+  await fetch(addUrl, { method:'POST', headers:{ Authorization:'Bearer '+token, 'Content-Type':'application/json' }, body: JSON.stringify(renameBody) });
+  await new Promise(r=>setTimeout(r, 500));
+  if(typeof populateSheetTabs === 'function') await populateSheetTabs(spreadsheetId, token);
+  if(typeof loadCaptionsFromSheet === 'function') try{ await loadCaptionsFromSheet(); }catch(_){}
+  return { gid:newGid, title: finalTitle };
+}
+
 function populateSheetTabs(spreadsheetId, token){
   const sel = $('save-target-sheet'); if(!sel||!spreadsheetId) return Promise.resolve();
   sel.innerHTML = '<option value="">Loading…</option>';
@@ -991,42 +1039,22 @@ clearPins(); overlays.forEach(function(_,id){ removeCaptionOverlay(id); }); over
     loadCaptionsFromSheet();
   });
 }
+
 const btnCreate = $('save-target-create');
 if(btnCreate){
-  btnCreate.addEventListener('click', function(){
-    const token = ensureToken(); if(!currentSpreadsheetId) return;
-    const title='Sheet_'+new Date().toISOString().slice(0,19).replace(/[:T]/g,'-');
-    const url=`https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(currentSpreadsheetId)}:batchUpdate`;
-    const body={ requests:[{ addSheet:{ properties:{ title } } }] };
-    fetch(url,{ method:'POST', headers:{ Authorization:'Bearer '+token, 'Content-Type':'application/json' }, body: JSON.stringify(body) })
-      .then(function(r){ if(!r.ok) throw new Error(String(r.status)); })
-      .then(function(){ return populateSheetTabs(currentSpreadsheetId, token); })
-      .then(function(){ loadCaptionsFromSheet(); })
-      .catch(function(e){ console.error('[Sheets addSheet] failed', e); });
+  btnCreate.addEventListener('click', async function(){
+    try{
+      const token = ensureToken();
+      if(!currentSpreadsheetId) return;
+      const ctx = await createCaptionSheetFlow(currentSpreadsheetId);
+      console.log('[btnCreate] created', ctx);
+    }catch(e){
+      console.error('[Sheets add+rename flow] failed', e);
+      alert('新規シートの作成に失敗しました: ' + (e && e.message || 'unknown'));
+    }
   });
 }
-const btnRename = $('save-target-rename');
-if(btnRename){
-  btnRename.addEventListener('click', function(){
-    const token = ensureToken(); if(!currentSpreadsheetId||!currentSheetId) return;
-    const input=$('rename-input'); const newTitle = input && input.value ? String(input.value).trim() : '';
-    if(!newTitle) return;
-    const url=`https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(currentSpreadsheetId)}:batchUpdate`;
-    const body={ requests:[{ updateSheetProperties:{ properties:{ sheetId: currentSheetId, title: newTitle }, fields: 'title' } }] };
-    fetch(url,{ method:'POST', headers:{ Authorization:'Bearer '+token, 'Content-Type':'application/json' }, body: JSON.stringify(body) })
-      .then(function(r){ if(!r.ok) throw new Error(String(r.status)); })
-      .then(function(){ return populateSheetTabs(currentSpreadsheetId, token); })
-      .then(function(){ loadCaptionsFromSheet(); })
-      .catch(function(e){ console.error('[Sheets rename] failed', e); });
-  });
-}
-
-console.log('[LociMyu ESM/CDN] boot clean full build loaded');
-
-// ---------- Chips init on DOM ready ----------
-document.addEventListener('DOMContentLoaded', function(){
-  try{ renderColorChips(); renderFilterChips(); applyColorFilter(); }catch(e){ console.warn('[chips init]', e); }
-});
+);
 
 // ---------- Shift+click add pin ----------
 onCanvasShiftPick(function(pos){
@@ -1790,3 +1818,49 @@ onCanvasShiftPick(function(pos){
   console.log(TAG,'installed');
 })();
 /* ===== /LM Sheets & Materials Hardening Patch v1.6 ===== */
+
+
+
+// === [LM] __LM_MATERIALS hotfix (IIFE) ===============================
+(function(){
+  const HDR = [
+    "materialKey","opacity","doubleSided","unlitLike",
+    "chromaColor","chromaTolerance","chromaFeather",
+    "renderOrder","alphaTest","depthWrite","depthTest",
+    "blendMode","side","roughness","metalness",
+    "sheetGid","updatedAt","updatedBy"
+  ];
+  async function ensureMaterialsSheet(spreadsheetId){
+    const metaUrl = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}?fields=sheets(properties(title,sheetId))`;
+    const meta = await __lm_fetchJSONAuth(metaUrl, { method:'GET' });
+    let has = false;
+    for(const sh of (meta.sheets||[])){
+      if(sh?.properties?.title === '__LM_MATERIALS'){ has = true; break; }
+    }
+    if (!has){
+      const addUrl = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}:batchUpdate`;
+      await __lm_fetchJSONAuth(addUrl, { method:'POST', body: JSON.stringify({ requests:[{ addSheet:{ properties:{ title:'__LM_MATERIALS' } } }] }) });
+      console.log('[lm-hotfix] __LM_MATERIALS created');
+    }
+    await ensureMaterialsHeader(spreadsheetId);
+  }
+  async function ensureMaterialsHeader(spreadsheetId){
+    const a1 = buildA1Quoted('__LM_MATERIALS','A1:Q1');
+    await __lm_fetchJSONAuth(
+      `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${encodeA1(a1)}?valueInputOption=RAW`,
+      { method:'PUT', body: { values:[HDR], majorDimension:'ROWS' } }
+    );
+    console.log('[lm-hotfix] materials header ensured');
+  }
+  window.__LM_HOTFIX__ = { ensureMaterialsSheet, ensureMaterialsHeader };
+})();
+// ensure on sheet-context
+window.addEventListener('lm:sheet-context', async (e)=>{
+  try{
+    const ctx = e && e.detail || {};
+    const ssid = ctx.spreadsheetId || window.currentSpreadsheetId;
+    if(!ssid) return;
+    await window.__LM_HOTFIX__.ensureMaterialsSheet(ssid);
+  }catch(err){ console.error('[lm-hotfix] ensureMaterialsSheet failed', err); }
+}, { once:false });
+
