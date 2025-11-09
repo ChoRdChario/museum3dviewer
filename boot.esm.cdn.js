@@ -1,3 +1,45 @@
+
+/* === [LM minimal auth shim v1] early __lm_fetchJSONAuth =====================
+   Uses getAccessToken() from gauth.module.js to attach Bearer token.
+   Keeps this tiny to avoid init races with the sheets hotfix.
+============================================================================= */
+(function(){
+  if (typeof window.__lm_fetchJSONAuth === 'function') return;
+  const TAG='[lm-auth-shim v1]';
+  function ensureToken(){
+    try{
+      if (typeof getAccessToken === 'function'){
+        const t = getAccessToken();
+        if (t) return t;
+      }
+    }catch(_){}
+    throw new Error('token_missing');
+  }
+  async function __lm_fetchJSONAuth(url, init){
+    const token = ensureToken();
+    const headers = Object.assign({}, (init && init.headers) || {}, {
+      'Authorization': 'Bearer ' + token,
+      'Accept': 'application/json'
+    });
+    let body = init && init.body;
+    if (body && typeof body !== 'string') body = JSON.stringify(body);
+    if (body && !headers['Content-Type']) headers['Content-Type'] = 'application/json';
+    const resp = await fetch(url, Object.assign({}, init||{}, { headers, body }));
+    if (!resp.ok){
+      const text = await resp.text().catch(()=>'');
+      let json; try{ json = JSON.parse(text); }catch(_){}
+      const err = new Error('HTTP '+resp.status+': '+resp.statusText);
+      err.status = resp.status; err.body = json || text;
+      throw err;
+    }
+    const ct = resp.headers.get('content-type') || '';
+    return ct.includes('application/json') ? await resp.json() : await resp.text();
+  }
+  window.__lm_fetchJSONAuth = __lm_fetchJSONAuth;
+  try{ window.dispatchEvent(new CustomEvent('lm:gauth-ready')); }catch(_){}
+  console.log(TAG,'installed');
+})();
+
 // boot.esm.cdn.js — LociMyu boot (clean full build, overlay image + Sheets delete fixes)
 
 // ---------- Globals (palette & helpers) ----------
@@ -870,7 +912,13 @@ function populateSheetTabs(spreadsheetId, token){
       currentSheetId = first ? first.sheetId : null;
       currentSheetTitle = first ? first.title : null;
       if(currentSheetId) sel.value = String(currentSheetId);
-    });
+    
+try {
+  // expose sheet context and notify listeners (hotfix ensures __LM_MATERIALS)
+  window.__LM_SHEET_CTX = { spreadsheetId, sheetGid: currentSheetId };
+  window.dispatchEvent(new CustomEvent('lm:sheet-context', { detail: window.__LM_SHEET_CTX }));
+} catch (_){}
+});
 }
 const sheetSel = $('save-target-sheet');
 if(sheetSel){
@@ -879,7 +927,12 @@ if(sheetSel){
     const opt = sel && sel.selectedOptions && sel.selectedOptions[0];
     currentSheetId = (opt && opt.value) ? Number(opt.value) : null;
     currentSheetTitle = (opt && opt.dataset && opt.dataset.title) ? opt.dataset.title : null;
-    clearPins(); overlays.forEach(function(_,id){ removeCaptionOverlay(id); }); overlays.clear();
+    
+try {
+  window.__LM_SHEET_CTX = { spreadsheetId: currentSpreadsheetId, sheetGid: currentSheetId };
+  window.dispatchEvent(new CustomEvent('lm:sheet-context', { detail: window.__LM_SHEET_CTX }));
+} catch (_){}
+clearPins(); overlays.forEach(function(_,id){ removeCaptionOverlay(id); }); overlays.clear();
     clearCaptionList(); rowCache.clear(); captionsIndex.clear(); selectedPinId=null;
     loadCaptionsFromSheet();
   });
@@ -1202,8 +1255,8 @@ onCanvasShiftPick(function(pos){
       console.log('[hotfix] __LM_MATERIALS created');
     }
     // ensure headers A1:M1
-    await fetchJSON(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encA1(spreadsheetId,'__LM_MATERIALS','A1:M1')}?valueInputOption=RAW`, {
-      method:'PUT',
+    await fetchJSON(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encA1(spreadsheetId,'__LM_MATERIALS','A1:M1')}:append?valueInputOption=RAW`, {
+      method:'POST',
       body:{ values:[['materialKey','opacity','doubleSided','unlitLike','chromaEnable','chromaColor','chromaTolerance','chromaFeather','roughness','metalness','emissiveHex','updatedAt','updatedBy','sheetGid']] }
     });
     console.log('[hotfix] __LM_MATERIALS ensured');
@@ -1287,108 +1340,68 @@ onCanvasShiftPick(function(pos){
 /* === /LM Sheets Hardening Hotfix v1.3 === */
 
 
-/* =============================================================
-   [LM hotfix] __LM_MATERIALS startup ensure (robust & idempotent)
-   - Runs as soon as possible after this script loads.
-   - Waits for auth shim + spreadsheetId, then ensures:
-       1) __LM_MATERIALS sheet exists (create if missing)
-       2) Header row A1:M1 is appended (idempotent)
-   - Also re-runs on lm:sheet-context / lm:sheet-changed.
-   - Skips if already ensured for the same spreadsheetId.
-   ============================================================= */
+/* [boot.ensure-materials trigger v1] 
+   If another module fires 'lm:glb-loaded' on first GLB load, make sure sheet-context is dispatched
+   so that the hotfix can ensure __LM_MATERIALS immediately.
+*/
 (function(){
-  const TAG = "[lm-materials-startup v1]";
-  const TITLE = "__LM_MATERIALS";
-  const HEADER = [[
-    "materialKey","opacity","doubleSided","unlitLike","sheetGid","updatedAt","updatedBy",
-    "chromaColor","chromaTolerance","chromaFeather","blendMode","alphaTest","notes"
-  ]];
-  const ensured = Object.create(null);
-
-  function log(){ try{ console.log.apply(console, arguments); }catch(_){ } }
-  function warn(){ try{ console.warn.apply(console, arguments); }catch(_){ } }
-
-  async function fetchJSON(url, init){
-    // Hardened: never fall back to unauthenticated fetch; wait for auth shim.
-    return (async function(url, init){
-      const ok = await new Promise(res=>{
-        const t0 = Date.now();
-        const id = setInterval(()=>{
-          if (typeof window.__lm_fetchJSONAuth === 'function'){ clearInterval(id); res(true); }
-          else if (Date.now() - t0 > 20000){ clearInterval(id); res(false); }
-        }, 50);
-      });
-      if (!ok) throw new Error('auth shim not ready');
-      return await window.__lm_fetchJSONAuth(url, init);
-    }).apply(this, arguments);}
-
-  async function ensureMaterialsSheet(sid){
-    if (!sid) return;
-    if (ensured[sid]) return;
+  function trigger(){
     try{
-      // 1) metadata check (titles only for faster response)
-      const meta = await fetchJSON(`https://sheets.googleapis.com/v4/spreadsheets/${sid}?fields=sheets(properties(title))`);
-      const has = (meta.sheets||[]).some(s=>s && s.properties && s.properties.title === TITLE);
-      if (!has){
-        await fetchJSON(`https://sheets.googleapis.com/v4/spreadsheets/${sid}:batchUpdate`, {
-          method: "POST",
-          body: { requests: [{ addSheet: { properties: { title: TITLE } } }] }
-        });
-        log(TAG, "created", TITLE);
+      if (window.__LM_SHEET_CTX && window.__LM_SHEET_CTX.spreadsheetId) {
+        window.dispatchEvent(new CustomEvent('lm:sheet-context', { detail: window.__LM_SHEET_CTX }));
       }
-      // 2) header append (idempotent; ignore duplicate errors)
-      const a1 = encodeURIComponent("'"+TITLE+"'!A1:M1");
-      try{
-        await fetchJSON(`https://sheets.googleapis.com/v4/spreadsheets/${sid}/values/${a1}:append?valueInputOption=RAW`, {
-          method: "POST",
-          body: { values: HEADER }
-        });
-        log(TAG, "header ensured");
-      }catch(e){
-        // If header already exists Google may still return 200; if not, we ignore duplicates safely
-        warn(TAG, "header append warn:", (e && e.message) || e);
+    }catch(_){}
+  }
+  window.addEventListener('lm:glb-loaded', trigger);
+  // also on DOM ready as a fallback
+  if (document.readyState === 'complete' || document.readyState === 'interactive'){
+    setTimeout(trigger, 0);
+  } else {
+    window.addEventListener('DOMContentLoaded', ()=> setTimeout(trigger,0), { once:true });
+  }
+})();
+
+
+
+/* === [LM dropdown filter v1] hide internal sheets (__LM_*) ==================
+   Removes options whose dataset.title or text starts with "__LM_".
+   Runs after DOM ready and on 'lm:sheet-context'/'lm:sheet-changed'.
+============================================================================= */
+(function(){
+  const TAG='[lm-dropdown-filter v1]';
+  function hideInternalOptions(sel){
+    if (!sel) return;
+    let removed = 0;
+    const opts = Array.from(sel.querySelectorAll('option'));
+    for (const o of opts){
+      const t = (o.dataset && o.dataset.title) || o.textContent || '';
+      if (t.startsWith('__LM_')){
+        if (o.selected) o.selected = false;
+        o.remove();
+        removed++;
       }
-      ensured[sid] = true;
-      log(TAG, "ensured for", sid);
-    }catch(e){
-      warn(TAG, "ensure failed (will retry on next ctx):", (e && e.message) || e);
+    }
+    if (removed){
+      const vis = sel.querySelector('option');
+      if (vis){
+        if (!sel.value || !sel.querySelector(`option[value="${sel.value}"]`)){
+          sel.value = vis.value;
+          try { sel.dispatchEvent(new Event('change', { bubbles:true })); } catch(_){}
+        }
+      }
+      console.log(TAG, 'removed', removed, 'internal option(s)');
     }
   }
-
-  // Waiters
-  function nowSid(){
-    return (window.__LM_SHEET_CTX && window.__LM_SHEET_CTX.spreadsheetId) || window.currentSpreadsheetId || null;
+  function run(){
+    const sel = document.querySelector('#save-target-sheet, select[data-role="sheet-target"], select#sheet-target');
+    if (sel) hideInternalOptions(sel);
   }
-  function waitForReady(maxMs=15000){
-    return new Promise(resolve=>{
-      const t0 = Date.now();
-      const id = setInterval(()=>{
-        const sid = nowSid();
-        const hasShim = (typeof window.__lm_fetchJSONAuth === "function");
-        if (sid && hasShim){
-          clearInterval(id); resolve(sid); return;
-        }
-        if (Date.now() - t0 > maxMs){
-          clearInterval(id); resolve(sid); // may be null; handler will skip
-        }
-      }, 250);
-    });
+  if (document.readyState === 'complete' || document.readyState === 'interactive'){
+    setTimeout(run, 0);
+  } else {
+    window.addEventListener('DOMContentLoaded', ()=> setTimeout(run,0), { once:true });
   }
-
-  // Fire at startup (once)
-  (async function bootKick(){
-    log(TAG, "armed");
-    const sid = await waitForReady(20000);
-    if (sid) ensureMaterialsSheet(sid);
-  })();
-
-  // Also on context updates
-  window.addEventListener("lm:sheet-context", e=>{
-    const sid = e && e.detail && e.detail.spreadsheetId;
-    if (sid) ensureMaterialsSheet(sid);
-  }, { passive:true });
-  window.addEventListener("lm:sheet-changed", e=>{
-    const sid = e && e.detail && e.detail.spreadsheetId;
-    if (sid) ensureMaterialsSheet(sid);
-  }, { passive:true });
+  window.addEventListener('lm:sheet-context', run);
+  window.addEventListener('lm:sheet-changed', run);
 })();
+
