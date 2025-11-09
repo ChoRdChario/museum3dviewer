@@ -1255,8 +1255,8 @@ onCanvasShiftPick(function(pos){
       console.log('[hotfix] __LM_MATERIALS created');
     }
     // ensure headers A1:M1
-    await fetchJSON(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encA1(spreadsheetId,'__LM_MATERIALS','A1:M1')}:append?valueInputOption=RAW`, {
-      method:'POST',
+    await fetchJSON(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encA1(spreadsheetId,'__LM_MATERIALS','A1:M1')}?valueInputOption=RAW`, {
+      method:'PUT',
       body:{ values:[['materialKey','opacity','doubleSided','unlitLike','chromaEnable','chromaColor','chromaTolerance','chromaFeather','roughness','metalness','emissiveHex','updatedAt','updatedBy','sheetGid']] }
     });
     console.log('[hotfix] __LM_MATERIALS ensured');
@@ -1405,3 +1405,104 @@ onCanvasShiftPick(function(pos){
   window.addEventListener('lm:sheet-changed', run);
 })();
 
+
+
+/* === [LM gid→title proxy v1] keep writes stable across renames =================
+   Intercepts Sheets "values.*" requests and rewrites A1's sheet title to match
+   the CURRENT title for the active sheet GID (from __LM_SHEET_CTX).
+   This keeps app logic that still uses stale titles working after a rename.
+=============================================================================== */
+(function(){
+  const TAG='[lm-gid-title-proxy v1]';
+  const TITLE_CACHE = Object.create(null);
+
+  async function resolveTitle(spreadsheetId, gid){
+    const key = spreadsheetId + ':' + gid;
+    if (TITLE_CACHE[key]) return TITLE_CACHE[key];
+    const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}?fields=sheets(properties(sheetId,title))`;
+    const meta = (typeof __lm_fetchJSONAuth === 'function')
+      ? await __lm_fetchJSONAuth(url)
+      : await fetch(url).then(r=>r.json());
+    const hit = (meta.sheets||[]).map(s=>s.properties).find(p=>String(p.sheetId)===String(gid));
+    if (hit && hit.title){
+      TITLE_CACHE[key] = hit.title;
+      return hit.title;
+    }
+    return null;
+  }
+
+  function decodeA1FromUrl(u){
+    // find "/values/<encoded A1>" part
+    const m = u.match(/\/values\/([^?]+)/);
+    if (!m) return null;
+    try {
+      return decodeURIComponent(m[1]);
+    } catch(_) {
+      return m[1];
+    }
+  }
+
+  function replaceTitleInUrl(u, newTitle){
+    // Replace the quoted sheet name in "'SheetName'!A..." with the new one.
+    // Work on the *decoded* part then re-encode it back.
+    const m = u.match(/(\/values\/)([^?]+)(\??.*)$/);
+    if (!m) return u;
+    const prefix = m[1], encodedA1 = m[2], suffix = m[3] || '';
+    let a1;
+    try { a1 = decodeURIComponent(encodedA1); } catch(_) { a1 = encodedA1; }
+    // only replace if it starts with 'Name'!
+    const m2 = a1.match(/^'([^']+)'!(.+)$/);
+    if (!m2) return u;
+    const rangeOnly = m2[2];
+    const replaced = `'${newTitle}'!${rangeOnly}`;
+    const reenc = encodeURIComponent(replaced);
+    return u.replace(prefix + encodedA1, prefix + reenc);
+  }
+
+  const _origFetch = window.fetch;
+  window.fetch = async function(u, init){
+    try{
+      const url = (typeof u === 'string') ? u : (u && u.url) || '';
+      if (typeof url === 'string' &&
+          url.startsWith('https://sheets.googleapis.com/v4/spreadsheets/') &&
+          url.includes('/values/')){
+        const ctx = window.__LM_SHEET_CTX || {};
+        const sid = ctx.spreadsheetId;
+        const gid = ctx.sheetGid;
+        if (sid && (gid || gid===0)){
+          const a1 = decodeA1FromUrl(url);
+          // only handle "'Name'!..." pattern
+          if (a1 && /^'[^']+'!/.test(a1)){
+            const currentTitle = await resolveTitle(sid, gid);
+            if (currentTitle){
+              const nameInUrl = a1.slice(1, a1.indexOf("'", 1));
+              if (nameInUrl !== currentTitle){
+                const newUrl = replaceTitleInUrl(url, currentTitle);
+                if (newUrl !== url){
+                  console.log(TAG, 'rewrite', nameInUrl, '→', currentTitle);
+                  return _origFetch.call(this, newUrl, init);
+                }
+              }
+            }
+          }
+        }
+      }
+    }catch(e){
+      console.warn(TAG, 'proxy skip due to error', e && e.message);
+    }
+    return _origFetch.call(this, u, init);
+  };
+
+  // warm cache on context events
+  async function warm(){
+    const ctx = window.__LM_SHEET_CTX || {};
+    if (ctx.spreadsheetId && (ctx.sheetGid || ctx.sheetGid===0)){
+      try{ await resolveTitle(ctx.spreadsheetId, ctx.sheetGid); }catch(_){}
+    }
+  }
+  window.addEventListener('lm:sheet-context', warm);
+  window.addEventListener('lm:sheet-changed', warm);
+  setTimeout(warm, 0);
+
+  console.log(TAG, 'installed');
+})();
