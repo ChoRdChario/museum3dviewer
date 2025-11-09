@@ -1,45 +1,3 @@
-
-/* === [LM minimal auth shim v1] early __lm_fetchJSONAuth =====================
-   Uses getAccessToken() from gauth.module.js to attach Bearer token.
-   Keeps this tiny to avoid init races with the sheets hotfix.
-============================================================================= */
-(function(){
-  if (typeof window.__lm_fetchJSONAuth === 'function') return;
-  const TAG='[lm-auth-shim v1]';
-  function ensureToken(){
-    try{
-      if (typeof getAccessToken === 'function'){
-        const t = getAccessToken();
-        if (t) return t;
-      }
-    }catch(_){}
-    throw new Error('token_missing');
-  }
-  async function __lm_fetchJSONAuth(url, init){
-    const token = ensureToken();
-    const headers = Object.assign({}, (init && init.headers) || {}, {
-      'Authorization': 'Bearer ' + token,
-      'Accept': 'application/json'
-    });
-    let body = init && init.body;
-    if (body && typeof body !== 'string') body = JSON.stringify(body);
-    if (body && !headers['Content-Type']) headers['Content-Type'] = 'application/json';
-    const resp = await fetch(url, Object.assign({}, init||{}, { headers, body }));
-    if (!resp.ok){
-      const text = await resp.text().catch(()=>'');
-      let json; try{ json = JSON.parse(text); }catch(_){}
-      const err = new Error('HTTP '+resp.status+': '+resp.statusText);
-      err.status = resp.status; err.body = json || text;
-      throw err;
-    }
-    const ct = resp.headers.get('content-type') || '';
-    return ct.includes('application/json') ? await resp.json() : await resp.text();
-  }
-  window.__lm_fetchJSONAuth = __lm_fetchJSONAuth;
-  try{ window.dispatchEvent(new CustomEvent('lm:gauth-ready')); }catch(_){}
-  console.log(TAG,'installed');
-})();
-
 // boot.esm.cdn.js — LociMyu boot (clean full build, overlay image + Sheets delete fixes)
 
 // ---------- Globals (palette & helpers) ----------
@@ -912,13 +870,7 @@ function populateSheetTabs(spreadsheetId, token){
       currentSheetId = first ? first.sheetId : null;
       currentSheetTitle = first ? first.title : null;
       if(currentSheetId) sel.value = String(currentSheetId);
-    
-try {
-  // expose sheet context and notify listeners (hotfix ensures __LM_MATERIALS)
-  window.__LM_SHEET_CTX = { spreadsheetId, sheetGid: currentSheetId };
-  window.dispatchEvent(new CustomEvent('lm:sheet-context', { detail: window.__LM_SHEET_CTX }));
-} catch (_){}
-});
+    });
 }
 const sheetSel = $('save-target-sheet');
 if(sheetSel){
@@ -927,12 +879,7 @@ if(sheetSel){
     const opt = sel && sel.selectedOptions && sel.selectedOptions[0];
     currentSheetId = (opt && opt.value) ? Number(opt.value) : null;
     currentSheetTitle = (opt && opt.dataset && opt.dataset.title) ? opt.dataset.title : null;
-    
-try {
-  window.__LM_SHEET_CTX = { spreadsheetId: currentSpreadsheetId, sheetGid: currentSheetId };
-  window.dispatchEvent(new CustomEvent('lm:sheet-context', { detail: window.__LM_SHEET_CTX }));
-} catch (_){}
-clearPins(); overlays.forEach(function(_,id){ removeCaptionOverlay(id); }); overlays.clear();
+    clearPins(); overlays.forEach(function(_,id){ removeCaptionOverlay(id); }); overlays.clear();
     clearCaptionList(); rowCache.clear(); captionsIndex.clear(); selectedPinId=null;
     loadCaptionsFromSheet();
   });
@@ -1340,199 +1287,113 @@ onCanvasShiftPick(function(pos){
 /* === /LM Sheets Hardening Hotfix v1.3 === */
 
 
-/* [boot.ensure-materials trigger v1] 
-   If another module fires 'lm:glb-loaded' on first GLB load, make sure sheet-context is dispatched
-   so that the hotfix can ensure __LM_MATERIALS immediately.
-*/
-(function(){
-  function trigger(){
-    try{
-      if (window.__LM_SHEET_CTX && window.__LM_SHEET_CTX.spreadsheetId) {
-        window.dispatchEvent(new CustomEvent('lm:sheet-context', { detail: window.__LM_SHEET_CTX }));
-      }
-    }catch(_){}
-  }
-  window.addEventListener('lm:glb-loaded', trigger);
-  // also on DOM ready as a fallback
-  if (document.readyState === 'complete' || document.readyState === 'interactive'){
-    setTimeout(trigger, 0);
-  } else {
-    window.addEventListener('DOMContentLoaded', ()=> setTimeout(trigger,0), { once:true });
-  }
-})();
-
-
-
-/* === [LM dropdown filter v1] hide internal sheets (__LM_*) ==================
-   Removes options whose dataset.title or text starts with "__LM_".
-   Runs after DOM ready and on 'lm:sheet-context'/'lm:sheet-changed'.
-============================================================================= */
-(function(){
-  const TAG='[lm-dropdown-filter v1]';
-  function hideInternalOptions(sel){
-    if (!sel) return;
-    let removed = 0;
-    const opts = Array.from(sel.querySelectorAll('option'));
-    for (const o of opts){
-      const t = (o.dataset && o.dataset.title) || o.textContent || '';
-      if (t.startsWith('__LM_')){
-        if (o.selected) o.selected = false;
-        o.remove();
-        removed++;
-      }
-    }
-    if (removed){
-      const vis = sel.querySelector('option');
-      if (vis){
-        if (!sel.value || !sel.querySelector(`option[value="${sel.value}"]`)){
-          sel.value = vis.value;
-          try { sel.dispatchEvent(new Event('change', { bubbles:true })); } catch(_){}
-        }
-      }
-      console.log(TAG, 'removed', removed, 'internal option(s)');
-    }
-  }
-  function run(){
-    const sel = document.querySelector('#save-target-sheet, select[data-role="sheet-target"], select#sheet-target');
-    if (sel) hideInternalOptions(sel);
-  }
-  if (document.readyState === 'complete' || document.readyState === 'interactive'){
-    setTimeout(run, 0);
-  } else {
-    window.addEventListener('DOMContentLoaded', ()=> setTimeout(run,0), { once:true });
-  }
-  window.addEventListener('lm:sheet-context', run);
-  window.addEventListener('lm:sheet-changed', run);
-})();
-
-
-
-/* === [LM sheets-fix proxy v2] title-sync + method/body sanitizer ==============
-   - Keeps A1 sheet titles in URL synced with current gid (rename-safe)
-   - Converts legacy PUT header writes to POST :append for '__LM_MATERIALS'
-   - Ensures values.append bodies are JSON and 2D array-shaped
+/* === [LM sheets-fix proxy v3] order-fixed ====================================
+   • First, detect '__LM_MATERIALS'!A1:M1 + PUT  → force POST :append with headers
+   • NEVER title-rewrite any '__LM_*' internal sheets
+   • Then, for other sheets, do gid→title title rewrite (rename-safe)
+   • Finally, for any :append, normalize body to JSON 2D array
 =============================================================================== */
 (function(){
-  const TAG='[lm-sheets-fix v2]';
+  const TAG='[lm-sheets-fix v3]';
+  const MAT = '__LM_MATERIALS';
+  const HDR = [['materialKey','opacity','doubleSided','unlitLike','sheetGid','updatedAt','updatedBy','chromaColor','chromaTolerance','chromaFeather','blendMode','alphaTest','notes']];
   const TITLE_CACHE = Object.create(null);
-  const MATERIALS_SHEET = '__LM_MATERIALS';
-  const MATERIALS_HEADERS = [['materialKey','opacity','doubleSided','unlitLike','sheetGid','updatedAt','updatedBy','chromaColor','chromaTolerance','chromaFeather','blendMode','alphaTest','notes']];
 
-  function parseA1FromUrl(url){
-    const m = url.match(/\/values\/([^?]+)/);
+  const _fetch = window.fetch;
+
+  function parseA1(url){
+    const m = String(url).match(/\/values\/([^?]+)/);
     if (!m) return null;
-    let dec = m[1];
-    try { dec = decodeURIComponent(dec); } catch(_){}
-    return dec; // e.g. "'Sheet 1'!A:Z" or "'__LM_MATERIALS'!A1:M1"
+    try { return decodeURIComponent(m[1]); } catch(_){ return m[1]; }
   }
-  function replaceTitle(a1, newTitle){
+  function a1Info(a1){
     const m = a1 && a1.match(/^'([^']+)'!(.+)$/);
-    if (!m) return a1;
-    return `'${newTitle}'!${m[2]}`;
+    if (!m) return null;
+    return {title:m[1], range:m[2]};
   }
-  function swapA1InUrl(url, newA1){
-    return url.replace(/(\/values\/)([^?]+)/, (__, p1, p2)=>{
-      const enc = encodeURIComponent(newA1);
-      return p1 + enc;
-    });
+  function swapA1(url, newA1){
+    return String(url).replace(/(\/values\/)([^?]+)/, (_,p1,p2)=> p1 + encodeURIComponent(newA1));
   }
-  async function resolveTitleByGid(sid, gid){
+  async function gidToTitle(sid, gid){
     const key = sid+':'+gid;
     if (TITLE_CACHE[key]) return TITLE_CACHE[key];
     const url = `https://sheets.googleapis.com/v4/spreadsheets/${sid}?fields=sheets(properties(sheetId,title))`;
     const meta = (typeof __lm_fetchJSONAuth === 'function')
       ? await __lm_fetchJSONAuth(url)
       : await fetch(url).then(r=>r.json());
-    const hit = (meta.sheets||[]).map(s=>s.properties).find(p => String(p.sheetId)===String(gid));
-    const title = (hit && hit.title) || null;
-    if (title) TITLE_CACHE[key] = title;
-    return title;
+    const hit = (meta.sheets||[]).map(s=>s.properties).find(p=>String(p.sheetId)===String(gid));
+    return TITLE_CACHE[key] = hit && hit.title || null;
   }
-  function ensureJsonBody(init){
+  function ensureJson(init){
     const out = Object.assign({}, init||{});
-    const headers = Object.assign({}, out.headers || {});
-    if (!headers['Content-Type']) headers['Content-Type'] = 'application/json';
-    out.headers = headers;
-    if (out.body){
-      if (typeof out.body === 'string'){
-        try { out.body = JSON.parse(out.body); } catch(_){ /* leave as string */ }
-      }
-    } else {
-      out.body = {};
+    const h = Object.assign({}, out.headers||{});
+    if (!h['Content-Type']) h['Content-Type'] = 'application/json';
+    out.headers = h;
+    if (out.body && typeof out.body === 'string'){
+      try { out.body = JSON.parse(out.body); } catch(_){}
     }
+    if (!out.body) out.body = {};
     return out;
   }
-  function ensure2DValues(init){
-    const out = ensureJsonBody(init);
-    const b = (typeof out.body === 'string') ? (()=>{ try{return JSON.parse(out.body);}catch(_){return {};}})() : (out.body || {});
+  function ensure2DAppend(init){
+    const out = ensureJson(init);
+    const b = (typeof out.body === 'string') ? (()=>{ try{return JSON.parse(out.body);}catch(_){return {};}})() : (out.body||{});
     let v = b.values;
-    if (!Array.isArray(v)){
-      // if body is a flat array -> wrap; else put headers placeholder to avoid 400
-      if (Array.isArray(out.body)) {
-        v = [ out.body ];
-      } else {
-        v = [ [] ];
-      }
-    } else if (v.length && !Array.isArray(v[0])) {
-      v = [ v ];
-    }
-    const newBodyObj = Object.assign({}, b, { values: v });
-    out.body = JSON.stringify(newBodyObj);
+    if (!Array.isArray(v)) v = [[]];
+    if (v.length && !Array.isArray(v[0])) v = [v];
+    out.body = JSON.stringify(Object.assign({}, b, {values:v}));
     return out;
   }
 
-  const _fetch = window.fetch;
   window.fetch = async function(u, init){
-    const url = (typeof u === 'string') ? u : (u && u.url) || '';
+    let url = (typeof u === 'string') ? u : (u && u.url) || '';
     let i = init;
-
     try{
-      if (typeof url === 'string' &&
-          url.startsWith('https://sheets.googleapis.com/v4/spreadsheets/') &&
-          url.includes('/values/')){
+      if (url.startsWith('https://sheets.googleapis.com/v4/spreadsheets/') && url.includes('/values/')) {
+        const a1 = parseA1(url);
+        const info = a1Info(a1);
 
-        // 1) rename-safety by gid→title
-        const ctx = window.__LM_SHEET_CTX || {};
-        const sid = ctx.spreadsheetId, gid = ctx.sheetGid;
-        const a1 = parseA1FromUrl(url);
-        if (sid && (gid || gid===0) && a1 && /^'[^']+'!/.test(a1)){
-          const cur = await resolveTitleByGid(sid, gid);
-          if (cur){
-            const old = a1.slice(1, a1.indexOf("'", 1));
-            if (old !== cur){
-              const newA1 = replaceTitle(a1, cur);
-              const newUrl = swapA1InUrl(url, newA1);
-              if (typeof u === 'string') u = newUrl; else if (u && u.url) u.url = newUrl;
-              console.log(TAG, 'title rewrite', old, '→', cur);
+        // (0) Guard: if no A1 info, fall through
+        if (info){
+          const isInternal = info.title.startsWith('__LM_');
+          // (1) Handle materials header PUT BEFORE any rewrite
+          const isMatHeader = (info.title === MAT) && (/^A1:M1$/i.test(info.range));
+          if (isMatHeader && i && String(i.method).toUpperCase() === 'PUT'){
+            // PUT → POST :append with fixed header row
+            url = url.replace(/(\/values\/[^?]+)(\?valueInputOption=RAW)/, (_,p1,p2)=> p1 + ':append' + p2);
+            if (typeof u === 'string') u = url; else if (u && u.url) u.url = url;
+            const out = ensureJson(i);
+            out.method = 'POST';
+            out.body = JSON.stringify({values: HDR});
+            i = out;
+            console.log(TAG,'fixed header PUT→POST append for __LM_MATERIALS');
+          }
+
+          // (2) Title rewrite for non-internal sheets only
+          if (!isInternal){
+            const ctx = window.__LM_SHEET_CTX || {};
+            if (ctx.spreadsheetId && (ctx.sheetGid || ctx.sheetGid===0)){
+              const cur = await gidToTitle(ctx.spreadsheetId, ctx.sheetGid);
+              if (cur && info.title !== cur){
+                const newA1 = `'${cur}'!${info.range}`;
+                url = swapA1(url, newA1);
+                if (typeof u === 'string') u = url; else if (u && u.url) u.url = url;
+                console.log(TAG,'title rewrite', info.title, '→', cur);
+              }
             }
           }
         }
 
-        // 2) method/body sanitizer
-        const a1b = parseA1FromUrl((typeof u==='string')?u:(u&&u.url)||url) || '';
-        const isMaterialsHeader = /'__LM_MATERIALS'!A1:M1$/.test(a1b);
-        // (a) legacy PUT for header -> switch to POST :append + set header row
-        if (isMaterialsHeader && i && String(i.method).toUpperCase() === 'PUT'){
-          const newUrl = ((typeof u==='string')?u:(u&&u.url)||url).replace(/(\/values\/[^?]+)(\?valueInputOption=RAW)/,
-            (__, p1, p2)=> p1 + ':append' + p2);
-          if (typeof u === 'string') u = newUrl; else if (u && u.url) u.url = newUrl;
-          const out = ensureJsonBody(i);
-          out.method = 'POST';
-          out.body = JSON.stringify({ values: MATERIALS_HEADERS });
-          i = out;
-          console.log(TAG, 'PUT→POST append fixed for __LM_MATERIALS header');
-        }
-        // (b) any append -> ensure 2D values + JSON
-        if (/(\/values\/[^?]+:append\?)/.test((typeof u==='string')?u:(u&&u.url)||url)){
-          i = ensure2DValues(i);
+        // (3) Any :append → normalize body
+        if (/(\/values\/[^?]+:append\?)/.test(url)) {
+          i = ensure2DAppend(i);
         }
       }
     }catch(e){
-      console.warn(TAG, 'proxy error (continuing without fix):', e && e.message);
+      console.warn(TAG,'proxy error (continue)', e && e.message);
     }
-
     return _fetch.call(this, u, i);
   };
 
-  console.log(TAG, 'installed');
+  console.log(TAG,'installed');
 })();
