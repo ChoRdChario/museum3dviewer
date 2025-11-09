@@ -1,116 +1,139 @@
-// [mat-sheet-persist v1.4-compatible SINGLE FILE]
-// Defines window.__LM_MATERIALS_PERSIST__ with { setCtx, ensureHeaders, upsert }.
-// Classic (non-module) script, idempotent. Auto-wires to lm:sheet-context to keep ctx fresh.
-//
-// Columns layout ensured: A..N
-// A: key (sheetGid::materialKey), B:opacity, C:doubleSided, D:unlitLike,
-// E:chromaEnable, F:chromaColor, G:chromaTolerance, H:chromaFeather,
-// I:roughness, J:metalness, K:emissiveHex, L:updatedAt, M:updatedBy, N:sheetGid
-//
+
+/*!
+ * materials.sheet.persist.js v1.4
+ * - Listens to `lm:sheet-context` and uses e.detail if provided
+ * - Falls back to window.__LM_SHEET_CTX
+ * - Waits for __lm_fetchJSONAuth and ctx before doing work
+ * - Idempotent sheet creation + A:M headers
+ * - Safe to call upsert() before ctx/auth are fully ready (will retry)
+ */
 (function(){
-  if (window.__LM_MATERIALS_PERSIST__) {
-    console.log('[mat-sheet-persist v1.4] already defined; skipping reinit');
-    return;
+  const LOG = (...a)=>console.log('[mat-sheet-persist v1.4]', ...a);
+  const WARN = (...a)=>console.warn('[mat-sheet-persist v1.4]', ...a);
+
+  const MAT_SHEET = '__LM_MATERIALS';
+  const HEADERS_AM = [
+    'materialKey','opacity','doubleSided','unlitLike',
+    'chromaEnable','chromaColor','chromaTolerance','chromaFeather',
+    'roughness','metalness','emissiveHex',
+    'updatedAt','updatedBy'
+  ]; // A..M
+
+  let ctx = null;         // { spreadsheetId, sheetGid }
+  let readyCtxResolve;
+  const readyCtx = new Promise(res=>readyCtxResolve=res);
+
+  let authResolve;
+  const readyAuth = new Promise(res=>authResolve=res);
+
+  // expose version
+  try { window.__LM_MAT_PERSIST_VERSION__ = '1.4'; } catch(e){}
+
+  // Detect/await auth helper (__lm_fetchJSONAuth)
+  function waitAuthHelper(timeoutMs=15000){
+    if (typeof window.__lm_fetchJSONAuth === 'function') return Promise.resolve();
+    return new Promise((resolve,reject)=>{
+      const t0 = performance.now();
+      const iv = setInterval(()=>{
+        if (typeof window.__lm_fetchJSONAuth === 'function'){
+          clearInterval(iv); resolve();
+        } else if (performance.now() - t0 > timeoutMs){
+          clearInterval(iv); reject(new Error('__lm_fetchJSONAuth not present'));
+        }
+      }, 50);
+    });
   }
 
-  const STATE = {
-    spreadsheetId: null,
-    sheetGid: null,
-    sheetTitle: '__LM_MATERIALS',
-  };
+  async function fetchJSON(url, init){ return window.__lm_fetchJSONAuth(url, init); }
 
-  function assertAuthShim() {
-    if (typeof window.__lm_fetchJSONAuth !== 'function') {
-      throw new Error('__lm_fetchJSONAuth missing');
+  // Context handling
+  function setCtx(cand){
+    if (!cand) cand = window.__LM_SHEET_CTX || null;
+    if (cand && cand.spreadsheetId){
+      ctx = { spreadsheetId: cand.spreadsheetId, sheetGid: cand.sheetGid || 0 };
+      readyCtxResolve?.(ctx);
+      LOG('ctx set', ctx);
+      return true;
     }
+    return false;
   }
 
-  function setCtx(ctx) {
-    if (!ctx || !ctx.spreadsheetId) {
-      console.warn('[mat-sheet-persist v1.4] setCtx ignored (no spreadsheetId)', ctx);
-      return;
+  window.addEventListener('lm:sheet-context', (e)=>{
+    const ok = setCtx(e && e.detail);
+    if (!ok) WARN('sheet-context received but invalid detail', e && e.detail);
+    else { /* kick ensure on fresh ctx */ ensureSheetAndHeaders().catch(()=>{}); }
+  }, {capture:true});
+
+  // In case event fired earlier
+  setCtx();
+
+  // Some apps also signal auth-ready; we resolve the helper wait here too
+  window.addEventListener('lm:auth-ready', ()=>{
+    waitAuthHelper().then(()=>authResolve()).catch(WARN);
+  }, {capture:true});
+
+  // Also proactively try
+  waitAuthHelper().then(()=>authResolve()).catch(WARN);
+
+  async function ensureSheetAndHeaders(){
+    await readyCtx;
+    await readyAuth;
+
+    const SHEET_ID = ctx?.spreadsheetId;
+    if (!SHEET_ID) throw new Error('no spreadsheetId in __LM_SHEET_CTX');
+
+    // get spreadsheet meta
+    const meta = await fetchJSON(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}`);
+    const titles = (meta.sheets||[]).map(s=>s.properties.title);
+
+    // add sheet if missing
+    if (!titles.includes(MAT_SHEET)){
+      try{
+        await fetchJSON(
+          `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}:batchUpdate`,
+          { method:'POST', body:{ requests:[{ addSheet:{ properties:{ title: MAT_SHEET } } }] } }
+        );
+        LOG('created sheet');
+      }catch(err){
+        // if already exists (race), ignore
+        const msg = (''+err).toLowerCase();
+        if (!msg.includes('already exists') && !msg.includes('すでに存在')) throw err;
+        LOG('sheet exists (race)');
+      }
+    } else {
+      LOG('sheet exists');
     }
-    STATE.spreadsheetId = ctx.spreadsheetId;
-    if (typeof ctx.sheetGid === 'number') STATE.sheetGid = ctx.sheetGid;
-    console.log('[mat-sheet-persist v1.4] ctx set', { spreadsheetId: STATE.spreadsheetId, sheetGid: STATE.sheetGid });
-  }
 
-  async function ensureSheet() {
-    assertAuthShim();
-    const sid = STATE.spreadsheetId;
-    if (!sid) throw new Error('no spreadsheetId in context');
-
-    // 1) get meta
-    const meta = await __lm_fetchJSONAuth(`https://sheets.googleapis.com/v4/spreadsheets/${sid}`);
-    const titles = (meta.sheets||[]).map(s => s.properties.title);
-    if (!titles.includes(STATE.sheetTitle)) {
-      await __lm_fetchJSONAuth(
-        `https://sheets.googleapis.com/v4/spreadsheets/${sid}:batchUpdate`,
-        { method:'POST', body:{ requests:[{ addSheet:{ properties:{ title: STATE.sheetTitle } } }] } }
-      );
-      console.log('[mat-sheet-persist v1.4] added sheet', STATE.sheetTitle);
-    }
-  }
-
-  async function ensureHeaders() {
-    assertAuthShim();
-    const sid = STATE.spreadsheetId;
-    if (!sid) throw new Error('no spreadsheetId in context');
-    await ensureSheet();
-
-    const headers = [
-      'key','opacity','doubleSided','unlitLike',
-      'chromaEnable','chromaColor','chromaTolerance','chromaFeather',
-      'roughness','metalness','emissiveHex','updatedAt','updatedBy','sheetGid'
-    ]; // A..N
-    const range = encodeURIComponent(`${STATE.sheetTitle}!A1:N1`);
-    await __lm_fetchJSONAuth(
-      `https://sheets.googleapis.com/v4/spreadsheets/${sid}/values/${range}?valueInputOption=RAW`,
-      { method:'PUT', body:{ values:[headers] } }
+    // write headers (A:M)
+    await fetchJSON(
+      `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${encodeURIComponent(MAT_SHEET+'!A1:M1')}?valueInputOption=RAW`,
+      { method:'PUT', body:{ values:[HEADERS_AM] } }
     );
-    console.log('[mat-sheet-persist v1.4] headers ensured A:N');
+    LOG('headers ensured A:M');
   }
 
-  async function upsert(payload) {
-    assertAuthShim();
-    const sid = STATE.spreadsheetId;
-    if (!sid) throw new Error('no spreadsheetId in context');
+  async function upsertCore({ materialKey, opacity= '', doubleSided=false, unlitLike=false,
+    chromaEnable=false, chromaColor='#000000', chromaTolerance=0, chromaFeather=0,
+    roughness='', metalness='', emissiveHex='', updatedBy='mat-ui' }){
 
-    const {
-      materialKey,
-      opacity,
-      doubleSided = false,
-      unlitLike   = false,
-      chromaEnable = false,
-      chromaColor = '#000000',
-      chromaTolerance = 0,
-      chromaFeather   = 0,
-      roughness = '',
-      metalness = '',
-      emissiveHex = '',
-      updatedBy = 'mat-ui',
-      sheetGid, // optional; falls back to STATE.sheetGid
-    } = payload || {};
+    await ensureSheetAndHeaders();
 
-    const sgid = (typeof sheetGid === 'number' ? sheetGid : STATE.sheetGid) ?? 0;
+    const SHEET_ID = ctx?.spreadsheetId;
+    if (!SHEET_ID) throw new Error('no spreadsheetId in __LM_SHEET_CTX');
     if (!materialKey) throw new Error('materialKey required');
 
-    const key = `${sgid}::${materialKey}`;
-
-    await ensureHeaders();
-
-    // A列を見て key を探す
-    const colA = await __lm_fetchJSONAuth(
-      `https://sheets.googleapis.com/v4/spreadsheets/${sid}/values/${encodeURIComponent(STATE.sheetTitle+'!A:A')}`
+    // A列 fetch
+    const colA = await fetchJSON(
+      `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${encodeURIComponent(MAT_SHEET+'!A:A')}`
     );
-    const rows = colA.values || []; // [[header],[key],...]
-    let rowIndex = rows.findIndex(r => (r[0]||'') === key);
+    const rows = colA.values || [];
+    let rowIndex = rows.findIndex(r => (r[0]||'') === materialKey);
     let rowNumber;
-    if (rowIndex <= 0) {
-      rowNumber = rows.length + 1; // append
-      await __lm_fetchJSONAuth(
-        `https://sheets.googleapis.com/v4/spreadsheets/${sid}/values/${encodeURIComponent(`${STATE.sheetTitle}!A${rowNumber}:A${rowNumber}`)}?valueInputOption=RAW`,
-        { method:'PUT', body:{ values:[[key]] } }
+    if (rowIndex <= 0){
+      rowNumber = rows.length + 1;
+      await fetchJSON(
+        `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${encodeURIComponent(`${MAT_SHEET}!A${rowNumber}:A${rowNumber}`)}?valueInputOption=RAW`,
+        { method:'PUT', body:{ values:[[materialKey]] } }
       );
     } else {
       rowNumber = rowIndex + 1;
@@ -118,38 +141,33 @@
 
     const iso = new Date().toISOString();
     const rowValues = [
-      opacity ?? '',
+      opacity,
       (doubleSided ? 'TRUE' : 'FALSE'),
-      (unlitLike   ? 'TRUE' : 'FALSE'),
+      (unlitLike ? 'TRUE' : 'FALSE'),
       (chromaEnable ? 'TRUE' : 'FALSE'),
       chromaColor || '',
       String(chromaTolerance ?? ''),
-      String(chromaFeather   ?? ''),
+      String(chromaFeather ?? ''),
       String(roughness ?? ''),
       String(metalness ?? ''),
       emissiveHex || '',
       iso,
-      updatedBy,
-      String(sgid)
+      updatedBy
     ];
-    const rangeBN = `${STATE.sheetTitle}!B${rowNumber}:N${rowNumber}`;
-    await __lm_fetchJSONAuth(
-      `https://sheets.googleapis.com/v4/spreadsheets/${sid}/values/${encodeURIComponent(rangeBN)}?valueInputOption=RAW`,
+    const rangeBM = `${MAT_SHEET}!B${rowNumber}:M${rowNumber}`;
+    await fetchJSON(
+      `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${encodeURIComponent(rangeBM)}?valueInputOption=RAW`,
       { method:'PUT', body:{ values:[rowValues] } }
     );
-
-    console.log('[mat-sheet-persist v1.4] upsert', { rowNumber, key, sheetGid: sgid, materialKey });
-    return { rowNumber, key, sheetGid: sgid, materialKey };
+    LOG('persisted', {rowNumber, materialKey, opacity});
   }
 
-  // expose
-  window.__LM_MATERIALS_PERSIST__ = { setCtx, ensureHeaders, upsert };
+  // public API
+  window.LM_MaterialsPersist = {
+    ensure: ensureSheetAndHeaders,
+    setContext: setCtx,
+    upsert: (payload)=> upsertCore(payload).catch(err=>{ WARN('upsert failed', err); throw err; }),
+  };
 
-  // auto-wire to sheet-context
-  window.addEventListener('lm:sheet-context', (e) => {
-    const d = e && e.detail || {};
-    setCtx(d);
-  });
-
-  console.log('[mat-sheet-persist v1.4] loaded & exposed API');
+  LOG('loaded');
 })();

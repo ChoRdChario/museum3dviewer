@@ -188,7 +188,7 @@
       <section id="pane-material" class="pane" data-pane="material">
         <div class="mat-grid">
           <div class="mat-card">
-            <h4>Per‑material opacity (saved per sheet)</h4>
+            <h4>Per-material opacity (saved per sheet)</h4>
             <div id="pm-opacity">
               <select id="pm-material" aria-label="Select material">
                 <option value="">— Select material —</option>
@@ -202,8 +202,8 @@
           <div class="mat-card">
             <h4>Shading</h4>
             <div class="inline">
-              <label class="nowrap"><input type="checkbox" id="pm-flag-doublesided"/> Double‑sided</label>
-              <label class="nowrap"><input type="checkbox" id="pm-flag-unlit"/> Unlit‑like</label>
+              <label class="nowrap"><input type="checkbox" id="pm-flag-doublesided"/> Double-sided</label>
+              <label class="nowrap"><input type="checkbox" id="pm-flag-unlit"/> Unlit-like</label>
             </div>
           </div>
 
@@ -259,7 +259,7 @@
   <script type="module" src="./viewer.bridge.module.js"></script>
   <script type="module" src="./materials.sheet.bridge.js"></script>
   <!-- NEW: persist layer for per-material settings (sheets/local) -->
-  
+  <script type="module" src="./materials.sheet.persist.js"></script>
 
   <!-- Runtime/UI helpers (non-module so they expose globals) -->
   <script src="./material.runtime.patch.js"></script>
@@ -299,13 +299,37 @@
   })();
   </script>
 
-    <!-- LociMyu materials: persist + UI wire + auto-apply (appended) -->
-    
-    
-    
-<!-- LociMyu: materials pipeline (classic order) -->
+  <!-- === LociMyu: Auth Fetch Shim (v2) + Persist Loader + UI Wire === -->
+  <script type="module">
+    // Authenticated JSON fetch shim (v2)
+    window.__lm_fetchJSONAuth = window.__lm_fetchJSONAuth || (async (url, init = {}) => {
+      const { ensureToken, getAccessToken } = await import('./gauth.module.js');
+      const tok = (await ensureToken?.()) || (await getAccessToken?.());
+      if (!tok) throw new Error('no token');
+
+      const headers = new Headers(init.headers || {});
+      if (!headers.has('Authorization')) headers.set('Authorization', `Bearer ${tok}`);
+
+      let body = init.body;
+      const isSendable = typeof body === 'string' || body instanceof Blob || body instanceof FormData ||
+                         body instanceof URLSearchParams || body instanceof ArrayBuffer;
+      if (body != null && !isSendable) {
+        body = JSON.stringify(body);
+        if (!headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
+      }
+      const res = await fetch(url, { ...init, headers, body });
+      if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text()}`);
+      const ct = res.headers.get('content-type') || '';
+      return ct.includes('application/json') ? res.json() : res.text();
+    });
+    console.log('[inject] __lm_fetchJSONAuth ready');
+  </script>
+
+  <!-- Persist runtime (ensures __LM_MATERIALS and headers) -->
   <script defer src="./materials.sheet.persist.js"></script>
-  <script defer src="./materials.ui.wire.js"></script>
-  <script defer src="./materials.auto.apply.js"></script>
+
+  <!-- UI wiring (binds #pm-material & #pm-opacity-range to Sheets) -->
+  <script type="module" src="./materials.ui.wire.js"></script>
+  <!-- === /LociMyu injection === -->
 </body>
 </html>
