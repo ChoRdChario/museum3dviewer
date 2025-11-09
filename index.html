@@ -23,12 +23,9 @@
     .row { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
     .row .grow { flex:1 1 180px; }
     .muted { color:#9aa4af; font-size:12px; }
-    /* Hide legacy synthesized panel to avoid duplication */
-    #panel-material.lm-panel-material.card{display:none;}
-    #panel-material{display:none !important;}
-    #pane-material .card{width:100%;box-sizing:border-box;}
-    #pane-material .controls{overflow:visible;}
-  </style>
+  #panel-material.lm-panel-material.card{display:none;} #pane-material .card{width:100%;box-sizing:border-box;} #pane-material .controls{overflow:visible;} 
+#panel-material{display:none !important;} .pane .card{width:100%;box-sizing:border-box;} .pane .controls{overflow:visible;} 
+</style>
 
   <!-- Optional loader for content.js to avoid 404 noise -->
   <script id="lm-optional-contentjs">
@@ -106,7 +103,9 @@
     /* Prevent horizontal scroll in the right panel */
     #ui *{max-width:100%}
     #ui{overflow-x:hidden}
-  </style>
+  #panel-material.lm-panel-material.card{display:none;} #pane-material .card{width:100%;box-sizing:border-box;} #pane-material .controls{overflow:visible;} 
+#panel-material{display:none !important;} .pane .card{width:100%;box-sizing:border-box;} .pane .controls{overflow:visible;} 
+</style>
 
   <style id="lm-material-layout-fix">
     /* ===== Material pane: overflow & wrapping fixes ===== */
@@ -125,7 +124,9 @@
     #pane-material .btn, #pane-material .switch, #pane-material .mini { flex:0 0 auto; }
     #pm-chroma .tol-row { display:flex; flex-wrap:wrap; gap:8px; }
     #pm-chroma .feather-row { display:flex; flex-wrap:wrap; gap:8px; margin-top:6px; }
-  </style>
+  #panel-material.lm-panel-material.card{display:none;} #pane-material .card{width:100%;box-sizing:border-box;} #pane-material .controls{overflow:visible;} 
+#panel-material{display:none !important;} .pane .card{width:100%;box-sizing:border-box;} .pane .controls{overflow:visible;} 
+</style>
 </head>
 <body>
   <div id="app">
@@ -188,7 +189,7 @@
       <section id="pane-material" class="pane" data-pane="material">
         <div class="mat-grid">
           <div class="mat-card">
-            <h4>Per-material opacity (saved per sheet)</h4>
+            <h4>Per‑material opacity (saved per sheet)</h4>
             <div id="pm-opacity">
               <select id="pm-material" aria-label="Select material">
                 <option value="">— Select material —</option>
@@ -202,8 +203,8 @@
           <div class="mat-card">
             <h4>Shading</h4>
             <div class="inline">
-              <label class="nowrap"><input type="checkbox" id="pm-flag-doublesided"/> Double-sided</label>
-              <label class="nowrap"><input type="checkbox" id="pm-flag-unlit"/> Unlit-like</label>
+              <label class="nowrap"><input type="checkbox" id="pm-flag-doublesided"/> Double‑sided</label>
+              <label class="nowrap"><input type="checkbox" id="pm-flag-unlit"/> Unlit‑like</label>
             </div>
           </div>
 
@@ -247,32 +248,23 @@
     })();
   </script>
 
-  <!-- Boot runtime (ESM) -->
+  <!-- Boot runtime -->
   <script type="module" src="./boot.esm.cdn.js"></script>
   <link rel="stylesheet" href="app.sheet-rename.css"/>
   <script type="module" src="sheet-rename.module.js"></script>
 
-  <!-- Sheet context event bridge (classic defer ok) -->
+  <!-- Sheet context event bridge -->
   <script defer src="./sheet.ctx.bridge.js"></script>
 
   <!-- ===== LociMyu material bridge stack (order matters) ===== -->
   <script type="module" src="./viewer.bridge.module.js"></script>
   <script type="module" src="./materials.sheet.bridge.js"></script>
-  <!-- NEW: persist layer for per-material settings (sheets/local) -->
-  <script type="module" src="./materials.sheet.persist.js"></script>
-
-  <!-- Runtime/UI helpers (non-module so they expose globals) -->
-  <script src="./material.runtime.patch.js"></script>
-  <script src="./glb.load.signal.js"></script>
-  <script src="./material.dropdown.patch.js?v=3.5.2"></script>
-
-  <!-- Orchestrator runs after dropdown/runtime is ready -->
   <script type="module" src="./material.orchestrator.js"></script>
 
-  <!-- lm-dx v4.3: keep only the click-detox; skip legacy material anchors -->
+  <!-- lm-dx v4.3: robust material panel anchoring & click passthrough (KEEP) -->
   <script>
   (() => {
-    const TAG='[lm-dx v4.3]'; const log=(...a)=>console.log(TAG,...a);
+    const TAG='[lm-dx v4.3]'; const log=(...a)=>console.log(TAG,...a), warn=(...a)=>console.warn(TAG,...a);
     const doc = document;
     const right = doc.querySelector('#right, aside, .right, .sidebar') || doc.body;
 
@@ -295,41 +287,87 @@
     detoxClickable(doc.getElementById('glbUrl'));
     detoxClickable(doc.getElementById('auth-signin'));
     detoxClickable(doc.getElementById('btnGlb'));
-    // NOTE: do NOT synthesize or move material controls here; canonical pane exists.
+
+    function findMaterialTabBtn() {
+      const idBtn = doc.getElementById('tab-material');
+      if (idBtn) return idBtn;
+      const btns = [...right.querySelectorAll('button,[role="tab"],.tab,nav button,header button')];
+      const m = btns.find(b => (b.textContent||'').trim().toLowerCase() === 'material');
+      return m || null;
+    }
+    const materialTabBtn = findMaterialTabBtn();
+    function isMaterialActive() {
+      const b = materialTabBtn;
+      if (!b) return true;
+      const cs = b.getAttribute('aria-selected');
+      if (cs) return cs === 'true';
+      return b.classList.contains('active') || b.classList.contains('selected');
+    }
+
+    function visible(el){ try{ return !!el && el.offsetParent !== null; } catch(_){ return false; } }
+    const tabBar = right.querySelector('[role="tablist"], .tabs, nav, header') || right;
+    const candidates = [
+      right.querySelector('#panel-material, [role="tabpanel"][data-tab="material"], [data-panel="material"]'),
+      ...[...right.querySelectorAll('section,.card,.panel,.group')]
+        .filter(c => {
+          const r=c.getBoundingClientRect?.(); if(!r) return false;
+          if (tabBar && r.top < (tabBar.getBoundingClientRect?.().bottom||0)) return false;
+          const t=(c.textContent||'').toLowerCase();
+          return /per-?material/.test(t) || /opacity/.test(t) || /chroma key|double-?sided|unlit/.test(t);
+        })
+    ].filter(Boolean);
+    let panel = candidates.find(visible) || candidates[0] || null;
+
+    if (!panel && tabBar){
+      panel = doc.createElement('section');
+      panel.id = 'panel-material';
+      panel.className = 'lm-panel-material card';
+      panel.style.marginTop = '8px';
+      const style = doc.createElement('style');
+      style.textContent = `#panel-material { display: ${isMaterialActive() ? 'block' : 'none'}; }`;
+      doc.head.appendChild(style);
+      tabBar.insertAdjacentElement('afterend', panel);
+      log('synthesized panel');
+    }
+    if (!panel){ warn('material panel/card not found'); return; }
+
+    function ensureAnchors(dst){
+      let sel = dst.querySelector('#materialSelect');
+      if (!sel) { sel = doc.createElement('select'); sel.id='materialSelect'; sel.style.width='100%'; dst.appendChild(sel); }
+      let rng = dst.querySelector('#opacityRange');
+      if (!rng) { rng = doc.createElement('input'); rng.type='range'; rng.id='opacityRange'; rng.min='0'; rng.max='1'; rng.step='0.01'; rng.value='1.0'; rng.style.width='100%'; dst.appendChild(rng); }
+      return {sel,rng};
+    }
+    const tabBtn = doc.getElementById('tab-material');
+    if (tabBtn) tabBtn.querySelectorAll('#materialSelect,#opacityRange').forEach(n=>n.remove());
+
+    const {sel, rng} = ensureAnchors(panel);
+    ['materialSelect','opacityRange'].forEach(id=>{ const n=doc.getElementById(id); if(n && !panel.contains(n)) panel.appendChild(n); });
+    log('material controls anchored in panel', panel);
+    window.dispatchEvent(new Event('lm:mat-ui-ready',{bubbles:true}));
   })();
   </script>
 
-  <!-- === LociMyu: Auth Fetch Shim (v2) + Persist Loader + UI Wire === -->
-  <script type="module">
-    // Authenticated JSON fetch shim (v2)
-    window.__lm_fetchJSONAuth = window.__lm_fetchJSONAuth || (async (url, init = {}) => {
-      const { ensureToken, getAccessToken } = await import('./gauth.module.js');
-      const tok = (await ensureToken?.()) || (await getAccessToken?.());
-      if (!tok) throw new Error('no token');
+  <!-- Material dropdown population + runtime wiring (must be loaded LAST) -->
+  <script type="module" src="./material.dropdown.patch.js"></script>
+  <script src="./material.runtime.patch.js"></script>
+<script src="./glb.load.signal.js"></script>
+<script src="./material.dropdown.patch.js"></script>
+<!-- 既存の viewer / bridge / orchestrator / sheet-bridge の後ろ -->
 
-      const headers = new Headers(init.headers || {});
-      if (!headers.has('Authorization')) headers.set('Authorization', `Bearer ${tok}`);
+<!-- GLB完了シグナル（Loadボタン→GLB読込完了を一度だけ通知） -->
+<script src="./glb.load.signal.js"></script>
 
-      let body = init.body;
-      const isSendable = typeof body === 'string' || body instanceof Blob || body instanceof FormData ||
-                         body instanceof URLSearchParams || body instanceof ArrayBuffer;
-      if (body != null && !isSendable) {
-        body = JSON.stringify(body);
-        if (!headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
-      }
-      const res = await fetch(url, { ...init, headers, body });
-      if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text()}`);
-      const ct = res.headers.get('content-type') || '';
-      return ct.includes('application/json') ? res.json() : res.text();
-    });
-    console.log('[inject] __lm_fetchJSONAuth ready');
-  </script>
+<!-- マテリアルドロップダウン投入（静音・一発実行版） -->
+<script src="./material.dropdown.patch.js"></script>
+<script src="./material.id.unify.v1.js"></script>
+<script src="./material.dropdown.sync.v1.js"></script>
 
-  <!-- Persist runtime (ensures __LM_MATERIALS and headers) -->
-  <script defer src="./materials.sheet.persist.js"></script>
+<!-- LociMyu: material local state & save-bus (localStorage) -->
+<script src="./material.state.local.v1.js"></script>
 
-  <!-- UI wiring (binds #pm-material & #pm-opacity-range to Sheets) -->
-  <script type="module" src="./materials.ui.wire.js"></script>
-  <!-- === /LociMyu injection === -->
+
+  <script src="materials.sheet.persist.js"></script>
+  <script src="materials.auto.apply.js"></script>
 </body>
 </html>
