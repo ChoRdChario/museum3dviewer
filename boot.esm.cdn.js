@@ -1,45 +1,3 @@
-
-/* === [LM minimal auth shim v1] early __lm_fetchJSONAuth =====================
-   Uses getAccessToken() from gauth.module.js to attach Bearer token.
-   This is intentionally tiny to avoid init races with the sheets hotfix.
-============================================================================= */
-(function(){
-  if (typeof window.__lm_fetchJSONAuth === 'function') return;
-  const TAG='[lm-auth-shim v1]';
-  function ensureToken(){
-    try{
-      if (typeof getAccessToken === 'function'){
-        const t = getAccessToken();
-        if (t) return t;
-      }
-    }catch(_){}
-    throw new Error('token_missing');
-  }
-  async function __lm_fetchJSONAuth(url, init){
-    const token = ensureToken();
-    const headers = Object.assign({}, (init && init.headers) || {}, {
-      'Authorization': 'Bearer ' + token,
-      'Accept': 'application/json'
-    });
-    let body = init && init.body;
-    if (body && typeof body !== 'string') body = JSON.stringify(body);
-    if (body && !headers['Content-Type']) headers['Content-Type'] = 'application/json';
-    const resp = await fetch(url, Object.assign({}, init||{}, { headers, body }));
-    if (!resp.ok){
-      const text = await resp.text().catch(()=>'');
-      let json; try{ json = JSON.parse(text); }catch(_){}
-      const err = new Error('HTTP '+resp.status+': '+resp.statusText);
-      err.status = resp.status; err.body = json || text;
-      throw err;
-    }
-    const ct = resp.headers.get('content-type') || '';
-    return ct.includes('application/json') ? await resp.json() : await resp.text();
-  }
-  window.__lm_fetchJSONAuth = __lm_fetchJSONAuth;
-  try{ window.dispatchEvent(new CustomEvent('lm:gauth-ready')); }catch(_){}
-  console.log(TAG,'installed');
-})();
-
 // boot.esm.cdn.js — LociMyu boot (clean full build, overlay image + Sheets delete fixes)
 
 // ---------- Globals (palette & helpers) ----------
@@ -1361,3 +1319,47 @@ onCanvasShiftPick(function(pos){
   }
 })();
 
+
+
+/* === [LM dropdown filter v1] hide internal sheets (__LM_*) ==================
+   - Removes options whose dataset.title or text starts with "__LM_" (e.g., "__LM_MATERIALS")
+   - Runs after DOM ready and on 'lm:sheet-context'/'lm:sheet-changed' to catch repopulations
+============================================================================= */
+(function(){
+  const TAG='[lm-dropdown-filter v1]';
+  function hideInternalOptions(sel){
+    if (!sel) return;
+    let removed = 0;
+    const opts = Array.from(sel.querySelectorAll('option'));
+    for (const o of opts){
+      const t = (o.dataset && o.dataset.title) || o.textContent || '';
+      if (t.startsWith('__LM_')){
+        if (o.selected) o.selected = false;
+        o.remove();
+        removed++;
+      }
+    }
+    if (removed){
+      // ensure a valid selection
+      const vis = sel.querySelector('option');
+      if (vis){
+        if (!sel.value || !sel.querySelector(`option[value="${sel.value}"]`)){
+          sel.value = vis.value;
+          try { sel.dispatchEvent(new Event('change', { bubbles:true })); } catch(_){}
+        }
+      }
+      console.log(TAG, 'removed', removed, 'internal option(s)');
+    }
+  }
+  function run(){
+    const sel = document.querySelector('#save-target-sheet, select[data-role="sheet-target"], select#sheet-target');
+    if (sel) hideInternalOptions(sel);
+  }
+  if (document.readyState === 'complete' || document.readyState === 'interactive'){
+    setTimeout(run, 0);
+  } else {
+    window.addEventListener('DOMContentLoaded', ()=> setTimeout(run,0), { once:true });
+  }
+  window.addEventListener('lm:sheet-context', run);
+  window.addEventListener('lm:sheet-changed', run);
+})();
