@@ -299,38 +299,9 @@
   })();
   </script>
 
-  <!-- === LociMyu: Auth Fetch Shim (v2) + Persist Loader + UI Wire === -->
-  <script type="module">
-    // Authenticated JSON fetch shim (v2)
-    window.__lm_fetchJSONAuth = window.__lm_fetchJSONAuth || (async (url, init = {}) => {
-      const { ensureToken, getAccessToken } = await import('./gauth.module.js');
-      const tok = (await ensureToken?.()) || (await getAccessToken?.());
-      if (!tok) throw new Error('no token');
-
-      const headers = new Headers(init.headers || {});
-      if (!headers.has('Authorization')) headers.set('Authorization', `Bearer ${tok}`);
-
-      let body = init.body;
-      const isSendable = typeof body === 'string' || body instanceof Blob || body instanceof FormData ||
-                         body instanceof URLSearchParams || body instanceof ArrayBuffer;
-      if (body != null && !isSendable) {
-        body = JSON.stringify(body);
-        if (!headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
-      }
-      const res = await fetch(url, { ...init, headers, body });
-      if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text()}`);
-      const ct = res.headers.get('content-type') || '';
-      return ct.includes('application/json') ? res.json() : res.text();
-    });
-    console.log('[inject] __lm_fetchJSONAuth ready');
-  </script>
-
-  <!-- Persist runtime (ensures __LM_MATERIALS and headers) -->
-  <script defer src="./materials.sheet.persist.js"></script>
-
-  <!-- UI wiring (binds #pm-material & #pm-opacity-range to Sheets) -->
-  <script type="module" src="./materials.ui.wire.js"></script>
-  <!-- === /LociMyu injection === -->
-  <script type="module" src="./materials.auto.apply.js"></script>
+    <!-- LociMyu materials: persist + UI wire + auto-apply (appended) -->
+    <script defer src="./materials.sheet.persist.js"></script>
+    <script defer src="./materials.ui.wire.js"></script>
+    <script defer src="./materials.auto.apply.js"></script>
 </body>
 </html>
