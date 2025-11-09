@@ -4,24 +4,7 @@
 window.LM_PALETTE = window.LM_PALETTE || ["#ef9368","#e9df5d","#a8e063","#8bb6ff","#b38bff","#86d2c4","#d58cc1","#9aa1a6"];
 window.currentPinColor = window.currentPinColor || window.LM_PALETTE[0];
 
-function lm_hexToRgb(
-
-
-// GID→タイトルを安全に解決
-async function __lm_titleByGid(spreadsheetId, gid){
-  const meta = await (async()=>{
-    if (typeof window.__lm_fetchJSONAuth === "function"){
-      return window.__lm_fetchJSONAuth(`https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}`);
-    }
-    const r = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}`);
-    return r.ok ? r.json() : {};
-  })();
-  const m = (meta.sheets||[]).find(s=> String(s.properties.sheetId)===String(gid));
-  return m ? m.properties.title : null;
-}
-
-
-hex){
+function lm_hexToRgb(hex){
   const m=/^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(String(hex||"000000"));
   return { r:parseInt((m&&m[1])||"00",16), g:parseInt((m&&m[2])||"00",16), b:parseInt((m&&m[3])||"00",16) };
 }
@@ -409,41 +392,12 @@ function ensureIndex(){
   });
 }
 
-
-// A:Z append をやめ、常に「次の行へ values.update」する安全版
-async function sheetsAppendRow(spreadsheetId, sheetTitleOrGid, obj){
-  const token = getAccessToken(); if(!token) return;
-
-  // sheetTitleOrGid はタイトル or 数値 GID の両対応
-  let title = String(sheetTitleOrGid||'');
-  if (/^\d+$/.test(title)) {
-    const t = await __lm_titleByGid(spreadsheetId, title);
-    if (t) title = t;
-  }
-
-  // 既存行数を数える（A 列）
-  const cur = await getValues(spreadsheetId, `'${title.replace(/'/g,"''")}'!A1:A99999`, token).catch(()=>[]);
-  const nextRow = (cur && cur.length ? cur.length : 0) + 1;
-  if (nextRow === 1) {
-    // ヘッダがまだなら入れる
-    await putValues(
-      spreadsheetId,
-      `'${title.replace(/'/g,"''")}'!A1:${colA1(LOCIMYU_HEADERS.length-1)}1`,
-      [LOCIMYU_HEADERS], token
-    );
-  }
-
-  const now = new Date().toISOString();
-  const row = [
-    obj.id, obj.title||'', obj.body||'', obj.color||window.currentPinColor,
-    obj.x||0, obj.y||0, obj.z||0, obj.imageFileId||'',
-    obj.createdAt||now, obj.updatedAt||now
-  ];
-  const a1 = `'${title.replace(/'/g,"''")}'!A${nextRow}:${colA1(LOCIMYU_HEADERS.length-1)}${nextRow}`;
-  await putValues(spreadsheetId, a1, [row], token);
-  await ensureIndex();
+function sheetsAppendRow(spreadsheetId, sheetTitle, obj){
+  const token=getAccessToken(); if(!token) return Promise.resolve();
+  const now=new Date().toISOString();
+  const vals=[[ obj.id, obj.title||'', obj.body||'', obj.color||window.currentPinColor, obj.x||0, obj.y||0, obj.z||0, obj.imageFileId||'', obj.createdAt||now, obj.updatedAt||now ]];
+  return appendValues(spreadsheetId, "'"+sheetTitle+"'!A:Z", vals, token).then(()=> ensureIndex());
 }
-
 
 function ensureRow(id, seed){
   if(rowCache.has(id)) return Promise.resolve(rowCache.get(id));
@@ -603,22 +557,14 @@ function refreshPinMarkerFromRow(id){
   removePinMarker(id);
   addPinMarker({ id, x:row.x||0, y:row.y||0, z:row.z||0, color:row.color||window.currentPinColor });
 }
-
 function updateCaptionForPin(id, fields){
-  const cached = rowCache.get(id)||{id};
-  const seed = Object.assign({}, cached, fields||{});
-  return ensureRow(id, seed).then(()=> ensureIndex()).then(async ()=>{
-    const meta = captionsIndex.get(id);
-
-    // タイトルは GID から毎回確定（rename・新規直後の競合を避ける）
-    let title = currentSheetTitle || 'シート1';
-    if (currentSheetId != null) {
-      const t = await __lm_titleByGid(currentSpreadsheetId, currentSheetId).catch(()=>null);
-      if (t) title = t;
-    }
-
+  const cached=rowCache.get(id)||{id};
+  const seed=Object.assign({}, cached, fields||{});
+  return ensureRow(id, seed).then(()=> ensureIndex()).then(()=>{
+    const meta=captionsIndex.get(id);
     if(!meta && currentSpreadsheetId){
-      await sheetsAppendRow(currentSpreadsheetId, title, {
+      const sheetTitle=currentSheetTitle||'シート1';
+      return sheetsAppendRow(currentSpreadsheetId, sheetTitle, {
         id,
         title:seed.title||'',
         body:seed.body||'',
@@ -627,26 +573,12 @@ function updateCaptionForPin(id, fields){
         imageFileId:seed.imageFileId||'',
         createdAt:seed.createdAt||new Date().toISOString(),
         updatedAt:new Date().toISOString()
-      });
-      rowCache.set(id, seed);
-      reflectRowToUI(id);
-      refreshPinMarkerFromRow(id);
+      }).then(()=>{ rowCache.set(id, seed); reflectRowToUI(id); refreshPinMarkerFromRow(id); });
     }else{
-      const rowIndex = meta ? meta.rowIndex : 2;
-      const values = LOCIMYU_HEADERS.map(h=>{
-        if(h==='updatedAt') return new Date().toISOString();
-        const v = seed[h]; return (v==null?'':String(v));
-      });
-      const rangeA1 = `'${title.replace(/'/g,"''")}'!A${rowIndex}:${colA1(LOCIMYU_HEADERS.length-1)}${rowIndex}`;
-      const token = ensureToken();
-      await putValues(currentSpreadsheetId, rangeA1, [values], token);
-      rowCache.set(id, seed);
-      reflectRowToUI(id);
-      refreshPinMarkerFromRow(id);
+      return putRowToSheet(seed, meta).then(()=>{ rowCache.set(id, seed); reflectRowToUI(id); refreshPinMarkerFromRow(id); }).catch(e=>{ console.error('[values.update] failed', e); throw e; });
     }
   });
 }
-
 
 // ---------- Image attach/detach (right pane) ----------
 let _thumbReq = 0;
@@ -1364,80 +1296,91 @@ onCanvasShiftPick(function(pos){
    - Also re-runs on lm:sheet-context / lm:sheet-changed.
    - Skips if already ensured for the same spreadsheetId.
    ============================================================= */
-/* =============================================================
-   [lm-materials-startup v1.1] __LM_MATERIALS ensure (auth-safe)
-   - __lm_fetchJSONAuth を必ず経由
-   - 生成: addSheet(title="__LM_MATERIALS") → A1:M1 を values.update
-   - idempotent
-   ============================================================= */
 (function(){
-  const TAG = "[lm-materials-startup v1.1]";
+  const TAG = "[lm-materials-startup v1]";
   const TITLE = "__LM_MATERIALS";
-  const HEADER_ROW = [
+  const HEADER = [[
     "materialKey","opacity","doubleSided","unlitLike","sheetGid","updatedAt","updatedBy",
     "chromaColor","chromaTolerance","chromaFeather","blendMode","alphaTest","notes"
-  ];
+  ]];
   const ensured = Object.create(null);
 
-  const waitFor = (pred, ms=20000, step=120)=> new Promise((res,rej)=>{
-    const t0=performance.now(), id=setInterval(()=>{
-      try{ if(pred()){ clearInterval(id); res(true); return; } }catch(_){}
-      if(performance.now()-t0>ms){ clearInterval(id); rej(new Error("timeout")); }
-    }, step);
-  });
+  function log(){ try{ console.log.apply(console, arguments); }catch(_){ } }
+  function warn(){ try{ console.warn.apply(console, arguments); }catch(_){ } }
 
-  async function jfetch(url, init){
-    await waitFor(()=> typeof window.__lm_fetchJSONAuth === "function");
-    return window.__lm_fetchJSONAuth(url, init);
-  }
+  async function fetchJSON(url, init){
+    // Hardened: never fall back to unauthenticated fetch; wait for auth shim.
+    return (async function(url, init){
+      const ok = await new Promise(res=>{
+        const t0 = Date.now();
+        const id = setInterval(()=>{
+          if (typeof window.__lm_fetchJSONAuth === 'function'){ clearInterval(id); res(true); }
+          else if (Date.now() - t0 > 20000){ clearInterval(id); res(false); }
+        }, 50);
+      });
+      if (!ok) throw new Error('auth shim not ready');
+      return await window.__lm_fetchJSONAuth(url, init);
+    }).apply(this, arguments);}
 
-  async function ensureMaterialsSheet(spreadsheetId){
-    if(!spreadsheetId || ensured[spreadsheetId]) return;
+  async function ensureMaterialsSheet(sid){
+    if (!sid) return;
+    if (ensured[sid]) return;
     try{
-      const meta = await jfetch(
-        `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}?fields=sheets(properties(title))`
-      );
-      const has = (meta.sheets||[]).some(s=> s.properties && s.properties.title === TITLE);
-
-      if(!has){
-        await jfetch(
-          `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}:batchUpdate`,
-          { method:"POST", body:{ requests:[{ addSheet:{ properties:{ title: TITLE } } }] } }
-        );
-        console.log(TAG, "created", TITLE);
+      // 1) metadata check (titles only for faster response)
+      const meta = await fetchJSON(`https://sheets.googleapis.com/v4/spreadsheets/${sid}?fields=sheets(properties(title))`);
+      const has = (meta.sheets||[]).some(s=>s && s.properties && s.properties.title === TITLE);
+      if (!has){
+        await fetchJSON(`https://sheets.googleapis.com/v4/spreadsheets/${sid}:batchUpdate`, {
+          method: "POST",
+          body: { requests: [{ addSheet: { properties: { title: TITLE } } }] }
+        });
+        log(TAG, "created", TITLE);
       }
-
-      const a1 = encodeURIComponent(`'${TITLE.replace(/'/g,"''")}'!A1:M1`);
-      await jfetch(
-        `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${a1}?valueInputOption=RAW`,
-        { method:"PUT", body:{ values:[HEADER_ROW] } }
-      );
-
-      ensured[spreadsheetId] = true;
-      console.log(TAG, "ensured for", spreadsheetId);
+      // 2) header append (idempotent; ignore duplicate errors)
+      const a1 = encodeURIComponent("'"+TITLE+"'!A1:M1");
+      try{
+        await fetchJSON(`https://sheets.googleapis.com/v4/spreadsheets/${sid}/values/${a1}:append?valueInputOption=RAW`, {
+          method: "POST",
+          body: { values: HEADER }
+        });
+        log(TAG, "header ensured");
+      }catch(e){
+        // If header already exists Google may still return 200; if not, we ignore duplicates safely
+        warn(TAG, "header append warn:", (e && e.message) || e);
+      }
+      ensured[sid] = true;
+      log(TAG, "ensured for", sid);
     }catch(e){
-      console.warn(TAG, "ensure failed", e);
+      warn(TAG, "ensure failed (will retry on next ctx):", (e && e.message) || e);
     }
   }
 
-  function currentSid(){
+  // Waiters
+  function nowSid(){
     return (window.__LM_SHEET_CTX && window.__LM_SHEET_CTX.spreadsheetId) || window.currentSpreadsheetId || null;
   }
+  function waitForReady(maxMs=15000){
+    return new Promise(resolve=>{
+      const t0 = Date.now();
+      const id = setInterval(()=>{
+        const sid = nowSid();
+        const hasShim = (typeof window.__lm_fetchJSONAuth === "function");
+        if (sid && hasShim){
+          clearInterval(id); resolve(sid); return;
+        }
+        if (Date.now() - t0 > maxMs){
+          clearInterval(id); resolve(sid); // may be null; handler will skip
+        }
+      }, 250);
+    });
+  }
 
-  (async function boot(){
-    console.log(TAG, "armed");
-    try{
-      await waitFor(()=> !!currentSid() && typeof window.__lm_fetchJSONAuth==="function");
-      const sid = currentSid();
-      if(sid) await ensureMaterialsSheet(sid);
-    }catch(_){}
+  // Fire at startup (once)
+  (async function bootKick(){
+    log(TAG, "armed");
+    const sid = await waitForReady(20000);
+    if (sid) ensureMaterialsSheet(sid);
   })();
-
-  window.addEventListener("lm:sheet-context", (e)=>{
-    const sid = e && e.detail && e.detail.spreadsheetId;
-    if(sid) ensureMaterialsSheet(sid);
-  });
-})();
 
   // Also on context updates
   window.addEventListener("lm:sheet-context", e=>{
