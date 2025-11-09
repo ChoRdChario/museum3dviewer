@@ -259,7 +259,7 @@
   <script type="module" src="./viewer.bridge.module.js"></script>
   <script type="module" src="./materials.sheet.bridge.js"></script>
   <!-- NEW: persist layer for per-material settings (sheets/local) -->
-  <script type="module" src="./materials.sheet.persist.js"></script>
+  
 
   <!-- Runtime/UI helpers (non-module so they expose globals) -->
   <script src="./material.runtime.patch.js"></script>
@@ -300,8 +300,12 @@
   </script>
 
     <!-- LociMyu materials: persist + UI wire + auto-apply (appended) -->
-    <script defer src="./materials.sheet.persist.js"></script>
-    <script defer src="./materials.ui.wire.js"></script>
-    <script defer src="./materials.auto.apply.js"></script>
+    
+    
+    
+<!-- LociMyu: materials pipeline (classic order) -->
+  <script defer src="./materials.sheet.persist.js"></script>
+  <script defer src="./materials.ui.wire.js"></script>
+  <script defer src="./materials.auto.apply.js"></script>
 </body>
 </html>
