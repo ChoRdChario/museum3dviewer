@@ -1255,8 +1255,8 @@ onCanvasShiftPick(function(pos){
       console.log('[hotfix] __LM_MATERIALS created');
     }
     // ensure headers A1:M1
-    await fetchJSON(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encA1(spreadsheetId,'__LM_MATERIALS','A1:M1')}?valueInputOption=RAW`, {
-      method:'PUT',
+    await fetchJSON(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encA1(spreadsheetId,'__LM_MATERIALS','A1:M1')}:append?valueInputOption=RAW`, {
+      method:'POST',
       body:{ values:[['materialKey','opacity','doubleSided','unlitLike','chromaEnable','chromaColor','chromaTolerance','chromaFeather','roughness','metalness','emissiveHex','updatedAt','updatedBy','sheetGid']] }
     });
     console.log('[hotfix] __LM_MATERIALS ensured');
