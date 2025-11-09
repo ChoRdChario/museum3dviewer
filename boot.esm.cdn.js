@@ -1138,94 +1138,150 @@ onCanvasShiftPick(function(pos){
 })();
 
 
-/* =====================
- * [LM Hotfix 2025-11-09]
- * - Safe A1 range builder by GID (handles rename/quotes)
- * - Row-append by GID (single-row, horizontal write to avoid "staircase")
- * - Ensure __LM_MATERIALS sheet + headers on spreadsheet creation/context
- * This block is appended non-destructively and only hooks via global scope.
- * ===================== */
+/* === LM Sheets Hardening Hotfix v1.3 ===
+   - Ensures __LM_MATERIALS auto-create after sheet context
+   - Defers until __lm_fetchJSONAuth is available
+   - Fixes caption writes by resolving current sheet *title* from GID
+   - Provides gid-safe wrappers for values.get / values.append helpers when present
+   - Non-destructive: only appends; guarded by __LM_SHEETS_HOTFIX_APPLIED flag
+*/
 (function(){
-  if (window.__LM_BOOT_HOTFIX__) return; // idempotent
-  window.__LM_BOOT_HOTFIX__ = "2025-11-09";
+  if (window.__LM_SHEETS_HOTFIX_APPLIED__) return;
+  window.__LM_SHEETS_HOTFIX_APPLIED__ = true;
 
-  const LM_MAT_SHEET   = '__LM_MATERIALS';
-  const LM_MAT_HEADERS = [
-    'materialKey','opacity','doubleSided','unlitLike',
-    'chromaEnable','chromaColor','chromaTolerance','chromaFeather',
-    'roughness','metalness','emissiveHex','updatedAt','updatedBy'
-  ];
-
-  async function buildA1RangeByGid(spreadsheetId, sheetGid, a1 = 'A1:Z9999') {
-    if (typeof window.__lm_fetchJSONAuth !== 'function') {
-      throw new Error('__lm_fetchJSONAuth missing');
-    }
-    const meta = await window.__lm_fetchJSONAuth(
-      `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}`
-    );
-    const sheet = (meta.sheets || []).find(s => s.properties.sheetId === sheetGid);
-    if (!sheet) throw new Error('sheet gid not found: ' + sheetGid);
-    const title = String(sheet.properties.title || '').replace(/'/g,"''");
-    const a1Expr = `'${title}'!${a1}`;
-    return encodeURIComponent(a1Expr);
-  }
-
-  async function appendRowByGid(spreadsheetId, sheetGid, rowArray) {
-    const range = await buildA1RangeByGid(spreadsheetId, sheetGid, 'A:Z');
-    const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${range}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`;
-    const values = [Array.isArray(rowArray) ? rowArray : [rowArray]];
-    return window.__lm_fetchJSONAuth(url, { method:'POST', body:{ values } });
-  }
-
-  async function ensureMaterialsSheet(spreadsheetId) {
-    const meta = await window.__lm_fetchJSONAuth(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}`);
-    const titles = (meta.sheets||[]).map(s=>s.properties.title);
-    if (!titles.includes(LM_MAT_SHEET)) {
-      await window.__lm_fetchJSONAuth(
-        `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}:batchUpdate`,
-        { method:'POST', body:{ requests:[{ addSheet:{ properties:{ title: LM_MAT_SHEET } } }] } }
-      );
-    }
-    const hdrRange = encodeURIComponent(`${LM_MAT_SHEET}!A1:M1`);
-    await window.__lm_fetchJSONAuth(
-      `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${hdrRange}?valueInputOption=RAW`,
-      { method:'PUT', body:{ values:[LM_MAT_HEADERS] } }
-    );
-  }
-
-  // expose helper API for other modules / debugging
-  window.__LM_SAFE_SHEETS__ = { buildA1RangeByGid, appendRowByGid, ensureMaterialsSheet };
-
-  // Hook: when sheet context appears, ensure __LM_MATERIALS once
-  (function(){
-    let done = false;
-    window.addEventListener('lm:sheet-context', async (e) => {
+  const waitFor = (pred, ms=15000, step=50) => new Promise((res, rej)=>{
+    const t0=performance.now(); const id=setInterval(()=>{
       try {
-        const spreadsheetId = e && e.detail && e.detail.spreadsheetId;
-        if (!spreadsheetId || done) return;
-        done = true;
-        await ensureMaterialsSheet(spreadsheetId);
-        console.log('[hotfix] __LM_MATERIALS ensured');
-      } catch (err) {
-        console.warn('[hotfix] ensureMaterialsSheet failed', err);
-      }
-    }, { once:false });
-  })();
+        if (pred()) { clearInterval(id); res(true); return; }
+      } catch(_) {}
+      if (performance.now()-t0>ms){ clearInterval(id); rej(new Error('timeout')); }
+    }, step);
+  });
 
-  // Monkey-patch: if global write helpers exist on window, wrap them to use GID-safe A1
-  // (this only affects cases where callsites reference window.*)
-  try {
-    const prevAppend = window.sheetsAppendRow;
-    if (typeof prevAppend === 'function') {
-      window.sheetsAppendRow = async function(spreadsheetId, sheetGid, rowArray){
-        try {
-          return await appendRowByGid(spreadsheetId, sheetGid, rowArray);
-        } catch (e) {
-          console.warn('[hotfix] sheetsAppendRow fallback -> original due to error:', e && e.message);
-          return prevAppend.apply(this, arguments);
-        }
-      };
-      console.log('[hotfix] patched window.sheetsAppendRow');
+  const fetchJSON = async (url, init)=>{
+    await waitFor(()=> typeof window.__lm_fetchJSONAuth === 'function', 20000);
+    return window.__lm_fetchJSONAuth(url, init);
+  };
+
+  const TITLE_CACHE = Object.create(null); // { [spreadsheetId]: { [gid]: title } }
+
+  async function refreshTitleCache(spreadsheetId){
+    const meta = await fetchJSON(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}`);
+    const map = Object.create(null);
+    for (const s of (meta.sheets||[])) {
+      const gid = String(s.properties.sheetId);
+      map[gid] = s.properties.title;
     }
-  } catch (_) {}
+    TITLE_CACHE[spreadsheetId] = map;
+    return map;
+  }
+
+  async function getTitleByGid(spreadsheetId, gid){
+    const gidStr = String(gid ?? '');
+    const cache = TITLE_CACHE[spreadsheetId] || await refreshTitleCache(spreadsheetId);
+    if (cache[gidStr]) return cache[gidStr];
+    const map = await refreshTitleCache(spreadsheetId);
+    return map[gidStr];
+  }
+
+  function encA1(spreadsheetId, title, a1){
+    const quoted = `'${String(title).replace(/'/g, "''")}'!${a1}`;
+    return encodeURIComponent(quoted);
+  }
+
+  async function ensureMaterialsSheet(spreadsheetId){
+    // check exist
+    const meta = await fetchJSON(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}`);
+    const exists = (meta.sheets||[]).some(s => s.properties.title === '__LM_MATERIALS');
+    if (!exists) {
+      // create via batchUpdate with sheetId auto
+      await fetchJSON(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}:batchUpdate`, {
+        method:'POST',
+        body:{ requests:[{ addSheet:{ properties:{ title:'__LM_MATERIALS' } } }]}
+      });
+      console.log('[hotfix] __LM_MATERIALS created');
+    }
+    // ensure headers A1:M1
+    await fetchJSON(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encA1(spreadsheetId,'__LM_MATERIALS','A1:M1')}?valueInputOption=RAW`, {
+      method:'PUT',
+      body:{ values:[['materialKey','opacity','doubleSided','unlitLike','chromaEnable','chromaColor','chromaTolerance','chromaFeather','roughness','metalness','emissiveHex','updatedAt','updatedBy','sheetGid']] }
+    });
+    console.log('[hotfix] __LM_MATERIALS ensured');
+  }
+
+  // Re-arm on sheet-context
+  window.addEventListener('lm:sheet-context', async (e)=>{
+    const ctx = e && e.detail || window.__LM_SHEET_CTX;
+    if (!ctx || !ctx.spreadsheetId) return;
+    try {
+      await waitFor(()=> typeof window.__lm_fetchJSONAuth === 'function', 20000);
+      await ensureMaterialsSheet(ctx.spreadsheetId);
+    } catch(err) {
+      console.warn('[hotfix] ensureMaterialsSheet failed', err);
+    }
+  }, { once:false });
+
+  // Optional: wrap global helpers if present to fix “staircase / 400 Bad Request when renamed”
+  const tryWrapValuesHelpers = ()=>{
+    const g = window;
+    const hasGet = typeof g.getValues === 'function';
+    const hasAppend = typeof g.appendValues === 'function' || typeof g.sheetsAppendRow === 'function';
+
+    if (hasGet) {
+      const orig = g.getValues;
+      g.getValues = async function(rangeOrSheet, a1Maybe){
+        // two calling styles: getValues("'Title'!A1:Z9999") or getValues(spreadsheetId, "'Title'!A1:Z9999")
+        try {
+          const ctx = g.__LM_SHEET_CTX || {};
+          const spreadsheetId = typeof rangeOrSheet === 'string' && rangeOrSheet.includes('!') ? (ctx.spreadsheetId||'') : rangeOrSheet;
+          const range = typeof rangeOrSheet === 'string' && rangeOrSheet.includes('!') ? rangeOrSheet : (a1Maybe||'');
+          if (spreadsheetId && ctx.sheetGid != null && /^'Sheet_/.test(range)) {
+            // replace timestamp title with real title resolved from gid
+            const title = await getTitleByGid(spreadsheetId, ctx.sheetGid);
+            const fixed = `'${String(title).replace(/'/g,"''")}'!` + range.split('!')[1];
+            return orig.call(this, spreadsheetId, fixed);
+          }
+        } catch (e) { console.warn('[hotfix:getValues] wrapper note', e); }
+        return orig.apply(this, arguments);
+      };
+    }
+
+    // prefer sheetsAppendRow if present
+    const targetName = typeof g.sheetsAppendRow === 'function' ? 'sheetsAppendRow'
+                        : (typeof g.appendValues === 'function' ? 'appendValues' : null);
+    if (targetName) {
+      const orig = g[targetName];
+      g[targetName] = async function(spreadsheetId, rangeOrRow, rowMaybe){
+        try {
+          const ctx = g.__LM_SHEET_CTX || {};
+          let range, row;
+          if (Array.isArray(rangeOrRow) && rowMaybe === undefined) {
+            // legacy style: sheetsAppendRow(spreadsheetId, rowArray) -> use ctx.gid and A:Z
+            row = rangeOrRow;
+            if (ctx.sheetGid != null) {
+              const title = await getTitleByGid(spreadsheetId, ctx.sheetGid);
+              range = `'${String(title).replace(/'/g,"''")}'!A:Z`;
+              return orig.call(this, spreadsheetId, range, row);
+            }
+          } else {
+            range = rangeOrRow; row = rowMaybe;
+            if (ctx.sheetGid != null && /^'Sheet_/.test(range)) {
+              const title = await getTitleByGid(spreadsheetId, ctx.sheetGid);
+              const suffix = range.split('!')[1] || 'A:Z';
+              const fixed = `'${String(title).replace(/'/g,"''")}'!` + suffix;
+              return orig.call(this, spreadsheetId, fixed, row);
+            }
+          }
+        } catch (e) { console.warn('[hotfix:append] wrapper note', e); }
+        return orig.apply(this, arguments);
+      };
+    }
+  };
+
+  tryWrapValuesHelpers();
+  // also refresh wrapping after auth comes up (some apps define helpers late)
+  setTimeout(tryWrapValuesHelpers, 2000);
+  document.addEventListener('DOMContentLoaded', ()=> setTimeout(tryWrapValuesHelpers, 1000));
+
 })();
+/* === /LM Sheets Hardening Hotfix v1.3 === */
