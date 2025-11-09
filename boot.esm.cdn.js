@@ -1,4 +1,15 @@
 
+// === LM: caption header helper (prevents staircase on a brand-new sheet) ===
+function lmWriteCaptionHeader(spreadsheetId, sheetTitle){
+  try{
+    const token = getAccessToken && getAccessToken();
+    if(!spreadsheetId || !sheetTitle || !token) return Promise.resolve(false);
+    const header = [['id','title','body','color','x','y','z','imageFileId','createdAt','updatedAt']];
+    return putValues(spreadsheetId, `'${sheetTitle}'!A1:J1`, header, token).then(()=>true).catch(()=>false);
+  }catch(e){ return Promise.resolve(false); }
+}
+
+
 /* === [LM minimal auth shim v1] early __lm_fetchJSONAuth =====================
    Uses getAccessToken() from gauth.module.js to attach Bearer token.
    Keeps this tiny to avoid init races with the sheets hotfix.
