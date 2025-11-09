@@ -314,6 +314,31 @@ onPinSelect((id)=> selectCaption(id));
 // ---------- Sheets I/O ----------
 const LOCIMYU_HEADERS = ['id','title','body','color','x','y','z','imageFileId','createdAt','updatedAt'];
 
+// Ensure caption headers exist on the current sheet (idempotent)
+async function ensureCaptionHeadersIfNeeded() {
+  try {
+    const token = (typeof getAccessToken === 'function') ? getAccessToken() : null;
+    if (!token || !currentSpreadsheetId || !currentSheetTitle) return;
+    // Read first row; if missing or not matching, write headers
+    const range = `'${currentSheetTitle}'!A1:Z1`;
+    let vals = [];
+    try {
+      vals = await getValues(currentSpreadsheetId, range, token);
+    } catch (e) {
+      // tolerate 400/404 here and just proceed to PUT headers
+      vals = [];
+    }
+    const first = (vals && vals[0]) || [];
+    const need = first.length < 3; // crude but safe
+    if (need) {
+      await putValues(currentSpreadsheetId, range, [LOCIMYU_HEADERS], token);
+    }
+  } catch (e) {
+    console.warn('[ensureCaptionHeadersIfNeeded] skipped:', e && e.message || e);
+  }
+}
+
+
 function colA1(i0){ let n=i0+1,s=''; while(n){ n--; s=String.fromCharCode(65+(n%26))+s; n=(n/26)|0; } return s; }
 function putValues(spreadsheetId, rangeA1, values, token){
   const url = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(rangeA1)}?valueInputOption=RAW`;
@@ -396,7 +421,11 @@ function sheetsAppendRow(spreadsheetId, sheetTitle, obj){
   const token=getAccessToken(); if(!token) return Promise.resolve();
   const now=new Date().toISOString();
   const vals=[[ obj.id, obj.title||'', obj.body||'', obj.color||window.currentPinColor, obj.x||0, obj.y||0, obj.z||0, obj.imageFileId||'', obj.createdAt||now, obj.updatedAt||now ]];
-  return appendValues(spreadsheetId, "'"+sheetTitle+"'!A:Z", vals, token).then(()=> ensureIndex());
+  return Promise.resolve()
+    .then(()=> { try { currentSheetTitle = sheetTitle; } catch(_){ } })
+    .then(()=> ensureCaptionHeadersIfNeeded())
+    .then(()=> appendValues(spreadsheetId, "'" + sheetTitle + "'!A:Z", vals, token))
+    .then(()=> ensureIndex());
 }
 
 function ensureRow(id, seed){
@@ -872,6 +901,7 @@ function populateSheetTabs(spreadsheetId, token){
       if(currentSheetId) sel.value = String(currentSheetId);
     });
 }
+    }).then(()=>{ try{ return ensureCaptionHeadersIfNeeded(); }catch(_){ } });
 const sheetSel = $('save-target-sheet');
 if(sheetSel){
   sheetSel.addEventListener('change', function(e){
@@ -879,6 +909,7 @@ if(sheetSel){
     const opt = sel && sel.selectedOptions && sel.selectedOptions[0];
     currentSheetId = (opt && opt.value) ? Number(opt.value) : null;
     currentSheetTitle = (opt && opt.dataset && opt.dataset.title) ? opt.dataset.title : null;
+    try{ ensureCaptionHeadersIfNeeded(); }catch(_){ }
     clearPins(); overlays.forEach(function(_,id){ removeCaptionOverlay(id); }); overlays.clear();
     clearCaptionList(); rowCache.clear(); captionsIndex.clear(); selectedPinId=null;
     loadCaptionsFromSheet();
@@ -893,8 +924,7 @@ if(btnCreate){
     const body={ requests:[{ addSheet:{ properties:{ title } } }] };
     fetch(url,{ method:'POST', headers:{ Authorization:'Bearer '+token, 'Content-Type':'application/json' }, body: JSON.stringify(body) })
       .then(function(r){ if(!r.ok) throw new Error(String(r.status)); })
-      .then(function(){ return populateSheetTabs(currentSpreadsheetId, token); })
-      .then(function(){ loadCaptionsFromSheet(); })
+      .then(function(){ return populateSheetTabs(currentSpreadsheetId, token); }).then(function(){ return ensureCaptionHeadersIfNeeded(); }).then(function(){ loadCaptionsFromSheet(); })
       .catch(function(e){ console.error('[Sheets addSheet] failed', e); });
   });
 }
@@ -908,8 +938,7 @@ if(btnRename){
     const body={ requests:[{ updateSheetProperties:{ properties:{ sheetId: currentSheetId, title: newTitle }, fields: 'title' } }] };
     fetch(url,{ method:'POST', headers:{ Authorization:'Bearer '+token, 'Content-Type':'application/json' }, body: JSON.stringify(body) })
       .then(function(r){ if(!r.ok) throw new Error(String(r.status)); })
-      .then(function(){ return populateSheetTabs(currentSpreadsheetId, token); })
-      .then(function(){ loadCaptionsFromSheet(); })
+      .then(function(){ return populateSheetTabs(currentSpreadsheetId, token); }).then(function(){ return ensureCaptionHeadersIfNeeded(); }).then(function(){ loadCaptionsFromSheet(); })
       .catch(function(e){ console.error('[Sheets rename] failed', e); });
   });
 }
