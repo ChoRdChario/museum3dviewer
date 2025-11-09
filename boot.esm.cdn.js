@@ -1,3 +1,45 @@
+
+/* === [LM minimal auth shim v1] early __lm_fetchJSONAuth =====================
+   Uses getAccessToken() from gauth.module.js to attach Bearer token.
+   This is intentionally tiny to avoid init races with the sheets hotfix.
+============================================================================= */
+(function(){
+  if (typeof window.__lm_fetchJSONAuth === 'function') return;
+  const TAG='[lm-auth-shim v1]';
+  function ensureToken(){
+    try{
+      if (typeof getAccessToken === 'function'){
+        const t = getAccessToken();
+        if (t) return t;
+      }
+    }catch(_){}
+    throw new Error('token_missing');
+  }
+  async function __lm_fetchJSONAuth(url, init){
+    const token = ensureToken();
+    const headers = Object.assign({}, (init && init.headers) || {}, {
+      'Authorization': 'Bearer ' + token,
+      'Accept': 'application/json'
+    });
+    let body = init && init.body;
+    if (body && typeof body !== 'string') body = JSON.stringify(body);
+    if (body && !headers['Content-Type']) headers['Content-Type'] = 'application/json';
+    const resp = await fetch(url, Object.assign({}, init||{}, { headers, body }));
+    if (!resp.ok){
+      const text = await resp.text().catch(()=>'');
+      let json; try{ json = JSON.parse(text); }catch(_){}
+      const err = new Error('HTTP '+resp.status+': '+resp.statusText);
+      err.status = resp.status; err.body = json || text;
+      throw err;
+    }
+    const ct = resp.headers.get('content-type') || '';
+    return ct.includes('application/json') ? await resp.json() : await resp.text();
+  }
+  window.__lm_fetchJSONAuth = __lm_fetchJSONAuth;
+  try{ window.dispatchEvent(new CustomEvent('lm:gauth-ready')); }catch(_){}
+  console.log(TAG,'installed');
+})();
+
 // boot.esm.cdn.js — LociMyu boot (clean full build, overlay image + Sheets delete fixes)
 
 // ---------- Globals (palette & helpers) ----------
