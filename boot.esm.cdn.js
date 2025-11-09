@@ -1397,3 +1397,104 @@ onCanvasShiftPick(function(pos){
 
   console.log(TAG,'installed');
 })();
+
+
+/* === [LM caption/material ensure v2] =======================================
+   - Ensure caption header on each sheet (non __LM_*). Inserts a row 0 if needed.
+   - Ensure __LM_MATERIALS sheet exists + headers (idempotent)
+   - Fires on lm:sheet-context / lm:sheet-changed
+============================================================================= */
+(function(){
+  const TAG='[lm-ensure v2]';
+  const CAP_HDR = [['id','title','body','color','x','y','z','imageFileId','createdAt','updatedAt']];
+  const MAT = '__LM_MATERIALS';
+  const MAT_HDR = [['materialKey','opacity','doubleSided','unlitLike','sheetGid','updatedAt','updatedBy','chromaColor','chromaTolerance','chromaFeather','blendMode','alphaTest','notes']];
+  const doneMat = Object.create(null);
+  const doneCap = Object.create(null);
+
+  async function fetchJSON(url, init){
+    if (typeof __lm_fetchJSONAuth === 'function') return __lm_fetchJSONAuth(url, init);
+    const r = await fetch(url, init);
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    return r.json();
+  }
+  function key(sid,gid){ return sid+':'+gid; }
+
+  async function gidToTitle(sid, gid){
+    const meta = await fetchJSON(`https://sheets.googleapis.com/v4/spreadsheets/${sid}?fields=sheets(properties(sheetId,title))`);
+    const p = (meta.sheets||[]).map(s=>s.properties).find(p=>String(p.sheetId)===String(gid));
+    return p && p.title || null;
+  }
+
+  async function ensureMaterialsSheet(sid){
+    const k = sid;
+    if (doneMat[k]) return;
+    try{
+      const meta = await fetchJSON(`https://sheets.googleapis.com/v4/spreadsheets/${sid}?fields=sheets(properties(title))`);
+      const has = (meta.sheets||[]).some(s=>s.properties && s.properties.title===MAT);
+      if (!has){
+        await fetchJSON(`https://sheets.googleapis.com/v4/spreadsheets/${sid}:batchUpdate`, {
+          method:'POST',
+          body:{ requests:[{ addSheet:{ properties:{ title: MAT } } }] }
+        });
+      }
+      // headers (append, idempotent)
+      await fetchJSON(`https://sheets.googleapis.com/v4/spreadsheets/${sid}/values/${encodeURIComponent("'"+MAT+"'!A1:M1")}:append?valueInputOption=RAW`, {
+        method:'POST', body:{ values: MAT_HDR }
+      }).catch(()=>{});
+      doneMat[k]=true;
+      console.log(TAG,'materials ensured');
+    }catch(e){
+      console.warn(TAG,'materials ensure fail (continue)', e.message||e);
+    }
+  }
+
+  async function ensureCaptionHeader(sid, gid){
+    const k = key(sid,gid);
+    if (doneCap[k]) return;
+    try{
+      const title = await gidToTitle(sid,gid);
+      if (!title || title.startsWith('__LM_')) return;
+
+      // read first row
+      const a1 = `'${title}'!A1:J1`;
+      const got = await fetchJSON(`https://sheets.googleapis.com/v4/spreadsheets/${sid}/values/${encodeURIComponent(a1)}`)
+        .catch(()=>({values:[]}));
+      const row = (got.values && got.values[0]) || [];
+      const isHeader = row[0]==='id' && row[3]==='color';
+      const firstCell = row[0] || '';
+
+      if (!isHeader){
+        // if first row seems to contain data (e.g., starts with "pin_"), insert one row at top
+        if (firstCell && firstCell.startsWith('pin_')){
+          await fetchJSON(`https://sheets.googleapis.com/v4/spreadsheets/${sid}:batchUpdate`, {
+            method:'POST',
+            body:{ requests:[{ insertDimension:{ range:{ sheetId: Number(gid), dimension:'ROWS', startIndex:0, endIndex:1 }, inheritFromBefore:false } }] }
+          }).catch(()=>{});
+        }
+        // write header
+        await fetchJSON(`https://sheets.googleapis.com/v4/spreadsheets/${sid}/values/${encodeURIComponent(`'${title}'!A1:J1`)}`+`?valueInputOption=RAW`, {
+          method:'PUT',
+          body:{ values: CAP_HDR }
+        });
+        console.log(TAG,'caption header ensured on', title);
+      }
+      doneCap[k]=true;
+    }catch(e){
+      console.warn(TAG,'caption header ensure fail (continue)', e.message||e);
+    }
+  }
+
+  function onCtx(detail){
+    const sid = detail && detail.spreadsheetId;
+    const gid = detail && detail.sheetGid;
+    if (!sid) return;
+    ensureMaterialsSheet(sid);
+    if (gid===undefined || gid===null) return;
+    ensureCaptionHeader(sid,gid);
+  }
+
+  window.addEventListener('lm:sheet-context', e=> onCtx(e.detail));
+  window.addEventListener('lm:sheet-changed', e=> onCtx(e.detail));
+  console.log(TAG,'armed');
+})();
