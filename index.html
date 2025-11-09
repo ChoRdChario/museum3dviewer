@@ -1,6 +1,38 @@
 <!DOCTYPE html>
 <html lang="ja">
 <head>
+<!-- lm:sheet-context cache & replay hub (idempotent) -->
+<script>
+(function () {
+  if (window.__LM_SHEET_CTX_HUB) return;
+  const hub = {
+    ctx: null,
+    get() { return hub.ctx; },
+    onCtx(ctx) {
+      hub.ctx = ctx || hub.ctx;
+      if (!hub.ctx) return;
+      // cache globally
+      window.__LM_SHEET_CTX = hub.ctx;
+      // replay for late subscribers (idempotent)
+      setTimeout(() => {
+        try {
+          window.dispatchEvent(new CustomEvent('lm:sheet-context', { detail: hub.ctx }));
+        } catch (e) { console.warn('[ctx-hub] replay failed', e); }
+      }, 0);
+    }
+  };
+  window.__LM_SHEET_CTX_HUB = hub;
+
+  // tap existing events and cache
+  window.addEventListener('lm:sheet-context', (e) => hub.onCtx(e.detail), { capture: true });
+
+  // on auth/ui milestones, replay if we already have ctx
+  ['lm:auth-ready', 'lm:mat-ui-ready', 'DOMContentLoaded', 'load', 'visibilitychange'].forEach(ev => {
+    window.addEventListener(ev, () => hub.ctx && hub.onCtx(hub.ctx), { capture: true });
+  });
+})();
+</script>
+
   <!-- ESM import map for THREE (and addons) -->
   <script id="lm-importmap-three" type="importmap">{
     "imports": {
@@ -249,6 +281,7 @@
 
   <!-- Boot runtime (ESM) -->
   <script type="module" src="./boot.esm.cdn.js"></script>
+  <script src="./materials.render.baseline.js"></script>
   <link rel="stylesheet" href="app.sheet-rename.css"/>
   <script type="module" src="sheet-rename.module.js"></script>
 
