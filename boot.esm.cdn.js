@@ -1407,102 +1407,132 @@ onCanvasShiftPick(function(pos){
 
 
 
-/* === [LM gid→title proxy v1] keep writes stable across renames =================
-   Intercepts Sheets "values.*" requests and rewrites A1's sheet title to match
-   the CURRENT title for the active sheet GID (from __LM_SHEET_CTX).
-   This keeps app logic that still uses stale titles working after a rename.
+/* === [LM sheets-fix proxy v2] title-sync + method/body sanitizer ==============
+   - Keeps A1 sheet titles in URL synced with current gid (rename-safe)
+   - Converts legacy PUT header writes to POST :append for '__LM_MATERIALS'
+   - Ensures values.append bodies are JSON and 2D array-shaped
 =============================================================================== */
 (function(){
-  const TAG='[lm-gid-title-proxy v1]';
+  const TAG='[lm-sheets-fix v2]';
   const TITLE_CACHE = Object.create(null);
+  const MATERIALS_SHEET = '__LM_MATERIALS';
+  const MATERIALS_HEADERS = [['materialKey','opacity','doubleSided','unlitLike','sheetGid','updatedAt','updatedBy','chromaColor','chromaTolerance','chromaFeather','blendMode','alphaTest','notes']];
 
-  async function resolveTitle(spreadsheetId, gid){
-    const key = spreadsheetId + ':' + gid;
+  function parseA1FromUrl(url){
+    const m = url.match(/\/values\/([^?]+)/);
+    if (!m) return null;
+    let dec = m[1];
+    try { dec = decodeURIComponent(dec); } catch(_){}
+    return dec; // e.g. "'Sheet 1'!A:Z" or "'__LM_MATERIALS'!A1:M1"
+  }
+  function replaceTitle(a1, newTitle){
+    const m = a1 && a1.match(/^'([^']+)'!(.+)$/);
+    if (!m) return a1;
+    return `'${newTitle}'!${m[2]}`;
+  }
+  function swapA1InUrl(url, newA1){
+    return url.replace(/(\/values\/)([^?]+)/, (__, p1, p2)=>{
+      const enc = encodeURIComponent(newA1);
+      return p1 + enc;
+    });
+  }
+  async function resolveTitleByGid(sid, gid){
+    const key = sid+':'+gid;
     if (TITLE_CACHE[key]) return TITLE_CACHE[key];
-    const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}?fields=sheets(properties(sheetId,title))`;
+    const url = `https://sheets.googleapis.com/v4/spreadsheets/${sid}?fields=sheets(properties(sheetId,title))`;
     const meta = (typeof __lm_fetchJSONAuth === 'function')
       ? await __lm_fetchJSONAuth(url)
       : await fetch(url).then(r=>r.json());
-    const hit = (meta.sheets||[]).map(s=>s.properties).find(p=>String(p.sheetId)===String(gid));
-    if (hit && hit.title){
-      TITLE_CACHE[key] = hit.title;
-      return hit.title;
+    const hit = (meta.sheets||[]).map(s=>s.properties).find(p => String(p.sheetId)===String(gid));
+    const title = (hit && hit.title) || null;
+    if (title) TITLE_CACHE[key] = title;
+    return title;
+  }
+  function ensureJsonBody(init){
+    const out = Object.assign({}, init||{});
+    const headers = Object.assign({}, out.headers || {});
+    if (!headers['Content-Type']) headers['Content-Type'] = 'application/json';
+    out.headers = headers;
+    if (out.body){
+      if (typeof out.body === 'string'){
+        try { out.body = JSON.parse(out.body); } catch(_){ /* leave as string */ }
+      }
+    } else {
+      out.body = {};
     }
-    return null;
+    return out;
   }
-
-  function decodeA1FromUrl(u){
-    // find "/values/<encoded A1>" part
-    const m = u.match(/\/values\/([^?]+)/);
-    if (!m) return null;
-    try {
-      return decodeURIComponent(m[1]);
-    } catch(_) {
-      return m[1];
+  function ensure2DValues(init){
+    const out = ensureJsonBody(init);
+    const b = (typeof out.body === 'string') ? (()=>{ try{return JSON.parse(out.body);}catch(_){return {};}})() : (out.body || {});
+    let v = b.values;
+    if (!Array.isArray(v)){
+      // if body is a flat array -> wrap; else put headers placeholder to avoid 400
+      if (Array.isArray(out.body)) {
+        v = [ out.body ];
+      } else {
+        v = [ [] ];
+      }
+    } else if (v.length && !Array.isArray(v[0])) {
+      v = [ v ];
     }
+    const newBodyObj = Object.assign({}, b, { values: v });
+    out.body = JSON.stringify(newBodyObj);
+    return out;
   }
 
-  function replaceTitleInUrl(u, newTitle){
-    // Replace the quoted sheet name in "'SheetName'!A..." with the new one.
-    // Work on the *decoded* part then re-encode it back.
-    const m = u.match(/(\/values\/)([^?]+)(\??.*)$/);
-    if (!m) return u;
-    const prefix = m[1], encodedA1 = m[2], suffix = m[3] || '';
-    let a1;
-    try { a1 = decodeURIComponent(encodedA1); } catch(_) { a1 = encodedA1; }
-    // only replace if it starts with 'Name'!
-    const m2 = a1.match(/^'([^']+)'!(.+)$/);
-    if (!m2) return u;
-    const rangeOnly = m2[2];
-    const replaced = `'${newTitle}'!${rangeOnly}`;
-    const reenc = encodeURIComponent(replaced);
-    return u.replace(prefix + encodedA1, prefix + reenc);
-  }
-
-  const _origFetch = window.fetch;
+  const _fetch = window.fetch;
   window.fetch = async function(u, init){
+    const url = (typeof u === 'string') ? u : (u && u.url) || '';
+    let i = init;
+
     try{
-      const url = (typeof u === 'string') ? u : (u && u.url) || '';
       if (typeof url === 'string' &&
           url.startsWith('https://sheets.googleapis.com/v4/spreadsheets/') &&
           url.includes('/values/')){
+
+        // 1) rename-safety by gid→title
         const ctx = window.__LM_SHEET_CTX || {};
-        const sid = ctx.spreadsheetId;
-        const gid = ctx.sheetGid;
-        if (sid && (gid || gid===0)){
-          const a1 = decodeA1FromUrl(url);
-          // only handle "'Name'!..." pattern
-          if (a1 && /^'[^']+'!/.test(a1)){
-            const currentTitle = await resolveTitle(sid, gid);
-            if (currentTitle){
-              const nameInUrl = a1.slice(1, a1.indexOf("'", 1));
-              if (nameInUrl !== currentTitle){
-                const newUrl = replaceTitleInUrl(url, currentTitle);
-                if (newUrl !== url){
-                  console.log(TAG, 'rewrite', nameInUrl, '→', currentTitle);
-                  return _origFetch.call(this, newUrl, init);
-                }
-              }
+        const sid = ctx.spreadsheetId, gid = ctx.sheetGid;
+        const a1 = parseA1FromUrl(url);
+        if (sid && (gid || gid===0) && a1 && /^'[^']+'!/.test(a1)){
+          const cur = await resolveTitleByGid(sid, gid);
+          if (cur){
+            const old = a1.slice(1, a1.indexOf("'", 1));
+            if (old !== cur){
+              const newA1 = replaceTitle(a1, cur);
+              const newUrl = swapA1InUrl(url, newA1);
+              if (typeof u === 'string') u = newUrl; else if (u && u.url) u.url = newUrl;
+              console.log(TAG, 'title rewrite', old, '→', cur);
             }
           }
         }
+
+        // 2) method/body sanitizer
+        const a1b = parseA1FromUrl((typeof u==='string')?u:(u&&u.url)||url) || '';
+        const isMaterialsHeader = /'__LM_MATERIALS'!A1:M1$/.test(a1b);
+        // (a) legacy PUT for header -> switch to POST :append + set header row
+        if (isMaterialsHeader && i && String(i.method).toUpperCase() === 'PUT'){
+          const newUrl = ((typeof u==='string')?u:(u&&u.url)||url).replace(/(\/values\/[^?]+)(\?valueInputOption=RAW)/,
+            (__, p1, p2)=> p1 + ':append' + p2);
+          if (typeof u === 'string') u = newUrl; else if (u && u.url) u.url = newUrl;
+          const out = ensureJsonBody(i);
+          out.method = 'POST';
+          out.body = JSON.stringify({ values: MATERIALS_HEADERS });
+          i = out;
+          console.log(TAG, 'PUT→POST append fixed for __LM_MATERIALS header');
+        }
+        // (b) any append -> ensure 2D values + JSON
+        if (/(\/values\/[^?]+:append\?)/.test((typeof u==='string')?u:(u&&u.url)||url)){
+          i = ensure2DValues(i);
+        }
       }
     }catch(e){
-      console.warn(TAG, 'proxy skip due to error', e && e.message);
+      console.warn(TAG, 'proxy error (continuing without fix):', e && e.message);
     }
-    return _origFetch.call(this, u, init);
-  };
 
-  // warm cache on context events
-  async function warm(){
-    const ctx = window.__LM_SHEET_CTX || {};
-    if (ctx.spreadsheetId && (ctx.sheetGid || ctx.sheetGid===0)){
-      try{ await resolveTitle(ctx.spreadsheetId, ctx.sheetGid); }catch(_){}
-    }
-  }
-  window.addEventListener('lm:sheet-context', warm);
-  window.addEventListener('lm:sheet-changed', warm);
-  setTimeout(warm, 0);
+    return _fetch.call(this, u, i);
+  };
 
   console.log(TAG, 'installed');
 })();
