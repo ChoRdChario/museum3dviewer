@@ -682,7 +682,7 @@ function loadCaptionsFromSheet(){
 }
 
 // ---------- Right-pane images grid ----------
-;(function wireImagesGrid(){
+(function wireImagesGrid(){
   const grid = $('images-grid'); if(!grid) return;
   grid.addEventListener('click', (e)=>{
     const cell = e.target.closest('.thumb'); if(!cell) return;
@@ -725,7 +725,7 @@ function refreshImagesGrid(){
 }
 
 // ---------- Form autosave ----------
-;(function wireForm(){
+(function wireForm(){
   const t=$('caption-title'), b=$('caption-body');
   let timer=null;
   function reflectOverlayImmediate(){
@@ -943,7 +943,8 @@ onCanvasShiftPick(function(pos){
 // == - Emits a CustomEvent('materials:apply', {detail:{ opacities: Map<string, number> }})
 // == - No UI assumptions: if #mat-list exists, render sliders; otherwise just persists.
 // =====================================================
-;(function MaterialsOpacityModule(){
+
+(function MaterialsOpacityModule(){
   const MAT_SHEET_TITLE = 'materials';
   const MAT_HEADERS = ['gid','material','opacity','updatedAt'];
 
@@ -1134,4 +1135,97 @@ onCanvasShiftPick(function(pos){
     refreshUI: renderMaterialsUI,
     reload: loadMaterialsForCurrentSheet
   };
+})();
+
+
+/* =====================
+ * [LM Hotfix 2025-11-09]
+ * - Safe A1 range builder by GID (handles rename/quotes)
+ * - Row-append by GID (single-row, horizontal write to avoid "staircase")
+ * - Ensure __LM_MATERIALS sheet + headers on spreadsheet creation/context
+ * This block is appended non-destructively and only hooks via global scope.
+ * ===================== */
+(function(){
+  if (window.__LM_BOOT_HOTFIX__) return; // idempotent
+  window.__LM_BOOT_HOTFIX__ = "2025-11-09";
+
+  const LM_MAT_SHEET   = '__LM_MATERIALS';
+  const LM_MAT_HEADERS = [
+    'materialKey','opacity','doubleSided','unlitLike',
+    'chromaEnable','chromaColor','chromaTolerance','chromaFeather',
+    'roughness','metalness','emissiveHex','updatedAt','updatedBy'
+  ];
+
+  async function buildA1RangeByGid(spreadsheetId, sheetGid, a1 = 'A1:Z9999') {
+    if (typeof window.__lm_fetchJSONAuth !== 'function') {
+      throw new Error('__lm_fetchJSONAuth missing');
+    }
+    const meta = await window.__lm_fetchJSONAuth(
+      `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}`
+    );
+    const sheet = (meta.sheets || []).find(s => s.properties.sheetId === sheetGid);
+    if (!sheet) throw new Error('sheet gid not found: ' + sheetGid);
+    const title = String(sheet.properties.title || '').replace(/'/g,"''");
+    const a1Expr = `'${title}'!${a1}`;
+    return encodeURIComponent(a1Expr);
+  }
+
+  async function appendRowByGid(spreadsheetId, sheetGid, rowArray) {
+    const range = await buildA1RangeByGid(spreadsheetId, sheetGid, 'A:Z');
+    const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${range}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`;
+    const values = [Array.isArray(rowArray) ? rowArray : [rowArray]];
+    return window.__lm_fetchJSONAuth(url, { method:'POST', body:{ values } });
+  }
+
+  async function ensureMaterialsSheet(spreadsheetId) {
+    const meta = await window.__lm_fetchJSONAuth(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}`);
+    const titles = (meta.sheets||[]).map(s=>s.properties.title);
+    if (!titles.includes(LM_MAT_SHEET)) {
+      await window.__lm_fetchJSONAuth(
+        `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}:batchUpdate`,
+        { method:'POST', body:{ requests:[{ addSheet:{ properties:{ title: LM_MAT_SHEET } } }] } }
+      );
+    }
+    const hdrRange = encodeURIComponent(`${LM_MAT_SHEET}!A1:M1`);
+    await window.__lm_fetchJSONAuth(
+      `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${hdrRange}?valueInputOption=RAW`,
+      { method:'PUT', body:{ values:[LM_MAT_HEADERS] } }
+    );
+  }
+
+  // expose helper API for other modules / debugging
+  window.__LM_SAFE_SHEETS__ = { buildA1RangeByGid, appendRowByGid, ensureMaterialsSheet };
+
+  // Hook: when sheet context appears, ensure __LM_MATERIALS once
+  (function(){
+    let done = false;
+    window.addEventListener('lm:sheet-context', async (e) => {
+      try {
+        const spreadsheetId = e && e.detail && e.detail.spreadsheetId;
+        if (!spreadsheetId || done) return;
+        done = true;
+        await ensureMaterialsSheet(spreadsheetId);
+        console.log('[hotfix] __LM_MATERIALS ensured');
+      } catch (err) {
+        console.warn('[hotfix] ensureMaterialsSheet failed', err);
+      }
+    }, { once:false });
+  })();
+
+  // Monkey-patch: if global write helpers exist on window, wrap them to use GID-safe A1
+  // (this only affects cases where callsites reference window.*)
+  try {
+    const prevAppend = window.sheetsAppendRow;
+    if (typeof prevAppend === 'function') {
+      window.sheetsAppendRow = async function(spreadsheetId, sheetGid, rowArray){
+        try {
+          return await appendRowByGid(spreadsheetId, sheetGid, rowArray);
+        } catch (e) {
+          console.warn('[hotfix] sheetsAppendRow fallback -> original due to error:', e && e.message);
+          return prevAppend.apply(this, arguments);
+        }
+      };
+      console.log('[hotfix] patched window.sheetsAppendRow');
+    }
+  } catch (_) {}
 })();
