@@ -870,7 +870,13 @@ function populateSheetTabs(spreadsheetId, token){
       currentSheetId = first ? first.sheetId : null;
       currentSheetTitle = first ? first.title : null;
       if(currentSheetId) sel.value = String(currentSheetId);
-    });
+    
+try {
+  // expose sheet context and notify listeners (hotfix ensures __LM_MATERIALS)
+  window.__LM_SHEET_CTX = { spreadsheetId, sheetGid: currentSheetId };
+  window.dispatchEvent(new CustomEvent('lm:sheet-context', { detail: window.__LM_SHEET_CTX }));
+} catch (_){}
+});
 }
 const sheetSel = $('save-target-sheet');
 if(sheetSel){
@@ -879,7 +885,12 @@ if(sheetSel){
     const opt = sel && sel.selectedOptions && sel.selectedOptions[0];
     currentSheetId = (opt && opt.value) ? Number(opt.value) : null;
     currentSheetTitle = (opt && opt.dataset && opt.dataset.title) ? opt.dataset.title : null;
-    clearPins(); overlays.forEach(function(_,id){ removeCaptionOverlay(id); }); overlays.clear();
+    
+try {
+  window.__LM_SHEET_CTX = { spreadsheetId: currentSpreadsheetId, sheetGid: currentSheetId };
+  window.dispatchEvent(new CustomEvent('lm:sheet-context', { detail: window.__LM_SHEET_CTX }));
+} catch (_){}
+clearPins(); overlays.forEach(function(_,id){ removeCaptionOverlay(id); }); overlays.clear();
     clearCaptionList(); rowCache.clear(); captionsIndex.clear(); selectedPinId=null;
     loadCaptionsFromSheet();
   });
@@ -1285,3 +1296,26 @@ onCanvasShiftPick(function(pos){
 
 })();
 /* === /LM Sheets Hardening Hotfix v1.3 === */
+
+
+/* [boot.ensure-materials trigger v1] 
+   If another module fires 'lm:glb-loaded' on first GLB load, make sure sheet-context is dispatched
+   so that the hotfix can ensure __LM_MATERIALS immediately.
+*/
+(function(){
+  function trigger(){
+    try{
+      if (window.__LM_SHEET_CTX && window.__LM_SHEET_CTX.spreadsheetId) {
+        window.dispatchEvent(new CustomEvent('lm:sheet-context', { detail: window.__LM_SHEET_CTX }));
+      }
+    }catch(_){}
+  }
+  window.addEventListener('lm:glb-loaded', trigger);
+  // also on DOM ready as a fallback
+  if (document.readyState === 'complete' || document.readyState === 'interactive'){
+    setTimeout(trigger, 0);
+  } else {
+    window.addEventListener('DOMContentLoaded', ()=> setTimeout(trigger,0), { once:true });
+  }
+})();
+
