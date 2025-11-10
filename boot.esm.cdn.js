@@ -2259,3 +2259,180 @@ window.addEventListener('lm:sheet-context', async (e)=>{
 
   try{ console.log(TAG, 'installed'); }catch(_){}
 })();
+/* =========================================================================
+ * LociMyu Overlay v1.9 (append-only)
+ * - Fix: 'Sheet_...' への values.* を gid→title で自動書き換え（fetch インターセプト）
+ * - Ensure: 新規/切替時に A1:J1 ヘッダを強制 PUT（__LM_* は除外）
+ * - Harden: __LM_MATERIALS の存在＋ヘッダ PUT（PUTのみ、appendは常に拒否）
+ * - Retry: 400/404（rename 直後の未反映）を指数バックオフで再試行
+ * ======================================================================= */
+
+/* === A1 helpers === */
+(function(){
+  if (!window.__LM_A1__) {
+    function quote(title){ return `'${String(title).replace(/'/g,"''")}'`; }
+    function build(sheet, part){ return `${quote(sheet)}!${part}`; }
+    function enc(a1){ return encodeURIComponent(a1); }
+    window.__LM_A1__ = { quote, build, enc };
+  }
+})();
+
+/* === auth shim (idempotent) === */
+(function(){
+  if (typeof window.__lm_fetchJSONAuth === 'function') return;
+  function token(){ if(typeof getAccessToken==='function'){ const t=getAccessToken(); if(t) return t; } throw new Error('token_missing'); }
+  window.__lm_fetchJSONAuth = async (url, init)=>{
+    const headers = Object.assign({}, init?.headers || {}, {
+      'Authorization': 'Bearer ' + token(),
+      'Accept': 'application/json'
+    });
+    let body = init && init.body; if (body && typeof body!=='string') body = JSON.stringify(body);
+    if (body && !headers['Content-Type']) headers['Content-Type']='application/json';
+    const r = await fetch(url, Object.assign({}, init||{}, { headers, body }));
+    if (!r.ok){ const txt = await r.text().catch(()=> ''); let j; try{ j=JSON.parse(txt);}catch(_){}
+      const e = new Error('HTTP '+r.status+': '+r.statusText); e.status=r.status; e.body=j||txt; throw e; }
+    const ct=r.headers.get('content-type')||''; return ct.includes('application/json') ? r.json() : r.text();
+  };
+  try{ window.dispatchEvent(new CustomEvent('lm:gauth-ready')); }catch(_){}
+})();
+
+/* === gid→title cache === */
+(function(){
+  const CACHE = Object.create(null); // { [spreadsheetId]: { [gidStr]: title } }
+  async function refresh(spreadsheetId){
+    const url = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}?fields=sheets(properties(sheetId,title))`;
+    const meta = await window.__lm_fetchJSONAuth(url, { method:'GET' });
+    const map = Object.create(null);
+    for (const s of (meta.sheets||[])){ const p=s.properties||{}; map[String(p.sheetId)] = p.title || ''; }
+    CACHE[spreadsheetId] = map; return map;
+  }
+  async function titleByGid(spreadsheetId, gid){
+    const gidStr = String(gid ?? ''); const map = CACHE[spreadsheetId] || await refresh(spreadsheetId);
+    if (map[gidStr]) return map[gidStr]; const map2 = await refresh(spreadsheetId); return map2[gidStr];
+  }
+  window.__LM_GID2TITLE__ = { refresh, titleByGid };
+})();
+
+/* === __LM_MATERIALS ensure (PUT header only) & append guard === */
+(function(){
+  const HDR = ['materialKey','matName','targetSheetGid','opacity','chromaEnable','chromaColor','chromaTolerance','chromaFeather','doubleSided','unlitLike','roughness','metalness','emissiveHex','updatedAt','updatedBy','__rev','__debug','sheetGid'];
+  async function ensureMaterials(spreadsheetId){
+    // 1) create if missing
+    try{
+      const metaUrl = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}?fields=sheets(properties(title))`;
+      const meta = await window.__lm_fetchJSONAuth(metaUrl, { method:'GET' });
+      const has = (meta.sheets||[]).some(s=> (s.properties||{}).title === '__LM_MATERIALS');
+      if (!has){
+        const addUrl = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}:batchUpdate`;
+        await window.__lm_fetchJSONAuth(addUrl, { method:'POST', body:{ requests:[{ addSheet:{ properties:{ title:'__LM_MATERIALS' } } }] } });
+        console.log('[overlay v1.9] __LM_MATERIALS created');
+      }
+    }catch(e){ console.warn('[overlay v1.9] ensureMaterials(create) note', e); }
+    // 2) header PUT（A1:..1）
+    try{
+      const a1 = window.__LM_A1__.build('__LM_MATERIALS', `A1:${String.fromCharCode(65+HDR.length-1)}1`);
+      const url = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${window.__LM_A1__.enc(a1)}?valueInputOption=RAW`;
+      await window.__lm_fetchJSONAuth(url, { method:'PUT', body:{ values:[HDR], majorDimension:'ROWS' } });
+      console.log('[overlay v1.9] materials header ensured');
+    }catch(e){ console.warn('[overlay v1.9] ensureMaterials(header) note', e); }
+  }
+  // never append to __LM_*
+  ['appendValues','sheetsAppendRow'].forEach(fn=>{
+    if (typeof window[fn] === 'function'){
+      const orig = window[fn];
+      window[fn] = function(spreadsheetId, rangeOrRow, maybeRow){
+        try{
+          if (typeof rangeOrRow === 'string' && /'__LM_[^']*'!/i.test(rangeOrRow)){
+            console.warn('[overlay v1.9]', fn, 'blocked for internal sheet'); return Promise.resolve({ blocked:true });
+          }
+        }catch(_){}
+        return orig.apply(this, arguments);
+      };
+    }
+  });
+  // bind to sheet-context
+  window.addEventListener('lm:sheet-context', (e)=>{
+    const d = (e && e.detail) || window.__LM_SHEET_CTX || {};
+    if (d && d.spreadsheetId) ensureMaterials(d.spreadsheetId).catch(()=>{});
+  });
+})();
+
+/* === caption header writer (force A1:J1 on new/switch) === */
+(function(){
+  if (typeof window.lmWriteCaptionHeaderDirect === 'function') return;
+  async function writeHeader(spreadsheetId, sheetTitle){
+    try{
+      if (!spreadsheetId || !sheetTitle) return false;
+      if (String(sheetTitle).startsWith('__LM_')) return true; // skip internal
+      const safe = String(sheetTitle).replace(/'/g,"''");
+      const a1 = `'${safe}'!A1:J1`;
+      const url = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(a1)}?valueInputOption=RAW`;
+      const body = { values: [[ 'id','title','body','color','x','y','z','imageFileId','createdAt','updatedAt' ]], majorDimension:'ROWS' };
+      await window.__lm_fetchJSONAuth(url, { method:'PUT', body });
+      console.log('[overlay v1.9] caption header ensured for', sheetTitle);
+      return true;
+    }catch(e){ console.warn('[overlay v1.9] caption header PUT note', e); return false; }
+  }
+  window.lmWriteCaptionHeaderDirect = writeHeader;
+
+  async function ensureByGid(spreadsheetId, gid){
+    if (!spreadsheetId || !Number.isFinite(gid)) return;
+    const title = await window.__LM_GID2TITLE__.titleByGid(spreadsheetId, gid);
+    if (title) await writeHeader(spreadsheetId, title);
+  }
+
+  // fire on context + changed（遅延付きで数回）
+  function scheduleEnsure(){
+    const ctx = window.__LM_SHEET_CTX || {};
+    const ss = ctx.spreadsheetId, gid = ctx.sheetGid;
+    [0, 250, 750].forEach(delay => setTimeout(()=> ensureByGid(ss, gid), delay));
+  }
+  window.addEventListener('lm:sheet-context', scheduleEnsure);
+  window.addEventListener('lm:sheet-changed', scheduleEnsure);
+})();
+
+/* === Sheets values.* fetch interceptor (rename race fixer) ============== */
+(function(){
+  const TAG='[overlay v1.9 fetchwrap]';
+  if (window.__LM_FETCH_WRAPPED__) return; window.__LM_FETCH_WRAPPED__ = true;
+
+  const RE = /^https:\/\/sheets\.googleapis\.com\/v4\/spreadsheets\/([^\/]+)\/values\/([^?]+)(\?.*)?$/i;
+  const origFetch = window.fetch;
+
+  async function fixEncodedRange(spreadsheetId, encRange){
+    // 例: encRange = %27Sheet_2025-11-10-03-43-47%27!A%3AZ
+    const a1 = decodeURIComponent(encRange);
+    if (!/^'Sheet_/.test(a1)) return encRange; // timestamp title 以外は触らない
+    const ctx = window.__LM_SHEET_CTX || {};
+    if (!spreadsheetId || !Number.isFinite(ctx.sheetGid)) return encRange;
+    const title = await window.__LM_GID2TITLE__.titleByGid(spreadsheetId, ctx.sheetGid);
+    if (!title) return encRange;
+    const fixed = `${window.__LM_A1__.quote(title)}!` + a1.split('!')[1];
+    return encodeURIComponent(fixed);
+  }
+
+  window.fetch = async function(input, init){
+    try{
+      const url = (typeof input==='string') ? input : input.url;
+      if (typeof url === 'string' && url.includes('/values/')){
+        const m = url.match(RE);
+        if (m){
+          const [_, ssid, encRange, qs=''] = m;
+          const newEnc = await fixEncodedRange(ssid, encRange);
+          if (newEnc !== encRange){
+            const newUrl = `https://sheets.googleapis.com/v4/spreadsheets/${ssid}/values/${newEnc}${qs}`;
+            // 400/404 を rename 反映まで軽くリトライ
+            const run = (u, i) => origFetch(u, init).then(r=>{
+              if (!r.ok && (r.status===400 || r.status===404) && i<2) return new Promise(res=>setTimeout(res, 300*(i+1))).then(()=> run(u, i+1));
+              return r;
+            });
+            return run(newUrl, 0);
+          }
+        }
+      }
+    }catch(e){ /* 失敗しても元 fetch へフォールバック */ }
+    return origFetch(input, init);
+  };
+
+  console.log(TAG,'installed');
+})();
