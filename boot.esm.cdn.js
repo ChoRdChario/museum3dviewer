@@ -2246,3 +2246,352 @@ window.addEventListener('lm:sheet-context', async (e)=>{
 
   try{ console.log(TAG,'installed'); }catch(_){}
 })();
+
+
+/* === [LM A1 helpers] (idempotent) ======================================== */
+(function(){
+  if (!window.__LM_A1__) {
+    function buildA1Quoted(sheetName, a1Part){
+      const escaped = String(sheetName).replace(/'/g, "''");
+      return `'${escaped}'!${a1Part}`;
+    }
+    function encodeA1(rangeA1){
+      return encodeURIComponent(rangeA1);
+    }
+    window.__LM_A1__ = { buildA1Quoted, encodeA1 };
+  }
+})();
+
+/* === [LM minimal auth shim v1] (idempotent) =============================== */
+(function(){
+  if (typeof window.__lm_fetchJSONAuth === 'function') return;
+  const TAG='[lm-auth-shim v1]';
+  function ensureToken(){
+    if (typeof getAccessToken === 'function'){
+      const t = getAccessToken();
+      if (t) return t;
+    }
+    throw new Error('token_missing');
+  }
+  async function __lm_fetchJSONAuth(url, init){
+    const token = ensureToken();
+    const headers = Object.assign({}, (init && init.headers) || {}, {
+      'Authorization': 'Bearer ' + token,
+      'Accept': 'application/json'
+    });
+    let body = init && init.body;
+    if (body && typeof body !== 'string') body = JSON.stringify(body);
+    if (body && !headers['Content-Type']) headers['Content-Type'] = 'application/json';
+    const resp = await fetch(url, Object.assign({}, init||{}, { headers, body }));
+    if (!resp.ok){
+      const text = await resp.text().catch(()=>'');
+      let json; try{ json = JSON.parse(text); }catch(_){}
+      const err = new Error('HTTP '+resp.status+': '+resp.statusText);
+      err.status = resp.status; err.body = json || text;
+      throw err;
+    }
+    const ct = resp.headers.get('content-type') || '';
+    return ct.includes('application/json') ? await resp.json() : await resp.text();
+  }
+  window.__lm_fetchJSONAuth = __lm_fetchJSONAuth;
+  try{ window.dispatchEvent(new CustomEvent('lm:gauth-ready')); }catch(_){}
+  try{ console.log(TAG,'installed'); }catch(_){}
+})();
+
+/* === [LM overlay v1] materials/caption header + dropdown filter =========== */
+(function(){
+  const TAG='[lm-overlay v1]';
+
+  // helpers
+  async function lmGetSheetMeta(spreadsheetId){
+    const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}?fields=sheets(properties(sheetId,title))`;
+    const j = await window.__lm_fetchJSONAuth(url, { method:'GET' });
+    const m = new Map();
+    (j.sheets||[]).forEach(s=>{
+      const p = s && s.properties || {};
+      if (typeof p.sheetId === 'number') m.set(p.sheetId, p.title||'');
+    });
+    return m;
+  }
+  async function lmPutHeader(spreadsheetId, a1, cols){
+    const range = a1;
+    const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}?valueInputOption=RAW`;
+    const body = { range, majorDimension:'ROWS', values:[cols] };
+    return window.__lm_fetchJSONAuth(url, { method:'PUT', body });
+  }
+  function lmQuote(title){ return `'${String(title).replace(/'/g,"''")}'`; }
+
+  // ensure __LM_MATERIALS header (PUT)
+  async function ensureMaterialsHeader(spreadsheetId){
+    const title='__LM_MATERIALS';
+    const urlPut = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(`'${title}'!A1:Q1`)}?valueInputOption=RAW`;
+    const header = [[
+      'materialKey','matName','targetSheetGid','opacity','chromaEnable','chromaColor','chromaTolerance','chromaFeather','doubleSided','unlitLike',
+      'notes','metalness','emissiveHex','updatedAt','updatedBy','__rev','__debug','sheetGid'
+    ]];
+    try{ await window.__lm_fetchJSONAuth(urlPut, { method:'PUT', body:{ values: header, majorDimension:'ROWS' } }); }
+    catch(e){ try{ console.warn(TAG,'materials header ensure failed', e); }catch(_){ } }
+  }
+
+  // caption header on switch/create (skip __LM_*)
+  const __SEEN = new Set();
+  async function writeCaptionHeaderIfNeeded(spreadsheetId, gid){
+    if (!spreadsheetId || !Number.isFinite(gid) || __SEEN.has(gid)) return;
+    try{
+      const meta = await lmGetSheetMeta(spreadsheetId);
+      const title = meta.get(gid); if(!title) return;
+      if (String(title).startsWith('__LM_')) return;
+      const cols = ['id','title','body','color','x','y','z','imageFileId','createdAt','updatedAt'];
+      const a1 = `${lmQuote(title)}!A1:J1`;
+      await lmPutHeader(spreadsheetId, a1, cols);
+      __SEEN.add(gid);
+      try{ console.log(TAG,'caption header written for', title); }catch(_){}
+    }catch(e){ try{ console.warn(TAG,'caption header guard skip', e); }catch(_){ } }
+  }
+
+  function getCtx(){ return (window.__LM_SHEET_CTX)||{}; }
+  function onCtx(e){
+    const d = (e && e.detail) || getCtx();
+    if (!d || !d.spreadsheetId) return;
+    ensureMaterialsHeader(d.spreadsheetId).catch(()=>{});
+    if (Number.isFinite(d.sheetGid)){
+      writeCaptionHeaderIfNeeded(d.spreadsheetId, d.sheetGid).catch(()=>{});
+    }
+  }
+  window.addEventListener('lm:sheet-context', onCtx);
+  window.addEventListener('lm:sheet-changed', onCtx);
+  if (document.readyState === 'complete' || document.readyState === 'interactive'){
+    setTimeout(()=>onCtx({detail:getCtx()}), 0);
+  } else {
+    window.addEventListener('DOMContentLoaded', ()=> setTimeout(()=>onCtx({detail:getCtx()}),0), { once:true });
+  }
+
+  // observe select to write header immediately
+  (function observeSelect(){
+    const sel = document.querySelector('#save-target-sheet, select[data-role="sheet-target"], select#sheet-target');
+    if (!sel) return;
+    const mo = new MutationObserver(()=>{
+      const ctx = getCtx();
+      const opts = Array.from(sel.querySelectorAll('option'));
+      for(const o of opts){
+        const gid = Number(o && (o.dataset && o.dataset.gid || o.value));
+        if (Number.isFinite(gid)) writeCaptionHeaderIfNeeded(ctx.spreadsheetId, gid).catch(()=>{});
+      }
+    });
+    mo.observe(sel, { childList:true, subtree:true });
+  })();
+
+  // dropdown filter: hide __LM_*
+  (function(){
+    const TAGDF='[lm-dropdown-filter v1]';
+    function hideInternalOptions(sel){
+      if (!sel) return;
+      let removed = 0;
+      const opts = Array.from(sel.querySelectorAll('option'));
+      for (const o of opts){
+        const t = (o.dataset && o.dataset.title) || o.textContent || '';
+        if (t.startsWith('__LM_')){
+          if (o.selected) o.selected = false;
+          o.remove();
+          removed++;
+        }
+      }
+      if (removed){
+        const vis = sel.querySelector('option');
+        if (vis){
+          if (!sel.value || !sel.querySelector(`option[value="${sel.value}"]`)){
+            sel.value = vis.value;
+            try { sel.dispatchEvent(new Event('change', { bubbles:true })); } catch(_){}
+          }
+        }
+        try{ console.log(TAGDF, 'removed', removed, 'internal option(s)'); }catch(_){}
+      }
+    }
+    function run(){
+      const sel = document.querySelector('#save-target-sheet, select[data-role="sheet-target"], select#sheet-target');
+      if (sel) hideInternalOptions(sel);
+    }
+    if (document.readyState === 'complete' || document.readyState === 'interactive'){
+      setTimeout(run, 0);
+    } else {
+      window.addEventListener('DOMContentLoaded', ()=> setTimeout(run,0), { once:true });
+    }
+    window.addEventListener('lm:sheet-context', run);
+    window.addEventListener('lm:sheet-changed', run);
+  })();
+
+  // re-dispatch sheet-context on glb load / DOM ready
+  (function(){
+    function trigger(){
+      try{
+        if (window.__LM_SHEET_CTX && window.__LM_SHEET_CTX.spreadsheetId) {
+          window.dispatchEvent(new CustomEvent('lm:sheet-context', { detail: window.__LM_SHEET_CTX }));
+        }
+      }catch(_){}
+    }
+    window.addEventListener('lm:glb-loaded', trigger);
+    if (document.readyState === 'complete' || document.readyState === 'interactive'){
+      setTimeout(trigger, 0);
+    } else {
+      window.addEventListener('DOMContentLoaded', ()=> setTimeout(trigger,0), { once:true });
+    }
+  })();
+
+  try{ console.log(TAG,'installed'); }catch(_){}
+})();
+
+/* === [LM Sheets & Materials Hardening v1.6-lite] ========================== */
+(function(){
+  const TAG='[lm-patch v1.6-lite]';
+  // guard append to internal sheets
+  (function guardAppends(){
+    const g = window;
+    ['appendValues','sheetsAppendRow'].forEach(function(nm){
+      if(typeof g[nm] === 'function'){
+        const orig = g[nm];
+        g[nm] = function(spreadsheetId, rangeOrRow, maybeRow){
+          try{
+            const range = (typeof rangeOrRow === 'string') ? rangeOrRow : null;
+            if (range && /'__LM_[^']*'!/i.test(range)) {
+              console.warn(TAG, nm, 'blocked for internal sheet');
+              return Promise.resolve({ blocked:true });
+            }
+          }catch(_){}
+          return orig.apply(this, arguments);
+        };
+      }
+    });
+  })();
+
+  // title cache for gid
+  const CACHE = Object.create(null);
+  async function refreshTitles(spreadsheetId){
+    const meta = await window.__lm_fetchJSONAuth(`https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}`, {method:'GET'});
+    const map = Object.create(null);
+    for(const s of (meta.sheets||[])){
+      const p = s.properties||{};
+      map[String(p.sheetId)] = p.title || '';
+    }
+    CACHE[spreadsheetId] = map; return map;
+  }
+  async function titleByGid(spreadsheetId, gid){
+    const gidStr = String(gid ?? '');
+    const map = CACHE[spreadsheetId] || await refreshTitles(spreadsheetId);
+    if (map[gidStr]) return map[gidStr];
+    const map2 = await refreshTitles(spreadsheetId); return map2[gidStr];
+  }
+
+  // wrap getValues (if present)
+  if (typeof window.getValues === 'function'){
+    const orig = window.getValues;
+    window.getValues = async function(spreadsheetIdOrRange, maybeRange){
+      try{
+        const ctx = window.__LM_SHEET_CTX || {};
+        const isSingle = (typeof spreadsheetIdOrRange === 'string') && spreadsheetIdOrRange.includes('!');
+        const spreadsheetId = isSingle ? (ctx.spreadsheetId || '') : spreadsheetIdOrRange;
+        const range = isSingle ? spreadsheetIdOrRange : (maybeRange || '');
+        if (spreadsheetId && Number.isFinite(ctx.sheetGid) && /^'Sheet_/.test(range)){
+          const title = await titleByGid(spreadsheetId, ctx.sheetGid);
+          const fixed = `'${String(title).replace(/'/g,"''")}'!` + range.split('!')[1];
+          return orig.call(this, spreadsheetId, fixed);
+        }
+      }catch(e){ try{ console.warn(TAG,'getValues wrap note', e); }catch(_){ } }
+      return orig.apply(this, arguments);
+    };
+  }
+
+  // wrap appendValues/sheetsAppendRow to fix timestamp ranges
+  (function wrapAppend(){
+    const g = window;
+    const pick = (typeof g.sheetsAppendRow === 'function') ? 'sheetsAppendRow'
+               : (typeof g.appendValues === 'function') ? 'appendValues' : null;
+    if (!pick) return;
+    const orig = g[pick];
+    g[pick] = async function(spreadsheetId, rangeOrRow, rowMaybe){
+      try{
+        const ctx = g.__LM_SHEET_CTX || {};
+        let range = rangeOrRow, row = rowMaybe;
+        if (Array.isArray(rangeOrRow) && rowMaybe === undefined){
+          row = rangeOrRow;
+          if (Number.isFinite(ctx.sheetGid)){
+            const title = await titleByGid(spreadsheetId, ctx.sheetGid);
+            range = `'${String(title).replace(/'/g,"''")}'!A:Z`;
+            return orig.call(this, spreadsheetId, range, row);
+          }
+        } else if (typeof range === 'string' && Number.isFinite(ctx.sheetGid) && /^'Sheet_/.test(range)) {
+          const title = await titleByGid(spreadsheetId, ctx.sheetGid);
+          const suffix = range.split('!')[1] || 'A:Z';
+          const fixed = `'${String(title).replace(/'/g,"''")}'!` + suffix;
+          return orig.call(this, spreadsheetId, fixed, row);
+        }
+      }catch(e){ try{ console.warn(TAG,'append wrap note', e); }catch(_){ } }
+      return orig.apply(this, arguments);
+    };
+  })();
+
+  try{ console.log(TAG,'installed'); }catch(_){}
+})();
+
+/* === [LM __LM_MATERIALS hotfix] ========================================== */
+(function(){
+  if (window.__LM_HOTFIX__ && window.__LM_HOTFIX__.ensureMaterialsSheet) return;
+  const HDR = [
+    "materialKey","opacity","doubleSided","unlitLike",
+    "chromaColor","chromaTolerance","chromaFeather",
+    "renderOrder","alphaTest","depthWrite","depthTest",
+    "blendMode","side","roughness","metalness",
+    "sheetGid","updatedAt","updatedBy"
+  ];
+  async function ensureMaterialsSheet(spreadsheetId){
+    const metaUrl = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}?fields=sheets(properties(title,sheetId))`;
+    const meta = await window.__lm_fetchJSONAuth(metaUrl, { method:'GET' });
+    let has = false;
+    for(const sh of (meta.sheets||[])){
+      if(sh && sh.properties && sh.properties.title === '__LM_MATERIALS'){ has = true; break; }
+    }
+    if (!has){
+      const addUrl = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}:batchUpdate`;
+      await window.__lm_fetchJSONAuth(addUrl, { method:'POST', body:{ requests:[{ addSheet:{ properties:{ title:'__LM_MATERIALS' } } }] } });
+      try{ console.log('[lm-hotfix] __LM_MATERIALS created'); }catch(_){}
+    }
+    await ensureMaterialsHeader(spreadsheetId);
+  }
+  async function ensureMaterialsHeader(spreadsheetId){
+    const range = window.__LM_A1__ ? window.__LM_A1__.buildA1Quoted('__LM_MATERIALS','A1:Q1') : `'__LM_MATERIALS'!A1:Q1`;
+    const url = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(range)}?valueInputOption=RAW`;
+    await window.__lm_fetchJSONAuth(url, { method:'PUT', body: { values:[HDR], majorDimension:'ROWS' } });
+    try{ console.log('[lm-hotfix] materials header ensured'); }catch(_){}
+  }
+  window.__LM_HOTFIX__ = { ensureMaterialsSheet, ensureMaterialsHeader };
+  window.addEventListener('lm:sheet-context', async (e)=>{
+    try{
+      const ctx = (e && e.detail) || window.__LM_SHEET_CTX || {};
+      const ssid = ctx.spreadsheetId || window.currentSpreadsheetId;
+      if(!ssid) return;
+      await ensureMaterialsSheet(ssid);
+    }catch(err){ try{ console.error('[lm-hotfix] ensureMaterialsSheet failed', err); }catch(_){ } }
+  }, { once:false });
+})();
+
+/* === [LM caption header writer] (robust) ================================= */
+(function(){
+  if (typeof window.lmWriteCaptionHeaderDirect === 'function') return;
+  window.lmWriteCaptionHeaderDirect = async function lmWriteCaptionHeaderDirect(spreadsheetId, sheetTitle){
+    try{
+      if(!spreadsheetId || !sheetTitle) return false;
+      if (String(sheetTitle).startsWith('__LM_')) return true;
+      let tries=0; while(typeof window.__lm_fetchJSONAuth!=='function' && tries<50){ await new Promise(r=>setTimeout(r,100)); tries++; }
+      if(typeof window.__lm_fetchJSONAuth!=='function') return false;
+      const safe = String(sheetTitle).replace(/'/g,"''");
+      const range = `'${safe}'!A1:J1`;
+      const body  = { values: [[ 'id','title','body','color','x','y','z','imageFileId','createdAt','updatedAt' ]], majorDimension:'ROWS' };
+      const url   = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(range)}?valueInputOption=RAW`;
+      await window.__lm_fetchJSONAuth(url, { method:'PUT', body });
+      try{ console.log('[lm-header] values.update ok for', sheetTitle); }catch(_){}
+      return true;
+    }catch(e){
+      try{ console.error('[lm-header] unexpected', e); }catch(_){}
+      return false;
+    }
+  };
+})();
