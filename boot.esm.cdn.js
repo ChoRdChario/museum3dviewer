@@ -1497,10 +1497,8 @@ async function ensureMaterialsHeader(spreadsheetId){
     }catch(e){ console.warn(TAG,'materials header ensure failed', e); }
   }
   // [removed legacy __ensureMaterialsSheet]
-        });
         console.log(TAG,'__LM_MATERIALS created');
       }
-      Promise.resolve();
     }catch(e){ console.warn(TAG,'ensureMaterialsSheet failed', e); }
   }
 
