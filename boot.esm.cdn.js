@@ -1910,7 +1910,7 @@ window.addEventListener('lm:sheet-context', async (e)=>{
 
 /* === end of Overlay v1.7 =============================================== */
 
-<!-- === LM: __LM_MATERIALS header ensure (append-only, idempotent) === -->
+/*  === LM: __LM_MATERIALS header ensure (append-only, idempotent) ===  */
 <script>
 (function(){
   const TAG='[lm-materials-header v1.1]';
@@ -2012,3 +2012,237 @@ window.addEventListener('lm:sheet-context', async (e)=>{
   try { console.log(TAG,'installed'); } catch(_){}
 })();
 </script>
+
+
+;/* ==========================================================================
+ * LociMyu Overlay v1.8 (append-only, non-destructive)
+ * - Minimal auth shim (__lm_fetchJSONAuth) if missing
+ * - A1 helpers (quote + encode) if missing
+ * - Ensure __LM_MATERIALS sheet + header (PUT, not POST to /values)
+ * - Robust caption header writer (values.update A1:J1) skipping __LM_* sheets
+ * - gid→title cache & wrappers for getValues / appendValues / sheetsAppendRow
+ * - Hide internal sheets (__LM_*) from dropdowns
+ * - Re-dispatch lm:sheet-context on glb load / DOM ready
+ * ========================================================================== */
+
+(function(){
+  const TAG='[lm-overlay v1.8]';
+  try{ console.log(TAG,'installing'); }catch(_){}
+
+  // ---- A1 helpers ---------------------------------------------------------
+  (function(){
+    if (!window.__LM_A1__) {
+      function buildA1Quoted(sheetName, a1Part){
+        const escaped = String(sheetName).replace(/'/g, "''");
+        return `'${escaped}'!${a1Part}`;
+      }
+      function encodeA1(rangeA1){ return encodeURIComponent(rangeA1); }
+      window.__LM_A1__ = { buildA1Quoted, encodeA1 };
+    }
+  })();
+
+  // ---- Minimal auth shim --------------------------------------------------
+  (function(){
+    if (typeof window.__lm_fetchJSONAuth === 'function') return;
+    function ensureToken(){
+      try{
+        if (typeof getAccessToken === 'function'){
+          const t = getAccessToken(); if (t) return t;
+        }
+      }catch(_){}
+      throw new Error('token_missing');
+    }
+    async function __lm_fetchJSONAuth(url, init){
+      const token = ensureToken();
+      const headers = Object.assign({}, (init && init.headers) || {}, {
+        'Authorization': 'Bearer ' + token,
+        'Accept': 'application/json'
+      });
+      let body = init && init.body;
+      if (body && typeof body !== 'string') body = JSON.stringify(body);
+      if (body && !headers['Content-Type']) headers['Content-Type'] = 'application/json';
+      const resp = await fetch(url, Object.assign({}, init||{}, { headers, body }));
+      if (!resp.ok){
+        let text = ''; try{ text = await resp.text(); }catch(_){}
+        let json; try{ json = JSON.parse(text); }catch(_){}
+        const err = new Error('HTTP '+resp.status+': '+resp.statusText);
+        err.status = resp.status; err.body = json || text;
+        throw err;
+      }
+      const ct = resp.headers.get('content-type') || '';
+      return ct.includes('application/json') ? await resp.json() : await resp.text();
+    }
+    window.__lm_fetchJSONAuth = __lm_fetchJSONAuth;
+    try{ window.dispatchEvent(new CustomEvent('lm:gauth-ready')); }catch(_){}
+    try{ console.log(TAG,'auth shim installed'); }catch(_){}
+  })();
+
+  // ---- Ensure __LM_MATERIALS (sheet + header) -----------------------------
+  (function(){
+    if (window.__LM_MATERIALS_OVERLAY_APPLIED__) return;
+    window.__LM_MATERIALS_OVERLAY_APPLIED__ = true;
+    const HDR = [
+      'materialKey','matName','targetSheetGid','opacity','chromaEnable','chromaColor','chromaTolerance','chromaFeather','doubleSided','unlitLike',
+      'roughness','metalness','emissiveHex','updatedAt','updatedBy','__rev','__debug','sheetGid'
+    ];
+    async function ensureMaterialsHeader(spreadsheetId){
+      const range = window.__LM_A1__.buildA1Quoted('__LM_MATERIALS', `A1:${String.fromCharCode(65+HDR.length-1)}1`);
+      const url   = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${window.__LM_A1__.encodeA1(range)}?valueInputOption=RAW`;
+      const body  = { values: [HDR], majorDimension: 'ROWS' };
+      await window.__lm_fetchJSONAuth(url, { method: 'PUT', body });
+    }
+    async function ensureMaterialsSheet(spreadsheetId){
+      const metaUrl = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}?fields=sheets(properties(title))`;
+      const meta = await window.__lm_fetchJSONAuth(metaUrl, { method:'GET' });
+      const has = (meta.sheets||[]).some(s => (s.properties||{}).title === '__LM_MATERIALS');
+      if (!has){
+        const addUrl = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}:batchUpdate`;
+        await window.__lm_fetchJSONAuth(addUrl, { method:'POST', body:{ requests:[{ addSheet:{ properties:{ title:'__LM_MATERIALS' } } }] } });
+        try{ console.log(TAG,'__LM_MATERIALS created'); }catch(_){}
+      }
+      await ensureMaterialsHeader(spreadsheetId);
+    }
+    window.addEventListener('lm:sheet-context', (e)=>{
+      const d = (e && e.detail) || window.__LM_SHEET_CTX || {};
+      if (!d || !d.spreadsheetId) return;
+      ensureMaterialsSheet(d.spreadsheetId).catch(()=>{});
+    });
+  })();
+
+  // ---- Caption header writer (robust) -------------------------------------
+  (function(){
+    if (typeof window.lmWriteCaptionHeaderDirect === 'function') return;
+    window.lmWriteCaptionHeaderDirect = async function(spreadsheetId, sheetTitle){
+      try{
+        if(!spreadsheetId || !sheetTitle) return false;
+        if (String(sheetTitle).startsWith('__LM_')) return true;
+        const safe = String(sheetTitle).replace(/'/g,"''");
+        const range = `'${safe}'!A1:J1`;
+        const body  = { values: [[ 'id','title','body','color','x','y','z','imageFileId','createdAt','updatedAt' ]], majorDimension:'ROWS' };
+        const url   = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(range)}?valueInputOption=RAW`;
+        await window.__lm_fetchJSONAuth(url, { method:'PUT', body });
+        try{ console.log(TAG,'caption header ensured for', sheetTitle); }catch(_){}
+        return true;
+      }catch(e){ try{ console.warn(TAG,'caption header failed', e); }catch(_){ } return false; }
+    };
+  })();
+
+  // ---- gid→title cache & wrappers ----------------------------------------
+  (function(){
+    const CACHE = Object.create(null);
+    async function refresh(spreadsheetId){
+      const url = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}?fields=sheets(properties(sheetId,title))`;
+      const meta = await window.__lm_fetchJSONAuth(url, { method:'GET' });
+      const map = Object.create(null);
+      for(const s of (meta.sheets||[])){
+        const p = s.properties||{}; map[String(p.sheetId)] = p.title || '';
+      }
+      CACHE[spreadsheetId] = map; return map;
+    }
+    async function titleByGid(spreadsheetId, gid){
+      const gidStr = String(gid ?? ''); const map = CACHE[spreadsheetId] || await refresh(spreadsheetId);
+      if (map[gidStr]) return map[gidStr]; const map2 = await refresh(spreadsheetId); return map2[gidStr];
+    }
+
+    if (typeof window.getValues === 'function'){
+      const orig = window.getValues;
+      window.getValues = async function(spreadsheetIdOrRange, maybeRange){
+        try{
+          const ctx = window.__LM_SHEET_CTX || {};
+          const isSingle = (typeof spreadsheetIdOrRange === 'string') && spreadsheetIdOrRange.includes('!');
+          const spreadsheetId = isSingle ? (ctx.spreadsheetId || '') : spreadsheetIdOrRange;
+          const range = isSingle ? spreadsheetIdOrRange : (maybeRange || '');
+          if (spreadsheetId && Number.isFinite(ctx.sheetGid) && /^'Sheet_/.test(range)){
+            const title = await titleByGid(spreadsheetId, ctx.sheetGid);
+            const fixed = `'${String(title).replace(/'/g,"''")}'!` + range.split('!')[1];
+            return orig.call(this, spreadsheetId, fixed);
+          }
+        }catch(e){ try{ console.warn(TAG,'getValues wrap note', e); }catch(_){ } }
+        return orig.apply(this, arguments);
+      };
+    }
+
+    const pick = (typeof window.sheetsAppendRow === 'function') ? 'sheetsAppendRow'
+               : (typeof window.appendValues === 'function') ? 'appendValues' : null;
+    if (pick){
+      const orig = window[pick];
+      window[pick] = async function(spreadsheetId, rangeOrRow, rowMaybe){
+        try{
+          const ctx = window.__LM_SHEET_CTX || {};
+          let range = rangeOrRow, row = rowMaybe;
+          if (Array.isArray(rangeOrRow) && rowMaybe === undefined){
+            row = rangeOrRow;
+            if (Number.isFinite(ctx.sheetGid)){
+              const title = await titleByGid(spreadsheetId, ctx.sheetGid);
+              range = `'${String(title).replace(/'/g,"''")}'!A:Z`;
+              return orig.call(this, spreadsheetId, range, row);
+            }
+          } else if (typeof range === 'string' && Number.isFinite(ctx.sheetGid) && /^'Sheet_/.test(range)) {
+            const title = await titleByGid(spreadsheetId, ctx.sheetGid);
+            const suffix = range.split('!')[1] || 'A:Z';
+            const fixed = `'${String(title).replace(/'/g,"''")}'!` + suffix;
+            return orig.call(this, spreadsheetId, fixed, row);
+          }
+        }catch(e){ try{ console.warn(TAG,'append wrap note', e); }catch(_){ } }
+        return orig.apply(this, arguments);
+      };
+    }
+  })();
+
+  // ---- Dropdown filter: hide __LM_* --------------------------------------
+  (function(){
+    const TAG2='[lm-dropdown-filter]';
+    function hideInternalOptions(sel){
+      if (!sel) return;
+      let removed = 0;
+      const opts = Array.from(sel.querySelectorAll('option'));
+      for (const o of opts){
+        const t = (o.dataset && o.dataset.title) || o.textContent || '';
+        if (t.startsWith('__LM_')){
+          if (o.selected) o.selected = false;
+          o.remove(); removed++;
+        }
+      }
+      if (removed){
+        const vis = sel.querySelector('option');
+        if (vis){
+          if (!sel.value || !sel.querySelector(`option[value="${vis.value}"]`)){
+            sel.value = vis.value;
+            try { sel.dispatchEvent(new Event('change', { bubbles:true })); } catch(_){}
+          }
+        }
+        try{ console.log(TAG2,'removed', removed, 'internal option(s)'); }catch(_){}
+      }
+    }
+    function run(){
+      const sel = document.querySelector('#save-target-sheet, select[data-role="sheet-target"], select#sheet-target');
+      if (sel) hideInternalOptions(sel);
+    }
+    if (document.readyState === 'complete' || document.readyState === 'interactive'){
+      setTimeout(run, 0);
+    } else {
+      window.addEventListener('DOMContentLoaded', ()=> setTimeout(run,0), { once:true });
+    }
+    window.addEventListener('lm:sheet-context', run);
+    window.addEventListener('lm:sheet-changed', run);
+  })();
+
+  // ---- Re-dispatch sheet-context on glb load / DOM ready ------------------
+  (function(){
+    function trigger(){
+      try{
+        if (window.__LM_SHEET_CTX && window.__LM_SHEET_CTX.spreadsheetId) {
+          window.dispatchEvent(new CustomEvent('lm:sheet-context', { detail: window.__LM_SHEET_CTX }));
+        }
+      }catch(_){}
+    }
+    window.addEventListener('lm:glb-loaded', trigger);
+    if (document.readyState === 'complete' || document.readyState === 'interactive'){
+      setTimeout(trigger, 0);
+    } else {
+      window.addEventListener('DOMContentLoaded', ()=> setTimeout(trigger,0), { once:true });
+    }
+  })();
+
+  try{ console.log(TAG,'installed'); }catch(_){}
+})();
