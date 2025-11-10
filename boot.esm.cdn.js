@@ -1911,7 +1911,6 @@ window.addEventListener('lm:sheet-context', async (e)=>{
 /* === end of Overlay v1.7 =============================================== */
 
 
-<script>
 (function(){
   const TAG='[lm-materials-header v1.1]';
   if (window.__LM_MHDR__) return;           // 二重定義ガード
@@ -2011,7 +2010,6 @@ window.addEventListener('lm:sheet-context', async (e)=>{
 
   try { console.log(TAG,'installed'); } catch(_){}
 })();
-</script>
 
 /* ==========================================================================
  * LociMyu Sheets & Materials Hardening Patch v2.0  (append-only / non-destructive)
