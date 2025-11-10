@@ -1909,3 +1909,106 @@ window.addEventListener('lm:sheet-context', async (e)=>{
 })();
 
 /* === end of Overlay v1.7 =============================================== */
+
+<!-- === LM: __LM_MATERIALS header ensure (append-only, idempotent) === -->
+<script>
+(function(){
+  const TAG='[lm-materials-header v1.1]';
+  if (window.__LM_MHDR__) return;           // 二重定義ガード
+  window.__LM_MHDR__ = true;
+
+  // --- 前提: 認可付きフェッチが存在すること（最小シムでもOK） ---
+  function requireAuthShim(){
+    if (typeof window.__lm_fetchJSONAuth !== 'function') {
+      throw new Error('auth_shim_missing: __lm_fetchJSONAuth not found');
+    }
+  }
+
+  // --- A1ヘルパ（クォート＆エンコード統一） ---
+  function buildA1Quoted(sheetName, a1Part){
+    const escaped = String(sheetName).replace(/'/g, "''");
+    return `'${escaped}'!${a1Part}`;
+  }
+  function encodeA1(rangeA1){ return encodeURIComponent(rangeA1); }
+
+  // --- ヘッダ定義（PUT固定・RAW） ---
+  const HDR = [
+    'materialKey','matName','targetSheetGid','opacity',
+    'chromaEnable','chromaColor','chromaTolerance','chromaFeather',
+    'doubleSided','unlitLike','roughness','metalness','emissiveHex',
+    'updatedAt','updatedBy','__rev','__debug','sheetGid'
+  ];
+
+  async function ensureMaterialsHeader(spreadsheetId){
+    requireAuthShim();
+    if (!spreadsheetId) return;
+    const a1 = buildA1Quoted('__LM_MATERIALS', `A1:${String.fromCharCode(65 + HDR.length - 1)}1`);
+    const url = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${encodeA1(a1)}?valueInputOption=RAW`;
+    const body = { values: [HDR], majorDimension: 'ROWS' };
+    await window.__lm_fetchJSONAuth(url, { method:'PUT', body });
+    try { console.log(TAG, 'header ensured'); } catch(_){}
+  }
+
+  async function ensureMaterialsSheet(spreadsheetId){
+    requireAuthShim();
+    if (!spreadsheetId) return;
+    const metaUrl = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}?fields=sheets(properties(title))`;
+    const meta = await window.__lm_fetchJSONAuth(metaUrl, { method:'GET' });
+    const has = (meta.sheets||[]).some(s => (s.properties||{}).title === '__LM_MATERIALS');
+    if (!has){
+      const addUrl = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}:batchUpdate`;
+      await window.__lm_fetchJSONAuth(addUrl, {
+        method:'POST',
+        body:{ requests:[{ addSheet:{ properties:{ title:'__LM_MATERIALS' } } }] }
+      });
+      try { console.log(TAG,'sheet created'); } catch(_){}
+    }
+    await ensureMaterialsHeader(spreadsheetId);
+  }
+
+  // --- append禁止のグローバルガード（未導入の場合のみ） ---
+  (function guardAppends(){
+    const g = window;
+    ['appendValues','sheetsAppendRow'].forEach(fn=>{
+      if (typeof g[fn] !== 'function') return;
+      const orig = g[fn];
+      if (orig.__lm_guarded_internal) return; // 二重ラップ防止
+      g[fn] = function(spreadsheetId, rangeOrRow, maybeRow){
+        try{
+          if (typeof rangeOrRow === 'string' && /'__LM_[^']*'!/i.test(rangeOrRow)){
+            console.warn(TAG, fn, 'blocked for internal sheet');
+            return Promise.resolve({ blocked:true });
+          }
+        }catch(_){}
+        return orig.apply(this, arguments);
+      };
+      g[fn].__lm_guarded_internal = true;
+    });
+  })();
+
+  // --- export（既存の __LM_HOTFIX__ に安全にマージ） ---
+  window.__LM_HOTFIX__ = Object.assign({}, window.__LM_HOTFIX__, {
+    ensureMaterialsHeader,
+    ensureMaterialsSheet
+  });
+
+  // --- イベント配線（sheet-context と DOMReady で実行） ---
+  function runOnceWithCtx(){
+    try {
+      const ctx = window.__LM_SHEET_CTX || {};
+      if (ctx.spreadsheetId) ensureMaterialsSheet(ctx.spreadsheetId).catch(()=>{});
+    } catch(_){}
+  }
+  window.addEventListener('lm:sheet-context', (e)=>{
+    const d = (e && e.detail) || window.__LM_SHEET_CTX || {};
+    if (d && d.spreadsheetId) ensureMaterialsSheet(d.spreadsheetId).catch(()=>{});
+  });
+  if (document.readyState === 'complete' || document.readyState === 'interactive'){
+    setTimeout(runOnceWithCtx, 0);
+  } else {
+    window.addEventListener('DOMContentLoaded', ()=> setTimeout(runOnceWithCtx, 0), { once:true });
+  }
+
+  try { console.log(TAG,'installed'); } catch(_){}
+})();
+</script>
