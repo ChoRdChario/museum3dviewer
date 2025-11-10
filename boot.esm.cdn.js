@@ -1602,17 +1602,6 @@ onCanvasShiftPick(function(pos){
 })();
 /* ===== /LM Sheets & Materials Hardening Patch v1.6 ===== */
 
-// === [LM] __LM_MATERIALS hotfix (IIFE) ===============================
-(function(){
-  const HDR = [
-
-/* =========================================================================
- * LociMyu Overlay Patch v1.9 (clean tail)
- * - Ensure __LM_MATERIALS existence (addSheet if missing)
- * - Write header via values.update (PUT) to A1:Q1
- * - Never append to __LM_* sheets
- * - Safe on top of existing globals without destructive changes
- * ========================================================================= */
 (function(){
   const TAG = '[overlay v1.9]';
   const MATERIALS_TITLE = '__LM_MATERIALS';
