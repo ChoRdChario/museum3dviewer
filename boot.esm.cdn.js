@@ -1190,16 +1190,6 @@ onCanvasShiftPick(function(pos){
   }
 
   // [removed legacy ensureMaterialsSheet]
-      });
-      console.log('[hotfix] __LM_MATERIALS created');
-    }
-    // ensure headers A1:M1
-    await fetchJSON(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encA1(spreadsheetId,'__LM_MATERIALS','A1:M1')}?valueInputOption=RAW`, {
-      method:'PUT',
-      body:{ values:[['materialKey','opacity','doubleSided','unlitLike','chromaEnable','chromaColor','chromaTolerance','chromaFeather','roughness','metalness','emissiveHex','updatedAt','updatedBy','sheetGid']] }
-    });
-    console.log('[hotfix] __LM_MATERIALS ensured');
-  }
 
   // Re-arm on sheet-context
   window.addEventListener('lm:sheet-context', async (e)=>{
@@ -1207,7 +1197,7 @@ onCanvasShiftPick(function(pos){
     if (!ctx || !ctx.spreadsheetId) return;
     try {
       await waitFor(()=> typeof window.__lm_fetchJSONAuth === 'function', 20000);
-      await // [removed call ensureMaterialsSheet]
+      await Promise.resolve()
     } catch(err) {
       console.warn('[hotfix] ensureMaterialsSheet failed', err);
     }
@@ -1504,7 +1494,7 @@ onCanvasShiftPick(function(pos){
         });
         console.log(TAG,'__LM_MATERIALS created');
       }
-      await __// [removed call ensureMaterialsHeader]
+      await Promise.resolve()
     }catch(e){ console.warn(TAG,'ensureMaterialsSheet failed', e); }
   }
 
@@ -1609,7 +1599,7 @@ onCanvasShiftPick(function(pos){
       await __lm_fetchJSONAuth(addUrl, { method:'POST', body: { requests:[{ addSheet:{ properties:{ title:'__LM_MATERIALS' } } }] } });
       console.log('[lm-hotfix] __LM_MATERIALS created');
     }
-    await // [removed call ensureMaterialsHeader]
+    await Promise.resolve()
   }
   // [removed legacy ensureMaterialsHeader]
     );
@@ -1696,7 +1686,7 @@ window.addEventListener('lm:sheet-context', async (e)=>{
   }
   // [removed legacy ensureMaterialsSheet]
     }
-    await // [removed call ensureMaterialsHeader]
+    await Promise.resolve()
   }
   window.addEventListener('lm:sheet-context', (e)=>{
     const d = (e && e.detail) || window.__LM_SHEET_CTX || {};
@@ -1907,7 +1897,7 @@ window.addEventListener('lm:sheet-context', async (e)=>{
       });
       try { console.log(TAG,'sheet created'); } catch(_){}
     }
-    await // [removed call ensureMaterialsHeader]
+    await Promise.resolve()
   }
 
   // --- append禁止のグローバルガード（未導入の場合のみ） ---
@@ -2016,7 +2006,7 @@ window.addEventListener('lm:sheet-context', async (e)=>{
     }
     // [removed legacy ensureMaterialsSheet]
         }
-        await // [removed call ensureMaterialsHeader]
+        await Promise.resolve()
       }catch(e){ try{ console.warn(TAG,'ensureMaterialsSheet failed', e); }catch(_){ } }
     }
     window.addEventListener('lm:sheet-context', (e)=>{
