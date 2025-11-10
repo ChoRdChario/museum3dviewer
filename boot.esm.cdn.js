@@ -2308,3 +2308,5 @@ window.addEventListener('lm:sheet-context', async (e)=>{
 })();
 
 try { // [removed early ensureHeaders] console.log('[boot] ensured materials headers'); } catch(e) { console.warn('[boot] ensureHeaders failed', e); }
+
+// [EOF patched by tool]
