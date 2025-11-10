@@ -1351,11 +1351,20 @@ onCanvasShiftPick(function(pos){
     }
     window.addEventListener('lm:sheet-context', onCtx);
   })();
+    if (!d || !d.spreadsheetId) return;
+    ensureMaterialsHeader(d.spreadsheetId).catch(()=>{});
+    if (Number.isFinite(d.sheetGid)){
+      writeCaptionHeaderIfNeeded(d.spreadsheetId, d.sheetGid).catch(()=>{});
+    }
+  }
+  window.addEventListener('lm:sheet-context', onCtx);
+  window.addEventListener('lm:sheet-changed', onCtx);
+
   // Also try once on DOM ready
   if (document.readyState === 'complete' || document.readyState === 'interactive'){
-    setTimeout(()=>onCtx({detail:(window.__LM_SHEET_CTX||{})}), 0);
+    setTimeout(()=>onCtx({detail:getCtx()}), 0);
   } else {
-    window.addEventListener('DOMContentLoaded', ()=> setTimeout(()=>onCtx({detail:(window.__LM_SHEET_CTX||{})}),0), { once:true });
+    window.addEventListener('DOMContentLoaded', ()=> setTimeout(()=>onCtx({detail:getCtx()}),0), { once:true });
   }
 
   // Observe Create: option appended to sheet selector → write header immediately
@@ -1448,16 +1457,27 @@ onCanvasShiftPick(function(pos){
 
   // ---- Ensure __LM_MATERIALS exists and has header (PUT, not POST) ----
   async function __ensureMaterialsHeader(spreadsheetId){
-    const HDR = ['materialKey','matName','targetSheetGid','opacity','chromaEnable','chromaColor','chromaTolerance','chromaFeather','doubleSided','unlitLike','roughness','metalness','emissiveHex','updatedAt','updatedBy','__rev','__debug'];
-    const range = `'__LM_MATERIALS'!A1:${String.fromCharCode(65+HDR.length-1)}1`;
-    try{
-      await __lm_fetchJSONAuth(
-        `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}?valueInputOption=RAW`,
-        { method:'PUT', body:{ values:[HDR], majorDimension:'ROWS' } }
-      );
-      console.log(TAG,'materials header ensured');
-    }catch(e){ console.warn(TAG,'materials header ensure failed', e); }
+  const TAG = '[lm-materials-header v1.2]';
+  const HEAD = [
+    "materialKey","opacity","chromaColor","chromaTolerance","chromaFeather",
+    "doubleSided","unlitLike","updatedAt","updatedBy","sheetGid","sheetTitle",
+    "meshName","matIndex","matName","version","notes","reserved1","reserved2"
+  ]; // 18 columns -> A..R
+  if (!spreadsheetId) { console.warn(TAG, 'no spreadsheetId'); return; }
+  const lastCol = String.fromCharCode(65 + HEAD.length - 1); // 65='A'
+  const a1 = "'__LM_MATERIALS'!A1:" + lastCol + "1";
+  const url = "https://sheets.googleapis.com/v4/spreadsheets/" + spreadsheetId + "/values/" + encodeURIComponent(a1) + "?valueInputOption=RAW";
+  try{
+    await __lm_fetchJSONAuth(url, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ values: [HEAD] })
+    });
+    console.log(TAG, 'header ensured');
+  }catch(e){
+    console.warn(TAG, 'header ensure failed', e);
   }
+}
   // [removed legacy __ensureMaterialsSheet]
         });
         console.log(TAG,'__LM_MATERIALS created');
