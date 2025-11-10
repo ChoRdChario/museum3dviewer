@@ -1329,25 +1329,51 @@ onCanvasShiftPick(function(pos){
     return `'${String(title).replace(/'/g,"''")}'`;
   }
 
+  // ---- Ensure __LM_MATERIALS header (fixed)
+
   // ---- Ensure __LM_MATERIALS header (idempotent) ---------------------------
-  // [removed legacy ensureMaterialsHeader]
+  const TAG2 = '[lm-materials-header v1.1]';
+  async function ensureMaterialsHeader(spreadsheetId){
+    if(!spreadsheetId) return;
+    try{
       const title='__LM_MATERIALS';
-      const header = [[
-        'materialKey','matName','targetSheetGid','opacity','chromaEnable','chromaColor','chromaTolerance','chromaFeather','doubleSided','unlitLike',
-        'notes','metalness','emissiveHex','updatedAt','updatedBy','__rev','__debug','sheetGid'
-      ]];
-      // check existing A1
-      const urlGet = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values:batchGet?ranges=${encodeURIComponent(`'${title}'!A1:A1`)} `;
-      try{ await __lm_fetchJSONAuth(urlGet, { method:'GET' }); }catch(_){}
-      const urlPut = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(`'${title}'!A1:Q1`)}?valueInputOption=RAW`;
-      await __lm_fetchJSONAuth(urlPut, { method:'PUT', body:{ values: header, majorDimension:'ROWS' } });
+      const checkUrl = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values:batchGet?ranges=${encodeURIComponent('\''+title+'\'!A1:A1')}`;
+      try{
+        await __lm_fetchJSONAuth(checkUrl, { method:'GET' });
+      }catch(_){/* may 404 if sheet missing; we'll create below */}
+
+      // Try to PUT header. If the sheet doesn't exist yet, create and retry.
+      const putHeader = async () => {
+        const urlPut = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent('\''+title+'\'!A1:Q1')}?valueInputOption=RAW`;
+        const header = [[
+          'materialKey','matName','targetSheetGid','opacity','chromaEnable','chromaColor','chromaTolerance','chromaFeather','doubleSided','unlitLike',
+          'notes','metalness','emissiveHex','updatedAt','updatedBy','__rev','__debug','sheetGid'
+        ]];
+        await __lm_fetchJSONAuth(urlPut, { method:'PUT', body:{ values: header, majorDimension:'ROWS' } });
+      };
+
+      try{
+        await putHeader();
+      }catch(e1){
+        // Likely because the sheet doesn't exist — create and retry once.
+        try{
+          const urlCreate = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}:batchUpdate`;
+          const body = { requests: [{ addSheet: { properties: { title: title } } }] };
+          await __lm_fetchJSONAuth(urlCreate, { method:'POST', body });
+          await putHeader();
+        }catch(e2){
+          console.warn(TAG2, 'failed to ensure header', e1 || e2);
+          throw e2;
+        }
+      }
       console.log(TAG2, 'ok');
     }catch(e){
       console.warn(TAG2,'failed', e);
     }
   }
 
-  // ---- Caption header guard (on create / switch) ---------------------------
+
+// ---- Caption header guard (on create / switch) ---------------------------
   const seenGids = new Set();
   async function writeCaptionHeaderIfNeeded(spreadsheetId, gid){
     if (!spreadsheetId || !Number.isFinite(gid) || seenGids.has(gid)) return;
