@@ -1189,15 +1189,7 @@ onCanvasShiftPick(function(pos){
     return encodeURIComponent(quoted);
   }
 
-  async function ensureMaterialsSheet(spreadsheetId){
-    // check exist
-    const meta = await fetchJSON(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}`);
-    const exists = (meta.sheets||[]).some(s => s.properties.title === '__LM_MATERIALS');
-    if (!exists) {
-      // create via batchUpdate with sheetId auto
-      await fetchJSON(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}:batchUpdate`, {
-        method:'POST',
-        body:{ requests:[{ addSheet:{ properties:{ title:'__LM_MATERIALS' } } }]}
+  // [removed legacy ensureMaterialsSheet]
       });
       console.log('[hotfix] __LM_MATERIALS created');
     }
@@ -1215,7 +1207,7 @@ onCanvasShiftPick(function(pos){
     if (!ctx || !ctx.spreadsheetId) return;
     try {
       await waitFor(()=> typeof window.__lm_fetchJSONAuth === 'function', 20000);
-      await ensureMaterialsSheet(ctx.spreadsheetId);
+      await // [removed call ensureMaterialsSheet]
     } catch(err) {
       console.warn('[hotfix] ensureMaterialsSheet failed', err);
     }
@@ -1348,10 +1340,7 @@ onCanvasShiftPick(function(pos){
   }
 
   // ---- Ensure __LM_MATERIALS header (idempotent) ---------------------------
-  async function ensureMaterialsHeader(spreadsheetId){
-    const TAG2='[lm-materials-header]';
-    try{
-      let tries=0; while(typeof window.__lm_fetchJSONAuth!=='function' && tries<50){ await new Promise(r=>setTimeout(r,100)); tries++; }
+  // [removed legacy ensureMaterialsHeader]
       const title='__LM_MATERIALS';
       const header = [[
         'materialKey','matName','targetSheetGid','opacity','chromaEnable','chromaColor','chromaTolerance','chromaFeather','doubleSided','unlitLike',
@@ -1511,17 +1500,11 @@ onCanvasShiftPick(function(pos){
       console.log(TAG,'materials header ensured');
     }catch(e){ console.warn(TAG,'materials header ensure failed', e); }
   }
-  async function __ensureMaterialsSheet(spreadsheetId){
-    try{
-      const meta = await __lm_fetchJSONAuth(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}?fields=sheets(properties(title))`, {method:'GET'});
-      const has = (meta.sheets||[]).some(s=> (s.properties||{}).title === '__LM_MATERIALS');
-      if(!has){
-        await __lm_fetchJSONAuth(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}:batchUpdate`, {
-          method:'POST', body:{ requests:[{ addSheet:{ properties:{ title:'__LM_MATERIALS' } } }] }
+  // [removed legacy __ensureMaterialsSheet]
         });
         console.log(TAG,'__LM_MATERIALS created');
       }
-      await __ensureMaterialsHeader(spreadsheetId);
+      await __// [removed call ensureMaterialsHeader]
     }catch(e){ console.warn(TAG,'ensureMaterialsSheet failed', e); }
   }
 
@@ -1619,25 +1602,16 @@ onCanvasShiftPick(function(pos){
     "blendMode","side","roughness","metalness",
     "sheetGid","updatedAt","updatedBy"
   ];
-  async function ensureMaterialsSheet(spreadsheetId){
-    const metaUrl = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}?fields=sheets(properties(title,sheetId))`;
-    const meta = await __lm_fetchJSONAuth(metaUrl, { method:'GET' });
-    let has = false;
-    for(const sh of (meta.sheets||[])){
-      if(sh?.properties?.title === '__LM_MATERIALS'){ has = true; break; }
+  // [removed legacy ensureMaterialsSheet]
     }
     if (!has){
       const addUrl = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}:batchUpdate`;
       await __lm_fetchJSONAuth(addUrl, { method:'POST', body: { requests:[{ addSheet:{ properties:{ title:'__LM_MATERIALS' } } }] } });
       console.log('[lm-hotfix] __LM_MATERIALS created');
     }
-    await ensureMaterialsHeader(spreadsheetId);
+    await // [removed call ensureMaterialsHeader]
   }
-  async function ensureMaterialsHeader(spreadsheetId){
-    const a1 = `'__LM_MATERIALS'!A1:Q1`;
-    await __lm_fetchJSONAuth(
-      `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(a1)}?valueInputOption=RAW`,
-      { method:'PUT', body: { values:[HDR], majorDimension:'ROWS' } }
+  // [removed legacy ensureMaterialsHeader]
     );
     console.log('[lm-hotfix] materials header ensured');
   }
@@ -1649,7 +1623,7 @@ window.addEventListener('lm:sheet-context', async (e)=>{
     const ctx = e && e.detail || {};
     const ssid = ctx.spreadsheetId || window.currentSpreadsheetId;
     if(!ssid) return;
-    await window.__LM_HOTFIX__.ensureMaterialsSheet(ssid);
+    await window.__LM_HOTFIX__.// [removed call ensureMaterialsSheet]
   }catch(err){ console.error('[lm-hotfix] ensureMaterialsSheet failed', err); }
 }, { once:false });
 
@@ -1718,23 +1692,11 @@ window.addEventListener('lm:sheet-context', async (e)=>{
 (function(){
   const TAG='[lm-materials v1]';
   const HDR = ['materialKey','matName','targetSheetGid','opacity','chromaEnable','chromaColor','chromaTolerance','chromaFeather','doubleSided','unlitLike','roughness','metalness','emissiveHex','updatedAt','updatedBy','__rev','__debug','sheetGid'];
-  async function ensureMaterialsHeader(spreadsheetId){
-    const range = window.__LM_A1__.buildA1Quoted('__LM_MATERIALS', `A1:${String.fromCharCode(65+HDR.length-1)}1`);
-    const url = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${window.__LM_A1__.encodeA1(range)}?valueInputOption=RAW`;
-    const body = { values: [HDR], majorDimension: 'ROWS' };
-    await window.__lm_fetchJSONAuth(url, { method: 'PUT', body });
-    try{ console.log(TAG,'header ensured'); }catch(_){}
+  // [removed legacy ensureMaterialsHeader]
   }
-  async function ensureMaterialsSheet(spreadsheetId){
-    const metaUrl = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}?fields=sheets(properties(title))`;
-    const meta = await window.__lm_fetchJSONAuth(metaUrl, { method:'GET' });
-    const has = (meta.sheets||[]).some(s => (s.properties||{}).title === '__LM_MATERIALS');
-    if (!has){
-      const addUrl = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}:batchUpdate`;
-      await window.__lm_fetchJSONAuth(addUrl, { method:'POST', body:{ requests:[{ addSheet:{ properties:{ title:'__LM_MATERIALS' } } }] } });
-      try{ console.log(TAG,'sheet created'); }catch(_){}
+  // [removed legacy ensureMaterialsSheet]
     }
-    await ensureMaterialsHeader(spreadsheetId);
+    await // [removed call ensureMaterialsHeader]
   }
   window.addEventListener('lm:sheet-context', (e)=>{
     const d = (e && e.detail) || window.__LM_SHEET_CTX || {};
@@ -1938,31 +1900,14 @@ window.addEventListener('lm:sheet-context', async (e)=>{
     'updatedAt','updatedBy','__rev','__debug','sheetGid'
   ];
 
-  async function ensureMaterialsHeader(spreadsheetId){
-    requireAuthShim();
-    if (!spreadsheetId) return;
-    const a1 = buildA1Quoted('__LM_MATERIALS', `A1:${String.fromCharCode(65 + HDR.length - 1)}1`);
-    const url = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${encodeA1(a1)}?valueInputOption=RAW`;
-    const body = { values: [HDR], majorDimension: 'ROWS' };
-    await window.__lm_fetchJSONAuth(url, { method:'PUT', body });
-    try { console.log(TAG, 'header ensured'); } catch(_){}
+  // [removed legacy ensureMaterialsHeader]
   }
 
-  async function ensureMaterialsSheet(spreadsheetId){
-    requireAuthShim();
-    if (!spreadsheetId) return;
-    const metaUrl = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}?fields=sheets(properties(title))`;
-    const meta = await window.__lm_fetchJSONAuth(metaUrl, { method:'GET' });
-    const has = (meta.sheets||[]).some(s => (s.properties||{}).title === '__LM_MATERIALS');
-    if (!has){
-      const addUrl = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}:batchUpdate`;
-      await window.__lm_fetchJSONAuth(addUrl, {
-        method:'POST',
-        body:{ requests:[{ addSheet:{ properties:{ title:'__LM_MATERIALS' } } }] }
+  // [removed legacy ensureMaterialsSheet]
       });
       try { console.log(TAG,'sheet created'); } catch(_){}
     }
-    await ensureMaterialsHeader(spreadsheetId);
+    await // [removed call ensureMaterialsHeader]
   }
 
   // --- append禁止のグローバルガード（未導入の場合のみ） ---
@@ -2067,24 +2012,11 @@ window.addEventListener('lm:sheet-context', async (e)=>{
   /* ---------- ensure __LM_MATERIALS (sheet + header) ----------------------- */
   (function(){
     const HDR = ['materialKey','matName','targetSheetGid','opacity','chromaEnable','chromaColor','chromaTolerance','chromaFeather','doubleSided','unlitLike','roughness','metalness','emissiveHex','updatedAt','updatedBy','__rev','__debug','sheetGid'];
-    async function ensureMaterialsHeader(spreadsheetId){
-      const a1 = window.__LM_A1__.buildA1Quoted('__LM_MATERIALS', `A1:${String.fromCharCode(65+HDR.length-1)}1`);
-      const url = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${window.__LM_A1__.encodeA1(a1)}?valueInputOption=RAW`;
-      const body = { values: [HDR], majorDimension: 'ROWS' };
-      await window.__lm_fetchJSONAuth(url, { method:'PUT', body });
-      try{ console.log(TAG,'materials header ensured'); }catch(_){}
+    // [removed legacy ensureMaterialsHeader]
     }
-    async function ensureMaterialsSheet(spreadsheetId){
-      try{
-        const metaUrl = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}?fields=sheets(properties(title))`;
-        const meta = await window.__lm_fetchJSONAuth(metaUrl, { method:'GET' });
-        const has = (meta.sheets||[]).some(s => (s.properties||{}).title === '__LM_MATERIALS');
-        if (!has){
-          const addUrl = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}:batchUpdate`;
-          await window.__lm_fetchJSONAuth(addUrl, { method:'POST', body:{ requests:[{ addSheet:{ properties:{ title:'__LM_MATERIALS' } } }] } });
-          try{ console.log(TAG,'__LM_MATERIALS created'); }catch(_){}
+    // [removed legacy ensureMaterialsSheet]
         }
-        await ensureMaterialsHeader(spreadsheetId);
+        await // [removed call ensureMaterialsHeader]
       }catch(e){ try{ console.warn(TAG,'ensureMaterialsSheet failed', e); }catch(_){ } }
     }
     window.addEventListener('lm:sheet-context', (e)=>{
@@ -2314,17 +2246,7 @@ window.addEventListener('lm:sheet-context', async (e)=>{
 /* === __LM_MATERIALS ensure (PUT header only) & append guard === */
 (function(){
   const HDR = ['materialKey','matName','targetSheetGid','opacity','chromaEnable','chromaColor','chromaTolerance','chromaFeather','doubleSided','unlitLike','roughness','metalness','emissiveHex','updatedAt','updatedBy','__rev','__debug','sheetGid'];
-  async function ensureMaterials(spreadsheetId){
-    // 1) create if missing
-    try{
-      const metaUrl = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}?fields=sheets(properties(title))`;
-      const meta = await window.__lm_fetchJSONAuth(metaUrl, { method:'GET' });
-      const has = (meta.sheets||[]).some(s=> (s.properties||{}).title === '__LM_MATERIALS');
-      if (!has){
-        const addUrl = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}:batchUpdate`;
-        await window.__lm_fetchJSONAuth(addUrl, { method:'POST', body:{ requests:[{ addSheet:{ properties:{ title:'__LM_MATERIALS' } } }] } });
-        console.log('[overlay v1.9] __LM_MATERIALS created');
-      }
+  // [removed overlay ensureMaterials]
     }catch(e){ console.warn('[overlay v1.9] ensureMaterials(create) note', e); }
     // 2) header PUT（A1:..1）
     try{
@@ -2435,4 +2357,4 @@ window.addEventListener('lm:sheet-context', async (e)=>{
   console.log(TAG,'installed');
 })();
 
-try { window.LM_MaterialsPersist?.ensureHeaders?.(); console.log('[boot] ensured materials headers'); } catch(e) { console.warn('[boot] ensureHeaders failed', e); }
+try { // [removed early ensureHeaders] console.log('[boot] ensured materials headers'); } catch(e) { console.warn('[boot] ensureHeaders failed', e); }

@@ -6,6 +6,7 @@
 // - uses boot A1-safe helpers when available
 
 (function(){
+  let __LM_MHDR_SID = null;
   if (window.__LM_MATERIALS_PERSIST__ && window.__LM_MATERIALS_PERSIST__.__patchTag === 'v1.4+sgid+ensure') {
     console.log('[mat-sheet-persist] already patched');
     return;
@@ -74,7 +75,7 @@
   async function upsert_({ materialKey, opacity=1, doubleSided=false, unlitLike=false, sheetGid=0 }) {
     const ctx = window.__LM_SHEET_CTX || {};
     const spreadsheetId = ctx.spreadsheetId;
-    if (!spreadsheetId) throw new Error('no spreadsheetId in ctx');
+    if (!spreadsheetId) throw new Error('no spreadsheetId in ctx (call setCtx or wait for lm:sheet-context)');
     await ensureHeaders_(spreadsheetId);
 
     // find key in colA
@@ -101,12 +102,16 @@
     __patchTag: 'v1.4+sgid+ensure',
     setCtx({ spreadsheetId, sheetGid }) {
       window.__LM_SHEET_CTX = { spreadsheetId, sheetGid };
-      ensureHeaders_(spreadsheetId).catch(err => console.warn('[persist.ensureHeaders early]', err));
+      if (spreadsheetId) {
+        API.ensureHeaders().catch(err => console.warn('[persist.ensureHeaders early]', err));
+      }
       console.log('[mat-sheet-persist v1.4+sgid] ctx set', { spreadsheetId, sheetGid });
     },
-    ensureHeaders() {
+    ensureHeaders(){
       const sid = window.__LM_SHEET_CTX?.spreadsheetId;
-      if (!sid) throw new Error('no spreadsheetId in ctx');
+      if (!sid) { try{ console.warn('[persist.ensureHeaders] skipped: no spreadsheetId'); }catch(_){}; return Promise.resolve(); }
+      if (__LM_MHDR_SID === sid) return Promise.resolve();
+      __LM_MHDR_SID = sid;
       return ensureHeaders_(sid);
     },
     upsert: upsert_
