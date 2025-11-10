@@ -113,5 +113,7 @@
   };
 
   window.__LM_MATERIALS_PERSIST__ = API;
-  console.log('[mat-sheet-persist v1.4+sgid+ensure] loaded & exposed API');
+  
+window.LM_MaterialsPersist = API; // alias for UI
+console.log('[mat-sheet-persist v1.4+sgid+ensure] loaded & exposed API');
 })();

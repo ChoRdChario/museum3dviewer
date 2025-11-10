@@ -66,3 +66,17 @@
     if (haveAuthFetch() || tries++ > 60) { clearInterval(t); drain(); }
   }, 1000);
 })();
+
+
+/* auto-injected thin adapter to persist layer */
+try {
+  window.addEventListener('lm:mat-opacity', (e) => {
+    const d = (e && e.detail) || {};
+    if (d.materialKey != null && d.opacity != null) {
+      window.LM_MaterialsPersist?.upsert?.({ materialKey: d.materialKey, opacity: d.opacity });
+      console.log('[mat-bridge->persist] upsert opacity', d.materialKey, d.opacity);
+    }
+  });
+} catch (err) {
+  console.warn('[mat-bridge->persist] adapter wiring failed', err);
+}

@@ -61,3 +61,16 @@
     window.addEventListener('DOMContentLoaded', start, { once: true });
   }
 })();
+
+// Ensure materials persist layer receives context
+try {
+  window.addEventListener('lm:sheet-context', (e) => {
+    const d = (e && e.detail) || {};
+    if (d.spreadsheetId && (d.sheetGid !== undefined)) {
+      if (window.LM_MaterialsPersist && typeof window.LM_MaterialsPersist.setCtx === 'function') {
+        window.LM_MaterialsPersist.setCtx(d.spreadsheetId, d.sheetGid);
+        console.log('[ctx->persist] setCtx applied', d.spreadsheetId, d.sheetGid);
+      }
+    }
+  }, { once: false });
+} catch (err) { console.warn('[ctx->persist] setCtx wiring failed', err); }

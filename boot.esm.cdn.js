@@ -2436,3 +2436,5 @@ window.addEventListener('lm:sheet-context', async (e)=>{
 
   console.log(TAG,'installed');
 })();
+
+try { window.LM_MaterialsPersist?.ensureHeaders?.(); console.log('[boot] ensured materials headers'); } catch(e) { console.warn('[boot] ensureHeaders failed', e); }
