@@ -1351,20 +1351,11 @@ onCanvasShiftPick(function(pos){
     }
     window.addEventListener('lm:sheet-context', onCtx);
   })();
-    if (!d || !d.spreadsheetId) return;
-    ensureMaterialsHeader(d.spreadsheetId).catch(()=>{});
-    if (Number.isFinite(d.sheetGid)){
-      writeCaptionHeaderIfNeeded(d.spreadsheetId, d.sheetGid).catch(()=>{});
-    }
-  }
-  window.addEventListener('lm:sheet-context', onCtx);
-  window.addEventListener('lm:sheet-changed', onCtx);
-
   // Also try once on DOM ready
   if (document.readyState === 'complete' || document.readyState === 'interactive'){
-    setTimeout(()=>onCtx({detail:getCtx()}), 0);
+    setTimeout(()=>onCtx({detail:(window.__LM_SHEET_CTX||{})}), 0);
   } else {
-    window.addEventListener('DOMContentLoaded', ()=> setTimeout(()=>onCtx({detail:getCtx()}),0), { once:true });
+    window.addEventListener('DOMContentLoaded', ()=> setTimeout(()=>onCtx({detail:(window.__LM_SHEET_CTX||{})}),0), { once:true });
   }
 
   // Observe Create: option appended to sheet selector → write header immediately
