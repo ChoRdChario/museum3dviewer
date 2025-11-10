@@ -933,8 +933,6 @@ onCanvasShiftPick(function(pos){
   ensureRow(id, row).then(function(){ updateCaptionForPin(id, row); });
 });
 
-
-
 // =====================================================
 // == Materials Opacity Module (sheet-scoped, non-breaking)
 // == - Stores per-material opacity per "parent save sheet" (gid = currentSheetId)
@@ -1137,7 +1135,6 @@ onCanvasShiftPick(function(pos){
   };
 })();
 
-
 /* === LM Sheets Hardening Hotfix v1.3 ===
    - Ensures __LM_MATERIALS auto-create after sheet context
    - Defers until __lm_fetchJSONAuth is available
@@ -1268,7 +1265,6 @@ onCanvasShiftPick(function(pos){
 })();
 /* === /LM Sheets Hardening Hotfix v1.3 === */
 
-
 ;/* ==========================================================================
  * LM overlay patch bundle (non-destructive, append-only)
  * - Fix __LM_MATERIALS header PUT URL (no stray colon; proper encodeURIComponent)
@@ -1328,25 +1324,6 @@ onCanvasShiftPick(function(pos){
   function lmQuote(title){
     return `'${String(title).replace(/'/g,"''")}'`;
   }
-
-  // ---- Ensure __LM_MATERIALS header (idempotent) ---------------------------
-  // [removed legacy ensureMaterialsHeader]
-      const title='__LM_MATERIALS';
-      const header = [[
-        'materialKey','matName','targetSheetGid','opacity','chromaEnable','chromaColor','chromaTolerance','chromaFeather','doubleSided','unlitLike',
-        'notes','metalness','emissiveHex','updatedAt','updatedBy','__rev','__debug','sheetGid'
-      ]];
-      // check existing A1
-      const urlGet = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values:batchGet?ranges=${encodeURIComponent(`'${title}'!A1:A1`)} `;
-      try{ await __lm_fetchJSONAuth(urlGet, { method:'GET' }); }catch(_){}
-      const urlPut = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(`'${title}'!A1:Q1`)}?valueInputOption=RAW`;
-      await __lm_fetchJSONAuth(urlPut, { method:'PUT', body:{ values: header, majorDimension:'ROWS' } });
-      console.log(TAG2, 'ok');
-    }catch(e){
-      console.warn(TAG2,'failed', e);
-    }
-  }
-
   // ---- Caption header guard (on create / switch) ---------------------------
   const seenGids = new Set();
   async function writeCaptionHeaderIfNeeded(spreadsheetId, gid){
@@ -1413,14 +1390,85 @@ onCanvasShiftPick(function(pos){
 (function(){
   const TAG='[lm-patch v1.6]';
 
+  // ---- Minimal auth shim (idempotent) ----
+  if (typeof window.__lm_fetchJSONAuth !== 'function') {
+    function __lm_fetchJSONAuth(url, init){
+      const t = (typeof getAccessToken==='function') ? getAccessToken() : null;
+      if(!t) throw new Error('token_missing');
+      const headers = Object.assign({}, (init && init.headers) || {}, {
+        'Authorization': 'Bearer ' + t,
+        'Accept': 'application/json'
+      });
+      let body = init && init.body;
+      if (body && typeof body !== 'string') body = JSON.stringify(body);
+      if (body && !headers['Content-Type']) headers['Content-Type'] = 'application/json';
+      return fetch(url, Object.assign({}, init||{}, { headers, body })).then(async r=>{
+        if(!r.ok){
+          const txt = await r.text().catch(()=>'');
+          let j; try{ j=JSON.parse(txt);}catch(_){}
+          const err = new Error('HTTP '+r.status+': '+r.statusText);
+          err.status=r.status; err.body=j||txt; throw err;
+        }
+        const ct = r.headers.get('content-type')||'';
+        return ct.includes('application/json') ? r.json() : r.text();
+      });
+    }
+    window.__lm_fetchJSONAuth = __lm_fetchJSONAuth;
+    try{ window.dispatchEvent(new CustomEvent('lm:gauth-ready')); }catch(_){}
+    console.log(TAG,'auth shim installed');
+  }
+
+  // ---- Caption header writer (skip internal sheets) ----
+  if (typeof window.lmWriteCaptionHeaderDirect !== 'function') {
+    window.lmWriteCaptionHeaderDirect = async function lmWriteCaptionHeaderDirect(spreadsheetId, sheetTitle){
+      try{
+        if(!spreadsheetId || !sheetTitle) return false;
+        if (String(sheetTitle).startsWith('__LM_')) return true; // never write into internal sheets
+        const safe = String(sheetTitle).replace(/'/g,"''");
+        const range = `'${safe}'!A1:J1`;
+        const body  = { values: [[ 'id','title','body','color','x','y','z','imageFileId','createdAt','updatedAt' ]], majorDimension:'ROWS' };
+        const url   = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}?valueInputOption=RAW`;
+        await __lm_fetchJSONAuth(url, { method:'PUT', body });
+        console.log(TAG,'lmWriteCaptionHeaderDirect ok for', sheetTitle);
+        return true;
+      }catch(e){ console.warn(TAG,'lmWriteCaptionHeaderDirect failed', e); return false; }
+    };
+  }
+
+  // ---- Resolve sheet title from GID (cache) ----
+  const __TITLE_CACHE = Object.create(null); // { [sheetId]:{gid:title} }
+  async function __refreshTitles(spreadsheetId){
+    const meta = await __lm_fetchJSONAuth(`https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}`, {method:'GET'});
+    const map = Object.create(null);
+    for(const s of (meta.sheets||[])){
+      const p = s.properties||{};
+      map[String(p.sheetId)] = p.title;
+    }
+    __TITLE_CACHE[spreadsheetId] = map;
+    return map;
+  }
+  async function __titleByGid(spreadsheetId, gid){
+    const gidStr = String(gid ?? '');
+    const cache = __TITLE_CACHE[spreadsheetId] || await __refreshTitles(spreadsheetId);
+    if (cache[gidStr]) return cache[gidStr];
+    const map = await __refreshTitles(spreadsheetId);
+    return map[gidStr];
+  }
+
+  // ---- Ensure __LM_MATERIALS exists and has header (PUT, not POST) ----
+  async function __ensureMaterialsHeader(spreadsheetId){
+    const HDR = ['materialKey','matName','targetSheetGid','opacity','chromaEnable','chromaColor','chromaTolerance','chromaFeather','doubleSided','unlitLike','roughness','metalness','emissiveHex','updatedAt','updatedBy','__rev','__debug'];
+    const range = `'__LM_MATERIALS'!A1:${String.fromCharCode(65+HDR.length-1)}1`;
+    try{
+      await __lm_fetchJSONAuth(
+        `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}?valueInputOption=RAW`,
+        { method:'PUT', body:{ values:[HDR], majorDimension:'ROWS' } }
+      );
+      console.log(TAG,'materials header ensured');
     }catch(e){ console.warn(TAG,'materials header ensure failed', e); }
   }
   // [removed legacy __ensureMaterialsSheet]
-        });
-        console.log(TAG,'__LM_MATERIALS created');
-      }
-      await Promise.resolve()
-    }catch(e){ console.warn(TAG,'ensureMaterialsSheet failed', e); }
+}catch(e){ console.warn(TAG,'ensureMaterialsSheet failed', e); }
   }
 
   // Fire after sheet-context is available
@@ -1532,16 +1580,6 @@ onCanvasShiftPick(function(pos){
   }
   window.__LM_HOTFIX__ = { ensureMaterialsSheet, ensureMaterialsHeader };
 })();
-// ensure on sheet-context
-window.addEventListener('lm:sheet-context', async (e)=>{
-  try{
-    const ctx = e && e.detail || {};
-    const ssid = ctx.spreadsheetId || window.currentSpreadsheetId;
-    if(!ssid) return;
-    await window.__LM_HOTFIX__.// [removed call ensureMaterialsSheet]
-  }catch(err){ console.error('[lm-hotfix] ensureMaterialsSheet failed', err); }
-}, { once:false });
-
 /* =========================================================================
  * LociMyu Overlay Patch v1.7 (append-only, non-destructive)
  * - Fix A1 encoding & header PUTs
@@ -1786,7 +1824,6 @@ window.addEventListener('lm:sheet-context', async (e)=>{
 })();
 
 /* === end of Overlay v1.7 =============================================== */
-
 
 (function(){
   const TAG='[lm-materials-header v1.1]';
