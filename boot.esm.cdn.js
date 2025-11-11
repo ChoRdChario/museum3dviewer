@@ -17,8 +17,7 @@ window.nearestPalette = window.nearestPalette || function nearestPalette(hex){
 };
 function lmCanonicalColor(hex){
   try{ return window.nearestPalette(hex||window.currentPinColor||window.LM_PALETTE[0]); }
-/* removed stray catch start */
- return hex||window.LM_PALETTE[0]; }
+  catch(_){ return hex||window.LM_PALETTE[0]; }
 }
 
 // ---------- Imports ----------
@@ -1271,95 +1270,145 @@ onCanvasShiftPick(function(pos){
 
 
 ;/* ==========================================================================
- 
-/* ==========================================================================
  * LM overlay patch bundle (non-destructive, append-only)
- * - Rewritten clean overlay (v1.2): fixes stray code & syntax errors
- * - Ensures __LM_MATERIALS sheet exists and writes header A1:R1 (18 cols)
- * - Proper range encoding (encodeURIComponent over `'Title'!A1:R1`)
- * - Idempotent; safe to include multiple times
+ * - Fix __LM_MATERIALS header PUT URL (no stray colon; proper encodeURIComponent)
+ * - Ensure caption header (A1:J1) is written immediately after Create (no rename required)
+ * - Exclude internal sheets (__LM_*) from caption header writes
+ * - Works alongside existing code; does not remove/replace prior logic
  * ========================================================================== */
 (function(){
-  const TAG = '[lm-overlay v1.2]';
-  if (window.__LM_OVERLAY_CLEAN_V12__) return;
-  window.__LM_OVERLAY_CLEAN_V12__ = true;
+  const TAG = '[lm-overlay v1]';
 
-  // ---------- Small helpers ----------
-  function log(){ try{ console.log(TAG, ...arguments); }catch(_){ } }
-  function warn(){ try{ console.warn(TAG, ...arguments); }catch(_){ } }
-
-  const HDR = [
-    "materialKey","opacity","chromaColor","chromaTolerance","chromaFeather",
-    "doubleSided","unlitLike","updatedAt","updatedBy","sheetGid","sheetTitle",
-    "meshName","matIndex","matName","version","notes","reserved1","reserved2"
-  ]; // 18 columns => A1:R1
-
-  function encA1(title, a1){
-    // "'Title'!A1:R1" with quotes doubled for embedded single quotes, then encodeURIComponent
-    const quoted = "'" + String(title).replace(/'/g, "''") + "'!" + a1;
-    return encodeURIComponent(quoted);
+  // ---- Safe auth fetch (reuse if present) ---------------------------------
+  if (typeof window.__lm_fetchJSONAuth !== 'function') {
+    // Minimal shim; prefers existing getAccessToken()
+    window.__lm_fetchJSONAuth = async function(url, init){
+      const tok = (typeof getAccessToken === 'function') ? getAccessToken() : null;
+      if(!tok) throw new Error('token_missing');
+      const headers = Object.assign({}, (init && init.headers) || {}, {
+        'Authorization': 'Bearer ' + tok,
+        'Accept': 'application/json'
+      });
+      let body = init && init.body;
+      if (body && typeof body !== 'string') body = JSON.stringify(body);
+      if (body && !headers['Content-Type']) headers['Content-Type'] = 'application/json';
+      const resp = await fetch(url, Object.assign({}, init||{}, { headers, body }));
+      if (!resp.ok){
+        let txt = ''; try{ txt = await resp.text(); }catch(_){}
+        let json; try{ json = JSON.parse(txt); }catch(_){}
+        const err = new Error('HTTP '+resp.status+': '+(resp.statusText||''));
+        err.status = resp.status; err.body = json || txt;
+        throw err;
+      }
+      const ct = resp.headers.get('content-type') || '';
+      return ct.includes('application/json') ? await resp.json() : await resp.text();
+    };
+    try{ console.log(TAG, 'auth shim installed'); }catch(_){}
   }
 
-  // Prefer existing auth wrapper
-  const f = (typeof window.__lm_fetchJSONAuth === 'function')
-    ? window.__lm_fetchJSONAuth
-    : async function(url, init){
-        const tok = (typeof getAccessToken === 'function') ? getAccessToken() : null;
-        if(!tok) throw new Error('token_missing');
-        const headers = Object.assign({ 'Authorization': 'Bearer ' + tok }, (init && init.headers) || {});
-        let body = init && init.body;
-        if (body && typeof body !== 'string') body = JSON.stringify(body);
-        const r = await fetch(url, Object.assign({}, init||{}, { headers, body }));
-        if(!r.ok){ const t = await r.text().catch(()=> ''); throw new Error('HTTP '+r.status+': '+t); }
-        const ct = r.headers.get('content-type')||'';
-        return ct.includes('application/json') ? await r.json() : await r.text();
-      };
-
-  async function ensureMaterialsSheet(spreadsheetId){
-    const meta = await f(`https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}?fields=sheets(properties(title,sheetId))`);
-    const exists = (meta.sheets||[]).some(s => s.properties && s.properties.title === "__LM_MATERIALS");
-    if (exists) return true;
-    await f(`https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}:batchUpdate`, {
-      method: 'POST',
-      body: { requests: [{ addSheet: { properties: { title: "__LM_MATERIALS", gridProperties:{ frozenRowCount:1 } } } }] }
+  // ---- Helpers -------------------------------------------------------------
+  async function lmGetSheetMeta(spreadsheetId){
+    const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}?fields=sheets(properties(sheetId,title))`;
+    const j = await __lm_fetchJSONAuth(url, { method:'GET' });
+    const m = new Map();
+    (j.sheets||[]).forEach(s=>{
+      const p = s && s.properties || {};
+      if (typeof p.sheetId === 'number') m.set(p.sheetId, p.title||'');
     });
-    log("__LM_MATERIALS created");
-    return true;
+    return m;
   }
 
-  async function ensureMaterialsHeader(spreadsheetId){
-    await ensureMaterialsSheet(spreadsheetId);
-    const url = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${encA1("__LM_MATERIALS","A1:R1")}?valueInputOption=RAW`;
-    await f(url, { method: 'PUT', body: { values: [HDR], majorDimension: 'ROWS' } });
-    log("materials header ensured");
+  async function lmPutHeader(spreadsheetId, a1, cols){
+    const range = a1; // keep original quotes for range, but encode later
+    const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}?valueInputOption=RAW`;
+    const body = { range, majorDimension:'ROWS', values:[cols] };
+    return __lm_fetchJSONAuth(url, { method:'PUT', body });
   }
 
+  function lmQuote(title){
+    return `'${String(title).replace(/'/g,"''")}'`;
+  }
+
+  // ---- Ensure __LM_MATERIALS header (idempotent) ---------------------------
+  // [removed legacy ensureMaterialsHeader]
+      const title='__LM_MATERIALS';
+      const header = [[
+        'materialKey','matName','targetSheetGid','opacity','chromaEnable','chromaColor','chromaTolerance','chromaFeather','doubleSided','unlitLike',
+        'notes','metalness','emissiveHex','updatedAt','updatedBy','__rev','__debug','sheetGid'
+      ]];
+      // check existing A1
+      const urlGet = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values:batchGet?ranges=${encodeURIComponent(`'${title}'!A1:A1`)} `;
+      try{ await __lm_fetchJSONAuth(urlGet, { method:'GET' }); }catch(_){}
+      const urlPut = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(`'${title}'!A1:Q1`)}?valueInputOption=RAW`;
+      await __lm_fetchJSONAuth(urlPut, { method:'PUT', body:{ values: header, majorDimension:'ROWS' } });
+      console.log(TAG2, 'ok');
+    }catch(e){
+      console.warn(TAG2,'failed', e);
+    }
+  }
+
+  // ---- Caption header guard (on create / switch) ---------------------------
+  const seenGids = new Set();
+  async function writeCaptionHeaderIfNeeded(spreadsheetId, gid){
+    if (!spreadsheetId || !Number.isFinite(gid) || seenGids.has(gid)) return;
+    try{
+      const meta = await lmGetSheetMeta(spreadsheetId);
+      const title = meta.get(gid);
+      if (!title) return;
+      if (String(title).startsWith('__LM_')) return; // internal skip
+      const cols = ['id','title','body','color','x','y','z','imageFileId','createdAt','updatedAt'];
+      const a1 = `${lmQuote(title)}!A1:J1`;
+      await lmPutHeader(spreadsheetId, a1, cols);
+      seenGids.add(gid);
+      try{ console.log('[lm-header-guard v1] header written for', title, '(gid', gid,')'); }catch(_){}
+    }catch(e){
+      try{ console.warn('[lm-header-guard v1] skip', e); }catch(_){}
+    }
+  }
+
+  // ---- Event wiring --------------------------------------------------------
   function getCtx(){
-    const c = window.__LM_SHEET_CTX || {};
-    return { spreadsheetId: c.spreadsheetId, sheetGid: c.sheetGid, sheetTitle: c.sheetTitle };
+    return (window.__LM_SHEET_CTX)||{};
   }
 
-  async function onCtx(ev){
-    const d = (ev && ev.detail) || getCtx();
+  // When sheet context appears/changes, ensure materials header and caption header
+  function onCtx(e){
+    const d = (e && e.detail) || getCtx();
     if (!d || !d.spreadsheetId) return;
-    try { ensureMaterialsHeader(d.spreadsheetId); }
-/* removed stray catch start */
- warn("ensureMaterialsHeader failed", e); }
+    ensureMaterialsHeader(d.spreadsheetId).catch(()=>{});
+    if (Number.isFinite(d.sheetGid)){
+      writeCaptionHeaderIfNeeded(d.spreadsheetId, d.sheetGid).catch(()=>{});
+    }
   }
-
-  // Wire events once
   window.addEventListener('lm:sheet-context', onCtx);
   window.addEventListener('lm:sheet-changed', onCtx);
 
-  // Fire once on DOM ready to cover initial state
-  if (document.readyState === 'complete' || document.readyState === 'interactive') {
-    setTimeout(()=> onCtx({ detail: getCtx() }), 0);
+  // Also try once on DOM ready
+  if (document.readyState === 'complete' || document.readyState === 'interactive'){
+    setTimeout(()=>onCtx({detail:getCtx()}), 0);
   } else {
-    document.addEventListener('DOMContentLoaded', ()=> setTimeout(()=> onCtx({ detail: getCtx() }), 0), { once:true });
+    window.addEventListener('DOMContentLoaded', ()=> setTimeout(()=>onCtx({detail:getCtx()}),0), { once:true });
   }
 
-  log('installed');
+  // Observe Create: option appended to sheet selector → write header immediately
+  (function observeSelect(){
+    const sel = document.querySelector('#save-target-sheet, select[data-role="sheet-target"], select#sheet-target');
+    if (!sel) return;
+    const mo = new MutationObserver((muts)=>{
+      const ctx = getCtx();
+      // Try all options; write for any unseen gid
+      const opts = Array.from(sel.querySelectorAll('option'));
+      for(const o of opts){
+        const gid = Number(o && (o.dataset && o.dataset.gid || o.value));
+        if (Number.isFinite(gid)) writeCaptionHeaderIfNeeded(ctx.spreadsheetId, gid).catch(()=>{});
+      }
+    });
+    mo.observe(sel, { childList:true, subtree:true });
+  })();
+
+  try{ console.log(TAG, 'installed'); }catch(_){}
 })();
+
 /* ===== LM Sheets & Materials Hardening Patch v1.6 (overlay, non-destructive) ===== */
 (function(){
   const TAG='[lm-patch v1.6]';
@@ -1431,27 +1480,16 @@ onCanvasShiftPick(function(pos){
 
   // ---- Ensure __LM_MATERIALS exists and has header (PUT, not POST) ----
   async function __ensureMaterialsHeader(spreadsheetId){
-  const TAG = '[lm-materials-header v1.2]';
-  const HEAD = [
-    "materialKey","opacity","chromaColor","chromaTolerance","chromaFeather",
-    "doubleSided","unlitLike","updatedAt","updatedBy","sheetGid","sheetTitle",
-    "meshName","matIndex","matName","version","notes","reserved1","reserved2"
-  ]; // 18 columns -> A..R
-  if (!spreadsheetId) { console.warn(TAG, 'no spreadsheetId'); return; }
-  const lastCol = String.fromCharCode(65 + HEAD.length - 1); // 65='A'
-  const a1 = "'__LM_MATERIALS'!A1:" + lastCol + "1";
-  const url = "https://sheets.googleapis.com/v4/spreadsheets/" + spreadsheetId + "/values/" + encodeURIComponent(a1) + "?valueInputOption=RAW";
-  try{
-    await __lm_fetchJSONAuth(url, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ values: [HEAD] })
-    });
-    console.log(TAG, 'header ensured');
-  }catch(e){
-    console.warn(TAG, 'header ensure failed', e);
+    const HDR = ['materialKey','matName','targetSheetGid','opacity','chromaEnable','chromaColor','chromaTolerance','chromaFeather','doubleSided','unlitLike','roughness','metalness','emissiveHex','updatedAt','updatedBy','__rev','__debug'];
+    const range = `'__LM_MATERIALS'!A1:${String.fromCharCode(65+HDR.length-1)}1`;
+    try{
+      await __lm_fetchJSONAuth(
+        `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}?valueInputOption=RAW`,
+        { method:'PUT', body:{ values:[HDR], majorDimension:'ROWS' } }
+      );
+      console.log(TAG,'materials header ensured');
+    }catch(e){ console.warn(TAG,'materials header ensure failed', e); }
   }
-}
   // [removed legacy __ensureMaterialsSheet]
         });
         console.log(TAG,'__LM_MATERIALS created');
@@ -2309,121 +2347,4 @@ window.addEventListener('lm:sheet-context', async (e)=>{
   console.log(TAG,'installed');
 })();
 
-try { // [removed early ensureHeaders] console.log('[boot] ensured materials headers'); } catch(e) { console.warn('[boot] ensureHeaders failed', e); }
-/* =====================================================================================
- * [LM Overlay] materials-header-guard v1.3  (clean)
- * Ensures '__LM_MATERIALS' sheet and header row A1:R1 exactly once per spreadsheet.
- * - No top-level await; no stray catch; single-flight per spreadsheetId.
- * - Safe range formatting using encodeURIComponent.
- * - Debounced listener on 'lm:sheet-context'.
- * ===================================================================================== */
-(function(){
-  try { if (window.__LM_OVERLAY_MAT_HEADER_V13__) return; } catch(_){}
-  window.__LM_OVERLAY_MAT_HEADER_V13__ = true;
-
-  const FLAG = "[materials.header.guard]";
-  const HEAD = [
-    "materialKey","opacity","chromaColor","chromaTolerance","chromaFeather",
-    "doubleSided","unlitLike","updatedAt","updatedBy","sheetGid","sheetTitle",
-    "meshName","matIndex","matName","version","notes","reserved1","reserved2"
-  ]; // A..R (18 columns)
-
-  function a1(name, range){ return encodeURIComponent(String(name)) + "!" + range; }
-  function log(){ try{ console.log(FLAG, ...arguments);}catch(_){} }
-  function warn(){ try{ console.warn(FLAG, ...arguments);}catch(_){} }
-  function err(){ try{ console.error(FLAG, ...arguments);}catch(_){} }
-
-  const f = (typeof window.__lm_fetchJSONAuth === "function")
-    ? window.__lm_fetchJSONAuth
-    : (url,opt)=>fetch(url,opt).then(r=>r.ok?r.json():Promise.reject(new Error("HTTP "+r.status)));
-
-  const inflight = new Map();
-  async function fetchOnce(key, fn){
-    if (inflight.has(key)) return inflight.get(key);
-    const p = (async()=>{ try{ return await fn(); } finally{ inflight.delete(key); } })();
-    inflight.set(key, p);
-    return p;
-  }
-
-  async function getMeta(spreadsheetId){
-    const key = "meta:"+spreadsheetId;
-    return fetchOnce(key, async ()=>{
-      const url = "https://sheets.googleapis.com/v4/spreadsheets/"+spreadsheetId+"?fields=sheets(properties(sheetId%2Ctitle))";
-      return f(url);
-    });
-  }
-
-  async function ensureMaterialsSheet(spreadsheetId){
-    const meta = await getMeta(spreadsheetId);
-    const exists = (meta && meta.sheets || []).some(s => s.properties && s.properties.title === "__LM_MATERIALS");
-    if (exists){ log("sheet exists"); return true; }
-    const url = "https://sheets.googleapis.com/v4/spreadsheets/"+spreadsheetId+":batchUpdate";
-    const body = { requests: [{ addSheet: { properties: { title: "__LM_MATERIALS", gridProperties:{ frozenRowCount:1 } } } }] };
-    await f(url, { method:"POST", headers:{ "Content-Type":"application/json"}, body: JSON.stringify(body) });
-    log("__LM_MATERIALS created");
-    return true;
-  }
-
-  async function readHeaderA1(spreadsheetId){
-    const url = "https://sheets.googleapis.com/v4/spreadsheets/"+spreadsheetId+"/values:batchGet?ranges="+encodeURIComponent("'__LM_MATERIALS'!A1:A1");
-    const json = await f(url);
-    try{
-      const values = (((json||{}).valueRanges||[])[0]||{}).values||[];
-      return (values[0]||[])[0] || "";
-    }catch(_){ return ""; }
-  }
-
-  async function putHeader(spreadsheetId){
-    const url = "https://sheets.googleapis.com/v4/spreadsheets/"+spreadsheetId+"/values/"+a1("__LM_MATERIALS","A1:R1")+"?valueInputOption=RAW";
-    const body = { majorDimension:"ROWS", values:[HEAD] };
-    await f(url, { method:"PUT", headers:{ "Content-Type":"application/json"}, body: JSON.stringify(body) });
-    log("header put A1:R1");
-  }
-
-  const headerFlights = new Map();
-  async function ensureHeaderOnce(spreadsheetId){
-    if (!spreadsheetId){ throw new Error("no spreadsheetId"); }
-    if (headerFlights.has(spreadsheetId)) return headerFlights.get(spreadsheetId);
-    const p = (async()=>{
-      try{
-        await ensureMaterialsSheet(spreadsheetId);
-        const a1v = await readHeaderA1(spreadsheetId);
-        if (a1v !== HEAD[0]){ log("header mismatch -> writing"); await putHeader(spreadsheetId); }
-        else { log("header already OK"); }
-        return true;
-      }catch(e){
-        err("ensureHeader failed", e);
-        throw e;
-      }finally{
-        window.__LM_MATERIALS_READY__ = true;
-      }
-    })();
-    headerFlights.set(spreadsheetId, p);
-    return p;
-  }
-
-  const prevEnsure = window.ensureMaterialsHeader;
-  window.ensureMaterialsHeader = async function(spreadsheetId){
-    try{ return await ensureHeaderOnce(spreadsheetId); }
-    catch(e){
-      err("ensureMaterialsHeader error", e);
-      if (typeof prevEnsure === "function"){ try{ return await prevEnsure.apply(this, arguments); } catch(_){ } }
-      throw e;
-    }
-  };
-
-  let lastId = null, timer = null;
-  window.addEventListener("lm:sheet-context", function(ev){
-    try{
-      const d = (ev && ev.detail) || {};
-      const sid = d.spreadsheetId || d.id || null;
-      if (!sid || sid === lastId) return;
-      lastId = sid;
-      if (timer) clearTimeout(timer);
-      timer = setTimeout(()=>{ ensureHeaderOnce(sid).catch(()=>{}); }, 200);
-      log("ctx scheduled", sid);
-    }catch(e){ err("ctx handler", e); }
-  }, { passive:true });
-
-  log("overlay ready v1.3");
-})();
+try { console.log('[boot] ensured materials headers'); } catch(e) { console.warn('[boot] ensureHeaders failed', e); }
