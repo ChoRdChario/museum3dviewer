@@ -1,248 +1,133 @@
-/* LociMyu boot.esm.cdn.js (auth+glb minimal overlay) 2025-11-12
- * Goal: stable Google auth shim + GLB load wiring without touching existing modules.
- * - No syntax errors, no top-level await, broad try/catch guards.
- * - Non-invasive: only defines new globals if not already defined.
- */
+/* LociMyu boot — minimal auth+GLB wire (reliable) 2025-11-11 16:10:10 */
 (function(){
-  "use strict";
-  // ---------- tiny logger ----------
-  var TAG = "[LM-boot.min]";
-  function log(){ try{ console.log.apply(console, [TAG].concat([].slice.call(arguments))); }catch(_){ } }
-  function warn(){ try{ console.warn.apply(console, [TAG].concat([].slice.call(arguments))); }catch(_){ } }
-  function err(){ try{ console.error.apply(console, [TAG].concat([].slice.call(arguments))); }catch(_){ } }
+  'use strict';
 
-  // ---------- env/feature flags (optional) ----------
-  var FLAGS = (window.__LM_FEATURES__ = window.__LM_FEATURES__ || {});
-  if (typeof FLAGS.authShim === "undefined") FLAGS.authShim = true;
-  if (typeof FLAGS.glbLoadWire === "undefined") FLAGS.glbLoadWire = true;
+  const TAG = '[LM-boot.min]';
 
-  // ---------- util: parse query ----------
-  function parseQuery(){
-    var out = {};
-    try{
-      var q = (location.search||"").replace(/^\?/, "");
-      if (!q) return out;
-      q.split("&").forEach(function(kv){
-        if (!kv) return;
-        var p = kv.split("=");
-        var k = decodeURIComponent(p[0]||"");
-        var v = decodeURIComponent((p[1]||"").replace(/\+/g,"%20"));
-        if (k) out[k]=v;
-      });
+  // -------- tiny util --------
+  function log(){ try{ console.log(TAG, ...arguments); }catch(_){}} 
+  function warn(){ try{ console.warn(TAG, ...arguments); }catch(_){}} 
+  function qs(sel){ return document.querySelector(sel); }
+  function once(el, ev, fn){ el && el.addEventListener(ev, fn, {once:true}); }
+
+  // -------- client_id resolution (defensive & ordered) --------
+  function readMeta(name){
+    const m = document.querySelector(`meta[name="${name}"]`);
+    return m && m.content || '';
+  }
+  function readQuery(keys){
+    try{ const u = new URL(location.href); for(const k of keys){ const v=u.searchParams.get(k); if(v) return v; } }catch(_){}
+    return '';
+  }
+  function readScriptData(){
+    try{ const s=[...document.scripts].find(x=>/boot\.esm\.cdn\.js/.test(x.src)); 
+      if(s) return s.dataset['lmClientId'] || s.getAttribute('data-lm-client-id') || ''; 
     }catch(_){}
-    return out;
+    return '';
   }
 
-  // ---------- GIS (Google Identity Services) auth shim ----------
-  if (FLAGS.authShim){
-    (function(){
-      // quick config discovery
-      var cfg = window.__LM_CONFIG__ = window.__LM_CONFIG__ || {};
-      cfg.client_id = cfg.client_id || window.__LM_CLIENT_ID || (function(){
-        try{
-          var el = document.querySelector("[data-lm-client-id]");
-          if (el && el.getAttribute) return el.getAttribute("data-lm-client-id");
-        }catch(_){}
-        var q = parseQuery();
-        return q.client_id || "";
-      })();
-      cfg.scopes = cfg.scopes || [
-        "https://www.googleapis.com/auth/spreadsheets",
-        "https://www.googleapis.com/auth/drive.readonly"
-      ];
+  function resolveClientId(){
+    const cand = [
+      window.__LM_CLIENT_ID,
+      readQuery(['gis_client_id','client_id']),
+      readScriptData(),
+      window.GIS_CLIENT_ID,
+      readMeta('google-signin-client_id'),
+      window.__BOOT_BRIDGE__ && window.__BOOT_BRIDGE__.client_id
+    ].map(x => (x||'').trim()).filter(Boolean);
+    const id = cand[0] || ''; // first non-empty
+    if(!id) warn('signin failed: Missing required parameter client_id.');
+    return id;
+  }
 
-      // state
-      var token = null;
-      var tokenExp = 0;
-      var tokenClient = null;
-      var loadingGIS = false;
-      var loadedGIS = !!(window.google && window.google.accounts && window.google.accounts.oauth2);
+  // -------- Google Identity Services (token client) --------
+  let _tokenClient = null;
+  let _tok = null;
+  const DEFAULT_SCOPES = (window.LM_SCOPES || [
+    'https://www.googleapis.com/auth/spreadsheets',
+    'https://www.googleapis.com/auth/drive.readonly'
+  ]).join(' ');
 
-      function nowSec(){ return Math.floor(Date.now()/1000); }
+  function loadGIS(){
+    return new Promise((res, rej)=>{
+      if (window.google && window.google.accounts && window.google.accounts.oauth2) return res();
+      const s = document.createElement('script');
+      s.src = 'https://accounts.google.com/gsi/client';
+      s.async = true; s.defer = true;
+      s.onload = ()=>res();
+      s.onerror = ()=>rej(new Error('GIS load failed'));
+      document.head.appendChild(s);
+    });
+  }
 
-      function loadGIS(cb){
-        if (loadedGIS) return cb();
-        if (loadingGIS) { // poll until available
-          var t = setInterval(function(){
-            if (window.google && window.google.accounts && window.google.accounts.oauth2){
-              clearInterval(t);
-              loadedGIS = true;
-              cb();
-            }
-          }, 100);
-          return;
-        }
-        loadingGIS = true;
-        var s = document.createElement("script");
-        s.src = "https://accounts.google.com/gsi/client";
-        s.async = true; s.defer = true;
-        s.onload = function(){
-          loadedGIS = true;
-          cb();
-        };
-        s.onerror = function(){ warn("Failed to load GIS client"); cb(); };
-        document.head.appendChild(s);
+  async function ensureTokenClient(){
+    await loadGIS();
+    if (_tokenClient) return _tokenClient;
+    const client_id = resolveClientId();
+    if (!client_id) throw new Error('Missing client_id');
+
+    _tokenClient = google.accounts.oauth2.initTokenClient({
+      client_id,
+      scope: DEFAULT_SCOPES,
+      prompt: '',
+      callback: (resp)=>{ 
+        if(resp && resp.access_token){ _tok = resp.access_token; }
       }
+    });
+    log('auth shim ready');
+    return _tokenClient;
+  }
 
-      function ensureTokenClient(cb){
-        loadGIS(function(){
-          try{
-            if (!window.google || !window.google.accounts || !window.google.accounts.oauth2){
-              warn("GIS not available yet"); return cb(new Error("GIS not available"));
-            }
-            if (!tokenClient){
-              tokenClient = window.google.accounts.oauth2.initTokenClient({
-                client_id: cfg.client_id || "",
-                scope: cfg.scopes.join(" "),
-                callback: function(res){
-                  try{
-                    if (res && res.access_token){
-                      token = res.access_token;
-                      // expires_in is seconds from now
-                      var exp = nowSec() + (Number(res.expires_in||0) | 0) - 30;
-                      tokenExp = exp>0?exp:0;
-                      log("token ok");
-                    }else{
-                      warn("token response without access_token", res);
-                    }
-                  }catch(e){ err("token callback", e); }
-                }
-              });
-            }
-            cb();
-          }catch(e){ cb(e); }
+  // Expose: getAccessToken (popup-safe)
+  window.__lm_getAccessToken = async function(){
+    await ensureTokenClient();
+    return new Promise((resolve, reject)=>{
+      try{
+        _tokenClient.requestAccessToken({
+          prompt: '',
+          // when an access token already exists, GIS may refresh silently
+          // we still provide a callback via initTokenClient above
         });
-      }
+        // poll for token (simple, robust)
+        let t=0;
+        const iv = setInterval(()=>{
+          if (_tok) { clearInterval(iv); resolve(_tok); }
+          else if ((t+=100) > 5000) { clearInterval(iv); reject(new Error('token timeout')); }
+        }, 100);
+      }catch(e){ reject(e); }
+    });
+  };
 
-      // public: getAccessToken
-      window.__lm_getAccessToken = window.__lm_getAccessToken || function(cb){
-        try{
-          ensureTokenClient(function(initErr){
-            if (initErr){ return cb(initErr); }
-            var fresh = token && tokenExp && (tokenExp - nowSec() > 30);
-            if (fresh){ return cb(null, token); }
-            try{
-              tokenClient.requestAccessToken({ prompt: "" });
-              // Wait for callback to set token
-              var tries = 0;
-              var t = setInterval(function(){
-                tries++;
-                if (token){ clearInterval(t); return cb(null, token); }
-                if (tries > 100){ // ~10s
-                  clearInterval(t);
-                  cb(new Error("timeout getting token"));
-                }
-              }, 100);
-            }catch(e){
-              cb(e);
-            }
-          });
-        }catch(e){
-          cb(e);
-        }
-      };
+  // Expose: fetch wrapper with Bearer
+  window.__lm_fetchJSONAuth = async function(url, opt){
+    const token = await window.__lm_getAccessToken();
+    const o = Object.assign({}, opt||{});
+    o.headers = Object.assign({}, o.headers||{}, { 'Authorization': 'Bearer '+token });
+    const r = await fetch(url, o);
+    if (!r.ok) throw new Error('HTTP '+r.status+': '+url);
+    const ct = r.headers.get('content-type')||'';
+    return ct.includes('application/json') ? r.json() : r.text();
+  };
 
-      // public: auth-fetch wrapper
-      if (typeof window.__lm_fetchJSONAuth !== "function"){
-        window.__lm_fetchJSONAuth = function(url, opt){
-          opt = opt || {};
-          var headers = opt.headers ? Object.assign({}, opt.headers) : {};
-          function doFetch(bearer){
-            if (bearer){
-              headers.Authorization = "Bearer " + bearer;
-            }
-            var fOpt = Object.assign({}, opt, { headers: headers });
-            return fetch(url, fOpt).then(function(r){
-              if (!r.ok){
-                var e = new Error("HTTP "+r.status);
-                e.status = r.status;
-                e.response = r;
-                throw e;
-              }
-              var ct = r.headers.get("content-type")||"";
-              if (ct.indexOf("application/json")>=0) return r.json();
-              return r.text();
-            });
-          }
-          return new Promise(function(resolve, reject){
-            window.__lm_getAccessToken(function(err, tok){
-              if (err){ return reject(err); }
-              doFetch(tok).then(resolve).catch(function(e){
-                // one 401 retry
-                if (e && (e.status===401 || e.status===403)){
-                  token = null; tokenExp = 0;
-                  window.__lm_getAccessToken(function(err2, tok2){
-                    if (err2) return reject(err2);
-                    doFetch(tok2).then(resolve).catch(reject);
-                  });
-                }else{
-                  reject(e);
-                }
-              });
-            });
-          });
-        };
-      }
-
-      // wire sign-in button if present
-      function wireSignin(){
-        try{
-          var btn = document.getElementById("auth-signin");
-          if (!btn) return;
-          if (btn.__lm_wired__) return;
-          btn.__lm_wired__ = true;
-          btn.addEventListener("click", function(){
-            window.__lm_getAccessToken(function(e){
-              if (e){ return warn("signin failed:", e&&e.message); }
-              log("signin ok");
-            });
-          });
-        }catch(e){ warn("wireSignin", e); }
-      }
-      if (document.readyState === "loading"){
-        document.addEventListener("DOMContentLoaded", wireSignin, { once: true });
-      }else{
-        wireSignin();
-      }
-      log("auth shim ready");
-    })();
+  // -------- GLB loader wire (reuses existing UI) --------
+  function wireGLB(){
+    const input = qs('#glbUrl');
+    const btn = qs('#btnGlb');
+    if (!input || !btn) return log('glb wire skipped (no UI)');
+    btn.addEventListener('click', ()=>{
+      const url = String(input.value||'').trim();
+      if(!url) return;
+      const ev = new CustomEvent('lm:load-glb', { detail: { url } });
+      window.dispatchEvent(ev);
+      log('glb wire ready');
+    }, { once: true });
   }
 
-  // ---------- GLB load wiring ----------
-  if (FLAGS.glbLoadWire){
-    (function(){
-      function dispatchLoad(url){
-        try{
-          if (!url) return;
-          var ev = new CustomEvent("lm:load-glb", { detail: { url: String(url) } });
-          window.dispatchEvent(ev);
-          log("lm:load-glb dispatched", url);
-        }catch(e){ warn("dispatchLoad", e); }
-      }
+  // -------- boot --------
+  (function boot(){
+    wireGLB();
+    // Preload GIS in background; token will be requested on demand
+    loadGIS().then(()=>log('GIS loaded')).catch(()=>{});
+  })();
 
-      function wireGLB(){
-        try{
-          var input = document.getElementById("glbUrl");
-          var btn = document.getElementById("btnGlb");
-          if (btn && !btn.__lm_wired__){
-            btn.__lm_wired__ = true;
-            btn.addEventListener("click", function(){
-              var url = (input && input.value) || "";
-              dispatchLoad(url);
-            });
-          }
-          // auto from query ?glb=
-          var q = parseQuery();
-          if (q.glb){ dispatchLoad(q.glb); }
-        }catch(e){ warn("wireGLB", e); }
-      }
-
-      if (document.readyState === "loading"){
-        document.addEventListener("DOMContentLoaded", wireGLB, { once: true });
-      }else{
-        wireGLB();
-      }
-      log("glb wire ready");
-    })();
-  }
 })();
