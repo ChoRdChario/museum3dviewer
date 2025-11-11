@@ -1,11 +1,30 @@
-/*! sheet.ctx.bridge.js — gid-based context bridge
+/*! sheet.ctx.bridge.js — gid-based context bridge (no-module/UMD)
+ * Fix: removes ES module `export` and attaches APIs to `window` for classic <script> usage.
  * VERSION_TAG:V6_12_FOUNDATION_AUTH_CTX_MAT_HDR
  */
-export function startSheetContextPolling(getter, opt) {
-  if (!window.sheetCtxBridge) throw new Error("[sheet-ctx] boot not loaded");
-  window.sheetCtxBridge.start(getter, opt);
-}
-export function stopSheetContextPolling() {
-  if (!window.sheetCtxBridge) return;
-  window.sheetCtxBridge.stop();
-}
+(function(){
+  if (!window.sheetCtxBridge) {
+    console.warn("[sheet-ctx] boot not loaded; minimal stub will be created");
+    window.sheetCtxBridge = (function(){
+      let _timer=null,_last=null;
+      function _emit(ctx){ console.log("[ctx] set", ctx); window.dispatchEvent(new CustomEvent("lm:sheet-context",{detail:ctx})); }
+      function start(getter,opt){
+        const interval=(opt&&opt.intervalMs)||4000;
+        if(_timer) clearInterval(_timer);
+        try{ const ctx=getter&&getter(); if(ctx&&ctx.spreadsheetId){ _last=JSON.stringify(ctx); _emit(ctx);} }catch(e){}
+        _timer=setInterval(function(){
+          try{ const ctx=getter&&getter(); if(!(ctx&&ctx.spreadsheetId))return; const s=JSON.stringify(ctx); if(s!==_last){_last=s; _emit(ctx);} }catch(e){}
+        }, interval);
+      }
+      function stop(){ if(_timer) clearInterval(_timer); _timer=null; }
+      return { start, stop };
+    })();
+  }
+  window.startSheetContextPolling = function(getter,opt){
+    if(!window.sheetCtxBridge) throw new Error("[sheet-ctx] bridge missing");
+    window.sheetCtxBridge.start(getter,opt);
+  };
+  window.stopSheetContextPolling = function(){
+    if(window.sheetCtxBridge) window.sheetCtxBridge.stop();
+  };
+})();
