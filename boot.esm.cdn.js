@@ -1145,7 +1145,7 @@ onCanvasShiftPick(function(pos){
    - Provides gid-safe wrappers for values.get / values.append helpers when present
    - Non-destructive: only appends; guarded by __LM_SHEETS_HOTFIX_APPLIED flag
 */
-;(function(){
+(function(){
   if (window.__LM_SHEETS_HOTFIX_APPLIED__) return;
   window.__LM_SHEETS_HOTFIX_APPLIED__ = true;
 
@@ -1276,7 +1276,7 @@ onCanvasShiftPick(function(pos){
  * - Exclude internal sheets (__LM_*) from caption header writes
  * - Works alongside existing code; does not remove/replace prior logic
  * ========================================================================== */
-;(function(){
+(function(){
   const TAG = '[lm-overlay v1]';
 
   // ---- Safe auth fetch (reuse if present) ---------------------------------
@@ -1329,88 +1329,101 @@ onCanvasShiftPick(function(pos){
     return `'${String(title).replace(/'/g,"''")}'`;
   }
 
-  // ---- Ensure __LM_MATERIALS header (idempotent) ---------------------------
-  // [removed legacy ensureMaterialsHeader]
-      const title='__LM_MATERIALS';
-      const header = [[
-        'materialKey','matName','targetSheetGid','opacity','chromaEnable','chromaColor','chromaTolerance','chromaFeather','doubleSided','unlitLike',
-        'notes','metalness','emissiveHex','updatedAt','updatedBy','__rev','__debug','sheetGid'
-      ]];
-      // check existing A1
-      const urlGet = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values:batchGet?ranges=${encodeURIComponent(`'${title}'!A1:A1`)} `;
-      try{ await __lm_fetchJSONAuth(urlGet, { method:'GET' }); }catch(_){}
-      const urlPut = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(`'${title}'!A1:Q1`)}?valueInputOption=RAW`;
-      await __lm_fetchJSONAuth(urlPut, { method:'PUT', body:{ values: header, majorDimension:'ROWS' } });
-      console.log(TAG2, 'ok');
-    }catch(e){
-      console.warn(TAG2,'failed', e);
-    }
+/* =====================================================================================
+ * [LM Overlay] materials-header-guard v1.3  (safe replacement)
+ * Ensures '__LM_MATERIALS' sheet exists and A1:R1 header is written exactly once.
+ * - Correct range handling (encodeURIComponent + "!A1:R1")
+ * - Idempotent and single-flight per spreadsheetId
+ * - No top-level await; subscribes to lm:sheet-context
+ * ===================================================================================== */
+(function(){
+  try { if (window.__LM_OVERLAY_MAT_HEADER_V13__) return; } catch(_){}
+  window.__LM_OVERLAY_MAT_HEADER_V13__ = true;
+
+  const FLAG = "[materials.header.guard]";
+  const HEAD = [
+    "materialKey","opacity","chromaColor","chromaTolerance","chromaFeather",
+    "doubleSided","unlitLike","updatedAt","updatedBy","sheetGid","sheetTitle",
+    "meshName","matIndex","matName","version","notes","reserved1","reserved2"
+  ]; // 18 columns -> A..R
+
+  function a1(name, range){ return encodeURIComponent(String(name)) + "!" + range; }
+  function log(){ try{ console.log(FLAG, ...arguments); }catch(_){} }
+  function warn(){ try{ console.warn(FLAG, ...arguments); }catch(_){} }
+
+  const f = (typeof window.__lm_fetchJSONAuth === "function")
+    ? window.__lm_fetchJSONAuth
+    : (url,opt)=>fetch(url, Object.assign({headers:{"Content-Type":"application/json"}}, opt||{})).then(r=>r.ok?r.json():Promise.reject(new Error("HTTP "+r.status)));
+
+  const inflight = new Map();
+  function once(key, fn){
+    if (inflight.has(key)) return inflight.get(key);
+    const p = Promise.resolve().then(fn).finally(()=>inflight.delete(key));
+    inflight.set(key, p);
+    return p;
   }
 
-  // ---- Caption header guard (on create / switch) ---------------------------
-  const seenGids = new Set();
-  async function writeCaptionHeaderIfNeeded(spreadsheetId, gid){
-    if (!spreadsheetId || !Number.isFinite(gid) || seenGids.has(gid)) return;
-    try{
-      const meta = await lmGetSheetMeta(spreadsheetId);
-      const title = meta.get(gid);
-      if (!title) return;
-      if (String(title).startsWith('__LM_')) return; // internal skip
-      const cols = ['id','title','body','color','x','y','z','imageFileId','createdAt','updatedAt'];
-      const a1 = `${lmQuote(title)}!A1:J1`;
-      await lmPutHeader(spreadsheetId, a1, cols);
-      seenGids.add(gid);
-      try{ console.log('[lm-header-guard v1] header written for', title, '(gid', gid,')'); }catch(_){}
-    }catch(e){
-      try{ console.warn('[lm-header-guard v1] skip', e); }catch(_){}
-    }
+  async function meta(spreadsheetId){
+    const url = "https://sheets.googleapis.com/v4/spreadsheets/"+spreadsheetId+"?fields=sheets(properties(sheetId%2Ctitle))";
+    return once("meta:"+spreadsheetId, ()=>f(url));
   }
 
-  // ---- Event wiring --------------------------------------------------------
-  function getCtx(){
-    return (window.__LM_SHEET_CTX)||{};
+  async function ensureSheet(spreadsheetId){
+    const m = await meta(spreadsheetId);
+    const exists = (m && m.sheets || []).some(s => s.properties && s.properties.title === "__LM_MATERIALS");
+    if (exists) return;
+    const url = "https://sheets.googleapis.com/v4/spreadsheets/"+spreadsheetId+":batchUpdate";
+    const body = { requests:[{ addSheet:{ properties:{ title:"__LM_MATERIALS", gridProperties:{ frozenRowCount:1 } } } }] };
+    await f(url, { method:"POST", body: JSON.stringify(body) });
+    log("__LM_MATERIALS created");
   }
 
-  // When sheet context appears/changes, ensure materials header and caption header
-  function onCtx(e){
-    const d = (e && e.detail) || getCtx();
-    if (!d || !d.spreadsheetId) return;
-    ensureMaterialsHeader(d.spreadsheetId).catch(()=>{});
-    if (Number.isFinite(d.sheetGid)){
-      writeCaptionHeaderIfNeeded(d.spreadsheetId, d.sheetGid).catch(()=>{});
-    }
-  }
-  window.addEventListener('lm:sheet-context', onCtx);
-  window.addEventListener('lm:sheet-changed', onCtx);
-
-  // Also try once on DOM ready
-  if (document.readyState === 'complete' || document.readyState === 'interactive'){
-    setTimeout(()=>onCtx({detail:getCtx()}), 0);
-  } else {
-    window.addEventListener('DOMContentLoaded', ()=> setTimeout(()=>onCtx({detail:getCtx()}),0), { once:true });
+  async function ensureHeader(spreadsheetId){
+    // read A1
+    const getUrl = "https://sheets.googleapis.com/v4/spreadsheets/"+spreadsheetId+"/values:batchGet?ranges="+encodeURIComponent("'__LM_MATERIALS'!A1:A1");
+    const j = await f(getUrl);
+    const a1v = (((j||{}).valueRanges||[])[0]||{}).values;
+    const current = (a1v && a1v[0] && a1v[0][0]) || "";
+    if (current === HEAD[0]) { log("header already OK"); return; }
+    // write A1:R1
+    const putUrl = "https://sheets.googleapis.com/v4/spreadsheets/"+spreadsheetId+"/values/"+a1("__LM_MATERIALS","A1:R1")+"?valueInputOption=RAW";
+    const body = { values:[HEAD], majorDimension:"ROWS" };
+    await f(putUrl, { method:"PUT", body: JSON.stringify(body) });
+    log("header put A1:R1");
   }
 
-  // Observe Create: option appended to sheet selector → write header immediately
-  (function observeSelect(){
-    const sel = document.querySelector('#save-target-sheet, select[data-role="sheet-target"], select#sheet-target');
-    if (!sel) return;
-    const mo = new MutationObserver((muts)=>{
-      const ctx = getCtx();
-      // Try all options; write for any unseen gid
-      const opts = Array.from(sel.querySelectorAll('option'));
-      for(const o of opts){
-        const gid = Number(o && (o.dataset && o.dataset.gid || o.value));
-        if (Number.isFinite(gid)) writeCaptionHeaderIfNeeded(ctx.spreadsheetId, gid).catch(()=>{});
+  const flights = new Map();
+  function ensureMaterialsHeader(spreadsheetId){
+    if (!spreadsheetId) return Promise.reject(new Error("no spreadsheetId"));
+    if (flights.has(spreadsheetId)) return flights.get(spreadsheetId);
+    const p = (async()=>{
+      try{
+        await ensureSheet(spreadsheetId);
+        await ensureHeader(spreadsheetId);
+      } finally {
+        window.__LM_MATERIALS_READY__ = true;
       }
-    });
-    mo.observe(sel, { childList:true, subtree:true });
-  })();
+    })();
+    flights.set(spreadsheetId, p);
+    return p;
+  }
+  window.ensureMaterialsHeader = ensureMaterialsHeader;
 
-  try{ console.log(TAG, 'installed'); }catch(_){}
+  let lastId = null, t=null;
+  function onCtx(ev){
+    const d = (ev && ev.detail) || window.__LM_SHEET_CTX || {};
+    const sid = d && (d.spreadsheetId || d.id);
+    if (!sid || sid === lastId) return;
+    lastId = sid;
+    if (t) clearTimeout(t);
+    t = setTimeout(()=>{ ensureMaterialsHeader(sid).catch(()=>{}); }, 200);
+  }
+
+  window.addEventListener("lm:sheet-context", onCtx, { passive:true });
+  log("overlay ready");
 })();
-
 /* ===== LM Sheets & Materials Hardening Patch v1.6 (overlay, non-destructive) ===== */
-;(function(){
+(function(){
   const TAG='[lm-patch v1.6]';
 
   // ---- Minimal auth shim (idempotent) ----
@@ -1629,7 +1642,7 @@ window.addEventListener('lm:sheet-context', async (e)=>{
  * ======================================================================= */
 
 /* === helpers: A1 quoting/encoding ===================================== */
-;(function(){
+(function(){
   if (!window.__LM_A1__) {
     function buildA1Quoted(sheetName, a1Part){
       const escaped = String(sheetName).replace(/'/g, "''");
@@ -1643,7 +1656,7 @@ window.addEventListener('lm:sheet-context', async (e)=>{
 })();
 
 /* === minimal auth shim (idempotent) =================================== */
-;(function(){
+(function(){
   if (typeof window.__lm_fetchJSONAuth === 'function') return;
   const TAG='[lm-auth-shim v1]';
   function ensureToken(){
@@ -1679,7 +1692,7 @@ window.addEventListener('lm:sheet-context', async (e)=>{
 })();
 
 /* === ensure __LM_MATERIALS (sheet + header) ============================ */
-;(function(){
+(function(){
   const TAG='[lm-materials v1]';
   const HDR = ['materialKey','matName','targetSheetGid','opacity','chromaEnable','chromaColor','chromaTolerance','chromaFeather','doubleSided','unlitLike','roughness','metalness','emissiveHex','updatedAt','updatedBy','__rev','__debug','sheetGid'];
   // [removed legacy ensureMaterialsHeader]
@@ -1696,7 +1709,7 @@ window.addEventListener('lm:sheet-context', async (e)=>{
 })();
 
 /* === guard: block append to __LM_* ==================================== */
-;(function(){
+(function(){
   const TAG='[lm-guard v1]';
   ['appendValues','sheetsAppendRow'].forEach(fn=>{
     const g = window;
@@ -1716,7 +1729,7 @@ window.addEventListener('lm:sheet-context', async (e)=>{
 })();
 
 /* === caption header writer (robust) =================================== */
-;(function(){
+(function(){
   if (typeof window.lmWriteCaptionHeaderDirect === 'function') return;
   window.lmWriteCaptionHeaderDirect = async function(spreadsheetId, sheetTitle){
     try{
@@ -1737,7 +1750,7 @@ window.addEventListener('lm:sheet-context', async (e)=>{
 })();
 
 /* === gid→title cache & wrappers ====================================== */
-;(function(){
+(function(){
   const TAG='[lm-rename-guard v1]';
   const CACHE = Object.create(null); // { [spreadsheetId]: { [gid]: title } }
   async function refresh(spreadsheetId){
@@ -1805,7 +1818,7 @@ window.addEventListener('lm:sheet-context', async (e)=>{
 })();
 
 /* === dropdown filter: hide __LM_* ==================================== */
-;(function(){
+(function(){
   const TAG='[lm-dropdown-filter v1]';
   function hideInternalOptions(sel){
     if (!sel) return;
@@ -1844,7 +1857,7 @@ window.addEventListener('lm:sheet-context', async (e)=>{
 })();
 
 /* === re-dispatch sheet-context on glb load / DOM ready ================= */
-;(function(){
+(function(){
   function trigger(){
     try{
       if (window.__LM_SHEET_CTX && window.__LM_SHEET_CTX.spreadsheetId) {
@@ -1958,7 +1971,7 @@ window.addEventListener('lm:sheet-context', async (e)=>{
  * - Re-dispatch lm:sheet-context on DOM ready / lm:glb-loaded
  * NOTE: This patch ONLY appends functions and event handlers; it does not remove or replace existing logic.
  * ========================================================================== */
-;(function(){
+(function(){
   const TAG='[lm-patch v2.0]';
 
   /* ---------- helpers: A1 quoting/encoding -------------------------------- */
@@ -2000,7 +2013,7 @@ window.addEventListener('lm:sheet-context', async (e)=>{
   }
 
   /* ---------- ensure __LM_MATERIALS (sheet + header) ----------------------- */
-  ;(function(){
+  (function(){
     const HDR = ['materialKey','matName','targetSheetGid','opacity','chromaEnable','chromaColor','chromaTolerance','chromaFeather','doubleSided','unlitLike','roughness','metalness','emissiveHex','updatedAt','updatedBy','__rev','__debug','sheetGid'];
     // [removed legacy ensureMaterialsHeader]
     }
@@ -2017,7 +2030,7 @@ window.addEventListener('lm:sheet-context', async (e)=>{
   })();
 
   /* ---------- guard: block append to __LM_* -------------------------------- */
-  ;(function(){
+  (function(){
     const names = ['appendValues','sheetsAppendRow'];
     names.forEach((nm)=>{
       const g = window;
@@ -2054,7 +2067,7 @@ window.addEventListener('lm:sheet-context', async (e)=>{
   }
 
   /* ---------- gid→title cache & wrappers ---------------------------------- */
-  ;(function(){
+  (function(){
     const CACHE = Object.create(null); // { [spreadsheetId]: { [gid]: title } }
     async function refresh(spreadsheetId){
       const url = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}?fields=sheets(properties(sheetId,title))`;
@@ -2122,7 +2135,7 @@ window.addEventListener('lm:sheet-context', async (e)=>{
   })();
 
   /* ---------- dropdown: hide internal sheets ------------------------------- */
-  ;(function(){
+  (function(){
     const TAG2='[lm-dropdown-filter v1]';
     function hideInternalOptions(sel){
       if (!sel) return;
@@ -2161,7 +2174,7 @@ window.addEventListener('lm:sheet-context', async (e)=>{
   })();
 
   /* ---------- re-dispatch sheet-context on GLB/DOM ------------------------- */
-  ;(function(){
+  (function(){
     function trigger(){
       try{
         if (window.__LM_SHEET_CTX && window.__LM_SHEET_CTX.spreadsheetId) {
@@ -2188,7 +2201,7 @@ window.addEventListener('lm:sheet-context', async (e)=>{
  * ======================================================================= */
 
 /* === A1 helpers === */
-;(function(){
+(function(){
   if (!window.__LM_A1__) {
     function quote(title){ return `'${String(title).replace(/'/g,"''")}'`; }
     function build(sheet, part){ return `${quote(sheet)}!${part}`; }
@@ -2198,7 +2211,7 @@ window.addEventListener('lm:sheet-context', async (e)=>{
 })();
 
 /* === auth shim (idempotent) === */
-;(function(){
+(function(){
   if (typeof window.__lm_fetchJSONAuth === 'function') return;
   function token(){ if(typeof getAccessToken==='function'){ const t=getAccessToken(); if(t) return t; } throw new Error('token_missing'); }
   window.__lm_fetchJSONAuth = async (url, init)=>{
@@ -2217,7 +2230,7 @@ window.addEventListener('lm:sheet-context', async (e)=>{
 })();
 
 /* === gid→title cache === */
-;(function(){
+(function(){
   const CACHE = Object.create(null); // { [spreadsheetId]: { [gidStr]: title } }
   async function refresh(spreadsheetId){
     const url = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}?fields=sheets(properties(sheetId,title))`;
@@ -2234,7 +2247,7 @@ window.addEventListener('lm:sheet-context', async (e)=>{
 })();
 
 /* === __LM_MATERIALS ensure (PUT header only) & append guard === */
-;(function(){
+(function(){
   const HDR = ['materialKey','matName','targetSheetGid','opacity','chromaEnable','chromaColor','chromaTolerance','chromaFeather','doubleSided','unlitLike','roughness','metalness','emissiveHex','updatedAt','updatedBy','__rev','__debug','sheetGid'];
   // [removed overlay ensureMaterials]
     }catch(e){ console.warn('[overlay v1.9] ensureMaterials(create) note', e); }
@@ -2268,7 +2281,7 @@ window.addEventListener('lm:sheet-context', async (e)=>{
 })();
 
 /* === caption header writer (force A1:J1 on new/switch) === */
-;(function(){
+(function(){
   if (typeof window.lmWriteCaptionHeaderDirect === 'function') return;
   async function writeHeader(spreadsheetId, sheetTitle){
     try{
@@ -2302,7 +2315,7 @@ window.addEventListener('lm:sheet-context', async (e)=>{
 })();
 
 /* === Sheets values.* fetch interceptor (rename race fixer) ============== */
-;(function(){
+(function(){
   const TAG='[overlay v1.9 fetchwrap]';
   if (window.__LM_FETCH_WRAPPED__) return; window.__LM_FETCH_WRAPPED__ = true;
 
