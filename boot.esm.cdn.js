@@ -1,162 +1,181 @@
-/*
- * LociMyu Minimal Boot (Auth + Drive GLB resolver -> viewer button path)
- * 2025-11-12
+/* LociMyu boot.esm.cdn.js (minimal, robust client_id resolver)
+ * 2025-11-12 JST
+ * Scope:
+ *   - Resolve Google OAuth client_id from several fallbacks already present in the page
+ *   - Initialize GIS token client safely (with lazy script load if needed)
+ *   - Expose window.__lm_getAccessToken() for other modules
+ *   - Wire #auth-signin button to call __lm_getAccessToken()
+ * Notes:
+ *   - Keeps boot responsibilities minimal and defers app-specific logic to existing modules
  */
+
 (function(){
   const TAG = "[LM-boot.min]";
+  const log  = (...a)=>{ try{ console.log(TAG, ...a);}catch(_){} };
+  const warn = (...a)=>{ try{ console.warn(TAG, ...a);}catch(_){} };
+  const err  = (...a)=>{ try{ console.error(TAG, ...a);}catch(_){} };
 
-  const log  = (...a)=>{ try{ console.log(TAG, a.length===1?a[0]:a); }catch(_){} };
-  const warn = (...a)=>{ try{ console.warn(TAG, a.length===1?a[0]:a); }catch(_){} };
-  const err  = (...a)=>{ try{ console.error(TAG, a.length===1?a[0]:a); }catch(_){} };
+  // --- Client ID resolver ----------------------------------------------------
+  function readMeta(name){
+    const el = document.querySelector(`meta[name="${name}"]`);
+    return el && (el.getAttribute("content") || "").trim();
+  }
+  function readDataAttr(){
+    const el = document.querySelector("[data-lm-client-id]");
+    return el && (el.getAttribute("data-lm-client-id") || "").trim();
+  }
+  function readScriptData(){
+    const el = Array.from(document.scripts||[]).find(s => s.hasAttribute("data-client_id"));
+    return el && (el.getAttribute("data-client_id") || "").trim();
+  }
+  function readConfig(){
+    try{
+      if (window.LM_CONFIG && typeof window.LM_CONFIG.client_id === "string") return window.LM_CONFIG.client_id.trim();
+    }catch(_){}
+    try{
+      if (window.__LM_BOOT && typeof window.__LM_BOOT.clientId === "string") return window.__LM_BOOT.clientId.trim();
+    }catch(_){}
+    return "";
+  }
+  function resolveClientId(){
+    // 1) already set
+    if (typeof window.__LM_CLIENT_ID === "string" && window.__LM_CLIENT_ID) return window.__LM_CLIENT_ID;
+    // 2) common meta names
+    const c =
+      readMeta("google-signin-client_id") ||
+      readMeta("lm:client_id") ||
+      readMeta("google-oauth-client_id") ||
+      readDataAttr() ||
+      readScriptData() ||
+      readConfig() ||
+      "";
+    if (c) window.__LM_CLIENT_ID = c;
+    return c;
+  }
 
-  // -------- GIS auth shim (keeps existing setup; we don't change client_id resolution policy) --------
+  // --- GIS loader ------------------------------------------------------------
+  function ensureGIS(){
+    return new Promise((resolve, reject)=>{
+      if (window.google && window.google.accounts && window.google.accounts.oauth2){
+        log("GIS loaded");
+        return resolve();
+      }
+      const id = "gsi-client";
+      if (document.getElementById(id)){
+        // Wait until it becomes ready
+        let tries = 0;
+        const t = setInterval(()=>{
+          if (window.google?.accounts?.oauth2){ clearInterval(t); log("GIS loaded"); resolve(); }
+          else if (++tries > 100){ clearInterval(t); reject(new Error("GIS load timeout")); }
+        }, 50);
+        return;
+      }
+      const s = document.createElement("script");
+      s.src = "https://accounts.google.com/gsi/client";
+      s.async = true;
+      s.defer = true;
+      s.id = id;
+      s.onload = ()=>{ log("GIS loaded"); resolve(); };
+      s.onerror = ()=>reject(new Error("GIS load failed"));
+      document.head.appendChild(s);
+      log("injecting GIS...");
+    });
+  }
+
+  // --- Token client (lazy) ---------------------------------------------------
   let tokenClient = null;
-  let lastToken = null;
+  let inflight = null;
 
   async function ensureTokenClient(){
-    // client_id must come from existing page wiring (meta/script) into window.__LM_CLIENT_ID
-    const cid = window.__LM_CLIENT_ID || (window.__LM_CONFIG && window.__LM_CONFIG.client_id) || null;
+    const cid = resolveClientId();
     if (!cid) throw new Error("Missing client_id");
-
-    const init = window.google && window.google.accounts && window.google.accounts.oauth2 && window.google.accounts.oauth2.initTokenClient;
-    if (!init) throw new Error("GIS not loaded");
-
-    tokenClient = init({
-      client_id: cid,
-      scope: "https://www.googleapis.com/auth/drive.readonly https://www.googleapis.com/auth/spreadsheets",
-      callback: (resp) => {
-        if (resp && resp.access_token) {
-          lastToken = resp.access_token;
+    await ensureGIS();
+    if (!tokenClient){
+      tokenClient = window.google.accounts.oauth2.initTokenClient({
+        client_id: cid,
+        scope: "https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive.readonly",
+        callback: (resp)=>{
+          // callback is overridden per request; keep default for safety
+          if (resp && resp.access_token){ log("token received (default callback)"); }
         }
-      }
-    });
+      });
+    }
     return tokenClient;
   }
 
-  async function __lm_getAccessToken(){
+  // Public API: get access token (re-entrant safe)
+  window.__lm_getAccessToken = async function(){
     try{
-      if (!tokenClient) await ensureTokenClient();
-      return await new Promise((resolve, reject)=>{
-        tokenClient.callback = (resp)=>{
-          if (resp && resp.access_token){
-            lastToken = resp.access_token;
-            resolve(resp.access_token);
-          } else {
-            reject(new Error("no access_token"));
-          }
+      const tc = await ensureTokenClient();
+      if (inflight) return await inflight;
+      inflight = new Promise((resolve, reject)=>{
+        // Temporary per-call callback
+        const saved = tc.callback;
+        tc.callback = (resp)=>{
+          tc.callback = saved;
+          inflight = null;
+          if (resp && resp.access_token){ resolve(resp.access_token); }
+          else { reject(new Error("No access_token in response")); }
         };
         try{
-          tokenClient.requestAccessToken({ prompt: "" });
+          tc.requestAccessToken({prompt: ""});
         }catch(e){
-          // If promptless fails (no prior grant), retry with consent
-          try{
-            tokenClient.requestAccessToken({ prompt: "consent" });
-          }catch(e2){
-            reject(e2);
-          }
+          tc.callback = saved;
+          inflight = null;
+          reject(e);
         }
       });
+      return await inflight;
     }catch(e){
-      warn("signin failed:", e.message || e);
+      warn("signin failed:", e && (e.message || e));
+      err(e);
       throw e;
     }
-  }
-  window.__lm_getAccessToken = __lm_getAccessToken;
-  log("auth shim ready");
-
-  // -------- GLB resolver: Drive share URL -> alt=media -> blob URL --------
-  const driveIdFromShare = (u)=>{
-    try{
-      const m = String(u).match(/\/file\/d\/([^/]+)\//);
-      return m ? m[1] : null;
-    }catch(_){ return null; }
   };
 
-  async function driveFileToBlobUrl(shareUrl){
-    const fid = driveIdFromShare(shareUrl);
-    if (!fid) return null;
-    const tok = lastToken || await __lm_getAccessToken();
-    const url = `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fid)}?alt=media&supportsAllDrives=true`;
-    const res = await fetch(url, { headers: { "Authorization": `Bearer ${tok}` }});
-    if (!res.ok) throw new Error(`Drive fetch ${res.status}`);
-    const blob = await res.blob();
-    const bUrl = URL.createObjectURL(blob);
-    return bUrl;
-  }
-
-  // ---- Wire UI: turn any input (Enter) / button click into "resolve -> fill -> click Load" flow ----
-  function getUI(){
-    const urlInput = document.querySelector("#glbUrl");
-    const btnLoad  = document.querySelector("#btnGlb");
-    return { urlInput, btnLoad };
-  }
-
-  async function resolveAndTrigger(url){
-    try{
-      if (!url) return;
-      const isDrive = /https?:\/\/drive\.google\.com\/file\/d\//.test(url);
-      if (!isDrive) {
-        // Non-Drive: just copy the url into input and click load to use existing path
-        const {urlInput, btnLoad} = getUI();
-        if (urlInput) urlInput.value = url;
-        if (btnLoad)  btnLoad.click();
-        log(["glb passthrough", url]);
-        return;
-      }
-      const blobUrl = await driveFileToBlobUrl(url);
-      const {urlInput, btnLoad} = getUI();
-      if (!urlInput || !btnLoad) throw new Error("viewer UI not ready");
-      urlInput.value = blobUrl;
-      btnLoad.click();
-      log(["glb resolved -> blob:", blobUrl]);
-    }catch(e){
-      err(["glb resolve failed", e && (e.stack || e.message || String(e))]);
-    }
-  }
-
-  // Existing UI hooks
-  function wireUI(){
-    const {urlInput, btnLoad} = getUI();
-    if (btnLoad && !btnLoad.__lm_wired){
-      btnLoad.addEventListener("click", (ev)=>{
-        const {urlInput} = getUI();
-        const u = urlInput && urlInput.value || "";
-        // If this click is user-driven, resolve path first, then let our code re-click
-        if (/drive\.google\.com\/file\/d\//.test(u)){
-          ev.preventDefault();
-          ev.stopImmediatePropagation();
-          resolveAndTrigger(u);
-        }
-      }, true); // capture to intercept before site handler
-      btnLoad.__lm_wired = true;
-      log(["wired #btnGlb"]);
-    }
-    if (urlInput && !urlInput.__lm_wired){
-      urlInput.addEventListener("keydown", (e)=>{
-        if (e.key === "Enter"){
-          e.preventDefault();
-          e.stopImmediatePropagation();
-          resolveAndTrigger(urlInput.value);
-        }
-      }, true);
-      urlInput.__lm_wired = true;
-      log(["wired #glbUrl[Enter]"]);
-    }
-    // auth button stays as original behavior; only ensure we expose token getter
+  // --- Wire UI ---------------------------------------------------------------
+  function wireButtons(){
     const btnSignin = document.querySelector("#auth-signin");
     if (btnSignin && !btnSignin.__lm_wired){
-      btnSignin.addEventListener("click", async ()=>{
-        try{ await __lm_getAccessToken(); log(["signin ok"]); }
-        catch(e){ err(e); }
-      }, {capture:false});
+      btnSignin.addEventListener("click", async (ev)=>{
+        try{
+          await window.__lm_getAccessToken();
+          log("signin ok");
+        }catch(e){
+          // already logged
+        }
+      }, {capture:true});
       btnSignin.__lm_wired = true;
-      log(["wired #auth-signin"]);
+      log("wired #auth-signin");
+    }
+
+    const btnGlb = document.querySelector("#btnGlb");
+    if (btnGlb && !btnGlb.__lm_wired){
+      // noop; existing app logic will handle click
+      btnGlb.__lm_wired = true;
+      log("wired #btnGlb");
+    }
+
+    const inpUrl = document.querySelector("#glbUrl");
+    if (inpUrl && !inpUrl.__lm_wired){
+      inpUrl.addEventListener("keydown", (e)=>{
+        if (e.key === "Enter"){
+          const b = document.querySelector("#btnGlb");
+          if (b) b.click();
+        }
+      }, {capture:true});
+      inpUrl.__lm_wired = true;
+      log("wired #glbUrl[Enter]");
     }
   }
-  wireUI();
-  log(["boot safe stub ready"]);
 
-  // In case UI appears late
-  const mo = new MutationObserver(()=>wireUI());
+  // Try to read client_id early and also on DOM changes
+  try{
+    resolveClientId();
+  }catch(_){}
+  wireButtons();
+  const mo = new MutationObserver(()=>{ resolveClientId(); wireButtons(); });
   mo.observe(document.documentElement, {subtree:true, childList:true});
+
+  log("auth shim ready");
 })();
