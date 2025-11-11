@@ -1,293 +1,195 @@
-/* ===================================================================
- * LociMyu boot: minimal auth + button wire (2025-11-12, r2)
- * - Resolves client_id from multiple sources (meta, script#g_id_onload, window.__LM_CONFIG)
- * - Waits dynamically if client_id not yet present (MutationObserver + timeout)
- * - Exposes window.__lm_getAccessToken() and window.__lm_signinNow()
- * - Wires #auth-signin click (idempotent)
- * - Wires #btnGlb and #glbUrl[Enter] to dispatch 'lm:glb-load' with {url}
- * =================================================================== */
+/* LociMyu boot.esm.cdn.js  (GLB normalize focus) 2025-11-12
+ * - Keeps minimal auth shim (window.__lm_getAccessToken)
+ * - Rewires GLB button/Enter to use __lm_requestGlbLoad(url)
+ * - __lm_requestGlbLoad resolves Drive/GitHub links to direct/Blob URLs
+ * - Emits a single normalized event:  window.dispatchEvent(new CustomEvent('lm:glb-load',{detail:{url}}))
+ * - Avoids duplicate signals & keeps compatibility with existing listeners
+ */
+
 (function(){
-  'use strict';
-  var TAG = "[LM-boot.min]";
-  function log(){ try{ console.log(TAG, [].slice.call(arguments)); }catch(_){ } }
-  function warn(){ try{ console.warn(TAG, [].slice.call(arguments)); }catch(_){ } }
-  function onReady(fn){ if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", fn, {once:true}); else fn(); }
+  const TAG = "[LM-boot.min]";
 
-  function readClientIdOnce(){
-    try{
-      if (window.__LM_CLIENT_ID) return window.__LM_CLIENT_ID;
-      var m1 = document.querySelector('meta[name="google-oauth-client_id"]');
-      var m2 = document.querySelector('meta[name="google-signin-client_id"]');
-      var s1 = document.querySelector('#g_id_onload');
-      var val = null;
-      if (m1 && m1.getAttribute) val = m1.getAttribute('content');
-      if (!val && m2 && m2.getAttribute) val = m2.getAttribute('content');
-      if (!val && s1 && s1.getAttribute) val = s1.getAttribute('data-client_id');
-      if (!val && window.__LM_CONFIG && window.__LM_CONFIG.client_id) val = window.__LM_CONFIG.client_id;
-      if (val) window.__LM_CLIENT_ID = val;
-      return val || null;
-    }catch(e){ return null; }
-  }
+  // -------- tiny console helpers
+  const log  = (...a)=>{ try{console.log(TAG, ...a);}catch(_){}};
+  const warn = (...a)=>{ try{console.warn(TAG, ...a);}catch(_){}};
+  const err  = (...a)=>{ try{console.error(TAG, ...a);}catch(_){}};
 
-  // Wait up to ~4s for client_id to appear via DOM or config
-  function waitForClientId(timeoutMs){
-    timeoutMs = (typeof timeoutMs === 'number') ? timeoutMs : 4000;
-    return new Promise(function(resolve, reject){
-      var existing = readClientIdOnce();
-      if (existing) return resolve(existing);
-
-      var done = false;
-      function finish(ok, val){
-        if (done) return;
-        done = true;
-        try{ mo.disconnect(); }catch(_){}
-        if (ok) { window.__LM_CLIENT_ID = val; resolve(val); }
-        else reject(new Error("Missing client_id"));
+  // -------- wait for Google Identity Services script (if present)
+  function ensureGisLoaded(){
+    return new Promise((resolve)=>{
+      if (window.google?.accounts?.oauth2) return resolve(true);
+      const s = document.querySelector('script[src*="accounts.google.com/gsi/client"]');
+      if (s && (s.dataset.loaded==="1" || s.dataset.loaded===true)) return resolve(true);
+      if (s){
+        s.addEventListener('load', ()=>{ s.dataset.loaded="1"; resolve(true); }, {once:true});
+        return;
       }
+      // optional load if not present
+      const sc = document.createElement('script');
+      sc.src = "https://accounts.google.com/gsi/client";
+      sc.async = true; sc.defer = true;
+      sc.onload = ()=>{ sc.dataset.loaded="1"; resolve(true); };
+      sc.onerror = ()=> resolve(false);
+      document.head.appendChild(sc);
+    }).then(()=>{ log("GIS loaded"); return true; });
+  }
 
-      var mo = new MutationObserver(function(){
-        var cid = readClientIdOnce();
-        if (cid) finish(true, cid);
+  // -------- client_id resolver (robust, non-blocking)
+  async function waitForClientId(timeoutMs=4000){
+    const t0 = Date.now();
+    const pick = ()=>{
+      const m1 = document.querySelector('meta[name="google-oauth-client_id"]')?.content;
+      if (m1) return m1;
+      const m2 = document.querySelector('meta[name="google-signin-client_id"]')?.content;
+      if (m2) return m2;
+      const g = document.querySelector('#g_id_onload')?.getAttribute('data-client_id');
+      if (g) return g;
+      const c = (window.__LM_CONFIG && window.__LM_CONFIG.client_id) ? window.__LM_CONFIG.client_id : null;
+      if (c) return c;
+      return null;
+    };
+    let cid = pick();
+    if (cid) return cid;
+    // observe for late injection
+    return await new Promise((resolve)=>{
+      const mo = new MutationObserver(()=>{
+        const got = pick();
+        if (got){ mo.disconnect(); resolve(got); }
+        else if (Date.now()-t0 > timeoutMs){ mo.disconnect(); resolve(null); }
       });
-      try { mo.observe(document.documentElement, {subtree:true, childList:true, attributes:true, attributeFilter:['content','data-client_id']}); } catch(_){}
-
-      // Also poll a few times (covers late window.__LM_CONFIG assignment)
-      var tries = Math.max(1, Math.floor(timeoutMs / 100));
-      var i = 0;
-      var iv = setInterval(function(){
-        var cid = readClientIdOnce();
-        if (cid){ clearInterval(iv); finish(true, cid); }
-        else if (++i >= tries){ clearInterval(iv); finish(false); }
-      }, 100);
+      mo.observe(document.documentElement, {childList:true, subtree:true});
+      setTimeout(()=>{ const got=pick(); if (!got) resolve(null); else resolve(got); }, Math.min(600, timeoutMs));
+      setTimeout(()=>{ mo.disconnect(); resolve(pick()); }, timeoutMs);
     });
   }
 
-  // Lazy-load GIS if not present
-  function ensureGIS(){
-    return new Promise(function(resolve){
-      if (window.google && window.google.accounts && window.google.accounts.oauth2){ return resolve(true); }
-      var s = document.createElement("script");
-      s.src = "https://accounts.google.com/gsi/client";
-      s.async = true;
-      s.onload = function(){ log("GIS loaded"); resolve(true); };
-      s.onerror = function(){ warn("GIS load failed"); resolve(false); };
-      (document.head||document.documentElement).appendChild(s);
-    });
-  }
-
-  var _tokenClient = null;
+  // -------- minimal auth shim
+  let _tokenClient=null, _clientId=null;
   async function ensureTokenClient(){
-    var cid = await waitForClientId(4000);
-    await ensureGIS();
-    if (_tokenClient) return _tokenClient;
-    if (!(window.google && google.accounts && google.accounts.oauth2 && google.accounts.oauth2.initTokenClient)){
-      throw new Error("GIS not ready");
+    await ensureGisLoaded();
+    if (!_clientId){
+      _clientId = await waitForClientId();
+      if (!_clientId) throw new Error("Missing client_id");
     }
-    _tokenClient = google.accounts.oauth2.initTokenClient({
-      client_id: cid,
-      scope: "https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive.readonly",
-      callback: function(){}
+    if (_tokenClient) return _tokenClient;
+    if (!window.google?.accounts?.oauth2) throw new Error("GIS not available");
+    _tokenClient = window.google.accounts.oauth2.initTokenClient({
+      client_id: _clientId,
+      scope: "https://www.googleapis.com/auth/drive.readonly https://www.googleapis.com/auth/spreadsheets",
+      callback: ()=>{},
     });
     return _tokenClient;
   }
 
-  // Public: get access token string
   window.__lm_getAccessToken = async function(){
-    var tc = await ensureTokenClient();
-    return new Promise(function(resolve, reject){
-      try{
-        tc.callback = function(resp){
-          if (resp && resp.access_token) return resolve(resp.access_token);
-          if (resp && resp.error) return reject(new Error(resp.error));
-          return reject(new Error("no token"));
-        };
-        tc.requestAccessToken({ prompt: "" });
-      }catch(e){ reject(e); }
-    });
+    try{
+      const tc = await ensureTokenClient();
+      return await new Promise((resolve, reject)=>{
+        try{
+          tc.callback = (resp)=>{
+            if (resp && resp.access_token) return resolve(resp.access_token);
+            reject(new Error("no token"));
+          };
+          tc.requestAccessToken({prompt:""});
+        }catch(e){ reject(e); }
+      });
+    }catch(e){
+      warn("signin failed:", e.message||e);
+      throw e;
+    }
+  };
+  log("auth shim ready");
+
+  // -------- GLB URL normalizer
+  function isDriveView(u){ return /https?:\/\/drive\.google\.com\/file\/d\/([^/]+)\//.test(u); }
+  function extractDriveId(u){ const m = u.match(/https?:\/\/drive\.google\.com\/file\/d\/([^/]+)\//); return m?m[1]:null; }
+  function isGithubBlob(u){ return /https?:\/\/github\.com\/[^/]+\/[^/]+\/blob\//.test(u); }
+
+  function toGithubRaw(u){
+    // https://github.com/user/repo/blob/branch/path/to.glb
+    // -> https://raw.githubusercontent.com/user/repo/branch/path/to.glb
+    try{
+      const m = u.match(/^https?:\/\/github\.com\/([^/]+)\/([^/]+)\/blob\/([^/]+)\/(.+)$/);
+      if (!m) return u;
+      const [,user,repo,branch,rest] = m;
+      return `https://raw.githubusercontent.com/${user}/${repo}/${branch}/${rest}`;
+    }catch(_){ return u; }
+  }
+
+  async function driveToBlobUrl(u){
+    const id = extractDriveId(u);
+    if (!id) return u;
+    let token = null;
+    try{ token = await window.__lm_getAccessToken(); }catch(_){}
+    // Prefer token fetch to avoid uc confirmation/cookies
+    if (token){
+      const api = `https://www.googleapis.com/drive/v3/files/${id}?alt=media`;
+      const res = await fetch(api, { headers: { Authorization: `Bearer ${token}` } });
+      if (!res.ok) throw new Error(`Drive alt=media ${res.status}`);
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      return url;
+    }
+    // Fallback to uc?export=download&id=
+    return `https://drive.google.com/uc?export=download&id=${id}`;
+  }
+
+  async function normalizeGlbUrl(u){
+    if (!u) throw new Error("no url");
+    if (isDriveView(u)) return await driveToBlobUrl(u);
+    if (isGithubBlob(u)) return toGithubRaw(u);
+    // Google Drive "open?id="
+    if (/drive\.google\.com\/open\?id=/.test(u)){
+      const id = (new URL(u)).searchParams.get("id");
+      if (id) return await driveToBlobUrl(`https://drive.google.com/file/d/${id}/view`);
+    }
+    return u;
+  }
+
+  // public API: resolve + emit a single normalized event
+  let _glbBusy = false;
+  window.__lm_requestGlbLoad = async function(inputUrl){
+    if (!inputUrl) return warn("no glb url");
+    if (_glbBusy){ warn("glb busy; dropping"); return; }
+    _glbBusy = true;
+    try{
+      const url = await normalizeGlbUrl(String(inputUrl).trim());
+      log("glb resolved", url.slice(0,120));
+      // emit ONE canonical event; consumers listen to this
+      window.dispatchEvent(new CustomEvent("lm:glb-load", { detail: { url } }));
+    }catch(e){
+      err("glb normalize error", e);
+      window.dispatchEvent(new CustomEvent("lm:glb-error", { detail: { message: String(e?.message||e) } }));
+    }finally{ _glbBusy = false; }
   };
 
-  // Manual trigger helper (for debugging)
-  window.__lm_signinNow = function(){ return window.__lm_getAccessToken().then(function(){ log("signin ok"); }).catch(function(e){ warn("signin failed:", e && e.message || e); }); };
-
-  // Wire Sign in button
-  function wireSigninBtn(root){
-    var btn = (root||document).querySelector && (root||document).querySelector("#auth-signin");
-    if (!btn || btn.__lm_wired) return;
-    btn.__lm_wired = true;
-    btn.addEventListener("click", function(){
-      window.__lm_signinNow().then(function(){
-        try{ btn.textContent = "Signed in"; btn.disabled = true; }catch(_){}
-      });
-    }, false);
-  }
-
-  // Wire GLB input/button to dispatch a signal
-  function wireGlbControls(root){
-    var r = root||document;
-    var btn = r.querySelector && r.querySelector("#btnGlb");
-    var inp = r.querySelector && r.querySelector("#glbUrl");
+  // ---- wire UI
+  function wireGlbUI(){
+    const btn = document.querySelector("#btnGlb");
+    const inp = document.querySelector("#glbUrl");
     if (btn && !btn.__lm_wired){
+      btn.addEventListener("click", ()=> window.__lm_requestGlbLoad(inp?.value||""));
       btn.__lm_wired = true;
-      btn.addEventListener("click", function(){
-        try{
-          var url = (inp && inp.value) || "";
-          if (!url) return;
-          window.dispatchEvent(new CustomEvent("lm:glb-load", { detail: { url: url } }));
-          log("glb signal", url);
-        }catch(e){ warn("glb wire error", e); }
-      });
+      log("wired #btnGlb");
     }
     if (inp && !inp.__lm_wired){
+      inp.addEventListener("keydown", (e)=>{
+        if (e.key==="Enter"){ e.preventDefault(); window.__lm_requestGlbLoad(inp.value||""); }
+      });
       inp.__lm_wired = true;
-      inp.addEventListener("keydown", function(ev){
-        if (ev.key === "Enter"){
-          try{
-            var url = inp.value || "";
-            if (!url) return;
-            window.dispatchEvent(new CustomEvent("lm:glb-load", { detail: { url: url } }));
-            log("glb signal (enter)", url);
-          }catch(e){ warn("glb wire error", e); }
-        }
-      });
+      log("wired #glbUrl[Enter]");
     }
   }
+  wireGlbUI();
+  const mo = new MutationObserver(()=> wireGlbUI());
+  mo.observe(document.documentElement, {subtree:true, childList:true});
 
-  onReady(function(){ wireSigninBtn(document); wireGlbControls(document); });
-  try{
-    var mo = new MutationObserver(function(muts){
-      for (var i=0;i<muts.length;i++){
-        var m = muts[i];
-        for (var j=0;j<(m.addedNodes||[]).length;j++){
-          var n = m.addedNodes[j];
-          if (n && n.nodeType === 1){ wireSigninBtn(n); wireGlbControls(n); }
-        }
-      }
-    });
-    mo.observe(document.documentElement, {childList:true, subtree:true});
-  }catch(_){}
+  // ---- optional: minimal visual feedback to catch pipeline issues
+  window.addEventListener("lm:glb-load", (ev)=>{
+    const u = ev?.detail?.url || "";
+    log("glb dispatch", u.slice(0,120));
+  });
 
-  // Minimal fetch shim (can be replaced later)
-  if (typeof window.__lm_fetchJSONAuth !== "function"){
-    window.__lm_fetchJSONAuth = async function(url,opt){
-      var tok = await window.__lm_getAccessToken();
-      var hdrs = Object.assign({}, (opt&&opt.headers)||{}, { "Authorization": "Bearer "+tok });
-      var res = await fetch(url, Object.assign({}, opt||{}, { headers: hdrs }));
-      if (!res.ok) throw new Error("HTTP "+res.status);
-      return res.json();
-    };
-    log("auth shim ready");
-  }
-
-  // Notify that auth bootstrap is ready
-  try{ window.dispatchEvent(new CustomEvent("lm:boot-auth-ready")); }catch(_){}
-})();
-
-// -------------------------------------------------------------------
-// boot.esm.cdn.js — SAFE MINIMAL BOOT (2025-11-12 r2)
-//  - Ensures __LM_MATERIALS sheet + header (idempotent)
-//  - Listens to `lm:sheet-context` and runs once per spreadsheetId
-//  - No top-level await / imports; ES5-compatible
-// -------------------------------------------------------------------
-;(function(){
-  'use strict';
-  try { console.log('[LociMyu ESM/CDN] boot safe stub loaded'); } catch(_){}
-
-  if (typeof window.__lm_fetchJSONAuth !== 'function') {
-    window.__lm_fetchJSONAuth = function(url, opt){
-      return fetch(url, opt).then(function(r){
-        if (r.ok) return r.json();
-        throw new Error('HTTP ' + r.status);
-      });
-    };
-    try { console.log('[boot.safe] __lm_fetchJSONAuth fallback installed'); } catch(_){}
-  }
-
-  var HEAD = [
-    "materialKey","opacity","chromaColor","chromaTolerance","chromaFeather",
-    "doubleSided","unlitLike","updatedAt","updatedBy","sheetGid","sheetTitle",
-    "meshName","matIndex","matName","version","notes","reserved1","reserved2"
-  ];
-
-  function a1(name, range){ return encodeURIComponent(String(name)) + '!' + range; }
-  function f(url, opt){ return window.__lm_fetchJSONAuth(url, opt); }
-
-  var inflight = new Map();
-  var ensuredIds = new Set();
-
-  function fetchOnce(key, fn){
-    if (inflight.has(key)) return inflight.get(key);
-    var p = Promise.resolve().then(fn).finally(function(){ inflight.delete(key); });
-    inflight.set(key, p);
-    return p;
-  }
-
-  function ensureSheet(spreadsheetId){
-    return fetchOnce('meta:'+spreadsheetId, function(){
-      var url = 'https://sheets.googleapis.com/v4/spreadsheets/'+spreadsheetId+'?fields=sheets(properties(sheetId%2Ctitle))';
-      return f(url).then(function(meta){
-        var exists = !!(((meta||{}).sheets||[]).some(function(s){ return s && s.properties && s.properties.title === '__LM_MATERIALS'; }));
-        if (exists) return true;
-        var u = 'https://sheets.googleapis.com/v4/spreadsheets/'+spreadsheetId+':batchUpdate';
-        var body = { requests: [ { addSheet: { properties: { title:'__LM_MATERIALS', gridProperties:{ frozenRowCount:1 } } } } ] };
-        return f(u, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) })
-          .then(function(){ try{ console.log('[boot.safe] __LM_MATERIALS created'); }catch(_){}; return true; });
-      });
-    });
-  }
-
-  function readHeaderA1(spreadsheetId){
-    var url = 'https://sheets.googleapis.com/v4/spreadsheets/'+spreadsheetId+'/values:batchGet?ranges='+encodeURIComponent("'__LM_MATERIALS'!A1:A1");
-    return f(url).then(function(json){
-      try {
-        var values = (((json||{}).valueRanges||[])[0]||{}).values||[];
-        return (values[0]||[])[0] || '';
-      } catch(_){ return ''; }
-    });
-  }
-
-  function putHeader(spreadsheetId){
-    var url = 'https://sheets.googleapis.com/v4/spreadsheets/'+spreadsheetId+'/values/'+a1('__LM_MATERIALS','A1:R1')+'?valueInputOption=RAW';
-    var body = { values: [ HEAD ] };
-    return f(url, { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) })
-      .then(function(){ try{ console.log('[boot.safe] header put A1:R1'); }catch(_){}; });
-  }
-
-  function ensureMaterialsHeader(spreadsheetId){
-    if (!spreadsheetId) return Promise.resolve(false);
-    if (ensuredIds.has(spreadsheetId)) return Promise.resolve(true);
-    return fetchOnce('ensure:'+spreadsheetId, function(){
-      return ensureSheet(spreadsheetId)
-        .then(function(){ return readHeaderA1(spreadsheetId); })
-        .then(function(a1v){ if (a1v !== HEAD[0]) return putHeader(spreadsheetId); })
-        .then(function(){
-          ensuredIds.add(spreadsheetId);
-          window.__LM_MATERIALS_READY__ = true;
-          return true;
-        })
-        .catch(function(err){
-          try { console.warn('[boot.safe] ensureMaterialsHeader failed', err); } catch(_){}
-          throw err;
-        });
-    });
-  }
-
-  if (typeof window.ensureMaterialsHeader !== 'function') {
-    window.ensureMaterialsHeader = ensureMaterialsHeader;
-  }
-
-  var lastCtx = null;
-  window.addEventListener('lm:sheet-context', function(ev){
-    try {
-      var d = (ev && ev.detail) || ev || {};
-      var sid = d.spreadsheetId || d.id || null;
-      if (!sid || sid === lastCtx) return;
-      lastCtx = sid;
-      setTimeout(function(){ ensureMaterialsHeader(sid); }, 200);
-      try { console.log('[boot.safe] ctx scheduled', sid); } catch(_){}
-    } catch(e){
-      try { console.warn('[boot.safe] ctx handler', e); } catch(_){}
-    }
-  }, { passive: true });
-
-  try { console.log('[LociMyu ESM/CDN] boot safe stub ready'); } catch(_){}
+  // keep stubs for compatibility with earlier logs
+  log("boot safe stub ready");
 })();
