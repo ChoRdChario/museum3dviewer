@@ -1,3 +1,116 @@
+/* ===================================================================
+ * LociMyu boot: minimal auth + button wire (2025-11-12)
+ * - Reads client_id from <meta name="google-oauth-client_id"> or window.__LM_CONFIG.client_id
+ * - Exposes window.__lm_getAccessToken()
+ * - Wires #auth-signin click (capture) to request token
+ * =================================================================== */
+(function(){
+  const TAG = "[LM-boot.min]";
+  function log(){ try{ console.log(TAG, ...arguments);}catch(_){ } }
+  function warn(){ try{ console.warn(TAG, ...arguments);}catch(_){ } }
+  function onReady(fn){ if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", fn, {once:true}); else fn(); }
+
+  // resolve client_id once
+  function resolveClientId(){
+    if (window.__LM_CLIENT_ID) return window.__LM_CLIENT_ID;
+    try{
+      const m1 = document.querySelector('meta[name="google-oauth-client_id"]');
+      const m2 = document.querySelector('meta[name="google-signin-client_id"]');
+      const val = (m1 && m1.getAttribute("content")) || (m2 && m2.getAttribute("content")) ||
+                  (window.__LM_CONFIG && window.__LM_CONFIG.client_id) || null;
+      if (val) window.__LM_CLIENT_ID = val;
+      return val;
+    }catch(e){ warn("resolveClientId failed", e); return null; }
+  }
+
+  // lazy-load GIS if not present
+  function ensureGIS(){
+    return new Promise((resolve)=>{
+      if (window.google && window.google.accounts && window.google.accounts.oauth2){ return resolve(true); }
+      const s = document.createElement("script");
+      s.src = "https://accounts.google.com/gsi/client";
+      s.async = true;
+      s.onload = ()=>{ log("GIS loaded"); resolve(true); };
+      s.onerror = ()=>{ warn("GIS load failed"); resolve(false); };
+      (document.head||document.documentElement).appendChild(s);
+    });
+  }
+
+  let _tokenClient = null;
+  async function ensureTokenClient(){
+    const cid = resolveClientId();
+    if (!cid) { throw new Error("Missing client_id"); }
+    await ensureGIS();
+    if (_tokenClient) return _tokenClient;
+    if (!(google && google.accounts && google.accounts.oauth2 && google.accounts.oauth2.initTokenClient)){
+      throw new Error("GIS not ready");
+    }
+    _tokenClient = google.accounts.oauth2.initTokenClient({
+      client_id: cid,
+      scope: "https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive.readonly",
+      callback: (resp)=>{ /* no-op here; handled per request */ }
+    });
+    return _tokenClient;
+  }
+
+  // Public: returns access token (string). Uses callback style API under the hood.
+  window.__lm_getAccessToken = async function(){
+    const tc = await ensureTokenClient();
+    return new Promise((resolve, reject)=>{
+      try{
+        tc.callback = (resp)=>{
+          if (resp && resp.access_token) return resolve(resp.access_token);
+          if (resp && resp.error) return reject(new Error(resp.error));
+          return reject(new Error("no token"));
+        };
+        tc.requestAccessToken({ prompt: "" }); // silent if possible
+      }catch(e){ reject(e); }
+    });
+  };
+
+  // Wire the Sign in button if present
+  function wireSigninBtn(root){
+    const btn = (root||document).querySelector && (root||document).querySelector("#auth-signin");
+    if (!btn || btn.__lm_wired) return;
+    btn.__lm_wired = true;
+    btn.addEventListener("click", async (e)=>{
+      try{
+        await window.__lm_getAccessToken();
+        btn.textContent = "Signed in";
+        btn.disabled = true;
+        log("signin ok");
+      }catch(err){ warn("signin failed:", err && err.message || err); }
+    }, false);
+  }
+
+  onReady(()=>{ wireSigninBtn(document); });
+  // Observe dynamic UI
+  try{
+    const mo = new MutationObserver((muts)=>{
+      for (const m of muts){
+        for (const n of m.addedNodes){ if (n && n.nodeType === 1) wireSigninBtn(n); }
+      }
+    });
+    mo.observe(document.documentElement, {childList:true, subtree:true});
+  }catch(_){}
+
+  // Minimal fetch shim for Sheets/Drive (others can overwrite)
+  if (typeof window.__lm_fetchJSONAuth !== "function"){
+    window.__lm_fetchJSONAuth = async function(url,opt){
+      const accessToken = await window.__lm_getAccessToken();
+      const hdrs = Object.assign({}, (opt&&opt.headers)||{}, { "Authorization": "Bearer "+accessToken });
+      const res = await fetch(url, Object.assign({}, opt||{}, { headers: hdrs }));
+      if (!res.ok) throw new Error("HTTP "+res.status);
+      return res.json();
+    };
+    log("auth shim ready");
+  }
+
+  // Tiny GLB loader signal bridge (kept minimal; actual viewer handles it)
+  window.dispatchEvent(new CustomEvent("lm:boot-auth-ready"));
+
+})();
+
 // boot.esm.cdn.js — SAFE MINIMAL BOOT (2025-11-12)
 // Purpose:
 //  - Replace corrupted boot with a minimal, syntax-safe bootstrap
