@@ -933,6 +933,8 @@ onCanvasShiftPick(function(pos){
   ensureRow(id, row).then(function(){ updateCaptionForPin(id, row); });
 });
 
+
+
 // =====================================================
 // == Materials Opacity Module (sheet-scoped, non-breaking)
 // == - Stores per-material opacity per "parent save sheet" (gid = currentSheetId)
@@ -1135,6 +1137,7 @@ onCanvasShiftPick(function(pos){
   };
 })();
 
+
 /* === LM Sheets Hardening Hotfix v1.3 ===
    - Ensures __LM_MATERIALS auto-create after sheet context
    - Defers until __lm_fetchJSONAuth is available
@@ -1142,7 +1145,7 @@ onCanvasShiftPick(function(pos){
    - Provides gid-safe wrappers for values.get / values.append helpers when present
    - Non-destructive: only appends; guarded by __LM_SHEETS_HOTFIX_APPLIED flag
 */
-(function(){
+;(function(){
   if (window.__LM_SHEETS_HOTFIX_APPLIED__) return;
   window.__LM_SHEETS_HOTFIX_APPLIED__ = true;
 
@@ -1265,6 +1268,7 @@ onCanvasShiftPick(function(pos){
 })();
 /* === /LM Sheets Hardening Hotfix v1.3 === */
 
+
 ;/* ==========================================================================
  * LM overlay patch bundle (non-destructive, append-only)
  * - Fix __LM_MATERIALS header PUT URL (no stray colon; proper encodeURIComponent)
@@ -1272,7 +1276,7 @@ onCanvasShiftPick(function(pos){
  * - Exclude internal sheets (__LM_*) from caption header writes
  * - Works alongside existing code; does not remove/replace prior logic
  * ========================================================================== */
-(function(){
+;(function(){
   const TAG = '[lm-overlay v1]';
 
   // ---- Safe auth fetch (reuse if present) ---------------------------------
@@ -1324,6 +1328,25 @@ onCanvasShiftPick(function(pos){
   function lmQuote(title){
     return `'${String(title).replace(/'/g,"''")}'`;
   }
+
+  // ---- Ensure __LM_MATERIALS header (idempotent) ---------------------------
+  // [removed legacy ensureMaterialsHeader]
+      const title='__LM_MATERIALS';
+      const header = [[
+        'materialKey','matName','targetSheetGid','opacity','chromaEnable','chromaColor','chromaTolerance','chromaFeather','doubleSided','unlitLike',
+        'notes','metalness','emissiveHex','updatedAt','updatedBy','__rev','__debug','sheetGid'
+      ]];
+      // check existing A1
+      const urlGet = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values:batchGet?ranges=${encodeURIComponent(`'${title}'!A1:A1`)} `;
+      try{ await __lm_fetchJSONAuth(urlGet, { method:'GET' }); }catch(_){}
+      const urlPut = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(`'${title}'!A1:Q1`)}?valueInputOption=RAW`;
+      await __lm_fetchJSONAuth(urlPut, { method:'PUT', body:{ values: header, majorDimension:'ROWS' } });
+      console.log(TAG2, 'ok');
+    }catch(e){
+      console.warn(TAG2,'failed', e);
+    }
+  }
+
   // ---- Caption header guard (on create / switch) ---------------------------
   const seenGids = new Set();
   async function writeCaptionHeaderIfNeeded(spreadsheetId, gid){
@@ -1387,7 +1410,7 @@ onCanvasShiftPick(function(pos){
 })();
 
 /* ===== LM Sheets & Materials Hardening Patch v1.6 (overlay, non-destructive) ===== */
-(function(){
+;(function(){
   const TAG='[lm-patch v1.6]';
 
   // ---- Minimal auth shim (idempotent) ----
@@ -1468,7 +1491,11 @@ onCanvasShiftPick(function(pos){
     }catch(e){ console.warn(TAG,'materials header ensure failed', e); }
   }
   // [removed legacy __ensureMaterialsSheet]
-}catch(e){ console.warn(TAG,'ensureMaterialsSheet failed', e); }
+        });
+        console.log(TAG,'__LM_MATERIALS created');
+      }
+      await Promise.resolve()
+    }catch(e){ console.warn(TAG,'ensureMaterialsSheet failed', e); }
   }
 
   // Fire after sheet-context is available
@@ -1580,6 +1607,16 @@ onCanvasShiftPick(function(pos){
   }
   window.__LM_HOTFIX__ = { ensureMaterialsSheet, ensureMaterialsHeader };
 })();
+// ensure on sheet-context
+window.addEventListener('lm:sheet-context', async (e)=>{
+  try{
+    const ctx = e && e.detail || {};
+    const ssid = ctx.spreadsheetId || window.currentSpreadsheetId;
+    if(!ssid) return;
+    await window.__LM_HOTFIX__.// [removed call ensureMaterialsSheet]
+  }catch(err){ console.error('[lm-hotfix] ensureMaterialsSheet failed', err); }
+}, { once:false });
+
 /* =========================================================================
  * LociMyu Overlay Patch v1.7 (append-only, non-destructive)
  * - Fix A1 encoding & header PUTs
@@ -1592,7 +1629,7 @@ onCanvasShiftPick(function(pos){
  * ======================================================================= */
 
 /* === helpers: A1 quoting/encoding ===================================== */
-(function(){
+;(function(){
   if (!window.__LM_A1__) {
     function buildA1Quoted(sheetName, a1Part){
       const escaped = String(sheetName).replace(/'/g, "''");
@@ -1606,7 +1643,7 @@ onCanvasShiftPick(function(pos){
 })();
 
 /* === minimal auth shim (idempotent) =================================== */
-(function(){
+;(function(){
   if (typeof window.__lm_fetchJSONAuth === 'function') return;
   const TAG='[lm-auth-shim v1]';
   function ensureToken(){
@@ -1642,7 +1679,7 @@ onCanvasShiftPick(function(pos){
 })();
 
 /* === ensure __LM_MATERIALS (sheet + header) ============================ */
-(function(){
+;(function(){
   const TAG='[lm-materials v1]';
   const HDR = ['materialKey','matName','targetSheetGid','opacity','chromaEnable','chromaColor','chromaTolerance','chromaFeather','doubleSided','unlitLike','roughness','metalness','emissiveHex','updatedAt','updatedBy','__rev','__debug','sheetGid'];
   // [removed legacy ensureMaterialsHeader]
@@ -1659,7 +1696,7 @@ onCanvasShiftPick(function(pos){
 })();
 
 /* === guard: block append to __LM_* ==================================== */
-(function(){
+;(function(){
   const TAG='[lm-guard v1]';
   ['appendValues','sheetsAppendRow'].forEach(fn=>{
     const g = window;
@@ -1679,7 +1716,7 @@ onCanvasShiftPick(function(pos){
 })();
 
 /* === caption header writer (robust) =================================== */
-(function(){
+;(function(){
   if (typeof window.lmWriteCaptionHeaderDirect === 'function') return;
   window.lmWriteCaptionHeaderDirect = async function(spreadsheetId, sheetTitle){
     try{
@@ -1700,7 +1737,7 @@ onCanvasShiftPick(function(pos){
 })();
 
 /* === gid→title cache & wrappers ====================================== */
-(function(){
+;(function(){
   const TAG='[lm-rename-guard v1]';
   const CACHE = Object.create(null); // { [spreadsheetId]: { [gid]: title } }
   async function refresh(spreadsheetId){
@@ -1768,7 +1805,7 @@ onCanvasShiftPick(function(pos){
 })();
 
 /* === dropdown filter: hide __LM_* ==================================== */
-(function(){
+;(function(){
   const TAG='[lm-dropdown-filter v1]';
   function hideInternalOptions(sel){
     if (!sel) return;
@@ -1807,7 +1844,7 @@ onCanvasShiftPick(function(pos){
 })();
 
 /* === re-dispatch sheet-context on glb load / DOM ready ================= */
-(function(){
+;(function(){
   function trigger(){
     try{
       if (window.__LM_SHEET_CTX && window.__LM_SHEET_CTX.spreadsheetId) {
@@ -1824,6 +1861,7 @@ onCanvasShiftPick(function(pos){
 })();
 
 /* === end of Overlay v1.7 =============================================== */
+
 
 (function(){
   const TAG='[lm-materials-header v1.1]';
@@ -1920,7 +1958,7 @@ onCanvasShiftPick(function(pos){
  * - Re-dispatch lm:sheet-context on DOM ready / lm:glb-loaded
  * NOTE: This patch ONLY appends functions and event handlers; it does not remove or replace existing logic.
  * ========================================================================== */
-(function(){
+;(function(){
   const TAG='[lm-patch v2.0]';
 
   /* ---------- helpers: A1 quoting/encoding -------------------------------- */
@@ -1962,7 +2000,7 @@ onCanvasShiftPick(function(pos){
   }
 
   /* ---------- ensure __LM_MATERIALS (sheet + header) ----------------------- */
-  (function(){
+  ;(function(){
     const HDR = ['materialKey','matName','targetSheetGid','opacity','chromaEnable','chromaColor','chromaTolerance','chromaFeather','doubleSided','unlitLike','roughness','metalness','emissiveHex','updatedAt','updatedBy','__rev','__debug','sheetGid'];
     // [removed legacy ensureMaterialsHeader]
     }
@@ -1979,7 +2017,7 @@ onCanvasShiftPick(function(pos){
   })();
 
   /* ---------- guard: block append to __LM_* -------------------------------- */
-  (function(){
+  ;(function(){
     const names = ['appendValues','sheetsAppendRow'];
     names.forEach((nm)=>{
       const g = window;
@@ -2016,7 +2054,7 @@ onCanvasShiftPick(function(pos){
   }
 
   /* ---------- gid→title cache & wrappers ---------------------------------- */
-  (function(){
+  ;(function(){
     const CACHE = Object.create(null); // { [spreadsheetId]: { [gid]: title } }
     async function refresh(spreadsheetId){
       const url = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}?fields=sheets(properties(sheetId,title))`;
@@ -2084,7 +2122,7 @@ onCanvasShiftPick(function(pos){
   })();
 
   /* ---------- dropdown: hide internal sheets ------------------------------- */
-  (function(){
+  ;(function(){
     const TAG2='[lm-dropdown-filter v1]';
     function hideInternalOptions(sel){
       if (!sel) return;
@@ -2123,7 +2161,7 @@ onCanvasShiftPick(function(pos){
   })();
 
   /* ---------- re-dispatch sheet-context on GLB/DOM ------------------------- */
-  (function(){
+  ;(function(){
     function trigger(){
       try{
         if (window.__LM_SHEET_CTX && window.__LM_SHEET_CTX.spreadsheetId) {
@@ -2150,7 +2188,7 @@ onCanvasShiftPick(function(pos){
  * ======================================================================= */
 
 /* === A1 helpers === */
-(function(){
+;(function(){
   if (!window.__LM_A1__) {
     function quote(title){ return `'${String(title).replace(/'/g,"''")}'`; }
     function build(sheet, part){ return `${quote(sheet)}!${part}`; }
@@ -2160,7 +2198,7 @@ onCanvasShiftPick(function(pos){
 })();
 
 /* === auth shim (idempotent) === */
-(function(){
+;(function(){
   if (typeof window.__lm_fetchJSONAuth === 'function') return;
   function token(){ if(typeof getAccessToken==='function'){ const t=getAccessToken(); if(t) return t; } throw new Error('token_missing'); }
   window.__lm_fetchJSONAuth = async (url, init)=>{
@@ -2179,7 +2217,7 @@ onCanvasShiftPick(function(pos){
 })();
 
 /* === gid→title cache === */
-(function(){
+;(function(){
   const CACHE = Object.create(null); // { [spreadsheetId]: { [gidStr]: title } }
   async function refresh(spreadsheetId){
     const url = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}?fields=sheets(properties(sheetId,title))`;
@@ -2196,7 +2234,7 @@ onCanvasShiftPick(function(pos){
 })();
 
 /* === __LM_MATERIALS ensure (PUT header only) & append guard === */
-(function(){
+;(function(){
   const HDR = ['materialKey','matName','targetSheetGid','opacity','chromaEnable','chromaColor','chromaTolerance','chromaFeather','doubleSided','unlitLike','roughness','metalness','emissiveHex','updatedAt','updatedBy','__rev','__debug','sheetGid'];
   // [removed overlay ensureMaterials]
     }catch(e){ console.warn('[overlay v1.9] ensureMaterials(create) note', e); }
@@ -2230,7 +2268,7 @@ onCanvasShiftPick(function(pos){
 })();
 
 /* === caption header writer (force A1:J1 on new/switch) === */
-(function(){
+;(function(){
   if (typeof window.lmWriteCaptionHeaderDirect === 'function') return;
   async function writeHeader(spreadsheetId, sheetTitle){
     try{
@@ -2264,7 +2302,7 @@ onCanvasShiftPick(function(pos){
 })();
 
 /* === Sheets values.* fetch interceptor (rename race fixer) ============== */
-(function(){
+;(function(){
   const TAG='[overlay v1.9 fetchwrap]';
   if (window.__LM_FETCH_WRAPPED__) return; window.__LM_FETCH_WRAPPED__ = true;
 
