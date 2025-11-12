@@ -1,8 +1,6 @@
-/* glb.btn.bridge.js — load via viewer.module.cdn.js (Drive fileId)
- * This wires #btnGlb and listens to lm:load-glb to call loadGlbFromDrive(fileId,{token}).
- */
+/* glb.btn.bridge.v2.js — ensure viewer initialized, then load via loadGlbFromDrive */
 (function(){
-  const TAG='[glb-bridge]';
+  const TAG='[glb-bridge-v2]';
   const log=(...a)=>console.log(TAG, ...a);
   const err=(...a)=>console.error(TAG, ...a);
 
@@ -23,7 +21,6 @@
     if (typeof window.__lm_getAccessToken === 'function'){
       return await window.__lm_getAccessToken();
     }
-    // fallback: gauth facade if present
     try{
       const g = await import('./gauth.module.js');
       if (g.getAccessToken) return await g.getAccessToken();
@@ -31,17 +28,49 @@
     throw new Error('no token provider');
   }
 
+  async function ensureViewerReady(mod){
+    // Try common init function names
+    const cands = ['bootViewer','initViewer','setupViewer','mountViewer','createViewer','ensureViewer','startViewer','init'];
+    for (const name of cands){
+      try{
+        if (typeof mod[name] === 'function'){
+          log('calling', name);
+          const r = await mod[name]();
+          // allow microtask flush
+          await new Promise(r=>setTimeout(r,0));
+          break;
+        }
+      }catch(e){ err(name+' failed', e); }
+    }
+    // Also wait for lm:scene-ready if emitted by other modules
+    const ready = await new Promise(res=>{
+      let t = setTimeout(()=>res(false), 1500);
+      function ok(){ clearTimeout(t); res(true); }
+      window.addEventListener('lm:scene-ready', ok, { once:true });
+      // if already ready, resolve quickly
+      if (document.querySelector('canvas') && window.THREE) { setTimeout(ok, 50); }
+    });
+    log('viewer ready?', ready);
+    return true;
+  }
+
   async function loadById(fileId){
     const mod = await import('./viewer.module.cdn.js');
+    await ensureViewerReady(mod);
     const token = await getToken();
-    await mod.loadGlbFromDrive(fileId, { token });
+    try{
+      await mod.loadGlbFromDrive(fileId, { token });
+    }catch(e){
+      err('loadGlbFromDrive threw', e);
+      throw e;
+    }
   }
 
   function wireBtn(){
     const btn = document.querySelector('#btnGlb');
     if (!btn) return;
-    if (btn.dataset && btn.dataset.glbBridgeWired) return;
-    btn.dataset.glbBridgeWired = '1';
+    if (btn.dataset && btn.dataset.glbBridgeWiredV2) return;
+    btn.dataset.glbBridgeWiredV2 = '1';
     btn.addEventListener('click', async ()=>{
       try{
         const input = document.querySelector('#glbUrl');
@@ -53,7 +82,7 @@
         await loadById(id);
       }catch(e){ err('btn load failed', e); }
     }, { passive:true });
-    log('button wired');
+    log('button wired v2');
   }
 
   function wireEvent(){
