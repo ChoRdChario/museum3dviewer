@@ -1,6 +1,6 @@
-/* glb.btn.bridge.v2.js — ensure viewer initialized, then load via loadGlbFromDrive */
+/* glb.btn.bridge.v3.js — ensure viewer with defaults, then load via loadGlbFromDrive */
 (function(){
-  const TAG='[glb-bridge-v2]';
+  const TAG='[glb-bridge-v3]';
   const log=(...a)=>console.log(TAG, ...a);
   const err=(...a)=>console.error(TAG, ...a);
 
@@ -17,6 +17,36 @@
     return '';
   }
 
+  function ensureCanvas(){
+    // Prefer existing canvas
+    let canvas = document.querySelector("#viewer-canvas") || document.querySelector("canvas");
+    if (canvas) return canvas;
+
+    // Prefer existing container
+    let container = document.querySelector("#viewer") || document.querySelector("#three-container") || document.querySelector(".viewer") || document.body;
+    canvas = document.createElement("canvas");
+    canvas.id = "viewer-canvas";
+    canvas.style.width = "100%";
+    canvas.style.height = "100%";
+    canvas.style.display = "block";
+    // Make sure container can host it
+    if (container === document.body){
+      // create a wrapper to avoid full-screen body issues
+      const wrapper = document.createElement("div");
+      wrapper.id = "viewer-wrapper";
+      wrapper.style.position = "relative";
+      wrapper.style.width = "100%";
+      wrapper.style.height = "70vh";
+      wrapper.style.margin = "8px 0";
+      wrapper.appendChild(canvas);
+      document.body.prepend(wrapper);
+      return canvas;
+    } else {
+      container.prepend(canvas);
+      return canvas;
+    }
+  }
+
   async function getToken(){
     if (typeof window.__lm_getAccessToken === 'function'){
       return await window.__lm_getAccessToken();
@@ -29,26 +59,36 @@
   }
 
   async function ensureViewerReady(mod){
-    // Try common init function names
-    const cands = ['bootViewer','initViewer','setupViewer','mountViewer','createViewer','ensureViewer','startViewer','init'];
+    // 1) If ensureViewer exists and expects opts, give it sensible defaults
+    try{
+      if (typeof mod.ensureViewer === 'function'){
+        const canvas = ensureCanvas();
+        log('calling ensureViewer with canvas', canvas.id || '(anon)');
+        await mod.ensureViewer({ canvas, container: canvas.parentElement || document.body });
+      }
+    }catch(e){ err('ensureViewer(opts) failed', e); }
+
+    // 2) Try other common init names without args
+    const cands = ['bootViewer','initViewer','setupViewer','mountViewer','createViewer','startViewer','init'];
     for (const name of cands){
       try{
         if (typeof mod[name] === 'function'){
           log('calling', name);
-          const r = await mod[name]();
-          // allow microtask flush
-          await new Promise(r=>setTimeout(r,0));
+          await mod[name]();
           break;
         }
       }catch(e){ err(name+' failed', e); }
     }
-    // Also wait for lm:scene-ready if emitted by other modules
+
+    // 3) Wait for readiness
     const ready = await new Promise(res=>{
-      let t = setTimeout(()=>res(false), 1500);
-      function ok(){ clearTimeout(t); res(true); }
+      let done=false;
+      const ok=()=>{ if(done) return; done=true; res(true); };
+      const t = setTimeout(()=>{ if(!done) res(!!document.querySelector('canvas')); }, 3000);
       window.addEventListener('lm:scene-ready', ok, { once:true });
-      // if already ready, resolve quickly
-      if (document.querySelector('canvas') && window.THREE) { setTimeout(ok, 50); }
+      window.addEventListener('lm:model-ready', ok, { once:true });
+      // if already present
+      if (document.querySelector('canvas')) setTimeout(ok, 50);
     });
     log('viewer ready?', ready);
     return true;
@@ -56,6 +96,11 @@
 
   async function loadById(fileId){
     const mod = await import('./viewer.module.cdn.js');
+    // Log available exports for diagnostics
+    try{
+      const keys = Object.keys(mod);
+      console.log(TAG, 'exports:', keys);
+    }catch(_){}
     await ensureViewerReady(mod);
     const token = await getToken();
     try{
@@ -69,8 +114,8 @@
   function wireBtn(){
     const btn = document.querySelector('#btnGlb');
     if (!btn) return;
-    if (btn.dataset && btn.dataset.glbBridgeWiredV2) return;
-    btn.dataset.glbBridgeWiredV2 = '1';
+    if (btn.dataset && btn.dataset.glbBridgeWiredV3) return;
+    btn.dataset.glbBridgeWiredV3 = '1';
     btn.addEventListener('click', async ()=>{
       try{
         const input = document.querySelector('#glbUrl');
@@ -82,7 +127,7 @@
         await loadById(id);
       }catch(e){ err('btn load failed', e); }
     }, { passive:true });
-    log('button wired v2');
+    log('button wired v3');
   }
 
   function wireEvent(){
