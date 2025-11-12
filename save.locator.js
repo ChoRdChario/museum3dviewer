@@ -107,3 +107,8 @@
   window.saveLocator = { findOrCreateSaveSheetByGlbId, getDefaultCaptionGid };
   if (typeof window !== 'undefined') window.findOrCreateSaveSheetByGlbId = findOrCreateSaveSheetByGlbId;
 })();
+
+// --- ESM compatibility exports (module import) ---
+export const findOrCreateSaveSheetByGlbId = (typeof window !== 'undefined' && window.findOrCreateSaveSheetByGlbId) ? window.findOrCreateSaveSheetByGlbId : undefined;
+export const getDefaultCaptionGid = (typeof window !== 'undefined' && window.getDefaultCaptionGid) ? window.getDefaultCaptionGid : undefined;
+export default { findOrCreateSaveSheetByGlbId, getDefaultCaptionGid };

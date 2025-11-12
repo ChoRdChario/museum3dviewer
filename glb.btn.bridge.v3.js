@@ -123,70 +123,43 @@
     return true;
   }
 
-  async function postLoadEnsureSaveSheet(fileId){
-    try{
-      const loc = await import('./save.locator.js');
-      const res = await loc.findOrCreateSaveSheetByGlbId(fileId);
-      const spreadsheetId = res && res.spreadsheetId;
-      const sheetGid = res && res.defaultCaptionGid || '';
-      if (spreadsheetId){
-        window.__LM_ACTIVE_SPREADSHEET_ID = spreadsheetId;
-        if (sheetGid) window.__LM_ACTIVE_SHEET_GID = sheetGid;
-        window.dispatchEvent(new CustomEvent('lm:sheet-context', { detail:{ spreadsheetId, sheetGid } }));
-        try{
-          const mat = await import('./materials.sheet.persist.js');
-          if (mat.ensureMaterialsHeader) await mat.ensureMaterialsHeader(spreadsheetId);
-        }catch(e){ err('ensureMaterialsHeader failed', e); }
-      }
-      return res;
-    }catch(e){ err('postLoadEnsureSaveSheet failed', e); }
-  }
+  
+async function postLoadEnsureSaveSheet(fileId){
+  try {
+    // Try to import the ES module. If it doesn't provide a named export, the IIFE still runs and populates window.*
+    let mod = null;
+    try {
+      mod = await import('./save.locator.js');
+    } catch (e) {
+      console.warn('[glb-bridge-v3] dynamic import failed (fallback to window):', e);
+    }
+    const fn =
+      (mod && (mod.findOrCreateSaveSheetByGlbId ||
+               (mod.default && mod.default.findOrCreateSaveSheetByGlbId))) ||
+      (typeof window.findOrCreateSaveSheetByGlbId === 'function' && window.findOrCreateSaveSheetByGlbId) ||
+      (typeof window.__lm_findOrCreateSaveSheet === 'function' && window.__lm_findOrCreateSaveSheet);
 
-  async function loadById(fileId){
-    const mod = await import('./viewer.module.cdn.js');
-    try{ console.log(TAG, 'exports:', Object.keys(mod)); }catch(_){}
-    showOverlay('GLB を読み込んでいます…');
-    let safe = true; const safeHide=()=>{ if(safe){ safe=false; hideOverlay(); } };
-    try{
-      await ensureViewerReady(mod);
-      const token = await getToken();
-      await mod.loadGlbFromDrive(fileId, { token });
-    }catch(e){ err('loadGlbFromDrive threw', e); safeHide(); throw e; }
-    setTimeout(safeHide, 120);
-    await postLoadEnsureSaveSheet(fileId);
-  }
+    if (!fn) {
+      throw new Error('save.locator not available: findOrCreateSaveSheetByGlbId missing');
+    }
 
-  function wireBtn(){
-    const btn = document.querySelector('#btnGlb');
-    if (!btn) return;
-    if (btn.dataset && btn.dataset.glbBridgeWiredV3) return;
-    btn.dataset.glbBridgeWiredV3 = '1';
-    btn.addEventListener('click', async ()=>{
-      try{
-        const input = document.querySelector('#glbUrl');
-        let raw = input && input.value ? input.value.trim() : '';
-        if (!raw) raw = prompt('Driveの共有URL または fileId を入力してください') || '';
-        const id = extractId(raw);
-        if (!id){ log('no id'); return; }
-        log('load fileId', id);
-        await loadById(id);
-      }catch(e){ err('btn load failed', e); }
-    }, { passive:true });
-    log('button wired v3');
+    const ctx = await fn(fileId);
+    console.log('[glb-bridge-v3] save ctx', ctx);
+
+    // Tell material/persist layer about spreadsheetId
+    window.dispatchEvent(new CustomEvent('lm:sheet-context', {
+      detail: { spreadsheetId: ctx.spreadsheetId, sheetGid: (ctx.captionGid || '') }
+    }));
+
+    // Ensure __LM_MATERIALS header exists
+    if (typeof window.__lm_ensureMaterialsHeader === 'function'){
+      await window.__lm_ensureMaterialsHeader(ctx.spreadsheetId).catch(console.warn);
+    }
+
+    return ctx;
+  } catch(err){
+    console.error('[glb-bridge-v3] postLoadEnsureSaveSheet failed', err);
+    throw err;
   }
-  function wireEvent(){
-    window.addEventListener('lm:load-glb', async (ev)=>{
-      try{
-        const id = ev && ev.detail && ev.detail.id;
-        if (!id) return;
-        log('event load fileId', id);
-        await loadById(id);
-      }catch(e){ err('event load failed', e); }
-    });
-    log('event listener armed');
-  }
-  window.__LM_LOAD_GLB_BY_ID = loadById;
-  if (document.readyState === 'loading'){
-    document.addEventListener('DOMContentLoaded', ()=>{ wireBtn(); wireEvent(); }, { once:true });
-  } else { wireBtn(); wireEvent(); }
-})();
+}
+)();
