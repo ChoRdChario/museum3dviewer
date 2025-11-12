@@ -1,165 +1,136 @@
-/* glb.btn.bridge.v3.js — v3.2 (loader + save sheet ensure + gid-first ctx) */
-(function(){
-  const TAG='[glb-bridge-v3]';
-  const log=(...a)=>console.log(TAG, ...a);
-  const err=(...a)=>console.error(TAG, ...a);
+// glb.btn.bridge.v3.js — patched (2025-11-12)
+// Robust GLB button wiring + viewer ensure + save sheet ensure (gid-first)
+(() => {
+  const BTN_SEL = "#btnGlb";
+  const INPUT_SEL = "#glbUrl";
+  const DATA_KEY = "lmGlbWired";
 
-  /* --- Loading overlay (same as v3.1) --- */
-  const OVERLAY_ID = 'lm-glb-loading-overlay';
-  function ensureStyle() {
-    if (document.getElementById(OVERLAY_ID+'-style')) return;
-    const css = document.createElement('style');
-    css.id = OVERLAY_ID+'-style';
-    css.textContent = `
-    #${OVERLAY_ID}{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
-      background:rgba(0,0,0,.35);backdrop-filter:blur(1px);
-      z-index:9999;pointer-events:none;opacity:0;transition:opacity .15s ease;
-      font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif}
-    #${OVERLAY_ID}.on{opacity:1}
-    #${OVERLAY_ID} .box{display:flex;flex-direction:column;align-items:center;gap:10px;
-      padding:16px 18px;border-radius:14px;background:rgba(18,18,18,.75);color:#fff;
-      box-shadow:0 4px 18px rgba(0,0,0,.3)}
-    #${OVERLAY_ID} .spin{width:28px;height:28px;border-radius:50%;border:3px solid rgba(255,255,255,.35);
-      border-top-color:#fff;animation:lmspin 1s linear infinite}
-    @keyframes lmspin{to{transform:rotate(360deg)}}
-    `;
-    document.head.appendChild(css);
+  // Guard: wire once
+  const btn = document.querySelector(BTN_SEL);
+  if (!btn) {
+    console.warn("[glb-bridge-v3] button not found:", BTN_SEL);
+    return;
   }
-  function findViewerHost(){
-    return document.querySelector('#viewer-wrapper')||document.querySelector('#viewer')
-        || document.querySelector('#three-container')||document.querySelector('.viewer')||document.body;
+  if (btn.dataset && btn.dataset[DATA_KEY]) {
+    console.log("[glb-bridge-v3] already wired v3");
+    return;
   }
-  function showOverlay(msg='読み込み中…'){
-    try{
-      ensureStyle();
-      const host = findViewerHost();
-      let ov = document.getElementById(OVERLAY_ID);
-      if (!ov){
-        ov = document.createElement('div');
-        ov.id = OVERLAY_ID;
-        ov.setAttribute('aria-live','polite');
-        ov.innerHTML = `<div class="box"><div class="spin"></div><div class="txt"></div></div>`;
-        if (host === document.body) ov.style.position='fixed';
-        host.appendChild(ov);
-      }
-      const txt = ov.querySelector('.txt'); if (txt) txt.textContent = msg;
-      requestAnimationFrame(()=>ov.classList.add('on'));
-    }catch(e){}
-  }
-  function hideOverlay(){
-    try{
-      const ov = document.getElementById(OVERLAY_ID);
-      if (!ov) return;
-      ov.classList.remove('on');
-      setTimeout(()=>ov.remove(), 180);
-    }catch(e){}
-  }
-  window.addEventListener('lm:model-ready', hideOverlay);
-  window.addEventListener('lm:scene-ready', ()=>setTimeout(hideOverlay, 100));
+  btn.dataset[DATA_KEY] = "1";
+  console.log("[glb-bridge-v3] button wired v3");
+  console.log("[glb-bridge-v3] event listener armed");
 
-  /* --- Helpers --- */
-  function extractId(input){
-    if (!input) return '';
-    if (/^[a-zA-Z0-9_-]{10,}$/.test(input)) return input;
-    try{
-      const u = new URL(input);
-      const m = u.pathname.match(/\/file\/d\/([a-zA-Z0-9_-]+)/);
-      if (m) return m[1];
-      const qp = u.searchParams.get('id');
-      if (qp) return qp;
-    }catch(_){}
-    return '';
-  }
-  function ensureCanvas(){
-    let canvas = document.querySelector("#viewer-canvas") || document.querySelector("canvas");
-    if (canvas) return canvas;
-    let container = document.querySelector("#viewer") || document.querySelector("#three-container") || document.querySelector(".viewer") || document.body;
-    canvas = document.createElement("canvas");
-    canvas.id = "viewer-canvas";
-    canvas.style.width = "100%";
-    canvas.style.height = "100%";
-    canvas.style.display = "block";
-    if (container === document.body){
-      const wrapper = document.createElement("div");
-      wrapper.id = "viewer-wrapper";
-      wrapper.style.position = "relative";
-      wrapper.style.width = "100%";
-      wrapper.style.height = "70vh";
-      wrapper.style.margin = "8px 0";
-      wrapper.appendChild(canvas);
-      document.body.prepend(wrapper);
-    } else {
-      container.prepend(canvas);
+  // Utilities
+  const sleep = (ms) => new Promise(res => setTimeout(res, ms));
+
+  async function ensureViewerReady(canvasId = "gl") {
+    // lazy import viewer module (ESM)
+    const viewer = await import("./viewer.module.cdn.js");
+    if (!viewer || !viewer.ensureViewer) {
+      throw new Error("[glb-bridge-v3] viewer.ensureViewer not available");
     }
-    return canvas;
-  }
-  async function getToken(){
-    if (typeof window.__lm_getAccessToken === 'function'){
-      return await window.__lm_getAccessToken();
-    }
-    try{ const g = await import('./gauth.module.js'); if (g.getAccessToken) return await g.getAccessToken(); }catch(_){}
-    throw new Error('no token provider');
-  }
-  async function ensureViewerReady(mod){
-    try{
-      if (typeof mod.ensureViewer === 'function'){
-        const canvas = ensureCanvas();
-        log('calling ensureViewer with canvas', canvas.id||'(anon)');
-        await mod.ensureViewer({ canvas, container: canvas.parentElement||document.body });
-      }
-    }catch(e){ err('ensureViewer(opts) failed', e); }
-    const cands=['bootViewer','initViewer','setupViewer','mountViewer','createViewer','startViewer','init'];
-    for (const name of cands){
-      try{ if (typeof mod[name]==='function'){ log('calling', name); await mod[name](); break; } }
-      catch(e){ err(name+' failed', e); }
-    }
-    await new Promise(res=>{
-      let done=false; const ok=()=>{ if(done) return; done=true; res(true); };
-      setTimeout(()=>{ if(!done) res(!!document.querySelector('canvas')); }, 3000);
-      window.addEventListener('lm:scene-ready', ok, { once:true });
-      window.addEventListener('lm:model-ready', ok, { once:true });
-      if (document.querySelector('canvas')) setTimeout(ok, 50);
-    });
-    return true;
+    const canvas = document.getElementById(canvasId);
+    if (!canvas) throw new Error(`[glb-bridge-v3] canvas #${canvasId} not found`);
+    // create or fetch viewer instance
+    const inst = await viewer.ensureViewer({ canvas });
+    return { viewer, inst };
   }
 
-  
-async function postLoadEnsureSaveSheet(fileId){
-  try {
-    // Try to import the ES module. If it doesn't provide a named export, the IIFE still runs and populates window.*
-    let mod = null;
+  // Try to import save.locator.js as ESM, fall back to window globals
+  async function getSaveLocatorAPI() {
     try {
-      mod = await import('./save.locator.js');
+      const loc = await import("./save.locator.js");
+      // prefer named export if present
+      if (loc && (loc.findOrCreateSaveSheetByGlbId || loc.default?.findOrCreateSaveSheetByGlbId)) {
+        const f = loc.findOrCreateSaveSheetByGlbId || loc.default.findOrCreateSaveSheetByGlbId;
+        const g = loc.getDefaultCaptionGid || loc.default?.getDefaultCaptionGid;
+        return { findOrCreateSaveSheetByGlbId: f, getDefaultCaptionGid: g };
+      }
     } catch (e) {
-      console.warn('[glb-bridge-v3] dynamic import failed (fallback to window):', e);
+      console.warn("[glb-bridge-v3] ESM import(save.locator.js) failed, fallback to window", e);
     }
-    const fn =
-      (mod && (mod.findOrCreateSaveSheetByGlbId ||
-               (mod.default && mod.default.findOrCreateSaveSheetByGlbId))) ||
-      (typeof window.findOrCreateSaveSheetByGlbId === 'function' && window.findOrCreateSaveSheetByGlbId) ||
-      (typeof window.__lm_findOrCreateSaveSheet === 'function' && window.__lm_findOrCreateSaveSheet);
-
-    if (!fn) {
-      throw new Error('save.locator not available: findOrCreateSaveSheetByGlbId missing');
-    }
-
-    const ctx = await fn(fileId);
-    console.log('[glb-bridge-v3] save ctx', ctx);
-
-    // Tell material/persist layer about spreadsheetId
-    window.dispatchEvent(new CustomEvent('lm:sheet-context', {
-      detail: { spreadsheetId: ctx.spreadsheetId, sheetGid: (ctx.captionGid || '') }
-    }));
-
-    // Ensure __LM_MATERIALS header exists
-    if (typeof window.__lm_ensureMaterialsHeader === 'function'){
-      await window.__lm_ensureMaterialsHeader(ctx.spreadsheetId).catch(console.warn);
-    }
-
-    return ctx;
-  } catch(err){
-    console.error('[glb-bridge-v3] postLoadEnsureSaveSheet failed', err);
-    throw err;
+    const f2 = window.findOrCreateSaveSheetByGlbId;
+    const g2 = window.getDefaultCaptionGid;
+    if (!f2) throw new Error("[glb-bridge-v3] save locator API not found");
+    return { findOrCreateSaveSheetByGlbId: f2, getDefaultCaptionGid: g2 };
   }
-}
-)();
+
+  // After GLB load, ensure save spreadsheet + __LM_MATERIALS header
+  async function postLoadEnsureSaveSheet(fileId) {
+    const { findOrCreateSaveSheetByGlbId, getDefaultCaptionGid } = await getSaveLocatorAPI();
+    const ctx = await findOrCreateSaveSheetByGlbId(fileId);
+    // ctx: { spreadsheetId, captionGid }
+    if (!ctx || !ctx.spreadsheetId) {
+      throw new Error("[glb-bridge-v3] invalid ctx returned from save locator");
+    }
+    if (!ctx.captionGid && typeof getDefaultCaptionGid === "function") {
+      ctx.captionGid = await getDefaultCaptionGid(ctx.spreadsheetId);
+    }
+
+    // Dispatch sheet-context for other modules
+    window.dispatchEvent(new CustomEvent("lm:sheet-context", { detail: {
+      spreadsheetId: ctx.spreadsheetId,
+      sheetGid: String(ctx.captionGid || "")
+    }}));
+
+    // Ensure __LM_MATERIALS header if helper is present
+    if (typeof window.__lm_ensureMaterialsHeader === "function") {
+      await window.__lm_ensureMaterialsHeader(ctx.spreadsheetId);
+      console.log("[glb-bridge-v3] materials header ensured");
+    } else {
+      console.log("[glb-bridge-v3] __lm_ensureMaterialsHeader not found (skipped)");
+    }
+  }
+
+  async function loadById(fileId) {
+    const { viewer, inst } = await ensureViewerReady("gl");
+    // viewer exports list for debug
+    console.log("[glb-bridge-v3] exports:", Object.keys(viewer));
+    // set current glb id on viewer side (optional)
+    if (typeof viewer.setCurrentGlbId === "function") {
+      viewer.setCurrentGlbId(fileId);
+    }
+    // Load GLB via Drive helper
+    if (!viewer.loadGlbFromDrive) {
+      throw new Error("[glb-bridge-v3] loadGlbFromDrive not exported");
+    }
+    await viewer.loadGlbFromDrive({ fileId });
+
+    // Wait a few frames for scene stabilization
+    await sleep(100);
+    await postLoadEnsureSaveSheet(fileId);
+  }
+
+  async function loadFromInputOrPrompt() {
+    const input = document.querySelector("#glbUrl");
+    let val = (input && input.value || "").trim();
+    if (!val) {
+      val = prompt("GLBのDrive共有URLまたはfileIdを入力してください");
+      if (!val) return;
+    }
+    // Normalize: extract fileId if it looks like a share URL
+    let fileId = val;
+    try {
+      if (val.includes("drive.google.com")) {
+        const u = new URL(val);
+        // patterns: /file/d/<id>/view, or ?id=<id>
+        const m = u.pathname.match(/\/file\/d\/([^/]+)/);
+        fileId = (m && m[1]) || u.searchParams.get("id") || val;
+      }
+    } catch {}
+    console.log("[glb-bridge-v3] load fileId", fileId);
+    await loadById(fileId);
+  }
+
+  btn.addEventListener("click", (ev) => {
+    // passive:true to keep UI smooth
+    (async () => {
+      try {
+        await loadFromInputOrPrompt();
+      } catch (err) {
+        console.error("[glb-bridge-v3] load failed", err);
+        alert("GLBの読み込みに失敗しました。コンソールを確認してください。");
+      }
+    })();
+  }, { passive: true });
+
+})();
