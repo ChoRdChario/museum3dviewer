@@ -1,39 +1,67 @@
-// material.id.unify.v1.js  v1.7 (robust, idempotent)
+// material.id.unify.v1.js  v1.8 (ready-gated, idempotent, robust)
 (function () {
-  try {
-    const panel = document.querySelector('#panel-material');
-    if (!panel) { console.warn('[mat-id-unify] panel not found'); return; }
+  const TAG = '[mat-id-unify]';
+  const log = (...a)=>console.log(TAG, ...a);
+  const warn = (...a)=>console.warn(TAG, ...a);
 
-    // Heuristic: pick the section that contains a range slider and mentions "opacity"
+  let armed = false;
+
+  function findOpacitySection(panel){
     const sections = Array.from(panel.querySelectorAll('section, fieldset, div'));
-    const opacitySection = sections.find(el => {
+    return sections.find(el => {
       const hasRange = !!el.querySelector('input[type="range"]');
       const txt = (el.textContent || '').toLowerCase();
-      return hasRange && txt.includes('opacity');
+      return hasRange && (txt.includes('opacity') || txt.includes('透明'));
     });
+  }
 
-    if (!opacitySection) { console.warn('[mat-id-unify] opacity section not found'); return; }
+  function applyOnce(){
+    if (armed) return true;
+    const panel = document.querySelector('#panel-material');
+    if (!panel) { warn('panel not found'); return false; }
 
-    // Dropdown (first select inside the section)
-    const dd = opacitySection.querySelector('select');
-    if (dd && !dd.id) dd.id = 'pm-material';
+    const sec = findOpacitySection(panel);
+    if (!sec) { warn('opacity section not found (waiting)'); return false; }
 
-    // Range slider
-    let range = opacitySection.querySelector('input[type="range"]');
-    if (range && !range.id) range.id = 'pm-opacity';
+    // === original binding logic (kept minimal & safe) ===
+    // Unify element IDs so other modules can reliably select them
+    const range = sec.querySelector('input[type="range"]');
+    if (range && !range.id) range.id = 'lm-opacity-range';
+    sec.id = sec.id || 'lm-opacity-section';
 
-    // Numeric readout (span placed after the range). Create if missing.
-    let value = opacitySection.querySelector('#pm-opacity-value, [data-lm="pm-opacity-value"], output, .pm-opacity-value');
-    if (!value) {
-      value = document.createElement('span');
-      value.id = 'pm-opacity-value';
-      value.style.marginLeft = '8px';
-      if (range && range.parentElement) range.parentElement.appendChild(value);
-      else opacitySection.appendChild(value);
-    } else if (!value.id) value.id = 'pm-opacity-value';
+    // Signal readiness for downstream consumers
+    window.dispatchEvent(new CustomEvent('lm:materials-ui-ready', {
+      detail: { sectionId: sec.id, rangeId: range ? range.id : null }
+    }));
+    log('bound', { sectionId: sec.id, rangeId: range ? range.id : null });
 
-    console.log('[mat-id-unify v1.7] unified', { dd: !!dd, range: !!range, value: !!value });
-  } catch (e) {
-    console.warn('[mat-id-unify] error', e);
+    armed = true;
+    return true;
+  }
+
+  // Try immediately
+  if (applyOnce()) return;
+
+  // Gate by scene ready & DOM mutations
+  let retries = 30;
+  const retryTick = () => {
+    if (applyOnce()) { obs && obs.disconnect(); return; }
+    if (--retries <= 0) { warn('give up waiting'); obs && obs.disconnect(); return; }
+    setTimeout(retryTick, 150);
+  };
+
+  // Wait for scene ready (often implies UI finished laying out)
+  const onScene = () => setTimeout(retryTick, 0);
+  window.addEventListener('lm:scene-ready', onScene, { once:true });
+
+  // Also observe panel-material for dynamic children
+  const panel = document.querySelector('#panel-material');
+  let obs = null;
+  if (panel && 'MutationObserver' in window){
+    obs = new MutationObserver(()=> { if (applyOnce()){ obs.disconnect(); } });
+    obs.observe(panel, { childList: true, subtree: true });
+  } else {
+    // Fallback: timed retries
+    retryTick();
   }
 })();
