@@ -1,9 +1,82 @@
-/* glb.btn.bridge.v3.js — ensure viewer with defaults, then load via loadGlbFromDrive */
+/* glb.btn.bridge.v3.js — v3.1 with loading overlay
+   - Ensures viewer presence
+   - Loads GLB from Google Drive by fileId/URL
+   - Shows/hides a non-blocking loading overlay during GLB load
+*/
 (function(){
   const TAG='[glb-bridge-v3]';
   const log=(...a)=>console.log(TAG, ...a);
   const err=(...a)=>console.error(TAG, ...a);
 
+  // ---------- Loading Overlay ----------
+  const OVERLAY_ID = 'lm-glb-loading-overlay';
+  function ensureStyle() {
+    if (document.getElementById(OVERLAY_ID+'-style')) return;
+    const css = document.createElement('style');
+    css.id = OVERLAY_ID+'-style';
+    css.textContent = `
+    #${OVERLAY_ID}{
+      position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+      background: rgba(0,0,0,0.35); backdrop-filter: blur(1px);
+      z-index: 9999; pointer-events: none; opacity: 0; transition: opacity .15s ease;
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+    }
+    #${OVERLAY_ID}.on{ opacity: 1; }
+    #${OVERLAY_ID} .box{
+      display:flex; flex-direction:column; align-items:center; gap:10px;
+      padding:16px 18px; border-radius:14px; background: rgba(18,18,18,.75);
+      color:#fff; box-shadow: 0 4px 18px rgba(0,0,0,.3);
+    }
+    #${OVERLAY_ID} .spin{
+      width:28px; height:28px; border-radius:50%; border:3px solid rgba(255,255,255,.35);
+      border-top-color:#fff; animation: lmspin 1s linear infinite;
+    }
+    @keyframes lmspin{ to{ transform: rotate(360deg); } }
+    `;
+    document.head.appendChild(css);
+  }
+  function findViewerHost(){
+    const wrap = document.querySelector('#viewer-wrapper') || document.querySelector('#viewer')
+               || document.querySelector('#three-container') || document.querySelector('.viewer');
+    return wrap || document.body;
+  }
+  function showOverlay(msg='読み込み中…'){
+    try{
+      ensureStyle();
+      const host = findViewerHost();
+      let ov = document.getElementById(OVERLAY_ID);
+      if (!ov){
+        ov = document.createElement('div');
+        ov.id = OVERLAY_ID;
+        ov.setAttribute('aria-live','polite');
+        ov.innerHTML = `<div class="box"><div class="spin"></div><div class="txt"></div></div>`;
+        if (host === document.body){
+          // Position fixed to cover viewport
+          ov.style.position = 'fixed';
+        }
+        host.appendChild(ov);
+      }
+      const txt = ov.querySelector('.txt');
+      if (txt) txt.textContent = msg;
+      // delay small to avoid flicker on ultra-fast operations
+      requestAnimationFrame(()=>ov.classList.add('on'));
+    }catch(e){ /* ignore */ }
+  }
+  function hideOverlay(){
+    try{
+      const ov = document.getElementById(OVERLAY_ID);
+      if (!ov) return;
+      ov.classList.remove('on');
+      // remove later to allow fade-out
+      setTimeout(()=>{ ov.remove(); }, 180);
+    }catch(e){ /* ignore */ }
+  }
+
+  // Auto-hide overlay on these global signals as redundancy
+  window.addEventListener('lm:model-ready', hideOverlay);
+  window.addEventListener('lm:scene-ready', () => setTimeout(hideOverlay, 100)); // scene -> soon ready
+
+  // ---------- Helpers ----------
   function extractId(input){
     if (!input) return '';
     if (/^[a-zA-Z0-9_-]{10,}$/.test(input)) return input;
@@ -87,14 +160,20 @@
   async function loadById(fileId){
     const mod = await import('./viewer.module.cdn.js');
     try{ console.log(TAG, 'exports:', Object.keys(mod)); }catch(_){}
-    await ensureViewerReady(mod);
-    const token = await getToken();
+    showOverlay('GLB を読み込んでいます…');
+    let hideOnce = true;
+    const safeHide = ()=>{ if (hideOnce){ hideOnce=false; hideOverlay(); } };
     try{
+      await ensureViewerReady(mod);
+      const token = await getToken();
       await mod.loadGlbFromDrive(fileId, { token });
     }catch(e){
       err('loadGlbFromDrive threw', e);
+      safeHide();
       throw e;
     }
+    // hide shortly after; also hidden by lm:model-ready listener redundantly
+    setTimeout(safeHide, 120);
   }
 
   function wireBtn(){
