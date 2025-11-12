@@ -1,6 +1,8 @@
 <!DOCTYPE html>
 <html lang="ja">
-<head>
+\1
+  <script type="module" src="./drive.fetch.auth.patch.js"></script>
+
   <!-- ESM import map for THREE (and addons) -->
   <script id="lm-importmap-three" type="importmap">{
     "imports": {
@@ -352,14 +354,14 @@
   <script type="module" src="./material.dropdown.patch.js"></script>
   <script src="./material.runtime.patch.js"></script>
 <script src="./glb.load.signal.js"></script>
-
+<script src="./material.dropdown.patch.js"></script>
 <!-- 既存の viewer / bridge / orchestrator / sheet-bridge の後ろ -->
 
 <!-- GLB完了シグナル（Loadボタン→GLB読込完了を一度だけ通知） -->
-
+<script src="./glb.load.signal.js"></script>
 
 <!-- マテリアルドロップダウン投入（静音・一発実行版） -->
-
+<script src="./material.dropdown.patch.js"></script>
 <script src="./material.id.unify.v1.js"></script>
 <script src="./material.dropdown.sync.v1.js"></script>
 
@@ -372,6 +374,6 @@
 
   <!-- LociMyu: save-sheet glue -->
   <script type="module" src="./save.locator.js"></script>
-  <script type="module" src="./glb.btn.bridge.v3.js"></script>
+  <script src="./glb.btn.bridge.v3.patch.js"></script>
 </body>
 </html>
