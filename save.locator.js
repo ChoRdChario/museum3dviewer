@@ -1,253 +1,251 @@
 
-// save.locator.js (ESM) — v3.1
-// Purpose: Given a GLB Drive fileId, find or create the LociMyu save Spreadsheet
-// in the same Drive folder, ensure __LM_MATERIALS sheet exists + header, and pick
-// the active caption sheet WITHOUT auto-creating "Captions".
+// save.locator.js
+// LociMyu: find or create a save spreadsheet next to the GLB on Drive
+// - Tolerant to missing glbId: will fall back to window.__LM_CURRENT_GLB_ID
+// - Guarantees __LM_MATERIALS sheet and header
+// - Does NOT auto-create caption sheet unless none exists at all
 //
 // Exports:
-//   - findOrCreateSaveSheetByGlbId({ glbId, glbName? }): Promise<{
-//       spreadsheetId: string,
-//       materialsGid: number,
-//       captionGid: number,
-//       defaultCaptionGid: number, // same as captionGid (for backward compat)
-//     }>
+//   findOrCreateSaveSheetByGlbId({ glbId, glbName }):
+//     -> { spreadsheetId, materialsGid, captionGid, defaultCaptionGid }
 //
-// Expected environment:
-//   - gauth.module.js: exports getAccessToken(): Promise<string>
-//   - This file is imported via ESM: `import * as loc from './save.locator.js'`
-//
-// Notes:
-//   - Uses native fetch with Authorization header (Bearer token).
-//   - Does NOT auto-create a "Captions" sheet. It selects an existing non-__LM_MATERIALS sheet.
-//   - If none exists, it falls back to the first sheet returned by Sheets API.
-//   - __LM_MATERIALS: created if missing; header row ensured once.
-//
-// Logging prefix: [save.locator]
-
-import * as gauth from './gauth.module.js';
-
-const DRIVE_V3 = 'https://www.googleapis.com/drive/v3';
-const SHEETS_V4 = 'https://sheets.googleapis.com/v4/spreadsheets';
-
-const LM_MATERIALS_TITLE = '__LM_MATERIALS';
-const LM_HEADER = [
-  'materialKey', 'opacity', 'chromaColor', 'chromaTolerance', 'chromaFeather',
-  'doubleSided', 'unlitLike', 'updatedAt', 'updatedBy'
+const LOG_PREFIX = '[save.locator]';
+const MATERIALS_SHEET_TITLE = '__LM_MATERIALS';
+const MATERIALS_HEADER = [
+  'materialKey','opacity','chromaColor','chromaTolerance','chromaFeather',
+  'doubleSided','unlitLike','updatedAt','updatedBy'
 ];
 
-async function fetchJSONAuth(url, opts = {}) {
-  const token = await gauth.getAccessToken();
-  const headers = {
-    ...(opts.headers || {}),
-    'Authorization': `Bearer ${token}`,
-    'Content-Type': opts.body && typeof opts.body === 'string' ? 'application/json' : (opts.headers && opts.headers['Content-Type']) ? opts.headers['Content-Type'] : 'application/json',
+// ---- hook for setCurrentGlbId so we can capture GLB id globally ----
+(function hookSetCurrentGlbId() {
+  const wrap = () => {
+    const prev = window.setCurrentGlbId;
+    if (typeof prev === 'function' && !prev.__lmWrapped) {
+      window.setCurrentGlbId = function(id, ...rest) {
+        window.__LM_CURRENT_GLB_ID = id;
+        try { return prev.apply(this, [id, ...rest]); }
+        finally { /* no-op */ }
+      };
+      window.setCurrentGlbId.__lmWrapped = true;
+      console.log(LOG_PREFIX, 'hooked setCurrentGlbId');
+    }
   };
-  const res = await fetch(url, { ...opts, headers });
+  // try immediately and then poll a few times
+  wrap();
+  let tries = 0;
+  const timer = setInterval(() => {
+    if (window.setCurrentGlbId && window.setCurrentGlbId.__lmWrapped) {
+      clearInterval(timer);
+    } else if (tries++ > 40) { // ~4s
+      clearInterval(timer);
+    } else {
+      wrap();
+    }
+  }, 100);
+})();
+
+async function getAccessToken() {
+  // defer import to avoid cyclic timing issues
+  const gauth = await import('./gauth.module.js');
+  const tok = await gauth.getAccessToken();
+  if (!tok) throw new Error('No OAuth token');
+  return tok;
+}
+
+async function authFetchJSON(url, init={}) {
+  const token = await getAccessToken();
+  const res = await fetch(url, {
+    ...init,
+    headers: {
+      'Authorization': `Bearer ${token}`,
+      'Content-Type': 'application/json',
+      ...(init.headers||{})
+    }
+  });
   if (!res.ok) {
-    const text = await res.text().catch(() => '');
-    console.warn('[save.locator] fetch failed', url, res.status, text);
-    throw new Error(`HTTP ${res.status}: ${text || res.statusText}`);
+    const body = await res.text().catch(()=>'');
+    throw new Error(`HTTP ${res.status} @ ${url} :: ${body}`);
   }
-  // Some Sheets batch endpoints return empty. Try JSON parse but allow empty.
-  const ct = res.headers.get('content-type') || '';
-  if (ct.includes('application/json')) return res.json();
-  return null;
+  return res.json();
 }
 
-async function getDriveFile(fileId) {
-  const url = `${DRIVE_V3}/files/${encodeURIComponent(fileId)}?fields=id,name,parents,mimeType`;
-  return fetchJSONAuth(url);
-}
-
-async function listSpreadsheetsInParent(parentId, nameHint) {
-  // Search spreadsheets in parent; prefer name containing hint
-  const q = [
-    `'${parentId}' in parents`,
-    `mimeType='application/vnd.google-apps.spreadsheet'`,
-    `trashed=false`
-  ].join(' and ');
-  const url = `${DRIVE_V3}/files?q=${encodeURIComponent(q)}&fields=files(id,name)&pageSize=10&orderBy=modifiedTime desc`;
-  const data = await fetchJSONAuth(url);
-  const files = data.files || [];
-  if (nameHint) {
-    const hit = files.find(f => (f.name || '').toLowerCase().includes(nameHint.toLowerCase()));
-    if (hit) return hit;
+async function authFetch(url, init={}) {
+  const token = await getAccessToken();
+  const res = await fetch(url, {
+    ...init,
+    headers: {
+      'Authorization': `Bearer ${token}`,
+      ...(init.headers||{})
+    }
+  });
+  if (!res.ok) {
+    const body = await res.text().catch(()=>'');
+    throw new Error(`HTTP ${res.status} @ ${url} :: ${body}`);
   }
-  return files[0] || null;
+  return res;
 }
 
-async function createSpreadsheet(title) {
+async function getGlbMeta(glbId) {
+  const fields = encodeURIComponent('id,name,parents');
+  return authFetchJSON(`https://www.googleapis.com/drive/v3/files/${glbId}?fields=${fields}`);
+}
+
+async function listSpreadsheetsInParent(parentId) {
+  const q = encodeURIComponent(`'${parentId}' in parents and mimeType='application/vnd.google-apps.spreadsheet' and trashed=false`);
+  const fields = encodeURIComponent('files(id,name),nextPageToken');
+  const out = [];
+  let pageToken = '';
+  do {
+    const data = await authFetchJSON(`https://www.googleapis.com/drive/v3/files?q=${q}&fields=${fields}${pageToken ? '&pageToken='+pageToken : ''}`);
+    out.push(...(data.files||[]));
+    pageToken = data.nextPageToken || '';
+  } while(pageToken);
+  return out;
+}
+
+async function moveFileToParent(fileId, parentId, previousParents) {
+  // previousParents must be a comma separated list of ids to remove
+  return authFetchJSON(`https://www.googleapis.com/drive/v3/files/${fileId}?addParents=${parentId}&removeParents=${encodeURIComponent(previousParents)}`, {
+    method: 'PATCH'
+  });
+}
+
+async function ensureMaterialsHeader(spreadsheetId, sheetId) {
+  // read first row, set if missing/mismatched
+  const get = await authFetchJSON(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}`);
+  const sheet = (get.sheets||[]).find(s => s.properties && s.properties.sheetId === sheetId);
+  if (!sheet) throw new Error('materials sheet not found by gid');
+  const grid = sheet.data?.[0] || null;
+  // simpler: just set A1: header unconditionally with values.update
+  await authFetchJSON(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(MATERIALS_SHEET_TITLE+'!A1:I1')}?valueInputOption=RAW`, {
+    method: 'PUT',
+    body: JSON.stringify({ values: [MATERIALS_HEADER] })
+  });
+}
+
+async function createSpreadsheetWithMaterials(title) {
   const payload = {
     properties: { title },
-    sheets: [{ properties: { title: 'Sheet1' } }]
+    sheets: [{
+      properties: { title: MATERIALS_SHEET_TITLE },
+      data: [{
+        rowData: [{
+          values: MATERIALS_HEADER.map(h => ({ userEnteredValue: { stringValue: h } }))
+        }]
+      }]
+    }]
   };
-  const url = `${SHEETS_V4}`;
-  const data = await fetchJSONAuth(url, { method: 'POST', body: JSON.stringify(payload) });
-  return data; // { spreadsheetId, sheets: [{properties:{sheetId,title}}], ... }
-}
-
-async function moveFileToParent(fileId, newParentId) {
-  // Need to add new parent and remove old parents (if any). First get parents.
-  const file = await getDriveFile(fileId);
-  const oldParents = (file.parents || []).join(',');
-  const url = `${DRIVE_V3}/files/${encodeURIComponent(fileId)}?addParents=${encodeURIComponent(newParentId)}${oldParents ? `&removeParents=${encodeURIComponent(oldParents)}` : ''}&fields=id,parents`;
-  return fetchJSONAuth(url, { method: 'PATCH' });
+  const created = await authFetchJSON('https://sheets.googleapis.com/v4/spreadsheets', {
+    method: 'POST',
+    body: JSON.stringify(payload)
+  });
+  // find gids
+  const sheets = created.sheets || [];
+  const materials = sheets.find(s => s.properties.title === MATERIALS_SHEET_TITLE);
+  return {
+    spreadsheetId: created.spreadsheetId,
+    materialsGid: materials?.properties?.sheetId || 0
+  };
 }
 
 async function getSpreadsheet(spreadsheetId) {
-  const url = `${SHEETS_V4}/${encodeURIComponent(spreadsheetId)}?includeGridData=false`;
-  return fetchJSONAuth(url);
+  return authFetchJSON(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}`);
 }
 
-async function batchUpdate(spreadsheetId, requests) {
-  const url = `${SHEETS_V4}/${encodeURIComponent(spreadsheetId)}:batchUpdate`;
-  return fetchJSONAuth(url, { method: 'POST', body: JSON.stringify({ requests }) });
+function chooseCaptionSheet(sheets) {
+  // Prefer "Captions"; else first non-materials; else null
+  const byTitle = new Map(sheets.map(s => [s.properties.title, s]));
+  if (byTitle.has('Captions')) return byTitle.get('Captions').properties.sheetId;
+  const nonMaterials = sheets.find(s => s.properties.title !== MATERIALS_SHEET_TITLE);
+  return nonMaterials ? nonMaterials.properties.sheetId : null;
 }
 
-async function valuesGet(spreadsheetId, rangeA1) {
-  const url = `${SHEETS_V4}/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(rangeA1)}`;
-  return fetchJSONAuth(url);
-}
-
-async function valuesUpdate(spreadsheetId, rangeA1, values) {
-  const url = `${SHEETS_V4}/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(rangeA1)}?valueInputOption=RAW`;
-  return fetchJSONAuth(url, { method: 'PUT', body: JSON.stringify({ values }) });
-}
-
-function pickCaptionSheet(sheets) {
-  // Policy:
-  // 1) Prefer a sheet named "Captions" (do NOT create; just pick if exists)
-  // 2) Otherwise, pick the first sheet whose title !== __LM_MATERIALS
-  // 3) Fallback: first sheet in the spreadsheet
-  let candidate = sheets.find(s => (s.properties?.title || '') === 'Captions');
-  if (candidate) return candidate.properties.sheetId;
-
-  candidate = sheets.find(s => (s.properties?.title || '') !== LM_MATERIALS_TITLE);
-  if (candidate) return candidate.properties.sheetId;
-
-  const first = sheets[0];
-  return first?.properties?.sheetId;
-}
-
-function ensureHeaderRowMatches(values, header) {
-  if (!Array.isArray(values) || values.length === 0) return false;
-  const row = values[0] || [];
-  if (row.length < header.length) return false;
-  for (let i = 0; i < header.length; i++) {
-    if ((row[i] || '') !== header[i]) return false;
-  }
-  return true;
-}
-
-async function ensureMaterialsSheet(spreadsheet) {
-  const sheets = spreadsheet.sheets || [];
-  const hit = sheets.find(s => (s.properties?.title || '') === LM_MATERIALS_TITLE);
-  if (hit) {
-    console.log('[save.locator] __LM_MATERIALS exists', hit.properties.sheetId);
-    // Verify header row
-    try {
-      const gr = await valuesGet(spreadsheet.spreadsheetId, `${LM_MATERIALS_TITLE}!A1:Z1`);
-      const ok = ensureHeaderRowMatches(gr.values, LM_HEADER);
-      if (!ok) {
-        await valuesUpdate(spreadsheet.spreadsheetId, `${LM_MATERIALS_TITLE}!A1:Z1`, [LM_HEADER]);
-        console.log('[save.locator] header fixed for __LM_MATERIALS');
-      } else {
-        console.log('[save.locator] header present -> SKIP');
+async function addSheet(spreadsheetId, title) {
+  const body = {
+    requests: [{
+      addSheet: {
+        properties: { title }
       }
-    } catch (e) {
-      // If values.get failed (sheet might be empty), write header.
-      await valuesUpdate(spreadsheet.spreadsheetId, `${LM_MATERIALS_TITLE}!A1:Z1`, [LM_HEADER]);
-      console.log('[save.locator] header set for __LM_MATERIALS');
-    }
-    return hit.properties.sheetId;
-  }
-
-  // Create the materials sheet
-  const addRes = await batchUpdate(spreadsheet.spreadsheetId, [{
-    addSheet: { properties: { title: LM_MATERIALS_TITLE, gridProperties: { frozenRowCount: 1 } } }
-  }]);
-  // Retrieve fresh spreadsheet to get sheetId
-  const updated = await getSpreadsheet(spreadsheet.spreadsheetId);
-  const created = updated.sheets.find(s => (s.properties?.title || '') === LM_MATERIALS_TITLE);
-  const sheetId = created?.properties?.sheetId;
-  if (sheetId == null) throw new Error('Failed to create __LM_MATERIALS');
-  console.log('[save.locator] __LM_MATERIALS created', sheetId);
-
-  await valuesUpdate(spreadsheet.spreadsheetId, `${LM_MATERIALS_TITLE}!A1:Z1`, [LM_HEADER]);
-  console.log('[save.locator] header set for __LM_MATERIALS');
-  return sheetId;
-}
-
-/**
- * Main entrypoint: find or create the save spreadsheet near the GLB, ensure materials,
- * and decide the active caption sheet (without auto-creating it).
- */
-export async function findOrCreateSaveSheetByGlbId({ glbId, glbName }) {
-  console.log('[save.locator] module loaded (ESM export active)');
-  console.log('[save.locator] begin', { glbId, glbName });
-
-  if (!glbId) throw new Error('glbId is required');
-
-  // 1) Locate GLB file parents
-  const glb = await getDriveFile(glbId);
-  const parentId = (glb.parents && glb.parents[0]) || null;
-  const nameHint = (glbName || glb.name || 'LociMyu').trim();
-  if (!parentId) console.warn('[save.locator] GLB has no parent; spreadsheet will be created in My Drive');
-
-  // 2) Find existing spreadsheet in the same folder (prefer name containing hint)
-  let spreadsheetFile = parentId ? await listSpreadsheetsInParent(parentId, nameHint) : null;
-
-  // 3) Create spreadsheet if none
-  let spreadsheetId;
-  if (!spreadsheetFile) {
-    const title = `${nameHint} — LociMyu Save`;
-    const created = await createSpreadsheet(title);
-    spreadsheetId = created.spreadsheetId;
-    console.log('[save.locator] spreadsheet created', spreadsheetId, title);
-    // Move into same parent folder as GLB (if possible)
-    if (parentId) {
-      try {
-        await moveFileToParent(spreadsheetId, parentId);
-        console.log('[save.locator] spreadsheet moved to GLB parent', parentId);
-      } catch (e) {
-        console.warn('[save.locator] moving spreadsheet to GLB parent failed (will stay in My Drive):', e?.message || e);
-      }
-    }
-  } else {
-    spreadsheetId = spreadsheetFile.id;
-    console.log('[save.locator] spreadsheet located', spreadsheetId, spreadsheetFile.name);
-  }
-
-  // 4) Ensure __LM_MATERIALS exists + header
-  const doc = await getSpreadsheet(spreadsheetId);
-  const materialsGid = await ensureMaterialsSheet(doc);
-
-  // 5) Decide caption sheet (do not create)
-  const fresh = await getSpreadsheet(spreadsheetId);
-  const captionGid = pickCaptionSheet(fresh.sheets || []);
-  if (captionGid == null) {
-    // Extremely unlikely (no sheets at all). Create a basic Sheet1 to avoid null.
-    await batchUpdate(spreadsheetId, [{ addSheet: { properties: { title: 'Sheet1' } } }]);
-    const after = await getSpreadsheet(spreadsheetId);
-    const fallback = pickCaptionSheet(after.sheets || []);
-    console.log('[save.locator] caption sheet auto-fallback -> Sheet1', fallback);
-    return {
-      spreadsheetId,
-      materialsGid,
-      captionGid: fallback,
-      defaultCaptionGid: fallback,
-    };
-  }
-
-  console.log('[save.locator] active caption sheet ->', captionGid);
-  return {
-    spreadsheetId,
-    materialsGid,
-    captionGid,
-    defaultCaptionGid: captionGid, // backward compatibility
+    }]
   };
+  const resp = await authFetchJSON(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}:batchUpdate`, {
+    method: 'POST',
+    body: JSON.stringify(body)
+  });
+  const sheet = resp.replies?.[0]?.addSheet?.properties;
+  return sheet?.sheetId || null;
 }
 
-export default {
-  findOrCreateSaveSheetByGlbId,
-};
+export async function findOrCreateSaveSheetByGlbId(opts = {}) {
+  console.log(LOG_PREFIX, 'module loaded (ESM export active)');
+  let { glbId, glbName } = opts || {};
+  if (!glbId) {
+    glbId = window.__LM_CURRENT_GLB_ID || null;
+  }
+  console.log(LOG_PREFIX, 'begin', { glbId, glbName });
+  if (!glbId) {
+    throw new Error('glbId is required (no argument and no captured __LM_CURRENT_GLB_ID)');
+  }
+
+  // 1) read GLB meta
+  const glb = await getGlbMeta(glbId);
+  const parent = (glb.parents && glb.parents[0]) || null;
+  const name = glbName || glb.name || 'LociMyu Target';
+  if (!parent) {
+    throw new Error('GLB has no parent folder');
+  }
+
+  // 2) find existing spreadsheet in same parent
+  const candidates = await listSpreadsheetsInParent(parent);
+  // naming heuristic: prefer a spreadsheet whose name includes the GLB name or "LociMyu"
+  const preferred = candidates.find(f => f.name && (f.name.includes(name) || /LociMyu/i.test(f.name))) || candidates[0];
+
+  let spreadsheetId;
+  let materialsGid;
+  if (preferred) {
+    spreadsheetId = preferred.id;
+    // ensure materials sheet exists + header
+    const ss = await getSpreadsheet(spreadsheetId);
+    const sheets = ss.sheets || [];
+    let materials = sheets.find(s => s.properties.title === MATERIALS_SHEET_TITLE);
+    if (!materials) {
+      // add materials sheet
+      const newGid = await addSheet(spreadsheetId, MATERIALS_SHEET_TITLE);
+      materialsGid = newGid;
+    } else {
+      materialsGid = materials.properties.sheetId;
+    }
+    await ensureMaterialsHeader(spreadsheetId, materialsGid);
+    console.log(LOG_PREFIX, 'spreadsheet located', { spreadsheetId });
+  } else {
+    // 3) create new spreadsheet and move into folder
+    const createdTitle = `${name} — LociMyu Save`;
+    const created = await createSpreadsheetWithMaterials(createdTitle);
+    spreadsheetId = created.spreadsheetId;
+    materialsGid = created.materialsGid;
+    // move to same folder
+    // we need previous parents list to remove; fetch them via Drive get again to be safe
+    const me = await authFetchJSON(`https://www.googleapis.com/drive/v3/files/${spreadsheetId}?fields=parents`);
+    const prevParents = (me.parents || []).join(',');
+    if (!prevParents.includes(parent)) {
+      await moveFileToParent(spreadsheetId, parent, prevParents);
+    }
+    console.log(LOG_PREFIX, 'spreadsheet created', { spreadsheetId });
+  }
+
+  // 4) choose caption sheet (no auto-create unless none exists at all)
+  const ss2 = await getSpreadsheet(spreadsheetId);
+  const sheets2 = ss2.sheets || [];
+  let captionGid = chooseCaptionSheet(sheets2);
+  if (captionGid == null) {
+    // as a fallback only (extremely rare), create Sheet1
+    captionGid = await addSheet(spreadsheetId, 'Sheet1');
+  }
+
+  // final
+  const result = { spreadsheetId, materialsGid, captionGid, defaultCaptionGid: captionGid };
+  console.log(LOG_PREFIX, 'done', result);
+  return result;
+}
+
+export default { findOrCreateSaveSheetByGlbId };
