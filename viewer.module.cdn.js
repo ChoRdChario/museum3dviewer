@@ -319,7 +319,7 @@ export function setPinSelected(id, on){
   });
 }
 
-export async function loadGlbFromDrive(fileId, { token }) {
+export async function loadGlbFromDrive(fileId, { token } = {}) {
   // Build Drive media URL
   const url = `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?alt=media&supportsAllDrives=true`;
 // Normalize/resolve token (support Promise; acquire silently if missing)
