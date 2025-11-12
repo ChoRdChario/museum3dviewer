@@ -1,8 +1,6 @@
 <!DOCTYPE html>
 <html lang="ja">
-\1
-  <script type="module" src="./drive.fetch.auth.patch.js"></script>
-
+<head>
   <!-- ESM import map for THREE (and addons) -->
   <script id="lm-importmap-three" type="importmap">{
     "imports": {
@@ -372,8 +370,14 @@
   <script src="materials.sheet.persist.js"></script>
   <script src="materials.auto.apply.js"></script>
 
-  <!-- LociMyu: save-sheet glue -->
-  <script type="module" src="./save.locator.js"></script>
-  <script src="./glb.btn.bridge.v3.patch.js"></script>
+  <!-- Load GLB via Drive fileId using viewer.module.cdn.js -->
+
+
+  <script src="./content.js"></script>
+
+  <script type="module" src="./glb.btn.bridge.v3.js"></script>
+
+  <script type="module" src="./drive.fetch.auth.patch.js"></script>
+  <script type="module" src="./bridge.autoload.js"></script>
 </body>
 </html>
