@@ -1,7 +1,4 @@
-/*! sheet.ctx.bridge.js — gid-based context bridge (no-module/UMD)
- * Fix: removes ES module `export` and attaches APIs to `window` for classic <script> usage.
- * VERSION_TAG:V6_12_FOUNDATION_AUTH_CTX_MAT_HDR
- */
+/*! sheet.ctx.bridge.js — gid-based context bridge (no-module/UMD) */
 (function(){
   if (!window.sheetCtxBridge) {
     console.warn("[sheet-ctx] boot not loaded; minimal stub will be created");

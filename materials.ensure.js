@@ -1,7 +1,4 @@
-/*! materials.ensure.js — __LM_MATERIALS header one-time ensure (no-module/UMD)
- * Fix: removes ES module `export` and attaches API to `window` for classic <script> usage.
- * VERSION_TAG:V6_12_FOUNDATION_AUTH_CTX_MAT_HDR
- */
+/*! materials.ensure.js — __LM_MATERIALS header one-time ensure (no-module/UMD) */
 (function(){
   window.ensureMaterialsHeader = async function(spreadsheetId){
     if (typeof window.__lm_ensureMaterialsHeader !== "function") {
