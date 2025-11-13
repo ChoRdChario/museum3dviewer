@@ -98,14 +98,30 @@ async function ensureMaterialsSheet(spreadsheetId, sheetsMeta){
   return gid;
 }
 
-async function ensureDefaultCaptionSheet(spreadsheetId, sheetsMeta){
-  const title = 'Captions';
-  let cap = pickSheetByTitle(sheetsMeta, title);
-  if (!cap){
-    const add = await sheetsBatchUpdate(spreadsheetId, [{ addSheet: { properties: { title } } }]);
-    const r = add?.replies?.[0]?.addSheet?.properties;
-    cap = { properties: r };
+
+async function ensureDefaultCaptionSheet(spreadsheetId){
+  // Do NOT auto-create "Captions" any more.
+  // 1) Prefer LM_SHEET_GIDMAP if available and try to resolve by title (legacy installs).
+  try{
+    if (window.LM_SHEET_GIDMAP && LM_SHEET_GIDMAP.resolveTitleToGid){
+      const gid = await LM_SHEET_GIDMAP.resolveTitleToGid(spreadsheetId, "Captions");
+      if (gid != null) return gid;
+    }
+  }catch(e){
+    console.warn("[save.locator] gidmap lookup failed (non-fatal)", e);
   }
+  // 2) Fallback: fetch metadata and look for an existing sheet named "Captions".
+  try{
+    const meta = await fetchSpreadsheetMeta(spreadsheetId);
+    const found = (meta && meta.sheets || []).find(s => (s.properties||{}).title === "Captions");
+    if (found) return found.properties.sheetId;
+  }catch(e){
+    console.warn("[save.locator] meta lookup failed (non-fatal)", e);
+  }
+  // 3) No existing caption sheet: return null and let UI guide the user to create/choose.
+  console.log("[save.locator] no existing 'Captions' sheet; skip auto-create");
+  return null;
+}
   return cap.properties.sheetId;
 }
 
