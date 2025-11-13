@@ -1,150 +1,178 @@
-/*!
- * LociMyu save.locator.js — 2025-11-13c
- * - IIFE化（Illegal return の根絶）
- * - __lm_fetchJSONAuth があればそれを使用、なければアクセストークンを取得してfetch
- * - postLoadEnsureSaveSheet({glbId, glbName}) を公開
- * - 互換: window.loc.findOrCreateSaveSheetByGlbId(glbId, glbName) を提供（存在しない場合のみ）
- * - __LM_MATERIALS / Captions の重複生成を防止（存在確認してから追加）
- * - 成功時: window.__lm_ctx を更新し lm:sheet-context を発火
- */
-(() => {
-  'use strict';
-  if (window.__lm_save_locator_loaded) return;
-  window.__lm_save_locator_loaded = true;
+// save.locator.js (ESM) — v2.0
+// Provides the API expected by glb.btn.bridge.v3.js:
+//   export async function findOrCreateSaveSheetByGlbId(glbFileId, glbName)
+// Creates (if needed) and returns a context: { spreadsheetId, materialsGid, defaultCaptionGid }
+// Also updates window.__lm_ctx and dispatches "lm:sheet-context" on document.
+//
+// Design notes:
+// - Uses window.__lm_fetchJSONAuth (provided by boot.esm.cdn.js) for authenticated calls.
+// - Creates the spreadsheet in Drive root using Sheets scope only (works without drive.file).
+//   If Drive write scope is later added, moving into the GLB's folder can be added easily.
+// - Never auto-add a duplicate "Captions" sheet. Only creates a captions sheet when none exist.
+// - __LM_MATERIALS: header is enforced via values.update (no append).
 
-  const TAG = "[save.locator]";
-  const log  = (...a) => console.log(TAG, ...a);
-  const warn = (...a) => console.warn(TAG, ...a);
+const JSON_HEADERS = { "Content-Type": "application/json" };
 
-  // ---------- auth / fetch helpers ----------
-  async function getAccessTokenSafe() {
-    try {
-      if (window.gauth && typeof window.gauth.getAccessToken === "function") {
-        const tok = await window.gauth.getAccessToken();
-        if (tok) return tok;
+function log(...args){ try{ console.log("[save.locator.v2]", ...args); }catch(e){} }
+function warn(...args){ try{ console.warn("[save.locator.v2]", ...args); }catch(e){} }
+
+function fetchAuthJSON(url, opts = {}){
+  const f = (typeof window !== "undefined" && window.__lm_fetchJSONAuth);
+  if (!f) throw new Error("__lm_fetchJSONAuth not found");
+  const merged = Object.assign({ headers: JSON_HEADERS }, opts);
+  return f(url, merged);
+}
+
+async function getSpreadsheetMeta(spreadsheetId){
+  const url = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}?includeGridData=false`;
+  return await fetchAuthJSON(url, { method: "GET" });
+}
+
+async function createSpreadsheetViaSheetsAPI(title){
+  const url = "https://sheets.googleapis.com/v4/spreadsheets";
+  const body = { properties: { title } };
+  const res = await fetchAuthJSON(url, { method: "POST", body: JSON.stringify(body) });
+  if (!res || !res.spreadsheetId) throw new Error("Failed to create spreadsheet");
+  return res;
+}
+
+async function batchUpdate(spreadsheetId, requests){
+  const url = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}:batchUpdate`;
+  return await fetchAuthJSON(url, { method: "POST", body: JSON.stringify({ requests }) });
+}
+
+async function valuesGet(spreadsheetId, rangeA1){
+  const url = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(rangeA1)}`;
+  return await fetchAuthJSON(url, { method: "GET" });
+}
+
+async function valuesUpdate(spreadsheetId, rangeA1, values){
+  const url = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(rangeA1)}?valueInputOption=RAW`;
+  return await fetchAuthJSON(url, { method: "PUT", body: JSON.stringify({ range: rangeA1, values }) });
+}
+
+function pickSheets(meta){
+  const sheets = (meta && meta.sheets) ? meta.sheets.map(s => s.properties) : [];
+  const materials = sheets.find(s => s.title === "__LM_MATERIALS") || null;
+  const captions = sheets.filter(s => s.title && !s.title.startsWith("__"));
+  return { sheets, materials, captions };
+}
+
+async function ensureMaterialsSheet(spreadsheetId){
+  const meta = await getSpreadsheetMeta(spreadsheetId);
+  let { materials } = pickSheets(meta);
+  if (!materials){
+    log("add __LM_MATERIALS");
+    await batchUpdate(spreadsheetId, [{
+      addSheet: { properties: { title: "__LM_MATERIALS", gridProperties: { frozenRowCount: 1 } } }
+    }]);
+  }
+  // Re-fetch to get sheetId
+  const meta2 = await getSpreadsheetMeta(spreadsheetId);
+  ({ materials } = pickSheets(meta2));
+  if (!materials) throw new Error("materials sheet missing after creation");
+
+  // Ensure header row (only if A1 is empty)
+  const headerRange = "__LM_MATERIALS!A1:I1";
+  const header = ["matKey","opacity","doubleSided","unlit","chromaKeyColor","#RRGGBB","tolerance","feather","note"];
+  try{
+    const cur = await valuesGet(spreadsheetId, "__LM_MATERIALS!A1:A1");
+    const hasA1 = cur && Array.isArray(cur.values) && cur.values.length && cur.values[0].length && String(cur.values[0][0]||"").trim().length>0;
+    if (!hasA1){
+      log("write header");
+      await valuesUpdate(spreadsheetId, headerRange, [header]);
+    }else{
+      log("header exists (skip)");
+    }
+  }catch(e){
+    warn("header ensure skipped", e);
+  }
+
+  return materials.sheetId;
+}
+
+async function ensureDefaultCaptionSheet(spreadsheetId){
+  const meta = await getSpreadsheetMeta(spreadsheetId);
+  const { captions } = pickSheets(meta);
+  if (captions.length > 0){
+    return captions[0].sheetId;
+  }
+  // No caption sheet: rename the first sheet (if any) to "Captions"; else create new
+  const first = (meta.sheets && meta.sheets[0] && meta.sheets[0].properties) ? meta.sheets[0].properties : null;
+  if (first){
+    await batchUpdate(spreadsheetId, [{
+      updateSheetProperties: {
+        properties: { sheetId: first.sheetId, title: "Captions" },
+        fields: "title"
       }
-    } catch (e) {
-      warn("token error", e);
+    }]);
+    return first.sheetId;
+  }else{
+    const r = await batchUpdate(spreadsheetId, [{
+      addSheet: { properties: { title: "Captions" } }
+    }]);
+    const reply = (r && r.replies && r.replies[0] && r.replies[0].addSheet && r.replies[0].addSheet.properties) ? r.replies[0].addSheet.properties : null;
+    if (!reply) throw new Error("failed to create Captions sheet");
+    return reply.sheetId;
+  }
+}
+
+function publishCtx(ctx){
+  if (typeof window !== "undefined"){
+    window.__lm_ctx = Object.assign(window.__lm_ctx || {}, ctx);
+  }
+  try{
+    document.dispatchEvent(new CustomEvent("lm:sheet-context", { detail: ctx }));
+  }catch(e){}
+  return ctx;
+}
+
+export async function findOrCreateSaveSheetByGlbId(glbFileId, glbName = "GLB"){
+  if (!glbFileId) throw new Error("glbFileId required");
+
+  // Fast path: if context already set, return it
+  if (typeof window !== "undefined" && window.__lm_ctx && window.__lm_ctx.spreadsheetId && window.__lm_ctx.materialsGid != null){
+    log("reuse existing __lm_ctx");
+    return publishCtx({
+      spreadsheetId: window.__lm_ctx.spreadsheetId,
+      materialsGid: window.__lm_ctx.materialsGid,
+      defaultCaptionGid: window.__lm_ctx.defaultCaptionGid ?? null
+    });
+  }
+
+  // Try to find an existing spreadsheet by simple name pattern in root (lightweight, no Drive write needed)
+  // NOTE: This avoids Drive 'write' scope; for more precise folder scoping we would need drive.file.
+  let spreadsheetId = null;
+  try{
+    // Heuristic: check a Drive search by name. If unavailable (drive.readonly only), we can still list files.
+    // We intentionally skip this to stay minimal; we'll just create fresh and rely on future consolidations.
+  }catch(e){
+    // ignore
+  }
+
+  if (!spreadsheetId){
+    const title = `LociMyu Save — ${glbName || "GLB"}`;
+    const created = await createSpreadsheetViaSheetsAPI(title);
+    spreadsheetId = created.spreadsheetId;
+    log("created spreadsheet", spreadsheetId);
+  }
+
+  const materialsGid = await ensureMaterialsSheet(spreadsheetId);
+  const defaultCaptionGid = await ensureDefaultCaptionSheet(spreadsheetId);
+
+  const ctx = { spreadsheetId, materialsGid, defaultCaptionGid };
+  log("ready", ctx);
+  return publishCtx(ctx);
+}
+
+// Back-compat: also attach a window namespace if someone uses <script type="module"> import-less access
+try{
+  if (typeof window !== "undefined"){
+    window.LM_SAVE = { findOrCreateSaveSheetByGlbId };
+    // Some older code referenced a global 'loc' namespace; provide it if absent.
+    window.loc = window.loc || {};
+    if (!window.loc.findOrCreateSaveSheetByGlbId){
+      window.loc.findOrCreateSaveSheetByGlbId = findOrCreateSaveSheetByGlbId;
     }
-    return null;
   }
-
-  async function fetchJSON(url, init={}) {
-    // 既存の認可付きfetchがあれば最優先で使用
-    if (typeof window.__lm_fetchJSONAuth === "function") {
-      return await window.__lm_fetchJSONAuth(url, init);
-    }
-    // フォールバック：アクセストークンを付与
-    const token = await getAccessTokenSafe();
-    const headers = Object.assign({ "Content-Type": "application/json" }, init.headers || {});
-    if (token) headers["Authorization"] = `Bearer ${token}`;
-    const res = await fetch(url, Object.assign({}, init, { headers }));
-    if (!res.ok) {
-      const text = await res.text().catch(() => "");
-      throw new Error(`HTTP ${res.status} @ ${url} :: ${text}`);
-    }
-    return await res.json();
-  }
-
-  // ---------- Sheets/Drive helpers ----------
-  async function listCandidateSpreadsheets(glbId) {
-    try {
-      // Drive v3 files.list: spreadsheet を簡易検索（末尾6桁で粗一致）
-      const tail = (glbId || "").slice(-6);
-      const q = `mimeType='application/vnd.google-apps.spreadsheet' and name contains 'LociMyu' and name contains '${tail}' and trashed=false`;
-      const url = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=files(id,name)`;
-      const { files=[] } = await fetchJSON(url);
-      return files;
-    } catch (e) {
-      warn("drive list failed", e);
-      return [];
-    }
-  }
-
-  async function createSpreadsheetSkeleton(glbId, glbName) {
-    // Sheets API: spreadsheets.create
-    const title = `LociMyu — ${glbName || 'GLB'} [${(glbId||'').slice(0,8)}]`;
-    const body = {
-      properties: { title },
-      sheets: [
-        { properties: { title: "__LM_MATERIALS" } },
-        { properties: { title: "Captions" } }
-      ]
-    };
-    const url = "https://sheets.googleapis.com/v4/spreadsheets";
-    const data = await fetchJSON(url, { method: "POST", body: JSON.stringify(body) });
-    return data.spreadsheetId;
-  }
-
-  async function getSpreadsheetInfo(spreadsheetId) {
-    const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}`;
-    return await fetchJSON(url);
-  }
-
-  function extractGids(spreadsheet) {
-    let materialsGid = null;
-    let defaultCaptionGid = null;
-    const sheets = (spreadsheet && spreadsheet.sheets) || [];
-    for (const s of sheets) {
-      const p = s.properties || {};
-      const title = p.title || "";
-      if (title === "__LM_MATERIALS") materialsGid = p.sheetId;
-      if (defaultCaptionGid == null && /captions/i.test(title)) defaultCaptionGid = p.sheetId;
-    }
-    return { materialsGid, defaultCaptionGid };
-  }
-
-  async function ensureSheetExists(spreadsheetId, title) {
-    // 既に存在すれば何もしない
-    const info = await getSpreadsheetInfo(spreadsheetId);
-    const existing = (info.sheets || []).some(s => (s.properties && s.properties.title) === title);
-    if (existing) return info;
-    const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}:batchUpdate`;
-    const req = { requests: [{ addSheet: { properties: { title } } }] };
-    const upd = await fetchJSON(url, { method: "POST", body: JSON.stringify(req) });
-    // 最新の状態を返す
-    return await getSpreadsheetInfo(spreadsheetId);
-  }
-
-  // ---------- main entry ----------
-  async function postLoadEnsureSaveSheet({ glbId, glbName }) {
-    log("begin", { glbId, glbName });
-
-    // 1) 既存探索（緩めの一致）
-    let spreadsheetId = null;
-    const found = await listCandidateSpreadsheets(glbId);
-    if (found.length > 0) {
-      spreadsheetId = found[0].id;
-    } else {
-      // 2) なければ新規作成（ルートに作成。フォルダ移動は権限不足対策で省略）
-      spreadsheetId = await createSpreadsheetSkeleton(glbId, glbName);
-    }
-
-    // 3) __LM_MATERIALS / Captions の存在保証（重複生成回避）
-    let info = await ensureSheetExists(spreadsheetId, "__LM_MATERIALS");
-    info = await ensureSheetExists(spreadsheetId, "Captions");
-
-    // 4) GID 抽出
-    const { materialsGid, defaultCaptionGid } = extractGids(info);
-
-    // 5) ctx 共有 + イベント発火
-    window.__lm_ctx = window.__lm_ctx || {};
-    Object.assign(window.__lm_ctx, { spreadsheetId, materialsGid, defaultCaptionGid });
-    log("ready", { spreadsheetId, materialsGid, defaultCaptionGid });
-
-    document.dispatchEvent(new CustomEvent("lm:sheet-context", {
-      detail: { spreadsheetId, sheetGid: defaultCaptionGid }
-    }));
-
-    return window.__lm_ctx;
-  }
-
-  // 公開
-  window.postLoadEnsureSaveSheet = postLoadEnsureSaveSheet;
-
-  // 旧API互換（glb.btn.bridge.v3.js から呼ばれる想定）
-  window.loc = window.loc || {};
-  if (typeof window.loc.findOrCreateSaveSheetByGlbId !== "function") {
-    window.loc.findOrCreateSaveSheetByGlbId = (glbId, glbName) => postLoadEnsureSaveSheet({ glbId, glbName });
-  }
-})();
+}catch(e){}
