@@ -1,4 +1,3 @@
-
 // [caption.ui.controller] minimal UI wiring (phase A0)
 // Defensive: runs even if other bridges are missing.
 (function(){
@@ -14,13 +13,13 @@
   const pane = $('#pane-caption');
   if(!pane){ return warn('pane not found; skip'); }
 
-  const elColor = $('#pinColorChips');
-  const elFilter = $('#pinFilterChips');
-  const elList = $('#caption-list');
-  const elTitle = $('#caption-title');
-  const elBody = $('#caption-body');
-  const elImages = $('#images-grid');
+  const elColorList = $('#caption-color-list', pane) || $('#caption-colors', pane);
+  const elFilterList = $('#caption-filter-list', pane) || $('#caption-filters', pane);
+  const elList = $('#caption-list', pane);
+  const elTitle = $('#caption-title', pane);
+  const elBody  = $('#caption-body', pane);
   const elImgStatus = $('#images-status');
+  const elImages = $('#images-grid');
 
   // Stable store on window for now (Phase A0 → will be replaced by sheet bridge)
   const store = window.__lm_capt || (window.__lm_capt = {
@@ -34,133 +33,151 @@
   // Color palette (legacy-compatible 10 colors)
   const PALETTE = ['#eab308','#a3e635','#60a5fa','#a78bfa','#93c5fd','#fda4af','#c084fc','#a3a3a3','#f97316','#22c55e'];
 
-  function renderChips(target, palette, onPick){
-    target.innerHTML='';
-    palette.forEach(col=>{
-      const b = document.createElement('button');
-      b.type='button'; b.className='chip'; b.title=col; b.style.background=col;
-      b.addEventListener('click',()=>onPick(col,b));
-      target.appendChild(b);
+  function newId(){
+    return 'c_'+Math.random().toString(36).slice(2,10);
+  }
+
+  // --- Rendering helpers -------------------------------------------------------
+
+  function renderColors(){
+    if(!elColorList) return;
+    elColorList.innerHTML = '';
+    PALETTE.forEach(col=>{
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'lm-cap-color';
+      btn.style.backgroundColor = col;
+      if (store.currentColor === col) btn.classList.add('active');
+      btn.addEventListener('click', ()=>{
+        store.currentColor = col;
+        renderColors();
+      });
+      elColorList.appendChild(btn);
     });
   }
 
-  // Pin color picker
-  renderChips(elColor, PALETTE, (col,btn)=>{
-    store.currentColor = col;
-    $$('.chip', elColor).forEach(x=>x.style.outline='none');
-    btn.style.outline = '2px solid #fff5';
-    log('pin color =', col);
-  });
-  // Select first as default outline
-  const firstColorBtn = $('.chip', elColor);
-  if(firstColorBtn) firstColorBtn.style.outline='2px solid #fff5';
-
-  // Filter chips (same palette + All/None)
-  (function(){
-    const wrap = document.createElement('div');
-    wrap.style.display='flex'; wrap.style.flexWrap='wrap'; wrap.style.gap='6px';
-    const mk = (label, cb) => {
-      const b=document.createElement('button');
-      b.textContent=label; b.className='chip'; b.style.width='auto'; b.style.borderRadius='12px'; b.style.padding='0 8px';
-      b.addEventListener('click',cb); return b;
-    };
-    const allBtn = mk('All', ()=>{ store.filter.clear(); refreshList(); });
-    const noneBtn = mk('None', ()=>{ store.filter = new Set(PALETTE); refreshList(); });
-    wrap.appendChild(allBtn); wrap.appendChild(noneBtn);
-    elFilter.appendChild(wrap);
-    renderChips(elFilter, PALETTE, (col,btn)=>{
-      if(store.filter.has(col)) store.filter.delete(col); else store.filter.add(col);
-      btn.style.outline = store.filter.has(col) ? '2px solid #fff5' : 'none';
-      refreshList();
+  function renderFilters(){
+    if(!elFilterList) return;
+    elFilterList.innerHTML = '';
+    PALETTE.forEach(col=>{
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'lm-cap-filter';
+      btn.style.backgroundColor = col;
+      if (store.filter.has(col)) btn.classList.add('active');
+      btn.addEventListener('click', ()=>{
+        if (store.filter.has(col)) store.filter.delete(col);
+        else store.filter.add(col);
+        renderFilters();
+        refreshList();
+      });
+      elFilterList.appendChild(btn);
     });
-  })();
+  }
 
-  // Item utilities
-  const newId = ()=> 'cap_'+Math.random().toString(36).slice(2,9);
+  function refreshList(){
+    if(!elList) return;
+    elList.innerHTML = '';
+    const activeColors = store.filter.size ? store.filter : null;
+    const items = store.items.filter(it=>{
+      return !activeColors || activeColors.has(it.color);
+    });
+
+    items.forEach(it=>{
+      const row = document.createElement('div');
+      row.className = 'lm-cap-row';
+      row.dataset.id = it.id;
+      const sw = document.createElement('span');
+      sw.className = 'lm-cap-sw';
+      sw.style.backgroundColor = it.color || '#eab308';
+      const title = document.createElement('span');
+      title.className = 'lm-cap-title';
+      title.textContent = it.title || '(untitled)';
+      const imgMark = document.createElement('span');
+      imgMark.className = 'lm-cap-imgmark';
+      if (it.image && it.image.url) imgMark.textContent = '🖼';
+
+      row.appendChild(sw);
+      row.appendChild(title);
+      row.appendChild(imgMark);
+
+      if (store.selectedId === it.id) row.classList.add('selected');
+
+      row.addEventListener('click', ()=>{
+        selectItem(it.id);
+      });
+
+      elList.appendChild(row);
+    });
+  }
 
   function selectItem(id){
     store.selectedId = id;
-    $$('.item', elList).forEach(li=>{
-      li.style.background = (li.dataset.id===id) ? '#111827' : 'transparent';
-      li.style.borderLeft = (li.dataset.id===id) ? '3px solid #60a5fa' : '3px solid transparent';
-    });
+    // Update list highlight
+    if(elList){
+      $$('.lm-cap-row', elList).forEach(row=>{
+        row.classList.toggle('selected', row.dataset.id === id);
+      });
+    }
+    // Update detail fields
     const it = store.items.find(x=>x.id===id);
-    elTitle.value = it ? (it.title||'') : '';
-    elBody.value = it ? (it.body||'') : '';
+    if(!it) return;
+    if (elTitle) elTitle.value = it.title || '';
+    if (elBody)  elBody.value = it.body  || '';
+    // TODO: image preview later
   }
 
   function removeItem(id){
     const idx = store.items.findIndex(x=>x.id===id);
-    if(idx>=0){ store.items.splice(idx,1); }
-    if(store.selectedId===id) store.selectedId=null;
+    if(idx===-1) return;
+    store.items.splice(idx,1);
+    if (store.selectedId === id) store.selectedId = null;
     refreshList();
   }
 
-  function renderItem(it){
-    const li = document.createElement('div');
-    li.className='item'; li.dataset.id = it.id;
-    li.style.padding='8px'; li.style.border='1px solid #1f2937'; li.style.borderRadius='8px';
-    li.style.margin='6px'; li.style.display='grid'; li.style.gridTemplateColumns='1fr auto'; li.style.alignItems='center';
-    const text = document.createElement('div');
-    const title = (it.title||'(untitled)');
-    const body = (it.body||'(no description)');
-    text.innerHTML = `<div style="font-weight:600">${title}</div><div style="opacity:.7">${body}</div>`;
-    const del = document.createElement('button'); del.textContent='×'; del.title='Delete'; del.style.width='28px'; del.style.height='28px';
-    del.addEventListener('click',e=>{ e.stopPropagation(); removeItem(it.id); });
-    li.appendChild(text); li.appendChild(del);
-    li.addEventListener('click',()=>selectItem(it.id));
-    return li;
+  // Title / Body input wiring
+  if (elTitle){
+    let tId = 0;
+    elTitle.addEventListener('input', ()=>{
+      const id = store.selectedId; if(!id) return;
+      const it = store.items.find(x=>x.id===id); if(!it) return;
+      it.title = elTitle.value;
+      if(tId) cancelAnimationFrame(tId);
+      tId = requestAnimationFrame(()=>refreshList());
+    });
+  }
+  if (elBody){
+    let bId = 0;
+    elBody.addEventListener('input', ()=>{
+      const id = store.selectedId; if(!id) return;
+      const it = store.items.find(x=>x.id===id); if(!it) return;
+      it.body = elBody.value;
+      if(bId) cancelAnimationFrame(bId);
+      bId = requestAnimationFrame(()=>refreshList());
+    });
   }
 
-  function refreshList(){
-    elList.innerHTML='';
-    const filtered = store.items.filter(it => !store.filter.size || !store.filter.has(it.color));
-    if(!filtered.length){
-      const empty = document.createElement('div');
-      empty.className='muted'; empty.style.padding='8px 10px'; empty.textContent='(no captions)';
-      elList.appendChild(empty);
-    } else {
-      filtered.forEach(it=> elList.appendChild(renderItem(it)));
-    }
-    if(store.selectedId && !store.items.some(i=>i.id===store.selectedId)){
-      store.selectedId = null;
-    }
-  }
-
-  // Title/Body binding (debounced update)
-  let tId=null; let bId=null;
-  elTitle.addEventListener('input', ()=>{
-    const id = store.selectedId; if(!id) return;
-    const it = store.items.find(x=>x.id===id); if(!it) return;
-    it.title = elTitle.value;
-    if(tId) cancelAnimationFrame(tId);
-    tId = requestAnimationFrame(()=>refreshList());
-  });
-  elBody.addEventListener('input', ()=>{
-    const id = store.selectedId; if(!id) return;
-    const it = store.items.find(x=>x.id===id); if(!it) return;
-    it.body = elBody.value;
-    if(bId) cancelAnimationFrame(bId);
-    bId = requestAnimationFrame(()=>refreshList());
-  });
-
-  // Shift+Click to add a pin + caption (placeholder; viewer bridge hookup later)
+  // Shift+Click でピン + キャプションを追加するエントリポイント
   function addCaptionAt(x,y, world){
     const item = { id:newId(), title:'(untitled)', body:'', color:store.currentColor, pos: world||null };
     store.items.push(item);
     refreshList();
     selectItem(item.id);
     log('caption added', item);
-    // Bridge (if present)
+    // Bridge (if present, ピンも描画する)
     try {
-      const maybe = window.__lm_viewer_bridge;
-      if(maybe && typeof maybe.addPinMarker === 'function'){
-        maybe.addPinMarker(item);
+      const pinRuntime = window.__lm_pin_runtime;
+      const bridge = (pinRuntime && typeof pinRuntime.getBridge === 'function'
+        ? pinRuntime.getBridge()
+        : window.__lm_viewer_bridge);
+      if(bridge && typeof bridge.addPinMarker === 'function' && item.pos){
+        const p = item.pos;
+        bridge.addPinMarker({ id: item.id, x: p.x, y: p.y, z: p.z, color: item.color });
       }
     } catch(e){ /* ignore */ }
   }
 
-  // Fallback: listen canvas shift-click
+  // Fallback: 旧 canvas(#gl) 上での Shift+Click を拾う（3D座標は取れない）
   (function(){
     const canvas = document.getElementById('gl');
     if(!canvas){ return; }
@@ -170,6 +187,32 @@
     });
   })();
 
+  // Viewer bridge: 3D座標での Shift+Click からキャプション追加
+  (function(){
+    let hooked = false;
+    function bind(){
+      if (hooked) return true;
+      const pinRuntime = window.__lm_pin_runtime;
+      const bridge = (pinRuntime && typeof pinRuntime.getBridge === 'function'
+        ? pinRuntime.getBridge()
+        : window.__lm_viewer_bridge);
+      if (!bridge || typeof bridge.onCanvasShiftPick !== 'function') return false;
+      try{
+        bridge.onCanvasShiftPick(({ x, y, z })=>{
+          addCaptionAt(0, 0, { x, y, z });
+        });
+        hooked = true;
+        log('onCanvasShiftPick bound');
+      }catch(e){
+        warn('bind onCanvasShiftPick failed', e);
+      }
+      return hooked;
+    }
+    if (!bind()){
+      document.addEventListener('lm:viewer-bridge-ready', ()=>{ bind(); }, { once:true });
+    }
+  })();
+
   // Public API for other modules
   window.__LM_CAPTION_UI = {
     addCaptionAt, refreshList, selectItem, removeItem,
@@ -177,28 +220,26 @@
     setImages(list){ store.images = Array.isArray(list)? list : []; renderImages(); }
   };
 
-  // Initial render
-  refreshList();
-  renderImages();
-
+  // --- images --------------------------------------------------------------
   function renderImages(){
-    elImages.innerHTML='';
-    const imgs = store.images || [];
-    if(!imgs.length){
-      elImgStatus.textContent = 'No Image';
+    if (!elImages || !elImgStatus) return;
+    const list = store.images || [];
+    elImages.innerHTML = '';
+    if (!list.length){
+      elImgStatus.textContent = 'no registered images';
       return;
     }
-    elImgStatus.textContent = '';
+    elImgStatus.textContent = `${list.length} images`;
     const grid = elImages;
-    imgs.forEach(it=>{
+    list.forEach(it=>{
       const wrap = document.createElement('button');
-      wrap.type='button'; wrap.style.width='74px'; wrap.style.height='74px';
-      wrap.style.borderRadius='10px'; wrap.style.overflow='hidden'; wrap.style.border='1px solid #1f2937';
-      wrap.style.padding=0; wrap.style.background='#0b0d11';
+      wrap.type = 'button';
+      wrap.className = 'lm-img-item';
       const img = document.createElement('img');
-      img.src = it.thumb || it.url || it.src || '';
+      img.loading = 'lazy';
+      img.decoding = 'async';
+      img.src = it.thumbUrl || it.url || '';
       img.alt = it.name || '';
-      img.style.width='100%'; img.style.height='100%'; img.style.objectFit='cover';
       wrap.appendChild(img);
       wrap.addEventListener('click', ()=>{
         const id = store.selectedId;
@@ -211,6 +252,10 @@
       grid.appendChild(wrap);
     });
   }
+
+  renderColors();
+  renderFilters();
+  refreshList();
 
   log('ready');
 })();
