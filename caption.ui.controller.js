@@ -1,4 +1,5 @@
-// [caption.ui.controller] minimal UI wiring (phase A0)
+
+// [caption.ui.controller] Phase A1 — minimal caption UI + pin bridge + Sheets hook points
 // Defensive: runs even if other bridges are missing.
 (function(){
   const TAG='[caption.ui.controller]';
@@ -13,15 +14,15 @@
   const pane = $('#pane-caption');
   if(!pane){ return warn('pane not found; skip'); }
 
-  const elColorList = $('#caption-color-list', pane) || $('#caption-colors', pane);
+  const elColorList  = $('#caption-color-list', pane)  || $('#caption-colors', pane);
   const elFilterList = $('#caption-filter-list', pane) || $('#caption-filters', pane);
-  const elList = $('#caption-list', pane);
+  const elList  = $('#caption-list', pane);
   const elTitle = $('#caption-title', pane);
   const elBody  = $('#caption-body', pane);
-  const elImgStatus = $('#images-status');
-  const elImages = $('#images-grid');
+  const elImgStatus = $('#images-status', pane) || $('#images-status');
+  const elImages    = $('#images-grid', pane)   || $('#images-grid');
 
-  // Stable store on window for now (Phase A0 → will be replaced by sheet bridge)
+  // Stable store on window
   const store = window.__lm_capt || (window.__lm_capt = {
     currentColor: '#eab308',
     filter: new Set(),
@@ -30,11 +31,22 @@
     images: [],
   });
 
-  // Color palette (legacy-compatible 10 colors)
   const PALETTE = ['#eab308','#a3e635','#60a5fa','#a78bfa','#93c5fd','#fda4af','#c084fc','#a3a3a3','#f97316','#22c55e'];
 
   function newId(){
     return 'c_'+Math.random().toString(36).slice(2,10);
+  }
+
+  // --- small event hub for Sheets bridge --------------------------------------
+  const addListeners = [];
+
+  function onItemAdded(fn){
+    if (typeof fn === 'function') addListeners.push(fn);
+  }
+  function emitItemAdded(item){
+    addListeners.forEach(fn=>{
+      try{ fn(item); }catch(e){ console.error(TAG,'onItemAdded handler failed',e); }
+    });
   }
 
   // --- Rendering helpers -------------------------------------------------------
@@ -75,14 +87,16 @@
     });
   }
 
+  function filteredItems(){
+    const active = store.filter.size ? store.filter : null;
+    if (!active) return store.items.slice();
+    return store.items.filter(it => active.has(it.color));
+  }
+
   function refreshList(){
     if(!elList) return;
     elList.innerHTML = '';
-    const activeColors = store.filter.size ? store.filter : null;
-    const items = store.items.filter(it=>{
-      return !activeColors || activeColors.has(it.color);
-    });
-
+    const items = filteredItems();
     items.forEach(it=>{
       const row = document.createElement('div');
       row.className = 'lm-cap-row';
@@ -95,7 +109,7 @@
       title.textContent = it.title || '(untitled)';
       const imgMark = document.createElement('span');
       imgMark.className = 'lm-cap-imgmark';
-      if (it.image && it.image.url) imgMark.textContent = '🖼';
+      if (it.image && (it.image.url || it.image.id)) imgMark.textContent = '🖼';
 
       row.appendChild(sw);
       row.appendChild(title);
@@ -113,18 +127,15 @@
 
   function selectItem(id){
     store.selectedId = id;
-    // Update list highlight
-    if(elList){
+    if (elList){
       $$('.lm-cap-row', elList).forEach(row=>{
         row.classList.toggle('selected', row.dataset.id === id);
       });
     }
-    // Update detail fields
     const it = store.items.find(x=>x.id===id);
     if(!it) return;
     if (elTitle) elTitle.value = it.title || '';
-    if (elBody)  elBody.value = it.body  || '';
-    // TODO: image preview later
+    if (elBody)  elBody.value  = it.body  || '';
   }
 
   function removeItem(id){
@@ -135,14 +146,14 @@
     refreshList();
   }
 
-  // Title / Body input wiring
+  // --- Title / Body input wiring ----------------------------------------------
   if (elTitle){
     let tId = 0;
     elTitle.addEventListener('input', ()=>{
       const id = store.selectedId; if(!id) return;
       const it = store.items.find(x=>x.id===id); if(!it) return;
       it.title = elTitle.value;
-      if(tId) cancelAnimationFrame(tId);
+      if (tId) cancelAnimationFrame(tId);
       tId = requestAnimationFrame(()=>refreshList());
     });
   }
@@ -152,54 +163,82 @@
       const id = store.selectedId; if(!id) return;
       const it = store.items.find(x=>x.id===id); if(!it) return;
       it.body = elBody.value;
-      if(bId) cancelAnimationFrame(bId);
+      if (bId) cancelAnimationFrame(bId);
       bId = requestAnimationFrame(()=>refreshList());
     });
   }
 
-  // Shift+Click でピン + キャプションを追加するエントリポイント
-  function addCaptionAt(x,y, world){
-    const item = { id:newId(), title:'(untitled)', body:'', color:store.currentColor, pos: world||null };
+  // --- Pin bridge helpers ------------------------------------------------------
+  function getViewerBridge(){
+    try{
+      const pinRuntime = window.__lm_pin_runtime;
+      if (pinRuntime && typeof pinRuntime.getBridge === 'function'){
+        const b = pinRuntime.getBridge();
+        if (b) return b;
+      }
+    }catch(e){}
+    return window.__lm_viewer_bridge || window.viewerBridge || null;
+  }
+
+  function addPinForItem(item){
+    const br = getViewerBridge();
+    if (!br || typeof br.addPinMarker!=='function') return;
+    if (!item.pos) return;
+    const p = item.pos;
+    try{
+      br.addPinMarker({ id:item.id, x:p.x, y:p.y, z:p.z, color:item.color });
+    }catch(e){ warn('addPinMarker failed', e); }
+  }
+
+  function syncPinsFromItems(){
+    const br = getViewerBridge();
+    if (!br || typeof br.clearPins!=='function' || typeof br.addPinMarker!=='function') return;
+    try{
+      br.clearPins();
+      store.items.forEach(it=>{ if(it.pos) addPinForItem(it); });
+    }catch(e){ warn('syncPinsFromItems failed', e); }
+  }
+
+  // --- Public entry: Shift+クリックでの追加 -----------------------------------
+  function addCaptionAt(x, y, world){
+    const item = {
+      id: newId(),
+      title: '(untitled)',
+      body: '',
+      color: store.currentColor,
+      pos: world || null,
+      image: null,
+      createdAt: null,
+      updatedAt: null,
+    };
     store.items.push(item);
     refreshList();
     selectItem(item.id);
     log('caption added', item);
-    // Bridge (if present, ピンも描画する)
-    try {
-      const pinRuntime = window.__lm_pin_runtime;
-      const bridge = (pinRuntime && typeof pinRuntime.getBridge === 'function'
-        ? pinRuntime.getBridge()
-        : window.__lm_viewer_bridge);
-      if(bridge && typeof bridge.addPinMarker === 'function' && item.pos){
-        const p = item.pos;
-        bridge.addPinMarker({ id: item.id, x: p.x, y: p.y, z: p.z, color: item.color });
-      }
-    } catch(e){ /* ignore */ }
+    addPinForItem(item);
+    emitItemAdded(item);
   }
 
-  // Fallback: 旧 canvas(#gl) 上での Shift+Click を拾う（3D座標は取れない）
+  // Fallback: legacy canvas click (2D only, no world pos)
   (function(){
     const canvas = document.getElementById('gl');
-    if(!canvas){ return; }
+    if(!canvas) return;
     canvas.addEventListener('click', (e)=>{
       if(!e.shiftKey) return;
       addCaptionAt(e.offsetX, e.offsetY, null);
     });
   })();
 
-  // Viewer bridge: 3D座標での Shift+Click からキャプション追加
+  // Viewer bridge: onCanvasShiftPick (3D)
   (function(){
     let hooked = false;
     function bind(){
       if (hooked) return true;
-      const pinRuntime = window.__lm_pin_runtime;
-      const bridge = (pinRuntime && typeof pinRuntime.getBridge === 'function'
-        ? pinRuntime.getBridge()
-        : window.__lm_viewer_bridge);
-      if (!bridge || typeof bridge.onCanvasShiftPick !== 'function') return false;
+      const br = getViewerBridge();
+      if (!br || typeof br.onCanvasShiftPick !== 'function') return false;
       try{
-        bridge.onCanvasShiftPick(({ x, y, z })=>{
-          addCaptionAt(0, 0, { x, y, z });
+        br.onCanvasShiftPick(({x,y,z})=>{
+          addCaptionAt(0,0,{x,y,z});
         });
         hooked = true;
         log('onCanvasShiftPick bound');
@@ -213,14 +252,7 @@
     }
   })();
 
-  // Public API for other modules
-  window.__LM_CAPTION_UI = {
-    addCaptionAt, refreshList, selectItem, removeItem,
-    get items(){ return store.items; },
-    setImages(list){ store.images = Array.isArray(list)? list : []; renderImages(); }
-  };
-
-  // --- images --------------------------------------------------------------
+  // --- Images ------------------------------------------------------------------
   function renderImages(){
     if (!elImages || !elImgStatus) return;
     const list = store.images || [];
@@ -253,9 +285,62 @@
     });
   }
 
+  // --- API for other modules ---------------------------------------------------
+  function normalizeItem(raw){
+    if (!raw) raw = {};
+    const id = raw.id || newId();
+    const color = raw.color || '#eab308';
+    let pos = raw.pos || null;
+    if (!pos && raw.posX!=null && raw.posY!=null && raw.posZ!=null){
+      const x = Number(raw.posX), y = Number(raw.posY), z = Number(raw.posZ);
+      if (Number.isFinite(x) && Number.isFinite(y) && Number.isFinite(z)){
+        pos = {x,y,z};
+      }
+    }
+    return {
+      id,
+      title: raw.title || '',
+      body: raw.body || '',
+      color,
+      pos,
+      image: raw.image || (raw.imageFileId ? {id:raw.imageFileId} : null),
+      createdAt: raw.createdAt || null,
+      updatedAt: raw.updatedAt || null,
+      rowIndex: raw.rowIndex || null,
+    };
+  }
+
+  function setItems(list){
+    try{
+      store.items = Array.isArray(list) ? list.map(normalizeItem) : [];
+      refreshList();
+      syncPinsFromItems();
+    }catch(e){
+      warn('setItems failed', e);
+    }
+  }
+
+  function setImages(list){
+    store.images = Array.isArray(list) ? list : [];
+    renderImages();
+  }
+
+  window.__LM_CAPTION_UI = {
+    addCaptionAt,
+    refreshList,
+    selectItem,
+    removeItem,
+    setItems,
+    setImages,
+    onItemAdded,
+    get items(){ return store.items; }
+  };
+
+  // initial render
   renderColors();
   renderFilters();
   refreshList();
+  renderImages();
 
   log('ready');
 })();

@@ -1,5 +1,6 @@
-/* glb.btn.bridge.v3.js — v3.3 (loader + save sheet ensure + gid-first ctx)
- * viewer.module.cdn.js の export から __lm_viewer_bridge を組み立てる案1ベース
+
+/* glb.btn.bridge.v3.js — v3.4 (loader + save sheet ensure + gid-first ctx)
+ * viewer.module.cdn.js の export から __lm_viewer_bridge を組み立てる（案1ベース）
  */
 (function(){
   const TAG='[glb-bridge-v3]';
@@ -200,7 +201,9 @@
       const loc = await import('./save.locator.js');
       const res = await loc.findOrCreateSaveSheetByGlbId(fileId);
       const spreadsheetId = res && res.spreadsheetId;
-      const sheetGid = res && res.defaultCaptionGid || '';
+      const rawCaptionGid = res && res.defaultCaptionGid;
+      const sheetGid = (rawCaptionGid === undefined || rawCaptionGid === null || rawCaptionGid === '') ? '' : String(rawCaptionGid);
+
       if (spreadsheetId){
         window.__LM_ACTIVE_SPREADSHEET_ID = spreadsheetId;
         if (sheetGid) window.__LM_ACTIVE_SHEET_GID = sheetGid;
