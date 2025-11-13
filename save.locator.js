@@ -1,155 +1,152 @@
-// save.locator.js (ESM) — v2.0 (exports + window alias)
-// Responsibilities:
-//  - Given a GLB Drive fileId (glbId) and its display name, locate a spreadsheet
-//    in the same Drive folder for LociMyu saves. If none exists, create it.
-//  - Ensure a __LM_MATERIALS sheet with headers exists.
-//  - Ensure a default caption sheet exists and return both gids.
-// Works with either:
-//  - window.__lm_fetchJSONAuth shim (if present), or
-//  - gauth.module.js:getAccessToken() fallback.
 
-import { getAccessToken } from './gauth.module.js';
+// save.locator.js
+// Finds or creates a LociMyu save spreadsheet next to the GLB in Drive,
+// ensures __LM_MATERIALS header row, and dispatches lm:sheet-context.
 
-const DRIVE_V3 = 'https://www.googleapis.com/drive/v3';
-const SHEETS_V4 = 'https://sheets.googleapis.com/v4';
+import ensureAuthBridge from './auth.fetch.bridge.js';
 
-function log(...args){ try{ console.log('[save.locator]', ...args); }catch(_){} }
-function warn(...args){ try{ console.warn('[save.locator]', ...args); }catch(_){} }
+const SHEETS_BASE = 'https://sheets.googleapis.com/v4/spreadsheets';
+const DRIVE_BASE  = 'https://www.googleapis.com/drive/v3';
 
-async function fetchAuthJSON(url, options={}) {
-  if (typeof window.__lm_fetchJSONAuth === 'function') {
-    return window.__lm_fetchJSONAuth(url, options);
+// Public API
+export async function findOrCreateSaveSheetByGlbId(glbFileId){
+  const fetchAuth = await needAuth();
+
+  // 1) resolve GLB parent folder
+  const glb = await fetchAuth(`${DRIVE_BASE}/files/${encodeURIComponent(glbFileId)}?fields=id,name,parents,mimeType`);
+  const parents = glb.parents || [];
+  const parentId = parents[0] || null; // may be null if no parent (My Drive root)
+
+  // 2) search existing "LociMyu Save" in same folder
+  let q = `mimeType='application/vnd.google-apps.spreadsheet' and trashed=false and name contains 'LociMyu Save'`;
+  if (parentId) q += ` and '${parentId}' in parents`;
+  const existing = await fetchAuth(`${DRIVE_BASE}/files?q=${encodeURIComponent(q)}&fields=files(id,name,parents)`);
+  let sheetId = existing.files?.[0]?.id || null;
+
+  if (!sheetId){
+    // 3) create spreadsheet file in the same folder via Drive (so location is correct)
+    const meta = { name: 'LociMyu Save', mimeType: 'application/vnd.google-apps.spreadsheet' };
+    if (parentId) meta.parents = [parentId];
+
+    // Use Drive v3 Files.create (multipart/related metadata only since it's a native type)
+    const boundary = '-------lm_boundary_' + Math.random().toString(16).slice(2);
+    const body =
+      `--${boundary}\r\n` +
+      `Content-Type: application/json; charset=UTF-8\r\n\r\n` +
+      `${JSON.stringify(meta)}\r\n` +
+      `--${boundary}--`;
+
+    const created = await fetchAuth(
+      'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name',
+      { method: 'POST',
+        headers: { 'Content-Type': `multipart/related; boundary=${boundary}` },
+        body
+      }
+    );
+    sheetId = created.id;
   }
-  const token = await getAccessToken();
-  const headers = Object.assign({}, options.headers || {}, {
-    'Authorization': `Bearer ${token}`,
-    'Content-Type': 'application/json'
+
+  // 4) ensure materials sheet header
+  const { materialsGid } = await ensureMaterialsHeader(sheetId);
+
+  // 5) ensure at least one caption sheet exists and pick default
+  const defaultCaptionGid = await ensureDefaultCaptionSheet(sheetId);
+
+  // 6) publish context
+  publishSheetContext({ spreadsheetId: sheetId, materialsGid, defaultCaptionGid });
+
+  return { spreadsheetId: sheetId, materialsGid, defaultCaptionGid };
+}
+
+export async function __debug_createNow(name='LociMyu Debug'){
+  const fetchAuth = await needAuth();
+  // Create in root (My Drive) for debug
+  const meta = { name, mimeType: 'application/vnd.google-apps.spreadsheet' };
+
+  const boundary = '-------lm_boundary_' + Math.random().toString(16).slice(2);
+  const body =
+    `--${boundary}\r\n` +
+    `Content-Type: application/json; charset=UTF-8\r\n\r\n` +
+    `${JSON.stringify(meta)}\r\n` +
+    `--${boundary}--`;
+
+  const created = await fetchAuth(
+    'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name',
+    { method: 'POST',
+      headers: { 'Content-Type': `multipart/related; boundary=${boundary}` },
+      body
+    }
+  );
+
+  const { materialsGid } = await ensureMaterialsHeader(created.id);
+  const defaultCaptionGid = await ensureDefaultCaptionSheet(created.id);
+  publishSheetContext({ spreadsheetId: created.id, materialsGid, defaultCaptionGid });
+  return created;
+}
+
+// Internals
+async function needAuth(){
+  const fn = await ensureAuthBridge();
+  if (typeof fn !== 'function') throw new Error('__lm_fetchJSONAuth not found');
+  return fn;
+}
+
+async function listSheets(spreadsheetId){
+  const fetchAuth = await needAuth();
+  const meta = await fetchAuth(`${SHEETS_BASE}/${encodeURIComponent(spreadsheetId)}?fields=sheets.properties`);
+  const list = (meta.sheets || []).map(s => s.properties);
+  return list;
+}
+
+async function ensureMaterialsHeader(spreadsheetId){
+  const fetchAuth = await needAuth();
+  // Header row definition (A1:Z1 fixed range)
+  const header = [
+    'materialKey','name','opacity','doubleSided','unlitLike','chromaKeyColor','chromaKeyTolerance','chromaFeather','notes','version',
+    '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', ''
+  ].slice(0,26); // up to Z
+
+  // Ensure sheet exists or create it
+  const props = await listSheets(spreadsheetId);
+  let mat = props.find(p => p.title === '__LM_MATERIALS');
+  if (!mat){
+    // create sheet
+    const res = await fetchAuth(`${SHEETS_BASE}/${encodeURIComponent(spreadsheetId)}:batchUpdate`, {
+      method: 'POST',
+      json: { requests: [{ addSheet: { properties: { title: '__LM_MATERIALS', gridProperties: { rowCount: 1000, columnCount: 26 } } } }] }
+    });
+    const added = res?.replies?.[0]?.addSheet?.properties;
+    mat = added;
+  }
+
+  // Put header (values.update requires request range == body.range)
+  const range = `'__LM_MATERIALS'!A1:Z1`;
+  await fetchAuth(`${SHEETS_BASE}/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(range)}?valueInputOption=RAW`, {
+    method: 'PUT',
+    json: { range, majorDimension: 'ROWS', values: [header] }
   });
-  const res = await fetch(url, Object.assign({}, options, { headers }));
-  if (!res.ok) {
-    const t = await res.text().catch(()=>'');
-    throw new Error(`HTTP ${res.status} @ ${url} :: ${t.slice(0,200)}`);
-  }
-  return res.json();
+
+  return { materialsGid: mat.sheetId };
 }
 
-async function driveGetFile(fileId, fields='id,name,parents,mimeType') {
-  const url = `${DRIVE_V3}/files/${encodeURIComponent(fileId)}?fields=${encodeURIComponent(fields)}&supportsAllDrives=true`;
-  return fetchAuthJSON(url);
-}
-
-async function driveListInParent(parentId, qExtra) {
-  const q = [`'${parentId}' in parents`, 'trashed=false'];
-  if (qExtra) q.push(qExtra);
-  const url = `${DRIVE_V3}/files?q=${encodeURIComponent(q.join(' and '))}&fields=files(id,name,mimeType)&supportsAllDrives=true`;
-  const out = await fetchAuthJSON(url);
-  return out.files || [];
-}
-
-async function driveMoveToParent(fileId, parentId) {
-  // lightweight: add parent without removing existing
-  const url = `${DRIVE_V3}/files/${encodeURIComponent(fileId)}?addParents=${encodeURIComponent(parentId)}&supportsAllDrives=true`;
-  return fetchAuthJSON(url, { method: 'PATCH' });
-}
-
-async function sheetsCreate(title) {
-  const url = `${SHEETS_V4}/spreadsheets`;
-  const body = { properties: { title } };
-  return fetchAuthJSON(url, { method: 'POST', body: JSON.stringify(body) });
-}
-
-async function sheetsGet(spreadsheetId) {
-  const url = `${SHEETS_V4}/spreadsheets/${encodeURIComponent(spreadsheetId)}`;
-  return fetchAuthJSON(url);
-}
-
-async function sheetsBatchUpdate(spreadsheetId, requests) {
-  const url = `${SHEETS_V4}/spreadsheets/${encodeURIComponent(spreadsheetId)}:batchUpdate`;
-  return fetchAuthJSON(url, { method: 'POST', body: JSON.stringify({ requests }) });
-}
-
-async function sheetsValuesUpdate(spreadsheetId, rangeA1, values) {
-  const url = `${SHEETS_V4}/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(rangeA1)}?valueInputOption=RAW`;
-  return fetchAuthJSON(url, { method: 'PUT', body: JSON.stringify({ values }) });
-}
-
-const MATERIAL_HEADERS = [
-  'materialKey','opacity','doubleSided','unlitLike',
-  'chromakey','chromaTolerance','chromaFeather',
-  'noteA','noteB','noteC','updatedAt','updatedBy','sheetGid'
-];
-
-function pickSheetByTitle(sheets, title){
-  return (sheets||[]).find(s => s.properties?.title === title);
-}
-
-async function ensureMaterialsSheet(spreadsheetId, sheetsMeta){
-  let mat = pickSheetByTitle(sheetsMeta, '__LM_MATERIALS');
-  if (!mat) {
-    const add = await sheetsBatchUpdate(spreadsheetId, [{
-      addSheet: { properties: { title: '__LM_MATERIALS', gridProperties: { frozenRowCount: 1 } } }
-    }]);
-    const r = add?.replies?.[0]?.addSheet?.properties;
-    mat = { properties: r };
-  }
-  const gid = mat.properties.sheetId;
-  // write headers
-  await sheetsValuesUpdate(spreadsheetId, '__LM_MATERIALS!A1:N1', [MATERIAL_HEADERS]);
-  return gid;
-}
-
-async function ensureDefaultCaptionSheet(spreadsheetId, sheetsMeta){
-  const title = 'Captions';
-  let cap = pickSheetByTitle(sheetsMeta, title);
+async function ensureDefaultCaptionSheet(spreadsheetId){
+  const fetchAuth = await needAuth();
+  const props = await listSheets(spreadsheetId);
+  // Find first non-materials sheet
+  let cap = props.find(p => p.title !== '__LM_MATERIALS');
   if (!cap){
-    const add = await sheetsBatchUpdate(spreadsheetId, [{ addSheet: { properties: { title } } }]);
-    const r = add?.replies?.[0]?.addSheet?.properties;
-    cap = { properties: r };
+    const res = await fetchAuth(`${SHEETS_BASE}/${encodeURIComponent(spreadsheetId)}:batchUpdate`, {
+      method: 'POST',
+      json: { requests: [{ addSheet: { properties: { title: 'Captions', gridProperties: { rowCount: 1000, columnCount: 12 } } } }] }
+    });
+    cap = res?.replies?.[0]?.addSheet?.properties;
   }
-  return cap.properties.sheetId;
+  return cap.sheetId;
 }
 
-/**
- * Main entry (expected by glb.btn.bridge.v3.js)
- * @param {string} glbId - Drive fileId of the GLB
- * @param {string} glbName - Display name of the GLB file
- * @returns {Promise<{spreadsheetId:string, materialsGid:number, defaultCaptionGid:number}>}
- */
-export async function findOrCreateSaveSheetByGlbId(glbId, glbName='GLB'){
-  log('begin', { glbId, glbName });
-  if (!glbId) throw new Error('glbId required');
-
-  // 1) GLB metadata -> parent folder
-  const meta = await driveGetFile(glbId, 'id,name,parents');
-  const parentId = (meta.parents || [])[0];
-  if (!parentId) throw new Error('GLB has no parent folder');
-
-  // 2) Search existing spreadsheet in the same folder
-  const candidates = await driveListInParent(parentId, 'mimeType="application/vnd.google-apps.spreadsheet"');
-  let file = candidates.find(f => /LociMyu Save/i.test(f.name)) || candidates[0];
-
-  // 3) Create if missing
-  if (!file){
-    const title = `${glbName} — LociMyu Save`;
-    const created = await sheetsCreate(title);
-    const sid = created.spreadsheetId;
-    await driveMoveToParent(sid, parentId);
-    file = { id: sid, name: title, mimeType: 'application/vnd.google-apps.spreadsheet' };
-  }
-  const spreadsheetId = file.id;
-
-  // 4) Ensure required sheets
-  const sheetMeta = await sheetsGet(spreadsheetId);
-  const sheets = sheetMeta.sheets || [];
-  const materialsGid = await ensureMaterialsSheet(spreadsheetId, sheets);
-  const defaultCaptionGid = await ensureDefaultCaptionSheet(spreadsheetId, sheets);
-
-  log('ready', { spreadsheetId, materialsGid, defaultCaptionGid });
-  return { spreadsheetId, materialsGid, defaultCaptionGid };
+function publishSheetContext({ spreadsheetId, materialsGid, defaultCaptionGid }){
+  // keep a cache on window
+  window.__lm_ctx = Object.assign(window.__lm_ctx || {}, { spreadsheetId, materialsGid, defaultCaptionGid });
+  document.dispatchEvent(new CustomEvent('lm:sheet-context', { detail: { spreadsheetId, materialsGid, defaultCaptionGid } }));
+  console.log('[save.locator] ready', { spreadsheetId, materialsGid, defaultCaptionGid });
 }
-
-// Back-compat global alias (optional)
-if (!window.loc) window.loc = {};
-window.loc.findOrCreateSaveSheetByGlbId = findOrCreateSaveSheetByGlbId;
-
-log('module loaded (ESM export active)');

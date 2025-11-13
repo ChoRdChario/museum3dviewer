@@ -23,9 +23,14 @@
     .row { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
     .row .grow { flex:1 1 180px; }
     .muted { color:#9aa4af; font-size:12px; }
-  #panel-material.lm-panel-material.card{display:none;} #pane-material .card{width:100%;box-sizing:border-box;} #pane-material .controls{overflow:visible;} 
-/* removed forced hide of material panel */ .pane .card{width:100%;box-sizing:border-box;} .pane .controls{overflow:visible;} 
-</style>
+    /* keep material visible */
+    #panel-material.lm-panel-material.card{display:none;}
+    #pane-material .card{width:100%;box-sizing:border-box;}
+    #pane-material .controls{overflow:visible;}
+    /* generic */
+    .pane .card{width:100%;box-sizing:border-box;}
+    .pane .controls{overflow:visible;}
+  </style>
 
   <!-- Optional loader for content.js to avoid 404 noise -->
   <script id="lm-optional-contentjs">
@@ -103,9 +108,11 @@
     /* Prevent horizontal scroll in the right panel */
     #ui *{max-width:100%}
     #ui{overflow-x:hidden}
-  #panel-material.lm-panel-material.card{display:none;} #pane-material .card{width:100%;box-sizing:border-box;} #pane-material .controls{overflow:visible;} 
-/* removed forced hide of material panel */ .pane .card{width:100%;box-sizing:border-box;} .pane .controls{overflow:visible;} 
-</style>
+    /* keep material visible */
+    #panel-material.lm-panel-material.card{display:none;}
+    #pane-material .card{width:100%;box-sizing:border-box;}
+    #pane-material .controls{overflow:visible;}
+  </style>
 
   <style id="lm-material-layout-fix">
     /* ===== Material pane: overflow & wrapping fixes ===== */
@@ -124,9 +131,11 @@
     #pane-material .btn, #pane-material .switch, #pane-material .mini { flex:0 0 auto; }
     #pm-chroma .tol-row { display:flex; flex-wrap:wrap; gap:8px; }
     #pm-chroma .feather-row { display:flex; flex-wrap:wrap; gap:8px; margin-top:6px; }
-  #panel-material.lm-panel-material.card{display:none;} #pane-material .card{width:100%;box-sizing:border-box;} #pane-material .controls{overflow:visible;} 
-/* removed forced hide of material panel */ .pane .card{width:100%;box-sizing:border-box;} .pane .controls{overflow:visible;} 
-</style>
+    /* keep material visible */
+    #panel-material.lm-panel-material.card{display:none;}
+    #pane-material .card{width:100%;box-sizing:border-box;}
+    #pane-material .controls{overflow:visible;}
+  </style>
 </head>
 <body>
   <div id="app">
@@ -156,28 +165,28 @@
         <button id="tab-views" role="tab" data-tab="views" aria-selected="false">Views</button>
       </nav>
 
-      <!-- Caption pane (unchanged structure) -->
+      <!-- Caption pane -->
       <section id="pane-caption" class="pane" data-pane="caption" data-active="true">
         <div class="grp">
           <div class="hint">Pin color</div>
-          <div id="pinColorChips" class="chips"></div>
+          <div id="pinColorChips" class="chips" data-hook="pin-color"></div>
         </div>
         <div class="grp">
           <div class="hint">Filter</div>
-          <div id="pinFilterChips" class="chips"></div>
+          <div id="pinFilterChips" class="chips" data-hook="pin-filter"></div>
         </div>
         <div class="grp">
           <div class="hint">Caption list</div>
-          <div id="caption-list"></div>
+          <div id="caption-list" data-hook="caption-list"></div>
         </div>
         <div class="grp">
           <div class="hint">Title / Body</div>
-          <input id="caption-title" placeholder="Title"/>
-          <input id="caption-body" placeholder="Body"/>
+          <input id="caption-title" placeholder="Title" data-hook="caption-title"/>
+          <input id="caption-body" placeholder="Body" data-hook="caption-body"/>
         </div>
         <div class="grp">
           <div class="hint">Images (auto from GLB folder)</div>
-          <div id="images-grid"></div>
+          <div id="images-grid" data-hook="images-grid"></div>
           <div class="row" style="margin-top:8px">
             <button id="btnRefreshImages" class="full">Refresh images</button>
           </div>
@@ -185,11 +194,11 @@
         </div>
       </section>
 
-      <!-- Material pane (refined) -->
+      <!-- Material pane -->
       <section id="pane-material" class="pane" data-pane="material">
         <div class="mat-grid">
           <div class="mat-card">
-            <h4>Per‑material opacity (saved per sheet)</h4>
+            <h4>Per-material opacity (saved per sheet)</h4>
             <div id="pm-opacity">
               <select id="pm-material" aria-label="Select material">
                 <option value="">— Select material —</option>
@@ -197,14 +206,14 @@
               <input id="pm-opacity-range" type="range" min="0" max="1" step="0.01" value="1"/>
               <output id="pm-opacity-val">1.00</output>
             </div>
-            <div class="hint">Pick a material, then set its opacity. This does not change global opacity above.</div>
+            <div class="hint">Pick a material, then set its opacity.</div>
           </div>
 
           <div class="mat-card">
             <h4>Shading</h4>
             <div class="inline">
-              <label class="nowrap"><input type="checkbox" id="pm-flag-doublesided"/> Double‑sided</label>
-              <label class="nowrap"><input type="checkbox" id="pm-flag-unlit"/> Unlit‑like</label>
+              <label class="nowrap"><input type="checkbox" id="pm-flag-doublesided"/> Double-sided</label>
+              <label class="nowrap"><input type="checkbox" id="pm-flag-unlit"/> Unlit-like</label>
             </div>
           </div>
 
@@ -250,7 +259,7 @@
 
   <!-- Boot runtime -->
   <script type="module" src="./boot.esm.cdn.js"></script>
-    <script src="./sheet.gid.map.js"></script>
+  <script src="./sheet.gid.map.js"></script>
   <link rel="stylesheet" href="app.sheet-rename.css"/>
   <script type="module" src="sheet-rename.module.js"></script>
 
@@ -352,32 +361,46 @@
   <!-- Material dropdown population + runtime wiring (must be loaded LAST) -->
   <script type="module" src="./material.dropdown.patch.js"></script>
   <script src="./material.runtime.patch.js"></script>
-<script src="./glb.load.signal.js"></script>
-<script src="./material.dropdown.patch.js"></script>
-<!-- 既存の viewer / bridge / orchestrator / sheet-bridge の後ろ -->
-
-<!-- GLB完了シグナル（Loadボタン→GLB読込完了を一度だけ通知） -->
-<script src="./glb.load.signal.js"></script>
-
-<!-- マテリアルドロップダウン投入（静音・一発実行版） -->
-<script src="./material.dropdown.patch.js"></script>
-<script src="./material.id.unify.v1.js"></script>
-<script src="./material.dropdown.sync.v1.js"></script>
-
-<!-- LociMyu: material local state & save-bus (localStorage) -->
-<script src="./material.state.local.v1.js"></script>
-
-
+  <script src="./glb.load.signal.js"></script>
+  <script src="./material.dropdown.patch.js"></script>
+  <script src="./glb.load.signal.js"></script>
+  <script src="./material.dropdown.patch.js"></script>
+  <script src="./material.id.unify.v1.js"></script>
+  <script src="./material.dropdown.sync.v1.js"></script>
+  <script src="./material.state.local.v1.js"></script>
   <script src="materials.sheet.persist.js"></script>
   <script src="materials.auto.apply.js"></script>
-<script src="./auto.apply.soft.patch.js"></script>
+  <script src="./auto.apply.soft.patch.js"></script>
+
+  <!-- ===== Caption wiring: optional silent loaders (no 404 noise) ===== -->
+  <script>
+  (function(){
+    const files = [
+      './caption.ui.controller.js',
+      './caption.sheet.bridge.js',
+      './caption.images.loader.js',
+      './pin.runtime.bridge.js'
+    ];
+    files.forEach(f=>{
+      fetch(f,{method:'HEAD'}).then(r=>{
+        if(r && r.ok){
+          const s=document.createElement('script');
+          s.type = f.endsWith('.js') ? 'module' : 'text/javascript';
+          s.src=f;
+          document.body.appendChild(s);
+          console.log('[caption] loaded', f);
+        } else {
+          console.log('[caption] skipped (not present)', f);
+        }
+      }).catch(()=>console.log('[caption] check skipped', f));
+    });
+  })();
+  </script>
 
   <!-- Load GLB via Drive fileId using viewer.module.cdn.js -->
-
-
   <script src="./content.js"></script>
-
   <script type="module" src="./glb.btn.bridge.v3.js"></script>
-
-  <script src="./viewer.bridge.autobind.js"></script></body>
+  <script src="./viewer.bridge.autobind.js"></script>
+  <script src="./pin.runtime.bridge.js"></script>
+</body>
 </html>

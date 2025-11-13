@@ -5,9 +5,18 @@
   if (window.__LM_AUTO_APPLY__ && window.__LM_AUTO_APPLY__.__ver && window.__LM_AUTO_APPLY__.__ver.startsWith("1.2")) {
     console.log("[auto-apply v1.2] already loaded");
     return;
+
+  // ---- Added: event-driven readiness flags to avoid spurious timeouts ----
+  let _sceneReady = false;
+  let _sheetCtxReady = false;
+  let _pendingRun = false;
+  document.addEventListener("lm:scene-ready", () => { _sceneReady = true; if (_sheetCtxReady && !_pendingRun) { _pendingRun = true; runOnce().catch(console.warn); } }, { once:true });
+  document.addEventListener("lm:sheet-context", () => { _sheetCtxReady = true; if (_sceneReady && !_pendingRun) { _pendingRun = true; runOnce().catch(console.warn); } }, { once:true });
+  // ----------------------------------------------------------------------
+
   }
 
-  async function until(pred, ms=15000, step=100){
+  async function until(pred, ms = 45000, step=100){
     const t0 = performance.now();
     return new Promise((res, rej)=>{
       const id = setInterval(()=>{
