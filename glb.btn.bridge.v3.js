@@ -1,10 +1,12 @@
-/* glb.btn.bridge.v3.js — v3.2 (loader + save sheet ensure + gid-first ctx) */
+/* glb.btn.bridge.v3.js — v3.3 (loader + save sheet ensure + gid-first ctx)
+ * viewer.module.cdn.js の export から __lm_viewer_bridge を組み立てる案1ベース
+ */
 (function(){
   const TAG='[glb-bridge-v3]';
   const log=(...a)=>console.log(TAG, ...a);
   const err=(...a)=>console.error(TAG, ...a);
 
-  /* --- Loading overlay (same as v3.1) --- */
+  /* --- Loading overlay --- */
   const OVERLAY_ID = 'lm-glb-loading-overlay';
   function ensureStyle() {
     if (document.getElementById(OVERLAY_ID+'-style')) return;
@@ -28,8 +30,11 @@
     document.head.appendChild(css);
   }
   function findViewerHost(){
-    return document.querySelector('#viewer-wrapper')||document.querySelector('#viewer')
-        || document.querySelector('#three-container')||document.querySelector('.viewer')||document.body;
+    return document.querySelector('#viewer-wrapper')
+        || document.querySelector('#viewer')
+        || document.querySelector('#three-container')
+        || document.querySelector('.viewer')
+        || document.body;
   }
   function showOverlay(msg='読み込み中…'){
     try{
@@ -73,25 +78,41 @@
     return (m2 && m2[0]) || '';
   }
 
+  /**
+   * 既存のビューア用 canvas を最優先で再利用する。
+   * どうしても見つからない場合のみ、新しい canvas を控えめに追加する。
+   * レイアウトを壊さないよう wrapper は新規作成しない。
+   */
   function ensureCanvas(){
-    let canvas = document.querySelector('canvas.lm-viewer, #lm-viewer-canvas, canvas#viewer');
+    // 1) 既知のコンテナ内を優先
+    let canvas = document.querySelector(
+      '#viewer-wrapper canvas, ' +
+      '#viewer canvas, ' +
+      '.viewer canvas, ' +
+      'canvas.lm-viewer, ' +
+      '#lm-viewer-canvas, ' +
+      'canvas#viewer'
+    );
     if (canvas) return canvas;
-    const container = findViewerHost();
+
+    // 2) ドキュメント内の既存 canvas を使う（最初に見つかったもの）
+    canvas = document.querySelector('main canvas, body > canvas, canvas');
+    if (canvas) return canvas;
+
+    // 3) どうしても無ければ、新しい canvas を控えめに追加
+    const host =
+      document.querySelector('#viewer-wrapper')
+      || document.querySelector('#viewer')
+      || document.querySelector('.viewer')
+      || document.body;
+
     canvas = document.createElement('canvas');
     canvas.className = 'lm-viewer';
     canvas.id = 'lm-viewer-canvas';
-    const wrapper = document.createElement('div');
-    wrapper.id = 'viewer-wrapper';
-    wrapper.style.position = 'relative';
-    wrapper.style.width = '100%';
-    wrapper.style.height = '70vh';
-    wrapper.style.margin = '8px 0';
-    wrapper.appendChild(canvas);
-    if (container === document.body){
-      document.body.prepend(wrapper);
-    }else{
-      container.prepend(wrapper);
-    }
+
+    // layout を壊さないよう、単に末尾に append するだけに留める
+    host.appendChild(canvas);
+
     return canvas;
   }
 
@@ -112,6 +133,7 @@
         const canvas = ensureCanvas();
         log('calling ensureViewer with canvas', canvas.id||'(anon)');
         await mod.ensureViewer({ canvas, container: canvas.parentElement||document.body });
+        return;
       }
     }catch(e){ err('ensureViewer(opts) failed', e); }
     const cands=['bootViewer','initViewer','setupViewer','mountViewer','createViewer','startViewer','init'];
@@ -129,7 +151,6 @@
   // viewer.module.cdn.js の export から __lm_viewer_bridge を組み立てる
   function ensureViewerBridge(mod){
     try{
-      // 既存ブリッジが core API を持っていればそれを優先的に拡張
       const existing = window.__lm_viewer_bridge;
       const hasCore = existing && typeof existing.addPinMarker === 'function' && typeof existing.clearPins === 'function';
       const bridge = hasCore ? existing : {};
@@ -149,14 +170,12 @@
 
       if (!hasCore){
         window.__lm_viewer_bridge = bridge;
-        // 後方互換: window.viewerBridge も同じ関数群を alias として持たせる
         const vb = window.viewerBridge = window.viewerBridge || {};
         keys.forEach((k) => {
           if (typeof bridge[k] === 'function' && !vb[k]) vb[k] = bridge[k];
         });
         log('viewer bridge established from viewer.module.cdn.js exports');
       } else {
-        // 既存ブリッジがある場合は viewerBridge だけ追従させる
         const vb = window.viewerBridge;
         if (vb){
           keys.forEach((k) => {
@@ -198,7 +217,6 @@
   async function loadById(fileId){
     const mod = await import('./viewer.module.cdn.js');
     try{ console.log(TAG, 'exports:', Object.keys(mod)); }catch(_){}
-    // viewer.module.cdn.js の export から viewer bridge を確立
     ensureViewerBridge(mod);
     showOverlay('GLB を読み込んでいます…');
     let safe = true; const safeHide=()=>{ if(safe){ safe=false; hideOverlay(); } };
