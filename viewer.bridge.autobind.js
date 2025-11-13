@@ -1,38 +1,77 @@
-
-// viewer.bridge.autobind.js
-// Minimal, non-invasive autobinder: finds an existing viewer bridge object
-// (must expose addPinMarker & clearPins), publishes to window.__lm_viewer_bridge,
-// and emits a readiness event.
+/*! viewer.bridge.autobind.js
+ * Find the viewer bridge object (one that exposes addPinMarker/clearPins)
+ * and publish it to window.__lm_viewer_bridge.
+ * Robust to load order; retries on scene-ready.
+ */
 (function(){
-  const READY_EVENT = 'lm:viewer-bridge-ready';
-  if (window.__lm_viewer_bridge && typeof window.__lm_viewer_bridge.addPinMarker === 'function') {
-    console.log('[viewer-bridge] existing __lm_viewer_bridge detected');
-    document.dispatchEvent(new Event(READY_EVENT));
-    return;
+  const LOG_PREFIX = "[viewer-bridge.autobind]";
+  const BRIDGE_KEYS = ["addPinMarker", "clearPins"];
+  let bound = false;
+  let tries = 0;
+  const MAX_TRIES = 50;
+  const RETRY_MS = 120;
+
+  function looksLikeBridge(v){
+    if(!v || typeof v !== "object") return false;
+    return BRIDGE_KEYS.every(k => typeof v[k] === "function");
   }
 
-  function tryBindOnce() {
-    try {
-      for (const k of Object.keys(window)) {
-        const v = window[k];
-        if (!v || typeof v !== 'object') continue;
-        if (typeof v.addPinMarker === 'function' && typeof v.clearPins === 'function') {
-          window.__lm_viewer_bridge = v;
-          console.log('[viewer-bridge] autobound from window.' + k);
-          document.dispatchEvent(new Event(READY_EVENT));
-          return true;
-        }
+  function scanOnce(){
+    tries++;
+    // Priority 1: commonly used global variable names (fast path)
+    const hotNames = ["viewerBridge", "__viewerBridge", "__lm_viewer", "__LM_VIEW"];
+    for(const n of hotNames){
+      if(looksLikeBridge(window[n])){
+        publish(window[n], "hotName:" + n);
+        return true;
       }
-    } catch (e) {}
+    }
+    // Priority 2: exhaustive scan of window keys (fallback path)
+    for(const k of Object.keys(window)){
+      const v = window[k];
+      if(looksLikeBridge(v)){
+        publish(v, "window." + k);
+        return true;
+      }
+    }
     return false;
   }
 
-  if (!tryBindOnce()) {
-    let tries = 0;
-    const maxTries = 50; // ~5s @100ms
-    const t = setInterval(() => {
-      tries++;
-      if (tryBindOnce() || tries >= maxTries) clearInterval(t);
-    }, 100);
+  function publish(bridge, source){
+    if(bound) return;
+    bound = true;
+    window.__lm_viewer_bridge = bridge;
+    try {
+      console.log(LOG_PREFIX, "bound __lm_viewer_bridge from", source);
+      document.dispatchEvent(new Event("lm:viewer-bridge-ready"));
+    } catch(e){
+      console.warn(LOG_PREFIX, "dispatch failed", e);
+    }
   }
+
+  function poll(){
+    if(bound) return;
+    if(scanOnce()) return;
+    if(tries >= MAX_TRIES) {
+      console.warn(LOG_PREFIX, "give up (not found after", tries, "tries)");
+      return;
+    }
+    setTimeout(poll, RETRY_MS);
+  }
+
+  // Kick off on DOMContentLoaded
+  if(document.readyState === "loading"){
+    document.addEventListener("DOMContentLoaded", poll, {once:true});
+  } else {
+    poll();
+  }
+
+  // Also retry once scene is ready (bridge may be created there)
+  document.addEventListener("lm:scene-ready", () => {
+    if(!bound){
+      console.log(LOG_PREFIX, "scene-ready => rescan");
+      tries = 0;
+      poll();
+    }
+  });
 })();

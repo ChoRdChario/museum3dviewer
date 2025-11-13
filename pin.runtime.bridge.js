@@ -1,65 +1,41 @@
-
-// pin.runtime.bridge.js
-// Robust binder that waits for window.__lm_viewer_bridge and wires basic pin draw.
-// It does NOT change your UI flows; it only ensures the bridge is present before use.
+/*! pin.runtime.bridge.js
+ * Bind to window.__lm_viewer_bridge (set by viewer.bridge.autobind.js) and expose
+ * simple helpers for caption pin rendering. Non-fatal if delayed.
+ */
 (function(){
-  const TAG = '[pin-bridge]';
-  const READY_EVENT = 'lm:viewer-bridge-ready';
-
+  const LOG_PREFIX = "[pin-bridge]";
   let bridge = null;
-  let bindResolved = false;
+  let armed = false;
+  console.log(LOG_PREFIX, "armed");
 
-  function hasBridge(obj){
-    return obj && typeof obj.addPinMarker === 'function' && typeof obj.clearPins === 'function';
-  }
-
-  function bindNow(){
-    if (bindResolved) return true;
-    if (hasBridge(window.__lm_viewer_bridge)) {
-      bridge = window.__lm_viewer_bridge;
-      console.log(TAG, 'viewer bound = true');
-      bindResolved = true;
-      // optional hook: trigger a redraw for anyone listening
-      document.dispatchEvent(new Event('lm:pins-bridge-bound'));
+  function tryBind(){
+    if(bridge) return true;
+    bridge = window.__lm_viewer_bridge || null;
+    if(bridge){
+      console.log(LOG_PREFIX, "bound");
+      document.dispatchEvent(new Event("lm:viewer-bridge-ready"));
       return true;
     }
     return false;
   }
 
-  // Attempt immediate bind
-  if (!bindNow()) {
-    console.log(TAG, 'waiting viewer bridge...');
-    // 1) react to explicit ready event
-    const onReady = () => { bindNow(); };
-    document.addEventListener(READY_EVENT, onReady, { once: true });
+  // Initial attempt
+  tryBind();
 
-    // 2) timed polling fallback (handles race without requiring HTML changes)
-    let tries = 0;
-    const max = 60; // ~6s
-    const id = setInterval(() => {
-      tries++;
-      if (bindNow() || tries >= max) {
-        clearInterval(id);
-        if (!bindResolved) {
-          console.warn(TAG, 'bind failed: viewer bridge timeout');
-        }
-      }
-    }, 100);
-  }
+  // Re-try on these events
+  document.addEventListener("lm:viewer-bridge-ready", tryBind);
+  document.addEventListener("lm:scene-ready", tryBind);
 
-  // Public, defensive wrappers (no-ops until bound)
-  window.__lm_pin_bridge = {
-    addPinMarkerSafe(pin){
-      if (!bindResolved) return false;
-      try { bridge.addPinMarker(pin); return true; } catch(e){ console.warn(TAG, 'addPinMarker failed', e); }
-      return false;
+  // Public API (guarded)
+  window.__lm_pin_runtime = {
+    addPin: function(p){
+      if(!tryBind()){ console.warn(LOG_PREFIX, "addPin ignored (no bridge yet)"); return; }
+      return bridge.addPinMarker(p);
     },
-    clearPinsSafe(){
-      if (!bindResolved) return false;
-      try { bridge.clearPins(); return true; } catch(e){ console.warn(TAG, 'clearPins failed', e); }
-      return false;
-    }
+    clear: function(){
+      if(!tryBind()){ console.warn(LOG_PREFIX, "clear ignored (no bridge yet)"); return; }
+      return bridge.clearPins();
+    },
+    getBridge: function(){ return tryBind() ? bridge : null; }
   };
-
-  console.log(TAG, 'armed');
 })();
