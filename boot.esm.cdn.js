@@ -253,19 +253,3 @@ export {
   putHeaderOnce,
   ensureMaterialsHeader,
 };
-
-
-// [captions] lazy boot
-;(function(){
-  let started = false;
-  async function start(){
-    if (started) return; started = true;
-    try{
-      await import('./auth.fetch.bridge.js').then(m=>m.default());
-      await import('./captions.sheet.bridge.js');
-      await import('./captions.ui.orch.js');
-      console.log('[captions] booted');
-    }catch(e){ console.warn('[captions] boot failed', e); }
-  }
-  document.addEventListener('lm:sheet-context', ()=>start(), { once:true });
-})();
