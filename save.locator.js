@@ -1,10 +1,9 @@
-// save.locator.js (ESM) — v2.1-no-caption-autocreate
+// save.locator.js (ESM) — v2.0 (exports + window alias)
 // Responsibilities:
 //  - Given a GLB Drive fileId (glbId) and its display name, locate a spreadsheet
 //    in the same Drive folder for LociMyu saves. If none exists, create it.
 //  - Ensure a __LM_MATERIALS sheet with headers exists.
-//  - DO NOT auto-create a "Captions" sheet (use if exists only).
-//
+//  - Ensure a default caption sheet exists and return both gids.
 // Works with either:
 //  - window.__lm_fetchJSONAuth shim (if present), or
 //  - gauth.module.js:getAccessToken() fallback.
@@ -94,22 +93,27 @@ async function ensureMaterialsSheet(spreadsheetId, sheetsMeta){
     mat = { properties: r };
   }
   const gid = mat.properties.sheetId;
-  // write headers (idempotent)
+  // write headers
   await sheetsValuesUpdate(spreadsheetId, '__LM_MATERIALS!A1:N1', [MATERIAL_HEADERS]);
   return gid;
 }
 
-// Captions を自動生成しない版：存在すれば GID、無ければ null。
-function findDefaultCaptionSheetGid(sheetsMeta){
-  const cap = pickSheetByTitle(sheetsMeta, 'Captions');
-  return cap ? cap.properties.sheetId : null;
+async function ensureDefaultCaptionSheet(spreadsheetId, sheetsMeta){
+  const title = 'Captions';
+  let cap = pickSheetByTitle(sheetsMeta, title);
+  if (!cap){
+    const add = await sheetsBatchUpdate(spreadsheetId, [{ addSheet: { properties: { title } } }]);
+    const r = add?.replies?.[0]?.addSheet?.properties;
+    cap = { properties: r };
+  }
+  return cap.properties.sheetId;
 }
 
 /**
  * Main entry (expected by glb.btn.bridge.v3.js)
  * @param {string} glbId - Drive fileId of the GLB
  * @param {string} glbName - Display name of the GLB file
- * @returns {Promise<{spreadsheetId:string, materialsGid:number, defaultCaptionGid:number|null}>}
+ * @returns {Promise<{spreadsheetId:string, materialsGid:number, defaultCaptionGid:number}>}
  */
 export async function findOrCreateSaveSheetByGlbId(glbId, glbName='GLB'){
   log('begin', { glbId, glbName });
@@ -134,13 +138,34 @@ export async function findOrCreateSaveSheetByGlbId(glbId, glbName='GLB'){
   }
   const spreadsheetId = file.id;
 
-  // 4) Ensure materials only; Captions は既存があれば拾う
+  // 4) Ensure required sheets
   const sheetMeta = await sheetsGet(spreadsheetId);
   const sheets = sheetMeta.sheets || [];
   const materialsGid = await ensureMaterialsSheet(spreadsheetId, sheets);
-  const defaultCaptionGid = findDefaultCaptionSheetGid(sheets);
+  const defaultCaptionGid = await ensureDefaultCaptionSheet(spreadsheetId, sheets);
 
   log('ready', { spreadsheetId, materialsGid, defaultCaptionGid });
+
+  // --- [LM] expose sheet context for listeners (gid-safe) ---
+  try {
+    window.__lm_ctx = window.__lm_ctx || {};
+    Object.assign(window.__lm_ctx, {
+      spreadsheetId,
+      materialsGid,
+      defaultCaptionGid: (typeof defaultCaptionGid !== 'undefined' && defaultCaptionGid != null) ? defaultCaptionGid : null
+    });
+    document.dispatchEvent(new CustomEvent("lm:sheet-context", {
+      detail: {
+        spreadsheetId,
+        materialsGid,
+        defaultCaptionGid: (typeof defaultCaptionGid !== 'undefined' && defaultCaptionGid != null) ? defaultCaptionGid : null
+      }
+    }));
+  } catch (e) {
+    console.warn("[save.locator] ctx emit failed", e);
+  }
+  // --- [/LM] ---
+
   return { spreadsheetId, materialsGid, defaultCaptionGid };
 }
 
