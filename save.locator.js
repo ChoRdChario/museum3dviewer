@@ -1,6 +1,7 @@
 // save.locator.js  (ESM self-contained / no __lm_fetchJSONAuth dependency)
-// Sheets API だけでスプレッドシートを新規作成（ルートに作成）し、__LM_MATERIALS と Captions(初回のみ) を保証。
+// Sheets API でスプレッドシートを新規作成し、__LM_MATERIALS と Captions(初回のみ) を保証。
 // window.__lm_ctx を更新し、"lm:sheet-context" を dispatch。
+// 2025-11-13 fix: PUT range と values の range 不一致を修正
 
 const SHEETS_BASE = 'https://sheets.googleapis.com/v4/spreadsheets';
 const MATERIALS_TITLE = '__LM_MATERIALS';
@@ -37,6 +38,11 @@ function listSheetSummaries(spreadsheet) {
     sheetId: s.properties?.sheetId
   }));
 }
+function colLetter(n){ // 1 -> A, 26 -> Z, 27 -> AA ...
+  let s = '';
+  while(n>0){ let r=(n-1)%26; s=String.fromCharCode(65+r)+s; n=Math.floor((n-1)/26); }
+  return s;
+}
 
 // --- core ops ---
 async function createSpreadsheetViaSheetsAPI(title) {
@@ -44,7 +50,6 @@ async function createSpreadsheetViaSheetsAPI(title) {
     properties: { title },
     sheets: [
       { properties: { title: MATERIALS_TITLE } },
-      // Captions は「初回のみ」作る想定だが、新規時は 1枚作っておく
       { properties: { title: CAPTIONS_TITLE } }
     ]
   };
@@ -56,7 +61,7 @@ async function createSpreadsheetViaSheetsAPI(title) {
 }
 
 async function getSpreadsheet(spreadsheetId) {
-  const url = `${SHEETS_BASE}/${encodeURIComponent(spreadsheetId)}?fields=properties.title,sheets(properties(title,sheetId))`;
+  const url = `${SHEETS_BASE}/${encodeURIComponent(spreadsheetId)}?fields=properties.title,sheets(properties(title,sheetId))";
   return fetchAuthJSON(url, { method: 'GET' });
 }
 
@@ -74,7 +79,7 @@ async function ensureSheetExists(spreadsheetId, title) {
   const hit = findSheetByTitle(ss, title);
   if (hit) return hit.properties.sheetId;
 
-  const resp = await batchUpdate(spreadsheetId, [
+  await batchUpdate(spreadsheetId, [
     { addSheet: { properties: { title } } }
   ]);
   // 追加直後の sheetId を取り直し
@@ -85,16 +90,19 @@ async function ensureSheetExists(spreadsheetId, title) {
 }
 
 // __LM_MATERIALS のヘッダは PUT で強制（append 禁止）
+// ※ PUT の URL に指定したレンジと body.range / values のサイズが一致していないと 400 になるため注意
 async function ensureMaterialsHeader(spreadsheetId) {
-  // 必要なヘッダは要件に合わせて調整
   const header = [
     "key","materialName","opacity","doubleSided","unlitLike",
     "chromaKey","chromaTol","chromaFeather","notes","updatedAt"
   ];
-  const url = `${SHEETS_BASE}/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(`'${MATERIALS_TITLE}'!A1:${String.fromCharCode(64+header.length)}1`)}?valueInputOption=RAW`;
+  const endCol = colLetter(header.length); // A..J
+  const a1 = `'${MATERIALS_TITLE}'!A1:${endCol}1`;
+
+  const url = `${SHEETS_BASE}/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(a1)}?valueInputOption=RAW`;
   await fetchAuthJSON(url, {
     method: 'PUT',
-    body: JSON.stringify({ range: `'${MATERIALS_TITLE}'!A1:Z1`, values: [header] })
+    body: JSON.stringify({ range: a1, values: [header] })
   });
 }
 
@@ -110,37 +118,27 @@ async function ensureCaptionsOnce(spreadsheetId) {
 
 // --- public API ---
 export async function findOrCreateSaveSheetByGlbId(glbFileId, glbName = 'GLB') {
-  // 1) GLB名ベースで新規SSを作成（毎回作らない！すでに紐づきがあるなら別途ロジックで復旧する想定）
-  //   - 今回はまず「確実に 1つ作れる」ことを優先し、新規作成→ctx設定 までを保証。
   const title = `LociMyu - ${glbName}`;
   const created = await createSpreadsheetViaSheetsAPI(title);
   const spreadsheetId = created.spreadsheetId;
 
-  // 2) __LM_MATERIALS 確保 & ヘッダ強制
   const materialsGid = await ensureSheetExists(spreadsheetId, MATERIALS_TITLE);
   await ensureMaterialsHeader(spreadsheetId);
 
-  // 3) Captions（初回のみ）
   await ensureCaptionsOnce(spreadsheetId);
   const ssAfter = await getSpreadsheet(spreadsheetId);
   const capHit = findSheetByTitle(ssAfter, CAPTIONS_TITLE);
   const defaultCaptionGid = capHit?.properties?.sheetId ?? null;
 
-  // 4) ctx 反映 + イベント
-  const ctx = {
-    spreadsheetId,
-    materialsGid,
-    defaultCaptionGid
-  };
+  const ctx = { spreadsheetId, materialsGid, defaultCaptionGid };
   window.__lm_ctx = Object.assign(window.__lm_ctx || {}, ctx);
   document.dispatchEvent(new CustomEvent("lm:sheet-context", {
     detail: { spreadsheetId, sheetGid: defaultCaptionGid }
   }));
 
-  // 互換（古い呼び出しが window.loc / window.LM_SAVE を参照しても動くように）
+  // 互換
   window.loc = window.loc || {};
   window.loc.findOrCreateSaveSheetByGlbId = findOrCreateSaveSheetByGlbId;
-
   window.LM_SAVE = window.LM_SAVE || {};
   window.LM_SAVE.findOrCreateSaveSheetByGlbId = findOrCreateSaveSheetByGlbId;
 
