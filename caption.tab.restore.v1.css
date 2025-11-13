@@ -1,0 +1,15 @@
+
+.lm-cap { font-size: 13px; }
+.lm-cap .row { margin: 8px 0; }
+.lm-cap .pill { display:inline-block; min-width:24px; height:24px; border-radius:999px; padding:0 10px; line-height:24px; text-align:center; margin-right:6px; cursor:pointer; user-select:none; border:1px solid rgba(255,255,255,.15); }
+.lm-cap .pill.active { outline:2px solid rgba(255,255,255,.5); }
+.lm-cap .muted { opacity:.7; font-size:12px; }
+.lm-cap .list { max-height:240px; overflow:auto; border:1px solid rgba(255,255,255,.15); border-radius:10px; padding:6px; }
+.lm-cap .item { border:1px solid rgba(255,255,255,.1); border-radius:10px; padding:8px; margin:6px 0; position:relative; }
+.lm-cap .item.active { outline:2px solid rgba(255,255,255,.35); }
+.lm-cap .item .del { position:absolute; right:8px; top:8px; cursor:pointer; opacity:.8; }
+.lm-cap input[type="text"], .lm-cap textarea { width:100%; box-sizing:border-box; border:1px solid rgba(255,255,255,.15); border-radius:8px; background:transparent; color:inherit; padding:6px 8px; }
+.lm-cap textarea { min-height:80px; resize:vertical; }
+.lm-cap .grid { display:grid; grid-template-columns:repeat(6, 1fr); gap:8px; }
+.lm-cap .thumb { aspect-ratio:1; border-radius:10px; background:#222; display:flex; align-items:center; justify-content:center; font-size:11px; border:1px dashed rgba(255,255,255,.2); }
+.lm-cap .header { font-weight:600; margin:6px 0 2px; }
