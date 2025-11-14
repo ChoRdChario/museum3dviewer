@@ -1,5 +1,6 @@
-// [caption.sheet.bridge] Phase A1’ — Sheets persistence for caption rows (single active sheet)
-// - Listens to lm:sheet-context (spreadsheetId + sheetGid)
+// [caption.sheet.bridge] Phase A1’+A2 — Sheets persistence for caption rows (single active sheet, gid-based)
+// - Listens to lm:sheet-context (spreadsheetId + sheetGid [+ sheetTitle])
+// - Resolves sheet title from gid via LM_SHEET_GIDMAP (or uses provided sheetTitle)
 // - Ensures header row on the active caption sheet
 // - Loads existing captions into __LM_CAPTION_UI
 // - Appends newly added captions (Shift+Click) to the sheet
@@ -12,6 +13,7 @@
 
   const HEADER = ['id','title','body','color','posX','posY','posZ','imageFileId','createdAt','updatedAt'];
 
+  // ctx.sheetTitle は「今この UI がバインドしているシート名」
   let ctx = { spreadsheetId:'', sheetGid:'', sheetTitle:'', nextRowIndex:2 };
   let uiPromise = null;
   let addedHookBound = false;
@@ -86,7 +88,7 @@
     return uiPromise;
   }
 
-  // --- sheet title resolution -------------------------------------------------
+  // --- sheet title resolution (gid -> title) ---------------------------------
   async function resolveSheetTitle(spreadsheetId, sheetGid){
     if (!spreadsheetId) return null;
     const gid = sheetGid && String(sheetGid).trim();
@@ -117,6 +119,7 @@
 
   // --- header ensure / fetch helpers -----------------------------------------
   function buildRange(sheetTitle, a1){
+    // シート名内のシングルクォートをエスケープして、'タイトル'!A1 形式を組み立てる
     const safeTitle = String(sheetTitle||'').replace(/'/g, "''");
     return `'${safeTitle}'!${a1}`;
   }
@@ -190,9 +193,16 @@
     }
     const updatedAt = now;
     return {
-      row: [id, item.title||'', item.body||'', item.color||'#eab308', px, py, pz,
-            item.image && item.image.id || item.imageFileId || '',
-            createdAt, updatedAt],
+      row: [
+        id,
+        item.title||'',
+        item.body||'',
+        item.color||'#eab308',
+        px, py, pz,
+        (item.image && item.image.id) || item.imageFileId || '',
+        createdAt,
+        updatedAt
+      ],
       id,
       createdAt,
       updatedAt,
@@ -234,10 +244,18 @@
 
   // --- main: sheet-context handler -------------------------------------------
   async function handleSheetContext(detail){
-    const spreadsheetId = String(detail.spreadsheetId||'');
+    const spreadsheetId = String(detail.spreadsheetId || '');
     let sheetGid = detail.sheetGid;
-    if (sheetGid===undefined || sheetGid===null) sheetGid='';
+    if (sheetGid === undefined || sheetGid === null) sheetGid = '';
     sheetGid = String(sheetGid);
+
+    // sheet-rename.module.js 等から sheetTitle が渡されていればそれを優先
+    let sheetTitle = detail.sheetTitle;
+    if (sheetTitle !== undefined && sheetTitle !== null){
+      sheetTitle = String(sheetTitle);
+    }else{
+      sheetTitle = '';
+    }
 
     ctx = { spreadsheetId, sheetGid, sheetTitle:'', nextRowIndex:2 };
 
@@ -246,10 +264,17 @@
       return;
     }
 
-    const title = await resolveSheetTitle(spreadsheetId, sheetGid);
-    ctx.sheetTitle = title || 'シート1';
+    let resolvedTitle = sheetTitle;
+    if (!resolvedTitle){
+      // タイトルが渡されていない場合のみ gid map から解決
+      resolvedTitle = await resolveSheetTitle(spreadsheetId, sheetGid);
+    }
+    ctx.sheetTitle = resolvedTitle || 'シート1';
+
+    // デバッグ／他モジュール用の現在値
     window.__LM_ACTIVE_SPREADSHEET_ID = spreadsheetId;
     window.__LM_ACTIVE_SHEET_GID = sheetGid;
+    window.__LM_ACTIVE_SHEET_TITLE = ctx.sheetTitle;
 
     log('sheet-context', ctx);
 
