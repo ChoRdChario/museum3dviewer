@@ -1,5 +1,7 @@
-/*! sheet-rename.module.js — v2 (gid-first + __LM_ACTIVE_SPREADSHEET_ID + __lm_fetchJSONAuth) */
+/*! sheet-rename.module.js — v2 (rename + gidmap invalidate + ctx rebroadcast) */
 (function () {
+  "use strict";
+
   const DEBUG =
     /\bdebug=1\b/.test(location.search) || window.SHEET_RENAME_DEBUG;
   const log = (...a) => {
@@ -9,7 +11,9 @@
     if (DEBUG) console.warn("[renameUI]", ...a);
   };
 
-  // --- small helpers ---------------------------------------------------
+  // -------------------------------------------------------------------
+  // DOM helpers
+  // -------------------------------------------------------------------
   function $(id) {
     return document.getElementById(id);
   }
@@ -27,30 +31,23 @@
 
   function ensureWrapperForSelect(sel) {
     if (!sel || !sel.parentNode) return null;
+
     let host =
       $("save-target-sheet-wrapper") || $("sheet-select-wrapper");
-    if (host) return host;
-    host = document.createElement("div");
-    host.id =
-      sel.id === "save-target-sheet"
-        ? "save-target-sheet-wrapper"
-        : "sheet-select-wrapper";
-    host.style.display = "flex";
-    host.style.alignItems = "center";
-    host.style.gap = "4px";
-    sel.parentNode.insertBefore(host, sel);
-    host.appendChild(sel);
-    return host;
-  }
 
-  function listSheetsFromDOM(sel) {
-    const out = [];
-    if (!sel) return out;
-    for (const opt of Array.from(sel.options || [])) {
-      const id = opt.value ? Number(opt.value) : null;
-      out.push({ sheetId: id, title: (opt.textContent || "").trim() });
+    if (!host) {
+      host = document.createElement("div");
+      host.id =
+        sel.id === "save-target-sheet"
+          ? "save-target-sheet-wrapper"
+          : "sheet-select-wrapper";
+      host.style.display = "flex";
+      host.style.alignItems = "center";
+      host.style.gap = "4px";
+      sel.parentNode.insertBefore(host, sel);
+      host.appendChild(sel);
     }
-    return out;
+    return host;
   }
 
   function updateOptionTextAndDataset(opt, title) {
@@ -60,7 +57,9 @@
     opt.dataset.title = title;
   }
 
-  // --- view state ------------------------------------------------------
+  // -------------------------------------------------------------------
+  // View state
+  // -------------------------------------------------------------------
   function updateSheetRenameView(mode) {
     const label = $("sheet-rename-label");
     const input = $("sheet-rename-input");
@@ -79,6 +78,7 @@
       cancel.style.display = "inline-block";
       edit.style.display = "none";
       spin.style.display = "none";
+
       input.value = title || "";
       input.focus();
       input.select();
@@ -89,6 +89,7 @@
       cancel.style.display = "none";
       edit.style.display = "inline-block";
       spin.style.display = "none";
+
       label.textContent = title || "(no sheet)";
     }
   }
@@ -96,9 +97,12 @@
   function wireSelectChange() {
     const sel = findSheetSelect();
     if (!sel) return;
+
     const syncFromSelect = () => {
       const opt =
-        (sel.selectedOptions && sel.selectedOptions[0]) || sel.options[sel.selectedIndex] || null;
+        (sel.selectedOptions && sel.selectedOptions[0]) ||
+        sel.options[sel.selectedIndex] ||
+        null;
       const title =
         opt && opt.textContent ? opt.textContent.trim() : "";
       const id = opt && opt.value ? Number(opt.value) : null;
@@ -120,24 +124,23 @@
 
     syncFromSelect();
     sel.addEventListener("change", syncFromSelect, { passive: true });
-    new MutationObserver(syncFromSelect).observe(sel, {
-      childList: true,
-      subtree: true,
-    });
+
+    const mo = new MutationObserver(syncFromSelect);
+    mo.observe(sel, { childList: true, subtree: true });
   }
 
-  // --- auth helper (unified with A系) ----------------------------------
+  // -------------------------------------------------------------------
+  // Auth helper (unified with A系)
+  // -------------------------------------------------------------------
   async function getAuthFetchAndToken() {
-    // 1) __lm_fetchJSONAuth があればそれを最優先（token 内部取得）
+    // A系の __lm_fetchJSONAuth があればそれを最優先
     if (typeof window.__lm_fetchJSONAuth === "function") {
       return { authFetch: window.__lm_fetchJSONAuth, token: null };
     }
 
-    // 2) 旧来の ensureToken + getAccessToken で token を取る
+    // 旧 ensureToken + getAccessToken パス
     let token = null;
-    let triedInteractive = false;
 
-    // silent
     try {
       if (typeof window.ensureToken === "function") {
         await window.ensureToken({ interactive: false });
@@ -147,10 +150,8 @@
       }
     } catch (_) {}
 
-    // interactive
     if (!token) {
       try {
-        triedInteractive = true;
         if (typeof window.ensureToken === "function") {
           await window.ensureToken({ interactive: true });
         }
@@ -191,7 +192,9 @@
     return { authFetch, token };
   }
 
-  // --- core: Sheets rename ---------------------------------------------
+  // -------------------------------------------------------------------
+  // Sheets API: rename sheet
+  // -------------------------------------------------------------------
   async function sheetsUpdateTitle(
     spreadsheetId,
     sheetId,
@@ -202,6 +205,7 @@
     const url = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(
       spreadsheetId
     )}:batchUpdate`;
+
     const body = {
       requests: [
         {
@@ -223,12 +227,13 @@
       });
     }
 
-    // 念のためのフォールバック（ほぼ来ない想定）
+    // fallback （ほぼ到達しない想定）
     const headers = {
       Accept: "application/json",
       "Content-Type": "application/json",
     };
     if (token) headers["Authorization"] = "Bearer " + token;
+
     const res = await fetch(url, {
       method: "POST",
       headers,
@@ -245,7 +250,9 @@
     }
   }
 
-  // --- applySheetRename (統一版 + キャッシュ無効化 + ctx再発行) -------
+  // -------------------------------------------------------------------
+  // core: applySheetRename
+  // -------------------------------------------------------------------
   async function applySheetRename() {
     const input = $("sheet-rename-input");
     const spin = $("sheet-rename-spin");
@@ -253,11 +260,16 @@
     const cancel = $("sheet-rename-cancel");
     const label = $("sheet-rename-label");
     const sel = findSheetSelect();
+
     if (!input || !spin || !ok || !cancel || !label || !sel) return;
 
+    // currentSheetId が未設定なら一度同期してみる
     if (window.currentSheetId == null) {
       wireSelectChange();
-      if (window.currentSheetId == null) return;
+      if (window.currentSheetId == null) {
+        warn("no currentSheetId; abort rename");
+        return;
+      }
     }
 
     const before = window.currentSheetTitle || "";
@@ -266,13 +278,13 @@
       `option[value="${window.currentSheetId}"]`
     );
 
-    // 不正 or 変更なし or 長すぎる → 何もしない
+    // 入力チェック
     if (!newTitle || newTitle === before || newTitle.length > 100) {
       updateSheetRenameView("view");
       return;
     }
 
-    // 重複チェック
+    // 重複タイトルチェック
     for (const o of Array.from(sel.options || [])) {
       if ((o.textContent || "").trim() === newTitle) {
         updateSheetRenameView("view");
@@ -291,9 +303,9 @@
       window.currentSpreadsheetId ||
       "";
 
-    // ctx.bridge が少し遅れるケースに備えて短時間だけ待つ
+    // ctx.bridge が遅れてくるケースに備えて少しだけ待つ
     if (!spreadsheetId) {
-      for (let t = 0; t < 5 && !spreadsheetId; t++) {
+      for (let i = 0; i < 5 && !spreadsheetId; i++) {
         await new Promise((r) => setTimeout(r, 60));
         spreadsheetId =
           window.__LM_ACTIVE_SPREADSHEET_ID ||
@@ -301,11 +313,12 @@
           "";
       }
     }
+
     if (!spreadsheetId) {
       label.textContent = before;
       if (opt) updateOptionTextAndDataset(opt, before);
       window.currentSheetTitle = before;
-      warn("rename failed", new Error("spreadsheetId missing"));
+      warn("rename failed: spreadsheetId missing");
       return;
     }
 
@@ -350,12 +363,13 @@
         }
       } catch (_) {}
 
-      // 他の UI が sheet title を index 用に使っている可能性に配慮
+      // 既存の index 再構築系があれば呼んでおく
       try {
         if (typeof window.ensureIndex === "function") {
           window.ensureIndex();
         }
       } catch (_) {}
+
       log("rename success", newTitle);
     } catch (e) {
       // 失敗したらロールバック
@@ -369,7 +383,9 @@
     }
   }
 
-  // --- UI events -------------------------------------------------------
+  // -------------------------------------------------------------------
+  // UI events
+  // -------------------------------------------------------------------
   function wireSheetRenameEvents() {
     const label = $("sheet-rename-label");
     const input = $("sheet-rename-input");
@@ -379,4 +395,109 @@
 
     if (!label || !input || !ok || !cancel || !edit) return;
 
-    edit.addEventListener(
+    // ✎ボタン / ラベルクリックで編集モードへ
+    const toEdit = () => {
+      if (!(window.currentSheetId != null)) return;
+      updateSheetRenameView("edit");
+    };
+
+    edit.addEventListener("click", toEdit, { passive: true });
+    label.addEventListener("click", toEdit, { passive: true });
+
+    // キャンセル
+    cancel.addEventListener(
+      "click",
+      () => {
+        updateSheetRenameView("view");
+      },
+      { passive: true }
+    );
+
+    // OK
+    ok.addEventListener(
+      "click",
+      () => {
+        applySheetRename();
+      },
+      { passive: true }
+    );
+
+    // Enter / Esc
+    input.addEventListener("keydown", (ev) => {
+      if (ev.key === "Enter") {
+        ev.preventDefault();
+        applySheetRename();
+      } else if (ev.key === "Escape") {
+        ev.preventDefault();
+        updateSheetRenameView("view");
+      }
+    });
+  }
+
+  // -------------------------------------------------------------------
+  // UI mount
+  // -------------------------------------------------------------------
+  function mountSheetRenameUI() {
+    const sel = findSheetSelect();
+    if (!sel || !sel.parentNode) return false;
+
+    const host = ensureWrapperForSelect(sel);
+    if (!host) return false;
+
+    if ($("sheet-rename-root")) {
+      // すでに構築済み
+      wireSelectChange();
+      updateSheetRenameView("view");
+      return true;
+    }
+
+    const root = document.createElement("div");
+    root.id = "sheet-rename-root";
+    root.className = "sheet-rename-ui";
+    root.style.display = "inline-flex";
+    root.style.alignItems = "center";
+    root.style.gap = "4px";
+
+    root.innerHTML = [
+      '<button id="sheet-rename-edit" class="sr-btn sr-edit" type="button" title="Rename sheet">✎</button>',
+      '<span id="sheet-rename-label" class="sr-label">(no sheet)</span>',
+      '<input id="sheet-rename-input" class="sr-input" type="text" style="display:none;max-width:160px;">',
+      '<button id="sheet-rename-ok" class="sr-btn sr-ok" type="button" title="Apply" style="display:none;">✓</button>',
+      '<button id="sheet-rename-cancel" class="sr-btn sr-cancel" type="button" title="Cancel" style="display:none;">×</button>',
+      '<span id="sheet-rename-spin" class="sr-spin" aria-hidden="true" style="display:none;">⏳</span>',
+    ].join("");
+
+    host.appendChild(root);
+
+    wireSheetRenameEvents();
+    wireSelectChange();
+    updateSheetRenameView("view");
+    log("UI mounted");
+    return true;
+  }
+
+  // -------------------------------------------------------------------
+  // auto-mount
+  // -------------------------------------------------------------------
+  (function autoMount() {
+    if (mountSheetRenameUI()) return;
+
+    const mo = new MutationObserver(() => {
+      if (mountSheetRenameUI()) mo.disconnect();
+    });
+    mo.observe(document.documentElement || document.body, {
+      childList: true,
+      subtree: true,
+    });
+
+    let tries = 30;
+    const tm = setInterval(() => {
+      if (mountSheetRenameUI() || --tries <= 0) {
+        clearInterval(tm);
+      }
+    }, 200);
+  })();
+
+  // 手動リマウント用
+  window.mountSheetRenameUI = mountSheetRenameUI;
+})();
