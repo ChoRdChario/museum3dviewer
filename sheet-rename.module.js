@@ -245,7 +245,7 @@
     }
   }
 
-  // --- applySheetRename (統一版) ---------------------------------------
+  // --- applySheetRename (統一版 + キャッシュ無効化 + ctx再発行) -------
   async function applySheetRename() {
     const input = $("sheet-rename-input");
     const spin = $("sheet-rename-spin");
@@ -323,8 +323,33 @@
         token
       );
 
+      // ローカル状態更新
       window.currentSheetTitle = newTitle;
       if (opt) updateOptionTextAndDataset(opt, newTitle);
+
+      // ★1: gid→title マップを無効化（次回解決で最新タイトルを取得させる）
+      try {
+        if (
+          window.LM_SHEET_GIDMAP &&
+          typeof window.LM_SHEET_GIDMAP.invalidateMap === "function"
+        ) {
+          window.LM_SHEET_GIDMAP.invalidateMap(spreadsheetId);
+        }
+      } catch (_) {}
+
+      // ★2: sheet-context を再発行（caption.sheet.bridge 等に新タイトルを伝える）
+      try {
+        if (
+          typeof window.setSheetContext === "function" &&
+          window.currentSheetId != null
+        ) {
+          window.setSheetContext({
+            spreadsheetId,
+            sheetGid: String(window.currentSheetId),
+          });
+        }
+      } catch (_) {}
+
       // 他の UI が sheet title を index 用に使っている可能性に配慮
       try {
         if (typeof window.ensureIndex === "function") {
@@ -355,98 +380,3 @@
     if (!label || !input || !ok || !cancel || !edit) return;
 
     edit.addEventListener(
-      "click",
-      () => {
-        if (!(window.currentSheetId != null)) return;
-        updateSheetRenameView("edit");
-      },
-      { passive: true }
-    );
-
-    label.addEventListener(
-      "click",
-      () => {
-        if (!(window.currentSheetId != null)) return;
-        updateSheetRenameView("edit");
-      },
-      { passive: true }
-    );
-
-    cancel.addEventListener(
-      "click",
-      () => {
-        updateSheetRenameView("view");
-      },
-      { passive: true }
-    );
-
-    ok.addEventListener(
-      "click",
-      () => {
-        applySheetRename();
-      },
-      { passive: true }
-    );
-
-    input.addEventListener("keydown", (ev) => {
-      if (ev.key === "Enter") {
-        ev.preventDefault();
-        applySheetRename();
-      } else if (ev.key === "Escape") {
-        ev.preventDefault();
-        updateSheetRenameView("view");
-      }
-    });
-  }
-
-  // --- UI mount --------------------------------------------------------
-  function mountSheetRenameUI() {
-    const sel = findSheetSelect();
-    if (!sel || !sel.parentNode) return false;
-
-    const host = ensureWrapperForSelect(sel);
-    if (!host) return false;
-    if ($("sheet-rename-root")) return true;
-
-    const root = document.createElement("div");
-    root.id = "sheet-rename-root";
-    root.className = "sheet-rename-ui";
-    root.style.display = "inline-flex";
-    root.style.alignItems = "center";
-    root.style.gap = "4px";
-    root.innerHTML = [
-      '<button id="sheet-rename-edit" class="sr-btn sr-edit" type="button" title="Rename sheet">✎</button>',
-      '<span id="sheet-rename-label" class="sr-label">(no sheet)</span>',
-      '<input id="sheet-rename-input" class="sr-input" type="text" style="display:none;max-width:160px;">',
-      '<button id="sheet-rename-ok" class="sr-btn sr-ok" type="button" title="Apply" style="display:none;">✓</button>',
-      '<button id="sheet-rename-cancel" class="sr-btn sr-cancel" type="button" title="Cancel" style="display:none;">×</button>',
-      '<span id="sheet-rename-spin" class="sr-spin" aria-hidden="true" style="display:none;">⏳</span>',
-    ].join("");
-
-    host.appendChild(root);
-    wireSheetRenameEvents();
-    wireSelectChange();
-    updateSheetRenameView("view");
-    log("UI mounted");
-    return true;
-  }
-
-  // --- auto-mount ------------------------------------------------------
-  (function autoMount() {
-    if (mountSheetRenameUI()) return;
-    const mo = new MutationObserver(() => {
-      if (mountSheetRenameUI()) mo.disconnect();
-    });
-    mo.observe(document.documentElement || document.body, {
-      childList: true,
-      subtree: true,
-    });
-    let tries = 30;
-    const tm = setInterval(() => {
-      if (mountSheetRenameUI() || --tries <= 0) clearInterval(tm);
-    }, 200);
-  })();
-
-  // optional export for manual re-mount
-  window.mountSheetRenameUI = mountSheetRenameUI;
-})();
