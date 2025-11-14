@@ -119,9 +119,10 @@
 
   // --- header ensure / fetch helpers -----------------------------------------
   function buildRange(sheetTitle, a1){
-    // シート名内のシングルクォートをエスケープして、'タイトル'!A1 形式を組み立てる
-    const safeTitle = String(sheetTitle||'').replace(/'/g, "''");
-    return `'${safeTitle}'!${a1}`;
+    // シート名をクォートで囲まず「シート名!A1」形式で返す
+    const safeTitle = String(sheetTitle || '').trim();
+    if (!safeTitle) return a1; // 念のため
+    return `${safeTitle}!${a1}`;
   }
 
   async function ensureHeader(spreadsheetId, sheetTitle){
