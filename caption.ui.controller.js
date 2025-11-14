@@ -1,4 +1,3 @@
-
 // [caption.ui.controller] Phase A1 — minimal caption UI + pin bridge + Sheets hook points
 // Defensive: runs even if other bridges are missing.
 (function(){
@@ -36,6 +35,12 @@
   function newId(){
     return 'c_'+Math.random().toString(36).slice(2,10);
   }
+
+  // ---- ここが今回のポイント ----------------------------------------------
+  // viewer 側の onCanvasShiftPick が有効になったら true にする。
+  // true のときは fallback(#gl click)は何もしない。
+  let preferWorldClicks = false;
+  // -------------------------------------------------------------------------
 
   // --- small event hub for Sheets bridge --------------------------------------
   const addListeners = [];
@@ -225,6 +230,8 @@
     if(!canvas) return;
     canvas.addEventListener('click', (e)=>{
       if(!e.shiftKey) return;
+      // viewer の 3D ピックが生きているときは、こちらは無効化して二重登録を防ぐ
+      if (preferWorldClicks) return;
       addCaptionAt(e.offsetX, e.offsetY, null);
     });
   })();
@@ -241,6 +248,7 @@
           addCaptionAt(0,0,{x,y,z});
         });
         hooked = true;
+        preferWorldClicks = true;   // 以後は 3D 側を優先
         log('onCanvasShiftPick bound');
       }catch(e){
         warn('bind onCanvasShiftPick failed', e);
