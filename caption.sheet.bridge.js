@@ -1,9 +1,9 @@
-
-// [caption.sheet.bridge] Phase A1 — Sheets persistence for caption rows (single active sheet)
+// [caption.sheet.bridge] Phase A1’ — Sheets persistence for caption rows (single active sheet)
 // - Listens to lm:sheet-context (spreadsheetId + sheetGid)
 // - Ensures header row on the active caption sheet
 // - Loads existing captions into __LM_CAPTION_UI
 // - Appends newly added captions (Shift+Click) to the sheet
+// - Updates title/body edits back to the same row
 (function(){
   const TAG='[caption.sheet.bridge]';
   const log=(...a)=>console.log(TAG,...a);
@@ -12,8 +12,10 @@
 
   const HEADER = ['id','title','body','color','posX','posY','posZ','imageFileId','createdAt','updatedAt'];
 
-  let ctx = { spreadsheetId:'', sheetGid:'', sheetTitle:'' };
+  let ctx = { spreadsheetId:'', sheetGid:'', sheetTitle:'', nextRowIndex:2 };
   let uiPromise = null;
+  let addedHookBound = false;
+  let changedHookBound = false;
 
   // --- auth helper (prefers __lm_fetchJSONAuth) -------------------------------
   async function authJSON(url, init){
@@ -110,7 +112,7 @@
       warn('resolveSheetTitle via gid map failed', e);
     }
     // final fallback
-    return 'Captions';
+    return 'シート1';
   }
 
   // --- header ensure / fetch helpers -----------------------------------------
@@ -175,14 +177,17 @@
     return items;
   }
 
-  function itemToRow(item){
+  function itemToRow(item, mode){
     const now = new Date().toISOString();
     const pos = item.pos || {};
     const px = (typeof pos.x === 'number') ? pos.x : '';
     const py = (typeof pos.y === 'number') ? pos.y : '';
     const pz = (typeof pos.z === 'number') ? pos.z : '';
     const id = item.id || ('c_'+Math.random().toString(36).slice(2,10));
-    const createdAt = item.createdAt || now;
+    let createdAt = item.createdAt;
+    if (!createdAt || mode === 'append'){
+      createdAt = createdAt || now;
+    }
     const updatedAt = now;
     return {
       row: [id, item.title||'', item.body||'', item.color||'#eab308', px, py, pz,
@@ -195,14 +200,36 @@
   }
 
   async function appendRow(spreadsheetId, sheetTitle, item){
-    const { row, id, createdAt, updatedAt } = itemToRow(item);
+    const { row, id, createdAt, updatedAt } = itemToRow(item, 'append');
     const range = buildRange(sheetTitle, 'A2:J');
     const url = `${SHEETS}/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(range)}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`;
     await authJSON(url, { method:'POST', body: JSON.stringify({ values:[row] }), rawResponse:true });
+
+    const rowIndex = ctx.nextRowIndex || (item.rowIndex || 2);
+    ctx.nextRowIndex = rowIndex + 1;
+
     item.id = id;
     item.createdAt = createdAt;
     item.updatedAt = updatedAt;
-    log('append row', id);
+    item.rowIndex = rowIndex;
+
+    log('append row', id, 'row', rowIndex);
+  }
+
+  async function updateRow(spreadsheetId, sheetTitle, item){
+    if (!item || !item.id || !item.rowIndex){
+      // rowIndex が無い場合は安全のため append にフォールバック
+      return appendRow(spreadsheetId, sheetTitle, item);
+    }
+    const { row, createdAt, updatedAt } = itemToRow(item, 'update');
+    const rowIndex = item.rowIndex;
+    const a1 = `A${rowIndex}:J${rowIndex}`;
+    const range = buildRange(sheetTitle, a1);
+    const url = `${SHEETS}/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(range)}?valueInputOption=RAW`;
+    await authJSON(url, { method:'PUT', body: JSON.stringify({ values:[row] }), rawResponse:true });
+    item.createdAt = createdAt || item.createdAt;
+    item.updatedAt = updatedAt;
+    log('update row', item.id, 'row', rowIndex);
   }
 
   // --- main: sheet-context handler -------------------------------------------
@@ -212,7 +239,7 @@
     if (sheetGid===undefined || sheetGid===null) sheetGid='';
     sheetGid = String(sheetGid);
 
-    ctx = { spreadsheetId, sheetGid, sheetTitle:'' };
+    ctx = { spreadsheetId, sheetGid, sheetTitle:'', nextRowIndex:2 };
 
     if (!spreadsheetId){
       warn('sheet-context without spreadsheetId', detail);
@@ -220,7 +247,7 @@
     }
 
     const title = await resolveSheetTitle(spreadsheetId, sheetGid);
-    ctx.sheetTitle = title || 'Captions';
+    ctx.sheetTitle = title || 'シート1';
     window.__LM_ACTIVE_SPREADSHEET_ID = spreadsheetId;
     window.__LM_ACTIVE_SHEET_GID = sheetGid;
 
@@ -229,18 +256,34 @@
     try{
       const rows = await fetchRows(spreadsheetId, ctx.sheetTitle);
       const items = rowsToItems(rows);
+      // nextRowIndex = 最大 rowIndex + 1
+      const maxRow = items.reduce((m,it)=> Math.max(m, it.rowIndex || 1), 1);
+      ctx.nextRowIndex = maxRow + 1;
+
       const ui = await waitCaptionUI();
       if (ui && typeof ui.setItems === 'function'){
         ui.setItems(items);
       }else{
         warn('caption UI missing setItems');
       }
-      // subscribe for new additions (Shift+Click)
-      if (ui && typeof ui.onItemAdded === 'function'){
-        ui.onItemAdded(it=>{
-          if (!ctx.spreadsheetId || !ctx.sheetTitle) return;
-          appendRow(ctx.spreadsheetId, ctx.sheetTitle, it).catch(e=>warn('append failed', e));
-        });
+
+      if (ui){
+        // subscribe for new additions (Shift+Click)
+        if (typeof ui.onItemAdded === 'function' && !addedHookBound){
+          ui.onItemAdded(it=>{
+            if (!ctx.spreadsheetId || !ctx.sheetTitle) return;
+            appendRow(ctx.spreadsheetId, ctx.sheetTitle, it).catch(e=>warn('append failed', e));
+          });
+          addedHookBound = true;
+        }
+        // subscribe for edits (title/body)
+        if (typeof ui.onItemChanged === 'function' && !changedHookBound){
+          ui.onItemChanged(it=>{
+            if (!ctx.spreadsheetId || !ctx.sheetTitle) return;
+            updateRow(ctx.spreadsheetId, ctx.sheetTitle, it).catch(e=>warn('update failed', e));
+          });
+          changedHookBound = true;
+        }
       }
     }catch(e){
       warn('load captions failed', e);

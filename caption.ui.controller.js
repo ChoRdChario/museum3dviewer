@@ -1,4 +1,4 @@
-// [caption.ui.controller] Phase A1 — minimal caption UI + pin bridge + Sheets hook points
+// [caption.ui.controller] Phase A1’ — caption UI + pin bridge + Sheets hook points
 // Defensive: runs even if other bridges are missing.
 (function(){
   const TAG='[caption.ui.controller]';
@@ -36,14 +36,14 @@
     return 'c_'+Math.random().toString(36).slice(2,10);
   }
 
-  // ---- ここが今回のポイント ----------------------------------------------
-  // viewer 側の onCanvasShiftPick が有効になったら true にする。
-  // true のときは fallback(#gl click)は何もしない。
+  // viewer 側の onCanvasShiftPick が有効になったら true。
+  // true のときは fallback(#gl click)は何もしない（ダブル追加防止）。
   let preferWorldClicks = false;
-  // -------------------------------------------------------------------------
 
   // --- small event hub for Sheets bridge --------------------------------------
   const addListeners = [];
+  const changeListeners = [];
+  const dirtyTimers = new Map(); // id -> timerId
 
   function onItemAdded(fn){
     if (typeof fn === 'function') addListeners.push(fn);
@@ -52,6 +52,29 @@
     addListeners.forEach(fn=>{
       try{ fn(item); }catch(e){ console.error(TAG,'onItemAdded handler failed',e); }
     });
+  }
+
+  function onItemChanged(fn){
+    if (typeof fn === 'function') changeListeners.push(fn);
+  }
+  function emitItemChanged(item){
+    changeListeners.forEach(fn=>{
+      try{ fn(item); }catch(e){ console.error(TAG,'onItemChanged handler failed',e); }
+    });
+  }
+  function scheduleChanged(item){
+    if (!item || !item.id) return;
+    const id = item.id;
+    const prev = dirtyTimers.get(id);
+    if (prev) cancelTimeout(prev);
+    const t = setTimeout(()=>{
+      dirtyTimers.delete(id);
+      emitItemChanged(item);
+    }, 600);
+    dirtyTimers.set(id, t);
+  }
+  function cancelTimeout(t){
+    try{ clearTimeout(t); }catch(_){}
   }
 
   // --- Rendering helpers -------------------------------------------------------
@@ -160,6 +183,7 @@
       it.title = elTitle.value;
       if (tId) cancelAnimationFrame(tId);
       tId = requestAnimationFrame(()=>refreshList());
+      scheduleChanged(it);
     });
   }
   if (elBody){
@@ -170,6 +194,7 @@
       it.body = elBody.value;
       if (bId) cancelAnimationFrame(bId);
       bId = requestAnimationFrame(()=>refreshList());
+      scheduleChanged(it);
     });
   }
 
@@ -288,6 +313,7 @@
         if(!item) return;
         item.image = { id: it.id || null, name: it.name || null, url: it.url || null };
         refreshList();
+        // 画像選択の保存は A3 で本実装予定なので、ここではまだ scheduleChanged しない
       });
       grid.appendChild(wrap);
     });
@@ -341,6 +367,7 @@
     setItems,
     setImages,
     onItemAdded,
+    onItemChanged,
     get items(){ return store.items; }
   };
 
