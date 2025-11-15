@@ -18,79 +18,45 @@
   const elList  = $('#caption-list', pane);
   const elTitle = $('#caption-title', pane);
   const elBody  = $('#caption-body', pane);
-  const elBtnAdd = $('#caption-add', pane) || $('#caption-add-pin', pane);
-  const elBtnClear = $('#caption-clear', pane) || $('#caption-clear-all', pane);
-  const elBtnAttachImage = $('#caption-attach-image', pane);
+  const elImgStatus = $('#images-status', pane) || $('#images-status');
+  const elImages    = $('#images-grid', pane)   || $('#images-grid');
 
-  if (!elList || !elTitle || !elBody){
-    return warn('essential caption controls missing; skip');
-  }
-
-  // --- State -------------------------------------------------------------------
-  const store = {
-    items: [],          // {id,title,body,color,image?,pos?}
+  // Stable store on window
+  const store = window.__lm_capt || (window.__lm_capt = {
+    currentColor: '#eab308',
+    filter: new Set(),
+    items: [],
     selectedId: null,
-    filterColor: null,  // null = all
-    colorPalette: ['#eab308','#22c55e','#3b82f6','#a855f7','#f97316','#ef4444','#e5e7eb']
-  };
+    images: [],
+  });
 
-  const changeListeners = new Set();
-  const dirtyTimers = new Map();
+  const PALETTE = ['#eab308','#a3e635','#60a5fa','#a78bfa','#93c5fd','#fda4af','#c084fc','#a3a3a3','#f97316','#22c55e'];
 
-  // --- Public API (for other modules) -----------------------------------------
-  const api = {
-    getItems(){ return store.items.slice(); },
-    setItems(list){
-      store.items = Array.isArray(list)?list.map(normalizeItem):[];
-      if (!store.selectedId && store.items.length){
-        store.selectedId = store.items[0].id;
-      }
-      renderColors();
-      refreshList();
-    },
-    addItem(raw){
-      const it = normalizeItem(raw);
-      store.items.push(it);
-      store.selectedId = it.id;
-      refreshList();
-      scheduleChanged(it);
-      return it;
-    },
-    getSelected(){
-      return store.items.find(x=>x.id===store.selectedId) || null;
-    },
-    setFilterColor(color){
-      store.filterColor = color || null;
-      renderFilters();
-      refreshList();
-    },
-    registerChangeListener(fn){
-      if (typeof fn === 'function') changeListeners.add(fn);
-      return ()=>changeListeners.delete(fn);
-    },
-    setImages(images){
-      // images: [{id,name,mimeType,thumbnailUrl,url}, ...]
-      store.images = Array.isArray(images)?images.slice():[];
-      log('setImages', store.images.length);
-    }
-  };
-
-  window.__LM_CAPTION_UI = api;
-
-  // --- Normalization -----------------------------------------------------------
-  function normalizeItem(raw){
-    const it = Object.assign({
-      id: `c_${Math.random().toString(36).slice(2)}`,
-      title: '',
-      body: '',
-      color: store.colorPalette[0],
-      image: null,
-      pos: null
-    }, raw || {});
-    return it;
+  function newId(){
+    return 'c_'+Math.random().toString(36).slice(2,10);
   }
 
-  // --- Events to outside ------------------------------------------------------
+  // viewer 側の onCanvasShiftPick が有効になったら true。
+  // true のときは fallback(#gl click)は何もしない（ダブル追加防止）。
+  let preferWorldClicks = false;
+
+  // --- small event hub for Sheets bridge --------------------------------------
+  const addListeners = [];
+  const changeListeners = [];
+  const dirtyTimers = new Map(); // id -> timerId
+
+  function onItemAdded(fn){
+    if (typeof fn === 'function') addListeners.push(fn);
+  }
+  function emitItemAdded(item){
+    addListeners.forEach(fn=>{
+      try{ fn(item); }catch(e){ console.error(TAG,'onItemAdded handler failed',e); }
+    });
+  }
+
+  function onItemChanged(fn){
+    if (typeof fn === 'function') changeListeners.push(fn);
+  }
   function emitItemChanged(item){
     changeListeners.forEach(fn=>{
       try{ fn(item); }catch(e){ console.error(TAG,'onItemChanged handler failed',e); }
@@ -116,47 +82,32 @@
   function renderColors(){
     if(!elColorList) return;
     elColorList.innerHTML = '';
-    store.colorPalette.forEach(col=>{
-      const chip = document.createElement('button');
-      chip.type = 'button';
-      chip.className = 'lm-cap-color-chip';
-      chip.style.backgroundColor = col;
-      chip.title = col;
-      chip.addEventListener('click', ()=>{
-        const it = api.getSelected();
-        if (!it) return;
-        it.color = col;
-        refreshList();
-        scheduleChanged(it);
+    PALETTE.forEach(col=>{
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'lm-cap-color';
+      btn.style.backgroundColor = col;
+      if (store.currentColor === col) btn.classList.add('active');
+      btn.addEventListener('click', ()=>{
+        store.currentColor = col;
+        renderColors();
       });
-      elColorList.appendChild(chip);
+      elColorList.appendChild(btn);
     });
   }
 
   function renderFilters(){
     if(!elFilterList) return;
     elFilterList.innerHTML = '';
-
-    const btnAll = document.createElement('button');
-    btnAll.type = 'button';
-    btnAll.textContent = 'All';
-    btnAll.className = 'lm-cap-filter';
-    if (!store.filterColor) btnAll.classList.add('active');
-    btnAll.addEventListener('click', ()=>{
-      store.filterColor = null;
-      renderFilters();
-      refreshList();
-    });
-    elFilterList.appendChild(btnAll);
-
-    store.colorPalette.forEach(col=>{
+    PALETTE.forEach(col=>{
       const btn = document.createElement('button');
       btn.type = 'button';
       btn.className = 'lm-cap-filter';
       btn.style.backgroundColor = col;
-      if (store.filterColor === col) btn.classList.add('active');
+      if (store.filter.has(col)) btn.classList.add('active');
       btn.addEventListener('click', ()=>{
-        store.filterColor = col;
+        if (store.filter.has(col)) store.filter.delete(col);
+        else store.filter.add(col);
         renderFilters();
         refreshList();
       });
@@ -165,8 +116,9 @@
   }
 
   function filteredItems(){
-    if (!store.filterColor) return store.items.slice();
-    return store.items.filter(it=>it.color===store.filterColor);
+    const active = store.filter.size ? store.filter : null;
+    if (!active) return store.items.slice();
+    return store.items.filter(it => active.has(it.color));
   }
 
   function refreshList(){
@@ -177,33 +129,19 @@
       const row = document.createElement('div');
       row.className = 'lm-cap-row';
       row.dataset.id = it.id;
-
       const sw = document.createElement('span');
       sw.className = 'lm-cap-sw';
       sw.style.backgroundColor = it.color || '#eab308';
-
       const title = document.createElement('span');
       title.className = 'lm-cap-title';
       title.textContent = it.title || '(untitled)';
-
       const imgMark = document.createElement('span');
       imgMark.className = 'lm-cap-imgmark';
       if (it.image && (it.image.url || it.image.id)) imgMark.textContent = '🖼';
 
-      const btnDelete = document.createElement('button');
-      btnDelete.type = 'button';
-      btnDelete.className = 'lm-cap-delete';
-      btnDelete.textContent = '×';
-      btnDelete.title = 'Delete caption';
-      btnDelete.addEventListener('click', (ev)=>{
-        ev.stopPropagation();
-        removeItem(it.id);
-      });
-
       row.appendChild(sw);
       row.appendChild(title);
       row.appendChild(imgMark);
-      row.appendChild(btnDelete);
 
       if (store.selectedId === it.id) row.classList.add('selected');
 
@@ -248,7 +186,6 @@
       scheduleChanged(it);
     });
   }
-
   if (elBody){
     let bId = 0;
     elBody.addEventListener('input', ()=>{
@@ -266,95 +203,179 @@
     try{
       const pinRuntime = window.__lm_pin_runtime;
       if (pinRuntime && typeof pinRuntime.getBridge === 'function'){
-        return pinRuntime.getBridge();
+        const b = pinRuntime.getBridge();
+        if (b) return b;
       }
-    }catch(_){}
-    return window.__lm_viewer_bridge || null;
+    }catch(e){}
+    return window.__lm_viewer_bridge || window.viewerBridge || null;
   }
 
   function addPinForItem(item){
     const br = getViewerBridge();
-    if (!br || typeof br.addPinMarker !== 'function'){
-      return warn('viewer bridge missing; cannot add pin');
-    }
-    const pos = item.pos || null;
-    const color = item.color || store.colorPalette[0];
-    br.addPinMarker(item.id, { color, pos });
+    if (!br || typeof br.addPinMarker!=='function') return;
+    if (!item.pos) return;
+    const p = item.pos;
+    try{
+      br.addPinMarker({ id:item.id, x:p.x, y:p.y, z:p.z, color:item.color });
+    }catch(e){ warn('addPinMarker failed', e); }
   }
 
-  function updatePinForItem(item){
+  function syncPinsFromItems(){
     const br = getViewerBridge();
-    if (!br || typeof br.updatePinMarker !== 'function'){
+    if (!br || typeof br.clearPins!=='function' || typeof br.addPinMarker!=='function') return;
+    try{
+      br.clearPins();
+      store.items.forEach(it=>{ if(it.pos) addPinForItem(it); });
+    }catch(e){ warn('syncPinsFromItems failed', e); }
+  }
+
+  // --- Public entry: Shift+クリックでの追加 -----------------------------------
+  function addCaptionAt(x, y, world){
+    const item = {
+      id: newId(),
+      title: '(untitled)',
+      body: '',
+      color: store.currentColor,
+      pos: world || null,
+      image: null,
+      createdAt: null,
+      updatedAt: null,
+    };
+    store.items.push(item);
+    refreshList();
+    selectItem(item.id);
+    log('caption added', item);
+    addPinForItem(item);
+    emitItemAdded(item);
+  }
+
+  // Fallback: legacy canvas click (2D only, no world pos)
+  (function(){
+    const canvas = document.getElementById('gl');
+    if(!canvas) return;
+    canvas.addEventListener('click', (e)=>{
+      if(!e.shiftKey) return;
+      // viewer の 3D ピックが生きているときは、こちらは無効化して二重登録を防ぐ
+      if (preferWorldClicks) return;
+      addCaptionAt(e.offsetX, e.offsetY, null);
+    });
+  })();
+
+  // Viewer bridge: onCanvasShiftPick (3D)
+  (function(){
+    let hooked = false;
+    function bind(){
+      if (hooked) return true;
+      const br = getViewerBridge();
+      if (!br || typeof br.onCanvasShiftPick !== 'function') return false;
+      try{
+        br.onCanvasShiftPick(({x,y,z})=>{
+          addCaptionAt(0,0,{x,y,z});
+        });
+        hooked = true;
+        preferWorldClicks = true;   // 以後は 3D 側を優先
+        log('onCanvasShiftPick bound');
+      }catch(e){
+        warn('bind onCanvasShiftPick failed', e);
+      }
+      return hooked;
+    }
+    if (!bind()){
+      document.addEventListener('lm:viewer-bridge-ready', ()=>{ bind(); }, { once:true });
+    }
+  })();
+
+  // --- Images ------------------------------------------------------------------
+  function renderImages(){
+    if (!elImages || !elImgStatus) return;
+    const list = store.images || [];
+    elImages.innerHTML = '';
+    if (!list.length){
+      elImgStatus.textContent = 'no registered images';
       return;
     }
-    const pos = item.pos || null;
-    const color = item.color || store.colorPalette[0];
-    br.updatePinMarker(item.id, { color, pos });
-  }
-
-  // --- Add / Clear buttons -----------------------------------------------------
-  if (elBtnAdd){
-    elBtnAdd.addEventListener('click', ()=>{
-      const br = getViewerBridge();
-      let pos = null;
-      if (br && typeof br.projectPoint === 'function'){
-        try{
-          pos = br.projectPoint();
-        }catch(e){
-          console.error(TAG,'projectPoint failed', e);
-        }
-      }
-      const it = api.addItem({ pos });
-      addPinForItem(it);
-      selectItem(it.id);
+    elImgStatus.textContent = `${list.length} images`;
+    const grid = elImages;
+    list.forEach(it=>{
+      const wrap = document.createElement('button');
+      wrap.type = 'button';
+      wrap.className = 'lm-img-item';
+      const img = document.createElement('img');
+      img.loading = 'lazy';
+      img.decoding = 'async';
+      img.src = it.thumbUrl || it.url || '';
+      img.alt = it.name || '';
+      wrap.appendChild(img);
+      wrap.addEventListener('click', ()=>{
+        const id = store.selectedId;
+        if(!id) return;
+        const item = store.items.find(x=>x.id===id);
+        if(!item) return;
+        item.image = { id: it.id || null, name: it.name || null, url: it.url || null };
+        refreshList();
+        // 画像選択の保存は A3 で本実装予定なので、ここではまだ scheduleChanged しない
+      });
+      grid.appendChild(wrap);
     });
   }
 
-  if (elBtnClear){
-    elBtnClear.addEventListener('click', ()=>{
-      if (!confirm('Clear all captions?')) return;
-      store.items = [];
-      store.selectedId = null;
-      if (elTitle) elTitle.value = '';
-      if (elBody)  elBody.value  = '';
+  // --- API for other modules ---------------------------------------------------
+  function normalizeItem(raw){
+    if (!raw) raw = {};
+    const id = raw.id || newId();
+    const color = raw.color || '#eab308';
+    let pos = raw.pos || null;
+    if (!pos && raw.posX!=null && raw.posY!=null && raw.posZ!=null){
+      const x = Number(raw.posX), y = Number(raw.posY), z = Number(raw.posZ);
+      if (Number.isFinite(x) && Number.isFinite(y) && Number.isFinite(z)){
+        pos = {x,y,z};
+      }
+    }
+    return {
+      id,
+      title: raw.title || '',
+      body: raw.body || '',
+      color,
+      pos,
+      image: raw.image || (raw.imageFileId ? {id:raw.imageFileId} : null),
+      createdAt: raw.createdAt || null,
+      updatedAt: raw.updatedAt || null,
+      rowIndex: raw.rowIndex || null,
+    };
+  }
+
+  function setItems(list){
+    try{
+      store.items = Array.isArray(list) ? list.map(normalizeItem) : [];
       refreshList();
-      const br = getViewerBridge();
-      if (br && typeof br.clearPins === 'function'){
-        br.clearPins();
-      }
-    });
+      syncPinsFromItems();
+    }catch(e){
+      warn('setItems failed', e);
+    }
   }
 
-  // --- Image attach button -----------------------------------------------------
-  if (elBtnAttachImage){
-    elBtnAttachImage.addEventListener('click', ()=>{
-      const it = api.getSelected();
-      if (!it) return;
-      const images = store.images || [];
-      if (!images.length){
-        alert('No images found in the same folder as the GLB.');
-        return;
-      }
-      const names = images.map((img,i)=>`${i+1}: ${img.name || img.id}`);
-      const choice = prompt(
-        'Attach which image? (enter index)\n\n' + names.join('\n'),
-        '1'
-      );
-      if (!choice) return;
-      const idx = parseInt(choice,10)-1;
-      if (isNaN(idx) || idx<0 || idx>=images.length){
-        return alert('Invalid index');
-      }
-      it.image = images[idx];
-      refreshList();
-      scheduleChanged(it);
-    });
+  function setImages(list){
+    store.images = Array.isArray(list) ? list : [];
+    renderImages();
   }
 
-  // --- Initial render ----------------------------------------------------------
+  window.__LM_CAPTION_UI = {
+    addCaptionAt,
+    refreshList,
+    selectItem,
+    removeItem,
+    setItems,
+    setImages,
+    onItemAdded,
+    onItemChanged,
+    get items(){ return store.items; }
+  };
+
+  // initial render
   renderColors();
   renderFilters();
   refreshList();
+  renderImages();
 
   log('ready');
 })();
