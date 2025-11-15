@@ -1,5 +1,5 @@
-/* glb.btn.bridge.v3.js — v3.4 (loader + save sheet ensure + gid-first ctx)
- * viewer.module.cdn.js の export から __lm_viewer_bridge を組み立てる（案1ベース）
+/* glb.btn.bridge.v3.js — v3.4 (loader + save sheet ensure + drive images bridge)
+ * viewer.module.cdn.js の export から __lm_viewer_bridge を組み立てる
  */
 (function(){
   const TAG='[glb-bridge-v3]';
@@ -77,14 +77,14 @@
     // 2) URL パターンを試す
     try{
       const u = new URL(raw);
-      // /file/d/<id>/
+      // /file/d/<id>/...
       let m = u.pathname.match(/\/file\/d\/([a-zA-Z0-9_-]{20,})/);
       if (m) return m[1];
       // ?id=<id>
       const qp = u.searchParams.get('id');
       if (qp && /^[a-zA-Z0-9_-]{10,}$/.test(qp)) return qp;
     }catch(_){}
-    // 3) それでもダメなら、文字列中の「長めのトークン」を最後の手段として抜き出す
+    // 3) 最後の手段: 文字列中の「長めの Drive っぽいトークン」
     const m2 = raw.match(/[-\w]{20,}/);
     return m2 ? m2[0] : '';
   }
@@ -168,7 +168,6 @@
   /**
    * ビューア用 canvas の確保。
    * すでに存在する canvas を優先し、無ければ最後に控えめに追加する。
-   * レイアウトを壊さないよう wrapper は新規作成しない。
    */
   function ensureCanvas(){
     // 1) 既知のコンテナ内を優先
@@ -197,7 +196,6 @@
     canvas.className = 'lm-viewer';
     canvas.id = 'lm-viewer-canvas';
 
-    // layout を壊さないよう、単に末尾に append するだけに留める
     host.appendChild(canvas);
     return canvas;
   }
@@ -257,6 +255,10 @@
   }
 
   async function loadById(fileId){
+    if (!fileId){
+      err('loadById called with empty fileId');
+      return;
+    }
     const mod = await import('./viewer.module.cdn.js');
     try{ console.log(TAG, 'exports:', Object.keys(mod)); }catch(_){}
     ensureViewerBridge(mod);
@@ -266,7 +268,11 @@
       await ensureViewerReady(mod);
       const token = await getToken();
       await mod.loadGlbFromDrive(fileId, { token });
-    }catch(e){ err('loadGlbFromDrive threw', e); safeHide(); throw e; }
+    }catch(e){
+      err('loadGlbFromDrive threw', e);
+      safeHide();
+      throw e;
+    }
     setTimeout(safeHide, 120);
     await postLoadEnsureSaveSheet(fileId);
     await ensureDriveBridge(fileId);
@@ -283,7 +289,10 @@
         let raw = input && input.value ? input.value.trim() : '';
         if (!raw) raw = prompt('Driveの共有URL または fileId を入力してください') || '';
         const id = extractId(raw);
-        if (!id){ log('no id'); return; }
+        if (!id){
+          log('no id', raw);
+          return;
+        }
         log('load fileId', id);
         await loadById(id);
       }catch(e){ err('btn load failed', e); }
@@ -294,8 +303,13 @@
   function wireEvent(){
     window.addEventListener('lm:load-glb', async (ev)=>{
       try{
-        const id = ev && ev.detail && ev.detail.id;
-        if (!id) return;
+        const src = ev && ev.detail && (ev.detail.id || ev.detail.url);
+        if (!src) return;
+        const id = extractId(src);
+        if (!id){
+          log('event no id', src);
+          return;
+        }
         log('event load fileId', id);
         await loadById(id);
       }catch(e){ err('event load failed', e); }
