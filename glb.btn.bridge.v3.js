@@ -1,4 +1,3 @@
-
 /* glb.btn.bridge.v3.js — v3.4 (loader + save sheet ensure + gid-first ctx)
  * viewer.module.cdn.js の export から __lm_viewer_bridge を組み立てる（案1ベース）
  */
@@ -45,43 +44,118 @@
       if (!ov){
         ov = document.createElement('div');
         ov.id = OVERLAY_ID;
-        ov.setAttribute('aria-live','polite');
-        ov.innerHTML = `<div class="box"><div class="spin"></div><div class="txt"></div></div>`;
-        if (host === document.body)
-          host.appendChild(ov);
-        else {
-          const style = getComputedStyle(host);
-          if (style.position === 'static') host.style.position = 'relative';
-          host.appendChild(ov);
-        }
+        ov.innerHTML = `
+          <div class="box">
+            <div class="spin"></div>
+            <div class="txt"></div>
+          </div>
+        `;
+        host.appendChild(ov);
       }
       const txt = ov.querySelector('.txt');
       if (txt) txt.textContent = msg;
       ov.classList.add('on');
-    }catch(e){ err('showOverlay failed', e); }
+    }catch(e){
+      err('showOverlay failed', e);
+    }
   }
   function hideOverlay(){
     try{
       const ov = document.getElementById(OVERLAY_ID);
       if (ov) ov.classList.remove('on');
-    }catch(e){ err('hideOverlay failed', e); }
+    }catch(e){
+      err('hideOverlay failed', e);
+    }
   }
 
-  /* --- GLB id extraction helpers --- */
+  /* --- Drive URL helper --- */
   function extractId(raw){
     if (!raw) return '';
     raw = String(raw).trim();
-    if (!raw) return '';
     if (/^[a-zA-Z0-9_-]{20,}$/.test(raw)) return raw;
-    const m = raw.match(/[?&#/]id=([a-zA-Z0-9_-]+)/) || raw.match(/\/d\/([a-zA-Z0-9_-]+)/);
-    if (m && m[1]) return m[1];
-    const m2 = raw.match(/[-\w]{25,}/);
-    return (m2 && m2[0]) || '';
+    const m = raw.match(/[-\\w]{25,}/);
+    return m ? m[0] : '';
+  }
+
+  /* --- Auth helper --- */
+  async function getToken(){
+    try{
+      if (window.__LM_auth && typeof window.__LM_auth.getAccessToken === 'function'){
+        return await window.__LM_auth.getAccessToken();
+      }
+    }catch(e){
+      err('getToken via __LM_auth failed', e);
+    }
+    if (typeof window.getAccessToken === 'function'){
+      return await window.getAccessToken();
+    }
+    throw new Error('No access token provider found');
+  }
+
+  /* --- Viewer bridge assembly --- */
+  function ensureViewerBridge(mod){
+    try{
+      if (window.__lm_viewer_bridge) return;
+      if (!mod) return;
+      const {
+        addPinMarker,
+        clearPins,
+        removePinMarker,
+        resetMaterial,
+        resetAllMaterials,
+        listMaterials,
+        applyMaterialProps,
+        projectPoint,
+        onCanvasShiftPick,
+        onPinSelect,
+        onRenderTick,
+        getScene,
+        ensureViewer,
+        setCurrentGlbId,
+        loadGlbFromDrive,
+      } = mod;
+
+      const bridge = {
+        addPinMarker,
+        clearPins,
+        removePinMarker,
+        resetMaterial,
+        resetAllMaterials,
+        listMaterials,
+        applyMaterialProps,
+        projectPoint,
+        onCanvasShiftPick,
+        onPinSelect,
+        onRenderTick,
+        getScene,
+        ensureViewer,
+        setCurrentGlbId,
+        loadGlbFromDrive,
+      };
+
+      window.__lm_viewer_bridge = bridge;
+      try{
+        document.dispatchEvent(new Event('lm:viewer-bridge-ready'));
+      }catch(e){
+        err('viewer-bridge-ready dispatch failed', e);
+      }
+      log('viewer bridge established from viewer.module.cdn.js exports');
+    }catch(e){
+      err('ensureViewerBridge failed', e);
+    }
+  }
+
+  async function ensureViewerReady(mod){
+    if (!mod || typeof mod.ensureViewer !== 'function'){
+      throw new Error('viewer module ensureViewer missing');
+    }
+    const canvas = ensureCanvas();
+    await mod.ensureViewer(canvas);
   }
 
   /**
-   * 既存のビューア用 canvas を最優先で再利用する。
-   * どうしても見つからない場合のみ、新しい canvas を控えめに追加する。
+   * ビューア用 canvas の確保。
+   * すでに存在する canvas を優先し、無ければ最後に控えめに追加する。
    * レイアウトを壊さないよう wrapper は新規作成しない。
    */
   function ensureCanvas(){
@@ -113,87 +187,7 @@
 
     // layout を壊さないよう、単に末尾に append するだけに留める
     host.appendChild(canvas);
-
     return canvas;
-  }
-
-  async function getToken(){
-    if (typeof window.__lm_getAccessToken === 'function'){
-      return await window.__lm_getAccessToken();
-    }
-    try{
-      const g = await import('./gauth.module.js');
-      if (g.getAccessToken) return await g.getAccessToken();
-    }catch(_){}
-    throw new Error('no token provider');
-  }
-
-  async function ensureViewerReady(mod){
-    try{
-      if (typeof mod.ensureViewer === 'function'){
-        const canvas = ensureCanvas();
-        log('calling ensureViewer with canvas', canvas.id||'(anon)');
-        await mod.ensureViewer({ canvas, container: canvas.parentElement||document.body });
-        return;
-      }
-    }catch(e){ err('ensureViewer(opts) failed', e); }
-    const cands=['bootViewer','initViewer','setupViewer','mountViewer','createViewer','startViewer','init'];
-    for (const name of cands){
-      try{
-        if (typeof mod[name]==='function'){
-          log('calling', name);
-          await mod[name]();
-          break;
-        }
-      }catch(e){ err(name+' failed', e); }
-    }
-  }
-
-  // viewer.module.cdn.js の export から __lm_viewer_bridge を組み立てる
-  function ensureViewerBridge(mod){
-    try{
-      const existing = window.__lm_viewer_bridge;
-      const hasCore = existing && typeof existing.addPinMarker === 'function' && typeof existing.clearPins === 'function';
-      const bridge = hasCore ? existing : {};
-
-      const keys = [
-        'ensureViewer','loadGlbFromDrive','listMaterials','getScene',
-        'onCanvasShiftPick','onPinSelect','addPinMarker','clearPins',
-        'removePinMarker','setPinSelected','onRenderTick','projectPoint',
-        'resetAllMaterials','resetMaterial','setCurrentGlbId','applyMaterialProps'
-      ];
-
-      keys.forEach((k) => {
-        if (mod && typeof mod[k] === 'function' && !bridge[k]) {
-          bridge[k] = mod[k];
-        }
-      });
-
-      if (!hasCore){
-        window.__lm_viewer_bridge = bridge;
-        const vb = window.viewerBridge = window.viewerBridge || {};
-        keys.forEach((k) => {
-          if (typeof bridge[k] === 'function' && !vb[k]) vb[k] = bridge[k];
-        });
-        log('viewer bridge established from viewer.module.cdn.js exports');
-      } else {
-        const vb = window.viewerBridge;
-        if (vb){
-          keys.forEach((k) => {
-            if (typeof bridge[k] === 'function' && !vb[k]) vb[k] = bridge[k];
-          });
-        }
-        log('viewer bridge extended from viewer.module.cdn.js exports');
-      }
-
-      try{
-        document.dispatchEvent(new Event('lm:viewer-bridge-ready'));
-      }catch(e){
-        err('viewer-bridge-ready dispatch failed', e);
-      }
-    }catch(e){
-      err('ensureViewerBridge failed', e);
-    }
   }
 
   async function postLoadEnsureSaveSheet(fileId){
@@ -217,6 +211,39 @@
     }catch(e){ err('postLoadEnsureSaveSheet failed', e); }
   }
 
+  let __LM_CURRENT_GLB_ID = null;
+
+  async function ensureDriveBridge(fileId){
+    try{
+      __LM_CURRENT_GLB_ID = fileId || null;
+      const mod = await import('./drive.images.list.js');
+      if (!mod || typeof mod.listSiblingImagesByGlbId !== 'function'){
+        log('drive.images.list.js missing or invalid');
+        return;
+      }
+      const bridge = {
+        listSiblingImages: async () => {
+          try{
+            if (!__LM_CURRENT_GLB_ID) return [];
+            return await mod.listSiblingImagesByGlbId(__LM_CURRENT_GLB_ID);
+          }catch(e){
+            err('listSiblingImages failed', e);
+            return [];
+          }
+        }
+      };
+      window.__lm_drive_bridge = bridge;
+      try{
+        document.dispatchEvent(new CustomEvent('lm:drive-bridge-ready'));
+      }catch(e){
+        err('lm:drive-bridge-ready dispatch failed', e);
+      }
+      log('drive bridge ready for', __LM_CURRENT_GLB_ID);
+    }catch(e){
+      err('ensureDriveBridge failed', e);
+    }
+  }
+
   async function loadById(fileId){
     const mod = await import('./viewer.module.cdn.js');
     try{ console.log(TAG, 'exports:', Object.keys(mod)); }catch(_){}
@@ -230,6 +257,7 @@
     }catch(e){ err('loadGlbFromDrive threw', e); safeHide(); throw e; }
     setTimeout(safeHide, 120);
     await postLoadEnsureSaveSheet(fileId);
+    await ensureDriveBridge(fileId);
   }
 
   function wireBtn(){
