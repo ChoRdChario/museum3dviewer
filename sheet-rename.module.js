@@ -1,7 +1,5 @@
-/*! sheet-rename.module.js — v2 (rename + gidmap invalidate + ctx rebroadcast) */
+/*! sheet-rename.module.js — v3 (display-name via Z1, gid-first, __lm_fetchJSONAuth) */
 (function () {
-  "use strict";
-
   const DEBUG =
     /\bdebug=1\b/.test(location.search) || window.SHEET_RENAME_DEBUG;
   const log = (...a) => {
@@ -11,9 +9,7 @@
     if (DEBUG) console.warn("[renameUI]", ...a);
   };
 
-  // -------------------------------------------------------------------
-  // DOM helpers
-  // -------------------------------------------------------------------
+  // --- small helpers ---------------------------------------------------
   function $(id) {
     return document.getElementById(id);
   }
@@ -31,35 +27,41 @@
 
   function ensureWrapperForSelect(sel) {
     if (!sel || !sel.parentNode) return null;
-
     let host =
       $("save-target-sheet-wrapper") || $("sheet-select-wrapper");
-
-    if (!host) {
-      host = document.createElement("div");
-      host.id =
-        sel.id === "save-target-sheet"
-          ? "save-target-sheet-wrapper"
-          : "sheet-select-wrapper";
-      host.style.display = "flex";
-      host.style.alignItems = "center";
-      host.style.gap = "4px";
-      sel.parentNode.insertBefore(host, sel);
-      host.appendChild(sel);
-    }
+    if (host) return host;
+    host = document.createElement("div");
+    host.id =
+      sel.id === "save-target-sheet"
+        ? "save-target-sheet-wrapper"
+        : "sheet-select-wrapper";
+    host.style.display = "flex";
+    host.style.alignItems = "center";
+    host.style.gap = "4px";
+    sel.parentNode.insertBefore(host, sel);
+    host.appendChild(sel);
     return host;
+  }
+
+  function listSheetsFromDOM(sel) {
+    const out = [];
+    if (!sel) return out;
+    for (const opt of Array.from(sel.options || [])) {
+      const id = opt.value ? Number(opt.value) : null;
+      out.push({ sheetId: id, title: (opt.textContent || "").trim() });
+    }
+    return out;
   }
 
   function updateOptionTextAndDataset(opt, title) {
     if (!opt) return;
     opt.textContent = title;
     if (!opt.dataset) opt.dataset = {};
+    // dataset.title は「UI上の名前」（表示名）として扱う
     opt.dataset.title = title;
   }
 
-  // -------------------------------------------------------------------
-  // View state
-  // -------------------------------------------------------------------
+  // --- view state ------------------------------------------------------
   function updateSheetRenameView(mode) {
     const label = $("sheet-rename-label");
     const input = $("sheet-rename-input");
@@ -78,7 +80,6 @@
       cancel.style.display = "inline-block";
       edit.style.display = "none";
       spin.style.display = "none";
-
       input.value = title || "";
       input.focus();
       input.select();
@@ -89,7 +90,6 @@
       cancel.style.display = "none";
       edit.style.display = "inline-block";
       spin.style.display = "none";
-
       label.textContent = title || "(no sheet)";
     }
   }
@@ -97,7 +97,6 @@
   function wireSelectChange() {
     const sel = findSheetSelect();
     if (!sel) return;
-
     const syncFromSelect = () => {
       const opt =
         (sel.selectedOptions && sel.selectedOptions[0]) ||
@@ -124,23 +123,23 @@
 
     syncFromSelect();
     sel.addEventListener("change", syncFromSelect, { passive: true });
-
-    const mo = new MutationObserver(syncFromSelect);
-    mo.observe(sel, { childList: true, subtree: true });
+    new MutationObserver(syncFromSelect).observe(sel, {
+      childList: true,
+      subtree: true,
+    });
   }
 
-  // -------------------------------------------------------------------
-  // Auth helper (unified with A系)
-  // -------------------------------------------------------------------
+  // --- auth helper (unified with A系) ----------------------------------
   async function getAuthFetchAndToken() {
-    // A系の __lm_fetchJSONAuth があればそれを最優先
+    // 1) __lm_fetchJSONAuth があればそれを最優先（token 内部取得）
     if (typeof window.__lm_fetchJSONAuth === "function") {
       return { authFetch: window.__lm_fetchJSONAuth, token: null };
     }
 
-    // 旧 ensureToken + getAccessToken パス
+    // 2) 旧来の ensureToken + getAccessToken で token を取る
     let token = null;
 
+    // silent
     try {
       if (typeof window.ensureToken === "function") {
         await window.ensureToken({ interactive: false });
@@ -150,6 +149,7 @@
       }
     } catch (_) {}
 
+    // interactive
     if (!token) {
       try {
         if (typeof window.ensureToken === "function") {
@@ -192,9 +192,197 @@
     return { authFetch, token };
   }
 
-  // -------------------------------------------------------------------
-  // Sheets API: rename sheet
-  // -------------------------------------------------------------------
+  // --- Sheets helper: display-name via Z1 -------------------------------
+  const SHEETS_ROOT = "https://sheets.googleapis.com/v4/spreadsheets";
+
+  function buildRange(sheetTitle, a1) {
+    const safeTitle = String(sheetTitle || "").replace(/'/g, "''");
+    return `'${safeTitle}'!${a1}`;
+  }
+
+  // Z1 に表示名を書き込む
+  async function sheetsPutDisplayName(
+    spreadsheetId,
+    sheetId,
+    newTitle,
+    authFetch,
+    token
+  ) {
+    const NS = window.LM_SHEET_GIDMAP;
+    if (!NS || typeof NS.fetchSheetMap !== "function") {
+      throw new Error("LM_SHEET_GIDMAP not available");
+    }
+    const map = await NS.fetchSheetMap(spreadsheetId);
+    const byId = map && map.byId;
+    const meta = byId && byId[Number(sheetId)];
+    const sheetTitle = meta && meta.title;
+    if (!sheetTitle) {
+      throw new Error("sheet title not found for gid " + sheetId);
+    }
+
+    const range = buildRange(sheetTitle, "Z1");
+    const url =
+      SHEETS_ROOT +
+      "/" +
+      encodeURIComponent(spreadsheetId) +
+      "/values/" +
+      encodeURIComponent(range) +
+      "?valueInputOption=RAW";
+
+    const body = {
+      values: [[newTitle]],
+    };
+
+    if (typeof authFetch === "function") {
+      return authFetch(url, {
+        method: "PUT",
+        body: JSON.stringify(body),
+      });
+    }
+
+    // 念のためのフォールバック
+    const headers = {
+      Accept: "application/json",
+      "Content-Type": "application/json",
+    };
+    if (token) headers["Authorization"] = "Bearer " + token;
+    const res = await fetch(url, {
+      method: "PUT",
+      headers,
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => res.statusText);
+      throw new Error(`Sheets API ${res.status}: ${text}`);
+    }
+    try {
+      return await res.json();
+    } catch {
+      return null;
+    }
+  }
+
+  // Z1 から表示名を一括で読み、ドロップダウンに反映
+  async function syncDisplayNamesFromZ1() {
+    const sel = findSheetSelect();
+    if (!sel) return;
+
+    let spreadsheetId =
+      window.__LM_ACTIVE_SPREADSHEET_ID ||
+      window.currentSpreadsheetId ||
+      "";
+
+    // ctx.bridge が少し遅れるケースに備えて短時間だけ待つ
+    if (!spreadsheetId) {
+      for (let t = 0; t < 5 && !spreadsheetId; t++) {
+        await new Promise((r) => setTimeout(r, 60));
+        spreadsheetId =
+          window.__LM_ACTIVE_SPREADSHEET_ID ||
+          window.currentSpreadsheetId ||
+          "";
+      }
+    }
+    if (!spreadsheetId) {
+      warn("syncDisplayNamesFromZ1: spreadsheetId missing");
+      return;
+    }
+
+    const NS = window.LM_SHEET_GIDMAP;
+    if (!NS || typeof NS.fetchSheetMap !== "function") {
+      warn("syncDisplayNamesFromZ1: LM_SHEET_GIDMAP not available");
+      return;
+    }
+
+    try {
+      const { authFetch, token } = await getAuthFetchAndToken();
+      const map = await NS.fetchSheetMap(spreadsheetId);
+      const byId = map && map.byId;
+      if (!byId) return;
+
+      const ranges = [];
+      const gidForRange = [];
+
+      for (const [gidStr, meta] of Object.entries(byId)) {
+        const gid = Number(gidStr);
+        if (!meta || !meta.title) continue;
+        const range = buildRange(meta.title, "Z1");
+        ranges.push(range);
+        gidForRange.push(gid);
+      }
+
+      if (!ranges.length) return;
+
+      const qs = ranges
+        .map((r) => "ranges=" + encodeURIComponent(r))
+        .join("&");
+      const url =
+        SHEETS_ROOT +
+        "/" +
+        encodeURIComponent(spreadsheetId) +
+        "/values:batchGet?" +
+        qs;
+
+      const json = await authFetch(url, {});
+      const result = {};
+      const vr = (json && json.valueRanges) || [];
+
+      // range: "'シート2'!Z1" の形式
+      for (const item of vr) {
+        const range = item.range || "";
+        const values = item.values || [];
+        const val =
+          values[0] && values[0][0] != null ? String(values[0][0]) : "";
+        if (!val) continue;
+
+        let sheetTitle = null;
+        const m = range.match(/^'(.+)'!/);
+        if (m) {
+          sheetTitle = m[1].replace(/''/g, "'");
+        } else {
+          const idx = range.indexOf("!");
+          sheetTitle = idx >= 0 ? range.slice(0, idx) : range;
+        }
+
+        if (!sheetTitle) continue;
+
+        // 対応する gid を探す
+        for (const [gidStr, meta] of Object.entries(byId)) {
+          if (meta && meta.title === sheetTitle) {
+            result[Number(gidStr)] = val;
+            break;
+          }
+        }
+      }
+
+      // DOM に反映
+      for (const opt of Array.from(sel.options || [])) {
+        if (!opt.value) continue;
+        const gid = Number(opt.value);
+        if (Number.isNaN(gid)) continue;
+        const name = result[gid];
+        if (name) {
+          updateOptionTextAndDataset(opt, name);
+        }
+      }
+
+      // currentSheetTitle / label も更新
+      const currentOpt =
+        (sel.selectedOptions && sel.selectedOptions[0]) ||
+        sel.options[sel.selectedIndex] ||
+        null;
+      if (currentOpt && currentOpt.textContent) {
+        window.currentSheetTitle = currentOpt.textContent.trim();
+        const label = $("sheet-rename-label");
+        if (label) label.textContent = window.currentSheetTitle;
+      }
+
+      log("display-names synced from Z1");
+    } catch (e) {
+      warn("syncDisplayNamesFromZ1 failed", e);
+    }
+  }
+
+  // --- legacy: real title rename (現在は未使用) -------------------------
   async function sheetsUpdateTitle(
     spreadsheetId,
     sheetId,
@@ -202,10 +390,10 @@
     authFetch,
     token
   ) {
+    // 互換性のために残しているが、現在は呼び出さない
     const url = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(
       spreadsheetId
     )}:batchUpdate`;
-
     const body = {
       requests: [
         {
@@ -227,13 +415,11 @@
       });
     }
 
-    // fallback （ほぼ到達しない想定）
     const headers = {
       Accept: "application/json",
       "Content-Type": "application/json",
     };
     if (token) headers["Authorization"] = "Bearer " + token;
-
     const res = await fetch(url, {
       method: "POST",
       headers,
@@ -250,9 +436,7 @@
     }
   }
 
-  // -------------------------------------------------------------------
-  // core: applySheetRename
-  // -------------------------------------------------------------------
+  // --- applySheetRename (Z1 display-name版) -----------------------------
   async function applySheetRename() {
     const input = $("sheet-rename-input");
     const spin = $("sheet-rename-spin");
@@ -260,16 +444,11 @@
     const cancel = $("sheet-rename-cancel");
     const label = $("sheet-rename-label");
     const sel = findSheetSelect();
-
     if (!input || !spin || !ok || !cancel || !label || !sel) return;
 
-    // currentSheetId が未設定なら一度同期してみる
     if (window.currentSheetId == null) {
       wireSelectChange();
-      if (window.currentSheetId == null) {
-        warn("no currentSheetId; abort rename");
-        return;
-      }
+      if (window.currentSheetId == null) return;
     }
 
     const before = window.currentSheetTitle || "";
@@ -278,13 +457,13 @@
       `option[value="${window.currentSheetId}"]`
     );
 
-    // 入力チェック
+    // 不正 or 変更なし or 長すぎる → 何もしない
     if (!newTitle || newTitle === before || newTitle.length > 100) {
       updateSheetRenameView("view");
       return;
     }
 
-    // 重複タイトルチェック
+    // 表示名としての重複チェック（実シート名とは無関係）
     for (const o of Array.from(sel.options || [])) {
       if ((o.textContent || "").trim() === newTitle) {
         updateSheetRenameView("view");
@@ -295,6 +474,7 @@
     // 楽観的 UI 更新
     label.textContent = newTitle;
     if (opt) updateOptionTextAndDataset(opt, newTitle);
+    window.currentSheetTitle = newTitle;
     updateSheetRenameView("view");
 
     // spreadsheetId を __LM_ACTIVE_SPREADSHEET_ID 優先で取得
@@ -303,9 +483,9 @@
       window.currentSpreadsheetId ||
       "";
 
-    // ctx.bridge が遅れてくるケースに備えて少しだけ待つ
+    // ctx.bridge が少し遅れるケースに備えて短時間だけ待つ
     if (!spreadsheetId) {
-      for (let i = 0; i < 5 && !spreadsheetId; i++) {
+      for (let t = 0; t < 5 && !spreadsheetId; t++) {
         await new Promise((r) => setTimeout(r, 60));
         spreadsheetId =
           window.__LM_ACTIVE_SPREADSHEET_ID ||
@@ -315,20 +495,21 @@
     }
 
     if (!spreadsheetId) {
+      // 失敗したらロールバック
       label.textContent = before;
       if (opt) updateOptionTextAndDataset(opt, before);
       window.currentSheetTitle = before;
-      warn("rename failed: spreadsheetId missing");
+      warn("rename failed", new Error("spreadsheetId missing"));
       return;
     }
 
-    // API 呼び出し
+    // API 呼び出し (Z1 書き込み)
     try {
       input.disabled = ok.disabled = cancel.disabled = true;
       spin.style.display = "inline-block";
 
       const { authFetch, token } = await getAuthFetchAndToken();
-      await sheetsUpdateTitle(
+      await sheetsPutDisplayName(
         spreadsheetId,
         window.currentSheetId,
         newTitle,
@@ -336,41 +517,8 @@
         token
       );
 
-      // ローカル状態更新
-      window.currentSheetTitle = newTitle;
-      if (opt) updateOptionTextAndDataset(opt, newTitle);
-
-      // ★1: gid→title マップを無効化（次回解決で最新タイトルを取得させる）
-      try {
-        if (
-          window.LM_SHEET_GIDMAP &&
-          typeof window.LM_SHEET_GIDMAP.invalidateMap === "function"
-        ) {
-          window.LM_SHEET_GIDMAP.invalidateMap(spreadsheetId);
-        }
-      } catch (_) {}
-
-      // ★2: sheet-context を再発行（caption.sheet.bridge 等に新タイトルを伝える）
-      try {
-        if (
-          typeof window.setSheetContext === "function" &&
-          window.currentSheetId != null
-        ) {
-          window.setSheetContext({
-            spreadsheetId,
-            sheetGid: String(window.currentSheetId),
-          });
-        }
-      } catch (_) {}
-
-      // 既存の index 再構築系があれば呼んでおく
-      try {
-        if (typeof window.ensureIndex === "function") {
-          window.ensureIndex();
-        }
-      } catch (_) {}
-
-      log("rename success", newTitle);
+      // 成功時は currentSheetTitle / option は既に newTitle になっているので何もしない
+      log("rename success (Z1 display-name)", newTitle);
     } catch (e) {
       // 失敗したらロールバック
       label.textContent = before;
@@ -383,9 +531,7 @@
     }
   }
 
-  // -------------------------------------------------------------------
-  // UI events
-  // -------------------------------------------------------------------
+  // --- UI events -------------------------------------------------------
   function wireSheetRenameEvents() {
     const label = $("sheet-rename-label");
     const input = $("sheet-rename-input");
@@ -395,16 +541,24 @@
 
     if (!label || !input || !ok || !cancel || !edit) return;
 
-    // ✎ボタン / ラベルクリックで編集モードへ
-    const toEdit = () => {
-      if (!(window.currentSheetId != null)) return;
-      updateSheetRenameView("edit");
-    };
+    edit.addEventListener(
+      "click",
+      () => {
+        if (!(window.currentSheetId != null)) return;
+        updateSheetRenameView("edit");
+      },
+      { passive: true }
+    );
 
-    edit.addEventListener("click", toEdit, { passive: true });
-    label.addEventListener("click", toEdit, { passive: true });
+    label.addEventListener(
+      "click",
+      () => {
+        if (!(window.currentSheetId != null)) return;
+        updateSheetRenameView("edit");
+      },
+      { passive: true }
+    );
 
-    // キャンセル
     cancel.addEventListener(
       "click",
       () => {
@@ -413,7 +567,6 @@
       { passive: true }
     );
 
-    // OK
     ok.addEventListener(
       "click",
       () => {
@@ -422,7 +575,6 @@
       { passive: true }
     );
 
-    // Enter / Esc
     input.addEventListener("keydown", (ev) => {
       if (ev.key === "Enter") {
         ev.preventDefault();
@@ -434,22 +586,14 @@
     });
   }
 
-  // -------------------------------------------------------------------
-  // UI mount
-  // -------------------------------------------------------------------
+  // --- UI mount --------------------------------------------------------
   function mountSheetRenameUI() {
     const sel = findSheetSelect();
     if (!sel || !sel.parentNode) return false;
 
     const host = ensureWrapperForSelect(sel);
     if (!host) return false;
-
-    if ($("sheet-rename-root")) {
-      // すでに構築済み
-      wireSelectChange();
-      updateSheetRenameView("view");
-      return true;
-    }
+    if ($("sheet-rename-root")) return true;
 
     const root = document.createElement("div");
     root.id = "sheet-rename-root";
@@ -457,7 +601,6 @@
     root.style.display = "inline-flex";
     root.style.alignItems = "center";
     root.style.gap = "4px";
-
     root.innerHTML = [
       '<button id="sheet-rename-edit" class="sr-btn sr-edit" type="button" title="Rename sheet">✎</button>',
       '<span id="sheet-rename-label" class="sr-label">(no sheet)</span>',
@@ -468,20 +611,18 @@
     ].join("");
 
     host.appendChild(root);
-
     wireSheetRenameEvents();
     wireSelectChange();
     updateSheetRenameView("view");
+    // シート一覧と gid → title のマップが揃った後、Z1 から表示名を同期
+    syncDisplayNamesFromZ1();
     log("UI mounted");
     return true;
   }
 
-  // -------------------------------------------------------------------
-  // auto-mount
-  // -------------------------------------------------------------------
+  // --- auto-mount ------------------------------------------------------
   (function autoMount() {
     if (mountSheetRenameUI()) return;
-
     const mo = new MutationObserver(() => {
       if (mountSheetRenameUI()) mo.disconnect();
     });
@@ -489,15 +630,12 @@
       childList: true,
       subtree: true,
     });
-
     let tries = 30;
     const tm = setInterval(() => {
-      if (mountSheetRenameUI() || --tries <= 0) {
-        clearInterval(tm);
-      }
+      if (mountSheetRenameUI() || --tries <= 0) clearInterval(tm);
     }, 200);
   })();
 
-  // 手動リマウント用
+  // optional export for manual re-mount
   window.mountSheetRenameUI = mountSheetRenameUI;
 })();
