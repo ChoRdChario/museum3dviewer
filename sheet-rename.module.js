@@ -636,6 +636,19 @@
     }, 200);
   })();
 
+
+// keep display-names in sync whenever sheet-context changes
+try {
+  window.addEventListener("lm:sheet-context", () => {
+    // fire-and-forget; errors are logged only in DEBUG mode
+    Promise.resolve().then(() => syncDisplayNamesFromZ1()).catch((e) => {
+      if (DEBUG) console.warn("[renameUI] syncDisplayNamesFromZ1 on sheet-context failed", e);
+    });
+  });
+} catch (_) {
+  // non-fatal
+}
+
   // optional export for manual re-mount
   window.mountSheetRenameUI = mountSheetRenameUI;
 })();
