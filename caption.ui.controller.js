@@ -38,7 +38,7 @@
     images: [],
   });
 
-  const PALETTE = ['#eab308','#a3e635','#60a5fa','#a78bfa','#93c5fd','#fda4af','#c084fc','#a3a3a3','#f97316','#22c55e'];
+  const PALETTE = ['#facc15','#f97316','#ef4444','#ec4899','#8b5cf6','#3b82f6','#0ea5e9','#22c55e','#14b8a6','#a3a3a3'];
 
   function newId(){
     return 'c_'+Math.random().toString(36).slice(2,10);
@@ -161,7 +161,17 @@
     });
   }
 
-  function selectItem(id){
+    function syncViewerSelection(id){
+    const br = getViewerBridge();
+    if (!br || typeof br.setPinSelected !== 'function') return;
+    try{
+      br.setPinSelected(id || null, !!id);
+    }catch(e){
+      warn('setPinSelected failed', e);
+    }
+  }
+
+function selectItem(id){
     store.selectedId = id;
     if (elList){
       $$('.lm-cap-row', elList).forEach(row=>{
@@ -169,9 +179,14 @@
       });
     }
     const it = store.items.find(x=>x.id===id);
-    if(!it) return;
+    if(!it){
+      syncViewerSelection(null);
+      return;
+    }
     if (elTitle) elTitle.value = it.title || '';
     if (elBody)  elBody.value  = it.body  || '';
+    // 3D ピン側の選択も同期
+    syncViewerSelection(it.pos ? it.id : null);
   }
 
   function removeItem(id){
@@ -292,6 +307,30 @@
       document.addEventListener('lm:viewer-bridge-ready', ()=>{ bind(); }, { once:true });
     }
   })();
+  // Viewer bridge: onPinSelect (3D pin click -> list select)
+  (function(){
+    let hooked = false;
+    function bind(){
+      if (hooked) return true;
+      const br = getViewerBridge();
+      if (!br || typeof br.onPinSelect !== 'function') return false;
+      try{
+        br.onPinSelect((id)=>{
+          if (!id) return;
+          selectItem(id);
+        });
+        hooked = true;
+        log('onPinSelect bound');
+      }catch(e){
+        warn('bind onPinSelect failed', e);
+      }
+      return hooked;
+    }
+    document.addEventListener('lm:viewer-bridge-ready', ()=>{ bind(); });
+    window.addEventListener('lm:scene-ready', ()=>{ bind(); });
+    setTimeout(bind, 2000);
+  })();
+
 
   // --- Images ------------------------------------------------------------------
   function renderImages(){
