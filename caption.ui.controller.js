@@ -13,8 +13,16 @@
   const pane = $('#pane-caption');
   if(!pane){ return warn('pane not found; skip'); }
 
-  const elColorList  = $('#caption-color-list', pane)  || $('#caption-colors', pane);
-  const elFilterList = $('#caption-filter-list', pane) || $('#caption-filters', pane);
+  // Accept both old and new ID schemes for pin color / filter chips
+  const elColorList  =
+    $('#caption-color-list',  pane) ||
+    $('#caption-colors',      pane) ||
+    $('#pinColorChips',       pane);
+
+  const elFilterList =
+    $('#caption-filter-list', pane) ||
+    $('#caption-filters',     pane) ||
+    $('#pinFilterChips',      pane);
   const elList  = $('#caption-list', pane);
   const elTitle = $('#caption-title', pane);
   const elBody  = $('#caption-body', pane);
