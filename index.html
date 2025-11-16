@@ -30,7 +30,55 @@
     /* generic */
     .pane .card{width:100%;box-sizing:border-box;}
     .pane .controls{overflow:visible;}
-  </style>
+  
+    /* caption list */
+    .lm-cap-row{
+      display:flex;
+      align-items:center;
+      gap:8px;
+      padding:4px 6px;
+      border-radius:6px;
+      cursor:pointer;
+    }
+    .lm-cap-row:hover{
+      background:rgba(255,255,255,0.05);
+    }
+    .lm-cap-row.selected{
+      background:rgba(59,130,246,0.25);
+      box-shadow:0 0 0 1px rgba(59,130,246,0.6);
+    }
+    .lm-cap-sw{
+      width:10px;
+      height:10px;
+      border-radius:999px;
+      flex-shrink:0;
+    }
+    .lm-cap-title{
+      flex:1 1 auto;
+      min-width:0;
+      white-space:nowrap;
+      overflow:hidden;
+      text-overflow:ellipsis;
+    }
+    .lm-cap-imgmark{
+      font-size:12px;
+      opacity:0.8;
+    }
+    .lm-cap-del{
+      border:none;
+      background:transparent;
+      color:inherit;
+      cursor:pointer;
+      padding:0 4px;
+      opacity:0.6;
+      font-size:14px;
+      line-height:1;
+    }
+    .lm-cap-del:hover{
+      opacity:1;
+      transform:scale(1.1);
+    }
+</style>
 
   <!-- Optional loader for content.js to avoid 404 noise -->
   <script id="lm-optional-contentjs">

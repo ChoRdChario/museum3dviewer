@@ -44,6 +44,21 @@
     return 'c_'+Math.random().toString(36).slice(2,10);
   }
 
+  // viewer bridge accessor
+  function getViewerBridge(){
+    try{
+      const cand = [
+        window.__lm_viewer_bridge,
+        window.viewerBridge,
+        (window.__LM_VIEW && window.__LM_VIEW.bridge)
+      ];
+      for (const b of cand){
+        if (b && typeof b.addPinMarker === 'function') return b;
+      }
+    }catch(e){}
+    return window.__lm_viewer_bridge || window.viewerBridge || null;
+  }
+
   // viewer 側の onCanvasShiftPick が有効になったら true。
   // true のときは fallback(#gl click)は何もしない（ダブル追加防止）。
   let preferWorldClicks = false;
@@ -51,7 +66,17 @@
   // --- small event hub for Sheets bridge --------------------------------------
   const addListeners = [];
   const changeListeners = [];
+  const deleteListeners = [];
   const dirtyTimers = new Map(); // id -> timerId
+
+  function onItemDeleted(fn){
+    if (typeof fn === 'function') deleteListeners.push(fn);
+  }
+  function emitItemDeleted(item){
+    deleteListeners.forEach(fn=>{
+      try{ fn(item); }catch(e){ console.error(TAG,'onItemDeleted handler failed', e); }
+    });
+  }
 
   function onItemAdded(fn){
     if (typeof fn === 'function') addListeners.push(fn);
@@ -74,43 +99,39 @@
     if (!item || !item.id) return;
     const id = item.id;
     const prev = dirtyTimers.get(id);
-    if (prev) cancelTimeout(prev);
-    const t = setTimeout(()=>{
+    if (prev) cancelAnimationFrame(prev);
+    const t = requestAnimationFrame(()=>{
       dirtyTimers.delete(id);
       emitItemChanged(item);
-    }, 600);
+    });
     dirtyTimers.set(id, t);
   }
-  function cancelTimeout(t){
-    try{ clearTimeout(t); }catch(_){}
-  }
 
-  // --- Rendering helpers -------------------------------------------------------
-
+  // --- colors / filters -------------------------------------------------------
   function renderColors(){
     if(!elColorList) return;
-    elColorList.innerHTML = '';
+    elColorList.innerHTML='';
     PALETTE.forEach(col=>{
       const btn = document.createElement('button');
       btn.type = 'button';
-      btn.className = 'lm-cap-color';
+      btn.className = 'pill';
       btn.style.backgroundColor = col;
-      if (store.currentColor === col) btn.classList.add('active');
       btn.addEventListener('click', ()=>{
         store.currentColor = col;
         renderColors();
       });
+      if (store.currentColor === col) btn.classList.add('active');
       elColorList.appendChild(btn);
     });
   }
 
   function renderFilters(){
     if(!elFilterList) return;
-    elFilterList.innerHTML = '';
+    elFilterList.innerHTML='';
     PALETTE.forEach(col=>{
       const btn = document.createElement('button');
       btn.type = 'button';
-      btn.className = 'lm-cap-filter';
+      btn.className = 'pill';
       btn.style.backgroundColor = col;
       if (store.filter.has(col)) btn.classList.add('active');
       btn.addEventListener('click', ()=>{
@@ -147,9 +168,21 @@
       imgMark.className = 'lm-cap-imgmark';
       if (it.image && (it.image.url || it.image.id)) imgMark.textContent = '🖼';
 
+      const delBtn = document.createElement('button');
+      delBtn.type = 'button';
+      delBtn.className = 'lm-cap-del';
+      delBtn.textContent = '×';
+      delBtn.addEventListener('click', (ev)=>{
+        ev.stopPropagation();
+        if (it && it.id){
+          removeItem(it.id);
+        }
+      });
+
       row.appendChild(sw);
       row.appendChild(title);
       row.appendChild(imgMark);
+      row.appendChild(delBtn);
 
       if (store.selectedId === it.id) row.classList.add('selected');
 
@@ -161,17 +194,15 @@
     });
   }
 
-    function syncViewerSelection(id){
+  function syncViewerSelection(id){
     const br = getViewerBridge();
     if (!br || typeof br.setPinSelected !== 'function') return;
     try{
       br.setPinSelected(id || null, !!id);
-    }catch(e){
-      warn('setPinSelected failed', e);
-    }
+    }catch(e){ warn('setPinSelected failed', e); }
   }
 
-function selectItem(id){
+  function selectItem(id){
     store.selectedId = id;
     if (elList){
       $$('.lm-cap-row', elList).forEach(row=>{
@@ -191,9 +222,32 @@ function selectItem(id){
 
   function removeItem(id){
     const idx = store.items.findIndex(x=>x.id===id);
-    if(idx===-1) return;
-    store.items.splice(idx,1);
+    if (idx === -1) return;
+    const removed = store.items.splice(idx,1)[0] || null;
     if (store.selectedId === id) store.selectedId = null;
+
+    // 3D 側のピンも同期して削除
+    try{
+      const br = getViewerBridge();
+      if (br){
+        if (typeof br.removePinMarker === 'function'){
+          br.removePinMarker(id);
+        }else if (typeof br.clearPins === 'function' && typeof br.addPinMarker === 'function'){
+          // removePinMarker が無い環境では、一覧から再構築する
+          syncPinsFromItems();
+        }
+      }
+    }catch(e){
+      warn('removePinMarker failed', e);
+    }
+
+    // Sheets ブリッジ向けに削除イベントを通知
+    if (removed && removed.id){
+      emitItemDeleted(removed);
+    }else{
+      emitItemDeleted({ id });
+    }
+
     refreshList();
   }
 
@@ -209,28 +263,72 @@ function selectItem(id){
       scheduleChanged(it);
     });
   }
+
   if (elBody){
-    let bId = 0;
     elBody.addEventListener('input', ()=>{
       const id = store.selectedId; if(!id) return;
       const it = store.items.find(x=>x.id===id); if(!it) return;
       it.body = elBody.value;
-      if (bId) cancelAnimationFrame(bId);
-      bId = requestAnimationFrame(()=>refreshList());
       scheduleChanged(it);
     });
   }
 
-  // --- Pin bridge helpers ------------------------------------------------------
-  function getViewerBridge(){
-    try{
-      const pinRuntime = window.__lm_pin_runtime;
-      if (pinRuntime && typeof pinRuntime.getBridge === 'function'){
-        const b = pinRuntime.getBridge();
-        if (b) return b;
+  // --- image grid wiring (Phase A1’ placeholder) ------------------------------
+  function renderImages(){
+    if (!elImages) return;
+    elImages.innerHTML='';
+    const imgs = store.images||[];
+    if (!imgs.length){
+      if (elImgStatus){
+        elImgStatus.textContent = '画像はまだありません';
       }
-    }catch(e){}
-    return window.__lm_viewer_bridge || window.viewerBridge || null;
+      return;
+    }
+    if (elImgStatus){
+      elImgStatus.textContent = imgs.length+' 枚の画像';
+    }
+    imgs.forEach(img=>{
+      const wrap = document.createElement('div');
+      wrap.className = 'lm-img-thumb';
+      wrap.textContent = img.name || '(image)';
+      // ここではまだクリックでの紐付けまでは行わない（A3 で実装予定）
+      wrap.addEventListener('click', ()=>{
+        // いまはデバッグログのみ
+        console.log(TAG,'image clicked (stub)', img);
+        // 将来的には: 選択中キャプションに imageFileId をセットして scheduleChanged()
+        // ただし、これをやるには Sheets 側の列設計とあわせる必要があるので A3 で。
+      });
+      elImages.appendChild(wrap);
+    });
+  }
+
+  // --- API for other modules ---------------------------------------------------
+  function normalizeItem(raw){
+    if (!raw) raw = {};
+    const id = raw.id || newId();
+    const color = raw.color || '#eab308';
+    const pos = raw.pos || null;
+    return {
+      id,
+      title: raw.title || '',
+      body: raw.body || '',
+      color,
+      pos,
+      image: raw.image || null,
+      createdAt: raw.createdAt || null,
+      updatedAt: raw.updatedAt || null,
+      rowIndex: raw.rowIndex || null,
+    };
+  }
+
+  function setItems(items){
+    store.items = (items || []).map(normalizeItem);
+    refreshList();
+  }
+
+  function setImages(images){
+    store.images = images || [];
+    renderImages();
   }
 
   function addPinForItem(item){
@@ -261,150 +359,49 @@ function selectItem(id){
       color: store.currentColor,
       pos: world || null,
       image: null,
-      createdAt: null,
+      createdAt: new Date().toISOString(),
       updatedAt: null,
+      rowIndex: null,
     };
     store.items.push(item);
     refreshList();
     selectItem(item.id);
-    log('caption added', item);
     addPinForItem(item);
     emitItemAdded(item);
   }
 
-  // Fallback: legacy canvas click (2D only, no world pos)
-  (function(){
-    const canvas = document.getElementById('gl');
-    if(!canvas) return;
-    canvas.addEventListener('click', (e)=>{
-      if(!e.shiftKey) return;
-      // viewer の 3D ピックが生きているときは、こちらは無効化して二重登録を防ぐ
-      if (preferWorldClicks) return;
-      addCaptionAt(e.offsetX, e.offsetY, null);
-    });
-  })();
-
-  // Viewer bridge: onCanvasShiftPick (3D)
-  (function(){
-    let hooked = false;
-    function bind(){
-      if (hooked) return true;
-      const br = getViewerBridge();
-      if (!br || typeof br.onCanvasShiftPick !== 'function') return false;
-      try{
-        br.onCanvasShiftPick(({x,y,z})=>{
-          addCaptionAt(0,0,{x,y,z});
-        });
-        hooked = true;
-        preferWorldClicks = true;   // 以後は 3D 側を優先
-        log('onCanvasShiftPick bound');
-      }catch(e){
-        warn('bind onCanvasShiftPick failed', e);
-      }
-      return hooked;
-    }
-    if (!bind()){
-      document.addEventListener('lm:viewer-bridge-ready', ()=>{ bind(); }, { once:true });
-    }
-  })();
-  // Viewer bridge: onPinSelect (3D pin click -> list select)
-  (function(){
-    let hooked = false;
-    function bind(){
-      if (hooked) return true;
-      const br = getViewerBridge();
-      if (!br || typeof br.onPinSelect !== 'function') return false;
-      try{
-        br.onPinSelect((id)=>{
-          if (!id) return;
-          selectItem(id);
-        });
-        hooked = true;
-        log('onPinSelect bound');
-      }catch(e){
-        warn('bind onPinSelect failed', e);
-      }
-      return hooked;
-    }
-    document.addEventListener('lm:viewer-bridge-ready', ()=>{ bind(); });
-    window.addEventListener('lm:scene-ready', ()=>{ bind(); });
-    setTimeout(bind, 2000);
-  })();
-
-
-  // --- Images ------------------------------------------------------------------
-  function renderImages(){
-    if (!elImages || !elImgStatus) return;
-    const list = store.images || [];
-    elImages.innerHTML = '';
-    if (!list.length){
-      elImgStatus.textContent = 'no registered images';
-      return;
-    }
-    elImgStatus.textContent = `${list.length} images`;
-    const grid = elImages;
-    list.forEach(it=>{
-      const wrap = document.createElement('button');
-      wrap.type = 'button';
-      wrap.className = 'lm-img-item';
-      const img = document.createElement('img');
-      img.loading = 'lazy';
-      img.decoding = 'async';
-      img.src = it.thumbUrl || it.url || '';
-      img.alt = it.name || '';
-      wrap.appendChild(img);
-      wrap.addEventListener('click', ()=>{
-        const id = store.selectedId;
-        if(!id) return;
-        const item = store.items.find(x=>x.id===id);
-        if(!item) return;
-        item.image = { id: it.id || null, name: it.name || null, url: it.url || null };
-        refreshList();
-        // 画像選択の保存は A3 で本実装予定なので、ここではまだ scheduleChanged しない
-      });
-      grid.appendChild(wrap);
+  // --- fallback click handler (pane canvas) -----------------------------------
+  // どこか別のモジュールが onCanvasShiftPick を提供している場合は、そちらが true を返した時点で fallback は無効化。
+  function installFallbackClick(){
+    const area = document.getElementById('gl') || document.querySelector('#viewer,#glCanvas,#glcanvas');
+    if (!area) return;
+    area.addEventListener('click', (ev)=>{
+      if (!ev.shiftKey) return;
+      if (preferWorldClicks) return; // viewer 側が有効ならそちらに任せる
+      const rect = area.getBoundingClientRect();
+      const x = (ev.clientX - rect.left) / rect.width;
+      const y = (ev.clientY - rect.top)  / rect.height;
+      addCaptionAt(x, y, null);
     });
   }
 
-  // --- API for other modules ---------------------------------------------------
-  function normalizeItem(raw){
-    if (!raw) raw = {};
-    const id = raw.id || newId();
-    const color = raw.color || '#eab308';
-    let pos = raw.pos || null;
-    if (!pos && raw.posX!=null && raw.posY!=null && raw.posZ!=null){
-      const x = Number(raw.posX), y = Number(raw.posY), z = Number(raw.posZ);
-      if (Number.isFinite(x) && Number.isFinite(y) && Number.isFinite(z)){
-        pos = {x,y,z};
-      }
-    }
-    return {
-      id,
-      title: raw.title || '',
-      body: raw.body || '',
-      color,
-      pos,
-      image: raw.image || (raw.imageFileId ? {id:raw.imageFileId} : null),
-      createdAt: raw.createdAt || null,
-      updatedAt: raw.updatedAt || null,
-      rowIndex: raw.rowIndex || null,
-    };
-  }
-
-  function setItems(list){
+  // --- world-space click hook --------------------------------------------------
+  // viewer 側が onCanvasShiftPick を expose している場合にそれを尊重する。
+  function installWorldSpaceHook(){
+    const br = getViewerBridge();
+    if (!br || typeof br.onCanvasShiftPick !== 'function') return;
     try{
-      store.items = Array.isArray(list) ? list.map(normalizeItem) : [];
-      refreshList();
-      syncPinsFromItems();
+      br.onCanvasShiftPick((world)=>{
+        preferWorldClicks = true;
+        addCaptionAt(0.5, 0.5, world); // 画面座標は使わず world のみ
+      });
     }catch(e){
-      warn('setItems failed', e);
+      warn('world-space hook failed', e);
     }
   }
 
-  function setImages(list){
-    store.images = Array.isArray(list) ? list : [];
-    renderImages();
-  }
+  installFallbackClick();
+  installWorldSpaceHook();
 
   window.__LM_CAPTION_UI = {
     addCaptionAt,
@@ -415,6 +412,8 @@ function selectItem(id){
     setImages,
     onItemAdded,
     onItemChanged,
+    onItemDeleted,
+    registerDeleteListener: onItemDeleted,
     get items(){ return store.items; }
   };
 
