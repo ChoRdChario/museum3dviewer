@@ -245,6 +245,7 @@
         const id = extractId(raw);
         if (!id){ log('no id'); return; }
         log('load fileId', id);
+        try{ window.__LM_ACTIVE_GLB_ID = id; }catch(_){}
         await loadById(id);
       }catch(e){ err('btn load failed', e); }
     }, { passive:true });
@@ -257,6 +258,7 @@
         const id = ev && ev.detail && ev.detail.id;
         if (!id) return;
         log('event load fileId', id);
+        try{ window.__LM_ACTIVE_GLB_ID = id; }catch(_){}
         await loadById(id);
       }catch(e){ err('event load failed', e); }
     });

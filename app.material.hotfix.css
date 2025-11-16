@@ -7,3 +7,97 @@
 .pm-select { width: 100%; }
 .pm-range { width: 100%; }
 .small { opacity: 0.7; font-size: 12px; }
+
+
+/* --- Caption list enhancements (Step2/Step3) --- */
+.lm-cap-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 4px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+}
+.lm-cap-row:hover {
+  background: rgba(148,163,184,0.25);
+}
+.lm-cap-row.selected {
+  background: rgba(59,130,246,0.28);
+}
+.lm-cap-sw {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  flex: 0 0 auto;
+}
+.lm-cap-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.lm-cap-imgmark {
+  font-size: 12px;
+  opacity: 0.8;
+  margin-right: 4px;
+}
+.lm-cap-del {
+  flex: 0 0 auto;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  padding: 0 4px;
+  font-size: 12px;
+  line-height: 1;
+  opacity: 0.6;
+}
+.lm-cap-del:hover {
+  opacity: 1;
+}
+
+/* active color for pin color / filter chips */
+#pinColorChips .pill.active,
+#pinFilterChips .pill.active {
+  outline: 2px solid rgba(15,23,42,0.9);
+  outline-offset: 1px;
+}
+
+/* --- Images grid --- */
+#images-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(72px, 1fr));
+  gap: 6px;
+  margin-top: 4px;
+}
+.lm-img-item {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  border-radius: 4px;
+  border: 1px solid rgba(148,163,184,0.7);
+  padding: 2px;
+  background: rgba(15,23,42,0.95);
+  cursor: pointer;
+}
+.lm-img-item img {
+  display: block;
+  width: 100%;
+  height: 56px;
+  object-fit: cover;
+  border-radius: 2px;
+}
+.lm-img-label {
+  margin-top: 2px;
+  font-size: 10px;
+  line-height: 1.2;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.lm-img-item.active {
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 1px rgba(59,130,246,0.7);
+}

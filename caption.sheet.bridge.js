@@ -5,7 +5,6 @@
 // - Loads existing captions into __LM_CAPTION_UI
 // - Appends newly added captions (Shift+Click) to the sheet
 // - Updates title/body edits back to the same row
-// - Soft delete: blank out row when UI deletes an item (id empty rows are skipped on reload)
 (function(){
   const TAG='[caption.sheet.bridge]';
   const log=(...a)=>console.log(TAG,...a);
@@ -42,29 +41,32 @@
       warn('auth.fetch.bridge import failed', e);
     }
 
-    // 3) Fallback: use gauth.module.js directly
+    // 3) Fallback: raw GIS token
+    let tok = null;
     try{
-      const gmod = await import('./gauth.module.js');
-      const tok = await gmod.getAccessToken();
-      if (!tok) throw new Error('no token from gauth');
-      const opt = Object.assign({}, init||{});
-      const headers = Object.assign({}, opt.headers||{}, {
-        'Authorization': `Bearer ${tok}`,
-        'Accept': 'application/json',
-        'Content-Type': 'application/json',
-      });
-      opt.headers = headers;
-      const res = await fetch(url, opt);
-      if (!res.ok){
-        const text = await res.text().catch(()=> '');
-        throw new Error(TAG+` fetch failed ${res.status} ${text.slice(0,256)}`);
+      const g = await import('./gauth.module.js');
+      if (typeof g.getAccessToken === 'function'){
+        tok = await g.getAccessToken();
       }
-      if (opt.rawResponse) return res;
-      return res.json();
     }catch(e){
-      warn('fallback auth failed', e);
-      throw e;
+      warn('gauth import failed', e);
     }
+    if (!tok) throw new Error(TAG+' no auth available for Sheets API');
+
+    const opt = Object.assign({}, init||{});
+    const headers = Object.assign({}, opt.headers||{}, {
+      'Authorization': `Bearer ${tok}`,
+      'Accept': 'application/json',
+      'Content-Type': 'application/json',
+    });
+    opt.headers = headers;
+    const res = await fetch(url, opt);
+    if (!res.ok){
+      const text = await res.text().catch(()=> '');
+      throw new Error(TAG+` fetch failed ${res.status} ${text.slice(0,256)}`);
+    }
+    if (opt.rawResponse) return res;
+    return res.json();
   }
 
   // --- caption UI access ------------------------------------------------------
@@ -105,52 +107,60 @@
         }
         // otherwise pick first non-__LM_MATERIALS
         if (map && map.byTitle){
-          const titles = Object.keys(map.byTitle);
-          const hit2 = titles.find(t=>t && t !== '__LM_MATERIALS');
-          if (hit2) return hit2;
+          const keys = Object.keys(map.byTitle).filter(t=>t && t!=='__LM_MATERIALS');
+          if (keys.length) return keys[0];
         }
       }
     }catch(e){
       warn('resolveSheetTitle via gid map failed', e);
     }
-    return null;
+    // final fallback
+    return 'シート1';
   }
 
+  // --- header ensure / fetch helpers -----------------------------------------
   function buildRange(sheetTitle, a1){
-    const safeTitle = sheetTitle.replace(/'/g,"''");
-    return `'${safeTitle}'!${a1}`;
+    // シート名をクォートで囲まず「シート名!A1」形式で返す
+    const safeTitle = String(sheetTitle || '').trim();
+    if (!safeTitle) return a1; // 念のため
+    return `${safeTitle}!${a1}`;
   }
 
-  // --- header ensure ----------------------------------------------------------
   async function ensureHeader(spreadsheetId, sheetTitle){
-    if (!spreadsheetId || !sheetTitle) return;
     const range = buildRange(sheetTitle, 'A1:J1');
-    const url = `${SHEETS}/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(range)}?valueInputOption=RAW`;
-    const body = { values:[HEADER] };
-    await authJSON(url, { method:'PUT', body: JSON.stringify(body), rawResponse:true });
-    log('header ensured for', sheetTitle);
+    const url = `${SHEETS}/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(range)}`;
+    let needPut = false;
+    try{
+      const j = await authJSON(url);
+      const v = (j && j.values && j.values[0]) || [];
+      const ok = HEADER.every((h,i)=> v[i] === h);
+      if (!ok) needPut = true;
+    }catch(e){
+      // 404 / missing range → PUT header
+      needPut = true;
+    }
+    if (!needPut) return true;
+
+    const putUrl = `${SHEETS}/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(range)}?valueInputOption=RAW`;
+    const body = { values: [HEADER] };
+    await authJSON(putUrl, { method:'PUT', body: JSON.stringify(body), rawResponse:true });
+    log('header put', range);
+    return true;
   }
 
-  // --- load rows --------------------------------------------------------------
-  async function loadRows(spreadsheetId, sheetTitle){
+  async function fetchRows(spreadsheetId, sheetTitle){
+    await ensureHeader(spreadsheetId, sheetTitle);
     const range = buildRange(sheetTitle, 'A2:J');
-    const url = `${SHEETS}/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(range)}?majorDimension=ROWS`;
-    const json = await authJSON(url, { method:'GET' });
-    const rows = (json && json.values) || [];
-    return rowsToItems(rows);
+    const url = `${SHEETS}/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(range)}`;
+    const j = await authJSON(url);
+    return (j && j.values) || [];
   }
 
   function rowsToItems(rows){
     const items = [];
     for (let i=0;i<rows.length;i++){
       const r = rows[i] || [];
-      const rowIndex = i+2; // 1-based, header = 1
       const [id,title,body,color,px,py,pz,imageFileId,createdAt,updatedAt] = r;
-      const idCell = (id && String(id).trim()) || '';
-      if (!idCell){
-        // id が空の行は「削除済み」とみなしてスキップ
-        continue;
-      }
       let pos = null;
       const nx = Number(px), ny = Number(py), nz = Number(pz);
       if (px!==undefined && py!==undefined && pz!==undefined &&
@@ -158,7 +168,7 @@
         pos = { x:nx, y:ny, z:nz };
       }
       items.push({
-        id: idCell,
+        id: id || null,
         title: title || '',
         body: body || '',
         color: color || '#eab308',
@@ -166,7 +176,7 @@
         imageFileId: imageFileId || null,
         createdAt: createdAt || null,
         updatedAt: updatedAt || null,
-        rowIndex,
+        rowIndex: i+2, // 1-based, header = 1
       });
     }
     return items;
@@ -191,9 +201,9 @@
         item.body||'',
         item.color||'#eab308',
         px, py, pz,
-        item.imageFileId || '',
+        (item.image && item.image.id) || item.imageFileId || '',
         createdAt,
-        updatedAt,
+        updatedAt
       ],
       id,
       createdAt,
@@ -234,58 +244,67 @@
     log('update row', item.id, 'row', rowIndex);
   }
 
+  
   async function softDeleteRow(spreadsheetId, sheetTitle, item){
     if (!item || !item.rowIndex){
-      // rowIndex を持たないものは安全のためなにもしない
+      warn('softDeleteRow: missing rowIndex; skip', item && item.id);
       return;
     }
     const rowIndex = item.rowIndex;
-    const blanks = new Array(HEADER.length).fill('');
+    if (rowIndex <= 1) return; // keep header
     const a1 = `A${rowIndex}:J${rowIndex}`;
     const range = buildRange(sheetTitle, a1);
     const url = `${SHEETS}/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(range)}?valueInputOption=RAW`;
-    await authJSON(url, { method:'PUT', body: JSON.stringify({ values:[blanks] }), rawResponse:true });
+    const empty = new Array(HEADER.length).fill('');
+    await authJSON(url, { method:'PUT', body: JSON.stringify({ values:[empty] }), rawResponse:true });
     log('soft delete row', item.id, 'row', rowIndex);
   }
 
-  // --- main: sheet-context handler -------------------------------------------
+// --- main: sheet-context handler -------------------------------------------
   async function handleSheetContext(detail){
     const spreadsheetId = String(detail.spreadsheetId || '');
-    let sheetGid = detail.sheetGid != null ? String(detail.sheetGid) : '';
-    let sheetTitle = detail.sheetTitle || '';
+    let sheetGid = detail.sheetGid;
+    if (sheetGid === undefined || sheetGid === null) sheetGid = '';
+    sheetGid = String(sheetGid);
+
+    // sheet-rename.module.js 等から sheetTitle が渡されていればそれを優先
+    let sheetTitle = detail.sheetTitle;
+    if (sheetTitle !== undefined && sheetTitle !== null){
+      sheetTitle = String(sheetTitle);
+    }else{
+      sheetTitle = '';
+    }
+
+    ctx = { spreadsheetId, sheetGid, sheetTitle:'', nextRowIndex:2 };
 
     if (!spreadsheetId){
-      warn('no spreadsheetId in sheet-context; skip');
+      warn('sheet-context without spreadsheetId', detail);
       return;
     }
 
-    ctx.spreadsheetId = spreadsheetId;
-    ctx.sheetGid     = sheetGid;
-    ctx.sheetTitle   = '';
-    ctx.nextRowIndex = 2;
-
-    if (!sheetTitle){
-      sheetTitle = await resolveSheetTitle(spreadsheetId, sheetGid) || 'Captions';
+    let resolvedTitle = sheetTitle;
+    if (!resolvedTitle){
+      // タイトルが渡されていない場合のみ gid map から解決
+      resolvedTitle = await resolveSheetTitle(spreadsheetId, sheetGid);
     }
+    ctx.sheetTitle = resolvedTitle || 'シート1';
 
-    ctx.sheetTitle = sheetTitle;
+    // デバッグ／他モジュール用の現在値
+    window.__LM_ACTIVE_SPREADSHEET_ID = spreadsheetId;
+    window.__LM_ACTIVE_SHEET_GID = sheetGid;
+    window.__LM_ACTIVE_SHEET_TITLE = ctx.sheetTitle;
+
+    log('sheet-context', ctx);
 
     try{
-      await ensureHeader(spreadsheetId, sheetTitle);
-    }catch(e){
-      warn('ensureHeader failed', e);
-    }
-
-    try{
-      const items = await loadRows(spreadsheetId, sheetTitle);
-      ctx.nextRowIndex = (items.reduce((max, it)=>Math.max(max, it.rowIndex||2), 1) || 1) + 1;
+      const rows = await fetchRows(spreadsheetId, ctx.sheetTitle);
+      const items = rowsToItems(rows);
+      // nextRowIndex = 最大 rowIndex + 1
+      const maxRow = items.reduce((m,it)=> Math.max(m, it.rowIndex || 1), 1);
+      ctx.nextRowIndex = maxRow + 1;
 
       const ui = await waitCaptionUI();
-      if (!ui){
-        warn('no caption UI; rows loaded but not bound');
-        return;
-      }
-      if (typeof ui.setItems === 'function'){
+      if (ui && typeof ui.setItems === 'function'){
         ui.setItems(items);
       }else{
         warn('caption UI missing setItems');
@@ -309,13 +328,19 @@
           changedHookBound = true;
         }
         // subscribe for deletes (soft delete)
-        const delReg = ui.onItemDeleted || ui.registerDeleteListener;
-        if (typeof delReg === 'function' && !deletedHookBound){
-          delReg(it=>{
-            if (!ctx.spreadsheetId || !ctx.sheetTitle) return;
-            softDeleteRow(ctx.spreadsheetId, ctx.sheetTitle, it).catch(e=>warn('soft delete failed', e));
-          });
-          deletedHookBound = true;
+        if (!deletedHookBound){
+          const deleter = ui.onItemDeleted || ui.registerDeleteListener;
+          if (typeof deleter === 'function'){
+            deleter(it=>{
+              if (!ctx.spreadsheetId || !ctx.sheetTitle) return;
+              if (!it || !it.rowIndex){
+                warn('delete without rowIndex; skip soft delete', it && it.id);
+                return;
+              }
+              softDeleteRow(ctx.spreadsheetId, ctx.sheetTitle, it).catch(e=>warn('soft delete failed', e));
+            });
+            deletedHookBound = true;
+          }
         }
       }
     }catch(e){
@@ -328,6 +353,6 @@
     handleSheetContext(d);
   }
 
-  window.addEventListener('lm:sheet-context', onSheetContext, { passive:true });
-
+  window.addEventListener('lm:sheet-context', onSheetContext);
+  log('armed');
 })();
