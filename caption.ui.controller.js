@@ -303,6 +303,13 @@
 
   function renderImages(){
     if (!elImages) return;
+    // enforce grid layout from JS (3 columns) in case CSS is old
+    elImages.style.display = 'grid';
+    elImages.style.gridTemplateColumns = 'repeat(3, minmax(72px, 1fr))';
+    elImages.style.gap = '6px';
+    elImages.style.maxHeight = '260px';
+    elImages.style.overflowY = 'auto';
+
     const list = store.images || [];
     elImages.innerHTML = '';
     const selected = getSelectedItem();
@@ -333,9 +340,54 @@
       label.textContent = imgInfo.name || '(image)';
       wrap.appendChild(label);
 
+      // detach button (visible on hover / when attached)
+      const detach = document.createElement('button');
+      detach.type = 'button';
+      detach.textContent = '×';
+      detach.title = 'Detach image';
+      detach.style.position = 'absolute';
+      detach.style.top = '2px';
+      detach.style.right = '2px';
+      detach.style.width = '16px';
+      detach.style.height = '16px';
+      detach.style.border = 'none';
+      detach.style.borderRadius = '999px';
+      detach.style.padding = '0';
+      detach.style.fontSize = '11px';
+      detach.style.lineHeight = '1';
+      detach.style.background = 'rgba(15,23,42,0.9)';
+      detach.style.color = '#e5e7eb';
+      detach.style.cursor = 'pointer';
+      detach.style.opacity = '0';
+      detach.style.transition = 'opacity .12s ease-out';
+      wrap.style.position = 'relative';
+
       if (selectedImageId && selectedImageId === imgInfo.id){
         wrap.classList.add('active');
+        detach.style.opacity = '1';
       }
+
+      wrap.addEventListener('mouseenter', ()=>{ detach.style.opacity = '1'; });
+      wrap.addEventListener('mouseleave', ()=>{
+        if (!(selectedImageId && selectedImageId === imgInfo.id)){
+          detach.style.opacity = '0';
+        }
+      });
+
+      detach.addEventListener('click', (ev)=>{
+        ev.stopPropagation();
+        const cur = getSelectedItem();
+        if (!cur) return;
+        if (cur.imageFileId && cur.imageFileId === imgInfo.id){
+          cur.imageFileId = null;
+          cur.image = null;
+          scheduleChanged(cur);
+          refreshList();
+          renderImages();
+        }
+      });
+
+      wrap.appendChild(detach);
 
       wrap.addEventListener('click', ()=>{
         const cur = getSelectedItem();
@@ -343,16 +395,9 @@
           log('image click ignored (no caption selected)');
           return;
         }
-        const already = cur.imageFileId && cur.imageFileId === imgInfo.id;
-        if (already){
-          // detach
-          cur.imageFileId = null;
-          cur.image = null;
-        }else{
-          // attach
-          cur.imageFileId = imgInfo.id;
-          cur.image = imgInfo;
-        }
+        // attach (no toggle; detach is handled by × button)
+        cur.imageFileId = imgInfo.id;
+        cur.image = imgInfo;
         scheduleChanged(cur);
         refreshList();   // 🖼 マーク更新
         renderImages();  // ハイライト更新
@@ -361,7 +406,6 @@
       elImages.appendChild(wrap);
     });
   }
-
   if (elRefreshImg){
     elRefreshImg.addEventListener('click', ()=>{
       try{
