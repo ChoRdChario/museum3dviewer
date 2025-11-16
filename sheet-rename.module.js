@@ -69,12 +69,12 @@
     const cancel = $("sheet-rename-cancel");
     const edit = $("sheet-rename-edit");
     const spin = $("sheet-rename-spin");
-    if (!label || !input || !ok || !cancel || !edit || !spin) return;
+    if (!input || !ok || !cancel || !edit || !spin) return;
 
     const title = (window.currentSheetTitle || "").trim();
 
     if (mode === "edit") {
-      label.style.display = "none";
+      if (label) label.style.display = "none";
       input.style.display = "inline-block";
       ok.style.display = "inline-block";
       cancel.style.display = "inline-block";
@@ -83,14 +83,22 @@
       input.value = title || "";
       input.focus();
       input.select();
+    } else if (mode === "busy") {
+      if (label) label.style.display = "none";
+      input.style.display = "none";
+      ok.style.display = "none";
+      cancel.style.display = "none";
+      edit.style.display = "none";
+      spin.style.display = "inline-block";
     } else {
-      label.style.display = "inline-block";
+      // view モードでもラベルは表示しない（ドロップダウン側の表示を優先）
+      if (label) label.style.display = "none";
       input.style.display = "none";
       ok.style.display = "none";
       cancel.style.display = "none";
       edit.style.display = "inline-block";
       spin.style.display = "none";
-      label.textContent = title || "(no sheet)";
+      // label.textContent = title || "(no sheet)"; // hidden anyway
     }
   }
 
