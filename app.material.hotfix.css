@@ -67,7 +67,9 @@
 /* --- Images grid --- */
 #images-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(72px, 1fr));
+  grid-template-columns: repeat(3, minmax(72px, 1fr));
+  max-height: 260px;
+  overflow-y: auto;
   gap: 6px;
   margin-top: 4px;
 }

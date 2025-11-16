@@ -343,8 +343,16 @@
           log('image click ignored (no caption selected)');
           return;
         }
-        cur.imageFileId = imgInfo.id;
-        cur.image = imgInfo;
+        const already = cur.imageFileId && cur.imageFileId === imgInfo.id;
+        if (already){
+          // detach
+          cur.imageFileId = null;
+          cur.image = null;
+        }else{
+          // attach
+          cur.imageFileId = imgInfo.id;
+          cur.image = imgInfo;
+        }
         scheduleChanged(cur);
         refreshList();   // 🖼 マーク更新
         renderImages();  // ハイライト更新
