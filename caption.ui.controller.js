@@ -24,6 +24,18 @@
   const elImages     = $('#images-grid', pane);
   const elImgStatus  = $('#images-status', pane);
   const elRefreshImg = $('#btnRefreshImages', pane);
+  let elPreview = $('#caption-image-preview', pane);
+  if (!elPreview && elImages && elImages.parentElement){
+    elPreview = document.createElement('div');
+    elPreview.id = 'caption-image-preview';
+    elPreview.className = 'lm-cap-preview';
+    try{
+      elImages.parentElement.insertBefore(elPreview, elImages);
+    }catch(e){
+      warn('preview insert failed', e);
+    }
+  }
+
 
   // Store (stable on window to survive reload of this script)
   const store = window.__LM_CAPTION_STORE || (window.__LM_CAPTION_STORE = {
@@ -231,12 +243,14 @@
       if (elTitle) elTitle.value = '';
       if (elBody)  elBody.value  = '';
       renderImages(); // clear image selection highlight
+      renderPreview();
       return;
     }
     if (elTitle) elTitle.value = it.title || '';
     if (elBody)  elBody.value  = it.body  || '';
     syncViewerSelection(it.pos ? it.id : null);
     renderImages(); // update image highlight for this caption
+    renderPreview();
   }
 
   function removeItem(id){
@@ -268,6 +282,7 @@
 
     refreshList();
     renderImages();
+  renderPreview();
   }
 
   // --- Title / Body input wiring ----------------------------------------------
@@ -301,13 +316,46 @@
     return store.items.find(x=>x.id === store.selectedId) || null;
   }
 
+  function renderPreview(){
+    if (!elPreview) return;
+    const sel = getSelectedItem();
+    elPreview.innerHTML = '';
+    if (!sel || !(sel.imageFileId || (sel.image && sel.image.id))){
+      elPreview.style.display = 'none';
+      return;
+    }
+    const imgId = sel.imageFileId || (sel.image && sel.image.id);
+    const list = store.images || [];
+    const meta = (list.find(it => it.id === imgId) || sel.image || null);
+    if (!meta){
+      elPreview.style.display = 'none';
+      return;
+    }
+    const url = meta.thumbUrl || meta.thumbnailUrl || meta.url || meta.webContentLink || meta.webViewLink || '';
+    if (!url){
+      elPreview.style.display = 'none';
+      return;
+    }
+    const label = document.createElement('div');
+    label.className = 'lm-cap-preview-label';
+    label.textContent = 'Attached image';
+    const img = document.createElement('img');
+    img.src = url;
+    img.alt = meta.name || '';
+    img.loading = 'lazy';
+    img.decoding = 'async';
+    elPreview.appendChild(label);
+    elPreview.appendChild(img);
+    elPreview.style.display = 'block';
+  }
+
   function renderImages(){
     if (!elImages) return;
     // enforce grid layout from JS (3 columns) in case CSS is old
     elImages.style.display = 'grid';
     elImages.style.gridTemplateColumns = 'repeat(3, minmax(72px, 1fr))';
     elImages.style.gap = '6px';
-    elImages.style.maxHeight = '260px';
+    elImages.style.maxHeight = '360px';
     elImages.style.overflowY = 'auto';
 
     const list = store.images || [];
@@ -384,6 +432,8 @@
           scheduleChanged(cur);
           refreshList();
           renderImages();
+  renderPreview();
+          renderPreview();
         }
       });
 
@@ -401,6 +451,7 @@
         scheduleChanged(cur);
         refreshList();   // 🖼 マーク更新
         renderImages();  // ハイライト更新
+        renderPreview();
       });
 
       elImages.appendChild(wrap);
@@ -444,11 +495,15 @@
     refreshList();
     syncPinsFromItems();
     renderImages();
+  renderPreview();
+    renderPreview();
   }
 
   function setImages(images){
     store.images = images || [];
     renderImages();
+  renderPreview();
+    renderPreview();
   }
 
   // --- caption creation --------------------------------------------------------
@@ -533,6 +588,7 @@
   renderFilters();
   refreshList();
   renderImages();
+  renderPreview();
 
   try{
     document.dispatchEvent(new Event('lm:caption-ui-ready'));

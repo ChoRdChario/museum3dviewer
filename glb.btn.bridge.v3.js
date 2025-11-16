@@ -219,7 +219,7 @@
 
   async function loadById(fileId){
     const mod = await import('./viewer.module.cdn.js');
-    try{ console.log(TAG, 'exports:', Object.keys(mod)); }catch(_){}
+    try{ console.log(TAG, 'exports:', Object.keys(mod)); }catch(_){ }
     ensureViewerBridge(mod);
     showOverlay('GLB を読み込んでいます…');
     let safe = true; const safeHide=()=>{ if(safe){ safe=false; hideOverlay(); } };
@@ -230,6 +230,7 @@
     }catch(e){ err('loadGlbFromDrive threw', e); safeHide(); throw e; }
     setTimeout(safeHide, 120);
     await postLoadEnsureSaveSheet(fileId);
+    try{ document.dispatchEvent(new Event('lm:refresh-images')); }catch(_){ }
   }
 
   function wireBtn(){
