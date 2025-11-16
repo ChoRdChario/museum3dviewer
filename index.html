@@ -78,6 +78,23 @@
       opacity:1;
       transform:scale(1.1);
     }
+    /* pin color / filter chips */
+    #pane-caption .pill{
+      border-radius:999px;
+      padding:4px 10px;
+      border:1px solid transparent;
+      opacity:0.75;
+      transition:transform .08s ease-out, box-shadow .08s ease-out, opacity .08s ease-out, border-color .08s ease-out;
+    }
+    #pane-caption .pill:hover{
+      opacity:1;
+    }
+    #pane-caption .pill.active{
+      opacity:1;
+      box-shadow:0 0 0 2px rgba(0,0,0,0.6);
+      border-color:rgba(255,255,255,0.9);
+      transform:translateY(-1px);
+    }
 </style>
 
   <!-- Optional loader for content.js to avoid 404 noise -->

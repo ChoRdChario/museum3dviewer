@@ -62,6 +62,7 @@
   // viewer 側の onCanvasShiftPick が有効になったら true。
   // true のときは fallback(#gl click)は何もしない（ダブル追加防止）。
   let preferWorldClicks = false;
+  let worldHookInstalled = false;
 
   // --- small event hub for Sheets bridge --------------------------------------
   const addListeners = [];
@@ -387,21 +388,28 @@
 
   // --- world-space click hook --------------------------------------------------
   // viewer 側が onCanvasShiftPick を expose している場合にそれを尊重する。
-  function installWorldSpaceHook(){
+  function tryInstallWorldSpaceHook(){
+    if (worldHookInstalled) return;
     const br = getViewerBridge();
     if (!br || typeof br.onCanvasShiftPick !== 'function') return;
     try{
       br.onCanvasShiftPick((world)=>{
+        if (!world) return;
         preferWorldClicks = true;
         addCaptionAt(0.5, 0.5, world); // 画面座標は使わず world のみ
       });
+      worldHookInstalled = true;
+      log('world-space hook installed');
     }catch(e){
       warn('world-space hook failed', e);
     }
   }
 
   installFallbackClick();
-  installWorldSpaceHook();
+  tryInstallWorldSpaceHook();
+  document.addEventListener('lm:viewer-bridge-ready', tryInstallWorldSpaceHook, { passive:true });
+  document.addEventListener('lm:scene-ready',          tryInstallWorldSpaceHook, { passive:true });
+  window.addEventListener('lm:scene-ready',            tryInstallWorldSpaceHook, { passive:true });
 
   window.__LM_CAPTION_UI = {
     addCaptionAt,
