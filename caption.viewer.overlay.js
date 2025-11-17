@@ -100,17 +100,23 @@ const TAG = '[caption-overlay]';
 
     const header = document.createElement('div');
     header.className = 'lm-cap-win-header';
+    header.style.position = 'relative';
+    header.style.paddingRight = '18px';
 
     const colorDot = document.createElement('div');
     colorDot.className = 'lm-cap-win-color';
 
     const titleEl = document.createElement('div');
     titleEl.className = 'lm-cap-win-title';
+    titleEl.style.fontWeight = '700';
 
     const closeBtn = document.createElement('button');
     closeBtn.type = 'button';
     closeBtn.className = 'lm-cap-win-close';
     closeBtn.textContent = '×';
+    closeBtn.style.position = 'absolute';
+    closeBtn.style.top = '-2px';
+    closeBtn.style.right = '-2px';
 
     header.appendChild(colorDot);
     header.appendChild(titleEl);
@@ -132,6 +138,7 @@ const TAG = '[caption-overlay]';
     openBtn.type = 'button';
     openBtn.className = 'lm-cap-win-open';
     openBtn.textContent = 'Open original';
+    openBtn.style.alignSelf = 'flex-start';
     imgWrap.appendChild(openBtn);
 
     inner.appendChild(header);
