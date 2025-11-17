@@ -56,7 +56,7 @@
   const addListeners = [];
   const changeListeners = [];
   const deleteListeners = [];
-  const selectListeners = [];
+  const selectListeners = []; // caption selection listeners
   const dirtyTimers = new Map(); // id -> raf id
 
   function onItemAdded(fn){
@@ -96,6 +96,8 @@
       try{ fn(item); }catch(e){ console.error(TAG,'onItemDeleted handler failed', e); }
     });
   }
+
+
   function onItemSelected(fn){
     if (typeof fn === 'function') selectListeners.push(fn);
   }
@@ -104,7 +106,6 @@
       try{ fn(item); }catch(e){ console.error(TAG,'onItemSelected handler failed', e); }
     });
   }
-
 
   // --- viewer bridge + pins ---------------------------------------------------
   function getViewerBridge(){
