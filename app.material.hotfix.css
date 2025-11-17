@@ -251,3 +251,20 @@
     max-width: 80vw;
   }
 }
+
+/* --- Step4 fine-tune overlay window layout ----------------------- */
+.lm-cap-win-close{
+  top: 4px !important;
+  right: 4px !important;
+}
+
+.lm-cap-win-image{
+  width: 100% !important;
+  display: block !important;
+}
+
+.lm-cap-win-open{
+  align-self: flex-start !important;
+  margin-top: 4px;
+}
+
