@@ -127,6 +127,7 @@
   display: none;
 }
 
+
 /* --- Step4: Viewer caption overlay windows ----------------------- */
 #lm-caption-overlay-root {
   pointer-events: none;
@@ -156,14 +157,16 @@
 }
 
 .lm-cap-win-header {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 6px;
   cursor: move;
   font-size: 12px;
-  font-weight: 600;
+  font-weight: 400;
   color: #f9fafb;
   user-select: none;
+  padding-right: 18px;
 }
 
 .lm-cap-win-color {
@@ -178,10 +181,13 @@
   flex: 1 1 auto;
   line-height: 1.2;
   word-break: break-word;
+  font-weight: 700; /* タイトル太字 */
 }
 
 .lm-cap-win-close {
-  flex-shrink: 0;
+  position: absolute;
+  top: -2px;
+  right: -2px;
   border: none;
   background: transparent;
   color: #9ca3af;
@@ -225,7 +231,7 @@
 }
 
 .lm-cap-win-open {
-  align-self: flex-end;
+  align-self: flex-start; /* 画像の直下・左寄せ */
   border: none;
   border-radius: 999px;
   padding: 2px 10px;
