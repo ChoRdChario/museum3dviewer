@@ -134,6 +134,11 @@
     img.loading = 'lazy';
     img.decoding = 'async';
     imgWrap.appendChild(img);
+    const openBtn = document.createElement('button');
+    openBtn.type = 'button';
+    openBtn.className = 'lm-cap-win-open';
+    openBtn.textContent = 'Open original';
+    imgWrap.appendChild(openBtn);
 
     const inner = document.createElement('div');
     inner.className = 'lm-cap-win-inner';
@@ -196,33 +201,49 @@
     const colorDot = state.el.querySelector('.lm-cap-win-color');
     const body = state.el.querySelector('.lm-cap-win-body');
     const img = state.el.querySelector('.lm-cap-win-image');
+    const openBtn = state.el.querySelector('.lm-cap-win-open');
     if (header) header.textContent = (item.title || '').trim() || '(untitled)';
     if (colorDot) colorDot.style.backgroundColor = item.color || '#4b5563';
     if (body) body.textContent = item.body || '';
 
     // image: look up from captionUI.images / item.image / item.imageFileId
-    let url = '';
+    let thumbUrl = '';
+    let originalUrl = '';
     try{
       const ui = ensureCaptionUI();
       const images = (ui && ui.images) || [];
-      if (item.imageFileId || (item.image && item.image.id)){
-        const imgId = item.imageFileId || (item.image && item.image.id);
+      const imgId = item.imageFileId || (item.image && item.image.id);
+      if (imgId){
         let meta = images.find(x=>x.id === imgId) || item.image || null;
         if (meta){
-          url = meta.thumbUrl || meta.thumbnailUrl || meta.url ||
-                meta.webContentLink || meta.webViewLink || '';
+          thumbUrl = meta.thumbUrl || meta.thumbnailUrl || meta.url || meta.webContentLink || meta.webViewLink || '';
+          originalUrl = meta.webViewLink || meta.webContentLink || meta.url || thumbUrl;
         }
       }
     }catch(e){
       warn('updateWindowContent image lookup failed', e);
     }
+    state.imageUrl = thumbUrl;
+    state.imageOriginalUrl = originalUrl;
     if (img){
-      if (url){
-        img.src = url;
+      if (thumbUrl){
+        img.src = thumbUrl;
         img.style.display = '';
       } else {
         img.removeAttribute('src');
         img.style.display = 'none';
+      }
+    }
+    if (openBtn){
+      if (originalUrl){
+        openBtn.style.display = 'inline-flex';
+        openBtn.onclick = (ev)=>{
+          ev.stopPropagation();
+          try{ window.open(originalUrl, '_blank', 'noopener'); }catch(_){}
+        };
+      } else {
+        openBtn.style.display = 'none';
+        openBtn.onclick = null;
       }
     }
   }

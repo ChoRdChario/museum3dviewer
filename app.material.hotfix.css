@@ -128,6 +128,7 @@
 }
 
 
+
 /* --- Step4: Viewer caption overlay windows ----------------------- */
 #lm-caption-overlay-root {
   pointer-events: none;
@@ -139,10 +140,11 @@
 
 .lm-cap-win {
   box-sizing: border-box;
-  background: rgba(17,24,39,0.96);
+  background: rgba(15,23,42,0.96);
   color: #e5e7eb;
-  border-radius: 8px;
-  box-shadow: 0 10px 30px rgba(15,23,42,0.6);
+  border-radius: 10px;
+  border: 1px solid rgba(148,163,184,0.9);
+  box-shadow: 0 12px 32px rgba(15,23,42,0.75);
   padding: 0;
   overflow: hidden;
   resize: both;
@@ -151,7 +153,7 @@
 .lm-cap-win-inner {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 6px;
   padding: 6px 8px 8px;
 }
 
@@ -207,6 +209,12 @@
   margin-top: 4px;
   max-height: 60vh;
   overflow: hidden;
+  background: rgba(15,23,42,0.9);
+  border-radius: 6px;
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 
 .lm-cap-win-image {
@@ -215,6 +223,22 @@
   height: auto;
   object-fit: contain;
   border-radius: 4px;
+}
+
+.lm-cap-win-open {
+  align-self: flex-end;
+  border: none;
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-size: 10px;
+  line-height: 1.2;
+  background: rgba(30,64,175,0.85);
+  color: #e5e7eb;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.lm-cap-win-open:hover {
+  background: rgba(59,130,246,0.95);
 }
 
 @media (max-width: 768px) {
