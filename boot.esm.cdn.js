@@ -253,3 +253,9 @@ export {
   putHeaderOnce,
   ensureMaterialsHeader,
 };
+
+
+// Step4: load caption viewer overlay (non-fatal)
+try {
+  import('./caption.viewer.overlay.js').catch(()=>{});
+} catch (_) {}

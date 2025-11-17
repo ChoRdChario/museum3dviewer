@@ -126,3 +126,99 @@
 #sheet-rename-label {
   display: none;
 }
+
+
+/* --- Step4: Viewer caption overlay windows ----------------------- */
+#lm-caption-overlay-root {
+  pointer-events: none;
+}
+
+#lm-caption-overlay-windows {
+  pointer-events: none;
+}
+
+.lm-cap-win {
+  box-sizing: border-box;
+  background: rgba(17,24,39,0.96);
+  color: #e5e7eb;
+  border-radius: 8px;
+  box-shadow: 0 10px 30px rgba(15,23,42,0.6);
+  padding: 0;
+  overflow: hidden;
+  resize: both;
+}
+
+.lm-cap-win-inner {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px 8px 8px;
+}
+
+.lm-cap-win-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: move;
+  font-size: 12px;
+  font-weight: 600;
+  color: #f9fafb;
+  user-select: none;
+}
+
+.lm-cap-win-color {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background-color: #4b5563;
+  flex-shrink: 0;
+}
+
+.lm-cap-win-title {
+  flex: 1 1 auto;
+  line-height: 1.2;
+  word-break: break-word;
+}
+
+.lm-cap-win-close {
+  flex-shrink: 0;
+  border: none;
+  background: transparent;
+  color: #9ca3af;
+  font-size: 14px;
+  cursor: pointer;
+  padding: 0 2px;
+}
+.lm-cap-win-close:hover {
+  color: #f9fafb;
+}
+
+.lm-cap-win-body {
+  font-size: 11px;
+  line-height: 1.35;
+  max-height: 260px;
+  overflow-y: auto;
+  padding-right: 2px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.lm-cap-win-image-wrap {
+  margin-top: 4px;
+  max-height: 60vh;
+  overflow: hidden;
+}
+
+.lm-cap-win-image {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  object-fit: contain;
+  border-radius: 4px;
+}
+
+@media (max-width: 768px) {
+  .lm-cap-win {
+    max-width: 80vw;
+  }
+}

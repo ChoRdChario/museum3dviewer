@@ -56,6 +56,7 @@
   const addListeners = [];
   const changeListeners = [];
   const deleteListeners = [];
+  const selectListeners = [];
   const dirtyTimers = new Map(); // id -> raf id
 
   function onItemAdded(fn){
@@ -95,6 +96,15 @@
       try{ fn(item); }catch(e){ console.error(TAG,'onItemDeleted handler failed', e); }
     });
   }
+  function onItemSelected(fn){
+    if (typeof fn === 'function') selectListeners.push(fn);
+  }
+  function emitItemSelected(item){
+    selectListeners.forEach(fn=>{
+      try{ fn(item); }catch(e){ console.error(TAG,'onItemSelected handler failed', e); }
+    });
+  }
+
 
   // --- viewer bridge + pins ---------------------------------------------------
   function getViewerBridge(){
@@ -244,6 +254,7 @@
       if (elBody)  elBody.value  = '';
       renderImages(); // clear image selection highlight
       renderPreview();
+      emitItemSelected(null);
       return;
     }
     if (elTitle) elTitle.value = it.title || '';
@@ -251,8 +262,8 @@
     syncViewerSelection(it.pos ? it.id : null);
     renderImages(); // update image highlight for this caption
     renderPreview();
+    emitItemSelected(it);
   }
-
   function removeItem(id){
     const idx = store.items.findIndex(x=>x.id===id);
     if (idx === -1) return;
@@ -579,8 +590,11 @@
     onItemAdded,
     onItemChanged,
     onItemDeleted,
+    onItemSelected,
     registerDeleteListener: onItemDeleted,
-    get items(){ return store.items; }
+    get items(){ return store.items; },
+    get images(){ return store.images; },
+    get selectedId(){ return store.selectedId; }
   };
 
   // initial render
