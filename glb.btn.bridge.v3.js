@@ -209,8 +209,14 @@
         if (sheetGid) window.__LM_ACTIVE_SHEET_GID = sheetGid;
         window.dispatchEvent(new CustomEvent('lm:sheet-context', { detail:{ spreadsheetId, sheetGid } }));
         try{
-          const mat = await import('./materials.sheet.persist.js');
-          if (mat.ensureMaterialsHeader) await mat.ensureMaterialsHeader(spreadsheetId);
+          // materials.sheet.persist.js は window.materialsPersist 経由でヘッダ確保を行う
+          await import('./materials.sheet.persist.js');
+          const fn = (window.materialsPersist && window.materialsPersist.ensureMaterialsHeader) || window.__lm_ensureMaterialsHeader;
+          if (typeof fn === 'function') {
+            await fn(spreadsheetId);
+          } else {
+            err('ensureMaterialsHeader not available');
+          }
         }catch(e){ err('ensureMaterialsHeader failed', e); }
       }
       return res;

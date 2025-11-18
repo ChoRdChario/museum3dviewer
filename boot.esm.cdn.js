@@ -161,10 +161,23 @@ async function ensureMaterialsSheet(spreadsheetId){
 }
 
 const MATERIAL_HEADERS = [
-  "materialKey","opacity","chromaColor","chromaTolerance","chromaFeather","doubleSided","unlitLike","captionSheetGid","updatedAt","updatedBy"
+  "materialKey",   // A
+  "opacity",       // B
+  "doubleSided",   // C
+  "unlitLike",     // D
+  "chromaEnable",  // E
+  "chromaColor",   // F
+  "chromaTolerance", // G
+  "chromaFeather",   // H
+  "roughness",     // I
+  "metalness",     // J
+  "emissiveHex",   // K
+  "updatedAt",     // L
+  "updatedBy",     // M
+  "sheetGid"       // N
 ];
 let _hdrGuard = new Set();
-async function putHeaderOnce(spreadsheetId, range="__LM_MATERIALS!A1:J1"){
+async function putHeaderOnce(spreadsheetId, range="__LM_MATERIALS!A1:N1"){
   const key = spreadsheetId+"::"+range;
   if (_hdrGuard.has(key)){ console.log("[materials] header put", range, "-> SKIP (guard)"); return; }
   try{
@@ -183,7 +196,7 @@ async function ensureMaterialsHeader(spreadsheetId){
   window.__LM_MATERIALS_READY__ = window.__LM_MATERIALS_READY__ || new Set();
   if (window.__LM_MATERIALS_READY__.has(spreadsheetId)){ console.log("[materials] ensure header -> SKIP (ready)"); return; }
   await ensureMaterialsSheet(spreadsheetId);
-  await putHeaderOnce(spreadsheetId, "__LM_MATERIALS!A1:J1");
+  await putHeaderOnce(spreadsheetId, "__LM_MATERIALS!A1:N1");
   window.__LM_MATERIALS_READY__.add(spreadsheetId);
 }
 window.__lm_ensureMaterialsHeader = ensureMaterialsHeader;
