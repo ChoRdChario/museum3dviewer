@@ -99,33 +99,38 @@ async function listSheets(spreadsheetId){
 }
 
 async function ensureMaterialsHeader(spreadsheetId){
-  const fetchAuth = await needAuth();
-  // Header row definition (A1:Z1 fixed range)
-  const header = [
-    'materialKey','name','opacity','doubleSided','unlitLike','chromaKeyColor','chromaKeyTolerance','chromaFeather','notes','version',
-    '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', ''
-  ].slice(0,26); // up to Z
+  // materials.sheet.persist / boot 側のヘッダ定義に委譲して、スキーマを 1 箇所に集約する
+  try{
+    await import('./materials.sheet.persist.js');
+  }catch(e){
+    console.warn('[save.locator] import materials.sheet.persist.js failed', e);
+  }
 
-  // Ensure sheet exists or create it
+  try{
+    const fn =
+      (window.materialsPersist && window.materialsPersist.ensureMaterialsHeader) ||
+      window.__lm_ensureMaterialsHeader;
+    if (typeof fn === 'function'){
+      await fn(spreadsheetId);
+    }else{
+      console.warn('[save.locator] ensureMaterialsHeader delegate not available');
+    }
+  }catch(e){
+    console.warn('[save.locator] ensureMaterialsHeader delegate failed', e);
+  }
+
+  // __LM_MATERIALS シートの GID を返す（ヘッダは上で保証済みの前提）
+  const fetchAuth = await needAuth();
   const props = await listSheets(spreadsheetId);
   let mat = props.find(p => p.title === '__LM_MATERIALS');
   if (!mat){
-    // create sheet
+    // シートが存在しない場合のみ追加（ヘッダは後段の ensureMaterialsHeader が再度保証する）
     const res = await fetchAuth(`${SHEETS_BASE}/${encodeURIComponent(spreadsheetId)}:batchUpdate`, {
       method: 'POST',
       json: { requests: [{ addSheet: { properties: { title: '__LM_MATERIALS', gridProperties: { rowCount: 1000, columnCount: 26 } } } }] }
     });
-    const added = res?.replies?.[0]?.addSheet?.properties;
-    mat = added;
+    mat = res?.replies?.[0]?.addSheet?.properties;
   }
-
-  // Put header (values.update requires request range == body.range)
-  const range = `'__LM_MATERIALS'!A1:Z1`;
-  await fetchAuth(`${SHEETS_BASE}/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(range)}?valueInputOption=RAW`, {
-    method: 'PUT',
-    json: { range, majorDimension: 'ROWS', values: [header] }
-  });
-
   return { materialsGid: mat.sheetId };
 }
 
