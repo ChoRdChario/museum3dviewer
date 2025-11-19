@@ -83,6 +83,27 @@
     return found;
   }
 
+  function applyToViewer(key, st){
+    if (!key || !st) return;
+    const br = window.__lm_viewer_bridge || window.viewerBridge || window.__LM_VIEWER_BRIDGE__ || window.__LM_VIEWER_BRIDGE || window.__lm_viewerBridge;
+    if (!br || typeof br.applyMaterialProps !== 'function') return;
+    const props = {};
+    if (typeof st.opacity === 'number' && !Number.isNaN(st.opacity)){
+      props.opacity = st.opacity;
+    }
+    if (typeof st.doubleSided === 'boolean'){
+      props.doubleSide = st.doubleSided;
+    }
+    if (typeof st.unlitLike === 'boolean'){
+      props.unlit = st.unlitLike;
+    }
+    try{
+      br.applyMaterialProps(key, props);
+    }catch(e){
+      console.warn('[mat-orch v4.0] applyToViewer failed', e);
+    }
+  }
+
   // ---- UI -> state 読み出し ----
   function readUI(){
     const sel = $('pm-material');
@@ -196,6 +217,7 @@
     });
 
     if (shouldPersist) persistState(key, st);
+    applyToViewer(key, st);
   }
 
   function onControlInput(){

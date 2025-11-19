@@ -1,6 +1,11 @@
 // [caption.ui.controller] Phase A2 — caption UI + pin bridge + Sheets hooks + image attach
 // Defensive: runs even if other bridges are missing.
 (function(){
+  if (window.__LM_CAPTION_UI && window.__LM_CAPTION_UI.__ver && String(window.__LM_CAPTION_UI.__ver).startsWith('A2')) {
+    console.log('[caption.ui.controller]', 'already loaded');
+    return;
+  }
+
   const TAG='[caption.ui.controller]';
   const log=(...a)=>console.log(TAG, ...a);
   const warn=(...a)=>console.warn(TAG, ...a);
@@ -596,7 +601,8 @@
     get items(){ return store.items; },
     get images(){ return store.images; },
     get selectedId(){ return store.selectedId; }
-  };
+  };  window.__LM_CAPTION_UI.__ver = 'A2';
+
 
   // initial render
   renderColors();

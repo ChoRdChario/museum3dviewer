@@ -11,6 +11,7 @@
     cur = n;
     window.__LM_ACTIVE_SPREADSHEET_ID = n.spreadsheetId;
     window.__LM_ACTIVE_SHEET_GID = n.sheetGid;
+    window.__LM_SHEET_CTX = n;
     window.dispatchEvent(new CustomEvent('lm:sheet-context', { detail: n }));
     log('set', n);
     return true;

@@ -1,6 +1,11 @@
 const TAG = '[caption-overlay]';
 
 (function () {
+  if (window.__LM_CAPTION_OVERLAY__ && window.__LM_CAPTION_OVERLAY__.__ver && String(window.__LM_CAPTION_OVERLAY__.__ver).startsWith('A2')) {
+    try { console.log(TAG, 'already loaded'); } catch(_) {}
+    return;
+  }
+
   'use strict';
 
   function log(...args) {
@@ -585,4 +590,6 @@ const TAG = '[caption-overlay]';
   } else {
     init();
   }
+
+  window.__LM_CAPTION_OVERLAY__ = { __ver: 'A2' };
 })();

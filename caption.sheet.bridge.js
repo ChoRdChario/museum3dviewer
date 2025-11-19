@@ -7,6 +7,11 @@
 // - Updates title/body edits back to the same row
 (function(){
   const TAG='[caption.sheet.bridge]';
+  if (window.__LM_CAPTION_SHEET_BRIDGE__ && window.__LM_CAPTION_SHEET_BRIDGE__.__ver && String(window.__LM_CAPTION_SHEET_BRIDGE__.__ver).startsWith('A2')) {
+    console.log('[caption.sheet.bridge]', 'already loaded');
+    return;
+  }
+
   const log=(...a)=>console.log(TAG,...a);
   const warn=(...a)=>console.warn(TAG,...a);
   const SHEETS='https://sheets.googleapis.com/v4/spreadsheets';
@@ -355,4 +360,6 @@
 
   window.addEventListener('lm:sheet-context', onSheetContext);
   log('armed');
+
+  window.__LM_CAPTION_SHEET_BRIDGE__ = { __ver: 'A2' };
 })();
