@@ -69,7 +69,7 @@
                 `?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`;
     await fetchAuth(url, {
       method: 'POST',
-      body: { values: [row] }
+      json: { values: [row] }
     });
   }
 

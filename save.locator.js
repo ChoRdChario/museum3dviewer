@@ -99,40 +99,25 @@ async function listSheets(spreadsheetId){
 }
 
 async function ensureMaterialsHeader(spreadsheetId){
-  // materials.sheet.persist / boot 側のヘッダ定義に委譲して、スキーマを 1 箇所に集約する
+  // Delegate to __lm_ensureMaterialsHeader implemented in materials.sheet.persist.js
+  if (typeof window.__lm_ensureMaterialsHeader === 'function') {
+    return window.__lm_ensureMaterialsHeader(spreadsheetId);
+  }
+
+  // Fallback: try to import materials.sheet.persist.js, then delegate again
   try{
     await import('./materials.sheet.persist.js');
   }catch(e){
-    console.warn('[save.locator] import materials.sheet.persist.js failed', e);
+    console.warn('[save.locator] materials.sheet.persist import failed', e);
+  }
+  if (typeof window.__lm_ensureMaterialsHeader === 'function') {
+    return window.__lm_ensureMaterialsHeader(spreadsheetId);
   }
 
-  try{
-    const fn =
-      (window.materialsPersist && window.materialsPersist.ensureMaterialsHeader) ||
-      window.__lm_ensureMaterialsHeader;
-    if (typeof fn === 'function'){
-      await fn(spreadsheetId);
-    }else{
-      console.warn('[save.locator] ensureMaterialsHeader delegate not available');
-    }
-  }catch(e){
-    console.warn('[save.locator] ensureMaterialsHeader delegate failed', e);
-  }
-
-  // __LM_MATERIALS シートの GID を返す（ヘッダは上で保証済みの前提）
-  const fetchAuth = await needAuth();
-  const props = await listSheets(spreadsheetId);
-  let mat = props.find(p => p.title === '__LM_MATERIALS');
-  if (!mat){
-    // シートが存在しない場合のみ追加（ヘッダは後段の ensureMaterialsHeader が再度保証する）
-    const res = await fetchAuth(`${SHEETS_BASE}/${encodeURIComponent(spreadsheetId)}:batchUpdate`, {
-      method: 'POST',
-      json: { requests: [{ addSheet: { properties: { title: '__LM_MATERIALS', gridProperties: { rowCount: 1000, columnCount: 26 } } } }] }
-    });
-    mat = res?.replies?.[0]?.addSheet?.properties;
-  }
-  return { materialsGid: mat.sheetId };
+  console.warn('[save.locator] __lm_ensureMaterialsHeader not available; materials sheet may be missing');
+  return { materialsGid: null };
 }
+
 
 async function ensureDefaultCaptionSheet(spreadsheetId){
   const fetchAuth = await needAuth();

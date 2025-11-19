@@ -176,6 +176,7 @@ const MATERIAL_HEADERS = [
   "updatedBy",     // M
   "sheetGid"       // N
 ];
+
 let _hdrGuard = new Set();
 async function putHeaderOnce(spreadsheetId, range="__LM_MATERIALS!A1:N1"){
   const key = spreadsheetId+"::"+range;

@@ -173,7 +173,7 @@
   }
 
   // ---- コントロール変更時ハンドラ ----
-  function onControlChanged(){
+  function onControlChanged(shouldPersist = true){
     if (!currentKey) return;
     const ui = readUI();
     const key = currentKey || ui.key;
@@ -195,10 +195,10 @@
       st[k] = v;
     });
 
-    persistState(key, st);
+    if (shouldPersist) persistState(key, st);
   }
 
-  // ---- マテリアル選択時（material.runtime.patch.js が発火） ----
+  \n  function onControlInput(){\n    onControlChanged(false);\n  }\n\n  function onControlCommit(){\n    onControlChanged(true);\n  }\n\n// ---- マテリアル選択時（material.runtime.patch.js が発火） ----
   function onMaterialSelected(ev){
     const detail = ev && ev.detail || {};
     const key = detail.key || '';
@@ -245,14 +245,14 @@
     window.addEventListener('lm:pm-material-selected', onMaterialSelected, { passive:true });
 
     // 値変更 → state 更新 & 保存
-    rng.addEventListener('input',  onControlChanged, { passive:true });
-    rng.addEventListener('change', onControlChanged, { passive:true });
-    if (ds)  ds.addEventListener('change', onControlChanged, { passive:true });
-    if (ul)  ul.addEventListener('change', onControlChanged, { passive:true });
-    if (ckE) ckE.addEventListener('change', onControlChanged, { passive:true });
-    if (ckC) ckC.addEventListener('input',  onControlChanged, { passive:true });
-    if (ckT) ckT.addEventListener('input',  onControlChanged, { passive:true });
-    if (ckF) ckF.addEventListener('input',  onControlChanged, { passive:true });
+    rng.addEventListener('input',  onControlInput, { passive:true });
+    rng.addEventListener('change', onControlCommit, { passive:true });
+    if (ds)  ds.addEventListener('change', onControlCommit, { passive:true });
+    if (ul)  ul.addEventListener('change', onControlCommit, { passive:true });
+    if (ckE) ckE.addEventListener('change', onControlCommit, { passive:true });
+    if (ckC) ckC.addEventListener('input',  onControlInput, { passive:true });
+    if (ckT) ckT.addEventListener('input',  onControlInput, { passive:true });
+    if (ckF) ckF.addEventListener('input',  onControlInput, { passive:true });
 
     log('UI bound');
 
