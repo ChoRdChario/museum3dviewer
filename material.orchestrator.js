@@ -48,44 +48,60 @@
     return st;
   }
 
-  // ---- scene から現在値を推定（auto.apply 済みの値を拾う） ----
+  // ---- scene から現在値を推定 ----
   function inferStateFromScene(key){
-    const root = window.__LM_SCENE || window.viewer?.scene;
-    const THREE_ = window.THREE;
-    if (!root || !THREE_ || !key) return null;
-
-    let found = null;
-    root.traverse(obj=>{
-      if (found || !obj.isMesh || !obj.material) return;
-      const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
-      for (const m of mats){
-        if (!m) continue;
-        const name = m.name || '';
-        if (name !== key) continue;
-
-        const opacity = (typeof m.opacity === 'number') ? m.opacity : 1;
-        const doubleSided = (m.side === THREE_.DoubleSide);
-        const unlitLike   = (m.type === 'MeshBasicMaterial'); // MeshBasic をアンリット風とみなす
-
-        found = {
-          opacity,
-          doubleSided,
-          unlitLike,
-          chromaEnable: false,
-          chromaColor: '#000000',
-          chromaTolerance: 0.10,
-          chromaFeather: 0.00,
-        };
-        break;
+    try{
+      const br = window.__lm_viewer_bridge || window.viewerBridge || window.__LM_VIEWER_BRIDGE__ || window.__LM_VIEWER_BRIDGE || window.__lm_viewerBridge;
+      if (!br || typeof br.getScene !== 'function'){
+        return null;
       }
-    });
-    if (found) log('infer from scene', key, found);
-    return found;
+      const root = br.getScene && br.getScene();
+      const THREE_ = window.THREE;
+      if (!root || !THREE_){
+        return null;
+      }
+      let found = null;
+      root.traverse(obj=>{
+        if (found || !obj.isMesh || !obj.material) return;
+        const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+        for (const m of mats){
+          if (!m) continue;
+          const name = m.name || '';
+          if (name !== key) continue;
+
+          const opacity = (typeof m.opacity === 'number') ? m.opacity : 1;
+          const doubleSided = (m.side === THREE_.DoubleSide);
+          const unlitLike   = (m.type === 'MeshBasicMaterial'); // MeshBasic をアンリット風とみなす
+
+          found = {
+            opacity,
+            doubleSided,
+            unlitLike,
+            chromaEnable: false,
+            chromaColor: '#000000',
+            chromaTolerance: 0.10,
+            chromaFeather: 0.00,
+          };
+          break;
+        }
+      });
+      if (found) log('infer from scene', key, found);
+      return found;
+    }catch(e){
+      warn('inferStateFromScene failed', e);
+      return null;
+    }
   }
 
+  // ---- viewer への即時適用 ----
   function applyToViewer(key, st){
     if (!key || !st) return;
-    const br = window.__lm_viewer_bridge || window.viewerBridge || window.__LM_VIEWER_BRIDGE__ || window.__LM_VIEWER_BRIDGE || window.__lm_viewerBridge;
+    const br =
+      window.__lm_viewer_bridge ||
+      window.viewerBridge ||
+      window.__LM_VIEWER_BRIDGE__ ||
+      window.__LM_VIEWER_BRIDGE ||
+      window.__lm_viewerBridge;
     if (!br || typeof br.applyMaterialProps !== 'function') return;
     const props = {};
     if (typeof st.opacity === 'number' && !Number.isNaN(st.opacity)){
@@ -100,7 +116,7 @@
     try{
       br.applyMaterialProps(key, props);
     }catch(e){
-      console.warn('[mat-orch v4.0] applyToViewer failed', e);
+      console.warn(TAG, 'applyToViewer failed', e);
     }
   }
 
@@ -147,10 +163,18 @@
         out.value = Number(st.opacity).toFixed(2);
       }
     }
-    if (ds) ds.checked = !!st.doubleSided;
-    if (ul) ul.checked = !!st.unlitLike;
-    if (ckE) ckE.checked = !!st.chromaEnable;
-    if (ckC && typeof st.chromaColor === 'string') ckC.value = st.chromaColor;
+    if (ds && typeof st.doubleSided === 'boolean'){
+      ds.checked = !!st.doubleSided;
+    }
+    if (ul && typeof st.unlitLike === 'boolean'){
+      ul.checked = !!st.unlitLike;
+    }
+    if (ckE && typeof st.chromaEnable === 'boolean'){
+      ckE.checked = !!st.chromaEnable;
+    }
+    if (ckC && typeof st.chromaColor === 'string'){
+      ckC.value = st.chromaColor;
+    }
     if (ckT && typeof st.chromaTolerance === 'number' && !Number.isNaN(st.chromaTolerance)){
       ckT.value = String(st.chromaTolerance);
     }
@@ -217,7 +241,7 @@
     });
 
     if (shouldPersist) persistState(key, st);
-    applyToViewer(key, st);
+    applyToViewer(key, st); // ★ UI操作毎に viewer に即時反映
   }
 
   function onControlInput(){
@@ -228,27 +252,23 @@
     onControlChanged(true);
   }
 
-// ---- マテリアル選択時（material.runtime.patch.js が発火） ----
+  // ---- マテリアル選択時（material.runtime.patch.js が発火） ----
   function onMaterialSelected(ev){
     const detail = ev && ev.detail || {};
     const key = detail.key || '';
     currentKey = key;
     if (!key) return;
 
-    // 初回は scene から推定、2回目以降は state を優先
-    let st = stateByKey.get(key);
-    if (!st){
-      st = inferStateFromScene(key) || defaultState();
-      stateByKey.set(key, st);
+    // 既存 state or scene から推定した state を UI に反映
+    let st = ensureStateForKey(key);
+    if (!st || st._fromSceneOnce !== true){
+      const inferred = inferStateFromScene(key);
+      if (inferred){
+        st = Object.assign(st||{}, inferred, { _fromSceneOnce:true });
+        stateByKey.set(key, st);
+      }
     }
     applyStateToUI(st);
-
-    // UI 同期完了通知（必要なら他モジュールが拾える）
-    try{
-      window.dispatchEvent(new CustomEvent('lm:mat-ui-synced', {
-        detail: { materialKey: key, state: st }
-      }));
-    }catch(_){}
   }
 
   // ---- sheet-context 取得 ----
@@ -277,14 +297,26 @@
     // 値変更 → state 更新 & 保存
     rng.addEventListener('input',  onControlInput, { passive:true });
     rng.addEventListener('change', onControlCommit, { passive:true });
-    if (ds)  ds.addEventListener('change', onControlCommit, { passive:true });
-    if (ul)  ul.addEventListener('change', onControlCommit, { passive:true });
-    if (ckE) ckE.addEventListener('change', onControlCommit, { passive:true });
-    if (ckC) ckC.addEventListener('input',  onControlInput, { passive:true });
-    if (ckT) ckT.addEventListener('input',  onControlInput, { passive:true });
-    if (ckF) ckF.addEventListener('input',  onControlInput, { passive:true });
-
-    log('UI bound');
+    if (ds){
+      ds.addEventListener('change', onControlCommit, { passive:true });
+    }
+    if (ul){
+      ul.addEventListener('change', onControlCommit, { passive:true });
+    }
+    if (ckE){
+      ckE.addEventListener('change', onControlCommit, { passive:true });
+    }
+    if (ckC){
+      ckC.addEventListener('change', onControlCommit, { passive:true });
+    }
+    if (ckT){
+      ckT.addEventListener('input',  onControlInput, { passive:true });
+      ckT.addEventListener('change', onControlCommit, { passive:true });
+    }
+    if (ckF){
+      ckF.addEventListener('input',  onControlInput, { passive:true });
+      ckF.addEventListener('change', onControlCommit, { passive:true });
+    }
 
     // すでにマテリアルが選択されている場合は同期を試みる
     if (sel.value){
