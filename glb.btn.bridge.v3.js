@@ -208,9 +208,13 @@
         window.__LM_ACTIVE_SPREADSHEET_ID = spreadsheetId;
         if (sheetGid) window.__LM_ACTIVE_SHEET_GID = sheetGid;
         window.dispatchEvent(new CustomEvent('lm:sheet-context', { detail:{ spreadsheetId, sheetGid } }));
-        try{
-          await import('./materials.sheet.persist.js');
-          if (mat.ensureMaterialsHeader) await ((window.materialsPersist && window.materialsPersist.ensureMaterialsHeader) || window.__lm_ensureMaterialsHeader)(spreadsheetId);
+                try{
+          const mat = await import('./materials.sheet.persist.js');
+          const fn =
+            (mat && mat.ensureMaterialsHeader) ||
+            (window.materialsPersist && window.materialsPersist.ensureMaterialsHeader) ||
+            window.__lm_ensureMaterialsHeader;
+          if (typeof fn === 'function') await fn(spreadsheetId);
         }catch(e){ err('ensureMaterialsHeader failed', e); }
       }
       return res;

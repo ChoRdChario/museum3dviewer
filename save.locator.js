@@ -99,23 +99,31 @@ async function listSheets(spreadsheetId){
 }
 
 async function ensureMaterialsHeader(spreadsheetId){
-  // Delegate to __lm_ensureMaterialsHeader implemented in materials.sheet.persist.js
-  if (typeof window.__lm_ensureMaterialsHeader === 'function') {
-    return window.__lm_ensureMaterialsHeader(spreadsheetId);
+  const fetchAuth = await needAuth();
+
+  // Delegate header/schema creation to boot-side helper if available
+  if (typeof window.__lm_ensureMaterialsHeader === 'function'){
+    try{
+      await window.__lm_ensureMaterialsHeader(spreadsheetId);
+    }catch(e){
+      console.warn('[save.locator] __lm_ensureMaterialsHeader failed', e);
+    }
   }
 
-  // Fallback: try to import materials.sheet.persist.js, then delegate again
-  try{
-    await import('./materials.sheet.persist.js');
-  }catch(e){
-    console.warn('[save.locator] materials.sheet.persist import failed', e);
-  }
-  if (typeof window.__lm_ensureMaterialsHeader === 'function') {
-    return window.__lm_ensureMaterialsHeader(spreadsheetId);
+  // List sheets and locate __LM_MATERIALS to obtain its gid
+  const props = await listSheets(spreadsheetId);
+  let mat = props.find(p => p.title === '__LM_MATERIALS');
+
+  // Fallback: create the sheet if it somehow does not exist
+  if (!mat){
+    const res = await fetchAuth(`${SHEETS_BASE}/${encodeURIComponent(spreadsheetId)}:batchUpdate`, {
+      method: 'POST',
+      json: { requests: [{ addSheet: { properties: { title: '__LM_MATERIALS', gridProperties: { rowCount: 1000, columnCount: 26 } } } }] }
+    });
+    mat = res?.replies?.[0]?.addSheet?.properties;
   }
 
-  console.warn('[save.locator] __lm_ensureMaterialsHeader not available; materials sheet may be missing');
-  return { materialsGid: null };
+  return { materialsGid: mat.sheetId };
 }
 
 

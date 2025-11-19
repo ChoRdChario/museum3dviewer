@@ -198,7 +198,15 @@
     if (shouldPersist) persistState(key, st);
   }
 
-  \n  function onControlInput(){\n    onControlChanged(false);\n  }\n\n  function onControlCommit(){\n    onControlChanged(true);\n  }\n\n// ---- マテリアル選択時（material.runtime.patch.js が発火） ----
+  function onControlInput(){
+    onControlChanged(false);
+  }
+
+  function onControlCommit(){
+    onControlChanged(true);
+  }
+
+// ---- マテリアル選択時（material.runtime.patch.js が発火） ----
   function onMaterialSelected(ev){
     const detail = ev && ev.detail || {};
     const key = detail.key || '';
