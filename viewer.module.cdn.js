@@ -1,12 +1,21 @@
-
 // --- LM auth resolver without dynamic import (classic-safe) ---
 function __lm_getAuth() {
+  const gauth = window.__LM_auth || {};
   return {
-    ensureToken: (window.__LM_auth && window.__LM_auth.ensureToken) || (window.ensureToken) || (async function(){ return window.__LM_TOK; }),
-    getAccessToken: (window.__LM_auth && window.__LM_auth.getAccessToken) || (window.getAccessToken) || (function(){ return window.__LM_TOK; })
+    ensureToken: (typeof gauth.ensureToken === 'function'
+                    ? gauth.ensureToken
+                    : (typeof window.ensureToken === 'function'
+                        ? window.ensureToken
+                        : async function(){ return window.__LM_TOK; })),
+    getAccessToken: (typeof gauth.getAccessToken === 'function'
+                       ? gauth.getAccessToken
+                       : (typeof window.getAccessToken === 'function'
+                           ? window.getAccessToken
+                           : function(){ return window.__LM_TOK; }))
   };
 }
 // --- end resolver ---
+
 
 // viewer.module.cdn.js — Three.js viewer with pins & picking/filters
 
@@ -15,24 +24,63 @@ const __matList = []; // {index, name, material, key}
 const __origMat = new WeakMap(); // Mesh -> snapshot
 let __glbId = null;
 
-export function setCurrentGlbId(glbId){
-  __glbId = glbId || null;
+function __snapshotIfNeeded(mesh){
+  if(!__origMat.has(mesh)){
+    const m = mesh.material;
+    const mats = Array.isArray(m) ? m : [m];
+    const snap = mats.map(mm => {
+      if(!mm) return null;
+      return {
+        transparent: mm.transparent,
+        opacity: mm.opacity,
+        side: mm.side,
+        depthWrite: mm.depthWrite,
+        colorWrite: mm.colorWrite,
+        alphaTest: mm.alphaTest,
+        color: mm.color ? mm.color.clone() : null,
+      };
+    });
+    __origMat.set(mesh, snap);
+  }
+  return __origMat.get(mesh);
+}
+
+function __restoreMaterial(mesh){
+  const snap = __origMat.get(mesh);
+  if(!snap) return;
+  const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+  for(let i=0;i<mats.length;i++){
+    const mm = mats[i];
+    const ss = snap[i];
+    if(!mm || !ss) continue;
+    mm.transparent = ss.transparent;
+    mm.opacity = ss.opacity;
+    mm.side = ss.side;
+    mm.depthWrite = ss.depthWrite;
+    mm.colorWrite = ss.colorWrite;
+    mm.alphaTest = ss.alphaTest;
+    if(mm.color && ss.color){
+      mm.color.copy(ss.color);
+    }
+    mm.needsUpdate = true;
+  }
 }
 
 // traverse scene and build unique material list
 function __rebuildMaterialList(){
   __matList.length = 0;
   if(!scene) return;
-  const matSet = new Map(); // key -> record
+  const matSet = new Map(); // material -> record
   let idx = 0;
   scene.traverse(obj => {
-    if(obj.isMesh){
+    if(obj && obj.isMesh){
       const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
       for (const mat of mats){
         if(!mat) continue;
-        const key = `${__glbId||'glb'}::${idx}::${mat.name||''}`;
+        const baseName = (mat.name || '').trim() || `#${idx}`;
+        const key = baseName; // use plain material name as key (UI + sheet compatible)
         if(!matSet.has(mat)){
-          const rec = { index: idx, name: mat.name||`#${idx}`, material: mat, key };
+          const rec = { index: idx, name: baseName, material: mat, key };
           matSet.set(mat, rec);
           __matList.push(rec);
           idx++;
@@ -42,65 +90,13 @@ function __rebuildMaterialList(){
   });
 }
 
+
 export function listMaterials(){
   __rebuildMaterialList();
   return __matList.map(({index,name,key})=>({index,name,materialKey:key}));
 }
 
-function __snapshotIfNeeded(mesh){
-  if(!__origMat.has(mesh)){
-    __origMat.set(mesh, {
-      material: mesh.material,
-      onBeforeCompile: mesh.material?.onBeforeCompile,
-      transparent: mesh.material?.transparent,
-      side: mesh.material?.side,
-      alphaTest: mesh.material?.alphaTest
-    });
-  }
-}
-
-function __hookMaterial(mat){
-  if (!mat || mat.__lmHooked) return;
-  mat.__lmHooked = true;
-  mat.userData.__lmUniforms = {
-    uWhiteThr: { value: 0.92 },
-    uBlackThr: { value: 0.08 },
-    uWhiteToAlpha: { value: false },
-    uBlackToAlpha: { value: false },
-    uUnlit: { value: false },
-  };
-  const u = mat.userData.__lmUniforms;
-  mat.onBeforeCompile = (shader)=>{
-    shader.uniforms = { ...shader.uniforms, ...u };
-    // Inject at alpha computation
-    shader.fragmentShader = shader.fragmentShader
-      .replace('#include <dithering_fragment>', `
-        // LociMyu material hook
-        vec3 lmColor = diffuseColor.rgb;
-        float lmLuma = dot(lmColor, vec3(0.299, 0.587, 0.114));
-        if (uWhiteToAlpha && lmLuma >= uWhiteThr) diffuseColor.a = 0.0;
-        if (uBlackToAlpha && lmLuma <= uBlackThr) diffuseColor.a = 0.0;
-        #include <dithering_fragment>
-      `)
-      .replace('#include <lights_fragment_begin>', `
-        // Unlit toggle
-        if (!uUnlit) {
-          #include <lights_fragment_begin>
-        }
-      `);
-  };
-  mat.needsUpdate = true;
-}
-
-function __allMeshes(){
-  const arr=[]; if(!scene) return arr;
-  scene.traverse(o=>{ if(o.isMesh) arr.push(o); });
-  return arr;
-}
-
 function __materialsByKey(materialKey){
-  // match by key prefix without index part to avoid instability if needed
-  // here we match full key
   const out=[];
   for(const {material, key} of __matList){
     if(key === materialKey) out.push(material);
@@ -108,298 +104,360 @@ function __materialsByKey(materialKey){
   return out;
 }
 
+// apply properties to all materials that match the 'materialKey'
 export function applyMaterialProps(materialKey, props={}){
   __rebuildMaterialList();
   const mats = __materialsByKey(materialKey);
+  if(!mats.length){
+    console.warn('[viewer.materials] no materials with key', materialKey);
+    return;
+  }
   for(const mat of mats){
-    __hookMaterial(mat);
-    if('unlit' in props){
-      mat.userData.__lmUniforms.uUnlit.value = !!props.unlit;
-    }
+    if(!mat) continue;
+
+    // if the material belongs to some mesh, capture snapshot first
+    // we only handle MeshStandardMaterial / MeshPhongMaterial for now
+    try {
+      if(mat.userData && mat.userData.__lm_mesh_ref){
+        __snapshotIfNeeded(mat.userData.__lm_mesh_ref);
+      }
+    } catch(_){}
+
     if('opacity' in props){
-      const v = Math.max(0, Math.min(1, Number(props.opacity)));
-      mat.opacity = v;
-      mat.transparent = v < 1 || mat.userData.__lmUniforms.uWhiteToAlpha.value || mat.userData.__lmUniforms.uBlackToAlpha.value;
-      mat.alphaTest = (v < 1 ? 0.003 : 0.0);
-      mat.needsUpdate = true;
+      mat.transparent = props.opacity < 1.0;
+      mat.opacity = props.opacity;
     }
     if('doubleSide' in props){
       mat.side = props.doubleSide ? THREE.DoubleSide : THREE.FrontSide;
-      mat.needsUpdate = true;
     }
-    if('whiteToTransparent' in props){
-      mat.userData.__lmUniforms.uWhiteToAlpha.value = !!props.whiteToTransparent;
-      mat.transparent = mat.transparent || !!props.whiteToTransparent;
-      mat.needsUpdate = true;
+    if('unlit' in props){
+      // naive unlit emulation: disable lighting-related flags
+      if(props.unlit){
+        mat.lights = false;
+        mat.emissive = mat.emissive || new THREE.Color(0xffffff);
+        mat.emissiveIntensity = 1.0;
+      } else {
+        mat.lights = true;
+      }
     }
-    if('whiteThreshold' in props){
-      mat.userData.__lmUniforms.uWhiteThr.value = Number(props.whiteThreshold);
+    if('chromaKeyColor' in props){
+      // store into userData; shader patch is handled in material.runtime.patch.js
+      mat.userData = mat.userData || {};
+      mat.userData.__lm_chroma = {
+        color: props.chromaKeyColor || '#000000',
+        tolerance: props.chromaKeyTolerance ?? 0.1,
+        feather: props.chromaKeyFeather ?? 0.05
+      };
     }
-    if('blackToTransparent' in props){
-      mat.userData.__lmUniforms.uBlackToAlpha.value = !!props.blackToTransparent;
-      mat.transparent = mat.transparent || !!props.blackToTransparent;
-      mat.needsUpdate = true;
-    }
-    if('blackThreshold' in props){
-      mat.userData.__lmUniforms.uBlackThr.value = Number(props.blackThreshold);
-    }
-  }
-}
-
-export function resetMaterial(materialKey){
-  __rebuildMaterialList();
-  const mats = __materialsByKey(materialKey);
-  for(const mat of mats){
-    if(!mat) continue;
-    // remove hook flags
-    if(mat.userData && mat.userData.__lmUniforms){
-      delete mat.userData.__lmUniforms;
-    }
-    mat.__lmHooked = false;
-    mat.onBeforeCompile = null;
-    mat.transparent = false;
-    mat.alphaTest = 0.0;
-    mat.side = THREE.FrontSide;
     mat.needsUpdate = true;
   }
 }
 
-export function resetAllMaterials(){
-  __rebuildMaterialList();
-  for(const rec of __matList){
-    resetMaterial(rec.key);
-  }
+// export to be reachable from window.viewerBridge (bridge pattern)
+if(typeof window !== 'undefined'){
+  window.__lm_viewer_materialApi = {
+    listMaterials,
+    applyMaterialProps
+  };
 }
 
-import * as THREE from 'three';
-import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { GLTFLoader } from 'https://unpkg.com/three@0.159.0/examples/jsm/loaders/GLTFLoader.js';
+// ===== end Materials API (WIP) =====
 
-// ---- LociMyu patch: expose scene globally (safe getter) ----
-let __lm_scene_ref = null;
-if (!('__lm_scene' in window)) {
-  Object.defineProperty(window, '__lm_scene', {
-    get(){ return __lm_scene_ref; },
-    configurable: false
+
+
+
+// ===== Core viewer code (existing) =====
+
+// Minimal Three.js viewer with GLB loading, picking & simple pin overlay API.
+// This file is designed to be imported as an ES module from boot.esm.cdn.js.
+
+let renderer, scene, camera, controls, raycaster, pointer;
+let _currentGLB = null;
+let _rootGroup = null;
+let _pinLayer = 10;
+let _pinObjects = []; // { mesh, data }
+let _canvas, _domContainer;
+let _resizeObserver;
+
+// For filters / visibility
+const _filter = {
+  onlyMeshName: null,
+  hideNonMatching: false,
+};
+
+// Utility: create renderer
+function createRenderer(canvas){
+  const r = new THREE.WebGLRenderer({
+    canvas,
+    antialias: true,
+    alpha: true,
+    preserveDrawingBuffer: true,
   });
+  r.setPixelRatio(window.devicePixelRatio || 1);
+  r.setSize(canvas.clientWidth, canvas.clientHeight, false);
+  r.outputEncoding = THREE.sRGBEncoding || THREE.LinearEncoding;
+  return r;
 }
 
-let renderer, scene, camera, controls, raycaster, canvasEl;
-const pickHandlers = new Set();
-const pinSelectHandlers = new Set();
-const renderCbs = new Set();
-let pinGroup;
+// Utility: create default camera
+function createCamera(canvas){
+  const aspect = canvas.clientWidth / canvas.clientHeight;
+  const cam = new THREE.PerspectiveCamera(45, aspect, 0.01, 1000);
+  cam.position.set(0, 0, 5);
+  return cam;
+}
 
-export function ensureViewer({ canvas }){
-  if (renderer) return;
-  canvasEl = canvas;
-  renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
-  renderer.setPixelRatio(window.devicePixelRatio || 1);
-  renderer.setSize(canvas.clientWidth, canvas.clientHeight, false);
+// Utility: create scene
+function createScene(){
+  const sc = new THREE.Scene();
+  sc.background = null; // transparent
+  const hemi = new THREE.HemisphereLight(0xffffff, 0x444444, 1.0);
+  hemi.position.set(0, 1, 0);
+  sc.add(hemi);
 
-  scene = new THREE.Scene();
-__lm_scene_ref = scene;
-// [LM patch] expose scene for UI and tools
-try {
-  window.__LM_SCENE = scene;
-  document.dispatchEvent(new CustomEvent('lm:scene-ready', { detail: { scene } }));
-} catch (e) { console.warn('[LM patch] scene expose failed', e); }
+  const dir = new THREE.DirectionalLight(0xffffff, 0.8);
+  dir.position.set(3, 10, 10);
+  dir.castShadow = true;
+  sc.add(dir);
 
-  scene.background = null;
+  return sc;
+}
 
-  camera = new THREE.PerspectiveCamera(50, canvas.clientWidth / canvas.clientHeight, 0.1, 2000);
-  camera.position.set(3, 2, 6);
+// Utility: create controls
+function createControls(camera, domElement){
+  const c = new THREE.OrbitControls(camera, domElement);
+  c.enableDamping = true;
+  c.dampingFactor = 0.05;
+  c.screenSpacePanning = true;
+  c.minDistance = 0.1;
+  c.maxDistance = 1000;
+  return c;
+}
 
-  controls = new OrbitControls(camera, canvas);
-  controls.enableDamping = true;
+// Initialize viewer
+export function initViewer(options){
+  const {
+    canvas,
+    container,
+    glbId = null,
+  } = options || {};
 
-  scene.add(new THREE.AmbientLight(0xffffff, 0.4));
-  const d1 = new THREE.DirectionalLight(0xffffff, 1.0); d1.position.set(5,10,7); scene.add(d1);
+  if(!canvas) throw new Error('initViewer: canvas is required');
 
-  pinGroup = new THREE.Group(); pinGroup.name = 'PinGroup'; scene.add(pinGroup);
+  _canvas = canvas;
+  _domContainer = container || canvas.parentElement || document.body;
 
+  renderer = createRenderer(canvas);
+  scene = createScene();
+  camera = createCamera(canvas);
+  controls = createControls(camera, canvas);
   raycaster = new THREE.Raycaster();
+  pointer = new THREE.Vector2();
+  __glbId = glbId || null;
 
+  // resize handling
   const onResize = () => {
-    const w = canvas.clientWidth, h = canvas.clientHeight;
-    renderer.setSize(w, h, false);
-    camera.aspect = w / h; camera.updateProjectionMatrix();
+    if(!renderer || !camera || !_canvas) return;
+    const { clientWidth, clientHeight } = _canvas;
+    if(clientWidth === 0 || clientHeight === 0) return;
+    renderer.setSize(clientWidth, clientHeight, false);
+    camera.aspect = clientWidth / clientHeight;
+    camera.updateProjectionMatrix();
   };
   window.addEventListener('resize', onResize);
 
-  canvas.addEventListener('pointerdown', (ev) => {
-    const rect = canvas.getBoundingClientRect();
-    const x = ((ev.clientX - rect.left) / rect.width) * 2 - 1;
-    const y = -((ev.clientY - rect.top) / rect.height) * 2 + 1;
-    raycaster.setFromCamera({ x, y }, camera);
-    const intersects = raycaster.intersectObjects(scene.children, true);
+  if('ResizeObserver' in window){
+    _resizeObserver = new ResizeObserver(onResize);
+    _resizeObserver.observe(_canvas);
+  }
 
-    if (ev.shiftKey){
-      const hit = intersects.find(i => i && i.object !== pinGroup && !pinGroup.children.includes(i.object));
-      if (hit && hit.point){
-        pickHandlers.forEach(fn => { try { fn({ x: hit.point.x, y: hit.point.y, z: hit.point.z }); } catch(_){} });
-      }
-    } else {
-      const pinHit = intersects.find(i => i.object && i.object.userData && i.object.userData.pinId);
-      if (pinHit && pinHit.object){
-        const id = pinHit.object.userData.pinId;
-        pinSelectHandlers.forEach(fn => { try { fn(id); } catch(_){} });
-        setPinSelected(id, true);
-      }
-    }
-  });
-
-  document.addEventListener('pinFilterChange', (e)=>{
-    const selected = new Set(e.detail?.selected || []);
-    if (!pinGroup) return;
-    pinGroup.children.forEach(ch => {
-      const c = ch.userData?.pinColor;
-      ch.visible = !c || selected.has(c);
-    });
-  });
-
+  // animation loop
   const tick = () => {
-    controls.update(); renderer.render(scene, camera);
-    renderCbs.forEach(fn => { try{ fn(); }catch(e){} });
+    if(!renderer || !scene || !camera) return;
     requestAnimationFrame(tick);
+    if(controls) controls.update();
+    renderer.render(scene, camera);
   };
   tick();
 }
 
-export function onRenderTick(fn){ renderCbs.add(fn); return ()=>renderCbs.delete(fn); }
-export function projectPoint(x, y, z){
-  const v = new THREE.Vector3(x,y,z).project(camera);
-  const rect = canvasEl.getBoundingClientRect();
-  const sx = (v.x * 0.5 + 0.5) * rect.width + rect.left;
-  const sy = (-v.y * 0.5 + 0.5) * rect.height + rect.top;
-  const visible = v.z > -1 && v.z < 1;
-  return { x: sx, y: sy, visible };
-}
+// Load GLB from URL/Blob
+export async function loadGLB(objectURL, opts={}){
+  if(!_canvas) throw new Error('initViewer must be called before loadGLB');
 
-export function onCanvasShiftPick(handler){ pickHandlers.add(handler); return () => pickHandlers.delete(handler); }
-export function onPinSelect(handler){ pinSelectHandlers.add(handler); return () => pinSelectHandlers.delete(handler); }
+  const {
+    onProgress,
+    onLoaded,
+  } = opts;
 
-export function addPinMarker({ id, x, y, z, color = '#ff6b6b' }){
-  if (!pinGroup) return;
-  // small sphere based on model size
-  let radius = 0.008;
-  try {
-    const objList = scene.children.filter(o=>!o.isLight && o!==pinGroup);
-    const box = new THREE.Box3().makeEmpty();
-    objList.forEach(o=>box.expandByObject(o));
-    const size = box.getSize(new THREE.Vector3()).length() || 1;
-    radius = Math.max(0.005, Math.min(0.02, size * 0.0018));
-  } catch(_){}
-  const geo = new THREE.SphereGeometry(radius, 16, 16);
-  const mat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.95 });
-  const m = new THREE.Mesh(geo, mat);
-  m.position.set(x, y, z);
-  m.userData.pinId = id;
-  m.userData.pinColor = color;
-  pinGroup.add(m);
-}
-export function clearPins(){ if (!pinGroup) return; while (pinGroup.children.length) pinGroup.remove(pinGroup.children[0]); }
-export function removePinMarker(id){
-  if (!pinGroup) return;
-  for (let i=pinGroup.children.length-1; i>=0; i--){
-    const ch = pinGroup.children[i];
-    if (ch.userData?.pinId === id){ pinGroup.remove(ch); break; }
+  const loader = new THREE.GLTFLoader();
+  loader.setCrossOrigin('anonymous');
+
+  // Clean up previous
+  if(_rootGroup && scene){
+    scene.remove(_rootGroup);
+    _rootGroup.traverse(obj => {
+      if(obj.isMesh && obj.geometry){
+        obj.geometry.dispose();
+      }
+      if(obj.material){
+        const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+        for(const m of mats){
+          if(m && m.map) m.map.dispose();
+          if(m && m.dispose) m.dispose();
+        }
+      }
+    });
   }
+
+  return new Promise((resolve, reject) => {
+    loader.load(
+      objectURL,
+      gltf => {
+        _currentGLB = gltf;
+        _rootGroup = gltf.scene || gltf.scenes[0];
+
+        // attach mesh-ref to materials for snapshot
+        _rootGroup.traverse(obj => {
+          if(obj.isMesh){
+            const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+            for (const mat of mats){
+              if(!mat) continue;
+              mat.userData = mat.userData || {};
+              mat.userData.__lm_mesh_ref = obj;
+            }
+          }
+        });
+
+        scene.add(_rootGroup);
+
+        // fit camera
+        const box = new THREE.Box3().setFromObject(_rootGroup);
+        const size = box.getSize(new THREE.Vector3()).length();
+        const center = box.getCenter(new THREE.Vector3());
+        controls.target.copy(center);
+        camera.position.copy(center).add(new THREE.Vector3(size*0.8, size*0.6, size*0.8));
+        camera.near = Math.max(size/1000, 0.01); camera.far = size*10; camera.updateProjectionMatrix();
+
+        if(onLoaded) onLoaded({ gltf, scene, camera, controls });
+
+        resolve({ gltf, scene, camera, controls });
+      },
+      xhr => {
+        if(onProgress){
+          try{
+            onProgress(xhr);
+          }catch(_){}
+        }
+      },
+      err => {
+        console.error('GLB load error', err);
+        reject(err);
+      }
+    );
+  });
 }
-export function setPinSelected(id, on){
-  if (!pinGroup) return;
-  pinGroup.children.forEach(ch => {
-    if (ch.userData.pinId === id){
-      ch.scale.set(on?1.5:1, on?1.5:1, on?1.5:1);
-      ch.material.opacity = on?1:0.85;
+
+// Picking API (basic)
+export function pickAt(clientX, clientY){
+  if(!renderer || !camera || !scene) return null;
+  const rect = _canvas.getBoundingClientRect();
+  pointer.x = ((clientX - rect.left) / rect.width) * 2 - 1;
+  pointer.y = -((clientY - rect.top) / rect.height) * 2 + 1;
+  raycaster.setFromCamera(pointer, camera);
+
+  const intersects = raycaster.intersectObjects(scene.children, true);
+  if(!intersects.length) return null;
+  const hit = intersects[0];
+  return {
+    point: hit.point.clone(),
+    object: hit.object,
+  };
+}
+
+// Pin overlay API (very simple: just record & return world positions)
+export function addPinAt(worldPos, data){
+  const pin = {
+    position: worldPos.clone(),
+    data: data || null,
+  };
+  _pinObjects.push(pin);
+  return pin;
+}
+
+export function listPins(){
+  return _pinObjects.slice();
+}
+
+export function clearPins(){
+  _pinObjects.length = 0;
+}
+
+// Filter API
+export function setMeshNameFilter(name, hideNonMatching=false){
+  _filter.onlyMeshName = name || null;
+  _filter.hideNonMatching = !!hideNonMatching;
+  if(!_rootGroup) return;
+  _rootGroup.traverse(obj => {
+    if(!obj.isMesh) return;
+    if(!_filter.onlyMeshName){
+      obj.visible = true;
     } else {
-      ch.scale.set(1,1,1);
-      ch.material.opacity = 0.6;
+      const match = (obj.name||'').includes(_filter.onlyMeshName);
+      obj.visible = _filter.hideNonMatching ? match : (obj.visible && match);
     }
   });
 }
 
-export async function loadGlbFromDrive(fileId, { token } = {}) {
-  // Build Drive media URL
-  const url = `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?alt=media&supportsAllDrives=true`;
-// Normalize/resolve token (support Promise; acquire silently if missing)
-try {
-  if (token && typeof token.then === 'function') {
-    token = await token.catch(()=>null);
-  }
-  if (!token) {
-    const g = __lm_getAuth();
-    token = (g.getAccessToken && g.getAccessToken()) || window.__LM_TOK || null;
-    if (!token && g.ensureToken) {
-      try { token = await g.ensureToken({ prompt: undefined }); } catch {}
-      if (!token && g.getAccessToken) token = g.getAccessToken();
+// Simple helper to restore all materials to original
+export function restoreAllMaterials(){
+  if(!_rootGroup) return;
+  _rootGroup.traverse(obj => {
+    if(obj.isMesh){
+      __restoreMaterial(obj);
     }
-  }
-} catch {}
-
-
-  // Resolve token if not provided
-  let useToken = token;
-  try {
-    if (!useToken) {
-      const g = await import('./gauth.module.js');
-      useToken = (g.getAccessToken && g.getAccessToken()) || window.__LM_TOK || null;
-      if (!useToken) {
-        // try interactive/silent fetch (without forcing consent) to avoid popup unless necessary
-        try { useToken = await g.ensureToken({ prompt: undefined }); } catch(_) {}
-        if (!useToken && g.getAccessToken) useToken = g.getAccessToken();
-      }
-    }
-  } catch (_) { /* keep going; we'll try without token (will 401) and handle below */ }
-
-  async function fetchWith(tok) {
-    const headers = tok ? { Authorization: `Bearer ${tok}` } : undefined;
-    return await fetch(url, { headers });
-  }
-
-  // First attempt
-  let r = await fetchWith(useToken);
-
-  // If unauthorized, try to (re)acquire token once and retry
-  if (r.status === 401) {
-    try {
-      const g = await import('./gauth.module.js');
-      const fresh = await (g.ensureToken ? g.ensureToken({ prompt: undefined }) : Promise.resolve(window.__LM_TOK));
-      if (fresh) {
-        useToken = fresh;
-        r = await fetchWith(useToken);
-      }
-    } catch(_) {}
-  }
-
-  if (!r.ok) throw new Error(`GLB fetch failed ${r.status}`);
-
-  const blob = await r.blob();
-  const objectURL = URL.createObjectURL(blob);
-  try {
-    const loader = new GLTFLoader();
-    const gltf = await loader.loadAsync(objectURL);
-    // remove previous (except lights & pin group)
-    const keep = new Set([pinGroup]);
-    for (let i = scene.children.length - 1; i >= 0; i--) {
-      const obj = scene.children[i];
-      if (obj.isLight || keep.has(obj)) continue;
-      scene.remove(obj);
-    }
-    scene.add(gltf.scene);
-
-    const box = new THREE.Box3().setFromObject(gltf.scene);
-    const size = box.getSize(new THREE.Vector3()).length();
-    const center = box.getCenter(new THREE.Vector3());
-    controls.target.copy(center);
-    camera.position.copy(center).add(new THREE.Vector3(size*0.8, size*0.6, size*0.8));
-    camera.near = Math.max(size/1000, 0.01); camera.far = size*10; camera.updateProjectionMatrix();
-  } finally {
-    URL.revokeObjectURL(objectURL);
-  }
-
+  });
 }
 
+// Allow external callers to get the underlying scene for more advanced usage
+export function getCurrentScene(){
+  return scene;
+}
+
+// Destroy viewer
+export function disposeViewer(){
+  try{
+    if(_resizeObserver && _canvas){
+      _resizeObserver.unobserve(_canvas);
+      _resizeObserver.disconnect();
+    }
+  }catch(_){}
+  window.removeEventListener('resize', ()=>{});
+
+  if(renderer){
+    renderer.dispose();
+    renderer = null;
+  }
+  if(scene){
+    scene.traverse(obj => {
+      if(obj.isMesh && obj.geometry) obj.geometry.dispose();
+      if(obj.material){
+        const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+        for(const m of mats){
+          if(m && m.map) m.map.dispose();
+          if(m && m.dispose) m.dispose();
+        }
+      }
+    });
+  }
+  scene = null;
+  camera = null;
+  controls = null;
+  _currentGLB = null;
+  _rootGroup = null;
+  _pinObjects.length = 0;
+}
 
 // ---- LociMyu patch: export getScene for external callers ----
 export function getScene(){ try{ return scene; }catch(_){ return __lm_scene_ref; } }
+
