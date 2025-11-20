@@ -72,6 +72,7 @@ function __snapshotIfNeeded(mesh){
 function __hookMaterial(mat){
   if (!mat || mat.__lmHooked) return;
   mat.__lmHooked = true;
+  mat.userData = mat.userData || {};
   mat.userData.__lmUniforms = {
     uWhiteThr: { value: 0.92 },
     uBlackThr: { value: 0.08 },
@@ -82,6 +83,16 @@ function __hookMaterial(mat){
   const u = mat.userData.__lmUniforms;
   mat.onBeforeCompile = (shader)=>{
     shader.uniforms = { ...shader.uniforms, ...u };
+    const header = `
+uniform float uWhiteThr;
+uniform float uBlackThr;
+uniform bool uWhiteToAlpha;
+uniform bool uBlackToAlpha;
+uniform bool uUnlit;
+`;
+    if (!shader.fragmentShader.includes('uniform bool uUnlit;')){
+      shader.fragmentShader = header + shader.fragmentShader;
+    }
     // Inject at alpha computation
     shader.fragmentShader = shader.fragmentShader
       .replace('#include <dithering_fragment>', `
