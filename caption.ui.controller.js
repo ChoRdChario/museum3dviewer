@@ -524,19 +524,19 @@
   }
 
   // --- caption creation --------------------------------------------------------
-    let __ADD_CAPTION_LAST_TS = 0;
-let preferWorldClicks = false;
+  let preferWorldClicks = false;
   let worldHookInstalled = false;
+  let lastAddAtMs = 0;
 
   function addCaptionAt(x, y, world){
-    const now = Date.now();
-    if (now - __ADD_CAPTION_LAST_TS < 150) {
-      console.log(TAG, 'skip duplicate addCaptionAt');
+    const tNow = Date.now();
+    if (tNow - lastAddAtMs < 150) {
+      log('skip duplicate addCaptionAt');
       return;
     }
-    __ADD_CAPTION_LAST_TS = now;
+    lastAddAtMs = tNow;
 
-    const now = new Date().toISOString();
+    const ts = new Date().toISOString();
     const item = {
       id: newId(),
       title: '(untitled)',
@@ -545,8 +545,8 @@ let preferWorldClicks = false;
       pos: world || null,
       imageFileId: null,
       image: null,
-      createdAt: now,
-      updatedAt: now,
+      createdAt: ts,
+      updatedAt: ts,
       rowIndex: null
     };
     store.items.push(item);
