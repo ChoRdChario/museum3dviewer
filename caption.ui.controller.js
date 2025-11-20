@@ -524,10 +524,18 @@
   }
 
   // --- caption creation --------------------------------------------------------
-  let preferWorldClicks = false;
+    let __ADD_CAPTION_LAST_TS = 0;
+let preferWorldClicks = false;
   let worldHookInstalled = false;
 
   function addCaptionAt(x, y, world){
+    const now = Date.now();
+    if (now - __ADD_CAPTION_LAST_TS < 150) {
+      console.log(TAG, 'skip duplicate addCaptionAt');
+      return;
+    }
+    __ADD_CAPTION_LAST_TS = now;
+
     const now = new Date().toISOString();
     const item = {
       id: newId(),

@@ -3,6 +3,11 @@
  * simple helpers for caption pin rendering. Non-fatal if delayed.
  */
 (function(){
+  if (window.__LM_PIN_BRIDGE__ && window.__LM_PIN_BRIDGE__.__ver === 'A1') {
+    console.log('[pin-bridge]', 'already loaded');
+    return;
+  }
+
   const LOG_PREFIX = "[pin-bridge]";
   let bridge = null;
   let armed = false;
@@ -38,4 +43,6 @@
     },
     getBridge: function(){ return tryBind() ? bridge : null; }
   };
+
+  window.__LM_PIN_BRIDGE__ = { __ver: 'A1' };
 })();
