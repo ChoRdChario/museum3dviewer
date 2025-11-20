@@ -526,9 +526,17 @@
   // --- caption creation --------------------------------------------------------
   let preferWorldClicks = false;
   let worldHookInstalled = false;
+  let lastAddAtMs = 0;
 
   function addCaptionAt(x, y, world){
-    const now = new Date().toISOString();
+    const tNow = Date.now();
+    if (tNow - lastAddAtMs < 150) {
+      log('skip duplicate addCaptionAt');
+      return;
+    }
+    lastAddAtMs = tNow;
+
+    const ts = new Date().toISOString();
     const item = {
       id: newId(),
       title: '(untitled)',
@@ -537,8 +545,8 @@
       pos: world || null,
       imageFileId: null,
       image: null,
-      createdAt: now,
-      updatedAt: now,
+      createdAt: ts,
+      updatedAt: ts,
       rowIndex: null
     };
     store.items.push(item);
