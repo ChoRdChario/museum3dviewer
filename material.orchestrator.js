@@ -91,26 +91,26 @@
   }
 
   /**
-   * 0〜1 の opacity を range から読む
-   * - range の min/max が 0〜1 or 0〜100 のどちらでも動くようにする
+   * range 要素から opacity を 0〜1 の値として取得
+   * - min/max が 0〜1 の場合はそのまま
+   * - min/max が 0〜100 の場合は 100 で割って正規化
    */
   function readOpacityFromRange(range) {
     if (!range) return 1;
-
     const raw = Number(range.value);
-    if (Number.isNaN(raw)) return 1;
-
     const min = Number(range.min || '0');
     const max = Number(range.max || '1');
 
+    if (!isFinite(raw)) return 1;
+
+    // 0〜1 っぽい設定
     if (max <= 1.0000001) {
-      // 0〜1 スライダ
       return clamp(raw, 0, 1);
-    } else {
-      // 0〜100 等 -> 0〜1 に正規化
-      const norm = raw / max;
-      return clamp(norm, 0, 1);
     }
+
+    // 0〜100 などのケースを想定して正規化
+    const norm = raw / max;
+    return clamp(norm, 0, 1);
   }
 
   function clamp(v, min, max) {
@@ -161,8 +161,8 @@
 
     const props = {
       opacity,
-      doubleSide: doubleSided,
-      unlit: unlitLike,
+      doubleSided,
+      unlitLike,
       chromaEnable,
       chromaColor,
       chromaTolerance,
@@ -171,12 +171,6 @@
       metalness,
       emissiveHex,
       emissiveIntensity,
-    };
-
-    // デバッグ用にグローバルへも出しておく
-    window.__LM_materialControls = {
-      materialKey: key,
-      props,
     };
 
     return { materialKey: key, props };
@@ -196,6 +190,31 @@
       return;
     }
     bridge.applyMaterialProps(materialKey, props || {});
+  }
+
+  /**
+   * __LM_MATERIALS への永続化
+   * - LM_MaterialsPersist が存在する場合のみ呼び出す
+   * - 非同期だが、呼び出し側は待たない（fire-and-forget）
+   */
+  function persistToSheet(materialKey, props) {
+    const persist = window.LM_MaterialsPersist;
+    if (!persist || typeof persist.upsert !== 'function') {
+      return;
+    }
+    if (!materialKey) return;
+    try {
+      const patch = Object.assign({ materialKey }, props || {});
+      // upsert は Promise を返すが、ここでは結果を待たない
+      const p = persist.upsert(patch);
+      if (p && typeof p.catch === 'function') {
+        p.catch((e) =>
+          console.warn(LOG_PREFIX, 'persistToSheet failed', e)
+        );
+      }
+    } catch (e) {
+      console.warn(LOG_PREFIX, 'persistToSheet threw', e);
+    }
   }
 
   /**
@@ -232,6 +251,8 @@
 
     applyToViewer(state.materialKey, state.props);
     emitChange('lm:material-commit', state);
+    // 永続化は commit タイミングのみ行う（input では行わない）
+    persistToSheet(state.materialKey, state.props);
   }
 
   /**
@@ -298,6 +319,27 @@
       emitChange('lm:material-change', state);
     }
   }
+
+  /**
+   * シーン / ドロップダウンの準備完了後に UI を再バインドするための補助
+   * - DOMContentLoaded 直後に UI がまだ構築されていないケースに対応
+   */
+  function scheduleRebind(reason) {
+    // 既存の ui キャッシュを捨てて再検索させる
+    ui = null;
+    retryCount = 0;
+    console.log(LOG_PREFIX, 'scheduleRebind', reason);
+    bindUI();
+  }
+
+  // scene-ready や material ドロップダウン populate 後にも再バインドしておく
+  window.addEventListener('lm:scene-ready', function () {
+    scheduleRebind('scene-ready');
+  });
+
+  window.addEventListener('lm:mat-dd-populated', function () {
+    scheduleRebind('mat-dd-populated');
+  });
 
   function boot() {
     console.log(LOG_PREFIX, 'loaded VERSION_TAG:V6_XX_MATERIAL_FIX_OPACITY');
