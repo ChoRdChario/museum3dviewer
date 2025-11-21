@@ -35,13 +35,13 @@ function __rebuildMaterialList(){
   const matSet = new Map(); // material -> record
   let idx = 0;
   scene.traverse(obj => {
-    if(obj.isMesh){
+    if (obj && obj.isMesh){
       const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
       for (const mat of mats){
-        if(!mat) continue;
+        if (!mat) continue;
         const baseName = (mat.name || '').trim() || `#${idx}`;
-        const key = baseName;
-        if(!matSet.has(mat)){
+        const key = baseName; // マテリアル名ベースのキー
+        if (!matSet.has(mat)){
           const rec = { index: idx, name: baseName, material: mat, key };
           matSet.set(mat, rec);
           __matList.push(rec);
@@ -51,6 +51,7 @@ function __rebuildMaterialList(){
     }
   });
 }
+
 
 export function listMaterials(){
   __rebuildMaterialList();
@@ -70,10 +71,36 @@ function __snapshotIfNeeded(mesh){
 }
 
 function __hookMaterial(mat){
-  // Simplified: no custom shader patching, just ensure userData exists.
   if (!mat || mat.__lmHooked) return;
   mat.__lmHooked = true;
-  mat.userData = mat.userData || {};
+  mat.userData.__lmUniforms = {
+    uWhiteThr: { value: 0.92 },
+    uBlackThr: { value: 0.08 },
+    uWhiteToAlpha: { value: false },
+    uBlackToAlpha: { value: false },
+    uUnlit: { value: false },
+  };
+  const u = mat.userData.__lmUniforms;
+  mat.onBeforeCompile = (shader)=>{
+    shader.uniforms = { ...shader.uniforms, ...u };
+    // Inject at alpha computation
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <dithering_fragment>', `
+        // LociMyu material hook
+        vec3 lmColor = diffuseColor.rgb;
+        float lmLuma = dot(lmColor, vec3(0.299, 0.587, 0.114));
+        if (uWhiteToAlpha && lmLuma >= uWhiteThr) diffuseColor.a = 0.0;
+        if (uBlackToAlpha && lmLuma <= uBlackThr) diffuseColor.a = 0.0;
+        #include <dithering_fragment>
+      `)
+      .replace('#include <lights_fragment_begin>', `
+        // Unlit toggle
+        if (!uUnlit) {
+          #include <lights_fragment_begin>
+        }
+      `);
+  };
+  mat.needsUpdate = true;
 }
 
 function __allMeshes(){
@@ -92,53 +119,68 @@ function __materialsByKey(materialKey){
   return out;
 }
 
-export function applyMaterialProps(materialKey, props={}){
+export function applyMaterialProps(materialKey, props = {}){
+  if (!materialKey) {
+    console.warn('[viewer.materials] applyMaterialProps called without materialKey');
+    return;
+  }
   __rebuildMaterialList();
   const mats = __materialsByKey(materialKey);
-  if (!mats.length){
+  if (!mats || !mats.length){
     console.warn('[viewer.materials] no materials with key', materialKey);
     return;
   }
+  console.log('[viewer.materials] applyMaterialProps', materialKey, props, 'targets', mats.length);
   for (const mat of mats){
     if (!mat) continue;
-    __hookMaterial(mat); // ensure userData exists / mark hooked
-
-    if ('opacity' in props){
-      const vRaw = Number(props.opacity);
-      if (!isFinite(vRaw)) continue;
-      const v = Math.max(0, Math.min(1, vRaw));
-      mat.opacity = v;
-      mat.transparent = v < 1.0;
-    }
-
-    if ('doubleSide' in props){
-      mat.side = props.doubleSide ? THREE.DoubleSide : THREE.FrontSide;
-    }
-
-    if ('unlit' in props){
-      // Lightweight "unlit-like" handling without custom shader code.
-      const unlit = !!props.unlit;
-      // Many materials in three.js honor .lights/.toneMapped flags
-      if ('lights' in mat) mat.lights = !unlit;
-      if ('toneMapped' in mat) mat.toneMapped = !unlit;
-      // Boost emissive a bit when unlit so it doesn't get too dark
-      if (unlit && mat.emissive && typeof mat.emissiveIntensity === 'number'){
-        if (mat.emissiveIntensity < 1.0) mat.emissiveIntensity = 1.0;
+    if (typeof props.opacity !== 'undefined'){
+      const v = Math.max(0, Math.min(1, Number(props.opacity)));
+      if (!Number.isNaN(v)){
+        mat.opacity = v;
+        mat.transparent = v < 1.0 || !!mat.transparent;
+        mat.needsUpdate = true;
       }
     }
-
-    // chroma-key系の値は一旦 userData に残しておくだけ（将来の安定版フック用）
-    if ('chromaKeyColor' in props || 'chromaKeyTolerance' in props || 'chromaKeyFeather' in props){
-      mat.userData = mat.userData || {};
-      mat.userData.__lm_chroma = mat.userData.__lm_chroma || {};
-      if ('chromaKeyColor' in props) mat.userData.__lm_chroma.color = props.chromaKeyColor;
-      if ('chromaKeyTolerance' in props) mat.userData.__lm_chroma.tolerance = Number(props.chromaKeyTolerance);
-      if ('chromaKeyFeather' in props) mat.userData.__lm_chroma.feather = Number(props.chromaKeyFeather);
+    if (typeof props.doubleSide !== 'undefined'){
+      try{
+        const THREE_NS = window.THREE || (window.viewer && window.viewer.THREE) || null;
+        if (THREE_NS){
+          mat.side = props.doubleSide ? THREE_NS.DoubleSide : THREE_NS.FrontSide;
+          mat.needsUpdate = true;
+        }else{
+          console.warn('[viewer.materials] THREE namespace not found for doubleSide');
+        }
+      }catch(e){
+        console.warn('[viewer.materials] doubleSide apply failed', e);
+      }
     }
-
-    mat.needsUpdate = true;
+    if (typeof props.unlit !== 'undefined' || typeof props.unlitLike !== 'undefined'){
+      const flag = !!(props.unlit ?? props.unlitLike);
+      // 簡易アンリット: ライティングと toneMapping を切る
+      if ('lights' in mat) mat.lights = !flag;
+      if ('toneMapped' in mat) mat.toneMapped = !flag;
+      // emissive があれば少し持ち上げる
+      if (flag && mat.emissive){
+        if (mat.emissiveIntensity !== undefined && mat.emissiveIntensity < 1.0){
+          mat.emissiveIntensity = 1.0;
+        }
+      }
+      mat.needsUpdate = true;
+    }
+    // chroma key 系は一旦保存専用（表示には使わない）
+    const ck = {};
+    if (typeof props.chromaEnable !== 'undefined') ck.enable = !!props.chromaEnable;
+    if (typeof props.chromaColor === 'string')     ck.color = props.chromaColor;
+    if (typeof props.chromaTolerance === 'number') ck.tolerance = props.chromaTolerance;
+    if (typeof props.chromaFeather === 'number')   ck.feather = props.chromaFeather;
+    if (Object.keys(ck).length){
+      mat.userData = mat.userData || {};
+      mat.userData.__lm_chroma = Object.assign(mat.userData.__lm_chroma || {}, ck);
+    }
   }
 }
+
+
 export function resetMaterial(materialKey){
   __rebuildMaterialList();
   const mats = __materialsByKey(materialKey);
