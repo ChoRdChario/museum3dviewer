@@ -14,58 +14,31 @@
   // pm-* ベースの現在状態（単純化：まずは opacity のみ扱う）
   let currentMaterialKey = '';
   // sheetPersist 経由で復元された「マテリアル → opacity」マップ
-  const materialOpacity = new Map(); // key: materialKey, value: number
+  const materialOpacity = new Map();
+  // 現在 UI 上で扱っている opacity
   let currentOpacity = 1;
-  let pmEventsWired = false;
 
   /**
-   * DOM から UI 要素を取得
-   * - なるべく canonical な ID (#materialSelect / #opacityRange)
-   * - 無ければ pm-* をフォールバックとして見る
+   * UI 要素の取得
    */
   function queryUI() {
-    const materialSelect =
-      document.getElementById('materialSelect') ||
-      document.getElementById('pm-material');
+    const materialSelect = document.querySelector('#mat-material-select');
+    const opacityRange = document.querySelector('#mat-opacity-range');
 
-    const opacityRange =
-      document.getElementById('opacityRange') ||
-      document.getElementById('pm-opacity-range');
+    const chkDoubleSided = document.querySelector('#mat-double-sided');
+    const chkUnlitLike = document.querySelector('#mat-unlit-like');
 
-    // 将来拡張用のコントロールは存在すれば拾う（無ければ undefined のまま）
-    const chkDoubleSided =
-      document.getElementById('matDoubleSided') ||
-      document.getElementById('materialDoubleSided');
-    const chkUnlitLike =
-      document.getElementById('matUnlitLike') ||
-      document.getElementById('materialUnlitLike');
+    const chkChromaEnable = document.querySelector('#mat-chroma-enable');
+    const inpChromaColor = document.querySelector('#mat-chroma-color');
+    const rngChromaTolerance = document.querySelector('#mat-chroma-tolerance');
+    const rngChromaFeather = document.querySelector('#mat-chroma-feather');
 
-    const chkChromaEnable =
-      document.getElementById('matChromaEnable') ||
-      document.getElementById('chromaEnable');
-    const inpChromaColor =
-      document.getElementById('matChromaColor') ||
-      document.getElementById('chromaColor');
-    const rngChromaTolerance =
-      document.getElementById('matChromaTolerance') ||
-      document.getElementById('chromaTolerance');
-    const rngChromaFeather =
-      document.getElementById('matChromaFeather') ||
-      document.getElementById('chromaFeather');
-
-    const rngRoughness =
-      document.getElementById('matRoughness') ||
-      document.getElementById('roughnessRange');
-    const rngMetalness =
-      document.getElementById('matMetalness') ||
-      document.getElementById('metalnessRange');
-
-    const inpEmissiveHex =
-      document.getElementById('matEmissiveHex') ||
-      document.getElementById('emissiveHex');
-    const rngEmissiveIntensity =
-      document.getElementById('matEmissiveIntensity') ||
-      document.getElementById('emissiveIntensityRange');
+    const rngRoughness = document.querySelector('#mat-roughness-range');
+    const rngMetalness = document.querySelector('#mat-metalness-range');
+    const inpEmissiveHex = document.querySelector('#mat-emissive-hex');
+    const rngEmissiveIntensity = document.querySelector(
+      '#mat-emissive-intensity-range'
+    );
 
     return {
       materialSelect,
@@ -81,43 +54,6 @@
       inpEmissiveHex,
       rngEmissiveIntensity,
     };
-  }
-
-  /**
-   * dropdown から materialKey を取得
-   */
-  function getSelectedMaterialKey(materialSelect) {
-    if (!materialSelect) return '';
-
-    const opt = materialSelect.options[materialSelect.selectedIndex];
-    if (!opt) return '';
-
-    return (
-      (opt.dataset && opt.dataset.materialKey) ||
-      opt.value ||
-      opt.textContent ||
-      ''
-    ).trim();
-  }
-
-  /**
-   * range 要素から opacity を 0〜1 の値として取得
-   */
-  function readOpacityFromRange(range) {
-    if (!range) return 1;
-    const raw = Number(range.value);
-    const max = Number(range.max || '1');
-
-    if (!isFinite(raw)) return 1;
-
-    // 0〜1 っぽい設定
-    if (max <= 1.0000001) {
-      return clamp(raw, 0, 1);
-    }
-
-    // 0〜100 などのケースを想定して正規化
-    const norm = raw / max;
-    return clamp(norm, 0, 1);
   }
 
   function clamp(v, min, max) {
@@ -159,7 +95,6 @@
     const metalness = ui.rngMetalness
       ? Number(ui.rngMetalness.value || '0')
       : 0;
-
     const emissiveHex = ui.inpEmissiveHex
       ? ui.inpEmissiveHex.value || '#000000'
       : '#000000';
@@ -201,24 +136,19 @@
   }
 
   /**
-   * __LM_MATERIALS への永続化
-   * - LM_MaterialsPersist が存在する場合のみ呼び出す
-   * - 非同期だが、呼び出し側は待たない（fire-and-forget）
+   * シート永続化レイヤーへの委譲
    */
   function persistToSheet(materialKey, props) {
-    const persist = window.LM_MaterialsPersist;
-    if (!persist || typeof persist.upsert !== 'function') {
-      return;
-    }
-    if (!materialKey) return;
     try {
-      const patch = Object.assign({ materialKey }, props || {});
-      const p = persist.upsert(patch);
-      if (p && typeof p.catch === 'function') {
-        p.catch((e) =>
-          console.warn(LOG_PREFIX, 'persistToSheet failed', e)
-        );
+      const persist = window.LM_MaterialsPersist;
+      if (!persist || typeof persist.upsert !== 'function') {
+        console.warn(LOG_PREFIX, 'LM_MaterialsPersist not ready');
+        return;
       }
+      persist.upsert({
+        materialKey,
+        ...props,
+      });
     } catch (e) {
       console.warn(LOG_PREFIX, 'persistToSheet threw', e);
     }
@@ -239,11 +169,28 @@
     );
   }
 
+  function getSelectedMaterialKey(selectEl) {
+    if (!selectEl) return '';
+    const opt = selectEl.selectedOptions
+      ? selectEl.selectedOptions[0]
+      : selectEl.options[selectEl.selectedIndex];
+
+    if (!opt) return '';
+    // option.value を materialKey として扱う（viewer 側と一致している前提）
+    return (opt.value || '').trim();
+  }
+
+  function readOpacityFromRange(rangeEl) {
+    if (!rangeEl) return currentOpacity;
+    const v = Number(rangeEl.value || '1');
+    if (!isFinite(v)) return currentOpacity;
+    return clamp(v, 0, 1);
+  }
+
   /**
    * 現在の state を元に viewer へ apply するヘルパー
    * - opacity は currentOpacity を優先（明示 override があればそれ）
    */
-  
   function applyState(key, opacityOverride) {
     if (!key) {
       console.warn(LOG_PREFIX, 'applyState called with empty key');
@@ -281,12 +228,12 @@
 
     var props = { opacity: newOpacity };
 
+    // シートへの保存はここでは行わない。
+    // ドラッグ終了や明示コミット時に、呼び出し側(onPmOpacityChange 等)で persistToSheet を呼ぶ。
     applyToViewer(key, props);
-    persistToSheet(key, props);
 
     return { materialKey: key, props: props };
   }
-
 
   // ===== DOM ベースのフォールバック（旧来の oninput/onchange） =====
 
@@ -334,13 +281,12 @@
       );
       if (retryCount++ < RETRY_MAX) {
         setTimeout(bindUI, RETRY_MS);
-      } else {
-        console.error(LOG_PREFIX, 'ui init failed (max retries)');
       }
       return;
     }
 
-    // 既存のリスナがあっても二重にならないように一旦 remove してから add
+    retryCount = 0;
+
     materialSelect.removeEventListener('change', onControlCommit);
     materialSelect.addEventListener('change', onControlCommit, {
       passive: true,
@@ -358,35 +304,19 @@
       materialSelect: !!materialSelect,
       opacityRange: !!opacityRange,
     });
-
-    // 初期状態を一度適用（materialKey が空なら何もしない）
-    const state = collectControls();
-    if (state.materialKey) {
-      currentMaterialKey = state.materialKey;
-      currentOpacity = typeof state.props.opacity === 'number'
-        ? clamp(state.props.opacity, 0, 1)
-        : currentOpacity;
-      applyToViewer(state.materialKey, state.props);
-      emitChange('lm:material-change', state);
-    }
   }
 
   /**
-   * シーン / ドロップダウンの準備完了後に UI を再バインドするための補助
+   * 再バインドを少し遅延させて行う
    */
   function scheduleRebind(reason) {
-    ui = null;
-    retryCount = 0;
     console.log(LOG_PREFIX, 'scheduleRebind', reason);
-    bindUI();
+    setTimeout(bindUI, 0);
   }
 
-  // ===== pm-* ベースのイベント駆動ライン（本命） =====
+  // ===== pm-* イベントベースの経路 =====
 
   function wirePmEvents() {
-    if (pmEventsWired) return;
-    pmEventsWired = true;
-
     window.addEventListener('lm:pm-material-selected', onPmMaterialSelected);
     window.addEventListener('lm:pm-opacity-input', onPmOpacityInput);
     window.addEventListener('lm:pm-opacity-change', onPmOpacityChange);
@@ -408,7 +338,7 @@
 
     console.log(LOG_PREFIX, 'pm-material-selected', detail, '=>', state);
     emitChange('lm:material-commit', state);
-    persistToSheet(state.materialKey, state.props);
+    // 単なる選択時は保存しない（編集が行われたタイミングで persistToSheet を呼ぶ）
   }
 
   function onPmOpacityInput(e) {
@@ -441,6 +371,7 @@
 
     console.log(LOG_PREFIX, 'pm-opacity-change', detail, '=>', state.props.opacity);
     emitChange('lm:material-commit', state);
+    // ドラッグ終了時（change）にだけシートへ保存する
     persistToSheet(state.materialKey, state.props);
   }
 
