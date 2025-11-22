@@ -13,6 +13,8 @@
 
   // pm-* ベースの現在状態（単純化：まずは opacity のみ扱う）
   let currentMaterialKey = '';
+  // sheetPersist 経由で復元された「マテリアル → opacity」マップ
+  const materialOpacity = new Map(); // key: materialKey, value: number
   let currentOpacity = 1;
   let pmEventsWired = false;
 
@@ -241,23 +243,50 @@
    * 現在の state を元に viewer へ apply するヘルパー
    * - opacity は currentOpacity を優先（明示 override があればそれ）
    */
-  function applyState(materialKeyOverride, opacityOverride) {
-    const key = (materialKeyOverride || currentMaterialKey || '').trim();
-    if (!key) return null;
-
-    let opacity = currentOpacity;
-    if (typeof opacityOverride === 'number' && isFinite(opacityOverride)) {
-      opacity = clamp(opacityOverride, 0, 1);
+  
+  function applyState(key, opacityOverride) {
+    if (!key) {
+      console.warn(LOG_PREFIX, 'applyState called with empty key');
+      return null;
     }
 
-    const props = {
-      opacity,
-      // 将来ここに他のプロパティも集約（今は opacity 中心）
-    };
+    // 優先度:
+    //  1) 呼び出し元からの opacityOverride
+    //  2) materialOpacity マップに保存されている値
+    //  3) デフォルト値 1
+    var baseOpacity;
+    if (typeof opacityOverride === 'number') {
+      baseOpacity = clamp(opacityOverride, 0, 1);
+    } else if (materialOpacity.has(key)) {
+      baseOpacity = materialOpacity.get(key);
+    } else {
+      baseOpacity = 1;
+    }
+
+    var newOpacity = baseOpacity;
+
+    // 状態を更新
+    materialOpacity.set(key, newOpacity);
+    currentMaterialKey = key;
+    currentOpacity = newOpacity;
+
+    // UI コントロールに反映（プルダウン切り替え時など）
+    try {
+      if (typeof opacityRange !== 'undefined' && opacityRange) {
+        opacityRange.value = String(newOpacity);
+      }
+    } catch (e) {
+      console.warn(LOG_PREFIX, 'failed to sync opacityRange', e);
+    }
+
+    var props = { opacity: newOpacity };
 
     applyToViewer(key, props);
-    return { materialKey: key, props };
+    persistToSheet(key, props);
+
+    return { materialKey: key, props: props };
   }
+
 
   // ===== DOM ベースのフォールバック（旧来の oninput/onchange） =====
 
