@@ -1,7 +1,7 @@
 // material.orchestrator.js
-// LociMyu material UI orchestrator (rebuild)
+// LociMyu material UI orchestrator
 // UI と viewer.bridge・各種保存ロジックの仲立ちを行う
-// VERSION_TAG: V6_XX_MATERIAL_FIX_OPACITY
+// VERSION_TAG: V6_XX_MATERIAL_FIX_OPACITY_PM_EVENTS
 
 (function () {
   const LOG_PREFIX = '[mat-orch]';
@@ -11,14 +11,26 @@
   let ui = null;
   let retryCount = 0;
 
+  // pm-* ベースの現在状態（単純化：まずは opacity のみ扱う）
+  let currentMaterialKey = '';
+  let currentOpacity = 1;
+  let pmEventsWired = false;
+
   /**
    * DOM から UI 要素を取得
+   * - なるべく canonical な ID (#materialSelect / #opacityRange)
+   * - 無ければ pm-* をフォールバックとして見る
    */
   function queryUI() {
-    const materialSelect = document.getElementById('materialSelect');
-    const opacityRange = document.getElementById('opacityRange');
+    const materialSelect =
+      document.getElementById('materialSelect') ||
+      document.getElementById('pm-material');
 
-    // 他のコントロールは存在すれば拾う（無ければ undefined のまま）
+    const opacityRange =
+      document.getElementById('opacityRange') ||
+      document.getElementById('pm-opacity-range');
+
+    // 将来拡張用のコントロールは存在すれば拾う（無ければ undefined のまま）
     const chkDoubleSided =
       document.getElementById('matDoubleSided') ||
       document.getElementById('materialDoubleSided');
@@ -71,10 +83,6 @@
 
   /**
    * dropdown から materialKey を取得
-   * - data-material-key
-   * - value
-   * - textContent
-   * の順で見る
    */
   function getSelectedMaterialKey(materialSelect) {
     if (!materialSelect) return '';
@@ -92,13 +100,10 @@
 
   /**
    * range 要素から opacity を 0〜1 の値として取得
-   * - min/max が 0〜1 の場合はそのまま
-   * - min/max が 0〜100 の場合は 100 で割って正規化
    */
   function readOpacityFromRange(range) {
     if (!range) return 1;
     const raw = Number(range.value);
-    const min = Number(range.min || '0');
     const max = Number(range.max || '1');
 
     if (!isFinite(raw)) return 1;
@@ -121,6 +126,7 @@
    * 現在の UI 状態を 1 つのオブジェクトにまとめる
    * - materialKey
    * - props (viewer.applyMaterialProps に渡す)
+   *   ※ 将来的に opacity 以外もここに集約
    */
   function collectControls() {
     if (!ui) ui = queryUI();
@@ -205,7 +211,6 @@
     if (!materialKey) return;
     try {
       const patch = Object.assign({ materialKey }, props || {});
-      // upsert は Promise を返すが、ここでは結果を待たない
       const p = persist.upsert(patch);
       if (p && typeof p.catch === 'function') {
         p.catch((e) =>
@@ -233,13 +238,37 @@
   }
 
   /**
-   * UI の input/change イベントハンドラ
-   * - input: viewer へ即反映 + lm:material-change
-   * - change: viewer へ反映 + lm:material-commit（保存トリガ）
+   * 現在の state を元に viewer へ apply するヘルパー
+   * - opacity は currentOpacity を優先（明示 override があればそれ）
    */
+  function applyState(materialKeyOverride, opacityOverride) {
+    const key = (materialKeyOverride || currentMaterialKey || '').trim();
+    if (!key) return null;
+
+    let opacity = currentOpacity;
+    if (typeof opacityOverride === 'number' && isFinite(opacityOverride)) {
+      opacity = clamp(opacityOverride, 0, 1);
+    }
+
+    const props = {
+      opacity,
+      // 将来ここに他のプロパティも集約（今は opacity 中心）
+    };
+
+    applyToViewer(key, props);
+    return { materialKey: key, props };
+  }
+
+  // ===== DOM ベースのフォールバック（旧来の oninput/onchange） =====
+
   function onControlInput() {
     const state = collectControls();
     if (!state.materialKey) return;
+
+    currentMaterialKey = state.materialKey || currentMaterialKey;
+    currentOpacity = typeof state.props.opacity === 'number'
+      ? clamp(state.props.opacity, 0, 1)
+      : currentOpacity;
 
     applyToViewer(state.materialKey, state.props);
     emitChange('lm:material-change', state);
@@ -249,14 +278,19 @@
     const state = collectControls();
     if (!state.materialKey) return;
 
+    currentMaterialKey = state.materialKey || currentMaterialKey;
+    currentOpacity = typeof state.props.opacity === 'number'
+      ? clamp(state.props.opacity, 0, 1)
+      : currentOpacity;
+
     applyToViewer(state.materialKey, state.props);
     emitChange('lm:material-commit', state);
-    // 永続化は commit タイミングのみ行う（input では行わない）
-    persistToSheet(state.materialKey, state.props);
+    // 永続化は pm-events 側（lm:pm-opacity-change 等）で行う想定
+    // ここでは保存しない（将来 runtime.patch が無い環境をサポートするならここで persistToSheet を呼ぶ）
   }
 
   /**
-   * UI イベントの配線
+   * UI イベントの配線（フォールバック用）
    */
   function bindUI() {
     if (!ui) ui = queryUI();
@@ -288,33 +322,21 @@
     opacityRange.addEventListener('input', onControlInput, { passive: true });
     opacityRange.addEventListener('change', onControlCommit, { passive: true });
 
-    // 他のコントロールもあればまとめて change で commit 扱い
-    const commitTargets = [
-      ui.chkDoubleSided,
-      ui.chkUnlitLike,
-      ui.chkChromaEnable,
-      ui.inpChromaColor,
-      ui.rngChromaTolerance,
-      ui.rngChromaFeather,
-      ui.rngRoughness,
-      ui.rngMetalness,
-      ui.inpEmissiveHex,
-      ui.rngEmissiveIntensity,
-    ].filter(Boolean);
-
-    commitTargets.forEach((el) => {
-      el.removeEventListener('change', onControlCommit);
-      el.addEventListener('change', onControlCommit, { passive: true });
-    });
+    // 初期 opacity を UI から拾って state に反映しておく
+    currentOpacity = readOpacityFromRange(opacityRange);
 
     console.log(LOG_PREFIX, 'ui bound', {
       materialSelect: !!materialSelect,
       opacityRange: !!opacityRange,
     });
 
-    // 初期状態を一度適用
+    // 初期状態を一度適用（materialKey が空なら何もしない）
     const state = collectControls();
     if (state.materialKey) {
+      currentMaterialKey = state.materialKey;
+      currentOpacity = typeof state.props.opacity === 'number'
+        ? clamp(state.props.opacity, 0, 1)
+        : currentOpacity;
       applyToViewer(state.materialKey, state.props);
       emitChange('lm:material-change', state);
     }
@@ -322,15 +344,78 @@
 
   /**
    * シーン / ドロップダウンの準備完了後に UI を再バインドするための補助
-   * - DOMContentLoaded 直後に UI がまだ構築されていないケースに対応
    */
   function scheduleRebind(reason) {
-    // 既存の ui キャッシュを捨てて再検索させる
     ui = null;
     retryCount = 0;
     console.log(LOG_PREFIX, 'scheduleRebind', reason);
     bindUI();
   }
+
+  // ===== pm-* ベースのイベント駆動ライン（本命） =====
+
+  function wirePmEvents() {
+    if (pmEventsWired) return;
+    pmEventsWired = true;
+
+    window.addEventListener('lm:pm-material-selected', onPmMaterialSelected);
+    window.addEventListener('lm:pm-opacity-input', onPmOpacityInput);
+    window.addEventListener('lm:pm-opacity-change', onPmOpacityChange);
+
+    console.log(LOG_PREFIX, 'pm-events wired');
+  }
+
+  function onPmMaterialSelected(e) {
+    const detail = (e && e.detail) || {};
+    const key = (detail.key || '').trim();
+    if (!key) {
+      currentMaterialKey = '';
+      return;
+    }
+    currentMaterialKey = key;
+
+    const state = applyState(currentMaterialKey);
+    if (!state) return;
+
+    console.log(LOG_PREFIX, 'pm-material-selected', detail, '=>', state);
+    emitChange('lm:material-commit', state);
+    persistToSheet(state.materialKey, state.props);
+  }
+
+  function onPmOpacityInput(e) {
+    if (!currentMaterialKey) return;
+    const detail = (e && e.detail) || {};
+    const v =
+      typeof detail.value === 'number' && isFinite(detail.value)
+        ? clamp(detail.value, 0, 1)
+        : currentOpacity;
+
+    currentOpacity = v;
+    const state = applyState(currentMaterialKey, currentOpacity);
+    if (!state) return;
+
+    console.log(LOG_PREFIX, 'pm-opacity-input', detail, '=>', state.props.opacity);
+    emitChange('lm:material-change', state);
+  }
+
+  function onPmOpacityChange(e) {
+    if (!currentMaterialKey) return;
+    const detail = (e && e.detail) || {};
+    const v =
+      typeof detail.value === 'number' && isFinite(detail.value)
+        ? clamp(detail.value, 0, 1)
+        : currentOpacity;
+
+    currentOpacity = v;
+    const state = applyState(currentMaterialKey, currentOpacity);
+    if (!state) return;
+
+    console.log(LOG_PREFIX, 'pm-opacity-change', detail, '=>', state.props.opacity);
+    emitChange('lm:material-commit', state);
+    persistToSheet(state.materialKey, state.props);
+  }
+
+  // ===== イベントフック =====
 
   // scene-ready や material ドロップダウン populate 後にも再バインドしておく
   window.addEventListener('lm:scene-ready', function () {
@@ -342,7 +427,8 @@
   });
 
   function boot() {
-    console.log(LOG_PREFIX, 'loaded VERSION_TAG:V6_XX_MATERIAL_FIX_OPACITY');
+    console.log(LOG_PREFIX, 'loaded VERSION_TAG:V6_XX_MATERIAL_FIX_OPACITY_PM_EVENTS');
+    wirePmEvents();
     bindUI();
   }
 
