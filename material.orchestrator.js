@@ -7,6 +7,7 @@
   const LOG_PREFIX = '[mat-orch]';
   const RETRY_MS = 250;
   const RETRY_MAX = 40;
+  const MATERIALS_RANGE = '__LM_MATERIALS!A:N';
 
   let ui = null;
   let retryCount = 0;
@@ -14,9 +15,16 @@
   // pm-* ベースの現在状態（単純化：まずは opacity のみ扱う）
   let currentMaterialKey = '';
   // sheetPersist 経由で復元された「マテリアル → opacity」マップ
-  const materialOpacity = new Map(); // key: materialKey, value: number
+  const sessionMaterialState = new Map(); // key: materialKey, value: props
   let currentOpacity = 1;
   let pmEventsWired = false;
+  let defaultProps = null;
+
+  // シートコンテキストごとのキャッシュ
+  let currentSheetGid = '';
+  let currentSheetCtx = null;
+  const sheetMaterialCache = new Map(); // sheetGid -> Map(materialKey -> props)
+  let sheetCacheLoading = null;
 
   /**
    * DOM から UI 要素を取得
@@ -146,6 +154,26 @@
     }
   }
 
+  function applyPropsToUI(props) {
+    if (!ui) ui = queryUI();
+    const base = Object.assign({}, ensureDefaultProps(), props || {});
+
+    if (ui.opacityRange) writeOpacityToRange(ui.opacityRange, base.opacity);
+    if (ui.chkDoubleSided) ui.chkDoubleSided.checked = !!base.doubleSided;
+    if (ui.chkUnlitLike) ui.chkUnlitLike.checked = !!base.unlitLike;
+    if (ui.chkChromaEnable) ui.chkChromaEnable.checked = !!base.chromaEnable;
+    if (ui.inpChromaColor) ui.inpChromaColor.value = base.chromaColor;
+    if (ui.rngChromaTolerance)
+      ui.rngChromaTolerance.value = String(base.chromaTolerance);
+    if (ui.rngChromaFeather)
+      ui.rngChromaFeather.value = String(base.chromaFeather);
+    if (ui.rngRoughness) ui.rngRoughness.value = String(base.roughness);
+    if (ui.rngMetalness) ui.rngMetalness.value = String(base.metalness);
+    if (ui.inpEmissiveHex) ui.inpEmissiveHex.value = base.emissiveHex;
+    if (ui.rngEmissiveIntensity)
+      ui.rngEmissiveIntensity.value = String(base.emissiveIntensity);
+  }
+
   /**
    * 現在の UI 状態を 1 つのオブジェクトにまとめる
    * - materialKey
@@ -204,6 +232,24 @@
     };
 
     return { materialKey: key, props };
+  }
+
+  function ensureDefaultProps() {
+    if (defaultProps) return defaultProps;
+    defaultProps = {
+      opacity: 1,
+      doubleSided: false,
+      unlitLike: false,
+      chromaEnable: false,
+      chromaColor: '#000000',
+      chromaTolerance: 0,
+      chromaFeather: 0,
+      roughness: 0,
+      metalness: 0,
+      emissiveHex: '#000000',
+      emissiveIntensity: 0,
+    };
+    return defaultProps;
   }
 
   /**
@@ -293,48 +339,178 @@
    * - opacity は currentOpacity を優先（明示 override があればそれ）
    */
   function applyState(key, opacityOverride) {
+    return applyStateWithOptions(key, opacityOverride, { persist: true });
+  }
+
+  function applyStateWithOptions(
+    key,
+    opacityOverride,
+    { persist = true, useCache = true } = {}
+  ) {
     if (!key) {
       console.warn(LOG_PREFIX, 'applyState called with empty key');
       return null;
     }
 
-    // 優先度:
-    //  1) 呼び出し元からの opacityOverride
-    //  2) materialOpacity マップに保存されている値
-    //  3) デフォルト値 1
-    let baseOpacity;
+    const defaults = ensureDefaultProps();
+    const cache = useCache ? getCurrentSheetMap() : null;
+    const cachedProps = cache ? cache.get(key) : null;
+    const prevSession = sessionMaterialState.get(key) || {};
+
+    const props = Object.assign({}, defaults, cachedProps || {}, prevSession);
+
     if (typeof opacityOverride === 'number') {
-      baseOpacity = clamp(opacityOverride, 0, 1);
-    } else if (materialOpacity.has(key)) {
-      baseOpacity = materialOpacity.get(key);
+      props.opacity = clamp(opacityOverride, 0, 1);
     } else {
-      baseOpacity = 1;
+      props.opacity = clamp(props.opacity, 0, 1);
     }
 
-    const newOpacity = baseOpacity;
-
-    // 状態を更新
-    materialOpacity.set(key, newOpacity);
     currentMaterialKey = key;
-    currentOpacity = newOpacity;
+    currentOpacity = props.opacity;
 
-    // UI コントロールに反映（プルダウン切り替え時など）
-    try {
-      if (!ui) ui = queryUI();
-      const range = ui && ui.opacityRange;
-      if (range) {
-        writeOpacityToRange(range, newOpacity);
-      }
-    } catch (e) {
-      console.warn(LOG_PREFIX, 'failed to sync opacityRange', e);
-    }
-
-    const props = { opacity: newOpacity };
+    applyPropsToUI(props);
 
     applyToViewer(key, props);
-    persistToSheet(key, props);
+    sessionMaterialState.set(key, Object.assign({}, props));
+    if (persist) {
+      persistToSheet(key, props);
+    }
 
     return { materialKey: key, props: props };
+  }
+
+  // ===== シートコンテキスト / __LM_MATERIALS キャッシュ =====
+
+  function getActiveSheetGid() {
+    const gid =
+      window.__LM_ACTIVE_SHEET_GID ||
+      (window.__LM_SHEET_CTX && window.__LM_SHEET_CTX.sheetGid) ||
+      '';
+    return String(gid || '');
+  }
+
+  function getCurrentSheetMap() {
+    const gid = currentSheetGid || getActiveSheetGid();
+    if (!gid) return null;
+    return sheetMaterialCache.get(String(gid)) || null;
+  }
+
+  function ensureSheetCache(ctx) {
+    const gid = String((ctx && ctx.sheetGid) || currentSheetGid || getActiveSheetGid() || '');
+    if (!gid) return Promise.resolve(null);
+
+    const cached = sheetMaterialCache.get(gid);
+    if (cached) return Promise.resolve(cached);
+
+    if (sheetCacheLoading) return sheetCacheLoading;
+
+    const promise = loadMaterialsForSheet(ctx || currentSheetCtx || window.__LM_SHEET_CTX).then((map) => {
+      if (gid !== (currentSheetGid || getActiveSheetGid())) return null;
+      sheetMaterialCache.set(gid, map);
+      return map;
+    });
+
+    sheetCacheLoading = promise.finally(() => {
+      if (sheetCacheLoading === promise) sheetCacheLoading = null;
+    });
+
+    return promise;
+  }
+
+  function rowToObj(row) {
+    return {
+      materialKey: row[0] || '',
+      opacity: row[1] !== undefined ? parseFloat(row[1]) : 1,
+      doubleSided: (row[2] || '').toString().toUpperCase() === 'TRUE',
+      unlitLike: (row[3] || '').toString().toUpperCase() === 'TRUE',
+      chromaEnable: (row[4] || '').toString().toUpperCase() === 'TRUE',
+      chromaColor: row[5] || '#000000',
+      chromaTolerance: parseFloat(row[6] || '0'),
+      chromaFeather: parseFloat(row[7] || '0'),
+      roughness: row[8] || '',
+      metalness: row[9] || '',
+      emissiveHex: row[10] || '',
+      emissiveIntensity: 0,
+      sheetGid: row[13] || '',
+    };
+  }
+
+  function buildMap(rows, sheetGid) {
+    const exact = new Map();
+    const fallback = new Map();
+    for (let i = 1; i < rows.length; i++) {
+      const o = rowToObj(rows[i]);
+      if (!o.materialKey) continue;
+      if (String(o.sheetGid) === String(sheetGid)) {
+        exact.set(o.materialKey, o);
+      } else if (o.sheetGid === '' && !fallback.has(o.materialKey)) {
+        fallback.set(o.materialKey, o);
+      }
+    }
+    const m = new Map(fallback);
+    for (const [k, v] of exact) m.set(k, v);
+    return m;
+  }
+
+  async function fetchMaterialsTable(spreadsheetId) {
+    const fetchAuth = window.__lm_fetchJSONAuth;
+    if (typeof fetchAuth !== 'function') {
+      console.warn(LOG_PREFIX, '__lm_fetchJSONAuth missing; skip material fetch');
+      return [];
+    }
+    const range = encodeURIComponent(MATERIALS_RANGE);
+    const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${range}`;
+    const got = await fetchAuth(url);
+    return got && got.values ? got.values : [];
+  }
+
+  async function loadMaterialsForSheet(ctx) {
+    if (!ctx || !ctx.spreadsheetId) return new Map();
+    try {
+      const rows = await fetchMaterialsTable(ctx.spreadsheetId);
+      return buildMap(rows, ctx.sheetGid ?? '');
+    } catch (e) {
+      console.warn(LOG_PREFIX, 'loadMaterialsForSheet failed', e);
+      return new Map();
+    }
+  }
+
+  function refreshSheetCache(ctx) {
+    const gid = String((ctx && ctx.sheetGid) || '');
+    currentSheetCtx = ctx || null;
+    currentSheetGid = gid;
+    sessionMaterialState.clear();
+    sheetMaterialCache.delete(gid);
+    sheetCacheLoading = null;
+
+    applyPropsToUI(ensureDefaultProps());
+    currentOpacity = ensureDefaultProps().opacity;
+
+    const selectedKey = (() => {
+      try {
+        if (!ui) ui = queryUI();
+        return getSelectedMaterialKey(ui.materialSelect);
+      } catch (e) {
+        console.warn(LOG_PREFIX, 'failed to read selected key on sheet change', e);
+        return '';
+      }
+    })();
+
+    const promise = ensureSheetCache(ctx);
+    sheetCacheLoading = promise;
+
+    promise
+      .then(() => {
+        if (!selectedKey || currentSheetGid !== gid) return;
+        const state = applyStateWithOptions(selectedKey, undefined, {
+          persist: false,
+          useCache: true,
+        });
+        if (state) {
+          emitChange('lm:material-change', state);
+        }
+      })
+      .catch((e) => console.warn(LOG_PREFIX, 'refreshSheetCache failed', e));
   }
 
   // ===== DOM ベースのフォールバック（旧来の oninput/onchange） =====
@@ -349,6 +525,7 @@
         ? clamp(state.props.opacity, 0, 1)
         : currentOpacity;
 
+    sessionMaterialState.set(state.materialKey, Object.assign({}, state.props));
     applyToViewer(state.materialKey, state.props);
     emitChange('lm:material-change', state);
   }
@@ -363,6 +540,7 @@
         ? clamp(state.props.opacity, 0, 1)
         : currentOpacity;
 
+    sessionMaterialState.set(state.materialKey, Object.assign({}, state.props));
     applyToViewer(state.materialKey, state.props);
     emitChange('lm:material-commit', state);
     // 永続化は pm-events 側（lm:pm-opacity-change 等）で行う想定
@@ -376,6 +554,8 @@
     if (!ui) ui = queryUI();
 
     const { materialSelect, opacityRange } = ui;
+
+    ensureDefaultProps();
 
     if (!materialSelect || !opacityRange) {
       console.warn(
@@ -413,13 +593,14 @@
     // 初期状態を一度適用（materialKey が空なら何もしない）
     const state = collectControls();
     if (state.materialKey) {
-      currentMaterialKey = state.materialKey;
-      currentOpacity =
-        typeof state.props.opacity === 'number'
-          ? clamp(state.props.opacity, 0, 1)
-          : currentOpacity;
-      applyToViewer(state.materialKey, state.props);
-      emitChange('lm:material-change', state);
+      sessionMaterialState.set(state.materialKey, Object.assign({}, state.props));
+      const applied = applyStateWithOptions(state.materialKey, state.props.opacity, {
+        persist: false,
+        useCache: true,
+      });
+      if (applied) {
+        emitChange('lm:material-change', applied);
+      }
     }
   }
 
@@ -455,12 +636,22 @@
     }
     currentMaterialKey = key;
 
-    const state = applyState(currentMaterialKey);
-    if (!state) return;
+    const applyFromCache = () => {
+      const state = applyStateWithOptions(currentMaterialKey, undefined, {
+        persist: false,
+        useCache: true,
+      });
+      if (!state) return;
 
-    console.log(LOG_PREFIX, 'pm-material-selected', detail, '=>', state);
-    emitChange('lm:material-commit', state);
-    persistToSheet(state.materialKey, state.props);
+      console.log(LOG_PREFIX, 'pm-material-selected', detail, '=>', state);
+      emitChange('lm:material-commit', state);
+    };
+
+    ensureSheetCache(currentSheetCtx)
+      .then(applyFromCache)
+      .catch((err) =>
+        console.warn(LOG_PREFIX, 'apply after sheet load failed', err)
+      );
   }
 
   function onPmOpacityInput(e) {
@@ -472,7 +663,10 @@
         : currentOpacity;
 
     currentOpacity = v;
-    const state = applyState(currentMaterialKey, currentOpacity);
+    const state = applyStateWithOptions(currentMaterialKey, currentOpacity, {
+      persist: false,
+      useCache: true,
+    });
     if (!state) return;
 
     console.log(
@@ -494,7 +688,10 @@
         : currentOpacity;
 
     currentOpacity = v;
-    const state = applyState(currentMaterialKey, currentOpacity);
+    const state = applyStateWithOptions(currentMaterialKey, currentOpacity, {
+      persist: true,
+      useCache: true,
+    });
     if (!state) return;
 
     console.log(
@@ -505,10 +702,18 @@
       state.props.opacity
     );
     emitChange('lm:material-commit', state);
-    persistToSheet(state.materialKey, state.props);
   }
 
   // ===== イベントフック =====
+
+  function onSheetContext(e) {
+    const detail = (e && e.detail) || {};
+    refreshSheetCache(detail);
+  }
+
+  // save.locator.js など document.dispatchEvent で送出するケースを拾う
+  document.addEventListener('lm:sheet-context', onSheetContext);
+  window.addEventListener('lm:sheet-context', onSheetContext);
 
   // scene-ready や material ドロップダウン populate 後にも再バインドしておく
   window.addEventListener('lm:scene-ready', function () {
@@ -525,6 +730,9 @@
       'loaded VERSION_TAG:V6_XX_MATERIAL_FIX_OPACITY_SYNC_UI'
     );
     wirePmEvents();
+    if (window.__LM_SHEET_CTX) {
+      refreshSheetCache(window.__LM_SHEET_CTX);
+    }
     bindUI();
   }
 
