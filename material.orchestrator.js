@@ -1,7 +1,3 @@
-{
-type: uploaded file
-fileName: material.orchestrator.js
-fullContent:
 // material.orchestrator.js
 // LociMyu material UI orchestrator (Unified)
 // Integrates full-scene application (replacing auto.apply.js) and direct DOM event handling.
