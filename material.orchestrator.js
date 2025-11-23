@@ -113,6 +113,15 @@
     }
   }
 
+  function persistAndCache(key, props) {
+    if (!key) return;
+    persistToSheet(key, props);
+
+    const cache = sheetMaterialCache.get(currentSheetGid) || new Map();
+    cache.set(key, props);
+    sheetMaterialCache.set(currentSheetGid, cache);
+  }
+
   function applyAllToScene(map) {
     const scene = window.__LM_SCENE || window.scene || (window.viewer && window.viewer.scene);
     if (!scene) return;
@@ -250,13 +259,38 @@
         if (state.materialKey) {
           console.log(LOG_PREFIX, 'Slider Commit:', state.materialKey);
           applyToViewer(state.materialKey, state.props);
-          persistToSheet(state.materialKey, state.props);
-          
-          const cache = sheetMaterialCache.get(currentSheetGid) || new Map();
-          cache.set(state.materialKey, state.props);
-          sheetMaterialCache.set(currentSheetGid, cache);
+          persistAndCache(state.materialKey, state.props);
         }
       });
+    }
+
+    const commit = (label) => {
+      const state = collectControls();
+      if (!state.materialKey) return;
+      console.log(LOG_PREFIX, label, state.materialKey);
+      applyToViewer(state.materialKey, state.props);
+      persistAndCache(state.materialKey, state.props);
+    };
+
+    const preview = () => {
+      const state = collectControls();
+      if (!state.materialKey) return;
+      applyToViewer(state.materialKey, state.props);
+    };
+
+    if (ui.chkDoubleSided) ui.chkDoubleSided.addEventListener('change', () => commit('DoubleSided'));
+    if (ui.chkUnlitLike) ui.chkUnlitLike.addEventListener('change', () => commit('UnlitLike'));
+    if (ui.chkChromaEnable) ui.chkChromaEnable.addEventListener('change', () => commit('ChromaEnable'));
+    if (ui.inpChromaColor) ui.inpChromaColor.addEventListener('change', () => commit('ChromaColor'));
+
+    if (ui.rngChromaTolerance) {
+      ui.rngChromaTolerance.addEventListener('input', preview);
+      ui.rngChromaTolerance.addEventListener('change', () => commit('ChromaTolerance'));
+    }
+
+    if (ui.rngChromaFeather) {
+      ui.rngChromaFeather.addEventListener('input', preview);
+      ui.rngChromaFeather.addEventListener('change', () => commit('ChromaFeather'));
     }
   }
 
