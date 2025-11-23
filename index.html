@@ -1,7 +1,10 @@
+{
+type: uploaded file
+fileName: index.html
+fullContent:
 <!DOCTYPE html>
 <html lang="ja">
 <head>
-  <!-- ESM import map for THREE (and addons) -->
   <script id="lm-importmap-three" type="importmap">{
     "imports": {
       "three": "https://unpkg.com/three@0.159.0/build/three.module.js",
@@ -9,7 +12,6 @@
     }
   }</script>
 
-  <!-- Minimal fallback styles while leader.css/app.css are missing -->
   <style id="lm-fallback-style">
     :root { color-scheme: dark; }
     body { margin:0; background:#111; color:#e6e6e6; font:14px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif; }
@@ -97,7 +99,6 @@
     }
 </style>
 
-  <!-- Optional loader for content.js to avoid 404 noise -->
   <script id="lm-optional-contentjs">
   (function(){
     try {
@@ -123,7 +124,6 @@
   <title>LociMyu v6.6 (ESM/CDN)</title>
   <link rel="icon" href="data:,"/>
 
-  <!-- Google OAuth (keys are read by boot.esm.cdn.js) -->
   <meta name="google-oauth-client_id" content="595200751510-ncahnf7edci6b9925becn5to49r6cguv.apps.googleusercontent.com"/>
   <meta name="google-api-key" content="AIzaSyCUnTCr5yWUWPdEXST9bKP1LpgawU5rIbI"/>
   <script defer async src="https://accounts.google.com/gsi/client"></script>
@@ -230,7 +230,6 @@
         <button id="tab-views" role="tab" data-tab="views" aria-selected="false">Views</button>
       </nav>
 
-      <!-- Caption pane -->
       <section id="pane-caption" class="pane" data-pane="caption" data-active="true">
         <div class="grp">
           <div class="hint">Pin color</div>
@@ -259,7 +258,6 @@
         </div>
       </section>
 
-      <!-- Material pane -->
       <section id="pane-material" class="pane" data-pane="material">
         <div class="mat-grid">
           <div class="mat-card">
@@ -310,7 +308,6 @@
     </aside>
   </div>
 
-  <!-- Tabs behavior -->
   <script>
     (function(){
       const tabs = document.querySelectorAll('[role="tab"]');
@@ -322,22 +319,18 @@
     })();
   </script>
 
-  <!-- Boot runtime -->
   <script type="module" src="./boot.esm.cdn.js"></script>
   <script src="./sheet.gid.map.js"></script>
   <link rel="stylesheet" href="app.sheet-rename.css"/>
   <script type="module" src="sheet-rename.module.js"></script>
 
-  <!-- Sheet context event bridge -->
   <script defer src="./sheet.ctx.bridge.js"></script>
 
-  <!-- ===== LociMyu material bridge stack (order matters) ===== -->
   <script type="module" src="./viewer.bridge.module.js"></script>
   <script src="./caption.sheet.selector.js"></script>
   <script type="module" src="./materials.sheet.bridge.js"></script>
   <script type="module" src="./material.orchestrator.js"></script>
 
-  <!-- lm-dx v4.3: robust material panel anchoring & click passthrough (KEEP) -->
   <script>
   (() => {
     const TAG='[lm-dx v4.3]'; const log=(...a)=>console.log(TAG,...a), warn=(...a)=>console.warn(TAG,...a);
@@ -424,7 +417,6 @@
   })();
   </script>
 
-  <!-- Material dropdown population + runtime wiring (must be loaded LAST) -->
   <script type="module" src="./material.dropdown.patch.js"></script>
   <script src="./material.runtime.patch.js"></script>
   <script src="./glb.load.signal.js"></script>
@@ -435,10 +427,8 @@
   <script src="./material.dropdown.sync.v1.js"></script>
   <script src="./material.state.local.v1.js"></script>
   <script src="materials.sheet.persist.js"></script>
-  <script src="materials.auto.apply.js"></script>
   <script src="./auto.apply.soft.patch.js"></script>
 
-  <!-- ===== Caption wiring: optional silent loaders (no 404 noise) ===== -->
   <script>
   (function(){
     const files = [
@@ -463,7 +453,6 @@
   })();
   </script>
 
-  <!-- Load GLB via Drive fileId using viewer.module.cdn.js -->
   <script src="./content.js"></script>
   <script type="module" src="./glb.btn.bridge.v3.js"></script>
   <script src="./viewer.bridge.autobind.js"></script>
