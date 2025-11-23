@@ -1,7 +1,7 @@
 // material.orchestrator.js
 // LociMyu material UI orchestrator
 // UI と viewer.bridge・各種保存ロジックの仲立ちを行う
-// VERSION_TAG: V6_XX_MATERIAL_FIX_OPACITY_PM_EVENTS
+// VERSION_TAG: V6_XX_MATERIAL_FIX_OPACITY_SYNC_UI
 
 (function () {
   const LOG_PREFIX = '[mat-orch]';
@@ -125,6 +125,28 @@
   }
 
   /**
+   * 正規化された opacity(0〜1) を range 要素に反映
+   * - max が 1 以下ならそのまま
+   * - max が 1 より大きければ 0〜max にスケール
+   */
+  function writeOpacityToRange(range, normalizedOpacity) {
+    if (!range) return;
+    const v = clamp(
+      typeof normalizedOpacity === 'number' ? normalizedOpacity : 1,
+      0,
+      1
+    );
+    const max = Number(range.max || '1');
+
+    if (!isFinite(max) || max <= 1.0000001) {
+      range.value = String(v);
+    } else {
+      const scaled = v * max;
+      range.value = String(scaled);
+    }
+  }
+
+  /**
    * 現在の UI 状態を 1 つのオブジェクトにまとめる
    * - materialKey
    * - props (viewer.applyMaterialProps に渡す)
@@ -224,9 +246,10 @@
     // clone to avoid accidental external mutation
     persistToSheet._lastProps = Object.assign({}, props || {});
 
-    const delay = typeof persistToSheet.DEBOUNCE_MS === 'number'
-      ? persistToSheet.DEBOUNCE_MS
-      : 800;
+    const delay =
+      typeof persistToSheet.DEBOUNCE_MS === 'number'
+        ? persistToSheet.DEBOUNCE_MS
+        : 800;
 
     persistToSheet._timer = setTimeout(() => {
       try {
@@ -269,7 +292,6 @@
    * 現在の state を元に viewer へ apply するヘルパー
    * - opacity は currentOpacity を優先（明示 override があればそれ）
    */
-  
   function applyState(key, opacityOverride) {
     if (!key) {
       console.warn(LOG_PREFIX, 'applyState called with empty key');
@@ -280,7 +302,7 @@
     //  1) 呼び出し元からの opacityOverride
     //  2) materialOpacity マップに保存されている値
     //  3) デフォルト値 1
-    var baseOpacity;
+    let baseOpacity;
     if (typeof opacityOverride === 'number') {
       baseOpacity = clamp(opacityOverride, 0, 1);
     } else if (materialOpacity.has(key)) {
@@ -289,7 +311,7 @@
       baseOpacity = 1;
     }
 
-    var newOpacity = baseOpacity;
+    const newOpacity = baseOpacity;
 
     // 状態を更新
     materialOpacity.set(key, newOpacity);
@@ -298,21 +320,22 @@
 
     // UI コントロールに反映（プルダウン切り替え時など）
     try {
-      if (typeof opacityRange !== 'undefined' && opacityRange) {
-        opacityRange.value = String(newOpacity);
+      if (!ui) ui = queryUI();
+      const range = ui && ui.opacityRange;
+      if (range) {
+        writeOpacityToRange(range, newOpacity);
       }
     } catch (e) {
       console.warn(LOG_PREFIX, 'failed to sync opacityRange', e);
     }
 
-    var props = { opacity: newOpacity };
+    const props = { opacity: newOpacity };
 
     applyToViewer(key, props);
     persistToSheet(key, props);
 
     return { materialKey: key, props: props };
   }
-
 
   // ===== DOM ベースのフォールバック（旧来の oninput/onchange） =====
 
@@ -321,9 +344,10 @@
     if (!state.materialKey) return;
 
     currentMaterialKey = state.materialKey || currentMaterialKey;
-    currentOpacity = typeof state.props.opacity === 'number'
-      ? clamp(state.props.opacity, 0, 1)
-      : currentOpacity;
+    currentOpacity =
+      typeof state.props.opacity === 'number'
+        ? clamp(state.props.opacity, 0, 1)
+        : currentOpacity;
 
     applyToViewer(state.materialKey, state.props);
     emitChange('lm:material-change', state);
@@ -334,9 +358,10 @@
     if (!state.materialKey) return;
 
     currentMaterialKey = state.materialKey || currentMaterialKey;
-    currentOpacity = typeof state.props.opacity === 'number'
-      ? clamp(state.props.opacity, 0, 1)
-      : currentOpacity;
+    currentOpacity =
+      typeof state.props.opacity === 'number'
+        ? clamp(state.props.opacity, 0, 1)
+        : currentOpacity;
 
     applyToViewer(state.materialKey, state.props);
     emitChange('lm:material-commit', state);
@@ -389,9 +414,10 @@
     const state = collectControls();
     if (state.materialKey) {
       currentMaterialKey = state.materialKey;
-      currentOpacity = typeof state.props.opacity === 'number'
-        ? clamp(state.props.opacity, 0, 1)
-        : currentOpacity;
+      currentOpacity =
+        typeof state.props.opacity === 'number'
+          ? clamp(state.props.opacity, 0, 1)
+          : currentOpacity;
       applyToViewer(state.materialKey, state.props);
       emitChange('lm:material-change', state);
     }
@@ -449,7 +475,13 @@
     const state = applyState(currentMaterialKey, currentOpacity);
     if (!state) return;
 
-    console.log(LOG_PREFIX, 'pm-opacity-input', detail, '=>', state.props.opacity);
+    console.log(
+      LOG_PREFIX,
+      'pm-opacity-input',
+      detail,
+      '=>',
+      state.props.opacity
+    );
     emitChange('lm:material-change', state);
   }
 
@@ -465,7 +497,13 @@
     const state = applyState(currentMaterialKey, currentOpacity);
     if (!state) return;
 
-    console.log(LOG_PREFIX, 'pm-opacity-change', detail, '=>', state.props.opacity);
+    console.log(
+      LOG_PREFIX,
+      'pm-opacity-change',
+      detail,
+      '=>',
+      state.props.opacity
+    );
     emitChange('lm:material-commit', state);
     persistToSheet(state.materialKey, state.props);
   }
@@ -482,7 +520,10 @@
   });
 
   function boot() {
-    console.log(LOG_PREFIX, 'loaded VERSION_TAG:V6_XX_MATERIAL_FIX_OPACITY_PM_EVENTS');
+    console.log(
+      LOG_PREFIX,
+      'loaded VERSION_TAG:V6_XX_MATERIAL_FIX_OPACITY_SYNC_UI'
+    );
     wirePmEvents();
     bindUI();
   }
