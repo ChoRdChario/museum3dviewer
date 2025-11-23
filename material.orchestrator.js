@@ -22,6 +22,7 @@
 
   // シートコンテキストごとのキャッシュ
   let currentSheetGid = '';
+  let currentSheetCtx = null;
   const sheetMaterialCache = new Map(); // sheetGid -> Map(materialKey -> props)
   let sheetCacheLoading = null;
 
@@ -394,6 +395,28 @@
     return sheetMaterialCache.get(String(gid)) || null;
   }
 
+  function ensureSheetCache(ctx) {
+    const gid = String((ctx && ctx.sheetGid) || currentSheetGid || getActiveSheetGid() || '');
+    if (!gid) return Promise.resolve(null);
+
+    const cached = sheetMaterialCache.get(gid);
+    if (cached) return Promise.resolve(cached);
+
+    if (sheetCacheLoading) return sheetCacheLoading;
+
+    const promise = loadMaterialsForSheet(ctx || currentSheetCtx || window.__LM_SHEET_CTX).then((map) => {
+      if (gid !== (currentSheetGid || getActiveSheetGid())) return null;
+      sheetMaterialCache.set(gid, map);
+      return map;
+    });
+
+    sheetCacheLoading = promise.finally(() => {
+      if (sheetCacheLoading === promise) sheetCacheLoading = null;
+    });
+
+    return promise;
+  }
+
   function rowToObj(row) {
     return {
       materialKey: row[0] || '',
@@ -454,6 +477,7 @@
 
   function refreshSheetCache(ctx) {
     const gid = String((ctx && ctx.sheetGid) || '');
+    currentSheetCtx = ctx || null;
     currentSheetGid = gid;
     sessionMaterialState.clear();
     sheetMaterialCache.delete(gid);
@@ -472,12 +496,7 @@
       }
     })();
 
-    const promise = loadMaterialsForSheet(ctx).then((map) => {
-      if (currentSheetGid !== gid) return null;
-      sheetMaterialCache.set(gid, map);
-      return map;
-    });
-
+    const promise = ensureSheetCache(ctx);
     sheetCacheLoading = promise;
 
     promise
@@ -628,13 +647,11 @@
       emitChange('lm:material-commit', state);
     };
 
-    if (sheetCacheLoading && typeof sheetCacheLoading.then === 'function') {
-      sheetCacheLoading.then(applyFromCache).catch((err) =>
+    ensureSheetCache(currentSheetCtx)
+      .then(applyFromCache)
+      .catch((err) =>
         console.warn(LOG_PREFIX, 'apply after sheet load failed', err)
       );
-    } else {
-      applyFromCache();
-    }
   }
 
   function onPmOpacityInput(e) {
