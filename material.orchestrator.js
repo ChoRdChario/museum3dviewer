@@ -211,17 +211,43 @@
       return;
     }
     if (!materialKey) return;
-    try {
-      const patch = Object.assign({ materialKey }, props || {});
-      const p = persist.upsert(patch);
-      if (p && typeof p.catch === 'function') {
-        p.catch((e) =>
-          console.warn(LOG_PREFIX, 'persistToSheet failed', e)
-        );
-      }
-    } catch (e) {
-      console.warn(LOG_PREFIX, 'persistToSheet threw', e);
+
+    // Debounced write:
+    //  - UI / pm events may fire many times while the user drags the slider.
+    //  - To avoid spamming Sheets, we keep only the latest state and
+    //    send a single upsert after a short delay.
+    if (persistToSheet._timer) {
+      clearTimeout(persistToSheet._timer);
     }
+
+    persistToSheet._lastKey = materialKey;
+    // clone to avoid accidental external mutation
+    persistToSheet._lastProps = Object.assign({}, props || {});
+
+    const delay = typeof persistToSheet.DEBOUNCE_MS === 'number'
+      ? persistToSheet.DEBOUNCE_MS
+      : 800;
+
+    persistToSheet._timer = setTimeout(() => {
+      try {
+        const key = persistToSheet._lastKey;
+        const latestProps = persistToSheet._lastProps || {};
+        if (!key) {
+          return;
+        }
+        const patch = Object.assign({ materialKey: key }, latestProps);
+        const p = persist.upsert(patch);
+        if (p && typeof p.catch === 'function') {
+          p.catch((e) =>
+            console.warn(LOG_PREFIX, 'persistToSheet failed', e)
+          );
+        }
+      } catch (e) {
+        console.warn(LOG_PREFIX, 'persistToSheet threw', e);
+      } finally {
+        persistToSheet._timer = null;
+      }
+    }, delay);
   }
 
   /**
@@ -341,10 +367,10 @@
     }
 
     // 既存のリスナがあっても二重にならないように一旦 remove してから add
-    // マテリアルの選択変更は material.dropdown.patch.js 側が
-    // `lm:pm-material-selected` を発火してくれるので、ここでは
-    // スライダーなど「値を編集する UI」のみを監視する。
     materialSelect.removeEventListener('change', onControlCommit);
+    materialSelect.addEventListener('change', onControlCommit, {
+      passive: true,
+    });
 
     opacityRange.removeEventListener('input', onControlInput);
     opacityRange.removeEventListener('change', onControlCommit);
