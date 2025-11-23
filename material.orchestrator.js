@@ -272,9 +272,8 @@
 
     // UI コントロールに反映（プルダウン切り替え時など）
     try {
-      var range = ui && ui.opacityRange;
-      if (range && typeof range.value !== 'undefined') {
-        range.value = String(newOpacity);
+      if (typeof opacityRange !== 'undefined' && opacityRange) {
+        opacityRange.value = String(newOpacity);
       }
     } catch (e) {
       console.warn(LOG_PREFIX, 'failed to sync opacityRange', e);
@@ -282,10 +281,9 @@
 
     var props = { opacity: newOpacity };
 
-    // ビューア本体へ反映（描画だけ先に更新）
     applyToViewer(key, props);
+    persistToSheet(key, props);
 
-    // シートへの保存は呼び出し側（pm-opacity-change など）が行う
     return { materialKey: key, props: props };
   }
 
@@ -324,8 +322,7 @@
    * UI イベントの配線（フォールバック用）
    */
   function bindUI() {
-    // 毎回 DOM を取り直す（最初の呼び出し時に要素が未生成だと null がキャッシュされてしまうため）
-    ui = queryUI();
+    if (!ui) ui = queryUI();
 
     const { materialSelect, opacityRange } = ui;
 
@@ -344,10 +341,10 @@
     }
 
     // 既存のリスナがあっても二重にならないように一旦 remove してから add
+    // マテリアルの選択変更は material.dropdown.patch.js 側が
+    // `lm:pm-material-selected` を発火してくれるので、ここでは
+    // スライダーなど「値を編集する UI」のみを監視する。
     materialSelect.removeEventListener('change', onControlCommit);
-    materialSelect.addEventListener('change', onControlCommit, {
-      passive: true,
-    });
 
     opacityRange.removeEventListener('input', onControlInput);
     opacityRange.removeEventListener('change', onControlCommit);
