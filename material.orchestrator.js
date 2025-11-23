@@ -27,22 +27,55 @@
     chromaFeather: 0,
   };
 
-  // --- UI Helpers ---
+  // --- Helpers ---
 
+  function ensureArray(x) {
+    if (!x) return [];
+    if (Array.isArray(x)) return x;
+    return [x];
+  }
+
+  // ▼▼▼ 修正ポイント：UI の参照先を #pane-material 優先にする ▼▼▼
   function queryUI() {
+    const doc = document;
+    // Prefer controls inside the new material pane to avoid accidentally
+    // binding to legacy/hidden anchors (e.g. #panel-material).
+    const pane = doc.querySelector('#pane-material') || doc;
+    const root = pane;
+
+    // Canonical material select: #materialSelect inside #pane-material.
+    // Fallbacks exist only for backward compatibility.
+    const materialSelect =
+      root.querySelector('#materialSelect') ||
+      root.querySelector('#pm-material') ||
+      doc.getElementById('pm-material') ||
+      doc.getElementById('materialSelect');
+
+    const opacityRange =
+      root.querySelector('#opacityRange') ||
+      root.querySelector('#pm-opacity-range') ||
+      doc.getElementById('pm-opacity-range') ||
+      doc.getElementById('opacityRange');
+
+    const opacityVal =
+      root.querySelector('#pm-opacity-val') ||
+      root.querySelector('#pm-value') ||
+      doc.getElementById('pm-opacity-val') ||
+      doc.getElementById('pm-value');
+
     return {
-      materialSelect: document.getElementById('materialSelect') || document.getElementById('pm-material'),
-      opacityRange: document.getElementById('opacityRange') || document.getElementById('pm-opacity-range'),
-      opacityVal: document.getElementById('pm-opacity-val') || document.getElementById('pm-value'),
-      
-      chkDoubleSided: document.getElementById('pm-flag-doublesided'),
-      chkUnlitLike: document.getElementById('pm-flag-unlit'),
-      chkChromaEnable: document.getElementById('pm-chroma-enable'),
-      inpChromaColor: document.getElementById('pm-chroma-color'),
-      rngChromaTolerance: document.getElementById('pm-chroma-tol'),
-      rngChromaFeather: document.getElementById('pm-chroma-feather')
+      materialSelect,
+      opacityRange,
+      opacityVal,
+      chkDoubleSided: root.querySelector('#pm-flag-doublesided') || doc.getElementById('pm-flag-doublesided'),
+      chkUnlitLike: root.querySelector('#pm-flag-unlit') || doc.getElementById('pm-flag-unlit'),
+      chkChromaEnable: root.querySelector('#pm-chroma-enable') || doc.getElementById('pm-chroma-enable'),
+      inpChromaColor: root.querySelector('#pm-chroma-color') || doc.getElementById('pm-chroma-color'),
+      rngChromaTolerance: root.querySelector('#pm-chroma-tol') || doc.getElementById('pm-chroma-tol'),
+      rngChromaFeather: root.querySelector('#pm-chroma-feather') || doc.getElementById('pm-chroma-feather')
     };
   }
+  // ▲▲▲ ここまでが変更点 ▲▲▲
 
   function getSelectedMaterialKey() {
     if (!ui) ui = queryUI();
@@ -101,17 +134,16 @@
   // --- Scene / Bridge Interaction ---
 
   function getViewerBridge() {
-    return window.__lm_viewer_bridge || window.viewerBridge;
+    return window.__lm_viewer_bridge || window.viewerBridge || null;
   }
 
-  function normalizeForViewer(props){
-    const out = Object.assign({}, props);
-    // viewer.module.cdn.js uses doubleSide / unlit keys
-    if (out.doubleSide === undefined && out.doubleSided !== undefined) {
-      out.doubleSide = !!out.doubleSided;
+  function normalizeForViewer(props) {
+    const out = Object.assign({}, props || {});
+    if (Object.prototype.hasOwnProperty.call(out, 'doubleSided')) {
+      out.side = out.doubleSided ? 'DoubleSide' : 'FrontSide';
     }
-    if (out.unlit === undefined && out.unlitLike !== undefined) {
-      out.unlit = !!out.unlitLike;
+    if (Object.prototype.hasOwnProperty.call(out, 'unlitLike')) {
+      out.unlitLike = !!out.unlitLike;
     }
     return out;
   }
@@ -159,8 +191,8 @@
   function persistToSheet(key, props) {
     const persist = window.LM_MaterialsPersist;
     if (!persist || typeof persist.upsert !== 'function') {
-        console.warn(LOG_PREFIX, 'Persistence module missing');
-        return;
+      console.warn(LOG_PREFIX, 'Persistence module missing');
+      return;
     }
     const patch = Object.assign({ materialKey: key, sheetGid: currentSheetGid }, props);
     persist.upsert(patch).catch(e => console.warn(LOG_PREFIX, 'Persist failed', e));
@@ -176,69 +208,83 @@
     
     applyPropsToUI(finalProps);
     applyToViewer(key, finalProps);
-    console.log(LOG_PREFIX, 'Synced Single:', key, cachedProps ? '(Cached)' : '(Default)');
   }
 
-  // --- Data Fetching ---
+  // --- Data Loading from __LM_MATERIALS ---
 
-  async function fetchAndCacheMaterials(spreadsheetId, sheetGid) {
-    const fetchAuth = window.__lm_fetchJSONAuth;
-    if (!fetchAuth || !spreadsheetId) return new Map();
-
-    const range = encodeURIComponent(MATERIALS_RANGE);
-    const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${range}`;
-    
-    try {
-      const res = await fetchAuth(url);
-      const rows = res.values || [];
-      const map = new Map();
-      
-      for (let i = 1; i < rows.length; i++) {
-        const r = rows[i];
-        const mKey = (r[0] || '').trim();
-        const mGid = (r[13] || '').trim(); // Column N is sheetGid
-        
-        if (mKey && mGid === sheetGid) {
-           map.set(mKey, {
-             opacity: r[1] !== undefined ? parseFloat(r[1]) : 1,
-             doubleSided: (r[2]||"").toUpperCase() === "TRUE",
-             unlitLike: (r[3]||"").toUpperCase() === "TRUE",
-             chromaEnable: (r[4]||"").toUpperCase() === "TRUE",
-             chromaColor: r[5] || "#000000",
-             chromaTolerance: parseFloat(r[6]||"0"),
-             chromaFeather: parseFloat(r[7]||"0"),
-           });
-        }
-      }
-      return map;
-    } catch (e) {
-      console.warn(LOG_PREFIX, 'Fetch failed', e);
-      return new Map();
+  async function loadMaterialsForContext(spreadsheetId, sheetGid) {
+    if (!spreadsheetId || !sheetGid) return;
+    const fetchJSON = window.__lm_fetchJSONAuth;
+    if (!fetchJSON) {
+      console.warn(LOG_PREFIX, 'No auth fetch available; cannot load materials');
+      return;
     }
+
+    const url = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(MATERIALS_RANGE)}?majorDimension=ROWS`;
+    const res = await fetchJSON(url);
+    const rows = ensureArray(res && res.values).slice(1); // skip header
+
+    const map = new Map();
+    rows.forEach(row => {
+      const [
+        updatedAt,
+        updatedBy,
+        rowSheetGid,
+        materialKey,
+        opacity,
+        doubleSided,
+        unlitLike,
+        chromaEnable,
+        chromaColor,
+        chromaTolerance,
+        chromaFeather,
+      ] = row;
+
+      if (!materialKey || rowSheetGid !== String(sheetGid)) return;
+
+      const props = {
+        opacity: opacity !== undefined ? Number(opacity) : 1,
+        doubleSided: doubleSided === 'TRUE',
+        unlitLike: unlitLike === 'TRUE',
+        chromaEnable: chromaEnable === 'TRUE',
+        chromaColor: chromaColor || '#000000',
+        chromaTolerance: chromaTolerance !== undefined ? Number(chromaTolerance) : 0,
+        chromaFeather: chromaFeather !== undefined ? Number(chromaFeather) : 0,
+      };
+
+      map.set(materialKey, props);
+    });
+
+    sheetMaterialCache.set(String(sheetGid), map);
+    return map;
   }
 
-  function handleSheetContextChange(ctx) {
-    const newSid = ctx.spreadsheetId || '';
-    const newGid = String(ctx.sheetGid !== undefined ? ctx.sheetGid : '');
+  // --- Sheet Context Handling ---
 
-    currentSheetGid = newGid;
-    console.log(LOG_PREFIX, 'Sheet Context Change ->', newGid);
+  async function handleSheetContextChange(ctx) {
+    const spreadsheetId = ctx && ctx.spreadsheetId;
+    const sheetGid = ctx && ctx.sheetGid;
+    currentSheetGid = sheetGid ? String(sheetGid) : '';
 
-    sheetMaterialCache.delete(newGid);
+    console.log(LOG_PREFIX, 'Sheet Context Change ->', currentSheetGid);
 
-    fetchAndCacheMaterials(newSid, newGid).then(map => {
-      if (currentSheetGid !== newGid) return;
+    if (!spreadsheetId || !currentSheetGid) return;
 
-      sheetMaterialCache.set(newGid, map);
-      console.log(LOG_PREFIX, 'Data Loaded. Keys:', map.size);
+    const map = await loadMaterialsForContext(spreadsheetId, currentSheetGid);
+    console.log(LOG_PREFIX, 'Data Loaded. Keys:', map ? map.size : 0);
 
-      applyAllToScene(map);
-
-      const key = getSelectedMaterialKey();
-      if (key) {
-        syncMaterialState(key);
+    if (!ui) ui = queryUI();
+    if (ui && ui.materialSelect && ui.materialSelect.value) {
+      syncMaterialState(ui.materialSelect.value);
+    } else if (map && map.size) {
+      const firstKey = map.keys().next().value;
+      if (firstKey && ui && ui.materialSelect) {
+        ui.materialSelect.value = firstKey;
       }
-    });
+      applyAllToScene(map);
+    } else {
+      applyAllToScene(new Map());
+    }
   }
 
   // --- Direct DOM Event Binding ---
@@ -260,19 +306,24 @@
     if (ui.opacityRange) {
       ui.opacityRange.addEventListener('input', () => {
         const state = collectControls();
-        if (state.materialKey) {
-          if (ui.opacityVal) ui.opacityVal.textContent = Number(state.props.opacity).toFixed(2);
-          applyToViewer(state.materialKey, state.props);
+        if (!state.materialKey) return;
+        if (ui.opacityVal) {
+          const disp = Number(state.props.opacity).toFixed(2);
+          if (ui.opacityVal.tagName === 'INPUT' || ui.opacityVal.tagName === 'OUTPUT') {
+            ui.opacityVal.value = disp;
+          } else {
+            ui.opacityVal.textContent = disp;
+          }
         }
+        applyToViewer(state.materialKey, state.props);
       });
 
       ui.opacityRange.addEventListener('change', () => {
         const state = collectControls();
-        if (state.materialKey) {
-          console.log(LOG_PREFIX, 'Slider Commit:', state.materialKey);
-          applyToViewer(state.materialKey, state.props);
-          persistAndCache(state.materialKey, state.props);
-        }
+        if (!state.materialKey) return;
+        console.log(LOG_PREFIX, 'Slider Commit:', state.materialKey);
+        applyToViewer(state.materialKey, state.props);
+        persistAndCache(state.materialKey, state.props);
       });
     }
 
@@ -306,7 +357,7 @@
     }
   }
 
-  // --- Boot ---
+  // --- Bootstrapping ---
 
   function boot() {
     console.log(LOG_PREFIX, 'Booting...');
