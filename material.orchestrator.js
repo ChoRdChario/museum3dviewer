@@ -1,5 +1,4 @@
 // material.orchestrator.js
-
 (function () {
   const LOG_PREFIX = '[mat-orch]';
   const VERSION_TAG = 'V6_16_SHEET_MAT_CACHE_FIX';
@@ -50,10 +49,12 @@
 
     try {
       const list = bridge.listMaterials() || [];
-      return list.map(m => ({
-        key: m.key || m.name || '',
-        name: m.name || m.key || ''
-      })).filter(m => m.key);
+      return list
+        .map(m => ({
+          key: m.key || m.name || '',
+          name: m.name || m.key || '',
+        }))
+        .filter(m => m.key);
     } catch (err) {
       console.error(LOG_PREFIX, 'failed to list materials', err);
       return [];
@@ -73,7 +74,13 @@
     try {
       bridge.applyMaterialProps(materialKey, props);
     } catch (err) {
-      console.error(LOG_PREFIX, 'failed to apply material props', materialKey, props, err);
+      console.error(
+        LOG_PREFIX,
+        'failed to apply material props',
+        materialKey,
+        props,
+        err,
+      );
     }
   }
 
@@ -82,7 +89,8 @@
    * __LM_MATERIALS シートにも反映するユーティリティ
    */
   function persistAndCache(materialKey, props) {
-    const ctx = window.__LM_SHEET_CTX || { spreadsheetId: '', sheetGid: currentSheetGid || '0' };
+    const ctx =
+      window.__LM_SHEET_CTX || { spreadsheetId: '', sheetGid: currentSheetGid || '0' };
     const spreadsheetId = ctx.spreadsheetId;
     const sheetGid = String(ctx.sheetGid || currentSheetGid || '0');
 
@@ -100,7 +108,10 @@
       return;
     }
 
-    if (!window.LM_MaterialsPersist || typeof window.LM_MaterialsPersist.upsert !== 'function') {
+    if (
+      !window.LM_MaterialsPersist ||
+      typeof window.LM_MaterialsPersist.upsert !== 'function'
+    ) {
       console.warn(LOG_PREFIX, 'LM_MaterialsPersist.upsert not ready; skip persist');
       return;
     }
@@ -121,11 +132,12 @@
   function syncUIFromProps(props) {
     if (!opacityRangeEl || !opacityValueEl) return;
 
-    const opacity = (props && typeof props.opacity === 'number')
-      ? props.opacity
-      : (props && typeof props.opacity === 'string')
-        ? parseFloat(props.opacity) || 1.0
-        : 1.0;
+    const opacity =
+      props && typeof props.opacity === 'number'
+        ? props.opacity
+        : props && typeof props.opacity === 'string'
+          ? parseFloat(props.opacity) || 1.0
+          : 1.0;
 
     const clamped = Math.max(0.0, Math.min(1.0, opacity));
     opacityRangeEl.value = String(clamped);
@@ -185,7 +197,7 @@
           chromaTolerance: 0.1,
           chromaFeather: 0.0,
         },
-        entry[1] || {}
+        entry[1] || {},
       );
       applyMaterialProps(key, props);
     }
@@ -203,7 +215,13 @@
     // すでにキャッシュ済みならそれを返す
     if (sheetMaterialCache.has(cacheKey)) {
       const existing = sheetMaterialCache.get(cacheKey);
-      console.log(LOG_PREFIX, '[cache hit] materials for sheet', cacheKey, 'keys:', existing.size);
+      console.log(
+        LOG_PREFIX,
+        '[cache hit] materials for sheet',
+        cacheKey,
+        'keys:',
+        existing.size,
+      );
       return existing;
     }
 
@@ -214,9 +232,18 @@
       return empty;
     }
 
-    console.log(LOG_PREFIX, 'Fetching materials for sheetGid', cacheKey, 'from __LM_MATERIALS...');
+    console.log(
+      LOG_PREFIX,
+      'Fetching materials for sheetGid',
+      cacheKey,
+      'from __LM_MATERIALS...',
+    );
     const base = 'https://sheets.googleapis.com/v4/spreadsheets/';
-    const url = base + encodeURIComponent(spreadsheetId) + '/values/' + encodeURIComponent(MATERIALS_RANGE);
+    const url =
+      base +
+      encodeURIComponent(spreadsheetId) +
+      '/values/' +
+      encodeURIComponent(MATERIALS_RANGE);
 
     try {
       const res = await (window.__lm_fetchJSONAuth
@@ -251,10 +278,12 @@
           doubleSided = String(r[3] || '').toUpperCase() === 'TRUE';
           unlitLike = String(r[4] || '').toUpperCase() === 'TRUE';
           chromaEnable = String(r[5] || '').toUpperCase() === 'TRUE';
-          chromaTolerance = r[6] !== undefined && r[6] !== '' ? parseFloat(r[6]) : 0.0;
-          chromaFeather = r[7] !== undefined && r[7] !== '' ? parseFloat(r[7]) : 0.0;
+          chromaTolerance =
+            r[6] !== undefined && r[6] !== '' ? parseFloat(r[6]) : 0.0;
+          chromaFeather =
+            r[7] !== undefined && r[7] !== '' ? parseFloat(r[7]) : 0.0;
 
-        // 旧フォーマットとの後方互換
+          // 旧フォーマットとの後方互換
         } else if (r.length >= 12) {
           // 旧: A:materialKey, B:name, C:opacity, D:doubleSided, E:unlitLike,
           // F:chromaEnable, G:chromaColor, H:chromaTolerance, I:chromaFeather,
@@ -265,9 +294,10 @@
           unlitLike = String(r[4] || '').toUpperCase() === 'TRUE';
           chromaEnable = String(r[5] || '').toUpperCase() === 'TRUE';
           chromaColor = r[6] || '#000000';
-          chromaTolerance = r[7] !== undefined && r[7] !== '' ? parseFloat(r[7]) : 0.1;
-          chromaFeather = r[8] !== undefined && r[8] !== '' ? parseFloat(r[8]) : 0.0;
-
+          chromaTolerance =
+            r[7] !== undefined && r[7] !== '' ? parseFloat(r[7]) : 0.1;
+          chromaFeather =
+            r[8] !== undefined && r[8] !== '' ? parseFloat(r[8]) : 0.0;
         } else {
           // 想定外フォーマット
           continue;
@@ -289,10 +319,21 @@
       }
 
       sheetMaterialCache.set(cacheKey, map);
-      console.log(LOG_PREFIX, 'Data Loaded. Keys:', map.size, 'for sheetGid', cacheKey);
+      console.log(
+        LOG_PREFIX,
+        'Data Loaded. Keys:',
+        map.size,
+        'for sheetGid',
+        cacheKey,
+      );
       return map;
     } catch (err) {
-      console.error(LOG_PREFIX, 'Failed to fetch materials for sheetGid', cacheKey, err);
+      console.error(
+        LOG_PREFIX,
+        'Failed to fetch materials for sheetGid',
+        cacheKey,
+        err,
+      );
       const empty = new Map();
       sheetMaterialCache.set(cacheKey, empty);
       return empty;
@@ -333,7 +374,11 @@
           updateUIFromMaterialsCache();
         })
         .catch(err => {
-          console.error(LOG_PREFIX, 'failed to fetch materials on sheet change', err);
+          console.error(
+            LOG_PREFIX,
+            'failed to fetch materials on sheet change',
+            err,
+          );
         });
     }
   }
@@ -347,7 +392,8 @@
     const selectedKey = materialSelectEl.value;
     if (!selectedKey) return;
 
-    const props = getPropsFromCache(currentSheetGid, selectedKey) || { opacity: 1.0 };
+    const props =
+      getPropsFromCache(currentSheetGid, selectedKey) || { opacity: 1.0 };
     syncUIFromProps(props);
   }
 
@@ -363,7 +409,8 @@
       return;
     }
 
-    const props = getPropsFromCache(currentSheetGid, currentMaterialKey) || { opacity: 1.0 };
+    const props =
+      getPropsFromCache(currentSheetGid, currentMaterialKey) || { opacity: 1.0 };
     syncUIFromProps(props);
   }
 
@@ -414,7 +461,10 @@
     opacityValueEl = document.querySelector('#opacityValue');
 
     if (!materialSelectEl || !opacityRangeEl || !opacityValueEl) {
-      console.warn(LOG_PREFIX, 'UI elements not found (materialSelect/opacityRange/opacityValue)');
+      console.warn(
+        LOG_PREFIX,
+        'UI elements not found (materialSelect/opacityRange/opacityValue)',
+      );
       return false;
     }
 
@@ -487,9 +537,13 @@
   }
 
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', () => {
-      boot();
-    }, { once: true });
+    document.addEventListener(
+      'DOMContentLoaded',
+      () => {
+        boot();
+      },
+      { once: true },
+    );
   } else {
     boot();
   }
