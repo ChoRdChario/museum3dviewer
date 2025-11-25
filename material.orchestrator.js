@@ -1,6 +1,6 @@
 // material.orchestrator.js
 // LociMyu material UI orchestrator (Sheet × Material SOT)
-// VERSION_TAG: V6_SHEET_MATERIAL_SOT_FIX1
+// VERSION_TAG: V6_SHEET_MATERIAL_SOT_DS_UNLIT
 //
 // ポリシー:
 // - 「キャプションシート × マテリアル」の状態テーブル（__LM_MATERIALS）を唯一のソース・オブ・トゥルースとする。
@@ -11,7 +11,8 @@
 (function () {
   const LOG_PREFIX = '[mat-orch-unified]';
   const MATERIALS_RANGE = '__LM_MATERIALS!A:N';
-  const VERSION_TAG = 'V6_SHEET_MATERIAL_SOT_FIX1';
+  const VERSION_TAG = 'V6_SHEET_MATERIAL_SOT_DS_UNLIT';
+
   console.log(LOG_PREFIX, 'loaded', VERSION_TAG);
 
   // UI State
@@ -170,12 +171,26 @@
 
   function normalizeForViewer(props) {
     const out = Object.assign({}, props || {});
+
+    // ▼ double side
+    // シート／UI では doubleSided を正とするが、
+    // viewer.module.cdn.js 側は doubleSide を見てサイドを切り替える実装。
     if (Object.prototype.hasOwnProperty.call(out, 'doubleSided')) {
-      out.side = out.doubleSided ? 'DoubleSide' : 'FrontSide';
+      out.doubleSide = !!out.doubleSided;
     }
+    // 他の経路から来た doubleSide も一応正規化しておく
+    if (Object.prototype.hasOwnProperty.call(out, 'doubleSide')) {
+      out.doubleSide = !!out.doubleSide;
+    }
+
+    // ▼ unlit（unlit / unlitLike のどちらからでも受けられるようにする）
     if (Object.prototype.hasOwnProperty.call(out, 'unlitLike')) {
       out.unlitLike = !!out.unlitLike;
     }
+    if (Object.prototype.hasOwnProperty.call(out, 'unlit')) {
+      out.unlit = !!out.unlit;
+    }
+
     return out;
   }
 
@@ -295,29 +310,41 @@
     const map = new Map();
 
     // ヘッダ順に厳密に合わせる（boot.esm.cdn.js の MATERIAL_HEADERS と一致）
-    rows.forEach((row, idx) => {
+    // A: materialKey
+    // B: opacity
+    // C: doubleSided
+    // D: unlitLike
+    // E: chromaEnable
+    // F: chromaColor
+    // G: chromaTolerance
+    // H: chromaFeather
+    // I: roughness
+    // J: metalness
+    // K: emissiveHex
+    // L: updatedAt
+    // M: updatedBy
+    // N: sheetGid
+    rows.forEach((row) => {
       const [
-        materialKey, // A
-        opacity, // B
-        doubleSided, // C
-        unlitLike, // D
-        chromaEnable, // E
-        chromaColor, // F
-        chromaTolerance, // G
-        chromaFeather, // H
-        roughness, // I
-        metalness, // J
-        emissiveHex, // K
-        updatedAt, // L
-        updatedBy, // M
-        rowSheetGid, // N
+        materialKey,
+        opacity,
+        doubleSided,
+        unlitLike,
+        chromaEnable,
+        chromaColor,
+        chromaTolerance,
+        chromaFeather,
+        roughness,
+        metalness,
+        emissiveHex,
+        updatedAt, // unused
+        updatedBy, // unused
+        rowSheetGid,
       ] = row;
 
       if (!materialKey) return;
 
       // sheetGid が指定されている行のみ、そのシートに属するとみなす
-      // （rowSheetGid が空の古い行があれば、グローバル扱いにしてもよいが
-      //  今回は「指定されていれば必ず一致すること」を優先）
       if (rowSheetGid && String(rowSheetGid) !== gidStr) return;
 
       const props = {
@@ -339,7 +366,6 @@
             ? Number(metalness)
             : undefined,
         emissiveHex: emissiveHex || undefined,
-        // updatedAt / updatedBy / sheetGid は props には含めない（メタ情報）
       };
 
       map.set(String(materialKey), props);
@@ -377,10 +403,9 @@
 
     if (!spreadsheetId || !currentSheetGid) return;
 
-    const map = (await loadMaterialsForContext(
-      spreadsheetId,
-      currentSheetGid,
-    )) || new Map();
+    const map =
+      (await loadMaterialsForContext(spreadsheetId, currentSheetGid)) ||
+      new Map();
 
     // 1. シーン全体を、このシートの状態テーブルに完全同期
     applyAllToScene(map);
