@@ -1,11 +1,19 @@
 // material.orchestrator.js
 // LociMyu material UI orchestrator (Unified)
-// Integrates full-scene application (replacing auto.apply.js) and direct DOM event handling.
-// VERSION_TAG: V6_UNIFIED_ORCHESTRATOR_FIXED
+// Sheet × Material state-table driven orchestrator.
+// VERSION_TAG: V6_SHEET_MATERIAL_SOT
+//
+// ポリシー:
+// - 「キャプションシート × マテリアル」の状態テーブル（__LM_MATERIALS）を唯一のソース・オブ・トゥルースとする。
+// - UI や Three.js 側は常にこの状態テーブルから同期される一時的なビュー。
+// - マテリアル切替・シート切替のたびに、必ず状態テーブル（＋デフォルト値）から UI / Viewer を再同期する。
+// - Viewer の状態を読み取ってシートへ書き戻すことはしない（片方向：シート → UI / Viewer, UI → シート）。
 
 (function () {
   const LOG_PREFIX = '[mat-orch-unified]';
   const MATERIALS_RANGE = '__LM_MATERIALS!A:N';
+  const VERSION_TAG = 'V6_SHEET_MATERIAL_SOT';
+  console.log(LOG_PREFIX, 'loaded', VERSION_TAG);
 
   // UI State
   let ui = null;
@@ -35,7 +43,7 @@
     return [x];
   }
 
-  // ▼▼▼ 修正ポイント：UI の参照先を #pane-material 優先にする ▼▼▼
+  // ▼▼▼ UI の参照先: #pane-material を最優先とし、旧 UI もフォールバックで拾う ▼▼▼
   function queryUI() {
     const doc = document;
     // Prefer controls inside the new material pane to avoid accidentally
@@ -75,7 +83,7 @@
       rngChromaFeather: root.querySelector('#pm-chroma-feather') || doc.getElementById('pm-chroma-feather')
     };
   }
-  // ▲▲▲ ここまでが変更点 ▲▲▲
+  // ▲▲▲ UI 参照先ここまで ▲▲▲
 
   function getSelectedMaterialKey() {
     if (!ui) ui = queryUI();
@@ -92,7 +100,7 @@
 
     // Opacity
     if (ui.opacityRange) ui.opacityRange.value = String(p.opacity);
-    
+
     // Text readout update
     if (ui.opacityVal) {
       const disp = Number(p.opacity).toFixed(2);
@@ -114,7 +122,7 @@
   function collectControls() {
     if (!ui) ui = queryUI();
     const opacity = ui.opacityRange ? Number(ui.opacityRange.value) : 1;
-    
+
     const props = {
       opacity: clamp(opacity, 0, 1),
       doubleSided: ui.chkDoubleSided ? ui.chkDoubleSided.checked : false,
@@ -159,31 +167,46 @@
 
   function persistAndCache(key, props) {
     if (!key) return;
+    if (!currentSheetGid) {
+      console.warn(LOG_PREFIX, 'No sheet context yet; skip persist for', key);
+      return;
+    }
     persistToSheet(key, props);
 
-    const cache = sheetMaterialCache.get(currentSheetGid) || new Map();
-    cache.set(key, props);
-    sheetMaterialCache.set(currentSheetGid, cache);
+    const gid = String(currentSheetGid);
+    const cache = sheetMaterialCache.get(gid) || new Map();
+    cache.set(key, Object.assign({}, defaultProps, props || {}));
+    sheetMaterialCache.set(gid, cache);
   }
 
-  function applyAllToScene(map) {
+  // --- 全マテリアルへ状態テーブルを適用（シートごとの完全同期） ---
+
+  function applyAllToScene(mapForSheet) {
     const scene = window.__LM_SCENE || window.scene || (window.viewer && window.viewer.scene);
     if (!scene) return;
+
+    const activeMap = mapForSheet instanceof Map ? mapForSheet : null;
 
     scene.traverse((o) => {
       if (!o.isMesh) return;
       const mats = Array.isArray(o.material) ? o.material : [o.material];
-      mats.forEach(m => {
+      mats.forEach((m) => {
         if (!m) return;
         const key = (m.name || o.name || '').trim();
         if (!key) return;
-        if (map.has(key)) {
-          const conf = map.get(key);
-          applyToViewer(key, conf);
+
+        // 「キャプションシート × マテリアル」の状態テーブルから props を決定
+        // 該当行がなければ必ず defaultProps を使う（前シートの値が残らないようにする）。
+        let props = activeMap && activeMap.get(key);
+        if (!props) {
+          props = Object.assign({}, defaultProps);
+        } else {
+          props = Object.assign({}, defaultProps, props);
         }
+        applyToViewer(key, props);
       });
     });
-    console.log(LOG_PREFIX, 'Applied full configuration to scene.');
+    console.log(LOG_PREFIX, 'Applied full configuration to scene for sheet', currentSheetGid);
   }
 
   // --- Persistence ---
@@ -194,18 +217,23 @@
       console.warn(LOG_PREFIX, 'Persistence module missing');
       return;
     }
-    const patch = Object.assign({ materialKey: key, sheetGid: currentSheetGid }, props);
-    persist.upsert(patch).catch(e => console.warn(LOG_PREFIX, 'Persist failed', e));
+    const patch = Object.assign({ materialKey: key, sheetGid: String(currentSheetGid || '') }, props);
+    persist.upsert(patch).catch((e) => console.warn(LOG_PREFIX, 'Persist failed', e));
   }
 
   // --- Core Sync Logic ---
 
   function syncMaterialState(key) {
     if (!key) return;
-    const cache = sheetMaterialCache.get(currentSheetGid);
+    const gid = String(currentSheetGid || '');
+    const cache = sheetMaterialCache.get(gid);
     const cachedProps = cache ? cache.get(key) : null;
-    const finalProps = cachedProps ? Object.assign({}, cachedProps) : Object.assign({}, defaultProps);
-    
+
+    // 状態テーブルから props を取得。なければ defaultProps を明示的に使用。
+    const finalProps = cachedProps
+      ? Object.assign({}, defaultProps, cachedProps)
+      : Object.assign({}, defaultProps);
+
     applyPropsToUI(finalProps);
     applyToViewer(key, finalProps);
   }
@@ -220,12 +248,22 @@
       return;
     }
 
-    const url = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(MATERIALS_RANGE)}?majorDimension=ROWS`;
-    const res = await fetchJSON(url);
+    const url = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(
+      spreadsheetId
+    )}/values/${encodeURIComponent(MATERIALS_RANGE)}?majorDimension=ROWS`;
+
+    let res;
+    try {
+      res = await fetchJSON(url);
+    } catch (e) {
+      console.warn(LOG_PREFIX, 'Failed to load materials from Sheets', e);
+      return;
+    }
+
     const rows = ensureArray(res && res.values).slice(1); // skip header
 
     const map = new Map();
-    rows.forEach(row => {
+    rows.forEach((row) => {
       const [
         updatedAt,
         updatedBy,
@@ -237,7 +275,7 @@
         chromaEnable,
         chromaColor,
         chromaTolerance,
-        chromaFeather,
+        chromaFeather
       ] = row;
 
       if (!materialKey || rowSheetGid !== String(sheetGid)) return;
@@ -249,13 +287,14 @@
         chromaEnable: chromaEnable === 'TRUE',
         chromaColor: chromaColor || '#000000',
         chromaTolerance: chromaTolerance !== undefined ? Number(chromaTolerance) : 0,
-        chromaFeather: chromaFeather !== undefined ? Number(chromaFeather) : 0,
+        chromaFeather: chromaFeather !== undefined ? Number(chromaFeather) : 0
       };
 
       map.set(materialKey, props);
     });
 
-    sheetMaterialCache.set(String(sheetGid), map);
+    const gid = String(sheetGid);
+    sheetMaterialCache.set(gid, map);
     return map;
   }
 
@@ -270,20 +309,24 @@
 
     if (!spreadsheetId || !currentSheetGid) return;
 
-    const map = await loadMaterialsForContext(spreadsheetId, currentSheetGid);
-    console.log(LOG_PREFIX, 'Data Loaded. Keys:', map ? map.size : 0);
+    const map = (await loadMaterialsForContext(spreadsheetId, currentSheetGid)) || new Map();
+    console.log(LOG_PREFIX, 'Data Loaded. Keys:', map.size);
 
     if (!ui) ui = queryUI();
-    if (ui && ui.materialSelect && ui.materialSelect.value) {
-      syncMaterialState(ui.materialSelect.value);
-    } else if (map && map.size) {
-      const firstKey = map.keys().next().value;
-      if (firstKey && ui && ui.materialSelect) {
-        ui.materialSelect.value = firstKey;
+
+    // 1. Viewer 側を、当該シートの状態テーブルに完全同期
+    applyAllToScene(map);
+
+    // 2. UI 側を、現在選択中のマテリアル（あれば）で同期
+    if (ui && ui.materialSelect) {
+      const currentKey = getSelectedMaterialKey();
+      if (currentKey) {
+        syncMaterialState(currentKey);
+      } else if (ui.materialSelect.options.length > 0) {
+        // 何も選ばれていなければ先頭を選択し、その状態で同期する
+        ui.materialSelect.value = ui.materialSelect.options[0].value;
+        syncMaterialState(ui.materialSelect.value);
       }
-      applyAllToScene(map);
-    } else {
-      applyAllToScene(new Map());
     }
   }
 
@@ -300,6 +343,7 @@
     ui.materialSelect.addEventListener('change', () => {
       const key = getSelectedMaterialKey();
       console.log(LOG_PREFIX, 'Select Change:', key);
+      // マテリアル切替ごとに状態テーブル（＋デフォルト）から同期
       syncMaterialState(key);
     });
 
@@ -307,6 +351,7 @@
       ui.opacityRange.addEventListener('input', () => {
         const state = collectControls();
         if (!state.materialKey) return;
+        // 即時プレビューはシートに書かず Viewer のみに反映
         if (ui.opacityVal) {
           const disp = Number(state.props.opacity).toFixed(2);
           if (ui.opacityVal.tagName === 'INPUT' || ui.opacityVal.tagName === 'OUTPUT') {
@@ -323,6 +368,7 @@
         if (!state.materialKey) return;
         console.log(LOG_PREFIX, 'Slider Commit:', state.materialKey);
         applyToViewer(state.materialKey, state.props);
+        // コミットタイミングでのみ状態テーブルを更新
         persistAndCache(state.materialKey, state.props);
       });
     }
@@ -360,8 +406,9 @@
   // --- Bootstrapping ---
 
   function boot() {
-    console.log(LOG_PREFIX, 'Booting...');
-    
+    console.log(LOG_PREFIX, 'Booting...', VERSION_TAG);
+
+    // シートコンテキスト変更イベント
     window.addEventListener('lm:sheet-context', (e) => {
       if (e.detail) handleSheetContextChange(e.detail);
     });
@@ -369,12 +416,17 @@
       handleSheetContextChange(window.__LM_SHEET_CTX);
     }
 
+    // UI 要素の出現をポーリングしてイベントバインド
     const t = setInterval(() => {
       const res = queryUI();
       if (res.materialSelect) {
+        ui = res;
         bindDirectEvents();
         const key = getSelectedMaterialKey();
-        if (key && currentSheetGid) syncMaterialState(key);
+        if (key && currentSheetGid) {
+          // 初期表示時も状態テーブルから同期
+          syncMaterialState(key);
+        }
         clearInterval(t);
       } else if (retryCount++ > 50) {
         console.warn(LOG_PREFIX, 'UI bind timeout');
