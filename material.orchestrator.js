@@ -1,18 +1,17 @@
 // material.orchestrator.js
-// LociMyu material UI orchestrator (Unified)
-// Sheet × Material state-table driven orchestrator.
-// VERSION_TAG: V6_SHEET_MATERIAL_SOT
+// LociMyu material UI orchestrator (Sheet × Material SOT)
+// VERSION_TAG: V6_SHEET_MATERIAL_SOT_FIX1
 //
 // ポリシー:
 // - 「キャプションシート × マテリアル」の状態テーブル（__LM_MATERIALS）を唯一のソース・オブ・トゥルースとする。
-// - UI や Three.js 側は常にこの状態テーブルから同期される一時的なビュー。
-// - マテリアル切替・シート切替のたびに、必ず状態テーブル（＋デフォルト値）から UI / Viewer を再同期する。
-// - Viewer の状態を読み取ってシートへ書き戻すことはしない（片方向：シート → UI / Viewer, UI → シート）。
+// - UI / Viewer は常にこの状態テーブルから再構成される一時ビュー。
+// - シート切替・マテリアル切替のたびに、必ず「状態テーブル → UI/Viewer」を行う。
+// - Viewer からシートへの逆流は行わず、UI コミット時のみ upsert で追記更新する。
 
 (function () {
   const LOG_PREFIX = '[mat-orch-unified]';
   const MATERIALS_RANGE = '__LM_MATERIALS!A:N';
-  const VERSION_TAG = 'V6_SHEET_MATERIAL_SOT';
+  const VERSION_TAG = 'V6_SHEET_MATERIAL_SOT_FIX1';
   console.log(LOG_PREFIX, 'loaded', VERSION_TAG);
 
   // UI State
@@ -22,9 +21,10 @@
 
   // Data State
   let currentSheetGid = '';
-  // Cache: sheetGid -> Map<materialKey, PropsObject>
+  // sheetGid(string) -> Map<materialKey, props>
   const sheetMaterialCache = new Map();
 
+  // シートの状態テーブルに存在しない場合に使うデフォルト値
   const defaultProps = {
     opacity: 1,
     doubleSided: false,
@@ -33,9 +33,13 @@
     chromaColor: '#000000',
     chromaTolerance: 0,
     chromaFeather: 0,
+    // 将来拡張用（現状 UI なし）
+    roughness: undefined,
+    metalness: undefined,
+    emissiveHex: undefined,
   };
 
-  // --- Helpers ---
+  // ---- small helpers -------------------------------------------------------
 
   function ensureArray(x) {
     if (!x) return [];
@@ -43,16 +47,18 @@
     return [x];
   }
 
-  // ▼▼▼ UI の参照先: #pane-material を最優先とし、旧 UI もフォールバックで拾う ▼▼▼
+  function clamp(v, min, max) {
+    return Math.min(Math.max(Number(v), min), max);
+  }
+
+  // ---- UI lookup -----------------------------------------------------------
+
+  // なるべく #pane-material 配下を優先して拾う（旧 #panel-material などはフォールバック）
   function queryUI() {
     const doc = document;
-    // Prefer controls inside the new material pane to avoid accidentally
-    // binding to legacy/hidden anchors (e.g. #panel-material).
     const pane = doc.querySelector('#pane-material') || doc;
     const root = pane;
 
-    // Canonical material select: #materialSelect inside #pane-material.
-    // Fallbacks exist only for backward compatibility.
     const materialSelect =
       root.querySelector('#materialSelect') ||
       root.querySelector('#pm-material') ||
@@ -75,36 +81,47 @@
       materialSelect,
       opacityRange,
       opacityVal,
-      chkDoubleSided: root.querySelector('#pm-flag-doublesided') || doc.getElementById('pm-flag-doublesided'),
-      chkUnlitLike: root.querySelector('#pm-flag-unlit') || doc.getElementById('pm-flag-unlit'),
-      chkChromaEnable: root.querySelector('#pm-chroma-enable') || doc.getElementById('pm-chroma-enable'),
-      inpChromaColor: root.querySelector('#pm-chroma-color') || doc.getElementById('pm-chroma-color'),
-      rngChromaTolerance: root.querySelector('#pm-chroma-tol') || doc.getElementById('pm-chroma-tol'),
-      rngChromaFeather: root.querySelector('#pm-chroma-feather') || doc.getElementById('pm-chroma-feather')
+      chkDoubleSided:
+        root.querySelector('#pm-flag-doublesided') ||
+        doc.getElementById('pm-flag-doublesided'),
+      chkUnlitLike:
+        root.querySelector('#pm-flag-unlit') ||
+        doc.getElementById('pm-flag-unlit'),
+      chkChromaEnable:
+        root.querySelector('#pm-chroma-enable') ||
+        doc.getElementById('pm-chroma-enable'),
+      inpChromaColor:
+        root.querySelector('#pm-chroma-color') ||
+        doc.getElementById('pm-chroma-color'),
+      rngChromaTolerance:
+        root.querySelector('#pm-chroma-tol') ||
+        doc.getElementById('pm-chroma-tol'),
+      rngChromaFeather:
+        root.querySelector('#pm-chroma-feather') ||
+        doc.getElementById('pm-chroma-feather'),
     };
   }
-  // ▲▲▲ UI 参照先ここまで ▲▲▲
 
   function getSelectedMaterialKey() {
     if (!ui) ui = queryUI();
     return ui.materialSelect ? (ui.materialSelect.value || '').trim() : '';
   }
 
-  function clamp(v, min, max) {
-    return Math.min(Math.max(Number(v), min), max);
-  }
-
   function applyPropsToUI(props) {
     if (!ui) ui = queryUI();
     const p = Object.assign({}, defaultProps, props || {});
 
-    // Opacity
-    if (ui.opacityRange) ui.opacityRange.value = String(p.opacity);
+    // opacity
+    if (ui.opacityRange) {
+      ui.opacityRange.value = String(p.opacity);
+    }
 
-    // Text readout update
     if (ui.opacityVal) {
       const disp = Number(p.opacity).toFixed(2);
-      if (ui.opacityVal.tagName === 'INPUT' || ui.opacityVal.tagName === 'OUTPUT') {
+      if (
+        ui.opacityVal.tagName === 'INPUT' ||
+        ui.opacityVal.tagName === 'OUTPUT'
+      ) {
         ui.opacityVal.value = disp;
       } else {
         ui.opacityVal.textContent = disp;
@@ -115,8 +132,10 @@
     if (ui.chkUnlitLike) ui.chkUnlitLike.checked = !!p.unlitLike;
     if (ui.chkChromaEnable) ui.chkChromaEnable.checked = !!p.chromaEnable;
     if (ui.inpChromaColor) ui.inpChromaColor.value = p.chromaColor || '#000000';
-    if (ui.rngChromaTolerance) ui.rngChromaTolerance.value = String(p.chromaTolerance || 0);
-    if (ui.rngChromaFeather) ui.rngChromaFeather.value = String(p.chromaFeather || 0);
+    if (ui.rngChromaTolerance)
+      ui.rngChromaTolerance.value = String(p.chromaTolerance || 0);
+    if (ui.rngChromaFeather)
+      ui.rngChromaFeather.value = String(p.chromaFeather || 0);
   }
 
   function collectControls() {
@@ -129,17 +148,21 @@
       unlitLike: ui.chkUnlitLike ? ui.chkUnlitLike.checked : false,
       chromaEnable: ui.chkChromaEnable ? ui.chkChromaEnable.checked : false,
       chromaColor: ui.inpChromaColor ? ui.inpChromaColor.value : '#000000',
-      chromaTolerance: ui.rngChromaTolerance ? Number(ui.rngChromaTolerance.value) : 0,
-      chromaFeather: ui.rngChromaFeather ? Number(ui.rngChromaFeather.value) : 0
+      chromaTolerance: ui.rngChromaTolerance
+        ? Number(ui.rngChromaTolerance.value)
+        : 0,
+      chromaFeather: ui.rngChromaFeather
+        ? Number(ui.rngChromaFeather.value)
+        : 0,
     };
 
     return {
       materialKey: getSelectedMaterialKey(),
-      props
+      props,
     };
   }
 
-  // --- Scene / Bridge Interaction ---
+  // ---- viewer bridge -------------------------------------------------------
 
   function getViewerBridge() {
     return window.__lm_viewer_bridge || window.viewerBridge || null;
@@ -165,24 +188,56 @@
     }
   }
 
+  // ---- キャッシュ ＋ 永続化 ------------------------------------------------
+
+  function persistToSheet(key, props) {
+    const persist = window.LM_MaterialsPersist;
+    if (!persist || typeof persist.upsert !== 'function') {
+      console.warn(LOG_PREFIX, 'Persistence module missing');
+      return;
+    }
+    const patch = Object.assign(
+      {
+        materialKey: key,
+        sheetGid: String(currentSheetGid || ''),
+      },
+      props || {},
+    );
+    persist
+      .upsert(patch)
+      .catch((e) => console.warn(LOG_PREFIX, 'Persist failed', e));
+  }
+
   function persistAndCache(key, props) {
     if (!key) return;
     if (!currentSheetGid) {
-      console.warn(LOG_PREFIX, 'No sheet context yet; skip persist for', key);
+      console.warn(LOG_PREFIX, 'No sheet context; skip persist for', key);
       return;
     }
-    persistToSheet(key, props);
 
+    // シートテーブル更新
     const gid = String(currentSheetGid);
     const cache = sheetMaterialCache.get(gid) || new Map();
     cache.set(key, Object.assign({}, defaultProps, props || {}));
     sheetMaterialCache.set(gid, cache);
+
+    // シート永続化
+    persistToSheet(key, props);
   }
 
-  // --- 全マテリアルへ状態テーブルを適用（シートごとの完全同期） ---
+  // ---- シーン全体への適用 ---------------------------------------------------
+
+  function getScene() {
+    return (
+      window.__LM_SCENE ||
+      window.scene ||
+      (window.viewer && window.viewer.scene) ||
+      null
+    );
+  }
 
   function applyAllToScene(mapForSheet) {
-    const scene = window.__LM_SCENE || window.scene || (window.viewer && window.viewer.scene);
+    const scene = getScene();
     if (!scene) return;
 
     const activeMap = mapForSheet instanceof Map ? mapForSheet : null;
@@ -195,9 +250,8 @@
         const key = (m.name || o.name || '').trim();
         if (!key) return;
 
-        // 「キャプションシート × マテリアル」の状態テーブルから props を決定
-        // 該当行がなければ必ず defaultProps を使う（前シートの値が残らないようにする）。
         let props = activeMap && activeMap.get(key);
+        // 行がないものは必ず defaultProps に戻す
         if (!props) {
           props = Object.assign({}, defaultProps);
         } else {
@@ -206,42 +260,18 @@
         applyToViewer(key, props);
       });
     });
-    console.log(LOG_PREFIX, 'Applied full configuration to scene for sheet', currentSheetGid);
+
+    console.log(
+      LOG_PREFIX,
+      'Applied full configuration to scene for sheet',
+      currentSheetGid,
+    );
   }
 
-  // --- Persistence ---
-
-  function persistToSheet(key, props) {
-    const persist = window.LM_MaterialsPersist;
-    if (!persist || typeof persist.upsert !== 'function') {
-      console.warn(LOG_PREFIX, 'Persistence module missing');
-      return;
-    }
-    const patch = Object.assign({ materialKey: key, sheetGid: String(currentSheetGid || '') }, props);
-    persist.upsert(patch).catch((e) => console.warn(LOG_PREFIX, 'Persist failed', e));
-  }
-
-  // --- Core Sync Logic ---
-
-  function syncMaterialState(key) {
-    if (!key) return;
-    const gid = String(currentSheetGid || '');
-    const cache = sheetMaterialCache.get(gid);
-    const cachedProps = cache ? cache.get(key) : null;
-
-    // 状態テーブルから props を取得。なければ defaultProps を明示的に使用。
-    const finalProps = cachedProps
-      ? Object.assign({}, defaultProps, cachedProps)
-      : Object.assign({}, defaultProps);
-
-    applyPropsToUI(finalProps);
-    applyToViewer(key, finalProps);
-  }
-
-  // --- Data Loading from __LM_MATERIALS ---
+  // ---- シート × マテリアル状態テーブルの読込 -------------------------------
 
   async function loadMaterialsForContext(spreadsheetId, sheetGid) {
-    if (!spreadsheetId || !sheetGid) return;
+    if (!spreadsheetId || sheetGid == null) return;
     const fetchJSON = window.__lm_fetchJSONAuth;
     if (!fetchJSON) {
       console.warn(LOG_PREFIX, 'No auth fetch available; cannot load materials');
@@ -249,7 +279,7 @@
     }
 
     const url = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(
-      spreadsheetId
+      spreadsheetId,
     )}/values/${encodeURIComponent(MATERIALS_RANGE)}?majorDimension=ROWS`;
 
     let res;
@@ -260,25 +290,35 @@
       return;
     }
 
-    const rows = ensureArray(res && res.values).slice(1); // skip header
-
+    const rows = ensureArray(res && res.values).slice(1); // skip header row
+    const gidStr = String(sheetGid);
     const map = new Map();
-    rows.forEach((row) => {
+
+    // ヘッダ順に厳密に合わせる（boot.esm.cdn.js の MATERIAL_HEADERS と一致）
+    rows.forEach((row, idx) => {
       const [
-        updatedAt,
-        updatedBy,
-        rowSheetGid,
-        materialKey,
-        opacity,
-        doubleSided,
-        unlitLike,
-        chromaEnable,
-        chromaColor,
-        chromaTolerance,
-        chromaFeather
+        materialKey, // A
+        opacity, // B
+        doubleSided, // C
+        unlitLike, // D
+        chromaEnable, // E
+        chromaColor, // F
+        chromaTolerance, // G
+        chromaFeather, // H
+        roughness, // I
+        metalness, // J
+        emissiveHex, // K
+        updatedAt, // L
+        updatedBy, // M
+        rowSheetGid, // N
       ] = row;
 
-      if (!materialKey || rowSheetGid !== String(sheetGid)) return;
+      if (!materialKey) return;
+
+      // sheetGid が指定されている行のみ、そのシートに属するとみなす
+      // （rowSheetGid が空の古い行があれば、グローバル扱いにしてもよいが
+      //  今回は「指定されていれば必ず一致すること」を優先）
+      if (rowSheetGid && String(rowSheetGid) !== gidStr) return;
 
       const props = {
         opacity: opacity !== undefined ? Number(opacity) : 1,
@@ -286,51 +326,80 @@
         unlitLike: unlitLike === 'TRUE',
         chromaEnable: chromaEnable === 'TRUE',
         chromaColor: chromaColor || '#000000',
-        chromaTolerance: chromaTolerance !== undefined ? Number(chromaTolerance) : 0,
-        chromaFeather: chromaFeather !== undefined ? Number(chromaFeather) : 0
+        chromaTolerance:
+          chromaTolerance !== undefined ? Number(chromaTolerance) : 0,
+        chromaFeather:
+          chromaFeather !== undefined ? Number(chromaFeather) : 0,
+        roughness:
+          roughness !== undefined && roughness !== ''
+            ? Number(roughness)
+            : undefined,
+        metalness:
+          metalness !== undefined && metalness !== ''
+            ? Number(metalness)
+            : undefined,
+        emissiveHex: emissiveHex || undefined,
+        // updatedAt / updatedBy / sheetGid は props には含めない（メタ情報）
       };
 
-      map.set(materialKey, props);
+      map.set(String(materialKey), props);
     });
 
-    const gid = String(sheetGid);
-    sheetMaterialCache.set(gid, map);
+    sheetMaterialCache.set(gidStr, map);
+    console.log(LOG_PREFIX, 'Data Loaded. Keys:', map.size, 'for sheet', gidStr);
     return map;
   }
 
-  // --- Sheet Context Handling ---
+  // ---- 1 マテリアル分の同期（状態テーブル → UI / Viewer） -----------------
+
+  function syncMaterialState(materialKey) {
+    if (!materialKey) return;
+    const gid = String(currentSheetGid || '');
+    const cache = sheetMaterialCache.get(gid);
+    const cachedProps = cache ? cache.get(materialKey) : null;
+
+    const finalProps = cachedProps
+      ? Object.assign({}, defaultProps, cachedProps)
+      : Object.assign({}, defaultProps);
+
+    applyPropsToUI(finalProps);
+    applyToViewer(materialKey, finalProps);
+  }
+
+  // ---- シートコンテキスト変更イベント --------------------------------------
 
   async function handleSheetContextChange(ctx) {
     const spreadsheetId = ctx && ctx.spreadsheetId;
     const sheetGid = ctx && ctx.sheetGid;
-    currentSheetGid = sheetGid ? String(sheetGid) : '';
+    currentSheetGid = sheetGid != null ? String(sheetGid) : '';
 
     console.log(LOG_PREFIX, 'Sheet Context Change ->', currentSheetGid);
 
     if (!spreadsheetId || !currentSheetGid) return;
 
-    const map = (await loadMaterialsForContext(spreadsheetId, currentSheetGid)) || new Map();
-    console.log(LOG_PREFIX, 'Data Loaded. Keys:', map.size);
+    const map = (await loadMaterialsForContext(
+      spreadsheetId,
+      currentSheetGid,
+    )) || new Map();
 
-    if (!ui) ui = queryUI();
-
-    // 1. Viewer 側を、当該シートの状態テーブルに完全同期
+    // 1. シーン全体を、このシートの状態テーブルに完全同期
     applyAllToScene(map);
 
-    // 2. UI 側を、現在選択中のマテリアル（あれば）で同期
+    // 2. UI を、現在選択中（なければ先頭）のマテリアルで同期
+    if (!ui) ui = queryUI();
     if (ui && ui.materialSelect) {
-      const currentKey = getSelectedMaterialKey();
-      if (currentKey) {
-        syncMaterialState(currentKey);
-      } else if (ui.materialSelect.options.length > 0) {
-        // 何も選ばれていなければ先頭を選択し、その状態で同期する
+      let key = getSelectedMaterialKey();
+      if (!key && ui.materialSelect.options.length > 0) {
         ui.materialSelect.value = ui.materialSelect.options[0].value;
-        syncMaterialState(ui.materialSelect.value);
+        key = ui.materialSelect.value;
+      }
+      if (key) {
+        syncMaterialState(key);
       }
     }
   }
 
-  // --- Direct DOM Event Binding ---
+  // ---- DOM イベントバインド -------------------------------------------------
 
   function bindDirectEvents() {
     if (listenersBound) return;
@@ -343,7 +412,6 @@
     ui.materialSelect.addEventListener('change', () => {
       const key = getSelectedMaterialKey();
       console.log(LOG_PREFIX, 'Select Change:', key);
-      // マテリアル切替ごとに状態テーブル（＋デフォルト）から同期
       syncMaterialState(key);
     });
 
@@ -351,10 +419,14 @@
       ui.opacityRange.addEventListener('input', () => {
         const state = collectControls();
         if (!state.materialKey) return;
-        // 即時プレビューはシートに書かず Viewer のみに反映
+
+        // 即時プレビュー（シートに書かず、UI/Viewer だけ更新）
         if (ui.opacityVal) {
           const disp = Number(state.props.opacity).toFixed(2);
-          if (ui.opacityVal.tagName === 'INPUT' || ui.opacityVal.tagName === 'OUTPUT') {
+          if (
+            ui.opacityVal.tagName === 'INPUT' ||
+            ui.opacityVal.tagName === 'OUTPUT'
+          ) {
             ui.opacityVal.value = disp;
           } else {
             ui.opacityVal.textContent = disp;
@@ -368,7 +440,6 @@
         if (!state.materialKey) return;
         console.log(LOG_PREFIX, 'Slider Commit:', state.materialKey);
         applyToViewer(state.materialKey, state.props);
-        // コミットタイミングでのみ状態テーブルを更新
         persistAndCache(state.materialKey, state.props);
       });
     }
@@ -387,28 +458,42 @@
       applyToViewer(state.materialKey, state.props);
     };
 
-    if (ui.chkDoubleSided) ui.chkDoubleSided.addEventListener('change', () => commit('DoubleSided'));
-    if (ui.chkUnlitLike) ui.chkUnlitLike.addEventListener('change', () => commit('UnlitLike'));
-    if (ui.chkChromaEnable) ui.chkChromaEnable.addEventListener('change', () => commit('ChromaEnable'));
-    if (ui.inpChromaColor) ui.inpChromaColor.addEventListener('change', () => commit('ChromaColor'));
+    if (ui.chkDoubleSided)
+      ui.chkDoubleSided.addEventListener('change', () =>
+        commit('DoubleSided'),
+      );
+    if (ui.chkUnlitLike)
+      ui.chkUnlitLike.addEventListener('change', () => commit('UnlitLike'));
+    if (ui.chkChromaEnable)
+      ui.chkChromaEnable.addEventListener('change', () =>
+        commit('ChromaEnable'),
+      );
+    if (ui.inpChromaColor)
+      ui.inpChromaColor.addEventListener('change', () =>
+        commit('ChromaColor'),
+      );
 
     if (ui.rngChromaTolerance) {
       ui.rngChromaTolerance.addEventListener('input', preview);
-      ui.rngChromaTolerance.addEventListener('change', () => commit('ChromaTolerance'));
+      ui.rngChromaTolerance.addEventListener('change', () =>
+        commit('ChromaTolerance'),
+      );
     }
 
     if (ui.rngChromaFeather) {
       ui.rngChromaFeather.addEventListener('input', preview);
-      ui.rngChromaFeather.addEventListener('change', () => commit('ChromaFeather'));
+      ui.rngChromaFeather.addEventListener('change', () =>
+        commit('ChromaFeather'),
+      );
     }
   }
 
-  // --- Bootstrapping ---
+  // ---- boot ---------------------------------------------------------------
 
   function boot() {
     console.log(LOG_PREFIX, 'Booting...', VERSION_TAG);
 
-    // シートコンテキスト変更イベント
+    // シートコンテキストイベント
     window.addEventListener('lm:sheet-context', (e) => {
       if (e.detail) handleSheetContextChange(e.detail);
     });
@@ -416,15 +501,15 @@
       handleSheetContextChange(window.__LM_SHEET_CTX);
     }
 
-    // UI 要素の出現をポーリングしてイベントバインド
+    // UI が張られるまでポーリングしてイベントをバインド
     const t = setInterval(() => {
       const res = queryUI();
       if (res.materialSelect) {
         ui = res;
         bindDirectEvents();
+
         const key = getSelectedMaterialKey();
         if (key && currentSheetGid) {
-          // 初期表示時も状態テーブルから同期
           syncMaterialState(key);
         }
         clearInterval(t);
