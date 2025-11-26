@@ -1,804 +1,436 @@
-// --- LM auth resolver without dynamic import (classic-safe) ---
-function __lm_getAuth() {
-  const gauth = window.__LM_auth || {};
+// ---------------------------------------------------------------------------
+// LociMyu viewer.module.cdn.js (patched for GLB auth + materials)
+// ---------------------------------------------------------------------------
+
+// --- LM auth resolver (classic-safe, no dynamic import name collisions) ---
+function __lm_auth_resolver_v2(){
+  // すでにグローバルにブリッジがあればそれを使う
+  if (window.__lm_auth_bridge && typeof window.__lm_auth_bridge.getAccessToken === 'function'){
+    return {
+      ensureToken: window.__lm_auth_bridge.ensureToken || (async () => {
+        const t = await window.__lm_auth_bridge.getAccessToken();
+        if (!t) throw new Error('no token from __lm_auth_bridge');
+        return t;
+      }),
+      getAccessToken: window.__lm_auth_bridge.getAccessToken
+    };
+  }
+
+  // gauth.module.js がロードされていればそれを使う
+  const gauth = window.__lm_gauth_module || window.gauthModule || null;
+  if (gauth && typeof gauth.getAccessToken === 'function'){
+    return {
+      ensureToken: gauth.ensureToken || (async () => {
+        const t = await gauth.getAccessToken();
+        if (!t) throw new Error('no token from gauth.module');
+        return t;
+      }),
+      getAccessToken: gauth.getAccessToken
+    };
+  }
+
+  console.warn('[viewer.auth] no explicit auth bridge; falling back to noop token');
   return {
-    ensureToken: (typeof gauth.ensureToken === 'function'
-                    ? gauth.ensureToken
-                    : (typeof window.ensureToken === 'function'
-                        ? window.ensureToken
-                        : async function(){ return null; })),
-    getAccessToken: (typeof gauth.getAccessToken === 'function'
-                       ? gauth.getAccessToken
-                       : (typeof window.getAccessToken === 'function'
-                           ? window.getAccessToken
-                           : async function(){ return null; }))
+    ensureToken: async () => null,
+    getAccessToken: async () => null
   };
 }
 
-// --- Globals/state for viewer ---
-let renderer;
-let scene;
-let camera;
-let controls;
-let currentGlb;
-let currentGlbId = null;
-let materialsCache = {};
-let clock;
-let canvasEl;
-let onRenderTickCb = null;
+const { ensureToken: __lm_ensureToken, getAccessToken: __lm_getAccessToken } = __lm_auth_resolver_v2();
 
-// expose a minimal viewer state for debugging if needed
-const __lm_viewer_state = {
-  get renderer(){ return renderer; },
-  get scene(){ return scene; },
-  get camera(){ return camera; },
-  get controls(){ return controls; },
-  get currentGlb(){ return currentGlb; },
-  get currentGlbId(){ return currentGlbId; },
-  get materialsCache(){ return materialsCache; },
-};
-window.__lm_viewer_state = __lm_viewer_state;
-
-// --- THREE / loaders ---
+// ---------------------------------------------------------------------------
+// 三角関数 / THREE.js import
+// ---------------------------------------------------------------------------
 
 import * as THREE from 'three';
-import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
-const LoadingManager = new THREE.LoadingManager();
+console.log('[viewer.module] using THREE from import map', !!THREE);
 
-// --- Google Drive helper (alt=media fetch → Blob) ---
+// ---------------------------------------------------------------------------
+// 内部状態
+// ---------------------------------------------------------------------------
 
-async function fetchDriveFileBlob(fileId, token) {
-  const url = `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?alt=media`;
-  const headers = {};
-  if (token) headers['Authorization'] = `Bearer ${token}`;
+let renderer = null;
+let scene = null;
+let camera = null;
+let currentGlbId = null;
+let currentRoot = null;
+let clock = new THREE.Clock();
 
-  const res = await fetch(url, { headers });
-  if (!res.ok) {
-    console.error('[viewer] Drive fetch failed', res.status, await res.text());
-    throw new Error(`Drive fetch failed: ${res.status}`);
-  }
-  return await res.blob();
+const materialState = new Map(); // material.id => { baseEmissive: Color|null, baseLights:boolean|undefined, baseToneMapped:boolean|undefined }
+
+function getCanvas() {
+  const c = document.getElementById('gl');
+  if (!c) throw new Error('canvas#gl not found');
+  return c;
 }
 
-// ------------------------------------------------------------------------------------
-//  Viewer bootstrap
-// ------------------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// ビューア初期化
+// ---------------------------------------------------------------------------
 
-// NOTE: glb.btn.bridge.v3 からは ensureViewer(canvasElement) 形式で呼ばれる想定。
-// 既存コードとの互換性のため、
-//   - canvasElement（HTMLCanvasElement）
-//   - { canvas: HTMLCanvasElement }
-//   の両方を受け付けるようにしている。
-export function ensureViewer(arg){
-  if (renderer) return;
-
-  const canvas = (arg && arg.tagName) ? arg
-                : (arg && arg.canvas) ? arg.canvas
-                : document.getElementById('gl');
-
-  if (!canvas || typeof canvas.getContext !== 'function') {
-    console.error('[viewer] ensureViewer: invalid canvas', canvas);
-    throw new Error('Viewer canvas not found or invalid');
+export function ensureViewer(opts = {}){
+  if (renderer && scene && camera){
+    return { renderer, scene, camera };
   }
 
-  canvasEl = canvas;
-
-  renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
+  const canvas = getCanvas();
+  renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
   renderer.setPixelRatio(window.devicePixelRatio || 1);
-
-  const width  = canvas.clientWidth  || canvas.width  || 800;
-  const height = canvas.clientHeight || canvas.height || 600;
-  renderer.setSize(width, height, false);
-  renderer.outputEncoding = THREE.sRGBEncoding;
+  renderer.setSize(canvas.clientWidth || 800, canvas.clientHeight || 600, false);
 
   scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x101015);
+  scene.background = new THREE.Color(0x202020);
 
-  const fov = 35;
-  const aspect = width / height;
-  const near = 0.1;
-  const far = 2000;
-  camera = new THREE.PerspectiveCamera(fov, aspect, near, far);
-  camera.position.set(5, 3, 8);
+  camera = new THREE.PerspectiveCamera(
+    45,
+    (canvas.clientWidth || 800) / (canvas.clientHeight || 600),
+    0.1,
+    1000
+  );
+  camera.position.set(0, 2, 5);
 
-  controls = new OrbitControls(camera, canvas);
-  controls.enableDamping = true;
-  controls.dampingFactor = 0.1;
-  controls.screenSpacePanning = true;
-  controls.target.set(0, 1, 0);
+  // 簡易ライト
+  const light = new THREE.DirectionalLight(0xffffff, 1.0);
+  light.position.set(5, 10, 7.5);
+  scene.add(light);
 
-  const hemi = new THREE.HemisphereLight(0xffffff, 0x444444, 1.0);
-  hemi.position.set(0, 20, 0);
-  scene.add(hemi);
+  const amb = new THREE.AmbientLight(0xffffff, 0.2);
+  scene.add(amb);
 
-  const dir = new THREE.DirectionalLight(0xffffff, 1.0);
-  dir.position.set(5, 10, 7.5);
-  dir.castShadow = true;
-  scene.add(dir);
-
-  clock = new THREE.Clock();
-
-  function onResize() {
-    if (!canvasEl || !renderer || !camera) return;
-    const w = canvasEl.clientWidth  || canvasEl.width  || 800;
-    const h = canvasEl.clientHeight || canvasEl.height || 600;
+  window.addEventListener('resize', () => {
+    if (!renderer || !camera) return;
+    const canvas = getCanvas();
+    const w = canvas.clientWidth || window.innerWidth;
+    const h = canvas.clientHeight || window.innerHeight;
+    renderer.setSize(w, h, false);
     camera.aspect = w / h;
     camera.updateProjectionMatrix();
-    renderer.setSize(w, h, false);
-  }
-  window.addEventListener('resize', onResize);
-
-  function renderLoop() {
-    requestAnimationFrame(renderLoop);
-    if (!renderer || !scene || !camera) return;
-
-    const dt = clock ? clock.getDelta() : 0.016;
-    if (controls) controls.update();
-
-    if (typeof onRenderTickCb === 'function') {
-      try { onRenderTickCb(dt); } catch (e) {
-        console.warn('[viewer] onRenderTick callback error', e);
-      }
-    }
-
-    renderer.render(scene, camera);
-  }
-  renderLoop();
-}
-
-// ------------------------------------------------------------------------------------
-//  GLB loading (from Google Drive)
-// ------------------------------------------------------------------------------------
-
-async function disposeCurrentGlb() {
-  if (!currentGlb || !scene) return;
-
-  scene.remove(currentGlb);
-
-  currentGlb.traverse(obj => {
-    if (!obj.isMesh) return;
-    if (obj.geometry) obj.geometry.dispose();
-    if (obj.material) {
-      const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
-      for (const m of mats) {
-        if (!m) continue;
-        if (m.map) m.map.dispose();
-        if (m.normalMap) m.normalMap.dispose();
-        if (m.roughnessMap) m.roughnessMap.dispose();
-        if (m.metalnessMap) m.metalnessMap.dispose();
-        if (m.alphaMap) m.alphaMap.dispose();
-        if (m.envMap) m.envMap.dispose();
-        m.dispose();
-      }
-    }
   });
 
-  currentGlb = null;
-  currentGlbId = null;
-  materialsCache = {};
+  console.log('[viewer.module] viewer initialized');
+  return { renderer, scene, camera };
 }
 
-// fileId: Google Drive file id (string)
-export async function loadGlbFromDrive(fileId) {
-  if (!fileId) throw new Error('fileId is required');
+// ---------------------------------------------------------------------------
+// GLB ロード
+// ---------------------------------------------------------------------------
 
-  const { ensureToken, getAccessToken } = __lm_getAuth();
-  if (ensureToken) await ensureToken();
-  const token = getAccessToken ? await getAccessToken() : null;
+export async function loadGlbFromDrive(fileId){
+  const { renderer, scene, camera } = ensureViewer();
 
-  await disposeCurrentGlb();
-
-  let objectURL = null;
-
-  try {
-    const blob = await fetchDriveFileBlob(fileId, token);
-    objectURL = URL.createObjectURL(blob);
-
-    const loader = new GLTFLoader(LoadingManager);
-    const gltf = await loader.loadAsync(objectURL);
-
-    currentGlb = gltf.scene || gltf.scenes[0];
-    currentGlbId = fileId;
-    scene.add(currentGlb);
-
-    // fit camera
-    const box = new THREE.Box3().setFromObject(currentGlb);
-    const size = box.getSize(new THREE.Vector3());
-    const center = box.getCenter(new THREE.Vector3());
-
-    const maxDim = Math.max(size.x, size.y, size.z);
-    const fov = camera.fov * (Math.PI / 180);
-    let cameraZ = Math.abs(maxDim / 2 / Math.tan(fov / 2));
-    cameraZ *= 1.4;
-
-    camera.position.set(center.x + cameraZ, center.y + cameraZ * 0.3, center.z + cameraZ);
-    camera.near = maxDim / 100;
-    camera.far = maxDim * 100;
-    camera.updateProjectionMatrix();
-
-    if (controls) {
-      controls.target.copy(center);
-      controls.update();
-    }
-
-    // cache materials by material.name
-    materialsCache = {};
-    currentGlb.traverse(obj => {
-      if (!obj.isMesh) return;
-      const materials = Array.isArray(obj.material) ? obj.material : [obj.material];
-      for (const mat of materials) {
-        if (!mat || !mat.name) continue;
-        if (!materialsCache[mat.name]) {
-          materialsCache[mat.name] = mat;
-        }
+  // 既存のモデルを削除
+  if (currentRoot){
+    scene.remove(currentRoot);
+    currentRoot.traverse(obj => {
+      if (obj.isMesh && obj.geometry) obj.geometry.dispose();
+      if (obj.material){
+        const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+        mats.forEach(m => {
+          if (m.map) m.map.dispose();
+          m.dispose();
+        });
       }
     });
-
-    console.log('[viewer] GLB loaded', {
-      fileId,
-      materialKeys: Object.keys(materialsCache),
-    });
-
-    return {
-      gltf,
-      scene: currentGlb,
-      materials: materialsCache,
-    };
-  } catch (err) {
-    console.error('[viewer] loadGlbFromDrive failed', err);
-    throw err;
-  } finally {
-    if (objectURL) URL.revokeObjectURL(objectURL);
+    currentRoot = null;
   }
-}
 
-// ------------------------------------------------------------------------------------
-//  Materials helpers + applyMaterialProps
-// ------------------------------------------------------------------------------------
+  // Drive URL を組み立てる（認可ヘッダは fetch 側に任せる）
+  const baseUrl = 'https://www.googleapis.com/drive/v3/files/';
+  const url = `${baseUrl}${fileId}?alt=media`;
 
-// returns array of material keys (names)
-export function listMaterials() {
-  return Object.keys(materialsCache || {});
-}
+  await __lm_ensureToken();
+  const token = await __lm_getAccessToken();
+  const headers = token ? { Authorization: `Bearer ${token}` } : {};
 
-// internal: get material object(s) by name
-function getMaterialTargets(materialName) {
-  const targets = [];
-  if (!currentGlb) return targets;
+  console.log('[viewer.module] loading GLB from Drive', { fileId, hasToken: !!token });
 
-  currentGlb.traverse(obj => {
-    if (!obj.isMesh) return;
-    const materials = Array.isArray(obj.material) ? obj.material : [obj.material];
+  const loader = new GLTFLoader();
+  loader.setCrossOrigin('anonymous');
 
-    for (const mat of materials) {
-      if (!mat || mat.name !== materialName) continue;
-      targets.push({ mesh: obj, material: mat });
-    }
+  // fetch して Blob URL に変換
+  const blob = await fetch(url, { headers }).then(r => {
+    if (!r.ok) throw new Error(`Drive fetch failed: ${r.status}`);
+    return r.blob();
   });
 
-  return targets;
-}
+  const blobUrl = URL.createObjectURL(blob);
 
-/**
- * props:
- *  - opacity: number (0–1)
- *  - doubleSided: boolean
- *  - unlitLike: boolean
- *  - chromaEnable: boolean
- *  - chromaColor: '#rrggbb'
- *  - chromaTolerance: number
- *  - chromaFeather: number
- */
-export function applyMaterialProps(materialName, props = {}) {
-  if (!materialName || !currentGlb) return;
-
-  const targets = getMaterialTargets(materialName);
-  if (!targets.length) return;
-
-  const {
-    opacity,
-    doubleSided,
-    unlitLike,
-    chromaEnable,
-    chromaColor,
-    chromaTolerance,
-    chromaFeather,
-  } = props;
-
-  targets.forEach(({ mesh, material }) => {
-    // --- Opacity / transparency ---
-    if (typeof opacity === 'number') {
-      const o = THREE.MathUtils.clamp(opacity, 0, 1);
-      material.opacity = o;
-      material.transparent = o < 0.999;
-      material.needsUpdate = true;
-    }
-
-    // --- Double sided flag ---
-    if (typeof doubleSided === 'boolean') {
-      material.side = doubleSided ? THREE.DoubleSide : THREE.FrontSide;
-      material.needsUpdate = true;
-    }
-
-    // --- Unlit-like flag ---
-    if (typeof unlitLike === 'boolean') {
-      if (unlitLike) {
-        // bake current color/texture, then disable lighting influence as much as possible
-        material.emissive = material.emissive || new THREE.Color(0x000000);
-        if (material.color) {
-          material.emissive.copy(material.color);
-        }
-        material.emissiveIntensity = 1.0;
-        material.lights = false;
-      } else {
-        material.lights = true;
-        material.emissiveIntensity = 0.0;
-      }
-      material.needsUpdate = true;
-    }
-
-    // --- Chroma key stub (color only; actual keying処理は今後のフェーズ) ---
-    if (typeof chromaEnable === 'boolean') {
-      material.userData.__lm_chromaEnable = chromaEnable;
-    }
-    if (typeof chromaColor === 'string') {
-      material.userData.__lm_chromaColor = chromaColor;
-    }
-    if (typeof chromaTolerance === 'number') {
-      material.userData.__lm_chromaTolerance = chromaTolerance;
-    }
-    if (typeof chromaFeather === 'number') {
-      material.userData.__lm_chromaFeather = chromaFeather;
-    }
-
-    mesh.material = material;
+  const gltf = await new Promise((resolve, reject) => {
+    loader.load(
+      blobUrl,
+      resolve,
+      undefined,
+      err => reject(err)
+    );
   });
+
+  URL.revokeObjectURL(blobUrl);
+
+  currentRoot = gltf.scene || gltf.scenes[0];
+  scene.add(currentRoot);
+
+  // ざっくりバウンディングからカメラ位置を決める
+  const box = new THREE.Box3().setFromObject(currentRoot);
+  const size = box.getSize(new THREE.Vector3());
+  const center = box.getCenter(new THREE.Vector3());
+
+  const maxDim = Math.max(size.x, size.y, size.z);
+  const fov = camera.fov * (Math.PI / 180);
+  let cameraZ = Math.abs(maxDim / 2 / Math.tan(fov / 2));
+  cameraZ *= 1.5;
+
+  camera.position.set(center.x, center.y, cameraZ);
+  camera.lookAt(center);
+
+  currentGlbId = fileId;
+
+  console.log('[viewer.module] glb loaded, id=', fileId, 'meshes=', listMeshes().length);
+
+  return gltf;
 }
 
-// ------------------------------------------------------------------------------------
-//  Misc exports used by bridges
-// ------------------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// メッシュ / マテリアル列挙
+// ---------------------------------------------------------------------------
 
-export function getScene() {
-  return scene;
+function listMeshes(){
+  const meshes = [];
+  if (!currentRoot) return meshes;
+  currentRoot.traverse(obj => {
+    if (obj.isMesh) meshes.push(obj);
+  });
+  return meshes;
 }
 
-export function getCurrentGlbId() {
+export function listMaterials(){
+  const mats = new Map();
+  listMeshes().forEach(mesh => {
+    const mm = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+    mm.forEach(mat => {
+      if (!mat || !mat.name) return;
+      if (!mats.has(mat.name)) mats.set(mat.name, mat);
+    });
+  });
+  return Array.from(mats.keys());
+}
+
+export function getScene(){
+  return { renderer, scene, camera, root: currentRoot };
+}
+
+export function getCurrentGlbId(){
   return currentGlbId;
 }
 
-export function setCurrentGlbId(id) {
-  currentGlbId = id;
-}
+// ---------------------------------------------------------------------------
+// マテリアル適用ロジック
+// ---------------------------------------------------------------------------
 
-export function resetAllMaterials() {
-  if (!currentGlb) return;
-  currentGlb.traverse(obj => {
-    if (!obj.isMesh) return;
-    if (obj.material && obj.material.isMaterial && obj.material.userData && obj.material.userData.__lm_orig) {
-      obj.material.copy(obj.material.userData.__lm_orig);
-    }
-  });
-}
-
-export function resetMaterial(/* materialName */) {
-  // 仕様上まだ細分化リセットは使っていないので、必要になったら実装
-}
-
-export function onRenderTick(cb) {
-  onRenderTickCb = cb;
-}
-
-// ピン関連のダミー実装（現状 LociMyu v6.x では viewer 側で処理していないため、
-// 既存の bridge との互換用に空関数を残す）
-export function addPinMarker() {}
-export function clearPins() {}
-export function onCanvasShiftPick() {}
-export function onPinSelect() {}
-export function projectPoint() { return null; }
-export function removePinMarker() {}
-export function setPinSelected() {}
-// --- LM auth resolver without dynamic import (classic-safe) ---
-function __lm_getAuth() {
-  const gauth = window.__LM_auth || {};
-  return {
-    ensureToken: (typeof gauth.ensureToken === 'function'
-                    ? gauth.ensureToken
-                    : (typeof window.ensureToken === 'function'
-                        ? window.ensureToken
-                        : async function(){ return null; })),
-    getAccessToken: (typeof gauth.getAccessToken === 'function'
-                       ? gauth.getAccessToken
-                       : (typeof window.getAccessToken === 'function'
-                           ? window.getAccessToken
-                           : async function(){ return null; }))
-  };
-}
-
-// --- Globals/state for viewer ---
-let renderer;
-let scene;
-let camera;
-let controls;
-let currentGlb;
-let currentGlbId = null;
-let materialsCache = {};
-let clock;
-let canvasEl;
-let onRenderTickCb = null;
-
-// expose a minimal viewer state for debugging if needed
-const __lm_viewer_state = {
-  get renderer(){ return renderer; },
-  get scene(){ return scene; },
-  get camera(){ return camera; },
-  get controls(){ return controls; },
-  get currentGlb(){ return currentGlb; },
-  get currentGlbId(){ return currentGlbId; },
-  get materialsCache(){ return materialsCache; },
-};
-window.__lm_viewer_state = __lm_viewer_state;
-
-// --- THREE / loaders ---
-
-import * as THREE from 'three';
-import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-
-const LoadingManager = new THREE.LoadingManager();
-
-// --- Google Drive helper (alt=media fetch → Blob) ---
-
-async function fetchDriveFileBlob(fileId, token) {
-  const url = `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?alt=media`;
-  const headers = {};
-  if (token) headers['Authorization'] = `Bearer ${token}`;
-
-  const res = await fetch(url, { headers });
-  if (!res.ok) {
-    console.error('[viewer] Drive fetch failed', res.status, await res.text());
-    throw new Error(`Drive fetch failed: ${res.status}`);
-  }
-  return await res.blob();
-}
-
-// ------------------------------------------------------------------------------------
-//  Viewer bootstrap
-// ------------------------------------------------------------------------------------
-
-// NOTE: glb.btn.bridge.v3 からは ensureViewer(canvasElement) 形式で呼ばれる想定。
-// 既存コードとの互換性のため、
-//   - canvasElement（HTMLCanvasElement）
-//   - { canvas: HTMLCanvasElement }
-//   の両方を受け付けるようにしている。
-export function ensureViewer(arg){
-  if (renderer) return;
-
-  const canvas = (arg && arg.tagName) ? arg
-                : (arg && arg.canvas) ? arg.canvas
-                : document.getElementById('gl');
-
-  if (!canvas || typeof canvas.getContext !== 'function') {
-    console.error('[viewer] ensureViewer: invalid canvas', canvas);
-    throw new Error('Viewer canvas not found or invalid');
-  }
-
-  canvasEl = canvas;
-
-  renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
-  renderer.setPixelRatio(window.devicePixelRatio || 1);
-
-  const width  = canvas.clientWidth  || canvas.width  || 800;
-  const height = canvas.clientHeight || canvas.height || 600;
-  renderer.setSize(width, height, false);
-  renderer.outputEncoding = THREE.sRGBEncoding;
-
-  scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x101015);
-
-  const fov = 35;
-  const aspect = width / height;
-  const near = 0.1;
-  const far = 2000;
-  camera = new THREE.PerspectiveCamera(fov, aspect, near, far);
-  camera.position.set(5, 3, 8);
-
-  controls = new OrbitControls(camera, canvas);
-  controls.enableDamping = true;
-  controls.dampingFactor = 0.1;
-  controls.screenSpacePanning = true;
-  controls.target.set(0, 1, 0);
-
-  const hemi = new THREE.HemisphereLight(0xffffff, 0x444444, 1.0);
-  hemi.position.set(0, 20, 0);
-  scene.add(hemi);
-
-  const dir = new THREE.DirectionalLight(0xffffff, 1.0);
-  dir.position.set(5, 10, 7.5);
-  dir.castShadow = true;
-  scene.add(dir);
-
-  clock = new THREE.Clock();
-
-  function onResize() {
-    if (!canvasEl || !renderer || !camera) return;
-    const w = canvasEl.clientWidth  || canvasEl.width  || 800;
-    const h = canvasEl.clientHeight || canvasEl.height || 600;
-    camera.aspect = w / h;
-    camera.updateProjectionMatrix();
-    renderer.setSize(w, h, false);
-  }
-  window.addEventListener('resize', onResize);
-
-  function renderLoop() {
-    requestAnimationFrame(renderLoop);
-    if (!renderer || !scene || !camera) return;
-
-    const dt = clock ? clock.getDelta() : 0.016;
-    if (controls) controls.update();
-
-    if (typeof onRenderTickCb === 'function') {
-      try { onRenderTickCb(dt); } catch (e) {
-        console.warn('[viewer] onRenderTick callback error', e);
-      }
-    }
-
-    renderer.render(scene, camera);
-  }
-  renderLoop();
-}
-
-// ------------------------------------------------------------------------------------
-//  GLB loading (from Google Drive)
-// ------------------------------------------------------------------------------------
-
-async function disposeCurrentGlb() {
-  if (!currentGlb || !scene) return;
-
-  scene.remove(currentGlb);
-
-  currentGlb.traverse(obj => {
-    if (!obj.isMesh) return;
-    if (obj.geometry) obj.geometry.dispose();
-    if (obj.material) {
-      const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
-      for (const m of mats) {
-        if (!m) continue;
-        if (m.map) m.map.dispose();
-        if (m.normalMap) m.normalMap.dispose();
-        if (m.roughnessMap) m.roughnessMap.dispose();
-        if (m.metalnessMap) m.metalnessMap.dispose();
-        if (m.alphaMap) m.alphaMap.dispose();
-        if (m.envMap) m.envMap.dispose();
-        m.dispose();
-      }
-    }
-  });
-
-  currentGlb = null;
-  currentGlbId = null;
-  materialsCache = {};
-}
-
-// fileId: Google Drive file id (string)
-export async function loadGlbFromDrive(fileId) {
-  if (!fileId) throw new Error('fileId is required');
-
-  const { ensureToken, getAccessToken } = __lm_getAuth();
-  if (ensureToken) await ensureToken();
-  const token = getAccessToken ? await getAccessToken() : null;
-
-  await disposeCurrentGlb();
-
-  let objectURL = null;
-
-  try {
-    const blob = await fetchDriveFileBlob(fileId, token);
-    objectURL = URL.createObjectURL(blob);
-
-    const loader = new GLTFLoader(LoadingManager);
-    const gltf = await loader.loadAsync(objectURL);
-
-    currentGlb = gltf.scene || gltf.scenes[0];
-    currentGlbId = fileId;
-    scene.add(currentGlb);
-
-    // fit camera
-    const box = new THREE.Box3().setFromObject(currentGlb);
-    const size = box.getSize(new THREE.Vector3());
-    const center = box.getCenter(new THREE.Vector3());
-
-    const maxDim = Math.max(size.x, size.y, size.z);
-    const fov = camera.fov * (Math.PI / 180);
-    let cameraZ = Math.abs(maxDim / 2 / Math.tan(fov / 2));
-    cameraZ *= 1.4;
-
-    camera.position.set(center.x + cameraZ, center.y + cameraZ * 0.3, center.z + cameraZ);
-    camera.near = maxDim / 100;
-    camera.far = maxDim * 100;
-    camera.updateProjectionMatrix();
-
-    if (controls) {
-      controls.target.copy(center);
-      controls.update();
-    }
-
-    // cache materials by material.name
-    materialsCache = {};
-    currentGlb.traverse(obj => {
-      if (!obj.isMesh) return;
-      const materials = Array.isArray(obj.material) ? obj.material : [obj.material];
-      for (const mat of materials) {
-        if (!mat || !mat.name) continue;
-        if (!materialsCache[mat.name]) {
-          materialsCache[mat.name] = mat;
-        }
-      }
-    });
-
-    console.log('[viewer] GLB loaded', {
-      fileId,
-      materialKeys: Object.keys(materialsCache),
-    });
-
-    return {
-      gltf,
-      scene: currentGlb,
-      materials: materialsCache,
+function getOrInitMatState(mat){
+  let st = materialState.get(mat.uuid);
+  if (!st){
+    st = {
+      baseEmissive: mat.emissive ? mat.emissive.clone() : null,
+      baseLights: ('lights' in mat) ? !!mat.lights : undefined,
+      baseToneMapped: ('toneMapped' in mat) ? !!mat.toneMapped : undefined
     };
-  } catch (err) {
-    console.error('[viewer] loadGlbFromDrive failed', err);
-    throw err;
-  } finally {
-    if (objectURL) URL.revokeObjectURL(objectURL);
+    materialState.set(mat.uuid, st);
   }
+  return st;
 }
 
-// ------------------------------------------------------------------------------------
-//  Materials helpers + applyMaterialProps
-// ------------------------------------------------------------------------------------
+export function applyMaterialProps(materialName, props){
+  if (!currentRoot) return;
 
-// returns array of material keys (names)
-export function listMaterials() {
-  return Object.keys(materialsCache || {});
-}
-
-// internal: get material object(s) by name
-function getMaterialTargets(materialName) {
-  const targets = [];
-  if (!currentGlb) return targets;
-
-  currentGlb.traverse(obj => {
-    if (!obj.isMesh) return;
-    const materials = Array.isArray(obj.material) ? obj.material : [obj.material];
-
-    for (const mat of materials) {
-      if (!mat || mat.name !== materialName) continue;
-      targets.push({ mesh: obj, material: mat });
-    }
+  const meshes = listMeshes().filter(m => {
+    const mm = Array.isArray(m.material) ? m.material : [m.material];
+    return mm.some(mat => mat && mat.name === materialName);
   });
 
-  return targets;
-}
+  if (!meshes.length){
+    console.warn('[viewer.materials] no meshes for material', materialName);
+    return;
+  }
 
-/**
- * props:
- *  - opacity: number (0–1)
- *  - doubleSided: boolean
- *  - unlitLike: boolean
- *  - chromaEnable: boolean
- *  - chromaColor: '#rrggbb'
- *  - chromaTolerance: number
- *  - chromaFeather: number
- */
-export function applyMaterialProps(materialName, props = {}) {
-  if (!materialName || !currentGlb) return;
+  meshes.forEach(mesh => {
+    const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+    mats.forEach(mat => {
+      if (!mat || mat.name !== materialName) return;
 
-  const targets = getMaterialTargets(materialName);
-  if (!targets.length) return;
+      const st = getOrInitMatState(mat);
 
-  const {
-    opacity,
-    doubleSided,
-    unlitLike,
-    chromaEnable,
-    chromaColor,
-    chromaTolerance,
-    chromaFeather,
-  } = props;
-
-  targets.forEach(({ mesh, material }) => {
-    // --- Opacity / transparency ---
-    if (typeof opacity === 'number') {
-      const o = THREE.MathUtils.clamp(opacity, 0, 1);
-      material.opacity = o;
-      material.transparent = o < 0.999;
-      material.needsUpdate = true;
-    }
-
-    // --- Double sided flag ---
-    if (typeof doubleSided === 'boolean') {
-      material.side = doubleSided ? THREE.DoubleSide : THREE.FrontSide;
-      material.needsUpdate = true;
-    }
-
-    // --- Unlit-like flag ---
-    if (typeof unlitLike === 'boolean') {
-      if (unlitLike) {
-        // bake current color/texture, then disable lighting influence as much as possible
-        material.emissive = material.emissive || new THREE.Color(0x000000);
-        if (material.color) {
-          material.emissive.copy(material.color);
-        }
-        material.emissiveIntensity = 1.0;
-        material.lights = false;
-      } else {
-        material.lights = true;
-        material.emissiveIntensity = 0.0;
+      // --- opacity ---
+      if (typeof props.opacity === 'number'){
+        const o = props.opacity;
+        mat.opacity = o;
+        mat.transparent = o < 0.999;
+        mat.needsUpdate = true;
       }
-      material.needsUpdate = true;
-    }
 
-    // --- Chroma key stub (color only; actual keying処理は今後のフェーズ) ---
-    if (typeof chromaEnable === 'boolean') {
-      material.userData.__lm_chromaEnable = chromaEnable;
-    }
-    if (typeof chromaColor === 'string') {
-      material.userData.__lm_chromaColor = chromaColor;
-    }
-    if (typeof chromaTolerance === 'number') {
-      material.userData.__lm_chromaTolerance = chromaTolerance;
-    }
-    if (typeof chromaFeather === 'number') {
-      material.userData.__lm_chromaFeather = chromaFeather;
-    }
+      // --- double sided (doubleSide / doubleSided 両対応) ---
+      if (typeof props.doubleSide !== 'undefined' || typeof props.doubleSided !== 'undefined'){
+        try{
+          const THREE_NS = window.THREE || (window.viewer && window.viewer.THREE) || null;
+          if (THREE_NS){
+            const doubleSided = (typeof props.doubleSided !== 'undefined') ? props.doubleSided : props.doubleSide;
+            mat.side = doubleSided ? THREE_NS.DoubleSide : THREE_NS.FrontSide;
+            mat.needsUpdate = true;
+          }else{
+            console.warn('[viewer.materials] THREE namespace not found for doubleSide');
+          }
+        }catch(e){
+          console.warn('[viewer.materials] doubleSide apply failed', e);
+        }
+      }
 
-    mesh.material = material;
+      // --- unlit like ---
+      if (typeof props.unlit !== 'undefined' || typeof props.unlitLike !== 'undefined'){
+        const flag = !!(props.unlit ?? props.unlitLike);
+
+        if (st.baseLights === undefined && 'lights' in mat){
+          st.baseLights = !!mat.lights;
+        }
+        if (st.baseToneMapped === undefined && 'toneMapped' in mat){
+          st.baseToneMapped = !!mat.toneMapped;
+        }
+
+        if (flag){
+          if ('lights' in mat) mat.lights = false;
+          if ('toneMapped' in mat) mat.toneMapped = false;
+
+          if (mat.emissive){
+            if (!st.baseEmissive){
+              st.baseEmissive = mat.emissive.clone();
+            }
+            if (mat.emissiveIntensity !== undefined && mat.emissiveIntensity < 1.0){
+              mat.emissiveIntensity = 1.0;
+            }
+          }
+        }else{
+          if ('lights' in mat && st.baseLights !== undefined) mat.lights = st.baseLights;
+          if ('toneMapped' in mat && st.baseToneMapped !== undefined) mat.toneMapped = st.baseToneMapped;
+          if (mat.emissive && st.baseEmissive){
+            mat.emissive.copy(st.baseEmissive);
+          }
+        }
+
+        mat.needsUpdate = true;
+      }
+
+      // --- chroma key: 今は保存専用。描画ロジックは別フェーズで。 ---
+      const ck = {};
+      if (typeof props.chromaEnable !== 'undefined') ck.enable = !!props.chromaEnable;
+      if (typeof props.chromaColor === 'string') ck.color = props.chromaColor;
+      if (typeof props.chromaTolerance === 'number') ck.tolerance = props.chromaTolerance;
+      if (typeof props.chromaFeather === 'number') ck.feather = props.chromaFeather;
+      if (Object.keys(ck).length){
+        mat.userData.__lm_chromaKey = Object.assign(mat.userData.__lm_chromaKey || {}, ck);
+      }
+    });
   });
+
+  console.log('[viewer.materials] applyMaterialProps', materialName, props, 'targets', meshes.length);
 }
 
-// ------------------------------------------------------------------------------------
-//  Misc exports used by bridges
-// ------------------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// 全リセット系
+// ---------------------------------------------------------------------------
 
-export function getScene() {
-  return scene;
-}
+export function resetMaterial(materialName){
+  if (!currentRoot) return;
 
-export function getCurrentGlbId() {
-  return currentGlbId;
-}
-
-export function setCurrentGlbId(id) {
-  currentGlbId = id;
-}
-
-export function resetAllMaterials() {
-  if (!currentGlb) return;
-  currentGlb.traverse(obj => {
-    if (!obj.isMesh) return;
-    if (obj.material && obj.material.isMaterial && obj.material.userData && obj.material.userData.__lm_orig) {
-      obj.material.copy(obj.material.userData.__lm_orig);
-    }
+  listMeshes().forEach(mesh => {
+    const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+    mats.forEach(mat => {
+      if (!mat || mat.name !== materialName) return;
+      const st = materialState.get(mat.uuid);
+      if (st && st.baseEmissive && mat.emissive){
+        mat.emissive.copy(st.baseEmissive);
+      }
+      if (st && st.baseLights !== undefined && 'lights' in mat){
+        mat.lights = st.baseLights;
+      }
+      if (st && st.baseToneMapped !== undefined && 'toneMapped' in mat){
+        mat.toneMapped = st.baseToneMapped;
+      }
+      mat.opacity = 1.0;
+      mat.transparent = false;
+      mat.side = THREE.FrontSide;
+      mat.needsUpdate = true;
+    });
   });
+
+  console.log('[viewer.materials] resetMaterial', materialName);
 }
 
-export function resetMaterial(/* materialName */) {
-  // 仕様上まだ細分化リセットは使っていないので、必要になったら実装
+export function resetAllMaterials(){
+  if (!currentRoot) return;
+  listMeshes().forEach(mesh => {
+    const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+    mats.forEach(mat => {
+      if (!mat) return;
+      const st = materialState.get(mat.uuid);
+      if (st && st.baseEmissive && mat.emissive){
+        mat.emissive.copy(st.baseEmissive);
+      }
+      if (st && st.baseLights !== undefined && 'lights' in mat){
+        mat.lights = st.baseLights;
+      }
+      if (st && st.baseToneMapped !== undefined && 'toneMapped' in mat){
+        mat.toneMapped = st.baseToneMapped;
+      }
+      mat.opacity = 1.0;
+      mat.transparent = false;
+      mat.side = THREE.FrontSide;
+      mat.needsUpdate = true;
+    });
+  });
+  console.log('[viewer.materials] resetAllMaterials');
 }
 
-export function onRenderTick(cb) {
-  onRenderTickCb = cb;
+// ---------------------------------------------------------------------------
+// 描画ループ
+// ---------------------------------------------------------------------------
+
+export function onRenderTick(){
+  if (!renderer || !scene || !camera) return;
+  const dt = clock.getDelta();
+  renderer.render(scene, camera);
+  // 必要ならアニメーション等に dt を利用
 }
 
-// ピン関連のダミー実装（現状 LociMyu v6.x では viewer 側で処理していないため、
-// 既存の bridge との互換用に空関数を残す）
-export function addPinMarker() {}
-export function clearPins() {}
-export function onCanvasShiftPick() {}
-export function onPinSelect() {}
-export function projectPoint() { return null; }
-export function removePinMarker() {}
-export function setPinSelected() {}
+// ---------------------------------------------------------------------------
+// 旧ブリッジ API 互換用ダミー
+// （pin 周りは別モジュールなのでここでは no-op とする）
+// ---------------------------------------------------------------------------
+
+export function addPinMarker(){ /* no-op here */ }
+export function removePinMarker(){ /* no-op here */ }
+export function clearPins(){ /* no-op here */ }
+export function projectPoint(){ return null; }
+export function onCanvasShiftPick(){ /* handled elsewhere */ }
+export function setPinSelected(){ /* handled elsewhere */ }
+
+// ---------------------------------------------------------------------------
+// デフォルトエクスポート
+// ---------------------------------------------------------------------------
+
+export default {
+  ensureViewer,
+  loadGlbFromDrive,
+  listMaterials,
+  getScene,
+  getCurrentGlbId,
+  applyMaterialProps,
+  resetMaterial,
+  resetAllMaterials,
+  onRenderTick,
+  addPinMarker,
+  removePinMarker,
+  clearPins,
+  projectPoint,
+  onCanvasShiftPick,
+  setPinSelected
+};
