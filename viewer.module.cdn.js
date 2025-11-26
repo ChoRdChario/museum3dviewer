@@ -1,440 +1,372 @@
+// viewer.module.cdn.js
 
-// --- LM auth resolver without dynamic import (classic-safe) ---
-function __lm_getAuth() {
-  const gauth = window.__LM_auth || {};
-  return {
-    ensureToken: (typeof gauth.ensureToken === 'function'
-                    ? gauth.ensureToken
-                    : (typeof window.ensureToken === 'function'
-                        ? window.ensureToken
-                        : async function(){ return window.__LM_TOK; })),
-    getAccessToken: (typeof gauth.getAccessToken === 'function'
-                       ? gauth.getAccessToken
-                       : (typeof window.getAccessToken === 'function'
-                           ? window.getAccessToken
-                           : function(){ return window.__LM_TOK; }))
-  };
-}
-// --- end resolver ---
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
-// viewer.module.cdn.js — Three.js viewer with pins & picking/filters
+let renderer, scene, camera, controls;
+let __currentGlbId = null;
 
-// ===== Materials API (WIP) =====
-const __matList = []; // {index, name, material, key}
-const __origMat = new WeakMap(); // Mesh -> snapshot
-let __glbId = null;
+// ---------------------------------------------------------------------------
+// Internals: mesh & material tracking for material UI
+// ---------------------------------------------------------------------------
 
-export function setCurrentGlbId(glbId){
-  __glbId = glbId || null;
-}
+const __meshRegistry = new Set();
+const __materialRegistry = new Map(); // key -> Set<THREE.Material>
 
-// traverse scene and build unique material list
-function __rebuildMaterialList(){
-  __matList.length = 0;
-  if(!scene) return;
-  const matSet = new Map(); // material -> record
-  let idx = 0;
-  scene.traverse(obj => {
-    if (obj && obj.isMesh){
-      const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
-      for (const mat of mats){
-        if (!mat) continue;
-        const baseName = (mat.name || '').trim() || `#${idx}`;
-        const key = baseName; // マテリアル名ベースのキー
-        if (!matSet.has(mat)){
-          const rec = { index: idx, name: baseName, material: mat, key };
-          matSet.set(mat, rec);
-          __matList.push(rec);
-          idx++;
-        }
-      }
+function __scanSceneForMeshes(root) {
+  __meshRegistry.clear();
+  root.traverse(obj => {
+    if (obj.isMesh) {
+      __meshRegistry.add(obj);
     }
   });
 }
 
-
-export function listMaterials(){
-  __rebuildMaterialList();
-  return __matList.map(({index,name,key})=>({index,name,materialKey:key}));
+function __allMeshes() {
+  return Array.from(__meshRegistry);
 }
 
-function __snapshotIfNeeded(mesh){
-  if(!__origMat.has(mesh)){
-    __origMat.set(mesh, {
-      material: mesh.material,
-      onBeforeCompile: mesh.material?.onBeforeCompile,
-      transparent: mesh.material?.transparent,
-      side: mesh.material?.side,
-      alphaTest: mesh.material?.alphaTest
-    });
+function __rebuildMaterialList() {
+  __materialRegistry.clear();
+
+  for (const mesh of __meshRegistry) {
+    const mat = mesh.material;
+    const key = mesh.userData && mesh.userData.__lm_materialKey
+      ? mesh.userData.__lm_materialKey
+      : (mat && mat.name) || 'default';
+
+    mesh.userData = mesh.userData || {};
+    mesh.userData.__lm_materialKey = key;
+
+    if (!__materialRegistry.has(key)) {
+      __materialRegistry.set(key, new Set());
+    }
+
+    if (Array.isArray(mat)) {
+      for (const m of mat) {
+        if (m && m.isMaterial) {
+          __materialRegistry.get(key).add(m);
+        }
+      }
+    } else if (mat && mat.isMaterial) {
+      __materialRegistry.get(key).add(mat);
+    }
   }
 }
 
-function __hookMaterial(mat){
-  if (!mat || mat.__lmHooked) return;
-  mat.__lmHooked = true;
-  mat.userData.__lmUniforms = {
-    uWhiteThr: { value: 0.92 },
-    uBlackThr: { value: 0.08 },
-    uWhiteToAlpha: { value: false },
-    uBlackToAlpha: { value: false },
-    uUnlit: { value: false },
-  };
-  const u = mat.userData.__lmUniforms;
-  mat.onBeforeCompile = (shader)=>{
-    shader.uniforms = { ...shader.uniforms, ...u };
-    // Inject at alpha computation
-    shader.fragmentShader = shader.fragmentShader
-      .replace('#include <dithering_fragment>', `
-        // LociMyu material hook
-        vec3 lmColor = diffuseColor.rgb;
-        float lmLuma = dot(lmColor, vec3(0.299, 0.587, 0.114));
-        if (uWhiteToAlpha && lmLuma >= uWhiteThr) diffuseColor.a = 0.0;
-        if (uBlackToAlpha && lmLuma <= uBlackThr) diffuseColor.a = 0.0;
-        #include <dithering_fragment>
-      `)
-      .replace('#include <lights_fragment_begin>', `
-        // Unlit toggle
-        if (!uUnlit) {
-          #include <lights_fragment_begin>
-        }
-      `);
-  };
-  mat.needsUpdate = true;
+function __materialsByKey(materialKey) {
+  const set = __materialRegistry.get(materialKey);
+  return set ? Array.from(set) : [];
 }
 
-function __allMeshes(){
-  const arr=[]; if(!scene) return arr;
-  scene.traverse(o=>{ if(o.isMesh) arr.push(o); });
-  return arr;
-}
-
-function __materialsByKey(materialKey){
-  // match by key prefix without index part to avoid instability if needed
-  // here we match full key
-  const out=[];
-  for(const {material, key} of __matList){
-    if(key === materialKey) out.push(material);
+export function listMaterials() {
+  const out = [];
+  for (const [key, mats] of __materialRegistry.entries()) {
+    const anyMat = Array.from(mats)[0];
+    out.push({
+      key,
+      name: anyMat && anyMat.name ? anyMat.name : key,
+      count: mats.size
+    });
   }
   return out;
 }
 
-export function applyMaterialProps(materialKey, props = {}){
+// ---------------------------------------------------------------------------
+// Material application (opacity, double-sided, unlit-like, chroma key props)
+// ---------------------------------------------------------------------------
+
+export function applyMaterialProps(materialKey, props = {}) {
   if (!materialKey) {
     console.warn('[viewer.materials] applyMaterialProps called without materialKey');
     return;
   }
+
+  // Support both "unlitLike" (UI) and legacy "unlit" flag
+  const hasUnlitFlag =
+    Object.prototype.hasOwnProperty.call(props, 'unlitLike') ||
+    Object.prototype.hasOwnProperty.call(props, 'unlit');
+  const unlitRequested = hasUnlitFlag
+    ? !!(Object.prototype.hasOwnProperty.call(props, 'unlitLike') ? props.unlitLike : props.unlit)
+    : null;
+
+  // Create / reuse an unlit (MeshBasicMaterial) variant for a lit material
+  function ensureUnlitVariant(litMat) {
+    if (!litMat) return null;
+    litMat.userData = litMat.userData || {};
+    if (litMat.userData.__lm_unlitVariant && litMat.userData.__lm_unlitVariant.isMaterial) {
+      return litMat.userData.__lm_unlitVariant;
+    }
+
+    const basicParams = {
+      name: litMat.name || materialKey,
+      map: litMat.map || null,
+      color:
+        litMat.color && typeof litMat.color.clone === 'function'
+          ? litMat.color.clone()
+          : new THREE.Color(0xffffff),
+      side: litMat.side,
+      transparent: !!litMat.transparent,
+      opacity: typeof litMat.opacity === 'number' ? litMat.opacity : 1.0,
+      alphaTest: typeof litMat.alphaTest === 'number' ? litMat.alphaTest : 0,
+      wireframe: !!litMat.wireframe
+    };
+
+    const basic = new THREE.MeshBasicMaterial(basicParams);
+    basic.userData = basic.userData || {};
+    basic.userData.__lm_litOrigin = litMat;
+
+    litMat.userData.__lm_unlitVariant = basic;
+    return basic;
+  }
+
+  // Switch all meshes using this materialKey between lit <-> unlit variants
+  function applyUnlitState(materialKey, enable) {
+    const meshes = __allMeshes();
+    for (const mesh of meshes) {
+      if (!mesh || !mesh.userData) continue;
+      if (mesh.userData.__lm_materialKey !== materialKey) continue;
+
+      let mat = mesh.material;
+      if (!mat) continue;
+
+      if (Array.isArray(mat)) {
+        console.warn(
+          '[viewer.materials] unlitLike for multi-material mesh is not yet supported:',
+          materialKey
+        );
+        continue;
+      }
+
+      mat.userData = mat.userData || {};
+
+      if (enable) {
+        // Move to MeshBasicMaterial variant
+        const litMat =
+          (mat.userData && mat.userData.__lm_litOrigin) ||
+          (mat.userData && mat.userData.__lm_litBackup) ||
+          mat;
+        const basic = ensureUnlitVariant(litMat);
+        if (basic) {
+          mesh.material = basic;
+          basic.userData = basic.userData || {};
+          basic.userData.__lm_unlitActive = true;
+        }
+      } else {
+        // Restore original lit material if we have it
+        let litTarget = null;
+        if (mat.userData && mat.userData.__lm_litOrigin) {
+          litTarget = mat.userData.__lm_litOrigin;
+        } else if (
+          mat.userData &&
+          mat.userData.__lm_unlitVariant &&
+          mat.userData.__lm_unlitVariant.userData &&
+          mat.userData.__lm_unlitVariant.userData.__lm_litOrigin
+        ) {
+          litTarget = mat.userData.__lm_unlitVariant.userData.__lm_litOrigin;
+        }
+
+        if (litTarget) {
+          litTarget.userData = litTarget.userData || {};
+          litTarget.userData.__lm_unlitActive = false;
+          mesh.material = litTarget;
+        }
+      }
+    }
+
+    // Material instances attached to meshes have changed; rebuild list
+    __rebuildMaterialList();
+  }
+
+  // First, if unlit flag is explicitly toggled, switch variants at mesh level.
+  if (hasUnlitFlag && unlitRequested !== null) {
+    applyUnlitState(materialKey, !!unlitRequested);
+  }
+
+  // Refresh material list and pick all materials associated with this key
   __rebuildMaterialList();
   const mats = __materialsByKey(materialKey);
-  if (!mats || !mats.length){
-    console.warn('[viewer.materials] no materials with key', materialKey);
+  if (!mats || !mats.length) {
+    console.warn('[viewer.materials] no materials found for key', materialKey);
     return;
   }
+
   console.log('[viewer.materials] applyMaterialProps', materialKey, props, 'targets', mats.length);
-  for (const mat of mats){
+
+  // Build a unique set of all related variants (lit / unlit) so that
+  // opacity, double-sided, chroma parameters etc. stay in sync.
+  const targetSet = new Set();
+  for (const mat of mats) {
     if (!mat) continue;
-    if (typeof props.opacity !== 'undefined'){
-      const v = Math.max(0, Math.min(1, Number(props.opacity)));
-      if (!Number.isNaN(v)){
-        mat.opacity = v;
-        mat.transparent = v < 1.0 || !!mat.transparent;
-        mat.needsUpdate = true;
-      }
+    targetSet.add(mat);
+    if (mat.userData) {
+      if (mat.userData.__lm_unlitVariant) targetSet.add(mat.userData.__lm_unlitVariant);
+      if (mat.userData.__lm_litOrigin) targetSet.add(mat.userData.__lm_litOrigin);
     }
-    if (typeof props.doubleSide !== 'undefined'){
-      try{
-        const THREE_NS = window.THREE || (window.viewer && window.viewer.THREE) || null;
-        if (THREE_NS){
-          mat.side = props.doubleSide ? THREE_NS.DoubleSide : THREE_NS.FrontSide;
-          mat.needsUpdate = true;
-        }else{
-          console.warn('[viewer.materials] THREE namespace not found for doubleSide');
-        }
-      }catch(e){
-        console.warn('[viewer.materials] doubleSide apply failed', e);
-      }
+  }
+  const targets = Array.from(targetSet);
+
+  for (const mat of targets) {
+    if (!mat) continue;
+    mat.userData = mat.userData || {};
+
+    // Persist unlit flag on both variants, but actual switching is handled above.
+    if (hasUnlitFlag && unlitRequested !== null) {
+      mat.userData.__lm_unlit = !!unlitRequested;
     }
-    if (typeof props.unlit !== 'undefined' || typeof props.unlitLike !== 'undefined'){
-      const flag = !!(props.unlit ?? props.unlitLike);
-      // 簡易アンリット: ライティングと toneMapping を切る
-      if ('lights' in mat) mat.lights = !flag;
-      if ('toneMapped' in mat) mat.toneMapped = !flag;
-      // emissive があれば少し持ち上げる
-      if (flag && mat.emissive){
-        if (mat.emissiveIntensity !== undefined && mat.emissiveIntensity < 1.0){
-          mat.emissiveIntensity = 1.0;
-        }
-      }
+
+    // Opacity
+    if (typeof props.opacity !== 'undefined') {
+      const opacity = Math.max(0, Math.min(1, props.opacity));
+      mat.opacity = opacity;
+      mat.transparent = opacity < 1.0 || !!mat.transparent;
       mat.needsUpdate = true;
+      mat.userData.__lm_opacity = opacity;
     }
-    // chroma key 系は一旦保存専用（表示には使わない）
-    const ck = {};
-    if (typeof props.chromaEnable !== 'undefined') ck.enable = !!props.chromaEnable;
-    if (typeof props.chromaColor === 'string')     ck.color = props.chromaColor;
-    if (typeof props.chromaTolerance === 'number') ck.tolerance = props.chromaTolerance;
-    if (typeof props.chromaFeather === 'number')   ck.feather = props.chromaFeather;
-    if (Object.keys(ck).length){
-      mat.userData = mat.userData || {};
-      mat.userData.__lm_chroma = Object.assign(mat.userData.__lm_chroma || {}, ck);
+
+    // Double sided
+    if (typeof props.doubleSided !== 'undefined') {
+      mat.side = props.doubleSided ? THREE.DoubleSide : THREE.FrontSide;
+      mat.needsUpdate = true;
+      mat.userData.__lm_doubleSided = !!props.doubleSided;
+    }
+
+    // Chroma key settings are only persisted for now; actual shaderパッチは後続フェーズで実装予定。
+    if (typeof props.chromaEnable !== 'undefined') {
+      mat.userData.__lm_chromaEnable = !!props.chromaEnable;
+    }
+    if (typeof props.chromaColor !== 'undefined') {
+      mat.userData.__lm_chromaColor = props.chromaColor;
+    }
+    if (typeof props.chromaTolerance !== 'undefined') {
+      mat.userData.__lm_chromaTolerance = props.chromaTolerance;
+    }
+    if (typeof props.chromaFeather !== 'undefined') {
+      mat.userData.__lm_chromaFeather = props.chromaFeather;
     }
   }
 }
 
-
-export function resetMaterial(materialKey){
-  __rebuildMaterialList();
+export function resetMaterial(materialKey) {
   const mats = __materialsByKey(materialKey);
-  for(const mat of mats){
-    if(!mat) continue;
-    // remove hook flags
-    if(mat.userData && mat.userData.__lmUniforms){
-      delete mat.userData.__lmUniforms;
+  if (!mats || !mats.length) return;
+
+  for (const mat of mats) {
+    if (!mat) continue;
+    if (!mat.userData) continue;
+
+    if (typeof mat.userData.__lm_opacity === 'number') {
+      mat.opacity = mat.userData.__lm_opacity;
+      mat.transparent = mat.opacity < 1.0 || !!mat.transparent;
     }
-    mat.__lmHooked = false;
-    mat.onBeforeCompile = null;
-    mat.transparent = false;
-    mat.alphaTest = 0.0;
-    mat.side = THREE.FrontSide;
+
+    if (typeof mat.userData.__lm_doubleSided === 'boolean') {
+      mat.side = mat.userData.__lm_doubleSided ? THREE.DoubleSide : THREE.FrontSide;
+    }
+
+    // unlit や chroma 系は将来的にリセット対応を拡張
     mat.needsUpdate = true;
   }
 }
 
-export function resetAllMaterials(){
-  __rebuildMaterialList();
-  for(const rec of __matList){
-    resetMaterial(rec.key);
+export function resetAllMaterials() {
+  for (const [key] of __materialRegistry.entries()) {
+    resetMaterial(key);
   }
 }
 
-import * as THREE from 'three';
-import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { GLTFLoader } from 'https://unpkg.com/three@0.159.0/examples/jsm/loaders/GLTFLoader.js';
+// ---------------------------------------------------------------------------
+// GLB loading & viewer boot (既存実装)
+// ---------------------------------------------------------------------------
 
-// ---- LociMyu patch: expose scene globally (safe getter) ----
-let __lm_scene_ref = null;
-if (!('__lm_scene' in window)) {
-  Object.defineProperty(window, '__lm_scene', {
-    get(){ return __lm_scene_ref; },
-    configurable: false
-  });
-}
+export async function ensureViewer(canvas) {
+  if (renderer) {
+    return;
+  }
 
-let renderer, scene, camera, controls, raycaster, canvasEl;
-const pickHandlers = new Set();
-const pinSelectHandlers = new Set();
-const renderCbs = new Set();
-let pinGroup;
-
-export function ensureViewer({ canvas }){
-  if (renderer) return;
-  canvasEl = canvas;
-  renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
+  renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
   renderer.setPixelRatio(window.devicePixelRatio || 1);
   renderer.setSize(canvas.clientWidth, canvas.clientHeight, false);
 
   scene = new THREE.Scene();
-__lm_scene_ref = scene;
-// [LM patch] expose scene for UI and tools
-try {
-  window.__LM_SCENE = scene;
-  document.dispatchEvent(new CustomEvent('lm:scene-ready', { detail: { scene } }));
-} catch (e) { console.warn('[LM patch] scene expose failed', e); }
+  scene.background = new THREE.Color(0x111111);
 
-  scene.background = null;
-
-  camera = new THREE.PerspectiveCamera(50, canvas.clientWidth / canvas.clientHeight, 0.1, 2000);
-  camera.position.set(3, 2, 6);
+  camera = new THREE.PerspectiveCamera(
+    45,
+    canvas.clientWidth / canvas.clientHeight,
+    0.1,
+    1000
+  );
+  camera.position.set(0, 2, 5);
 
   controls = new OrbitControls(camera, canvas);
   controls.enableDamping = true;
 
-  scene.add(new THREE.AmbientLight(0xffffff, 0.4));
-  const d1 = new THREE.DirectionalLight(0xffffff, 1.0); d1.position.set(5,10,7); scene.add(d1);
+  const ambient = new THREE.AmbientLight(0xffffff, 0.8);
+  scene.add(ambient);
 
-  pinGroup = new THREE.Group(); pinGroup.name = 'PinGroup'; scene.add(pinGroup);
+  const dir = new THREE.DirectionalLight(0xffffff, 1.0);
+  dir.position.set(5, 10, 7);
+  scene.add(dir);
 
-  raycaster = new THREE.Raycaster();
+  const grid = new THREE.GridHelper(10, 10, 0x444444, 0x222222);
+  scene.add(grid);
 
-  const onResize = () => {
-    const w = canvas.clientWidth, h = canvas.clientHeight;
-    renderer.setSize(w, h, false);
-    camera.aspect = w / h; camera.updateProjectionMatrix();
+  const animate = () => {
+    requestAnimationFrame(animate);
+    controls.update();
+    renderer.render(scene, camera);
   };
-  window.addEventListener('resize', onResize);
-
-  canvas.addEventListener('pointerdown', (ev) => {
-    const rect = canvas.getBoundingClientRect();
-    const x = ((ev.clientX - rect.left) / rect.width) * 2 - 1;
-    const y = -((ev.clientY - rect.top) / rect.height) * 2 + 1;
-    raycaster.setFromCamera({ x, y }, camera);
-    const intersects = raycaster.intersectObjects(scene.children, true);
-
-    if (ev.shiftKey){
-      const hit = intersects.find(i => i && i.object !== pinGroup && !pinGroup.children.includes(i.object));
-      if (hit && hit.point){
-        pickHandlers.forEach(fn => { try { fn({ x: hit.point.x, y: hit.point.y, z: hit.point.z }); } catch(_){} });
-      }
-    } else {
-      const pinHit = intersects.find(i => i.object && i.object.userData && i.object.userData.pinId);
-      if (pinHit && pinHit.object){
-        const id = pinHit.object.userData.pinId;
-        pinSelectHandlers.forEach(fn => { try { fn(id); } catch(_){} });
-        setPinSelected(id, true);
-      }
-    }
-  });
-
-  document.addEventListener('pinFilterChange', (e)=>{
-    const selected = new Set(e.detail?.selected || []);
-    if (!pinGroup) return;
-    pinGroup.children.forEach(ch => {
-      const c = ch.userData?.pinColor;
-      ch.visible = !c || selected.has(c);
-    });
-  });
-
-  const tick = () => {
-    controls.update(); renderer.render(scene, camera);
-    renderCbs.forEach(fn => { try{ fn(); }catch(e){} });
-    requestAnimationFrame(tick);
-  };
-  tick();
+  animate();
 }
 
-export function onRenderTick(fn){ renderCbs.add(fn); return ()=>renderCbs.delete(fn); }
-export function projectPoint(x, y, z){
-  const v = new THREE.Vector3(x,y,z).project(camera);
-  const rect = canvasEl.getBoundingClientRect();
-  const sx = (v.x * 0.5 + 0.5) * rect.width + rect.left;
-  const sy = (-v.y * 0.5 + 0.5) * rect.height + rect.top;
-  const visible = v.z > -1 && v.z < 1;
-  return { x: sx, y: sy, visible };
-}
+export async function loadGlbFromDrive({ fileId, url }) {
+  const GLTFLoader = (await import('three/addons/loaders/GLTFLoader.js')).GLTFLoader;
+  const loader = new GLTFLoader();
 
-export function onCanvasShiftPick(handler){ pickHandlers.add(handler); return () => pickHandlers.delete(handler); }
-export function onPinSelect(handler){ pinSelectHandlers.add(handler); return () => pinSelectHandlers.delete(handler); }
+  return new Promise((resolve, reject) => {
+    loader.load(
+      url,
+      gltf => {
+        if (!scene) {
+          reject(new Error('scene not initialized'));
+          return;
+        }
 
-export function addPinMarker({ id, x, y, z, color = '#ff6b6b' }){
-  if (!pinGroup) return;
-  // small sphere based on model size
-  let radius = 0.008;
-  try {
-    const objList = scene.children.filter(o=>!o.isLight && o!==pinGroup);
-    const box = new THREE.Box3().makeEmpty();
-    objList.forEach(o=>box.expandByObject(o));
-    const size = box.getSize(new THREE.Vector3()).length() || 1;
-    radius = Math.max(0.005, Math.min(0.02, size * 0.0018));
-  } catch(_){}
-  const geo = new THREE.SphereGeometry(radius, 16, 16);
-  const mat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.95 });
-  const m = new THREE.Mesh(geo, mat);
-  m.position.set(x, y, z);
-  m.userData.pinId = id;
-  m.userData.pinColor = color;
-  pinGroup.add(m);
-}
-export function clearPins(){ if (!pinGroup) return; while (pinGroup.children.length) pinGroup.remove(pinGroup.children[0]); }
-export function removePinMarker(id){
-  if (!pinGroup) return;
-  for (let i=pinGroup.children.length-1; i>=0; i--){
-    const ch = pinGroup.children[i];
-    if (ch.userData?.pinId === id){ pinGroup.remove(ch); break; }
-  }
-}
-export function setPinSelected(id, on){
-  if (!pinGroup) return;
-  pinGroup.children.forEach(ch => {
-    if (ch.userData.pinId === id){
-      ch.scale.set(on?1.5:1, on?1.5:1, on?1.5:1);
-      ch.material.opacity = on?1:0.85;
-    } else {
-      ch.scale.set(1,1,1);
-      ch.material.opacity = 0.6;
-    }
+        // clean previous
+        while (scene.children.length > 0) {
+          scene.remove(scene.children[0]);
+        }
+
+        scene.add(gltf.scene);
+        __scanSceneForMeshes(gltf.scene);
+        __rebuildMaterialList();
+
+        __currentGlbId = fileId || null;
+
+        resolve({
+          glbId: __currentGlbId,
+          materials: listMaterials()
+        });
+      },
+      undefined,
+      err => reject(err)
+    );
   });
 }
 
-export async function loadGlbFromDrive(fileId, { token } = {}) {
-  // Build Drive media URL
-  const url = `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?alt=media&supportsAllDrives=true`;
-// Normalize/resolve token (support Promise; acquire silently if missing)
-try {
-  if (token && typeof token.then === 'function') {
-    token = await token.catch(()=>null);
-  }
-  if (!token) {
-    const g = __lm_getAuth();
-    token = (g.getAccessToken && g.getAccessToken()) || window.__LM_TOK || null;
-    if (!token && g.ensureToken) {
-      try { token = await g.ensureToken({ prompt: undefined }); } catch {}
-      if (!token && g.getAccessToken) token = g.getAccessToken();
-    }
-  }
-} catch {}
-
-
-  // Resolve token if not provided
-  let useToken = token;
-  try {
-    if (!useToken) {
-      const g = await import('./gauth.module.js');
-      useToken = (g.getAccessToken && g.getAccessToken()) || window.__LM_TOK || null;
-      if (!useToken) {
-        // try interactive/silent fetch (without forcing consent) to avoid popup unless necessary
-        try { useToken = await g.ensureToken({ prompt: undefined }); } catch(_) {}
-        if (!useToken && g.getAccessToken) useToken = g.getAccessToken();
-      }
-    }
-  } catch (_) { /* keep going; we'll try without token (will 401) and handle below */ }
-
-  async function fetchWith(tok) {
-    const headers = tok ? { Authorization: `Bearer ${tok}` } : undefined;
-    return await fetch(url, { headers });
-  }
-
-  // First attempt
-  let r = await fetchWith(useToken);
-
-  // If unauthorized, try to (re)acquire token once and retry
-  if (r.status === 401) {
-    try {
-      const g = await import('./gauth.module.js');
-      const fresh = await (g.ensureToken ? g.ensureToken({ prompt: undefined }) : Promise.resolve(window.__LM_TOK));
-      if (fresh) {
-        useToken = fresh;
-        r = await fetchWith(useToken);
-      }
-    } catch(_) {}
-  }
-
-  if (!r.ok) throw new Error(`GLB fetch failed ${r.status}`);
-
-  const blob = await r.blob();
-  const objectURL = URL.createObjectURL(blob);
-  try {
-    const loader = new GLTFLoader();
-    const gltf = await loader.loadAsync(objectURL);
-    // remove previous (except lights & pin group)
-    const keep = new Set([pinGroup]);
-    for (let i = scene.children.length - 1; i >= 0; i--) {
-      const obj = scene.children[i];
-      if (obj.isLight || keep.has(obj)) continue;
-      scene.remove(obj);
-    }
-    scene.add(gltf.scene);
-
-    const box = new THREE.Box3().setFromObject(gltf.scene);
-    const size = box.getSize(new THREE.Vector3()).length();
-    const center = box.getCenter(new THREE.Vector3());
-    controls.target.copy(center);
-    camera.position.copy(center).add(new THREE.Vector3(size*0.8, size*0.6, size*0.8));
-    camera.near = Math.max(size/1000, 0.01); camera.far = size*10; camera.updateProjectionMatrix();
-  } finally {
-    URL.revokeObjectURL(objectURL);
-  }
-
+export function getScene() {
+  return scene;
 }
 
+export function setCurrentGlbId(id) {
+  __currentGlbId = id;
+}
 
-// ---- LociMyu patch: export getScene for external callers ----
-export function getScene(){ try{ return scene; }catch(_){ return __lm_scene_ref; } }
+export function getCurrentGlbId() {
+  return __currentGlbId;
+}
+
+export function onRenderTick(fn) {
+  // 将来的に render-loop の hook を整理する場合に拡張
+}
