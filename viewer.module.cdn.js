@@ -1,152 +1,440 @@
-// ===== viewer.module.cdn.js =====
-// ここからファイル全文です。このまま viewer.module.cdn.js として置き換えてください。
 
-// （元から入っていた既存の import / three.js 初期化 / シーン・カメラ・レンダラ初期化などのコードは
-// ここにそのまま残っています。省略せずに全体を貼っています。）
+// --- LM auth resolver without dynamic import (classic-safe) ---
+function __lm_getAuth() {
+  const gauth = window.__LM_auth || {};
+  return {
+    ensureToken: (typeof gauth.ensureToken === 'function'
+                    ? gauth.ensureToken
+                    : (typeof window.ensureToken === 'function'
+                        ? window.ensureToken
+                        : async function(){ return window.__LM_TOK; })),
+    getAccessToken: (typeof gauth.getAccessToken === 'function'
+                       ? gauth.getAccessToken
+                       : (typeof window.getAccessToken === 'function'
+                           ? window.getAccessToken
+                           : function(){ return window.__LM_TOK; }))
+  };
+}
+// --- end resolver ---
 
-// ...（冒頭〜中盤の three.js / scene / camera / controls / render-loop など既存コードが続く）...
+// viewer.module.cdn.js — Three.js viewer with pins & picking/filters
 
-// ---- ここから loadGlbFromDrive の新実装 ----
+// ===== Materials API (WIP) =====
+const __matList = []; // {index, name, material, key}
+const __origMat = new WeakMap(); // Mesh -> snapshot
+let __glbId = null;
 
-export async function loadGlbFromDrive(fileId, { token } = {}) {
-  if (!fileId) {
-    throw new Error('loadGlbFromDrive requires fileId');
-  }
+export function setCurrentGlbId(glbId){
+  __glbId = glbId || null;
+}
 
-  // Drive のメディア URL を組み立て
-  const url =
-    `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(
-      fileId
-    )}?alt=media&supportsAllDrives=true`;
-
-  // アクセストークン解決ロジック
-  async function resolveToken() {
-    // 1. 明示的に渡された token（Promise も許容）
-    try {
-      if (token && typeof token.then === "function") {
-        token = await token.catch(() => null);
-      }
-      if (token) return token;
-    } catch (e) {
-      console.warn("[viewer.auth] explicit token resolution failed", e);
-      token = null;
-    }
-
-    // 2. boot/auth 層から提供されるブリッジ（あれば使う）
-    try {
-      const bridgeFactory =
-        globalThis && typeof globalThis.__lm_getAuth === "function"
-          ? globalThis.__lm_getAuth
-          : null;
-
-      if (bridgeFactory) {
-        const g = bridgeFactory();
-        if (g) {
-          if (typeof g.ensureToken === "function") {
-            // ensureToken は idempotent / popup-safe な想定
-            await g.ensureToken({ prompt: undefined });
-          }
-          if (typeof g.getAccessToken === "function") {
-            const t = await g.getAccessToken();
-            if (t) return t;
-          }
+// traverse scene and build unique material list
+function __rebuildMaterialList(){
+  __matList.length = 0;
+  if(!scene) return;
+  const matSet = new Map(); // material -> record
+  let idx = 0;
+  scene.traverse(obj => {
+    if (obj && obj.isMesh){
+      const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+      for (const mat of mats){
+        if (!mat) continue;
+        const baseName = (mat.name || '').trim() || `#${idx}`;
+        const key = baseName; // マテリアル名ベースのキー
+        if (!matSet.has(mat)){
+          const rec = { index: idx, name: baseName, material: mat, key };
+          matSet.set(mat, rec);
+          __matList.push(rec);
+          idx++;
         }
       }
-    } catch (e) {
-      console.warn("[viewer.auth] bridge-based token resolution failed", e);
     }
-
-    // 3. 直接 gauth.module.js を import してトークン取得（フォールバック）
-    try {
-      const gauth = await import("./gauth.module.js");
-      if (gauth) {
-        if (typeof gauth.ensureToken === "function") {
-          await gauth.ensureToken({ prompt: undefined });
-        }
-        if (typeof gauth.getAccessToken === "function") {
-          const t = await gauth.getAccessToken();
-          if (t) return t;
-        }
-      }
-    } catch (e) {
-      console.warn("[viewer.auth] gauth.module.js import failed", e);
-    }
-
-    // 4. 最後の手段としてレガシーなグローバル（あれば）
-    if (typeof window !== "undefined" && window.__LM_TOK) {
-      return window.__LM_TOK;
-    }
-
-    // トークンがなくても、ファイルが完全公開なら成功しうるので null で返す
-    return null;
-  }
-
-  async function fetchWithToken() {
-    let tok = await resolveToken();
-    let headers = tok ? { Authorization: `Bearer ${tok}` } : {};
-    let res = await fetch(url, { method: "GET", headers });
-
-    // 認可エラーの場合は一度だけトークンを取り直してリトライ
-    if (res.status === 401 || res.status === 403) {
-      try {
-        token = null; // resolveToken をやり直すためにリセット
-        tok = await resolveToken();
-        headers = tok ? { Authorization: `Bearer ${tok}` } : {};
-        res = await fetch(url, { method: "GET", headers });
-      } catch (e) {
-        console.warn(
-          "[viewer.module] token refresh after 401/403 failed",
-          e
-        );
-      }
-    }
-
-    if (!res.ok) {
-      throw new Error(`Drive fetch failed: ${res.status}`);
-    }
-    return res;
-  }
-
-  console.log("[viewer.module] loading GLB from Drive", {
-    fileId,
   });
+}
 
-  const response = await fetchWithToken();
-  const blob = await response.blob();
-  const arrayBuffer = await blob.arrayBuffer();
 
-  // GLTFLoader が認可のことを気にしなくていいように、blob URL 経由で読み込む
-  const objectURL = URL.createObjectURL(new Blob([arrayBuffer]));
-  try {
-    const loader = ensureGltfLoader(); // 既存の GLTFLoader 生成関数
-    const gltf = await loader.loadAsync(objectURL);
-    const viewer = ensureViewer(); // 既存の viewer 取得関数
-    const scene = viewer.scene;
+export function listMaterials(){
+  __rebuildMaterialList();
+  return __matList.map(({index,name,key})=>({index,name,materialKey:key}));
+}
 
-    // 既存シーンをクリアして新しい GLB を追加
-    while (scene.children.length) {
-      scene.remove(scene.children[0]);
-    }
-    scene.add(gltf.scene);
-
-    // カメラを新しいシーンに合わせてフレーミング
-    adjustCameraToScene(viewer); // 既存のカメラ調整関数
-
-    // 即時レンダリング
-    viewer.render();
-
-    return gltf;
-  } finally {
-    URL.revokeObjectURL(objectURL);
+function __snapshotIfNeeded(mesh){
+  if(!__origMat.has(mesh)){
+    __origMat.set(mesh, {
+      material: mesh.material,
+      onBeforeCompile: mesh.material?.onBeforeCompile,
+      transparent: mesh.material?.transparent,
+      side: mesh.material?.side,
+      alphaTest: mesh.material?.alphaTest
+    });
   }
 }
 
-// ---- LociMyu patch: export getScene / materials helpers など、以降の既存コードが続く ----
+function __hookMaterial(mat){
+  if (!mat || mat.__lmHooked) return;
+  mat.__lmHooked = true;
+  mat.userData.__lmUniforms = {
+    uWhiteThr: { value: 0.92 },
+    uBlackThr: { value: 0.08 },
+    uWhiteToAlpha: { value: false },
+    uBlackToAlpha: { value: false },
+    uUnlit: { value: false },
+  };
+  const u = mat.userData.__lmUniforms;
+  mat.onBeforeCompile = (shader)=>{
+    shader.uniforms = { ...shader.uniforms, ...u };
+    // Inject at alpha computation
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <dithering_fragment>', `
+        // LociMyu material hook
+        vec3 lmColor = diffuseColor.rgb;
+        float lmLuma = dot(lmColor, vec3(0.299, 0.587, 0.114));
+        if (uWhiteToAlpha && lmLuma >= uWhiteThr) diffuseColor.a = 0.0;
+        if (uBlackToAlpha && lmLuma <= uBlackThr) diffuseColor.a = 0.0;
+        #include <dithering_fragment>
+      `)
+      .replace('#include <lights_fragment_begin>', `
+        // Unlit toggle
+        if (!uUnlit) {
+          #include <lights_fragment_begin>
+        }
+      `);
+  };
+  mat.needsUpdate = true;
+}
 
-// ここから下は、元の viewer.module.cdn.js に入っていた
-// - ensureViewer / onRenderTick / listMaterials / applyMaterialProps
-// - resetMaterial / resetAllMaterials / addPinMarker / clearPins / projectPoint / setPinSelected
-// などの既存エクスポート群がそのまま残っています。
-// （実際のファイルでは全エクスポート関数本体も含めて貼り付けてあります）
+function __allMeshes(){
+  const arr=[]; if(!scene) return arr;
+  scene.traverse(o=>{ if(o.isMesh) arr.push(o); });
+  return arr;
+}
 
-// ===== viewer.module.cdn.js ここまで =====
+function __materialsByKey(materialKey){
+  // match by key prefix without index part to avoid instability if needed
+  // here we match full key
+  const out=[];
+  for(const {material, key} of __matList){
+    if(key === materialKey) out.push(material);
+  }
+  return out;
+}
+
+export function applyMaterialProps(materialKey, props = {}){
+  if (!materialKey) {
+    console.warn('[viewer.materials] applyMaterialProps called without materialKey');
+    return;
+  }
+  __rebuildMaterialList();
+  const mats = __materialsByKey(materialKey);
+  if (!mats || !mats.length){
+    console.warn('[viewer.materials] no materials with key', materialKey);
+    return;
+  }
+  console.log('[viewer.materials] applyMaterialProps', materialKey, props, 'targets', mats.length);
+  for (const mat of mats){
+    if (!mat) continue;
+    if (typeof props.opacity !== 'undefined'){
+      const v = Math.max(0, Math.min(1, Number(props.opacity)));
+      if (!Number.isNaN(v)){
+        mat.opacity = v;
+        mat.transparent = v < 1.0 || !!mat.transparent;
+        mat.needsUpdate = true;
+      }
+    }
+    if (typeof props.doubleSide !== 'undefined'){
+      try{
+        const THREE_NS = window.THREE || (window.viewer && window.viewer.THREE) || null;
+        if (THREE_NS){
+          mat.side = props.doubleSide ? THREE_NS.DoubleSide : THREE_NS.FrontSide;
+          mat.needsUpdate = true;
+        }else{
+          console.warn('[viewer.materials] THREE namespace not found for doubleSide');
+        }
+      }catch(e){
+        console.warn('[viewer.materials] doubleSide apply failed', e);
+      }
+    }
+    if (typeof props.unlit !== 'undefined' || typeof props.unlitLike !== 'undefined'){
+      const flag = !!(props.unlit ?? props.unlitLike);
+      // 簡易アンリット: ライティングと toneMapping を切る
+      if ('lights' in mat) mat.lights = !flag;
+      if ('toneMapped' in mat) mat.toneMapped = !flag;
+      // emissive があれば少し持ち上げる
+      if (flag && mat.emissive){
+        if (mat.emissiveIntensity !== undefined && mat.emissiveIntensity < 1.0){
+          mat.emissiveIntensity = 1.0;
+        }
+      }
+      mat.needsUpdate = true;
+    }
+    // chroma key 系は一旦保存専用（表示には使わない）
+    const ck = {};
+    if (typeof props.chromaEnable !== 'undefined') ck.enable = !!props.chromaEnable;
+    if (typeof props.chromaColor === 'string')     ck.color = props.chromaColor;
+    if (typeof props.chromaTolerance === 'number') ck.tolerance = props.chromaTolerance;
+    if (typeof props.chromaFeather === 'number')   ck.feather = props.chromaFeather;
+    if (Object.keys(ck).length){
+      mat.userData = mat.userData || {};
+      mat.userData.__lm_chroma = Object.assign(mat.userData.__lm_chroma || {}, ck);
+    }
+  }
+}
+
+
+export function resetMaterial(materialKey){
+  __rebuildMaterialList();
+  const mats = __materialsByKey(materialKey);
+  for(const mat of mats){
+    if(!mat) continue;
+    // remove hook flags
+    if(mat.userData && mat.userData.__lmUniforms){
+      delete mat.userData.__lmUniforms;
+    }
+    mat.__lmHooked = false;
+    mat.onBeforeCompile = null;
+    mat.transparent = false;
+    mat.alphaTest = 0.0;
+    mat.side = THREE.FrontSide;
+    mat.needsUpdate = true;
+  }
+}
+
+export function resetAllMaterials(){
+  __rebuildMaterialList();
+  for(const rec of __matList){
+    resetMaterial(rec.key);
+  }
+}
+
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { GLTFLoader } from 'https://unpkg.com/three@0.159.0/examples/jsm/loaders/GLTFLoader.js';
+
+// ---- LociMyu patch: expose scene globally (safe getter) ----
+let __lm_scene_ref = null;
+if (!('__lm_scene' in window)) {
+  Object.defineProperty(window, '__lm_scene', {
+    get(){ return __lm_scene_ref; },
+    configurable: false
+  });
+}
+
+let renderer, scene, camera, controls, raycaster, canvasEl;
+const pickHandlers = new Set();
+const pinSelectHandlers = new Set();
+const renderCbs = new Set();
+let pinGroup;
+
+export function ensureViewer({ canvas }){
+  if (renderer) return;
+  canvasEl = canvas;
+  renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
+  renderer.setPixelRatio(window.devicePixelRatio || 1);
+  renderer.setSize(canvas.clientWidth, canvas.clientHeight, false);
+
+  scene = new THREE.Scene();
+__lm_scene_ref = scene;
+// [LM patch] expose scene for UI and tools
+try {
+  window.__LM_SCENE = scene;
+  document.dispatchEvent(new CustomEvent('lm:scene-ready', { detail: { scene } }));
+} catch (e) { console.warn('[LM patch] scene expose failed', e); }
+
+  scene.background = null;
+
+  camera = new THREE.PerspectiveCamera(50, canvas.clientWidth / canvas.clientHeight, 0.1, 2000);
+  camera.position.set(3, 2, 6);
+
+  controls = new OrbitControls(camera, canvas);
+  controls.enableDamping = true;
+
+  scene.add(new THREE.AmbientLight(0xffffff, 0.4));
+  const d1 = new THREE.DirectionalLight(0xffffff, 1.0); d1.position.set(5,10,7); scene.add(d1);
+
+  pinGroup = new THREE.Group(); pinGroup.name = 'PinGroup'; scene.add(pinGroup);
+
+  raycaster = new THREE.Raycaster();
+
+  const onResize = () => {
+    const w = canvas.clientWidth, h = canvas.clientHeight;
+    renderer.setSize(w, h, false);
+    camera.aspect = w / h; camera.updateProjectionMatrix();
+  };
+  window.addEventListener('resize', onResize);
+
+  canvas.addEventListener('pointerdown', (ev) => {
+    const rect = canvas.getBoundingClientRect();
+    const x = ((ev.clientX - rect.left) / rect.width) * 2 - 1;
+    const y = -((ev.clientY - rect.top) / rect.height) * 2 + 1;
+    raycaster.setFromCamera({ x, y }, camera);
+    const intersects = raycaster.intersectObjects(scene.children, true);
+
+    if (ev.shiftKey){
+      const hit = intersects.find(i => i && i.object !== pinGroup && !pinGroup.children.includes(i.object));
+      if (hit && hit.point){
+        pickHandlers.forEach(fn => { try { fn({ x: hit.point.x, y: hit.point.y, z: hit.point.z }); } catch(_){} });
+      }
+    } else {
+      const pinHit = intersects.find(i => i.object && i.object.userData && i.object.userData.pinId);
+      if (pinHit && pinHit.object){
+        const id = pinHit.object.userData.pinId;
+        pinSelectHandlers.forEach(fn => { try { fn(id); } catch(_){} });
+        setPinSelected(id, true);
+      }
+    }
+  });
+
+  document.addEventListener('pinFilterChange', (e)=>{
+    const selected = new Set(e.detail?.selected || []);
+    if (!pinGroup) return;
+    pinGroup.children.forEach(ch => {
+      const c = ch.userData?.pinColor;
+      ch.visible = !c || selected.has(c);
+    });
+  });
+
+  const tick = () => {
+    controls.update(); renderer.render(scene, camera);
+    renderCbs.forEach(fn => { try{ fn(); }catch(e){} });
+    requestAnimationFrame(tick);
+  };
+  tick();
+}
+
+export function onRenderTick(fn){ renderCbs.add(fn); return ()=>renderCbs.delete(fn); }
+export function projectPoint(x, y, z){
+  const v = new THREE.Vector3(x,y,z).project(camera);
+  const rect = canvasEl.getBoundingClientRect();
+  const sx = (v.x * 0.5 + 0.5) * rect.width + rect.left;
+  const sy = (-v.y * 0.5 + 0.5) * rect.height + rect.top;
+  const visible = v.z > -1 && v.z < 1;
+  return { x: sx, y: sy, visible };
+}
+
+export function onCanvasShiftPick(handler){ pickHandlers.add(handler); return () => pickHandlers.delete(handler); }
+export function onPinSelect(handler){ pinSelectHandlers.add(handler); return () => pinSelectHandlers.delete(handler); }
+
+export function addPinMarker({ id, x, y, z, color = '#ff6b6b' }){
+  if (!pinGroup) return;
+  // small sphere based on model size
+  let radius = 0.008;
+  try {
+    const objList = scene.children.filter(o=>!o.isLight && o!==pinGroup);
+    const box = new THREE.Box3().makeEmpty();
+    objList.forEach(o=>box.expandByObject(o));
+    const size = box.getSize(new THREE.Vector3()).length() || 1;
+    radius = Math.max(0.005, Math.min(0.02, size * 0.0018));
+  } catch(_){}
+  const geo = new THREE.SphereGeometry(radius, 16, 16);
+  const mat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.95 });
+  const m = new THREE.Mesh(geo, mat);
+  m.position.set(x, y, z);
+  m.userData.pinId = id;
+  m.userData.pinColor = color;
+  pinGroup.add(m);
+}
+export function clearPins(){ if (!pinGroup) return; while (pinGroup.children.length) pinGroup.remove(pinGroup.children[0]); }
+export function removePinMarker(id){
+  if (!pinGroup) return;
+  for (let i=pinGroup.children.length-1; i>=0; i--){
+    const ch = pinGroup.children[i];
+    if (ch.userData?.pinId === id){ pinGroup.remove(ch); break; }
+  }
+}
+export function setPinSelected(id, on){
+  if (!pinGroup) return;
+  pinGroup.children.forEach(ch => {
+    if (ch.userData.pinId === id){
+      ch.scale.set(on?1.5:1, on?1.5:1, on?1.5:1);
+      ch.material.opacity = on?1:0.85;
+    } else {
+      ch.scale.set(1,1,1);
+      ch.material.opacity = 0.6;
+    }
+  });
+}
+
+export async function loadGlbFromDrive(fileId, { token } = {}) {
+  // Build Drive media URL
+  const url = `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?alt=media&supportsAllDrives=true`;
+// Normalize/resolve token (support Promise; acquire silently if missing)
+try {
+  if (token && typeof token.then === 'function') {
+    token = await token.catch(()=>null);
+  }
+  if (!token) {
+    const g = __lm_getAuth();
+    token = (g.getAccessToken && g.getAccessToken()) || window.__LM_TOK || null;
+    if (!token && g.ensureToken) {
+      try { token = await g.ensureToken({ prompt: undefined }); } catch {}
+      if (!token && g.getAccessToken) token = g.getAccessToken();
+    }
+  }
+} catch {}
+
+
+  // Resolve token if not provided
+  let useToken = token;
+  try {
+    if (!useToken) {
+      const g = await import('./gauth.module.js');
+      useToken = (g.getAccessToken && g.getAccessToken()) || window.__LM_TOK || null;
+      if (!useToken) {
+        // try interactive/silent fetch (without forcing consent) to avoid popup unless necessary
+        try { useToken = await g.ensureToken({ prompt: undefined }); } catch(_) {}
+        if (!useToken && g.getAccessToken) useToken = g.getAccessToken();
+      }
+    }
+  } catch (_) { /* keep going; we'll try without token (will 401) and handle below */ }
+
+  async function fetchWith(tok) {
+    const headers = tok ? { Authorization: `Bearer ${tok}` } : undefined;
+    return await fetch(url, { headers });
+  }
+
+  // First attempt
+  let r = await fetchWith(useToken);
+
+  // If unauthorized, try to (re)acquire token once and retry
+  if (r.status === 401) {
+    try {
+      const g = await import('./gauth.module.js');
+      const fresh = await (g.ensureToken ? g.ensureToken({ prompt: undefined }) : Promise.resolve(window.__LM_TOK));
+      if (fresh) {
+        useToken = fresh;
+        r = await fetchWith(useToken);
+      }
+    } catch(_) {}
+  }
+
+  if (!r.ok) throw new Error(`GLB fetch failed ${r.status}`);
+
+  const blob = await r.blob();
+  const objectURL = URL.createObjectURL(blob);
+  try {
+    const loader = new GLTFLoader();
+    const gltf = await loader.loadAsync(objectURL);
+    // remove previous (except lights & pin group)
+    const keep = new Set([pinGroup]);
+    for (let i = scene.children.length - 1; i >= 0; i--) {
+      const obj = scene.children[i];
+      if (obj.isLight || keep.has(obj)) continue;
+      scene.remove(obj);
+    }
+    scene.add(gltf.scene);
+
+    const box = new THREE.Box3().setFromObject(gltf.scene);
+    const size = box.getSize(new THREE.Vector3()).length();
+    const center = box.getCenter(new THREE.Vector3());
+    controls.target.copy(center);
+    camera.position.copy(center).add(new THREE.Vector3(size*0.8, size*0.6, size*0.8));
+    camera.near = Math.max(size/1000, 0.01); camera.far = size*10; camera.updateProjectionMatrix();
+  } finally {
+    URL.revokeObjectURL(objectURL);
+  }
+
+}
+
+
+// ---- LociMyu patch: export getScene for external callers ----
+export function getScene(){ try{ return scene; }catch(_){ return __lm_scene_ref; } }
