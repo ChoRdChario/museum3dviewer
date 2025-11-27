@@ -30,7 +30,7 @@ const tokenResolver = typeof window !== 'undefined' && typeof window.__lm_getAut
 // -----------------------------------------------------------------------------
 // Public exports (consumed by glb.btn.bridge.v3.js / pin.runtime.bridge.js):
 //   - ensureViewer(opts)
-//   - loadGlbFromDrive({ fileId })
+//   - loadGlbFromDrive(fileIdOrOptions)
 //   - getScene()
 //   - onRenderTick(cb)
 //   - listMaterials()
@@ -47,28 +47,28 @@ const tokenResolver = typeof window !== 'undefined' && typeof window.__lm_getAut
 //   - setPinSelected(...)
 // -----------------------------------------------------------------------------
 
-
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
 let _renderer = null;
 let _scene = null;
 let _camera = null;
-let _controls = null;
 let _canvas = null;
 let _currentGlbId = null;
 let _rootGroup = null;
 
 let _onRenderCbs = [];
-let _materialsByKey = new Map(); // materialKey -> material
-let _materialOriginal = new Map(); // material -> shallow clone of original props
+let _materialsByKey = new Map();    // materialKey -> material
+let _materialOriginal = new Map();  // material -> shallow clone of original props
 
 // -----------------------------------------------------------------------------
 // Viewer core
 // -----------------------------------------------------------------------------
 
 function ensureViewer(opts = {}) {
-  if (_renderer && _scene && _camera) return { renderer: _renderer, scene: _scene, camera: _camera };
+  if (_renderer && _scene && _camera) {
+    return { renderer: _renderer, scene: _scene, camera: _camera };
+  }
 
   const { canvas } = opts;
   if (!canvas) throw new Error('ensureViewer requires { canvas }');
@@ -93,8 +93,7 @@ function ensureViewer(opts = {}) {
   dir.position.set(3, 10, 10);
   _scene.add(dir);
 
-  // Minimal orbit-style controls (no dependency on OrbitControls to keep this
-  // file self-contained).
+  // --- Very simple orbit-like controls (no OrbitControls dependency) --------
   let isDragging = false;
   let prev = { x: 0, y: 0 };
   let target = new THREE.Vector3(0, 0, 0);
@@ -116,7 +115,9 @@ function ensureViewer(opts = {}) {
     prev.x = ev.clientX;
     prev.y = ev.clientY;
   });
-  window.addEventListener('mouseup', () => { isDragging = false; });
+  window.addEventListener('mouseup', () => {
+    isDragging = false;
+  });
   window.addEventListener('mousemove', (ev) => {
     if (!isDragging) return;
     const dx = ev.clientX - prev.x;
@@ -126,7 +127,7 @@ function ensureViewer(opts = {}) {
 
     const ROT_SPEED = 0.005;
     spherical.theta -= dx * ROT_SPEED;
-    spherical.phi -= dy * ROT_SPEED;
+    spherical.phi   -= dy * ROT_SPEED;
     spherical.phi = Math.max(0.01, Math.min(Math.PI - 0.01, spherical.phi));
     updateCamera();
   });
@@ -154,11 +155,22 @@ function ensureViewer(opts = {}) {
   return { renderer: _renderer, scene: _scene, camera: _camera };
 }
 
-async function loadGlbFromDrive({ fileId }) {
+// ★ここを修正：文字列 / オブジェクト両対応にする
+async function loadGlbFromDrive(fileIdOrOptions) {
   if (!_renderer || !_scene || !_camera || !_canvas) {
     throw new Error('Viewer not initialized; call ensureViewer({ canvas }) first');
   }
-  if (!fileId) throw new Error('loadGlbFromDrive requires fileId');
+
+  let fileId = null;
+  if (typeof fileIdOrOptions === 'string') {
+    fileId = fileIdOrOptions;
+  } else if (fileIdOrOptions && typeof fileIdOrOptions === 'object') {
+    fileId = fileIdOrOptions.fileId || null;
+  }
+
+  if (!fileId) {
+    throw new Error('loadGlbFromDrive requires fileId');
+  }
 
   const accessToken = await tokenResolver();
   const hasToken = !!accessToken;
@@ -280,7 +292,7 @@ function _rebuildMaterialList() {
           transparent: m.transparent,
           opacity: m.opacity,
           toneMapped: m.toneMapped !== undefined ? m.toneMapped : true,
-          color: m.color ? m.color.clone() : null,
+          color: m.color ? mat.color.clone() : null,
           emissive: m.emissive ? m.emissive.clone() : null,
           emissiveIntensity: m.emissiveIntensity !== undefined ? m.emissiveIntensity : 1.0,
           lights: m.lights !== undefined ? m.lights : true,
@@ -314,9 +326,9 @@ function listMaterials() {
  *   - opacity: number (0.0–1.0)
  *   - doubleSided: boolean
  *   - unlitLike: boolean
- *   - chromaEnable: boolean (future use)
- *   - chromaColor: string "#rrggbb" (future use)
- *   - chromaTolerance: number (future use)
+ *   - chromaEnable: boolean
+ *   - chromaColor: string "#rrggbb"
+ *   - chromaTolerance: number
  */
 function applyMaterialProps(materialKey, props) {
   if (!_rootGroup) return;
@@ -382,22 +394,21 @@ function applyMaterialProps(materialKey, props) {
     }
   }
 
-  // Shader-uniform bridge (used by onBeforeCompile hook below).
+  // Shader-uniform bridge
   if (!mat.userData.__lmUniforms) {
     mat.userData.__lmUniforms = {
-      uWhiteThr: { value: 0.92 },
-      uBlackThr: { value: 0.08 },
+      uWhiteThr:     { value: 0.92 },
+      uBlackThr:     { value: 0.08 },
       uWhiteToAlpha: { value: false },
       uBlackToAlpha: { value: false },
-      uUnlit: { value: false },
+      uUnlit:        { value: false },
     };
   }
 
   const u = mat.userData.__lmUniforms;
   u.uUnlit.value = !!unlitLike;
 
-  // ここではクロマキーはまだ実装せず、将来のためのパラメータだけブリッジしておく
-  // （必要になったタイミングで uWhiteToAlpha / uBlackToAlpha / Thr を UI 仕様に合わせて使う）
+  // クロマキー系はまだ無効だが、将来用に値だけ受け取っている
   u.uWhiteToAlpha.value = false;
   u.uBlackToAlpha.value = false;
 
@@ -463,8 +474,6 @@ function __hookMaterial(mat) {
   if (!mat || mat.__lmHooked) return;
   mat.__lmHooked = true;
 
-  // Store LociMyu material uniforms on the material so we can
-  // reference and mutate them from the orchestrator.
   mat.userData.__lmUniforms = {
     uWhiteThr:     { value: 0.92 },
     uBlackThr:     { value: 0.08 },
@@ -477,7 +486,6 @@ function __hookMaterial(mat) {
   mat.onBeforeCompile = (shader) => {
     shader.uniforms = { ...shader.uniforms, ...u };
 
-    // Be very conservative: only inject when the token exists.
     if (shader.fragmentShader.includes('#include <dithering_fragment>')) {
       shader.fragmentShader = shader.fragmentShader.replace(
         '#include <dithering_fragment>',
@@ -495,8 +503,8 @@ function __hookMaterial(mat) {
           gl_FragColor.a = 0.0;
         }
 
-        // Unlit-like: overwrite final lit color with the base diffuse
-        // color so the result is effectively unshaded.
+        // Unlit-like: overwrite final lit color with the base diffuse color
+        // so the result is effectively unshaded.
         if (uUnlit) {
           gl_FragColor.rgb = diffuseColor.rgb;
         }
@@ -509,7 +517,7 @@ function __hookMaterial(mat) {
 }
 
 // -----------------------------------------------------------------------------
-// Pin API (existing behaviourを維持)
+// Pin API (既存仕様を維持)
 // -----------------------------------------------------------------------------
 
 let _pinGroup = null;
@@ -561,12 +569,11 @@ function projectPoint(worldPosition) {
   const vector = new THREE.Vector3(worldPosition.x, worldPosition.y, worldPosition.z);
   vector.project(_camera);
   const x = (vector.x * 0.5 + 0.5) * _renderer.domElement.clientWidth;
-  const y = ( - vector.y * 0.5 + 0.5) * _renderer.domElement.clientHeight;
+  const y = (-vector.y * 0.5 + 0.5) * _renderer.domElement.clientHeight;
   return { x, y };
 }
 
 function onCanvasShiftPick(cb) {
-  // 実装は既存のまま（ここではピック処理は省略し、外側ブリッジで実装）
   if (!_canvas) return;
   _canvas.addEventListener('click', (ev) => {
     if (!ev.shiftKey) return;
@@ -584,7 +591,7 @@ function getCurrentGlbId() {
 }
 
 function setPinSelected(/* id, selected */) {
-  // 現状は no-op。必要になったら viewer 側での選択表示を実装。
+  // no-op for now
 }
 
 // -----------------------------------------------------------------------------
