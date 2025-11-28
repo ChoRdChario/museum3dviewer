@@ -1,31 +1,23 @@
+
 // --- LM auth resolver without dynamic import (classic-safe) ---
 function __lm_getAuth() {
   const gauth = window.__LM_auth || {};
-
-  async function ensureToken() {
-    if (gauth && typeof gauth.ensureToken === 'function') {
-      return gauth.ensureToken();
-    }
-    if (typeof window.ensureToken === 'function') {
-      return window.ensureToken();
-    }
-    return window.__LM_TOK;
-  }
-
-  function getAccessToken() {
-    if (gauth && typeof gauth.getAccessToken === 'function') {
-      return gauth.getAccessToken();
-    }
-    if (typeof window.getAccessToken === 'function') {
-      return window.getAccessToken();
-    }
-    return window.__LM_TOK;
-  }
-
-  return { ensureToken, getAccessToken };
+  return {
+    ensureToken: (typeof gauth.ensureToken === 'function'
+                    ? gauth.ensureToken
+                    : (typeof window.ensureToken === 'function'
+                        ? window.ensureToken
+                        : async function(){ return window.__LM_TOK; })),
+    getAccessToken: (typeof gauth.getAccessToken === 'function'
+                       ? gauth.getAccessToken
+                       : (typeof window.getAccessToken === 'function'
+                           ? window.getAccessToken
+                           : function(){ return window.__LM_TOK; }))
+  };
 }
 // --- end resolver ---
 
+// viewer.module.cdn.js — Three.js viewer with pins & picking/filters
 
 // ===== Materials API (WIP) =====
 const __matList = []; // {index, name, material, key}
@@ -106,6 +98,15 @@ function __hookMaterial(mat){
         if (!uUnlit) {
           #include <lights_fragment_begin>
         }
+      `)
+      .replace('gl_FragColor = vec4( outgoingLight, diffuseColor.a );', `
+        #ifndef LM_UNLIT_REPLACED
+        #define LM_UNLIT_REPLACED
+        if (uUnlit) {
+          outgoingLight = diffuseColor.rgb;
+        }
+        gl_FragColor = vec4( outgoingLight, diffuseColor.a );
+        #endif
       `);
   };
   mat.needsUpdate = true;
