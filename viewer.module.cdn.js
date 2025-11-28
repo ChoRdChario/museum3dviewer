@@ -1,3 +1,4 @@
+
 // --- LM auth resolver without dynamic import (classic-safe) ---
 function __lm_getAuth() {
   const gauth = window.__LM_auth || {};
@@ -28,8 +29,6 @@ export function setCurrentGlbId(glbId){
 }
 
 // traverse scene and build unique material list
-let scene; // forward-declared later but used here via closure
-
 function __rebuildMaterialList(){
   __matList.length = 0;
   if(!scene) return;
@@ -53,6 +52,7 @@ function __rebuildMaterialList(){
   });
 }
 
+
 export function listMaterials(){
   __rebuildMaterialList();
   return __matList.map(({index,name,key})=>({index,name,materialKey:key}));
@@ -70,49 +70,54 @@ function __snapshotIfNeeded(mesh){
   }
 }
 
-// Unlit 用フック + 将来の拡張用フック
 function __hookMaterial(mat){
-  if (!mat) return;
-  mat.userData = mat.userData || {};
-  if (mat.userData.__lmHookInstalled) return;
-  mat.userData.__lmHookInstalled = true;
-
-  const backupOnBeforeCompile = mat.onBeforeCompile || null;
-  const unlitUniform = { value: false };
-
-  mat.userData.__lmUnlitUniform = unlitUniform;
-  mat.userData.__lmHookBackup = {
-    onBeforeCompile: backupOnBeforeCompile,
+  if (!mat || mat.__lmHooked) return;
+  mat.__lmHooked = true;
+  mat.userData.__lmUniforms = {
+    uWhiteThr: { value: 0.92 },
+    uBlackThr: { value: 0.08 },
+    uWhiteToAlpha: { value: false },
+    uBlackToAlpha: { value: false },
+    uUnlit: { value: false },
   };
-
-  mat.onBeforeCompile = function (shader) {
-    // 既存 onBeforeCompile があれば先に実行
-    if (typeof backupOnBeforeCompile === 'function') {
-      backupOnBeforeCompile.call(this, shader);
-    }
-
-    shader.uniforms = shader.uniforms || {};
-    shader.uniforms.uLmUnlit = unlitUniform;
-
+  const u = mat.userData.__lmUniforms;
+  mat.onBeforeCompile = (shader)=>{
+    shader.uniforms = { ...shader.uniforms, ...u };
+    // Inject at alpha computation + custom unlit hook
     let src = shader.fragmentShader;
-    const token = '#include <tonemapping_fragment>';
-
-    if (src.includes(token)) {
-      const inject = `
-        // LociMyu unlit hook (diffuse only)
-        if (uLmUnlit) {
-          gl_FragColor = vec4( diffuseColor.rgb, diffuseColor.a );
-          return;
-        }
-      `;
-      src = src.replace(token, inject + '\n' + token);
-    } else {
-      console.warn('[viewer.materials] unlit hook: tonemapping_fragment not found in shader');
-    }
-
+    src = src.replace('#include <dithering_fragment>', `
+      // LociMyu material hook
+      uniform bool uWhiteToAlpha;
+      uniform bool uBlackToAlpha;
+      uniform bool uUnlit;
+      uniform float uWhiteThr;
+      uniform float uBlackThr;
+      vec3 lmColor = diffuseColor.rgb;
+      float lmLuma = dot(lmColor, vec3(0.299, 0.587, 0.114));
+      if (uWhiteToAlpha && lmLuma >= uWhiteThr) diffuseColor.a = 0.0;
+      if (uBlackToAlpha && lmLuma <= uBlackThr) diffuseColor.a = 0.0;
+      #include <dithering_fragment>
+    `);
+    src = src.replace('#include <lights_fragment_begin>', `
+      // Unlit toggle
+      if (!uUnlit) {
+        #include <lights_fragment_begin>
+      } else {
+        vec3 outgoingLight = diffuseColor.rgb;
+      }
+    `);
+    src = src.replace('gl_FragColor = vec4( outgoingLight, diffuseColor.a );', `
+      #ifndef LM_UNLIT_REPLACED
+      #define LM_UNLIT_REPLACED
+      if (uUnlit) {
+        outgoingLight = diffuseColor.rgb;
+      }
+      gl_FragColor = vec4( outgoingLight, diffuseColor.a );
+      #endif
+    `);
     shader.fragmentShader = src;
   };
-
+  };
   mat.needsUpdate = true;
 }
 
@@ -123,6 +128,8 @@ function __allMeshes(){
 }
 
 function __materialsByKey(materialKey){
+  // match by key prefix without index part to avoid instability if needed
+  // here we match full key
   const out=[];
   for(const {material, key} of __matList){
     if(key === materialKey) out.push(material);
@@ -142,12 +149,8 @@ export function applyMaterialProps(materialKey, props = {}){
     return;
   }
   console.log('[viewer.materials] applyMaterialProps', materialKey, props, 'targets', mats.length);
-
   for (const mat of mats){
     if (!mat) continue;
-    mat.userData = mat.userData || {};
-
-    // --- Opacity ---
     if (typeof props.opacity !== 'undefined'){
       const v = Math.max(0, Math.min(1, Number(props.opacity)));
       if (!Number.isNaN(v)){
@@ -156,14 +159,11 @@ export function applyMaterialProps(materialKey, props = {}){
         mat.needsUpdate = true;
       }
     }
-
-    // --- Double-sided (doubleSide / doubleSided 両対応) ---
-    const ds = (props.doubleSide ?? props.doubleSided);
-    if (typeof ds !== 'undefined'){
+    if (typeof props.doubleSide !== 'undefined'){
       try{
-        const THREE_NS = window.THREE || (window.viewer && window.viewer.THREE) || null;
+        const THREE_NS = (typeof THREE !== 'undefined' ? THREE : (window.THREE || (window.viewer && window.viewer.THREE) || null));
         if (THREE_NS){
-          mat.side = ds ? THREE_NS.DoubleSide : THREE_NS.FrontSide;
+          mat.side = props.doubleSide ? THREE_NS.DoubleSide : THREE_NS.FrontSide;
           mat.needsUpdate = true;
         }else{
           console.warn('[viewer.materials] THREE namespace not found for doubleSide');
@@ -172,107 +172,47 @@ export function applyMaterialProps(materialKey, props = {}){
         console.warn('[viewer.materials] doubleSide apply failed', e);
       }
     }
-
-    // --- Unlit / Unlit-like ---
     if (typeof props.unlit !== 'undefined' || typeof props.unlitLike !== 'undefined'){
       const flag = !!(props.unlit ?? props.unlitLike);
-
-      // フックを仕込む（1回だけ）
-      __hookMaterial(mat);
-
-      // 初回だけバックアップ
-      if (!mat.userData.__lmUnlitBackup){
-        mat.userData.__lmUnlitBackup = {
-          lights: ('lights' in mat ? mat.lights : undefined),
-          toneMapped: ('toneMapped' in mat ? mat.toneMapped : undefined),
-          envMap: mat.envMap,
-          metalness: mat.metalness,
-          roughness: mat.roughness,
-          emissiveIntensity: mat.emissiveIntensity
-        };
-      }
-
-      const u = mat.userData.__lmUnlitUniform;
-      if (u) u.value = flag;
-
-      if ('lights' in mat)     mat.lights     = !flag;
+      // 簡易アンリット: ライティングと toneMapping を切る
+      if ('lights' in mat) mat.lights = !flag;
       if ('toneMapped' in mat) mat.toneMapped = !flag;
-
-      if (flag){
-        // 完全アンリット寄りに
-        if ('envMap' in mat) mat.envMap = null;
-        if (typeof mat.metalness === 'number')  mat.metalness  = 0.0;
-        if (typeof mat.roughness === 'number')  mat.roughness  = 1.0;
+      // emissive があれば少し持ち上げる
+      if (flag && mat.emissive){
         if (mat.emissiveIntensity !== undefined && mat.emissiveIntensity < 1.0){
           mat.emissiveIntensity = 1.0;
         }
-      } else {
-        // 可能な範囲で元に戻す
-        const b = mat.userData.__lmUnlitBackup;
-        if (b){
-          if ('lights' in b && b.lights !== undefined && 'lights' in mat) {
-            mat.lights = b.lights;
-          }
-          if ('toneMapped' in b && b.toneMapped !== undefined && 'toneMapped' in mat) {
-            mat.toneMapped = b.toneMapped;
-          }
-          if ('envMap' in b) {
-            mat.envMap = b.envMap;
-          }
-          if (typeof b.metalness === 'number' && typeof mat.metalness === 'number') {
-            mat.metalness = b.metalness;
-          }
-          if (typeof b.roughness === 'number' && typeof mat.roughness === 'number') {
-            mat.roughness = b.roughness;
-          }
-          if (typeof b.emissiveIntensity === 'number' && mat.emissiveIntensity !== undefined) {
-            mat.emissiveIntensity = b.emissiveIntensity;
-          }
-        }
       }
-
       mat.needsUpdate = true;
     }
-
-    // --- Chroma key (今は保存のみ／描画は未使用) ---
+    // chroma key 系は一旦保存専用（表示には使わない）
     const ck = {};
-    if (typeof props.chromaEnable !== 'undefined')     ck.enable    = !!props.chromaEnable;
-    if (typeof props.chromaColor === 'string')         ck.color     = props.chromaColor;
-    if (typeof props.chromaTolerance === 'number')     ck.tolerance = props.chromaTolerance;
-    if (typeof props.chromaFeather === 'number')       ck.feather   = props.chromaFeather;
+    if (typeof props.chromaEnable !== 'undefined') ck.enable = !!props.chromaEnable;
+    if (typeof props.chromaColor === 'string')     ck.color = props.chromaColor;
+    if (typeof props.chromaTolerance === 'number') ck.tolerance = props.chromaTolerance;
+    if (typeof props.chromaFeather === 'number')   ck.feather = props.chromaFeather;
     if (Object.keys(ck).length){
+      mat.userData = mat.userData || {};
       mat.userData.__lm_chroma = Object.assign(mat.userData.__lm_chroma || {}, ck);
     }
   }
 }
+
 
 export function resetMaterial(materialKey){
   __rebuildMaterialList();
   const mats = __materialsByKey(materialKey);
   for(const mat of mats){
     if(!mat) continue;
-
-    if (mat.userData){
+    // remove hook flags
+    if(mat.userData && mat.userData.__lmUniforms){
       delete mat.userData.__lmUniforms;
-      delete mat.userData.__lm_chroma;
-      delete mat.userData.__lmHookInstalled;
-      delete mat.userData.__lmUnlitUniform;
-      delete mat.userData.__lmUnlitBackup;
-      delete mat.userData.__lmHookBackup;
     }
-
     mat.__lmHooked = false;
     mat.onBeforeCompile = null;
     mat.transparent = false;
     mat.alphaTest = 0.0;
-
-    try {
-      const THREE_NS = window.THREE || (window.viewer && window.viewer.THREE) || null;
-      if (THREE_NS) {
-        mat.side = THREE_NS.FrontSide;
-      }
-    } catch (_) {}
-
+    mat.side = THREE.FrontSide;
     mat.needsUpdate = true;
   }
 }
@@ -297,7 +237,7 @@ if (!('__lm_scene' in window)) {
   });
 }
 
-let renderer, camera, controls, raycaster, canvasEl;
+let renderer, scene, camera, controls, raycaster, canvasEl;
 const pickHandlers = new Set();
 const pinSelectHandlers = new Set();
 const renderCbs = new Set();
@@ -311,12 +251,12 @@ export function ensureViewer({ canvas }){
   renderer.setSize(canvas.clientWidth, canvas.clientHeight, false);
 
   scene = new THREE.Scene();
-  __lm_scene_ref = scene;
-  // [LM patch] expose scene for UI and tools
-  try {
-    window.__LM_SCENE = scene;
-    document.dispatchEvent(new CustomEvent('lm:scene-ready', { detail: { scene } }));
-  } catch (e) { console.warn('[LM patch] scene expose failed', e); }
+__lm_scene_ref = scene;
+// [LM patch] expose scene for UI and tools
+try {
+  window.__LM_SCENE = scene;
+  document.dispatchEvent(new CustomEvent('lm:scene-ready', { detail: { scene } }));
+} catch (e) { console.warn('[LM patch] scene expose failed', e); }
 
   scene.background = null;
 
@@ -435,29 +375,30 @@ export function setPinSelected(id, on){
 export async function loadGlbFromDrive(fileId, { token } = {}) {
   // Build Drive media URL
   const url = `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?alt=media&supportsAllDrives=true`;
-
-  // Normalize/resolve token (support Promise; acquire silently if missing)
-  try {
-    if (token && typeof token.then === 'function') {
-      token = await token.catch(()=>null);
+// Normalize/resolve token (support Promise; acquire silently if missing)
+try {
+  if (token && typeof token.then === 'function') {
+    token = await token.catch(()=>null);
+  }
+  if (!token) {
+    const g = __lm_getAuth();
+    token = (g.getAccessToken && g.getAccessToken()) || window.__LM_TOK || null;
+    if (!token && g.ensureToken) {
+      try { token = await g.ensureToken({ prompt: undefined }); } catch {}
+      if (!token && g.getAccessToken) token = g.getAccessToken();
     }
-    if (!token) {
-      const g = __lm_getAuth();
-      token = (g.getAccessToken && g.getAccessToken()) || window.__LM_TOK || null;
-      if (!token && g.ensureToken) {
-        try { token = await g.ensureToken({ prompt: undefined }); } catch {}
-        if (!token && g.getAccessToken) token = g.getAccessToken();
-      }
-    }
-  } catch {}
+  }
+} catch {}
 
-  // Resolve token if not provided (fallback, dynamic import OK in ESM)
+
+  // Resolve token if not provided
   let useToken = token;
   try {
     if (!useToken) {
       const g = await import('./gauth.module.js');
       useToken = (g.getAccessToken && g.getAccessToken()) || window.__LM_TOK || null;
       if (!useToken) {
+        // try interactive/silent fetch (without forcing consent) to avoid popup unless necessary
         try { useToken = await g.ensureToken({ prompt: undefined }); } catch(_) {}
         if (!useToken && g.getAccessToken) useToken = g.getAccessToken();
       }
@@ -509,7 +450,9 @@ export async function loadGlbFromDrive(fileId, { token } = {}) {
   } finally {
     URL.revokeObjectURL(objectURL);
   }
+
 }
+
 
 // ---- LociMyu patch: export getScene for external callers ----
 export function getScene(){ try{ return scene; }catch(_){ return __lm_scene_ref; } }
