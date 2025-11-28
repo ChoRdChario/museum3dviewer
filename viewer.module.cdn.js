@@ -1,22 +1,31 @@
 // --- LM auth resolver without dynamic import (classic-safe) ---
 function __lm_getAuth() {
   const gauth = window.__LM_auth || {};
-  return {
-    ensureToken: (typeof gauth.ensureToken === 'function'
-                    ? gauth.ensureToken
-                    : (typeof window.ensureToken === 'function'
-                        ? window.ensureToken
-                        : async function(){ return window.__LM_TOK; })),
-    getAccessToken: (typeof gauth.getAccessToken === 'function'
-                       ? gauth.getAccessToken
-                       : (typeof window.getAccessToken === 'function'
-                           : window.getAccessToken
-                           : function(){ return window.__LM_TOK; }))
-  };
+
+  async function ensureToken() {
+    if (gauth && typeof gauth.ensureToken === 'function') {
+      return gauth.ensureToken();
+    }
+    if (typeof window.ensureToken === 'function') {
+      return window.ensureToken();
+    }
+    return window.__LM_TOK;
+  }
+
+  function getAccessToken() {
+    if (gauth && typeof gauth.getAccessToken === 'function') {
+      return gauth.getAccessToken();
+    }
+    if (typeof window.getAccessToken === 'function') {
+      return window.getAccessToken();
+    }
+    return window.__LM_TOK;
+  }
+
+  return { ensureToken, getAccessToken };
 }
 // --- end resolver ---
 
-// viewer.module.cdn.js — Three.js viewer with pins & picking/filters
 
 // ===== Materials API (WIP) =====
 const __matList = []; // {index, name, material, key}
@@ -51,6 +60,7 @@ function __rebuildMaterialList(){
   });
 }
 
+
 export function listMaterials(){
   __rebuildMaterialList();
   return __matList.map(({index,name,key})=>({index,name,materialKey:key}));
@@ -71,7 +81,6 @@ function __snapshotIfNeeded(mesh){
 function __hookMaterial(mat){
   if (!mat || mat.__lmHooked) return;
   mat.__lmHooked = true;
-  mat.userData = mat.userData || {};
   mat.userData.__lmUniforms = {
     uWhiteThr: { value: 0.92 },
     uBlackThr: { value: 0.08 },
@@ -130,15 +139,8 @@ export function applyMaterialProps(materialKey, props = {}){
     return;
   }
   console.log('[viewer.materials] applyMaterialProps', materialKey, props, 'targets', mats.length);
-
   for (const mat of mats){
     if (!mat) continue;
-
-    // shader フック（unlit / chroma 用）を必ず差し込む
-    __hookMaterial(mat);
-    const uniforms = (mat.userData && mat.userData.__lmUniforms) || null;
-
-    // --- Opacity ---
     if (typeof props.opacity !== 'undefined'){
       const v = Math.max(0, Math.min(1, Number(props.opacity)));
       if (!Number.isNaN(v)){
@@ -147,44 +149,33 @@ export function applyMaterialProps(materialKey, props = {}){
         mat.needsUpdate = true;
       }
     }
-
-    // --- Double-sided (doubleSided / doubleSide 両対応) ---
-    const dsFlagRaw = (props.doubleSided !== undefined ? props.doubleSided : props.doubleSide);
-    if (typeof dsFlagRaw !== 'undefined'){
-      const dsFlag = !!dsFlagRaw;
+    if (typeof props.doubleSide !== 'undefined'){
       try{
-        mat.side = dsFlag ? THREE.DoubleSide : THREE.FrontSide;
-        mat.needsUpdate = true;
+        const THREE_NS = window.THREE || (window.viewer && window.viewer.THREE) || null;
+        if (THREE_NS){
+          mat.side = props.doubleSide ? THREE_NS.DoubleSide : THREE_NS.FrontSide;
+          mat.needsUpdate = true;
+        }else{
+          console.warn('[viewer.materials] THREE namespace not found for doubleSide');
+        }
       }catch(e){
         console.warn('[viewer.materials] doubleSide apply failed', e);
       }
     }
-
-    // --- Unlit / UnlitLike ---
     if (typeof props.unlit !== 'undefined' || typeof props.unlitLike !== 'undefined'){
       const flag = !!(props.unlit ?? props.unlitLike);
-
-      // shader uniform にフラグを渡す（onBeforeCompile で lights_fragment_begin を制御）
-      if (uniforms && uniforms.uUnlit){
-        uniforms.uUnlit.value = flag;
-      }
-
-      // three.js Material のフラグも合わせて調整
-      if ('lights' in mat)      mat.lights = !flag;
-      if ('toneMapped' in mat)  mat.toneMapped = !flag;
-
-      // 環境寄与を弱める（可能な範囲で）
-      if (flag) {
-        if ('envMapIntensity' in mat && typeof mat.envMapIntensity === 'number'){
-          // 元値の保存まではしていないので、強制 0 にするだけ
-          mat.envMapIntensity = 0;
+      // 簡易アンリット: ライティングと toneMapping を切る
+      if ('lights' in mat) mat.lights = !flag;
+      if ('toneMapped' in mat) mat.toneMapped = !flag;
+      // emissive があれば少し持ち上げる
+      if (flag && mat.emissive){
+        if (mat.emissiveIntensity !== undefined && mat.emissiveIntensity < 1.0){
+          mat.emissiveIntensity = 1.0;
         }
       }
-
       mat.needsUpdate = true;
     }
-
-    // --- chroma key 系は一旦保存専用（表示には使わない） ---
+    // chroma key 系は一旦保存専用（表示には使わない）
     const ck = {};
     if (typeof props.chromaEnable !== 'undefined') ck.enable = !!props.chromaEnable;
     if (typeof props.chromaColor === 'string')     ck.color = props.chromaColor;
@@ -196,6 +187,7 @@ export function applyMaterialProps(materialKey, props = {}){
     }
   }
 }
+
 
 export function resetMaterial(materialKey){
   __rebuildMaterialList();
@@ -249,12 +241,12 @@ export function ensureViewer({ canvas }){
   renderer.setSize(canvas.clientWidth, canvas.clientHeight, false);
 
   scene = new THREE.Scene();
-  __lm_scene_ref = scene;
-  // [LM patch] expose scene for UI and tools
-  try {
-    window.__LM_SCENE = scene;
-    document.dispatchEvent(new CustomEvent('lm:scene-ready', { detail: { scene } }));
-  } catch (e) { console.warn('[LM patch] scene expose failed', e); }
+__lm_scene_ref = scene;
+// [LM patch] expose scene for UI and tools
+try {
+  window.__LM_SCENE = scene;
+  document.dispatchEvent(new CustomEvent('lm:scene-ready', { detail: { scene } }));
+} catch (e) { console.warn('[LM patch] scene expose failed', e); }
 
   scene.background = null;
 
@@ -373,20 +365,21 @@ export function setPinSelected(id, on){
 export async function loadGlbFromDrive(fileId, { token } = {}) {
   // Build Drive media URL
   const url = `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?alt=media&supportsAllDrives=true`;
-  // Normalize/resolve token (support Promise; acquire silently if missing)
-  try {
-    if (token && typeof token.then === 'function') {
-      token = await token.catch(()=>null);
+// Normalize/resolve token (support Promise; acquire silently if missing)
+try {
+  if (token && typeof token.then === 'function') {
+    token = await token.catch(()=>null);
+  }
+  if (!token) {
+    const g = __lm_getAuth();
+    token = (g.getAccessToken && g.getAccessToken()) || window.__LM_TOK || null;
+    if (!token && g.ensureToken) {
+      try { token = await g.ensureToken({ prompt: undefined }); } catch {}
+      if (!token && g.getAccessToken) token = g.getAccessToken();
     }
-    if (!token) {
-      const g = __lm_getAuth();
-      token = (g.getAccessToken && g.getAccessToken()) || window.__LM_TOK || null;
-      if (!token && g.ensureToken) {
-        try { token = await g.ensureToken({ prompt: undefined }); } catch {}
-        if (!token && g.getAccessToken) token = g.getAccessToken();
-      }
-    }
-  } catch {}
+  }
+} catch {}
+
 
   // Resolve token if not provided
   let useToken = token;
@@ -449,6 +442,7 @@ export async function loadGlbFromDrive(fileId, { token } = {}) {
   }
 
 }
+
 
 // ---- LociMyu patch: export getScene for external callers ----
 export function getScene(){ try{ return scene; }catch(_){ return __lm_scene_ref; } }
