@@ -1,3 +1,4 @@
+
 // --- LM auth resolver without dynamic import (classic-safe) ---
 function __lm_getAuth() {
   const gauth = window.__LM_auth || {};
@@ -11,553 +12,499 @@ function __lm_getAuth() {
                        ? gauth.getAccessToken
                        : (typeof window.getAccessToken === 'function'
                            ? window.getAccessToken
-                           : async function(){
-                               const tok = await (this.ensureToken());
-                               return tok || window.__LM_TOK;
-                             }))
+                           : function(){ return window.__LM_TOK; }))
   };
 }
+// --- end resolver ---
 
-// --- LM Sheets fetch helper (uses auth resolver above) ---
-async function __lm_fetchJSONAuth(url, options={}) {
-  const { getAccessToken } = __lm_getAuth();
-  const token = await getAccessToken();
-  if (!token) {
-    console.warn('[viewer.module] no access token available');
-  }
-  const headers = Object.assign(
-    {
-      'Accept': 'application/json',
-    },
-    options.headers || {},
-    token ? { 'Authorization': `Bearer ${token}` } : {}
-  );
-  const res = await fetch(url, Object.assign({}, options, { headers }));
-  if (!res.ok) {
-    const text = await res.text();
-    console.warn('[viewer.module] fetchJSONAuth error', res.status, text);
-    throw new Error(`fetchJSONAuth failed: ${res.status}`);
-  }
-  return res.json();
+// viewer.module.cdn.js — Three.js viewer with pins & picking/filters
+
+// ===== Materials API (WIP) =====
+const __matList = []; // {index, name, material, key}
+const __origMat = new WeakMap(); // Mesh -> snapshot
+let __glbId = null;
+
+export function setCurrentGlbId(glbId){
+  __glbId = glbId || null;
 }
 
-// Sheets read helper specialized for LM materials
-async function __lm_readMaterialsConfig(spreadsheetId, materialsGid, sheetGid) {
-  if (!spreadsheetId || !materialsGid) {
-    console.warn('[viewer.module] __lm_readMaterialsConfig missing ids', { spreadsheetId, materialsGid });
-    return {};
-  }
-  try {
-    const range = `'__LM_MATERIALS'!A2:J`;
-    const url = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(range)}?majorDimension=ROWS`;
-    const data = await __lm_fetchJSONAuth(url, { method: 'GET' });
-
-    const rows = (data.values || []);
-    const cfg = {};
-    for (const row of rows) {
-      // 想定カラム:
-      // A: materialKey
-      // B: sheetGid
-      // C: opacity
-      // D: doubleSided
-      // E: unlitLike
-      // F: chromaEnable
-      // G: chromaColor
-      // H: chromaTolerance
-      // I: chromaFeather
-      // J: reserved
-      const matKey = row[0] || '';
-      const gidStr = row[1] || '';
-      if (!matKey) continue;
-      if (gidStr !== String(sheetGid)) continue;
-
-      const entry = cfg[matKey] || (cfg[matKey] = {});
-      if (typeof row[2] !== 'undefined' && row[2] !== '') {
-        const v = parseFloat(row[2]);
-        if (!Number.isNaN(v)) entry.opacity = v;
-      }
-      if (typeof row[3] !== 'undefined' && row[3] !== '') {
-        entry.doubleSided = (row[3] === 'TRUE' || row[3] === 'true' || row[3] === '1');
-      }
-      if (typeof row[4] !== 'undefined' && row[4] !== '') {
-        entry.unlitLike = (row[4] === 'TRUE' || row[4] === 'true' || row[4] === '1');
-      }
-      if (typeof row[5] !== 'undefined' && row[5] !== '') {
-        entry.chromaEnable = (row[5] === 'TRUE' || row[5] === 'true' || row[5] === '1');
-      }
-      if (typeof row[6] !== 'undefined' && row[6] !== '') {
-        entry.chromaColor = row[6];
-      }
-      if (typeof row[7] !== 'undefined' && row[7] !== '') {
-        const v = parseFloat(row[7]);
-        if (!Number.isNaN(v)) entry.chromaTolerance = v;
-      }
-      if (typeof row[8] !== 'undefined' && row[8] !== '') {
-        const v = parseFloat(row[8]);
-        if (!Number.isNaN(v)) entry.chromaFeather = v;
+// traverse scene and build unique material list
+function __rebuildMaterialList(){
+  __matList.length = 0;
+  if(!scene) return;
+  const matSet = new Map(); // material -> record
+  let idx = 0;
+  scene.traverse(obj => {
+    if (obj && obj.isMesh){
+      const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+      for (const mat of mats){
+        if (!mat) continue;
+        const baseName = (mat.name || '').trim() || `#${idx}`;
+        const key = baseName; // マテリアル名ベースのキー
+        if (!matSet.has(mat)){
+          const rec = { index: idx, name: baseName, material: mat, key };
+          matSet.set(mat, rec);
+          __matList.push(rec);
+          idx++;
+        }
       }
     }
-    console.log('[viewer.module] __lm_readMaterialsConfig loaded', Object.keys(cfg).length, 'entries for sheet', sheetGid);
-    return cfg;
-  } catch (e) {
-    console.warn('[viewer.module] __lm_readMaterialsConfig error', e);
-    return {};
+  });
+}
+
+
+export function listMaterials(){
+  __rebuildMaterialList();
+  return __matList.map(({index,name,key})=>({index,name,materialKey:key}));
+}
+
+function __snapshotIfNeeded(mesh){
+  if(!__origMat.has(mesh)){
+    __origMat.set(mesh, {
+      material: mesh.material,
+      onBeforeCompile: mesh.material?.onBeforeCompile,
+      transparent: mesh.material?.transparent,
+      side: mesh.material?.side,
+      alphaTest: mesh.material?.alphaTest
+    });
   }
 }
 
-// --- Three.js viewer core ---
-
-let renderer, scene, camera, controls, animationId;
-let currentGlb = null;
-let mixer = null;
-let clock = null;
-let renderCallbacks = [];
-let canvasElementRef = null;
-let currentGlbId = null;
-let orbitTarget = null;
-
-const viewerMaterials = Object.create(null);
-
-function clearScene() {
-  if (!scene) return;
-  while (scene.children.length > 0) {
-    scene.remove(scene.children[0]);
-  }
-}
-
-function disposeRenderer() {
-  if (animationId) {
-    cancelAnimationFrame(animationId);
-    animationId = null;
-  }
-  if (renderer) {
-    renderer.dispose();
-    renderer.forceContextLoss();
-    renderer.domElement = null;
-    renderer = null;
-  }
-  scene = null;
-  camera = null;
-  controls = null;
-  clock = null;
-  renderCallbacks = [];
-  currentGlb = null;
-  mixer = null;
-  orbitTarget = null;
-}
-
-function addRenderCallback(fn) {
-  if (typeof fn !== 'function') return;
-  renderCallbacks.push(fn);
-}
-
-const MATERIAL_DEFAULTS = {
-  opacity: 1.0,
-  doubleSided: false,
-  unlitLike: false,
-  chromaEnable: false,
-  chromaColor: '#000000',
-  chromaTolerance: 0.0,
-  chromaFeather: 0.0,
-};
-
-function getScene() {
-  return scene || null;
-}
-
-function setCurrentGlbId(id) {
-  currentGlbId = id || null;
-}
-
-function applyMaterialStateToMeshMaterial(mat, nextState){
-  if (!mat) return;
-  const s = nextState || {};
-  const opaqueOpacity = (typeof s.opacity === 'number' ? s.opacity : MATERIAL_DEFAULTS.opacity);
-  mat.transparent = opaqueOpacity < 1.0;
-  mat.opacity = opaqueOpacity;
-
-  if (typeof s.doubleSided === 'boolean') {
-    mat.side = s.doubleSided ? THREE.DoubleSide : THREE.FrontSide;
-  } else {
-    mat.side = MATERIAL_DEFAULTS.doubleSided ? THREE.DoubleSide : THREE.FrontSide;
-  }
-
-  if (typeof s.unlitLike === 'boolean') {
-    mat.userData = mat.userData || {};
-    mat.userData.__lm_unlitEnabled = !!s.unlitLike;
-  } else {
-    if (mat.userData) delete mat.userData.__lm_unlitEnabled;
-  }
-
+function __hookMaterial(mat){
+  if (!mat || mat.__lmHooked) return;
+  mat.__lmHooked = true;
+  mat.userData.__lmUniforms = {
+    uWhiteThr: { value: 0.92 },
+    uBlackThr: { value: 0.08 },
+    uWhiteToAlpha: { value: false },
+    uBlackToAlpha: { value: false },
+    uUnlit: { value: false },
+  };
+  const u = mat.userData.__lmUniforms;
+  mat.onBeforeCompile = (shader)=>{
+    shader.uniforms = { ...shader.uniforms, ...u };
+    // Inject at alpha computation
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <dithering_fragment>', `
+        // LociMyu material hook
+        vec3 lmColor = diffuseColor.rgb;
+        float lmLuma = dot(lmColor, vec3(0.299, 0.587, 0.114));
+        if (uWhiteToAlpha && lmLuma >= uWhiteThr) diffuseColor.a = 0.0;
+        if (uBlackToAlpha && lmLuma <= uBlackThr) diffuseColor.a = 0.0;
+        #include <dithering_fragment>
+      `)
+      .replace('#include <lights_fragment_begin>', `
+        // Unlit toggle
+        if (!uUnlit) {
+          #include <lights_fragment_begin>
+        }
+      `);
+  };
   mat.needsUpdate = true;
 }
 
-// ★★ ここが今回差し替えた Unlit 用フック本体 ★★
-function ensureUnlitHook(mat){
-  if (!mat) return;
-  mat.userData = mat.userData || {};
-  if (mat.userData.__lm_unlitHookInstalled) return;
-  mat.userData.__lm_unlitHookInstalled = true;
+function __allMeshes(){
+  const arr=[]; if(!scene) return arr;
+  scene.traverse(o=>{ if(o.isMesh) arr.push(o); });
+  return arr;
+}
 
-  const backupOnBeforeCompile = mat.onBeforeCompile;
-  mat.userData.__lm_unlitBackupOnBeforeCompile = backupOnBeforeCompile || null;
+function __materialsByKey(materialKey){
+  // match by key prefix without index part to avoid instability if needed
+  // here we match full key
+  const out=[];
+  for(const {material, key} of __matList){
+    if(key === materialKey) out.push(material);
+  }
+  return out;
+}
 
-  mat.onBeforeCompile = function(shader){
-    if (typeof backupOnBeforeCompile === 'function'){
-      backupOnBeforeCompile.call(this, shader);
-    }
+export function applyMaterialProps(materialKey, props = {}){
+  if (!materialKey) {
+    console.warn('[viewer.materials] applyMaterialProps called without materialKey');
+    return;
+  }
+  __rebuildMaterialList();
+  const mats = __materialsByKey(materialKey);
+  if (!mats || !mats.length){
+    console.warn('[viewer.materials] no materials with key', materialKey);
+    return;
+  }
 
-    let src = shader.fragmentShader || '';
-    const tokenMain = 'void main() {';
-    const tokenTone = '#include <tonemapping_fragment>';
+  // Unlit 用の onBeforeCompile フックを一度だけ仕込むヘルパ
+  function ensureUnlitHook(mat){
+    if (!mat) return;
+    mat.userData = mat.userData || {};
+    if (mat.userData.__lm_unlitHookInstalled) return;
+    mat.userData.__lm_unlitHookInstalled = true;
 
-    const hasMain = src.includes(tokenMain);
-    const hasTone = src.includes(tokenTone);
-    if (!(hasMain && hasTone)){
-      // パターンが見つからない場合は何もせず安全側に倒す
+    const backupOnBeforeCompile = mat.onBeforeCompile;
+    mat.userData.__lm_unlitBackupOnBeforeCompile = backupOnBeforeCompile || null;
+
+    mat.onBeforeCompile = function(shader){
+      if (typeof backupOnBeforeCompile === 'function'){
+        backupOnBeforeCompile.call(this, shader);
+      }
+
+      let src = shader.fragmentShader || '';
+      const tokenMain = 'void main() {';
+      const beforeFrag = 'gl_FragColor = vec4( outgoingLight, diffuseColor.a );';
+      const uniformsDecl = [
+        'uniform bool uLmUnlit;',
+        'uniform float uLmUnlitMix;',
+        ''
+      ].join('\n');
+      const replacement = [
+        'if (uLmUnlit) {',
+        '  gl_FragColor = vec4( diffuseColor.rgb, diffuseColor.a );',
+        '} else {',
+        '  gl_FragColor = vec4( outgoingLight, diffuseColor.a );',
+        '}'
+      ].join('\n');
+
+      const hasMain = src.includes(tokenMain);
+      const hasBefore = src.includes(beforeFrag);
+      if (!(hasMain && hasBefore)){
+        // パターンが見つからない場合は何もせず安全側に倒す
+        shader.fragmentShader = src;
+        return;
+      }
+
+      src = src.replace(tokenMain, uniformsDecl + '\n' + tokenMain);
+      src = src.replace(beforeFrag, replacement);
+
       shader.fragmentShader = src;
-      return;
+      shader.uniforms = shader.uniforms || {};
+      shader.uniforms.uLmUnlit = shader.uniforms.uLmUnlit || { value: !!(mat.userData && mat.userData.__lm_unlitEnabled) };
+      shader.uniforms.uLmUnlitMix = shader.uniforms.uLmUnlitMix || { value: 1.0 };
+
+      // 後からトグルできるように参照を保持
+      mat.userData.__lm_unlitUniformRef = shader.uniforms.uLmUnlit;
+    };
+  }
+
+  console.log('[viewer.materials] applyMaterialProps', materialKey, props, 'targets', mats.length);
+  for (const mat of mats){
+    if (!mat) continue;
+
+    // 透明度
+    if (typeof props.opacity !== 'undefined'){
+      const val = props.opacity;
+      if (typeof val === 'number'){
+        mat.transparent = val < 1.0 - 1e-4;
+        mat.opacity = val;
+        mat.needsUpdate = true;
+      }
     }
 
-    // uniform の注入
-    const uniformsDecl = [
-      'uniform bool uLmUnlit;',
-      ''
-    ].join('\n');
-    src = src.replace(tokenMain, uniformsDecl + '\n' + tokenMain);
-
-    // lit/unlit の切り替えロジックをトーンマッピング直前に挿入
-    const inject = [
-      '',
-      '// [lm-unlit] conditional unlit override',
-      'if (uLmUnlit) {',
-      '  gl_FragColor = vec4( diffuseColor.rgb, diffuseColor.a );',
-      '}',
-      ''
-    ].join('\n');
-
-    src = src.replace(tokenTone, inject + '\n' + tokenTone);
-
-    shader.fragmentShader = src;
-    shader.uniforms = shader.uniforms || {};
-    shader.uniforms.uLmUnlit = shader.uniforms.uLmUnlit || { value: !!(mat.userData && mat.userData.__lm_unlitEnabled) };
-
-    // 後からトグルできるように参照を保持
-    mat.userData.__lm_unlitUniformRef = shader.uniforms.uLmUnlit;
-  };
-}
-
-function resetMaterial(materialKey){
-  if (!scene) return;
-  scene.traverse(obj => {
-    if (!obj.isMesh || !obj.material) return;
-    const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
-    for (const mat of mats) {
-      if (!mat || mat.name !== materialKey) continue;
-
-      if (mat.userData && mat.userData.__lm_unlitUniformRef){
-        mat.userData.__lm_unlitUniformRef.value = false;
+    // 両面表示
+    if (typeof props.doubleSided !== 'undefined'){
+      const flag = !!props.doubleSided;
+      try{
+        // THREE 定数に依存しないよう数値を直接指定（FrontSide=0, BackSide=1, DoubleSide=2）
+        mat.side = flag ? 2 : 0;
+      } catch (e){
+        console.warn('[viewer.materials] failed to set doubleSided', e);
       }
-      if (mat.userData && mat.userData.__lm_unlitEnabled){
-        delete mat.userData.__lm_unlitEnabled;
-      }
-      mat.opacity = 1.0;
-      mat.transparent = false;
-      mat.side = THREE.FrontSide;
       mat.needsUpdate = true;
     }
-  });
-}
 
-function resetAllMaterials(){
-  if (!scene) return;
-  scene.traverse(obj => {
-    if (!obj.isMesh || !obj.material) return;
-    const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
-    for (const mat of mats) {
-      if (!mat) continue;
-      if (mat.userData && mat.userData.__lm_unlitUniformRef){
-        mat.userData.__lm_unlitUniformRef.value = false;
+    // アンリット風表示
+    if (typeof props.unlit !== 'undefined' || typeof props.unlitLike !== 'undefined'){
+      const flag = (typeof props.unlitLike !== 'undefined') ? !!props.unlitLike : !!props.unlit;
+      mat.userData = mat.userData || {};
+      mat.userData.__lm_unlitEnabled = flag;
+
+      // 初回だけシェーダーフックを仕込む
+      ensureUnlitHook(mat);
+
+      const uRef = mat.userData.__lm_unlitUniformRef;
+      if (uRef && typeof uRef.value !== 'undefined'){
+        uRef.value = flag;
       }
-      if (mat.userData && mat.userData.__lm_unlitEnabled){
-        delete mat.userData.__lm_unlitEnabled;
-      }
-      mat.opacity = 1.0;
-      mat.transparent = false;
-      mat.side = THREE.FrontSide;
+
+      // 既存挙動も残しておく
+      mat.toneMapped = !flag;
+      mat.lights = !flag;
       mat.needsUpdate = true;
     }
-  });
-}
 
-import * as THREE from "three";
-import { OrbitControls } from "three/addons/controls/OrbitControls.js";
-
-console.log('[viewer.module] Three version', THREE.REVISION);
-
-export async function ensureViewer(canvasElement) {
-  if (canvasElementRef && canvasElementRef !== canvasElement) {
-    disposeRenderer();
-  }
-
-  canvasElementRef = canvasElement;
-
-  if (!renderer) {
-    renderer = new THREE.WebGLRenderer({ canvas: canvasElement, antialias: true, alpha: true });
-    renderer.setPixelRatio(window.devicePixelRatio || 1);
-    renderer.setSize(canvasElement.clientWidth, canvasElement.clientHeight, false);
-  }
-
-  if (!scene) {
-    scene = new THREE.Scene();
-    scene.background = null;
-  }
-
-  if (!camera) {
-    camera = new THREE.PerspectiveCamera(
-      45,
-      canvasElement.clientWidth / canvasElement.clientHeight,
-      0.1,
-      1000
-    );
-    camera.position.set(0, 0, 3);
-  }
-
-  if (!controls) {
-    controls = new OrbitControls(camera, canvasElement);
-    controls.enableDamping = true;
-    controls.dampingFactor = 0.1;
-    controls.enablePan = true;
-    controls.enableZoom = true;
-    controls.target.set(0, 0, 0);
-    controls.update();
-  }
-
-  if (!clock) {
-    clock = new THREE.Clock();
-  }
-
-  function onWindowResize() {
-    if (!renderer || !camera || !canvasElementRef) return;
-    const width = canvasElementRef.clientWidth;
-    const height = canvasElementRef.clientHeight;
-    renderer.setSize(width, height, false);
-    camera.aspect = width / height;
-    camera.updateProjectionMatrix();
-  }
-
-  window.addEventListener('resize', onWindowResize);
-
-  function renderLoop() {
-    animationId = requestAnimationFrame(renderLoop);
-
-    const delta = clock.getDelta();
-
-    if (mixer) {
-      mixer.update(delta);
+    // chroma key 系は一旦保存専用（表示には使わない）
+    const ck = {};
+    if (typeof props.chromaEnable !== 'undefined') ck.enable = !!props.chromaEnable;
+    if (typeof props.chromaColor === 'string')     ck.color = props.chromaColor;
+    if (typeof props.chromaTolerance === 'number') ck.tolerance = props.chromaTolerance;
+    if (typeof props.chromaFeather === 'number')   ck.feather = props.chromaFeather;
+    if (Object.keys(ck).length){
+      mat.userData = mat.userData || {};
+      mat.userData.__lm_chroma = Object.assign(mat.userData.__lm_chroma || {}, ck);
     }
 
-    if (controls) controls.update();
-
-    for (const fn of renderCallbacks) {
-      try {
-        fn(delta);
-      } catch (e) {
-        console.warn('[viewer.module] render callback error', e);
-      }
+    // 最後に props を userData にミラーしておく（デバッグ／将来拡張用）
+    if (mat.userData){
+      mat.userData.__lmMaterialProps = Object.assign(
+        {},
+        mat.userData.__lmMaterialProps || {},
+        props
+      );
     }
-
-    renderer.render(scene, camera);
   }
-
-  if (!animationId) {
-    renderLoop();
-  }
-
-  return { renderer, scene, camera, controls };
 }
 
-export async function loadGlbFromDrive(fileId, opts = {}) {
-  const { applyMaterialsFromSheet } = opts;
-  if (!fileId) throw new Error('fileId is required');
-
-  const canvas = canvasElementRef;
-  if (!canvas) throw new Error('Canvas not set; call ensureViewer first');
-
-  const { renderer, scene, camera, controls } = await ensureViewer(canvas);
-  clearScene();
-
-  const { getAccessToken } = __lm_getAuth();
-  const token = await getAccessToken();
-  const headers = token ? { 'Authorization': `Bearer ${token}` } : {};
-
-  const url = `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?alt=media`;
-  const res = await fetch(url, { headers });
-
-  if (!res.ok) {
-    const text = await res.text();
-    console.error('[viewer.module] GLB fetch error', res.status, text);
-    throw new Error(`GLB fetch failed: ${res.status}`);
-  }
-
-  const arrayBuffer = await res.arrayBuffer();
-  const loader = new THREE.GLTFLoader();
-
-  return new Promise((resolve, reject) => {
-    loader.parse(arrayBuffer, '', gltf => {
-      currentGlb = gltf;
-
-      if (gltf.animations && gltf.animations.length > 0) {
-        mixer = new THREE.AnimationMixer(gltf.scene);
-        const action = mixer.clipAction(gltf.animations[0]);
-        action.play();
-      }
-
-      scene.add(gltf.scene);
-
-      const box = new THREE.Box3().setFromObject(gltf.scene);
-      const size = new THREE.Vector3();
-      box.getSize(size);
-      const center = new THREE.Vector3();
-      box.getCenter(center);
-
-      const maxDim = Math.max(size.x, size.y, size.z) || 1;
-      const fov = camera.fov * (Math.PI / 180);
-      const cameraZ = Math.abs(maxDim / (2 * Math.tan(fov / 2))) * 1.3;
-
-      camera.position.set(center.x, center.y, center.z + cameraZ);
-      camera.near = maxDim / 100;
-      camera.far = maxDim * 10;
-      camera.updateProjectionMatrix();
-
-      controls.target.copy(center);
-      controls.update();
-
-      orbitTarget = center.clone();
-
-      viewerMaterials.__lm_materialsMap = Object.create(null);
-      gltf.scene.traverse(obj => {
-        if (!obj.isMesh || !obj.material) return;
-        const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
-        for (const mat of mats) {
-          if (!mat) return;
-          const key = mat.name || '(noname)';
-          viewerMaterials.__lm_materialsMap[key] = viewerMaterials.__lm_materialsMap[key] || [];
-          viewerMaterials.__lm_materialsMap[key].push(mat);
-
-          ensureUnlitHook(mat);
-        }
-      });
-
-      console.log('[viewer.module] materials indexed', Object.keys(viewerMaterials.__lm_materialsMap));
-
-      if (typeof applyMaterialsFromSheet === 'function') {
-        try {
-          applyMaterialsFromSheet();
-        } catch (e) {
-          console.warn('[viewer.module] applyMaterialsFromSheet error', e);
-        }
-      }
-
-      resolve({ gltf, scene, camera, controls });
-    }, err => {
-      console.error('[viewer.module] GLB parse error', err);
-      reject(err);
-    });
-  });
-}
-
-export function listMaterials() {
-  const map = viewerMaterials.__lm_materialsMap || {};
-  return Object.keys(map);
-}
-
-export function applyMaterialProps(materialKey, nextState){
-  const map = viewerMaterials.__lm_materialsMap || {};
-  const targets = map[materialKey] || [];
-  console.log('[viewer.materials] applyMaterialProps', materialKey, nextState, 'targets', targets.length);
-
-  for (const mat of targets) {
-    applyMaterialStateToMeshMaterial(mat, nextState);
-
-    if (mat.userData && mat.userData.__lm_unlitUniformRef){
-      mat.userData.__lm_unlitUniformRef.value = !!nextState.unlitLike;
+export function resetMaterial(materialKey){
+  __rebuildMaterialList();
+  const mats = __materialsByKey(materialKey);
+  for(const mat of mats){
+    if(!mat) continue;
+    // remove hook flags
+    if(mat.userData && mat.userData.__lmUniforms){
+      delete mat.userData.__lmUniforms;
     }
-
+    mat.__lmHooked = false;
+    mat.onBeforeCompile = null;
+    mat.transparent = false;
+    mat.alphaTest = 0.0;
+    mat.side = THREE.FrontSide;
     mat.needsUpdate = true;
   }
 }
 
-console.log('[viewer.materials] ready', Object.keys(viewerMaterials));
-
-export function addPinMarker(position, options = {}) {
-  if (!scene) return null;
-  const size = options.size || 0.01;
-  const color = options.color || 0xff0000;
-  const geom = new THREE.SphereGeometry(size, 16, 16);
-  const mat = new THREE.MeshBasicMaterial({ color });
-  const mesh = new THREE.Mesh(geom, mat);
-  mesh.position.copy(position);
-  scene.add(mesh);
-  return mesh;
-}
-
-export function removePinMarker(mesh) {
-  if (!scene || !mesh) return;
-  scene.remove(mesh);
-  if (mesh.geometry) mesh.geometry.dispose();
-  if (mesh.material) mesh.material.dispose();
-}
-
-export function clearPins() {
-  if (!scene) return;
-  const toRemove = [];
-  scene.traverse(obj => {
-    if (obj.userData && obj.userData.__lm_isPinMarker) {
-      toRemove.push(obj);
-    }
-  });
-  for (const obj of toRemove) {
-    scene.remove(obj);
-    if (obj.geometry) obj.geometry.dispose();
-    if (obj.material) obj.material.dispose();
+export function resetAllMaterials(){
+  __rebuildMaterialList();
+  for(const rec of __matList){
+    resetMaterial(rec.key);
   }
 }
 
-export function projectPoint(worldPos, cameraOverride) {
-  const cam = cameraOverride || camera;
-  if (!renderer || !cam) return null;
-  const width = renderer.domElement.clientWidth;
-  const height = renderer.domElement.clientHeight;
-  const projected = worldPos.clone().project(cam);
-  const x = (projected.x + 1) / 2 * width;
-  const y = (-projected.y + 1) / 2 * height;
-  return { x, y, z: projected.z };
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { GLTFLoader } from 'https://unpkg.com/three@0.159.0/examples/jsm/loaders/GLTFLoader.js';
+
+// ---- LociMyu patch: expose scene globally (safe getter) ----
+let __lm_scene_ref = null;
+if (!('__lm_scene' in window)) {
+  Object.defineProperty(window, '__lm_scene', {
+    get(){ return __lm_scene_ref; },
+    configurable: false
+  });
 }
 
-export function onRenderTick(fn) {
-  addRenderCallback(fn);
-}
+let renderer, scene, camera, controls, raycaster, canvasEl;
+const pickHandlers = new Set();
+const pinSelectHandlers = new Set();
+const renderCbs = new Set();
+let pinGroup;
 
-export function onCanvasShiftPick(domCanvas, handler) {
-  if (!domCanvas || typeof handler !== 'function') return;
-  domCanvas.addEventListener('click', ev => {
-    if (!ev.shiftKey) return;
-    if (!scene || !camera) return;
-    const rect = domCanvas.getBoundingClientRect();
-    const mouse = new THREE.Vector2(
-      ((ev.clientX - rect.left) / rect.width) * 2 - 1,
-      -((ev.clientY - rect.top) / rect.height) * 2 + 1
-    );
-    const raycaster = new THREE.Raycaster();
-    raycaster.setFromCamera(mouse, camera);
+export function ensureViewer({ canvas }){
+  if (renderer) return;
+  canvasEl = canvas;
+  renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
+  renderer.setPixelRatio(window.devicePixelRatio || 1);
+  renderer.setSize(canvas.clientWidth, canvas.clientHeight, false);
+
+  scene = new THREE.Scene();
+__lm_scene_ref = scene;
+// [LM patch] expose scene for UI and tools
+try {
+  window.__LM_SCENE = scene;
+  document.dispatchEvent(new CustomEvent('lm:scene-ready', { detail: { scene } }));
+} catch (e) { console.warn('[LM patch] scene expose failed', e); }
+
+  scene.background = null;
+
+  camera = new THREE.PerspectiveCamera(50, canvas.clientWidth / canvas.clientHeight, 0.1, 2000);
+  camera.position.set(3, 2, 6);
+
+  controls = new OrbitControls(camera, canvas);
+  controls.enableDamping = true;
+
+  scene.add(new THREE.AmbientLight(0xffffff, 0.4));
+  const d1 = new THREE.DirectionalLight(0xffffff, 1.0); d1.position.set(5,10,7); scene.add(d1);
+
+  pinGroup = new THREE.Group(); pinGroup.name = 'PinGroup'; scene.add(pinGroup);
+
+  raycaster = new THREE.Raycaster();
+
+  const onResize = () => {
+    const w = canvas.clientWidth, h = canvas.clientHeight;
+    renderer.setSize(w, h, false);
+    camera.aspect = w / h; camera.updateProjectionMatrix();
+  };
+  window.addEventListener('resize', onResize);
+
+  canvas.addEventListener('pointerdown', (ev) => {
+    const rect = canvas.getBoundingClientRect();
+    const x = ((ev.clientX - rect.left) / rect.width) * 2 - 1;
+    const y = -((ev.clientY - rect.top) / rect.height) * 2 + 1;
+    raycaster.setFromCamera({ x, y }, camera);
     const intersects = raycaster.intersectObjects(scene.children, true);
-    if (intersects.length > 0) {
-      const p = intersects[0].point.clone();
-      handler(p, intersects[0]);
+
+    if (ev.shiftKey){
+      const hit = intersects.find(i => i && i.object !== pinGroup && !pinGroup.children.includes(i.object));
+      if (hit && hit.point){
+        pickHandlers.forEach(fn => { try { fn({ x: hit.point.x, y: hit.point.y, z: hit.point.z }); } catch(_){} });
+      }
+    } else {
+      const pinHit = intersects.find(i => i.object && i.object.userData && i.object.userData.pinId);
+      if (pinHit && pinHit.object){
+        const id = pinHit.object.userData.pinId;
+        pinSelectHandlers.forEach(fn => { try { fn(id); } catch(_){} });
+        setPinSelected(id, true);
+      }
+    }
+  });
+
+  document.addEventListener('pinFilterChange', (e)=>{
+    const selected = new Set(e.detail?.selected || []);
+    if (!pinGroup) return;
+    pinGroup.children.forEach(ch => {
+      const c = ch.userData?.pinColor;
+      ch.visible = !c || selected.has(c);
+    });
+  });
+
+  const tick = () => {
+    controls.update(); renderer.render(scene, camera);
+    renderCbs.forEach(fn => { try{ fn(); }catch(e){} });
+    requestAnimationFrame(tick);
+  };
+  tick();
+}
+
+export function onRenderTick(fn){ renderCbs.add(fn); return ()=>renderCbs.delete(fn); }
+export function projectPoint(x, y, z){
+  const v = new THREE.Vector3(x,y,z).project(camera);
+  const rect = canvasEl.getBoundingClientRect();
+  const sx = (v.x * 0.5 + 0.5) * rect.width + rect.left;
+  const sy = (-v.y * 0.5 + 0.5) * rect.height + rect.top;
+  const visible = v.z > -1 && v.z < 1;
+  return { x: sx, y: sy, visible };
+}
+
+export function onCanvasShiftPick(handler){ pickHandlers.add(handler); return () => pickHandlers.delete(handler); }
+export function onPinSelect(handler){ pinSelectHandlers.add(handler); return () => pinSelectHandlers.delete(handler); }
+
+export function addPinMarker({ id, x, y, z, color = '#ff6b6b' }){
+  if (!pinGroup) return;
+  // small sphere based on model size
+  let radius = 0.008;
+  try {
+    const objList = scene.children.filter(o=>!o.isLight && o!==pinGroup);
+    const box = new THREE.Box3().makeEmpty();
+    objList.forEach(o=>box.expandByObject(o));
+    const size = box.getSize(new THREE.Vector3()).length() || 1;
+    radius = Math.max(0.005, Math.min(0.02, size * 0.0018));
+  } catch(_){}
+  const geo = new THREE.SphereGeometry(radius, 16, 16);
+  const mat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.95 });
+  const m = new THREE.Mesh(geo, mat);
+  m.position.set(x, y, z);
+  m.userData.pinId = id;
+  m.userData.pinColor = color;
+  pinGroup.add(m);
+}
+export function clearPins(){ if (!pinGroup) return; while (pinGroup.children.length) pinGroup.remove(pinGroup.children[0]); }
+export function removePinMarker(id){
+  if (!pinGroup) return;
+  for (let i=pinGroup.children.length-1; i>=0; i--){
+    const ch = pinGroup.children[i];
+    if (ch.userData?.pinId === id){ pinGroup.remove(ch); break; }
+  }
+}
+export function setPinSelected(id, on){
+  if (!pinGroup) return;
+  pinGroup.children.forEach(ch => {
+    if (ch.userData.pinId === id){
+      ch.scale.set(on?1.5:1, on?1.5:1, on?1.5:1);
+      ch.material.opacity = on?1:0.85;
+    } else {
+      ch.scale.set(1,1,1);
+      ch.material.opacity = 0.6;
     }
   });
 }
 
-// LociMyu patch: export getScene for external callers
-export { getScene, resetMaterial, resetAllMaterials, setCurrentGlbId };
+export async function loadGlbFromDrive(fileId, { token } = {}) {
+  // Build Drive media URL
+  const url = `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?alt=media&supportsAllDrives=true`;
+// Normalize/resolve token (support Promise; acquire silently if missing)
+try {
+  if (token && typeof token.then === 'function') {
+    token = await token.catch(()=>null);
+  }
+  if (!token) {
+    const g = __lm_getAuth();
+    token = (g.getAccessToken && g.getAccessToken()) || window.__LM_TOK || null;
+    if (!token && g.ensureToken) {
+      try { token = await g.ensureToken({ prompt: undefined }); } catch {}
+      if (!token && g.getAccessToken) token = g.getAccessToken();
+    }
+  }
+} catch {}
+
+
+  // Resolve token if not provided
+  let useToken = token;
+  try {
+    if (!useToken) {
+      const g = await import('./gauth.module.js');
+      useToken = (g.getAccessToken && g.getAccessToken()) || window.__LM_TOK || null;
+      if (!useToken) {
+        // try interactive/silent fetch (without forcing consent) to avoid popup unless necessary
+        try { useToken = await g.ensureToken({ prompt: undefined }); } catch(_) {}
+        if (!useToken && g.getAccessToken) useToken = g.getAccessToken();
+      }
+    }
+  } catch (_) { /* keep going; we'll try without token (will 401) and handle below */ }
+
+  async function fetchWith(tok) {
+    const headers = tok ? { Authorization: `Bearer ${tok}` } : undefined;
+    return await fetch(url, { headers });
+  }
+
+  // First attempt
+  let r = await fetchWith(useToken);
+
+  // If unauthorized, try to (re)acquire token once and retry
+  if (r.status === 401) {
+    try {
+      const g = await import('./gauth.module.js');
+      const fresh = await (g.ensureToken ? g.ensureToken({ prompt: undefined }) : Promise.resolve(window.__LM_TOK));
+      if (fresh) {
+        useToken = fresh;
+        r = await fetchWith(useToken);
+      }
+    } catch(_) {}
+  }
+
+  if (!r.ok) throw new Error(`GLB fetch failed ${r.status}`);
+
+  const blob = await r.blob();
+  const objectURL = URL.createObjectURL(blob);
+  try {
+    const loader = new GLTFLoader();
+    const gltf = await loader.loadAsync(objectURL);
+    // remove previous (except lights & pin group)
+    const keep = new Set([pinGroup]);
+    for (let i = scene.children.length - 1; i >= 0; i--) {
+      const obj = scene.children[i];
+      if (obj.isLight || keep.has(obj)) continue;
+      scene.remove(obj);
+    }
+    scene.add(gltf.scene);
+
+    const box = new THREE.Box3().setFromObject(gltf.scene);
+    const size = box.getSize(new THREE.Vector3()).length();
+    const center = box.getCenter(new THREE.Vector3());
+    controls.target.copy(center);
+    camera.position.copy(center).add(new THREE.Vector3(size*0.8, size*0.6, size*0.8));
+    camera.near = Math.max(size/1000, 0.01); camera.far = size*10; camera.updateProjectionMatrix();
+  } finally {
+    URL.revokeObjectURL(objectURL);
+  }
+
+}
+
+
+// ---- LociMyu patch: export getScene for external callers ----
+export function getScene(){ try{ return scene; }catch(_){ return __lm_scene_ref; } }
