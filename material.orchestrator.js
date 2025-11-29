@@ -1,12 +1,12 @@
 // material.orchestrator.js
 // LociMyu material UI orchestrator (Unified)
 // Integrates full-scene application (replacing auto.apply.js) and direct DOM event handling.
-// VERSION_TAG: V6_SHEET_MATERIAL_SOT_DS_UNLIT
+// VERSION_TAG: V6_SHEET_MATERIAL_SOT_DS_UNLIT_SHEETSYNC1
 
 (function () {
   const LOG_PREFIX = '[mat-orch-unified]';
   const MATERIALS_RANGE = '__LM_MATERIALS!A:N';
-  const VERSION_TAG = 'V6_SHEET_MATERIAL_SOT_DS_UNLIT';
+  const VERSION_TAG = 'V6_SHEET_MATERIAL_SOT_DS_UNLIT_SHEETSYNC1';
 
   console.log(LOG_PREFIX, 'loaded', VERSION_TAG);
 
@@ -38,16 +38,12 @@
     return [x];
   }
 
-  // ▼▼▼ 修正ポイント：UI の参照先を #pane-material 優先にする ▼▼▼
+  // UI の参照先を #pane-material 優先にする
   function queryUI() {
     const doc = document;
-    // Prefer controls inside the new material pane to avoid accidentally
-    // binding to legacy/hidden anchors (e.g. #panel-material).
     const pane = doc.querySelector('#pane-material') || doc;
     const root = pane;
 
-    // Canonical material select: #materialSelect inside #pane-material.
-    // Fallbacks exist only for backward compatibility.
     const materialSelect =
       root.querySelector('#materialSelect') ||
       root.querySelector('#pm-material') ||
@@ -78,7 +74,6 @@
       rngChromaFeather: root.querySelector('#pm-chroma-feather') || doc.getElementById('pm-chroma-feather')
     };
   }
-  // ▲▲▲ ここまでが変更点 ▲▲▲
 
   function getSelectedMaterialKey() {
     if (!ui) ui = queryUI();
@@ -147,7 +142,6 @@
   function normalizeForViewer(props) {
     const out = Object.assign({}, props || {});
     if (Object.prototype.hasOwnProperty.call(out, 'doubleSided')) {
-      // viewer.module 側は side='DoubleSide' / 'FrontSide' で受ける想定
       out.side = out.doubleSided ? 'DoubleSide' : 'FrontSide';
     }
     if (Object.prototype.hasOwnProperty.call(out, 'unlitLike')) {
@@ -165,7 +159,7 @@
     }
   }
 
-  // ▼▼▼ DoubleSided / Unlit 用の直接シーン適用ヘルパ ▼▼▼
+  // DoubleSided / Unlit 用の直接シーン適用ヘルパ
   function applyFlagsToMaterial(material, materialKey, props) {
     if (!material || !materialKey || !props) return;
 
@@ -176,8 +170,7 @@
       material.needsUpdate = true;
     }
 
-    // UnlitLike については、現状は viewer.module 側の実装に委譲。
-    // 将来ここで material.lights=false 等のローカル実装を追加する余地を残す。
+    // UnlitLike: 現状は viewer.module 側の実装に委譲。
   }
 
   function applyFlagsDirectToScene(key, props) {
@@ -196,7 +189,6 @@
       });
     });
   }
-  // ▲▲▲ DoubleSided / Unlit 用ヘルパここまで ▲▲▲
 
   function persistAndCache(key, props) {
     if (!key) return;
@@ -210,6 +202,7 @@
   function applyAllToScene(map) {
     const scene = getScene();
     if (!scene) return;
+    const confMap = map || new Map();
 
     scene.traverse((o) => {
       if (!o.isMesh) return;
@@ -218,11 +211,9 @@
         if (!m) return;
         const key = (m.name || o.name || '').trim();
         if (!key) return;
-        if (map.has(key)) {
-          const conf = map.get(key);
-          // Sheets に保存された値をビューアへブリッジ
+        if (confMap.has(key)) {
+          const conf = confMap.get(key);
           applyToViewer(key, conf);
-          // THREE グローバルに依存せず、ここで side だけは直接反映
           applyFlagsToMaterial(m, key, conf);
         }
       });
@@ -252,7 +243,6 @@
 
     applyPropsToUI(finalProps);
     applyToViewer(key, finalProps);
-    // シート切替・マテリアル選択時にも doubleSided を直接反映
     applyFlagsDirectToScene(key, finalProps);
   }
 
@@ -316,21 +306,36 @@
 
     if (!spreadsheetId || !currentSheetGid) return;
 
-    const map = await loadMaterialsForContext(spreadsheetId, currentSheetGid);
-    console.log(LOG_PREFIX, 'Data Loaded. Keys:', map ? map.size : 0, 'for sheet', currentSheetGid);
+    const map = (await loadMaterialsForContext(spreadsheetId, currentSheetGid)) || new Map();
+    console.log(LOG_PREFIX, 'Data Loaded. Keys:', map.size, 'for sheet', currentSheetGid);
 
+    // 1) このシート用の設定でシーン全体を書き換える
+    applyAllToScene(map);
+
+    // 2) UI とアクティブマテリアルの同期
     if (!ui) ui = queryUI();
-    if (ui && ui.materialSelect && ui.materialSelect.value) {
-      // 既に選択されているマテリアルがあれば、その状態を優先して同期
-      syncMaterialState(ui.materialSelect.value);
-    } else if (map && map.size) {
-      const firstKey = map.keys().next().value;
-      if (firstKey && ui && ui.materialSelect) {
-        ui.materialSelect.value = firstKey;
-      }
-      applyAllToScene(map);
+    if (!ui || !ui.materialSelect) {
+      return;
+    }
+
+    let targetKey = '';
+    const currentSelect = (ui.materialSelect.value || '').trim();
+
+    if (currentSelect) {
+      // UI 上で選択されているキーを優先。
+      // map に無くても、シート未設定として defaultProps で同期される。
+      targetKey = currentSelect;
+    } else if (map.size > 0) {
+      // 何も選択されていなければ、このシートで最初のキーを採用
+      targetKey = map.keys().next().value;
+      ui.materialSelect.value = targetKey;
+    }
+
+    if (targetKey) {
+      syncMaterialState(targetKey);
     } else {
-      applyAllToScene(new Map());
+      // このシートに設定が何も無い場合は UI をデフォルトに戻す
+      applyPropsToUI(defaultProps);
     }
   }
 
@@ -362,7 +367,6 @@
             ui.opacityVal.textContent = disp;
           }
         }
-        // スライダーのリアルタイム反映はビューアブリッジのみ（シーン traverse はしない）
         applyToViewer(state.materialKey, state.props);
       });
 
@@ -381,7 +385,6 @@
       console.log(LOG_PREFIX, label, state.materialKey);
       applyToViewer(state.materialKey, state.props);
 
-      // DoubleSided / UnlitLike のトグル時のみ、シーンに直接 side/unlit を反映
       if (label === 'DoubleSided' || label === 'UnlitLike') {
         applyFlagsDirectToScene(state.materialKey, state.props);
       }
