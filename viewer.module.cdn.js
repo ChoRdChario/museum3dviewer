@@ -3,26 +3,30 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
 /**
- * LociMyu viewer module (reconstructed, shader-patch fixed)
- * - Public API (called from glb.btn.bridge.v3.js):
+ * LociMyu viewer module
+ *
+ * Public API (used by glb.btn.bridge.v3.js):
  *   addPinMarker, applyMaterialProps, clearPins, ensureViewer, getScene,
  *   listMaterials, loadGlbFromDrive, onCanvasShiftPick, onPinSelect,
  *   onRenderTick, projectPoint, removePinMarker, resetAllMaterials,
  *   resetMaterial, setCurrentGlbId, setPinSelected
  *
- * - Material extensions:
+ * Extended material properties:
  *   props.opacity        : number 0..1
  *   props.doubleSided    : boolean
- *   props.unlitLike      : boolean (lightingを無視してdiffuseColorベースに)
+ *   props.unlitLike      : boolean
  *   props.chromaEnable   : boolean
- *   props.chromaColor    : '#rrggbb'
+ *   props.chromaColor    : "#rrggbb"
  *   props.chromaTolerance: number
  *   props.chromaFeather  : number
  */
 
 console.log('[viewer.module] Three version', THREE.REVISION);
 
-// Core viewer state
+// ---------------------------------------------------------------------------
+// Core state
+// ---------------------------------------------------------------------------
+
 let renderer = null;
 let scene = null;
 let camera = null;
@@ -31,14 +35,14 @@ let canvasRef = null;
 let gltfRoot = null;
 let currentGlbId = null;
 
-// Helpers
 const raycaster = new THREE.Raycaster();
 const pointerNdc = new THREE.Vector2();
-const materialsByName = Object.create(null);   // name -> [THREE.Material]
-const materialBaselines = new Map();          // material -> { ...props }
+const materialsByName = Object.create(null);   // materialName -> [material]
+const materialBaselines = new Map();          // material -> baselineProps
 const renderCallbacks = new Set();            // fn({renderer, scene, camera})
-const shiftPickHandlers = new Set();          // fn({ point, event, hit })
-const pinMarkers = new Map();                 // id -> THREE.Object3D
+const shiftPickHandlers = new Set();          // fn({point, event, hit})
+const pinMarkers = new Map();                 // id -> Object3D
+const pinSelectHandlers = new Set();          // fn({id})
 
 let animationFrameId = null;
 let resizeHandlerInstalled = false;
@@ -89,7 +93,6 @@ function ensureResizeHandler() {
   };
 
   window.addEventListener('resize', handleResize);
-  // 初回
   handleResize();
 }
 
@@ -107,7 +110,8 @@ function emitSceneReady() {
   }
 }
 
-// GLSL patch for unlit / chroma key
+// --- Shader patch: Unlit / Chroma -----------------------------------------
+
 function patchMaterialShader(mat) {
   if (!mat) return;
   if (!(mat.isMeshStandardMaterial || mat.isMeshPhysicalMaterial)) return;
@@ -116,9 +120,10 @@ function patchMaterialShader(mat) {
   if (mat.userData.__lmShaderPatched) return;
   mat.userData.__lmShaderPatched = true;
 
+  // note: GLSL 側ではすべて float として扱う
   const uniforms = mat.userData.__lmUniforms = {
-    uUnlit:           { value: false },
-    uChromaEnable:    { value: 0 },
+    uUnlit:           { value: 0.0 },             // 0 or 1
+    uChromaEnable:    { value: 0.0 },             // 0 or 1
     uChromaColor:     { value: new THREE.Color(0, 0, 0) },
     uChromaTolerance: { value: 0.0 },
     uChromaFeather:   { value: 0.0 }
@@ -138,7 +143,26 @@ function patchMaterialShader(mat) {
 
     let src = shader.fragmentShader;
 
-    // --- (1) クロマキー注入: <dithering_fragment> の後に追加 -----------------
+    // (0) GLSL に uniform 宣言を注入
+    // ----------------------------------------------------------------
+    if (!src.includes('uUnlit') && !src.includes('uChromaEnable')) {
+      const header = `
+uniform float uUnlit;
+uniform float uChromaEnable;
+uniform vec3  uChromaColor;
+uniform float uChromaTolerance;
+uniform float uChromaFeather;
+`;
+      const tokenMain = 'void main()';
+      if (src.includes(tokenMain)) {
+        src = src.replace(tokenMain, header + '\n' + tokenMain);
+      } else {
+        src = header + '\n' + src;
+      }
+    }
+
+    // (1) クロマキー注入: <dithering_fragment> の直後
+    // ----------------------------------------------------------------
     const tokenDither = '#include <dithering_fragment>';
     if (src.includes(tokenDither)) {
       src = src.replace(
@@ -157,21 +181,14 @@ if (uChromaEnable > 0.5) {
       );
     }
 
-    // --- (2) Unlit: トーンマッピング直前で gl_FragColor を上書き ----------
-    //
-    // 標準の PBR フラグメントシェーダでは、
-    //   gl_FragColor = vec4( outgoingLight, diffuseColor.a );
-    // の後で <tonemapping_fragment> が挿入される。
-    // そこで、<tonemapping_fragment> の直前に
-    //   if (uUnlit) gl_FragColor = vec4(diffuseColor.rgb, diffuseColor.a);
-    // を挿入して、ライト計算はそのままに、最終出力だけ差し替える。
-    //
+    // (2) Unlit: トーンマッピング直前で gl_FragColor を差し替え
+    // ----------------------------------------------------------------
     const tokenTone = '#include <tonemapping_fragment>';
     if (src.includes(tokenTone)) {
       src = src.replace(
         tokenTone,
         `
-if (uUnlit) {
+if (uUnlit > 0.5) {
   gl_FragColor = vec4( diffuseColor.rgb, diffuseColor.a );
 }
 ` + '\n' + tokenTone
@@ -185,7 +202,6 @@ if (uUnlit) {
 }
 
 function rebuildMaterialIndex() {
-  // reset maps
   for (const k of Object.keys(materialsByName)) delete materialsByName[k];
   materialBaselines.clear();
   if (!scene) return;
@@ -271,7 +287,7 @@ function disposeGltfRoot() {
 }
 
 // ---------------------------------------------------------------------------
-// Public API
+// Public API: viewer bootstrap
 // ---------------------------------------------------------------------------
 
 export async function ensureViewer(opts = {}) {
@@ -281,21 +297,19 @@ export async function ensureViewer(opts = {}) {
     throw new Error('[viewer.module] ensureViewer: canvas is required');
   }
 
-  // Reuse if already initialized with same canvas
   if (renderer && canvasRef === canvas && scene && camera) {
     return { renderer, scene, camera };
   }
 
   canvasRef = canvas;
 
-  // Initialize renderer / scene / camera
   renderer = new THREE.WebGLRenderer({
     canvas,
     antialias: true,
     alpha: true
   });
 
-  // Three r1xx 系の仕様変更に合わせる
+  // three r15x 系の仕様に合わせる
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.useLegacyLights = false;
 
@@ -312,7 +326,6 @@ export async function ensureViewer(opts = {}) {
   controls.target.set(0, 0, 0);
   controls.update();
 
-  // Simple hemisphere light + directional light
   const hemi = new THREE.HemisphereLight(0xffffff, 0x444444, 1.0);
   hemi.position.set(0, 1, 0);
   scene.add(hemi);
@@ -321,7 +334,6 @@ export async function ensureViewer(opts = {}) {
   dir.position.set(5, 10, 7.5);
   scene.add(dir);
 
-  // Events
   canvas.removeEventListener('click', handleCanvasShiftClick);
   canvas.addEventListener('click', handleCanvasShiftClick);
 
@@ -334,6 +346,7 @@ export async function ensureViewer(opts = {}) {
   return { renderer, scene, camera };
 }
 
+// GLB fetch from Drive
 async function fetchGlbArrayBuffer(fileId, token) {
   const url = `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?alt=media`;
   const res = await fetch(url, {
@@ -360,10 +373,8 @@ export async function loadGlbFromDrive(fileId, opts = {}) {
   console.log('[viewer.module] loadGlbFromDrive', fileId);
 
   const loader = new GLTFLoader();
-
   const arrayBuffer = await fetchGlbArrayBuffer(fileId, token);
 
-  // Dispose previous model
   disposeGltfRoot();
 
   await new Promise((resolve, reject) => {
@@ -379,7 +390,6 @@ export async function loadGlbFromDrive(fileId, opts = {}) {
 
         scene.add(gltfRoot);
 
-        // Center & fit camera
         const box = new THREE.Box3().setFromObject(gltfRoot);
         const size = new THREE.Vector3();
         const center = new THREE.Vector3();
@@ -391,10 +401,10 @@ export async function loadGlbFromDrive(fileId, opts = {}) {
         let distance = maxDim / (2 * Math.tan(fov / 2));
         distance *= 1.5;
 
-        const dir = new THREE.Vector3(0, 0, 1);
-        camera.position.copy(center).addScaledVector(dir, distance);
+        const dz = new THREE.Vector3(0, 0, 1);
+        camera.position.copy(center).addScaledVector(dz, distance);
         camera.near = maxDim / 100;
-        camera.far = maxDim * 100;
+        camera.far  = maxDim * 100;
         camera.updateProjectionMatrix();
 
         if (controls) {
@@ -407,9 +417,7 @@ export async function loadGlbFromDrive(fileId, opts = {}) {
         emitSceneReady();
         resolve();
       },
-      err => {
-        reject(err || new Error('GLTFLoader parse error'));
-      }
+      err => reject(err || new Error('GLTFLoader parse error'))
     );
   });
 }
@@ -427,10 +435,9 @@ export function applyMaterialProps(materialName, props = {}) {
   if (!mats.length) return;
 
   for (const mat of mats) {
-    // basic scalar props
+    // scalar props
     if (typeof props.opacity === 'number') {
       mat.opacity = props.opacity;
-      // 半透明 or chroma有効時は transparent を true
       const uniforms = mat.userData && mat.userData.__lmUniforms;
       const chromaOn = uniforms && uniforms.uChromaEnable && uniforms.uChromaEnable.value > 0.5;
       mat.transparent = props.opacity < 1.0 || chromaOn;
@@ -440,16 +447,16 @@ export function applyMaterialProps(materialName, props = {}) {
       mat.side = props.doubleSided ? THREE.DoubleSide : THREE.FrontSide;
     }
 
-    // unlit-like / chroma uniforms
+    // uniforms
     const uniforms = mat.userData && mat.userData.__lmUniforms;
     if (uniforms) {
       if (typeof props.unlitLike !== 'undefined' && uniforms.uUnlit) {
-        uniforms.uUnlit.value = !!props.unlitLike;
+        uniforms.uUnlit.value = props.unlitLike ? 1.0 : 0.0;
         if ('toneMapped' in mat) mat.toneMapped = !props.unlitLike;
       }
 
       if (typeof props.chromaEnable !== 'undefined' && uniforms.uChromaEnable) {
-        uniforms.uChromaEnable.value = props.chromaEnable ? 1 : 0;
+        uniforms.uChromaEnable.value = props.chromaEnable ? 1.0 : 0.0;
       }
 
       if (typeof props.chromaColor === 'string' && uniforms.uChromaColor) {
@@ -473,25 +480,29 @@ export function applyMaterialProps(materialName, props = {}) {
 export function resetMaterial(materialName) {
   const mats = getMaterialsByName(materialName);
   if (!mats.length) return;
+
   for (const mat of mats) {
     const base = materialBaselines.get(mat);
     if (!base) continue;
+
     Object.assign(mat, {
-      opacity: base.opacity,
+      opacity:    base.opacity,
       transparent: base.transparent,
-      side: base.side,
-      toneMapped: base.toneMapped,
-      depthWrite: base.depthWrite,
-      depthTest: base.depthTest
+      side:        base.side,
+      toneMapped:  base.toneMapped,
+      depthWrite:  base.depthWrite,
+      depthTest:   base.depthTest
     });
+
     const uniforms = mat.userData && mat.userData.__lmUniforms;
     if (uniforms) {
-      uniforms.uUnlit.value = false;
-      uniforms.uChromaEnable.value = 0;
+      uniforms.uUnlit.value           = 0.0;
+      uniforms.uChromaEnable.value    = 0.0;
       uniforms.uChromaColor.value.set(0, 0, 0);
       uniforms.uChromaTolerance.value = 0.0;
-      uniforms.uChromaFeather.value = 0.0;
+      uniforms.uChromaFeather.value   = 0.0;
     }
+
     mat.needsUpdate = true;
   }
 }
@@ -503,7 +514,7 @@ export function resetAllMaterials() {
 }
 
 // ---------------------------------------------------------------------------
-// Pins / overlay support
+// Pins / overlay
 // ---------------------------------------------------------------------------
 
 export function getScene() {
@@ -530,7 +541,7 @@ export function addPinMarker(pin) {
   removePinMarker(pin.id);
 
   const geom = new THREE.SphereGeometry(0.01, 8, 8);
-  const mat = new THREE.MeshBasicMaterial({ color: 0xff0000 });
+  const mat  = new THREE.MeshBasicMaterial({ color: 0xff0000 });
   const mesh = new THREE.Mesh(geom, mat);
   mesh.position.set(pin.position.x, pin.position.y, pin.position.z);
   mesh.userData.__lmPin = { id: pin.id, data: pin };
@@ -543,11 +554,13 @@ export function removePinMarker(pinId) {
   if (!scene) return;
   const mesh = pinMarkers.get(pinId);
   if (!mesh) return;
+
   try {
     scene.remove(mesh);
   } catch (e) {
     console.warn('[viewer.module] removePinMarker failed', e);
   }
+
   if (mesh.geometry && typeof mesh.geometry.dispose === 'function') {
     mesh.geometry.dispose();
   }
@@ -563,22 +576,17 @@ export function clearPins() {
   }
 }
 
-// Simple onRenderTick registration
 export function onRenderTick(fn) {
   if (typeof fn !== 'function') return () => {};
   renderCallbacks.add(fn);
   return () => { renderCallbacks.delete(fn); };
 }
 
-// Shift-pick registration
 export function onCanvasShiftPick(fn) {
   if (typeof fn !== 'function') return () => {};
   shiftPickHandlers.add(fn);
   return () => { shiftPickHandlers.delete(fn); };
 }
-
-// Pin selection hook (no-op placeholder; kept for API compatibility)
-const pinSelectHandlers = new Set();
 
 export function onPinSelect(fn) {
   if (typeof fn !== 'function') return () => {};
@@ -594,12 +602,14 @@ export function setPinSelected(id) {
   }
 }
 
-// GLB id (used for telemetry / sheet binding)
 export function setCurrentGlbId(id) {
   currentGlbId = id;
 }
 
-// Default export
+// ---------------------------------------------------------------------------
+// default export
+// ---------------------------------------------------------------------------
+
 export default {
   ensureViewer,
   loadGlbFromDrive,
