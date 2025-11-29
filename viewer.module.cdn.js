@@ -3,12 +3,21 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
 /**
- * LociMyu viewer module (reconstructed)
- * - Exports the same public API used by glb.btn.bridge.v3.js
- * - Adds support for:
- *     - doubleSided    -> material.side
- *     - unlitLike      -> shader patch that bypasses lighting
- *     - chroma* fields -> shader patch for chroma-key transparency
+ * LociMyu viewer module (reconstructed, shader-patch fixed)
+ * - Public API (called from glb.btn.bridge.v3.js):
+ *   addPinMarker, applyMaterialProps, clearPins, ensureViewer, getScene,
+ *   listMaterials, loadGlbFromDrive, onCanvasShiftPick, onPinSelect,
+ *   onRenderTick, projectPoint, removePinMarker, resetAllMaterials,
+ *   resetMaterial, setCurrentGlbId, setPinSelected
+ *
+ * - Material extensions:
+ *   props.opacity        : number 0..1
+ *   props.doubleSided    : boolean
+ *   props.unlitLike      : boolean (lightingを無視してdiffuseColorベースに)
+ *   props.chromaEnable   : boolean
+ *   props.chromaColor    : '#rrggbb'
+ *   props.chromaTolerance: number
+ *   props.chromaFeather  : number
  */
 
 console.log('[viewer.module] Three version', THREE.REVISION);
@@ -80,7 +89,7 @@ function ensureResizeHandler() {
   };
 
   window.addEventListener('resize', handleResize);
-  // 初期一回
+  // 初回
   handleResize();
 }
 
@@ -129,7 +138,7 @@ function patchMaterialShader(mat) {
 
     let src = shader.fragmentShader;
 
-    // 1) chroma key
+    // --- (1) クロマキー注入: <dithering_fragment> の後に追加 -----------------
     const tokenDither = '#include <dithering_fragment>';
     if (src.includes(tokenDither)) {
       src = src.replace(
@@ -148,16 +157,24 @@ if (uChromaEnable > 0.5) {
       );
     }
 
-    // 2) Unlit: skip lights fragment
-    const tokenLights = '#include <lights_fragment_begin>';
-    if (src.includes(tokenLights)) {
+    // --- (2) Unlit: トーンマッピング直前で gl_FragColor を上書き ----------
+    //
+    // 標準の PBR フラグメントシェーダでは、
+    //   gl_FragColor = vec4( outgoingLight, diffuseColor.a );
+    // の後で <tonemapping_fragment> が挿入される。
+    // そこで、<tonemapping_fragment> の直前に
+    //   if (uUnlit) gl_FragColor = vec4(diffuseColor.rgb, diffuseColor.a);
+    // を挿入して、ライト計算はそのままに、最終出力だけ差し替える。
+    //
+    const tokenTone = '#include <tonemapping_fragment>';
+    if (src.includes(tokenTone)) {
       src = src.replace(
-        tokenLights,
+        tokenTone,
         `
-if (!uUnlit) {
-  #include <lights_fragment_begin>
+if (uUnlit) {
+  gl_FragColor = vec4( diffuseColor.rgb, diffuseColor.a );
 }
-`
+` + '\n' + tokenTone
       );
     }
 
@@ -277,8 +294,10 @@ export async function ensureViewer(opts = {}) {
     antialias: true,
     alpha: true
   });
-  renderer.outputEncoding = THREE.sRGBEncoding;
-  renderer.physicallyCorrectLights = true;
+
+  // Three r1xx 系の仕様変更に合わせる
+  renderer.outputColorSpace = THREE.SRGBColorSpace;
+  renderer.useLegacyLights = false;
 
   scene = new THREE.Scene();
 
@@ -411,20 +430,21 @@ export function applyMaterialProps(materialName, props = {}) {
     // basic scalar props
     if (typeof props.opacity === 'number') {
       mat.opacity = props.opacity;
-      // 半透明の場合は transparent を true に
-      mat.transparent = props.opacity < 1.0 || (mat.userData.__lmUniforms && mat.userData.__lmUniforms.uChromaEnable.value > 0.5);
+      // 半透明 or chroma有効時は transparent を true
+      const uniforms = mat.userData && mat.userData.__lmUniforms;
+      const chromaOn = uniforms && uniforms.uChromaEnable && uniforms.uChromaEnable.value > 0.5;
+      mat.transparent = props.opacity < 1.0 || chromaOn;
     }
 
     if (typeof props.doubleSided !== 'undefined') {
       mat.side = props.doubleSided ? THREE.DoubleSide : THREE.FrontSide;
     }
 
-    // unlit-like
+    // unlit-like / chroma uniforms
     const uniforms = mat.userData && mat.userData.__lmUniforms;
     if (uniforms) {
       if (typeof props.unlitLike !== 'undefined' && uniforms.uUnlit) {
         uniforms.uUnlit.value = !!props.unlitLike;
-        // 物理ベースマテリアル側のフラグも合わせておく
         if ('toneMapped' in mat) mat.toneMapped = !props.unlitLike;
       }
 
@@ -496,7 +516,6 @@ export function projectPoint(pos) {
   const v = new THREE.Vector3(pos.x, pos.y, pos.z);
   v.project(camera);
 
-  // NDC [-1,1] -> viewport [0,1]
   return {
     x: (v.x + 1) / 2,
     y: 1 - (v.y + 1) / 2,
@@ -508,7 +527,6 @@ export function addPinMarker(pin) {
   if (!scene) return;
   if (!pin || !pin.id || !pin.position) return;
 
-  // すでに存在する場合は一旦削除
   removePinMarker(pin.id);
 
   const geom = new THREE.SphereGeometry(0.01, 8, 8);
@@ -576,12 +594,12 @@ export function setPinSelected(id) {
   }
 }
 
-// GLB id (used only for telemetry / sheet binding)
+// GLB id (used for telemetry / sheet binding)
 export function setCurrentGlbId(id) {
   currentGlbId = id;
 }
 
-// Default export for convenience (not strictly required but harmless)
+// Default export
 export default {
   ensureViewer,
   loadGlbFromDrive,
