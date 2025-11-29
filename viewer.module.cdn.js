@@ -133,125 +133,49 @@ export function applyMaterialProps(materialKey, props = {}){
 
   // Unlit 用の onBeforeCompile フックを一度だけ仕込むヘルパ
   function ensureUnlitHook(mat){
-    if (!mat) return;
-    mat.userData = mat.userData || {};
-    if (mat.userData.__lm_unlitHookInstalled) return;
-    mat.userData.__lm_unlitHookInstalled = true;
+  if (!mat) return;
+  // 対象は Standard / Physical 系のみ
+  if (!(mat.isMeshStandardMaterial || mat.isMeshPhysicalMaterial)) return;
 
-    const backupOnBeforeCompile = mat.onBeforeCompile;
-    mat.userData.__lm_unlitBackupOnBeforeCompile = backupOnBeforeCompile || null;
+  mat.userData = mat.userData || {};
+  if (mat.userData.__lm_unlitHookInstalled) return;
+  mat.userData.__lm_unlitHookInstalled = true;
 
-    mat.onBeforeCompile = function(shader){
-      if (typeof backupOnBeforeCompile === 'function'){
-        backupOnBeforeCompile.call(this, shader);
-      }
+  const backupOnBeforeCompile = mat.onBeforeCompile;
+  mat.userData.__lm_unlitBackupOnBeforeCompile = backupOnBeforeCompile || null;
 
-      let src = shader.fragmentShader || '';
-      const tokenMain = 'void main() {';
-      const beforeFrag = 'gl_FragColor = vec4( outgoingLight, diffuseColor.a );';
-      const uniformsDecl = [
-        'uniform bool uLmUnlit;',
-        'uniform float uLmUnlitMix;',
-        ''
-      ].join('\n');
-      const replacement = [
-        'if (uLmUnlit) {',
-        '  gl_FragColor = vec4( diffuseColor.rgb, diffuseColor.a );',
-        '} else {',
-        '  gl_FragColor = vec4( outgoingLight, diffuseColor.a );',
-        '}'
-      ].join('\n');
-
-      const hasMain = src.includes(tokenMain);
-      const hasBefore = src.includes(beforeFrag);
-      if (!(hasMain && hasBefore)){
-        // パターンが見つからない場合は何もせず安全側に倒す
-        shader.fragmentShader = src;
-        return;
-      }
-
-      src = src.replace(tokenMain, uniformsDecl + '\n' + tokenMain);
-      src = src.replace(beforeFrag, replacement);
-
-      shader.fragmentShader = src;
-      shader.uniforms = shader.uniforms || {};
-      shader.uniforms.uLmUnlit = shader.uniforms.uLmUnlit || { value: !!(mat.userData && mat.userData.__lm_unlitEnabled) };
-      shader.uniforms.uLmUnlitMix = shader.uniforms.uLmUnlitMix || { value: 1.0 };
-
-      // 後からトグルできるように参照を保持
-      mat.userData.__lm_unlitUniformRef = shader.uniforms.uLmUnlit;
-    };
-  }
-
-  console.log('[viewer.materials] applyMaterialProps', materialKey, props, 'targets', mats.length);
-  for (const mat of mats){
-    if (!mat) continue;
-
-    // 透明度
-    if (typeof props.opacity !== 'undefined'){
-      const val = props.opacity;
-      if (typeof val === 'number'){
-        mat.transparent = val < 1.0 - 1e-4;
-        mat.opacity = val;
-        mat.needsUpdate = true;
-      }
+  mat.onBeforeCompile = function(shader){
+    if (typeof backupOnBeforeCompile === 'function'){
+      backupOnBeforeCompile.call(this, shader);
+    }
+    if (!shader || !shader.fragmentShader){
+      return;
     }
 
-    // 両面表示
-    if (typeof props.doubleSided !== 'undefined'){
-      const flag = !!props.doubleSided;
-      try{
-        // THREE 定数に依存しないよう数値を直接指定（FrontSide=0, BackSide=1, DoubleSide=2）
-        mat.side = flag ? 2 : 0;
-      } catch (e){
-        console.warn('[viewer.materials] failed to set doubleSided', e);
-      }
-      mat.needsUpdate = true;
+    // uniforms セットアップ
+    shader.uniforms = shader.uniforms || {};
+    const initialOn = !!(mat.userData && mat.userData.__lm_unlitEnabled);
+    shader.uniforms.uLmUnlit = shader.uniforms.uLmUnlit || { value: initialOn };
+    shader.uniforms.uLmUnlitMix = shader.uniforms.uLmUnlitMix || { value: 1.0 };
+    mat.userData.__lm_unlitUniformRef = shader.uniforms.uLmUnlit;
+
+    var src = shader.fragmentShader;
+    var token = '#include <tonemapping_fragment>';
+
+    if (src.indexOf(token) >= 0){
+      var inject = '\n' +
+        '// [LociMyu] unlit-like override (bool uniform)\n' +
+        'if (uLmUnlit) {\n' +
+        '  gl_FragColor = vec4( diffuseColor.rgb, diffuseColor.a );\n' +
+        '}\n';
+
+      src = src.replace(token, inject + '\n' + token);
     }
 
-    // アンリット風表示
-    if (typeof props.unlit !== 'undefined' || typeof props.unlitLike !== 'undefined'){
-      const flag = (typeof props.unlitLike !== 'undefined') ? !!props.unlitLike : !!props.unlit;
-      mat.userData = mat.userData || {};
-      mat.userData.__lm_unlitEnabled = flag;
-
-      // 初回だけシェーダーフックを仕込む
-      ensureUnlitHook(mat);
-
-      const uRef = mat.userData.__lm_unlitUniformRef;
-      if (uRef && typeof uRef.value !== 'undefined'){
-        uRef.value = flag;
-      }
-
-      // 既存挙動も残しておく
-      mat.toneMapped = !flag;
-      mat.lights = !flag;
-      mat.needsUpdate = true;
-    }
-
-    // chroma key 系は一旦保存専用（表示には使わない）
-    const ck = {};
-    if (typeof props.chromaEnable !== 'undefined') ck.enable = !!props.chromaEnable;
-    if (typeof props.chromaColor === 'string')     ck.color = props.chromaColor;
-    if (typeof props.chromaTolerance === 'number') ck.tolerance = props.chromaTolerance;
-    if (typeof props.chromaFeather === 'number')   ck.feather = props.chromaFeather;
-    if (Object.keys(ck).length){
-      mat.userData = mat.userData || {};
-      mat.userData.__lm_chroma = Object.assign(mat.userData.__lm_chroma || {}, ck);
-    }
-
-    // 最後に props を userData にミラーしておく（デバッグ／将来拡張用）
-    if (mat.userData){
-      mat.userData.__lmMaterialProps = Object.assign(
-        {},
-        mat.userData.__lmMaterialProps || {},
-        props
-      );
-    }
-  }
+    shader.fragmentShader = src;
+  };
 }
-
-export function resetMaterial(materialKey){
+function resetMaterial(materialKey){
   __rebuildMaterialList();
   const mats = __materialsByKey(materialKey);
   for(const mat of mats){
