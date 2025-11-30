@@ -266,36 +266,112 @@
       return;
     }
 
-    const url = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(MATERIALS_RANGE)}?majorDimension=ROWS`;
+    const base = 'https://sheets.googleapis.com/v4/spreadsheets';
+    const url =
+      `${base}/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(MATERIALS_RANGE)}?majorDimension=ROWS`;
     const res = await fetchJSON(url);
     const rows = ensureArray(res && res.values).slice(1); // skip header
 
     const map = new Map();
     rows.forEach(row => {
-      const [
-        updatedAt,
-        updatedBy,
-        rowSheetGid,
-        materialKey,
-        opacity,
-        doubleSided,
-        unlitLike,
-        chromaEnable,
-        chromaColor,
-        chromaTolerance,
-        chromaFeather,
-      ] = row;
+      if (!row || !row.length) return;
 
-      if (!materialKey || rowSheetGid !== String(sheetGid)) return;
+      let materialKey;
+      let opacity;
+      let doubleSided;
+      let unlitLike;
+      let chromaEnable;
+      let chromaColor;
+      let chromaTolerance;
+      let chromaFeather;
+      let rowSheetGid;
+
+      const first = row[0];
+
+      // 旧フォーマット:
+      //   A: updatedAt, B: updatedBy, C: sheetGid, D: materialKey, E: opacity, F: doubleSided,
+      //   G: unlitLike, H: chromaEnable, I: chromaColor, J: chromaTolerance, K: chromaFeather
+      //
+      // 新フォーマット:
+      //   A: materialKey, B: opacity, C: doubleSided, D: unlitLike, E: chromaEnable,
+      //   F: chromaColor, G: chromaTolerance, H: chromaFeather, I: roughness, J: metalness,
+      //   K: emissiveHex, L: updatedAt, M: updatedBy, N: sheetGid
+      if (typeof first === 'string' && /^\d{4}-\d{2}-\d{2}T/.test(first)) {
+        // 旧フォーマット
+        const [
+          updatedAt,
+          updatedBy,
+          rowSheetGidRaw,
+          materialKeyRaw,
+          opacityRaw,
+          doubleSidedRaw,
+          unlitLikeRaw,
+          chromaEnableRaw,
+          chromaColorRaw,
+          chromaToleranceRaw,
+          chromaFeatherRaw,
+        ] = row;
+
+        materialKey     = materialKeyRaw;
+        opacity         = opacityRaw;
+        doubleSided     = doubleSidedRaw;
+        unlitLike       = unlitLikeRaw;
+        chromaEnable    = chromaEnableRaw;
+        chromaColor     = chromaColorRaw;
+        chromaTolerance = chromaToleranceRaw;
+        chromaFeather   = chromaFeatherRaw;
+        rowSheetGid     = rowSheetGidRaw;
+      } else {
+        // 新フォーマット
+        const [
+          materialKeyRaw,
+          opacityRaw,
+          doubleSidedRaw,
+          unlitLikeRaw,
+          chromaEnableRaw,
+          chromaColorRaw,
+          chromaToleranceRaw,
+          chromaFeatherRaw,
+          roughnessRaw,
+          metalnessRaw,
+          emissiveHexRaw,
+          updatedAtRaw,
+          updatedByRaw,
+          rowSheetGidRaw,
+        ] = row;
+
+        materialKey     = materialKeyRaw;
+        opacity         = opacityRaw;
+        doubleSided     = doubleSidedRaw;
+        unlitLike       = unlitLikeRaw;
+        chromaEnable    = chromaEnableRaw;
+        chromaColor     = chromaColorRaw;
+        chromaTolerance = chromaToleranceRaw;
+        chromaFeather   = chromaFeatherRaw;
+        rowSheetGid     = rowSheetGidRaw;
+      }
+
+      if (!materialKey || String(rowSheetGid) !== String(sheetGid)) return;
 
       const props = {
-        opacity: opacity !== undefined ? Number(opacity) : 1,
-        doubleSided: doubleSided === 'TRUE',
-        unlitLike: unlitLike === 'TRUE',
-        chromaEnable: chromaEnable === 'TRUE',
-        chromaColor: chromaColor || '#000000',
-        chromaTolerance: chromaTolerance !== undefined ? Number(chromaTolerance) : 0,
-        chromaFeather: chromaFeather !== undefined ? Number(chromaFeather) : 0,
+        opacity:
+          opacity !== undefined && opacity !== '' ? Number(opacity) : 1,
+        doubleSided:
+          String(doubleSided).toUpperCase() === 'TRUE',
+        unlitLike:
+          String(unlitLike).toUpperCase() === 'TRUE',
+        chromaEnable:
+          String(chromaEnable).toUpperCase() === 'TRUE',
+        chromaColor:
+          chromaColor || '#000000',
+        chromaTolerance:
+          chromaTolerance !== undefined && chromaTolerance !== ''
+            ? Number(chromaTolerance)
+            : 0,
+        chromaFeather:
+          chromaFeather !== undefined && chromaFeather !== ''
+            ? Number(chromaFeather)
+            : 0,
       };
 
       map.set(materialKey, props);
@@ -305,7 +381,8 @@
     return map;
   }
 
-  // --- Sheet Context Handling ---
+
+// --- Sheet Context Handling ---
 
   async function handleSheetContextChange(ctx) {
     const spreadsheetId = ctx && ctx.spreadsheetId;
