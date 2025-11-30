@@ -1,12 +1,12 @@
 // material.orchestrator.js
 // LociMyu material UI orchestrator (Unified)
 // Integrates full-scene application (replacing auto.apply.js) and direct DOM event handling.
-// VERSION_TAG: V6_SHEET_MATERIAL_SOT_DS_UNLIT_SHEETSYNC2
+// VERSION_TAG: V6_SHEET_MATERIAL_SOT_DS_UNLIT
 
 (function () {
   const LOG_PREFIX = '[mat-orch-unified]';
   const MATERIALS_RANGE = '__LM_MATERIALS!A:N';
-  const VERSION_TAG = 'V6_SHEET_MATERIAL_SOT_DS_UNLIT_SHEETSYNC2';
+  const VERSION_TAG = 'V6_SHEET_MATERIAL_SOT_DS_UNLIT';
 
   console.log(LOG_PREFIX, 'loaded', VERSION_TAG);
 
@@ -38,14 +38,16 @@
     return [x];
   }
 
-  // ▼▼▼ UI 探索：#pane-material を優先 ▼▼▼
+  // ▼▼▼ 修正ポイント：UI の参照先を #pane-material 優先にする ▼▼▼
   function queryUI() {
     const doc = document;
-    // 新しいマテリアルペインを優先
+    // Prefer controls inside the new material pane to avoid accidentally
+    // binding to legacy/hidden anchors (e.g. #panel-material).
     const pane = doc.querySelector('#pane-material') || doc;
     const root = pane;
 
-    // マテリアルセレクト（優先：#pane-material 内の #materialSelect）
+    // Canonical material select: #materialSelect inside #pane-material.
+    // Fallbacks exist only for backward compatibility.
     const materialSelect =
       root.querySelector('#materialSelect') ||
       root.querySelector('#pm-material') ||
@@ -76,7 +78,7 @@
       rngChromaFeather: root.querySelector('#pm-chroma-feather') || doc.getElementById('pm-chroma-feather')
     };
   }
-  // ▲▲▲ UI 探索ここまで ▲▲▲
+  // ▲▲▲ ここまでが変更点 ▲▲▲
 
   function getSelectedMaterialKey() {
     if (!ui) ui = queryUI();
@@ -205,12 +207,9 @@
     sheetMaterialCache.set(currentSheetGid, cache);
   }
 
-  // ▼▼▼ シートごとの設定をシーン全体に適用（なければデフォルト） ▼▼▼
   function applyAllToScene(map) {
     const scene = getScene();
     if (!scene) return;
-
-    const confMap = map || new Map();
 
     scene.traverse((o) => {
       if (!o.isMesh) return;
@@ -219,18 +218,17 @@
         if (!m) return;
         const key = (m.name || o.name || '').trim();
         if (!key) return;
-
-        // このシートで定義があればそれを、なければデフォルト値を使う
-        const conf = confMap.has(key) ? confMap.get(key) : defaultProps;
-
-        applyToViewer(key, conf);
-        applyFlagsToMaterial(m, key, conf);
+        if (map.has(key)) {
+          const conf = map.get(key);
+          // Sheets に保存された値をビューアへブリッジ
+          applyToViewer(key, conf);
+          // THREE グローバルに依存せず、ここで side だけは直接反映
+          applyFlagsToMaterial(m, key, conf);
+        }
       });
     });
-
     console.log(LOG_PREFIX, 'Applied full configuration to scene for sheet', currentSheetGid);
   }
-  // ▲▲▲ applyAllToScene ここまで ▲▲▲
 
   // --- Persistence ---
 
@@ -250,13 +248,11 @@
     if (!key) return;
     const cache = sheetMaterialCache.get(currentSheetGid);
     const cachedProps = cache ? cache.get(key) : null;
-    const finalProps = cachedProps
-      ? Object.assign({}, defaultProps, cachedProps)
-      : Object.assign({}, defaultProps);
+    const finalProps = cachedProps ? Object.assign({}, cachedProps) : Object.assign({}, defaultProps);
 
     applyPropsToUI(finalProps);
     applyToViewer(key, finalProps);
-    // シート切替・マテリアル選択時にも doubleSided / Unlit を直接反映
+    // シート切替・マテリアル選択時にも doubleSided を直接反映
     applyFlagsDirectToScene(key, finalProps);
   }
 
@@ -320,48 +316,21 @@
 
     if (!spreadsheetId || !currentSheetGid) return;
 
-    // 1. シート用マテリアル設定を読み込み
-    const map = (await loadMaterialsForContext(spreadsheetId, currentSheetGid)) || new Map();
-    console.log(LOG_PREFIX, 'Data Loaded. Keys:', map.size, 'for sheet', currentSheetGid);
+    const map = await loadMaterialsForContext(spreadsheetId, currentSheetGid);
+    console.log(LOG_PREFIX, 'Data Loaded. Keys:', map ? map.size : 0, 'for sheet', currentSheetGid);
 
-    // 2. 現在の UI / 選択中マテリアルキーを決定
     if (!ui) ui = queryUI();
-
-    let targetKey = '';
-    if (ui && ui.materialSelect) {
-      const selected = (ui.materialSelect.value || '').trim();
-      if (selected) {
-        targetKey = selected;
-      } else if (map.size > 0) {
-        // UI に値が入っていない場合は、このシートで何か定義されている最初のキーを選ぶ
-        targetKey = map.keys().next().value;
-        ui.materialSelect.value = targetKey;
+    if (ui && ui.materialSelect && ui.materialSelect.value) {
+      // 既に選択されているマテリアルがあれば、その状態を優先して同期
+      syncMaterialState(ui.materialSelect.value);
+    } else if (map && map.size) {
+      const firstKey = map.keys().next().value;
+      if (firstKey && ui && ui.materialSelect) {
+        ui.materialSelect.value = firstKey;
       }
-    }
-
-    // 3. シーン全体に対して「このシートにおける状態」を適用
-    //    （定義なしマテリアルはデフォルト値を強制適用）
-    applyAllToScene(map);
-
-    // 4. UI と「現在の選択マテリアル」の状態を同期
-    if (targetKey) {
-      const cacheForSheet = sheetMaterialCache.get(currentSheetGid) || map || new Map();
-      const cachedProps = cacheForSheet.get(targetKey) || map.get(targetKey) || null;
-      const finalProps = cachedProps
-        ? Object.assign({}, defaultProps, cachedProps)
-        : Object.assign({}, defaultProps);
-
-      applyPropsToUI(finalProps);
-      applyToViewer(targetKey, finalProps);
-      applyFlagsDirectToScene(targetKey, finalProps);
-
-      // キャッシュにも反映（UI 同期で確定した状態）
-      const newCache = sheetMaterialCache.get(currentSheetGid) || new Map();
-      newCache.set(targetKey, finalProps);
-      sheetMaterialCache.set(currentSheetGid, newCache);
+      applyAllToScene(map);
     } else {
-      // 選択マテリアルが決められない場合は UI をデフォルト表示に揃える
-      applyPropsToUI(defaultProps);
+      applyAllToScene(new Map());
     }
   }
 
@@ -457,7 +426,6 @@
     const t = setInterval(() => {
       const res = queryUI();
       if (res.materialSelect) {
-        ui = res;
         bindDirectEvents();
         const key = getSelectedMaterialKey();
         if (key && currentSheetGid) syncMaterialState(key);
