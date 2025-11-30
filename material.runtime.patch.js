@@ -1,10 +1,11 @@
+
 // material.runtime.patch.js
 // LociMyu runtime material patch
 // Adds Chroma key support on top of viewer.module.cdn.js
-// VERSION_TAG: mat-rt v3.3 (chroma key)
+// VERSION_TAG: mat-rt v3.4 (chroma key via output_fragment)
 
 (function () {
-  const TAG = '[mat-rt v3.3]';
+  const TAG = '[mat-rt v3.4]';
 
   function log() {
     console.log.apply(console, [TAG].concat(Array.from(arguments)));
@@ -66,9 +67,7 @@
   function matchMaterialName(targetKey, material) {
     if (!targetKey || !material) return false;
     const key = String(targetKey);
-    // typical pattern: material.name === key
     if (String(material.name) === key) return true;
-    // Some pipelines prefix with mesh name; allow suffix match as a fallback
     if (material.name && material.name.endsWith('::' + key)) return true;
     return false;
   }
@@ -84,9 +83,13 @@
     material.userData.__lm_chroma_origOnBeforeCompile = material.onBeforeCompile || null;
 
     material.onBeforeCompile = function (shader) {
-      // call original hook first, if any
+      // 既存の onBeforeCompile があれば先に実行
       if (typeof material.userData.__lm_chroma_origOnBeforeCompile === 'function') {
-        material.userData.__lm_chroma_origOnBeforeCompile(shader);
+        try {
+          material.userData.__lm_chroma_origOnBeforeCompile(shader);
+        } catch (e) {
+          warn('orig onBeforeCompile error', e);
+        }
       }
 
       const params = material.userData.__lm_chroma_params || {};
@@ -103,30 +106,33 @@
       shader.uniforms.lmChromaTolerance = { value: tol };
       shader.uniforms.lmChromaFeather = { value: feather };
 
-      // header
+      // header に uniform 定義を差し込み
       shader.fragmentShader =
-        'uniform vec3 lmChromaKeyColor;\\n' +
-        'uniform float lmChromaTolerance;\\n' +
-        'uniform float lmChromaFeather;\\n' +
+        'uniform vec3 lmChromaKeyColor;\n' +
+        'uniform float lmChromaTolerance;\n' +
+        'uniform float lmChromaFeather;\n' +
         shader.fragmentShader;
 
-      // body injection: replace final color write
-      shader.fragmentShader = shader.fragmentShader.replace(
-        'gl_FragColor = vec4( outgoingLight, diffuseColor.a );',
-        [
-          'vec4 lm_color = vec4( outgoingLight, diffuseColor.a );',
-          'float lm_d = distance( lm_color.rgb, lmChromaKeyColor );',
-          'float lm_alpha = lm_color.a;',
-          'if (lmChromaTolerance > 0.0) {',
-          '  float edge0 = max(lmChromaTolerance - lmChromaFeather, 0.0);',
-          '  float edge1 = lmChromaTolerance + lmChromaFeather;',
-          '  float k = smoothstep(edge0, edge1, lm_d);',
-          '  lm_alpha *= k;',
-          '}',
-          'if (lm_alpha <= 0.001) discard;',
-          'gl_FragColor = vec4( lm_color.rgb, lm_alpha );'
-        ].join('\\n')
-      );
+      // MeshStandardMaterial などの標準シェーダでは #include <output_fragment> を差し替える
+      if (shader.fragmentShader.indexOf('#include <output_fragment>') !== -1) {
+        shader.fragmentShader = shader.fragmentShader.replace(
+          '#include <output_fragment>',
+          [
+            '#include <output_fragment>',
+            'vec3 lmColor = gl_FragColor.rgb;',
+            'float lmAlpha = gl_FragColor.a;',
+            'float lm_d = distance(lmColor, lmChromaKeyColor);',
+            'if (lmChromaTolerance > 0.0) {',
+            '  float edge0 = max(lmChromaTolerance - lmChromaFeather, 0.0);',
+            '  float edge1 = lmChromaTolerance + lmChromaFeather;',
+            '  float k = smoothstep(edge0, edge1, lm_d);',
+            '  lmAlpha *= k;',
+            '}',
+            'if (lmAlpha <= 0.001) discard;',
+            'gl_FragColor = vec4(lmColor, lmAlpha);'
+          ].join('\\n')
+        );
+      }
 
       material.userData.__lm_chroma_shader = shader;
     };
@@ -145,7 +151,7 @@
       feather: clamp01(feather)
     };
 
-    // ensure hook installed
+    // hook を必ずインストール
     ensureChromaPatched(material);
 
     const shader = material.userData.__lm_chroma_shader;
@@ -173,7 +179,7 @@
       }
     }
 
-    // enable transparency when chroma is active
+    // クロマキー有効時は透明描画を強制
     material.transparent = !!params.enable || material.transparent;
     material.needsUpdate = true;
   }
@@ -246,7 +252,6 @@
 
   function waitAndInstall() {
     if (!install()) {
-      // retry a few times while viewer.module initializes
       let tries = 0;
       const timer = setInterval(function () {
         tries++;
@@ -257,7 +262,6 @@
     }
   }
 
-  // kick
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', waitAndInstall);
   } else {

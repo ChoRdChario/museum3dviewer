@@ -186,14 +186,8 @@
     #pane-material .row > *, #pane-material .controls > * { min-width:0; }
     #pane-material select,
     #pane-material input[type="range"],
-    #pm-material {
+    #pm-material, #pm-chroma-tol, #pm-chroma-feather {
       flex:1 1 100%; width:100%; max-width:100%;
-    }
-    #pm-chroma-tol,
-    #pm-chroma-feather {
-      flex:0 0 auto;
-      width:auto;
-      max-width:220px;
     }
     #pane-material .btn, #pane-material .switch, #pane-material .mini { flex:0 0 auto; }
     #pm-chroma .tol-row { display:flex; flex-wrap:wrap; gap:8px; }
@@ -203,7 +197,12 @@
     #pane-material .card{width:100%;box-sizing:border-box;}
     #pane-material .controls{overflow:visible;}
   </style>
-</head>
+\n<style>
+/* LociMyu material sliders: limit range width inside panel-material */
+#panel-material input[type="range"] {
+  max-width: 220px;
+}
+</style>\n</head>
 <body>
   <div id="app">
     <div id="stage"><canvas id="gl"></canvas></div>
