@@ -15,14 +15,15 @@ window.LM_SCOPES = window.LM_SCOPES || [
 ];
 
 /* =========================
-   Enhanced client_id discovery
-   Priority:
-   1) URL ?lm_client_id= / ?client_id=
-   2) button#auth-signin[data-client-id]
-   3) localStorage.LM_GIS_CLIENT_ID
-   4) window.GIS_CLIENT_ID / window.__LM_CLIENT_ID
-   5) <meta name="google-signin-client_id">
-   ========================= */
+ * client_id discovery order
+ *
+ *   1) URL ?lm_client_id= or ?client_id=
+ *   2) button#auth-signin[data-client-id]
+ *   3) localStorage.LM_GIS_CLIENT_ID
+ *   4) window.GIS_CLIENT_ID / window.__LM_CLIENT_ID
+ *   5) <meta name="google-signin-client_id">
+ *   6) <meta name="google-oauth-client_id">  <-- index.html 側の親設定
+ *   ========================= */
 function pickClientIdFromDOM(){
   try{
     const u = new URL(location.href);
@@ -48,6 +49,9 @@ function pickClientIdFromDOM(){
 
   const m = document.querySelector('meta[name="google-signin-client_id"]');
   if (m && m.content && m.content.trim()) return m.content.trim();
+
+  const mo = document.querySelector('meta[name="google-oauth-client_id"]');
+  if (mo && mo.content && mo.content.trim()) return mo.content.trim();
 
   return null;
 }
@@ -81,18 +85,25 @@ async function __lm_getAccessToken(){
 
   await loadGISOnce();
   const clientId = pickClientIdFromDOM();
-  if (!clientId) throw new Error("[auth] client_id not found. Provide window.GIS_CLIENT_ID or meta[name='google-signin-client_id'] or URL ?lm_client_id=...");
+  if (!clientId) throw new Error("[auth] client_id not found. Provide window.GIS_CLIENT_ID or meta[name='google-signin-client_id'] or meta[name='google-oauth-client_id'] or URL ?lm_client_id=... or localStorage.LM_GIS_CLIENT_ID");
 
   if (!_tokClient){
+    if (!window.google || !window.google.accounts || !window.google.accounts.oauth2){
+      throw new Error("[auth] GIS not ready after load");
+    }
     _tokClient = window.google.accounts.oauth2.initTokenClient({
       client_id: clientId,
-      scope: window.LM_SCOPES.join(" "),
+      scope: (window.LM_SCOPES||[]).join(" "),
       callback: (resp)=>{
-        if (!resp || resp.error){
-          if (_pendingReject) _pendingReject(resp && resp.error ? resp.error : "unknown_error");
+        if (resp.error){
+          err("[auth] token error", resp);
+          if (_pendingReject) _pendingReject(resp);
           _pendingResolve = _pendingReject = null;
+          _tokInflight=null;
+          window.dispatchEvent(new CustomEvent("lm:signin-error", { detail:{ error:resp } }));
           return;
         }
+        LOG("[auth] token ok");
         _tokCache = resp.access_token;
         _tokCacheExp = Date.now() + 50*60*1000;
         if (_pendingResolve) _pendingResolve(resp.access_token);
@@ -111,123 +122,132 @@ async function __lm_getAccessToken(){
 }
 window.__lm_getAccessToken = __lm_getAccessToken;
 
-/* Drive GLB resolver */
-function _extractDriveId(input){
-  if (!input) return null;
-  if (/^[a-zA-Z0-9_-]{10,}$/.test(input)) return input;
-  try{
-    const u = new URL(input);
-    const m = u.pathname.match(/\/file\/d\/([a-zA-Z0-9_-]+)\/view/);
-    if (m) return m[1];
-    const idp = u.searchParams.get("id");
-    if (idp) return idp;
-  }catch(e){}
-  return null;
-}
-async function resolveDriveGlbToBlob(urlOrId){
-  const id = _extractDriveId(urlOrId) || urlOrId;
+/* Drive helper: resolve GLB URL in Drive to Blob via Files API */
+async function resolveDriveGlbToBlob(src){
   const token = await __lm_getAccessToken();
-  const res = await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(id)}?alt=media`, {
-    headers: { "Authorization": `Bearer ${token}` }
-  });
-  if (!res.ok) throw new Error(`[drive] fetch GLB failed ${res.status}`);
-  const blob = await res.blob();
-  LOG("[drive] glb resolved -> blob", blob.size);
-  return blob;
-}
-window.__lm_resolveDriveGlbToBlob = resolveDriveGlbToBlob;
+  const headers = { "Authorization": `Bearer ${token}` };
+  let fileIdMatch = null;
 
-/* Sheets minimal helpers */
-async function gapiFetchJson(url, init={}){
-  const token = await __lm_getAccessToken();
-  const headers = Object.assign({ "Authorization": `Bearer ${token}`, "Content-Type": "application/json" }, init.headers||{});
-  const res = await fetch(url, Object.assign({ headers }, init));
-  const text = await res.text();
-  let body=null; try{ body=text?JSON.parse(text):null; }catch(e){ body=text; }
-  if (!res.ok) throw new Error(`[gapi] ${res.status} ${url} -> ${text}`);
-  return body;
+  if (typeof src === "string"){
+    // pattern: https://drive.google.com/file/d/<id>/view?usp=...
+    const m1 = src.match(/\/file\/d\/([^/]+)/);
+    if (m1) fileIdMatch = m1[1];
+    // pattern: https://drive.google.com/open?id=<id>
+    const m2 = src.match(/[?&]id=([^&]+)/);
+    if (!fileIdMatch && m2) fileIdMatch = m2[1];
+  }
+  const fileId = fileIdMatch || src.id || src.fileId || src;
+  if (!fileId) throw new Error("[drive] cannot resolve fileId from src");
+
+  const metaRes = await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?alt=json&fields=id,name,mimeType`, { headers });
+  if (!metaRes.ok) throw new Error("[drive] meta fetch failed "+metaRes.status);
+  const meta = await metaRes.json();
+  LOG("[drive] meta", meta);
+
+  const downloadRes = await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?alt=media`, { headers });
+  if (!downloadRes.ok) throw new Error("[drive] download failed "+downloadRes.status);
+  return await downloadRes.blob();
 }
 
+/* Materials sheet helpers */
 async function ensureMaterialsSheet(spreadsheetId){
-  const meta = await gapiFetchJson(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}`);
-  const exists = (meta.sheets||[]).find(s=>s.properties && s.properties.title==="__LM_MATERIALS");
-  if (exists){ console.log("[materials] ensure sheet -> EXISTS", exists.properties.sheetId); return { title:"__LM_MATERIALS", sheetId: exists.properties.sheetId }; }
-  const added = await gapiFetchJson(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}:batchUpdate`, {
-    method:"POST", body: JSON.stringify({ requests: [{ addSheet: { properties: { title: "__LM_MATERIALS" } } }] })
+  const token = await __lm_getAccessToken();
+  const headers = {
+    "Authorization": `Bearer ${token}`,
+    "Content-Type": "application/json",
+  };
+  const getRes = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}?fields=sheets.properties`, { headers });
+  if (!getRes.ok){
+    throw new Error("[mat-sheet] get sheets failed "+getRes.status);
+  }
+  const data = await getRes.json();
+  const sheets = (data.sheets||[]).map(s=>s.properties || {});
+  const found = sheets.find(p=>p.title==="__LM_MATERIALS");
+  if (found) return { spreadsheetId, sheetId: found.sheetId, title: found.title };
+
+  const body = {
+    requests: [{
+      addSheet: {
+        properties: {
+          title: "__LM_MATERIALS",
+          gridProperties: { rowCount: 1000, columnCount: 20 },
+        },
+      },
+    }],
+  };
+  const batchRes = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}:batchUpdate`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify(body),
   });
-  const sheetId = added.replies && added.replies[0] && added.replies[0].addSheet && added.replies[0].addSheet.properties.sheetId;
-  console.log("[materials] ensure sheet -> OK(200)", sheetId);
-  return { title:"__LM_MATERIALS", sheetId };
+  if (!batchRes.ok){
+    throw new Error("[mat-sheet] create __LM_MATERIALS failed "+batchRes.status);
+  }
+  const batchJson = await batchRes.json();
+  const reply = (batchJson.replies||[])[0] || {};
+  const props = reply.addSheet && reply.addSheet.properties;
+  LOG("[mat-sheet] created __LM_MATERIALS", props);
+  return { spreadsheetId, sheetId: props.sheetId, title: props.title };
 }
 
-const MATERIAL_HEADERS = [
-  "materialKey",   // A
-  "opacity",       // B
-  "doubleSided",   // C
-  "unlitLike",     // D
-  "chromaEnable",  // E
-  "chromaColor",   // F
-  "chromaTolerance", // G
-  "chromaFeather",   // H
-  "roughness",     // I
-  "metalness",     // J
-  "emissiveHex",   // K
-  "updatedAt",     // L
-  "updatedBy",     // M
-  "sheetGid"       // N
-];
-
-let _hdrGuard = new Set();
-async function putHeaderOnce(spreadsheetId, range="__LM_MATERIALS!A1:N1"){
-  const key = spreadsheetId+"::"+range;
-  if (_hdrGuard.has(key)){ console.log("[materials] header put", range, "-> SKIP (guard)"); return; }
-  try{
-    const got = await gapiFetchJson(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}`);
-    const values = (got.values && got.values[0]) || [];
-    if ((values||[]).length){ console.log("[materials] header present -> SKIP"); _hdrGuard.add(key); return; }
-  }catch(e){ console.warn("[materials] header check failed; will put anyway", String(e)); }
-  await gapiFetchJson(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}?valueInputOption=RAW`, {
-    method:"PUT", body: JSON.stringify({ range, values:[MATERIAL_HEADERS] })
+async function putHeaderOnce(spreadsheetId, rangeA1, values){
+  const token = await __lm_getAccessToken();
+  const headers = {
+    "Authorization": `Bearer ${token}`,
+    "Content-Type": "application/json",
+  };
+  const body = {
+    valueInputOption: "RAW",
+    data: [{
+      range: rangeA1,
+      values: [values],
+    }],
+  };
+  const res = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values:batchUpdate`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify(body),
   });
-  console.log("[materials] header put", range, "-> OK(200)");
-  _hdrGuard.add(key);
+  if (!res.ok){
+    throw new Error("[mat-sheet] header batchUpdate failed "+res.status);
+  }
+  LOG("[mat-sheet] header updated", rangeA1);
 }
+
 async function ensureMaterialsHeader(spreadsheetId){
-  if (!spreadsheetId) throw new Error("[materials] spreadsheetId required");
-  window.__LM_MATERIALS_READY__ = window.__LM_MATERIALS_READY__ || new Set();
-  if (window.__LM_MATERIALS_READY__.has(spreadsheetId)){ console.log("[materials] ensure header -> SKIP (ready)"); return; }
   await ensureMaterialsSheet(spreadsheetId);
-  await putHeaderOnce(spreadsheetId, "__LM_MATERIALS!A1:N1");
-  window.__LM_MATERIALS_READY__.add(spreadsheetId);
+  const token = await __lm_getAccessToken();
+  const headers = { "Authorization": `Bearer ${token}` };
+  const range = "__LM_MATERIALS!A1:N1";
+  const getRes = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(range)}`, { headers });
+  if (!getRes.ok){
+    throw new Error("[mat-sheet] header get failed "+getRes.status);
+  }
+  const json = await getRes.json();
+  const rows = json.values || [];
+  if (rows.length>0 && rows[0] && rows[0].length>0){
+    LOG("[mat-sheet] header already present");
+    return;
+  }
+  await putHeaderOnce(spreadsheetId, range, [
+    "sheetGid",
+    "materialKey",
+    "opacity",
+    "doubleSided",
+    "unlitLike",
+    "chromaKeyEnabled",
+    "chromaKeyColor",
+    "chromaKeyTolerance",
+    "chromaKeyFeather",
+    "timestamp",
+    "user",
+    "note1",
+    "note2",
+    "note3",
+  ]);
 }
-window.__lm_ensureMaterialsHeader = ensureMaterialsHeader;
 
-/* sheet-context bridge */
-const sheetCtxBridge = (()=>{
-  let _last=null,_timer=null;
-  function _emit(ctx){ console.log("[ctx] set", ctx); window.dispatchEvent(new CustomEvent("lm:sheet-context",{detail:ctx})); }
-  function start(getter,opt={}){
-    const interval = opt.intervalMs || 4000;
-    if (_timer) clearInterval(_timer);
-    try{ const ctx=getter(); if (ctx&&ctx.spreadsheetId){ _last=JSON.stringify(ctx); _emit(ctx);} else { console.warn("[ctx] getter returned empty"); } }catch(e){ console.warn("[ctx] first tick failed",e); }
-    _timer=setInterval(()=>{
-      try{ const ctx=getter(); if(!(ctx&&ctx.spreadsheetId)) return; const s=JSON.stringify(ctx); if (s!==_last){ _last=s; _emit(ctx);} }catch(e){}
-    }, interval);
-  }
-  function stop(){ if (_timer) clearInterval(_timer); _timer=null; }
-  return { start, stop };
-})();
-window.sheetCtxBridge = sheetCtxBridge;
-
-/* materials ensure on ctx */
-window.addEventListener("lm:sheet-context",(ev)=>{
-  const ctx = ev.detail||{};
-  if (ctx && ctx.spreadsheetId){
-    ensureMaterialsHeader(ctx.spreadsheetId).catch(e=>console.error("[materials] ensure header failed", e));
-  }
-});
-
-/* Optional: GLB load helper */
+/* Drive GLB load bridge: listen for lm:load-glb and resolve via Drive */
 window.addEventListener("lm:load-glb", async (ev)=>{
   try{
     const src = ev && ev.detail && (ev.detail.id || ev.detail.url);
@@ -246,14 +266,13 @@ window.addEventListener("lm:load-glb", async (ev)=>{
   if (btn.dataset && btn.dataset.lmAuthWired) return;
   btn.dataset.lmAuthWired = "1";
   btn.addEventListener("click", async (ev)=>{
+    ev.preventDefault();
     try{
-      const tok = await __lm_getAccessToken();
-      console.log("[auth] signin ok (popup-safe)", !!tok);
+      await __lm_getAccessToken();
+      console.log("[auth] signin ok (button)");
     }catch(e){
       console.error("[auth] signin failed", e);
-      if (String(e).includes("client_id not found")){
-        console.warn("[auth] 提供方法: URL に ?lm_client_id=YOUR_CLIENT_ID を付けるか、localStorage.LM_GIS_CLIENT_ID に設定してください。");
-      }
+      console.error("[auth] 提供方法: URL に ?lm_client_id=YOUR_CLIENT_ID を付けるか、localStorage.LM_GIS_CLIENT_ID に設定してください。");
     }
   }, { passive:true });
 })();
