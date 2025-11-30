@@ -66,9 +66,9 @@
   function matchMaterialName(targetKey, material) {
     if (!targetKey || !material) return false;
     const key = String(targetKey);
-    // typicalパターン: material.name === key
+    // typical pattern: material.name === key
     if (String(material.name) === key) return true;
-    // 「meshName::materialName」 のような名前にも一応対応
+    // Some pipelines prefix with mesh name; allow suffix match as a fallback
     if (material.name && material.name.endsWith('::' + key)) return true;
     return false;
   }
@@ -84,7 +84,7 @@
     material.userData.__lm_chroma_origOnBeforeCompile = material.onBeforeCompile || null;
 
     material.onBeforeCompile = function (shader) {
-      // 既存の onBeforeCompile があれば先に実行
+      // call original hook first, if any
       if (typeof material.userData.__lm_chroma_origOnBeforeCompile === 'function') {
         material.userData.__lm_chroma_origOnBeforeCompile(shader);
       }
@@ -103,14 +103,14 @@
       shader.uniforms.lmChromaTolerance = { value: tol };
       shader.uniforms.lmChromaFeather = { value: feather };
 
-      // header に uniform 定義を差し込み
+      // header
       shader.fragmentShader =
-        'uniform vec3 lmChromaKeyColor;\n' +
-        'uniform float lmChromaTolerance;\n' +
-        'uniform float lmChromaFeather;\n' +
+        'uniform vec3 lmChromaKeyColor;\\n' +
+        'uniform float lmChromaTolerance;\\n' +
+        'uniform float lmChromaFeather;\\n' +
         shader.fragmentShader;
 
-      // 最終的な gl_FragColor 書き込みを置換してクロマキー処理を挿入
+      // body injection: replace final color write
       shader.fragmentShader = shader.fragmentShader.replace(
         'gl_FragColor = vec4( outgoingLight, diffuseColor.a );',
         [
@@ -125,7 +125,7 @@
           '}',
           'if (lm_alpha <= 0.001) discard;',
           'gl_FragColor = vec4( lm_color.rgb, lm_alpha );'
-        ].join('\n')
+        ].join('\\n')
       );
 
       material.userData.__lm_chroma_shader = shader;
@@ -145,7 +145,7 @@
       feather: clamp01(feather)
     };
 
-    // hook を必ずインストール
+    // ensure hook installed
     ensureChromaPatched(material);
 
     const shader = material.userData.__lm_chroma_shader;
@@ -173,7 +173,7 @@
       }
     }
 
-    // クロマキー有効時は透明描画を強制
+    // enable transparency when chroma is active
     material.transparent = !!params.enable || material.transparent;
     material.needsUpdate = true;
   }
@@ -194,6 +194,16 @@
       updateChromaUniforms(mat, colorHex, tol, feather, enable);
     });
   }
+
+  // global hook so orchestrator can call directly
+  window.__lm_applyChromaForKey = function (materialKey, props) {
+    try {
+      const bridge = window.__lm_viewer_bridge || window.viewerBridge || null;
+      applyChromaForKey(bridge, materialKey, props || {});
+    } catch (e) {
+      warn('global chroma apply error', e);
+    }
+  };
 
   // --- patch viewer bridge ---
 
@@ -236,7 +246,7 @@
 
   function waitAndInstall() {
     if (!install()) {
-      // viewer.module 初期化を待ちながらリトライ
+      // retry a few times while viewer.module initializes
       let tries = 0;
       const timer = setInterval(function () {
         tries++;

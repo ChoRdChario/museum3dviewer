@@ -463,6 +463,17 @@
         applyFlagsDirectToScene(state.materialKey, state.props);
       }
 
+      // Chroma 系の変更は、専用ランタイムパッチに直接依頼して適用
+      if (label === 'ChromaEnable' || label === 'ChromaColor' || label === 'ChromaTolerance' || label === 'ChromaFeather') {
+        if (typeof window.__lm_applyChromaForKey === 'function') {
+          try {
+            window.__lm_applyChromaForKey(state.materialKey, state.props);
+          } catch (e) {
+            console.warn(LOG_PREFIX, 'chroma apply error', e);
+          }
+        }
+      }
+
       persistAndCache(state.materialKey, state.props);
     };
 
