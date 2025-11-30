@@ -186,8 +186,14 @@
     #pane-material .row > *, #pane-material .controls > * { min-width:0; }
     #pane-material select,
     #pane-material input[type="range"],
-    #pm-material, #pm-chroma-tol, #pm-chroma-feather {
+    #pm-material {
       flex:1 1 100%; width:100%; max-width:100%;
+    }
+    #pm-chroma-tol,
+    #pm-chroma-feather {
+      flex:1 1 auto;
+      width:100%;
+      max-width:200px;
     }
     #pane-material .btn, #pane-material .switch, #pane-material .mini { flex:0 0 auto; }
     #pm-chroma .tol-row { display:flex; flex-wrap:wrap; gap:8px; }
