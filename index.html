@@ -17,7 +17,7 @@
     select, input[type="text"], input[type="color"] {
       background:#0f1317; color:#e6e6e6; border:1px solid #2a2f36; border-radius:8px; padding:8px 10px;
     }
-    input[type="range"] { width:100%; }
+    input[type="range"] { width:100%; box-sizing:border-box; }
     .row { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
     .row .grow { flex:1 1 180px; }
     .muted { color:#9aa4af; font-size:12px; }
@@ -197,12 +197,7 @@
     #pane-material .card{width:100%;box-sizing:border-box;}
     #pane-material .controls{overflow:visible;}
   </style>
-\n<style>
-/* LociMyu material sliders: limit range width inside panel-material */
-#panel-material input[type="range"] {
-  max-width: 220px;
-}
-</style>\n</head>
+</head>
 <body>
   <div id="app">
     <div id="stage"><canvas id="gl"></canvas></div>
