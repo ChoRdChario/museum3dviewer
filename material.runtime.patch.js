@@ -1,210 +1,290 @@
 // material.runtime.patch.js
-// LociMyu / Material runtime shader patch (chroma clip version)
-// v3.11
+// v3.12 — chroma clip via shader discard, hooked at viewer bridge
+(function (global) {
+  const TAG = '[mat-rt v3.12]';
 
-(function () {
-  'use strict';
-
-  var TAG = '[mat-rt v3.11]';
-
-  function log() {
-    if (!console || !console.log) return;
-    var args = Array.prototype.slice.call(arguments);
-    args.unshift(TAG);
-    console.log.apply(console, args);
+  if (global.__LM_MaterialsRuntime && global.__LM_MaterialsRuntime.__v === '3.12') {
+    console.log(TAG, 'already loaded');
+    return;
   }
 
-  function warn() {
-    if (!console || !console.warn) return;
-    var args = Array.prototype.slice.call(arguments);
-    args.unshift(TAG);
-    console.warn.apply(console, args);
+  // ----- 内部状態 -----
+  const state = {
+    // materialKey -> { chroma: { enabled, colorHex, tolerance, feather } }
+    byKey: new Map()
+  };
+
+  function normalizeChromaConfig(raw) {
+    if (!raw) return null;
+
+    // props.chroma 形式と、フラットな chromaEnabled 形式の両方に対応
+    const src = raw.chroma || raw;
+
+    const enabled =
+      typeof src.enabled === 'boolean'
+        ? src.enabled
+        : !!src.chromaEnabled;
+
+    const colorHex =
+      src.colorHex ||
+      src.chromaColor ||
+      '#000000';
+
+    const tolerance =
+      typeof src.tolerance === 'number'
+        ? src.tolerance
+        : (typeof src.chromaTolerance === 'number' ? src.chromaTolerance : 0.10);
+
+    const feather =
+      typeof src.feather === 'number'
+        ? src.feather
+        : (typeof src.chromaFeather === 'number' ? src.chromaFeather : 0.0);
+
+    return {
+      enabled,
+      colorHex,
+      tolerance,
+      feather
+    };
   }
 
-  /**
-   * シェーダにクロマ用のユニフォームと処理を注入する
-   *  - キー色は一旦無視し、「明度が高い部分＝白地」をクロップ対象とする
-   *  - tolerance: 「どこまで白を飛ばすか」（0〜1, 高いほど広く飛ばす）
-   *  - feather:   エッジのソフトさ（0〜1, 高いほどふんわり）
-   */
-  function patchShaderForChroma(shader) {
-    // 既にパッチ済みなら二重適用を避ける
-    if (shader.__lm_chroma_patched) return;
+  function setChromaConfig(materialKey, props) {
+    const chroma = normalizeChromaConfig(props);
+    if (!chroma) return;
 
-    shader.uniforms.lmChromaEnabled = { value: false };
-    shader.uniforms.lmChromaTolerance = { value: 0.3 };
-    shader.uniforms.lmChromaFeather = { value: 0.5 };
-
-    // MeshStandardMaterial 系のフラグメント末尾近辺にある行
-    var hook = 'gl_FragColor = vec4( outgoingLight, diffuseColor.a );';
-
-    if (shader.fragmentShader.indexOf(hook) === -1) {
-      // Material の種類によってはこの行が無いケースもあるので、その場合は諦める
-      warn('no hook line; chroma disabled for this material');
-      return;
+    let entry = state.byKey.get(materialKey);
+    if (!entry) {
+      entry = {};
+      state.byKey.set(materialKey, entry);
     }
+    entry.chroma = chroma;
 
-    var injection = [
-      '',
-      '  // --- LociMyu chroma clip (brightness based) ---',
-      '  if ( lmChromaEnabled ) {',
-      '    // diffuseColor.rgb は sRGB → Linear 変換後の色想定',
-      '    float lmLuma = dot( diffuseColor.rgb, vec3( 0.299, 0.587, 0.114 ) );',
-      '',
-      '    // tolerance が大きいほど「白に近い広い範囲」を飛ばす',
-      '    // 例: tol=0.3 → luma が 0.7〜1.0 の領域が対象',
-      '    float edge0 = 1.0 - clamp( lmChromaTolerance, 0.0, 1.0 );',
-      '    float edge1 = edge0 + clamp( lmChromaFeather, 0.0, 1.0 ) * 0.25;', // feather で境界幅を調整
-      '',
-      '    float k = smoothstep( edge0, edge1, lmLuma );',
-      '',
-      '    // ほぼ完全に白地な領域は深度も含めて完全に捨てる',
-      '    if ( k >= 0.999 ) {',
-      '      discard;',
-      '    }',
-      '',
-      '    // 境界部分はフェードアウトさせてジャギを抑える',
-      '    diffuseColor.a *= ( 1.0 - k );',
-      '  }',
-      '  // --- end chroma clip ---',
-      ''
-    ].join('\n');
-
-    shader.fragmentShader = shader.fragmentShader.replace(hook, injection + hook);
-    shader.__lm_chroma_patched = true;
+    console.log(TAG, 'set chroma config', materialKey, chroma);
   }
 
-  /**
-   * 個々の THREE.Material に対して chroma パッチを設定
-   */
-  function ensureMaterialPatchedForChroma(material, state) {
-    if (!material || !material.isMaterial) return;
+  // ----- THREE / viewer bridge 取得 -----
+  function getTHREE() {
+    // viewer.module.cdn.js は importmap で three を読むので、
+    // グローバル THREE が無い可能性もあるが、通常は expose されている前提。
+    return global.THREE || null;
+  }
 
-    // 透明表現と discard の両立をさせるための基本設定
-    material.transparent = true;
-    material.depthWrite = true;
-    material.depthTest = true;
+  function getViewerBridge() {
+    return global.__lm_viewer_bridge || global.__LM_VIEWER_BRIDGE || null;
+  }
 
-    // onBeforeCompile はマテリアル単位で一度だけ差し込めばよい
-    var originalOnBeforeCompile = material.onBeforeCompile;
+  function getSceneFromBridge(bridge) {
+    if (!bridge) return null;
+    if (typeof bridge.getScene === 'function') {
+      try {
+        return bridge.getScene();
+      } catch (e) {
+        console.warn(TAG, 'getScene() failed', e);
+      }
+    }
+    return null;
+  }
+
+  // materialKey に紐づく Material をシーンから探す（名前ベース）。
+  function findMaterialsForKey(bridge, materialKey) {
+    const scene = getSceneFromBridge(bridge);
+    const found = [];
+    if (!scene) return found;
+
+    scene.traverse(obj => {
+      const mat = obj.material;
+      if (!mat) return;
+
+      const matchOne = m => {
+        if (!m) return;
+        const name = m.name || m.userData?.lmKey || m.userData?.materialKey;
+        if (name === materialKey) {
+          found.push(m);
+        }
+      };
+
+      if (Array.isArray(mat)) {
+        mat.forEach(matchOne);
+      } else {
+        matchOne(mat);
+      }
+    });
+
+    return found;
+  }
+
+  // ----- シェーダパッチ -----
+  function patchMaterialShaderForChroma(material, materialKey) {
+    const THREE = getTHREE();
+    if (!THREE || !material || material.__lmChromaPatched) return;
+
+    material.__lmChromaPatched = true;
+    material.userData = material.userData || {};
+    material.userData.__lmMaterialKey = materialKey;
+
+    const key = materialKey; // クロージャに固定
 
     material.onBeforeCompile = function (shader) {
-      if (typeof originalOnBeforeCompile === 'function') {
-        originalOnBeforeCompile.call(this, shader);
+      const entry = state.byKey.get(key) || {};
+      const chroma = entry.chroma || {
+        enabled: false,
+        colorHex: '#000000',
+        tolerance: 0.1,
+        feather: 0.0
+      };
+
+      // ユニフォーム定義
+      shader.uniforms.uLmChromaEnabled = { value: !!chroma.enabled };
+      shader.uniforms.uLmChromaColor = { value: new THREE.Color(chroma.colorHex || '#000000') };
+      shader.uniforms.uLmChromaTolerance = { value: chroma.tolerance };
+      shader.uniforms.uLmChromaFeather = { value: chroma.feather };
+
+      material.userData.__lmChromaUniforms = shader.uniforms;
+
+      let frag = shader.fragmentShader;
+
+      const header = `
+uniform bool uLmChromaEnabled;
+uniform vec3 uLmChromaColor;
+uniform float uLmChromaTolerance;
+uniform float uLmChromaFeather;
+#define USE_LM_CHROMA
+`;
+
+      if (!frag.includes('uLmChromaEnabled')) {
+        frag = header + frag;
       }
 
-      patchShaderForChroma(shader);
+      const hookBlock = `
+#ifdef USE_LM_CHROMA
+  #ifdef USE_MAP
+    // sample original baseColor (同じ UV で再サンプリング)
+    vec4 lmTexel = texture2D( map, vUv );
+    lmTexel = mapTexelToLinear( lmTexel );
+    vec3 lmColor = lmTexel.rgb;
+    float lmDist = length(lmColor - uLmChromaColor);
 
-      if (shader.uniforms.lmChromaEnabled) {
-        shader.uniforms.lmChromaEnabled.value = !!state.enabled;
+    if (uLmChromaEnabled) {
+      // feather 0: 純粋なクリップ、>0 ならエッジを少しだけ残す
+      float tol = uLmChromaTolerance;
+      float feather = max(uLmChromaFeather, 0.0);
+      if (feather <= 0.0001) {
+        if (lmDist < tol) {
+          discard;
+        }
+      } else {
+        float edge = smoothstep(tol, tol + feather, lmDist);
+        if (edge <= 0.0001) {
+          discard;
+        }
       }
-      if (shader.uniforms.lmChromaTolerance) {
-        shader.uniforms.lmChromaTolerance.value =
-          typeof state.tolerance === 'number' ? state.tolerance : 0.0;
-      }
-      if (shader.uniforms.lmChromaFeather) {
-        shader.uniforms.lmChromaFeather.value =
-          typeof state.feather === 'number' ? state.feather : 0.0;
+    }
+  #endif
+#endif
+`;
+
+      if (frag.includes('#include <output_fragment>')) {
+        frag = frag.replace(
+          '#include <output_fragment>',
+          hookBlock + '\n#include <output_fragment>'
+        );
+      } else {
+        // 保険：output_fragment ブロックが無い場合は main の末尾に差し込む
+        const mainEnd = frag.lastIndexOf('}');
+        if (mainEnd !== -1) {
+          frag =
+            frag.slice(0, mainEnd) +
+            '\n' +
+            hookBlock +
+            '\n' +
+            frag.slice(mainEnd);
+        }
+        console.warn(TAG, 'no <output_fragment> hook; injected fallback block for', key);
       }
 
-      material.userData.__lm_chromaShader = shader;
+      shader.fragmentShader = frag;
     };
 
-    // 再コンパイルを促す
+    // コンパイルやり直し
     material.needsUpdate = true;
   }
 
-  /**
-   * シーン内の「指定された material.name を持つマテリアル」に対して
-   * chroma 設定を適用
-   */
-  function applyChromaToScene(materialKey, options) {
-    if (!materialKey) {
-      warn('applyChromaToScene called without materialKey');
+  function applyChromaToMaterials(bridge, materialKey) {
+    const entry = state.byKey.get(materialKey);
+    if (!entry || !entry.chroma) return;
+
+    const materials = findMaterialsForKey(bridge, materialKey);
+    if (!materials.length) {
+      console.log(TAG, 'no materials found for key', materialKey);
       return;
     }
 
-    var bridge = window.__lm_viewer_bridge;
-    if (!bridge || typeof bridge.getScene !== 'function') {
-      warn('no viewer bridge / getScene not ready');
-      return;
-    }
+    materials.forEach(mat => {
+      patchMaterialShaderForChroma(mat, materialKey);
 
-    var scene = bridge.getScene && bridge.getScene();
-    if (!scene) {
-      warn('scene not ready yet');
-      return;
-    }
+      const uniforms = mat.userData && mat.userData.__lmChromaUniforms;
+      const chroma = entry.chroma;
 
-    var state = {
-      enabled: !!options.enabled,
-      tolerance:
-        typeof options.tolerance === 'number' ? options.tolerance : 0.0,
-      feather: typeof options.feather === 'number' ? options.feather : 0.0
-    };
-
-    scene.traverse(function (obj) {
-      if (!obj.isMesh) return;
-
-      var mats = obj.material;
-      if (!mats) return;
-      if (!Array.isArray(mats)) mats = [mats];
-
-      for (var i = 0; i < mats.length; i++) {
-        var mat = mats[i];
-        if (!mat || !mat.name) continue;
-        if (mat.name !== materialKey) continue;
-
-        ensureMaterialPatchedForChroma(mat, state);
-
-        // すでにコンパイル済みで userData に shader があれば、直接 uniform を更新
-        var shader = mat.userData.__lm_chromaShader;
-        if (shader) {
-          if (shader.uniforms.lmChromaEnabled) {
-            shader.uniforms.lmChromaEnabled.value = state.enabled;
-          }
-          if (shader.uniforms.lmChromaTolerance) {
-            shader.uniforms.lmChromaTolerance.value = state.tolerance;
-          }
-          if (shader.uniforms.lmChromaFeather) {
-            shader.uniforms.lmChromaFeather.value = state.feather;
-          }
-        }
+      if (uniforms) {
+        uniforms.uLmChromaEnabled.value = !!chroma.enabled;
+        uniforms.uLmChromaColor.value.set(chroma.colorHex || '#000000');
+        uniforms.uLmChromaTolerance.value = chroma.tolerance;
+        uniforms.uLmChromaFeather.value = chroma.feather;
       }
     });
+
+    console.log(TAG, 'applied chroma to', materialKey, 'mats=', materials.length);
   }
 
-  /**
-   * オーケストレータ側から呼ばれる公開 API
-   *
-   * 既存実装との互換性を考えて、いくつか名前違いのメソッド／グローバル名を
-   * まとめて生やしておく。
-   */
-  function apiApplyChroma(opts) {
-    opts = opts || {};
-    log('apply chroma', opts);
-    applyChromaToScene(opts.materialKey, {
-      enabled: opts.enabled,
-      tolerance: opts.tolerance,
-      feather: opts.feather
-    });
+  // ----- viewer bridge の applyMaterialProps をフック -----
+  function patchViewerBridgeOnce() {
+    const bridge = getViewerBridge();
+    if (!bridge || bridge.__lmChromaHooked) return;
+
+    if (typeof bridge.applyMaterialProps !== 'function') {
+      console.warn(TAG, 'viewer bridge has no applyMaterialProps; chroma disabled');
+      return;
+    }
+
+    const original = bridge.applyMaterialProps.bind(bridge);
+
+    bridge.applyMaterialProps = function (materialKey, props) {
+      // 既存処理（透明度 / double-sided / unlit など）を先に実行
+      const result = original(materialKey, props);
+
+      // クロマ設定を記録・適用
+      setChromaConfig(materialKey, props);
+      applyChromaToMaterials(bridge, materialKey);
+
+      return result;
+    };
+
+    bridge.__lmChromaHooked = true;
+    console.log(TAG, 'patched viewer bridge.applyMaterialProps');
   }
 
-  var api = {
-    // メイン想定
-    applyChroma: apiApplyChroma,
+  function waitForBridge() {
+    const bridge = getViewerBridge();
+    if (bridge && typeof bridge.applyMaterialProps === 'function') {
+      patchViewerBridgeOnce();
+      return;
+    }
+    setTimeout(waitForBridge, 500);
+  }
 
-    // 互換用エイリアス（過去の実装で違う名前を使っていても拾えるように）
-    applyChromaForKey: apiApplyChroma,
-    setChroma: apiApplyChroma,
-    updateChroma: apiApplyChroma
+  // ----- 公開 API（簡易版。将来拡張用） -----
+  const runtime = {
+    __v: '3.12',
+    setChromaConfig,
+    applyChromaNow: function (materialKey) {
+      const bridge = getViewerBridge();
+      if (!bridge) return;
+      applyChromaToMaterials(bridge, materialKey);
+    }
   };
 
-  // グローバル公開名も複数用意しておく（どれかに既存コードがぶら下がっている想定）
-  window.__lm_material_runtime_patch = api;
-  window.__LM_MaterialRuntime = api;
-  window.__LM_MaterialsRuntime = api;
-  window.__LM_MaterialsRuntimePatch = api;
+  global.__LM_MaterialsRuntime = runtime;
+  console.log(TAG, 'ready');
 
-  log('ready');
-})();
+  waitForBridge();
+})(window);
