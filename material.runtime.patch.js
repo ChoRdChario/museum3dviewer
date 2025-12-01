@@ -1,28 +1,32 @@
 // material.runtime.patch.js
-// v3.7 - Chromakey runtime patch (Scene direct, no viewer-bridge race)
+// v3.8 - Chromakey runtime patch (no THREE import, no viewer-bridge patch)
 
 (function () {
-  const LOG_PREFIX = '[mat-rt v3.7]';
+  const LOG_PREFIX = '[mat-rt v3.8]';
 
   const log = (...args) => console.log(LOG_PREFIX, ...args);
   const warn = (...args) => console.warn(LOG_PREFIX, ...args);
 
   log('ready');
 
-  /**
-   * props からクロマキー関連の値を抽出し、正規化する
-   */
+  // ---------------------------------------------------------------------------
+  // Config 解決
+  // ---------------------------------------------------------------------------
+
   function resolveChromaConfig(rawProps) {
     const p = rawProps || {};
     const nested = p.chroma || {};
 
     const enabled =
-      !!(p.chromaEnable ?? p.flagChromaEnable ?? nested.enable ?? false);
+      !!(p.chromaEnable ??
+         p.flagChromaEnable ??
+         nested.enable ??
+         false);
 
     const colorHex =
       p.chromaColor ??
       nested.color ??
-      '#000000'; // デフォルトは黒キー
+      '#000000'; // デフォルト黒キー
 
     const tolerance =
       p.chromaTolerance ??
@@ -42,9 +46,7 @@
     };
   }
 
-  /**
-   * "#rrggbb" → [r,g,b] (0-1)
-   */
+  // "#rrggbb" -> [0..1, 0..1, 0..1]
   function hexToRgb01(hex) {
     if (typeof hex !== 'string') return [0, 0, 0];
     const m = /^#?([0-9a-fA-F]{6})$/.exec(hex.trim());
@@ -56,9 +58,10 @@
     return [r / 255, g / 255, b / 255];
   }
 
-  /**
-   * fragmentShader にクロマキー処理をインジェクト
-   */
+  // ---------------------------------------------------------------------------
+  // fragmentShader injection
+  // ---------------------------------------------------------------------------
+
   function injectChromaIntoFragment(fragmentSrc) {
     if (!fragmentSrc || typeof fragmentSrc !== 'string') {
       warn('fragmentShader missing or not a string');
@@ -97,9 +100,10 @@ ${hook}
     return header + fragmentSrc.replace(hook, injection);
   }
 
-  /**
-   * 単一マテリアルにクロマキー情報を設定＆シェーダーパッチ
-   */
+  // ---------------------------------------------------------------------------
+  // Material 単位のパッチ
+  // ---------------------------------------------------------------------------
+
   function applyChromaToMaterial(material, cfg) {
     if (!material) return;
 
@@ -119,24 +123,16 @@ ${hook}
     data.tolerance = cfg.tolerance;
     data.feather = cfg.feather;
 
-    // onBeforeCompile パッチ（初回のみ）
+    // 初回だけ onBeforeCompile を仕込む
     if (!material.userData.__lmChromaPatched) {
       material.userData.__lmChromaPatched = true;
 
       material.onBeforeCompile = function (shader) {
-        // uniforms の追加
         const u = shader.uniforms;
+
         u.uLmChromaEnable = { value: data.enabled ? 1.0 : 0.0 };
-
-        // Three.Color を利用（material.color が Color のはず）
-        let chromaColor = null;
-        if (material.color && material.color.isColor) {
-          chromaColor = material.color.clone();
-          chromaColor.setRGB(data.color[0], data.color[1], data.color[2]);
-        }
-
         u.uLmChromaColor = {
-          value: chromaColor || { r: data.color[0], g: data.color[1], b: data.color[2] }
+          value: { r: data.color[0], g: data.color[1], b: data.color[2] }
         };
         u.uLmChromaTolerance = { value: data.tolerance };
         u.uLmChromaFeather = { value: data.feather };
@@ -148,7 +144,7 @@ ${hook}
       };
     }
 
-    // すでに onBeforeCompile 済みで shader があるなら uniforms を更新
+    // すでにシェーダーが存在する場合は uniforms を更新
     const shader = material.userData.__lmChromaShader;
     if (shader && shader.uniforms) {
       const u = shader.uniforms;
@@ -157,29 +153,25 @@ ${hook}
       if (u.uLmChromaFeather) u.uLmChromaFeather.value = data.feather;
       if (u.uLmChromaColor && u.uLmChromaColor.value) {
         const c = u.uLmChromaColor.value;
-        if (c.isColor && Array.isArray(data.color)) {
-          c.setRGB(data.color[0], data.color[1], data.color[2]);
-        } else {
-          c.r = data.color[0];
-          c.g = data.color[1];
-          c.b = data.color[2];
-        }
+        c.r = data.color[0];
+        c.g = data.color[1];
+        c.b = data.color[2];
       }
     }
 
-    // 透明系のフラグもある程度こちらで面倒を見る
+    // 透過関連のフラグ調整（ざっくり）
     if (data.enabled) {
       material.transparent = true;
-      // 完全厳密ではないが、Z-fighting/ちらつき対策として depthWrite を落とし気味にする
-      material.depthWrite = false;
+      material.depthWrite = false; // Z-fighting 軽減用
     }
+
     material.needsUpdate = true;
   }
 
-  /**
-   * グローバルに公開されるエントリポイント
-   * material.orchestrator.js から呼ばれる想定
-   */
+  // ---------------------------------------------------------------------------
+  // グローバルエントリポイント
+  // ---------------------------------------------------------------------------
+
   window.__lm_applyChromaForKey = function (materialKey, props) {
     const scene = window.__LM_SCENE;
     if (!scene) {
@@ -192,14 +184,13 @@ ${hook}
     }
 
     const cfg = resolveChromaConfig(props);
-    const debugSummary = {
+    log('apply chroma', {
       materialKey,
       enabled: cfg.enabled,
       colorHex: cfg.colorHex,
       tolerance: cfg.tolerance,
       feather: cfg.feather
-    };
-    log('apply chroma', debugSummary);
+    });
 
     let touched = 0;
 
