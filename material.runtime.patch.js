@@ -1,232 +1,210 @@
 // material.runtime.patch.js
-// v3.10 – chroma key with clip (discard) + compatibility wrapper
-//
-// ・クロマキー対象画素は discard で完全に抜く（奥のメッシュが見える）
-// ・tolerance / feather で距離とソフトエッジ幅を調整
-// ・オーケストレータからの呼び出し形式が違っても受け止められるよう、
-//   applyChroma / applyChromaKey / chromaKey など複数の名前に対応
+// LociMyu / Material runtime shader patch (chroma clip version)
+// v3.11
 
-(function (global) {
-  const LOG_TAG = '[mat-rt v3.10]';
+(function () {
+  'use strict';
 
-  function log () {
-    console.log.apply(console, [LOG_TAG, ...arguments]);
+  var TAG = '[mat-rt v3.11]';
+
+  function log() {
+    if (!console || !console.log) return;
+    var args = Array.prototype.slice.call(arguments);
+    args.unshift(TAG);
+    console.log.apply(console, args);
   }
 
-  function warn () {
-    console.warn.apply(console, [LOG_TAG, ...arguments]);
+  function warn() {
+    if (!console || !console.warn) return;
+    var args = Array.prototype.slice.call(arguments);
+    args.unshift(TAG);
+    console.warn.apply(console, args);
   }
 
-  // "#rrggbb" → 0.0〜1.0 の RGB
-  function hexToRgb01 (hex) {
-    if (!hex) hex = '#ffffff';
-    if (hex.charAt(0) === '#') hex = hex.slice(1);
-    if (hex.length === 3) {
-      hex = hex.split('').map(function (c) { return c + c; }).join('');
-    }
-    const r = parseInt(hex.slice(0, 2), 16) / 255;
-    const g = parseInt(hex.slice(2, 4), 16) / 255;
-    const b = parseInt(hex.slice(4, 6), 16) / 255;
-    return { r, g, b };
-  }
+  /**
+   * シェーダにクロマ用のユニフォームと処理を注入する
+   *  - キー色は一旦無視し、「明度が高い部分＝白地」をクロップ対象とする
+   *  - tolerance: 「どこまで白を飛ばすか」（0〜1, 高いほど広く飛ばす）
+   *  - feather:   エッジのソフトさ（0〜1, 高いほどふんわり）
+   */
+  function patchShaderForChroma(shader) {
+    // 既にパッチ済みなら二重適用を避ける
+    if (shader.__lm_chroma_patched) return;
 
-  // シーンを取得
-  function getScene () {
-    const br =
-      global.__lm_viewer_bridge ||
-      global.__lm_viewer_bridge_autobind ||
-      global.__lm_viewer;
+    shader.uniforms.lmChromaEnabled = { value: false };
+    shader.uniforms.lmChromaTolerance = { value: 0.3 };
+    shader.uniforms.lmChromaFeather = { value: 0.5 };
 
-    if (br && typeof br.getScene === 'function') {
-      return br.getScene();
-    }
-    if (global.scene && typeof global.scene.traverse === 'function') {
-      return global.scene;
-    }
-    return null;
-  }
+    // MeshStandardMaterial 系のフラグメント末尾近辺にある行
+    var hook = 'gl_FragColor = vec4( outgoingLight, diffuseColor.a );';
 
-  // material.name === materialKey なマテリアルを列挙
-  function collectMaterialsByKey (materialKey) {
-    const scene = getScene();
-    if (!scene) {
-      warn('no scene found; chroma skipped for key', materialKey);
-      return [];
-    }
-    const found = [];
-    scene.traverse(function (obj) {
-      if (!obj.material) return;
-
-      if (Array.isArray(obj.material)) {
-        obj.material.forEach(function (m) {
-          if (m && m.name === materialKey && found.indexOf(m) === -1) {
-            found.push(m);
-          }
-        });
-      } else {
-        const m = obj.material;
-        if (m && m.name === materialKey && found.indexOf(m) === -1) {
-          found.push(m);
-        }
-      }
-    });
-    return found;
-  }
-
-  // クリッピング用の GLSL チャンクを生成
-  function buildClipChunk (params) {
-    const rgb = hexToRgb01(params.colorHex || '#ffffff');
-
-    // tolerance: 0〜1 を 0.01〜0.4 くらいの距離にマップ
-    const tol = typeof params.tolerance === 'number' ? params.tolerance : 0.15;
-    const hard = 0.01 + tol * 0.35;
-
-    // feather: 0〜1 → ソフトエッジ幅 0.0〜0.1 くらい
-    const feather = typeof params.feather === 'number' ? params.feather : 0.5;
-    const soft = hard + (0.02 + feather * 0.08);
-
-    return `
-      // === LociMyu chroma clip ===
-      vec3 lmKeyColor = vec3(${rgb.r.toFixed(6)}, ${rgb.g.toFixed(6)}, ${rgb.b.toFixed(6)});
-      float lmChromaDist = distance(gl_FragColor.rgb, lmKeyColor);
-      float lmHard = ${hard.toFixed(6)};
-      float lmSoft = ${soft.toFixed(6)};
-
-      // lmMask: 1.0 = 保持 / 0.0 = 完全カット
-      float lmMask = smoothstep(lmSoft, lmHard, lmChromaDist);
-
-      // ほぼキー色 → 完全 discard して奥のメッシュを表示
-      if (lmMask <= 0.0) {
-        discard;
-      }
-
-      // エッジ付近だけ少し残したい場合のために α にも反映
-      gl_FragColor.a *= lmMask;
-      // === /LociMyu chroma clip ===
-    `;
-  }
-
-  // 個々のマテリアルに対して onBeforeCompile でフラグメントを書き換える
-  function applyClipToMaterial (material, params) {
-    material.userData = material.userData || {};
-    material.userData.__lm_chromaClipParams = params;
-
-    if (!params.enabled) {
-      // off のときはフック解除
-      if (material.__lm_hasChromaClip) {
-        material.onBeforeCompile = function () { /* no-op → デフォルトシェーダ */ };
-        material.__lm_hasChromaClip = false;
-        material.needsUpdate = true;
-        log('chroma disabled for material', material.name);
-      }
+    if (shader.fragmentShader.indexOf(hook) === -1) {
+      // Material の種類によってはこの行が無いケースもあるので、その場合は諦める
+      warn('no hook line; chroma disabled for this material');
       return;
     }
 
-    const chunk = buildClipChunk(params);
+    var injection = [
+      '',
+      '  // --- LociMyu chroma clip (brightness based) ---',
+      '  if ( lmChromaEnabled ) {',
+      '    // diffuseColor.rgb は sRGB → Linear 変換後の色想定',
+      '    float lmLuma = dot( diffuseColor.rgb, vec3( 0.299, 0.587, 0.114 ) );',
+      '',
+      '    // tolerance が大きいほど「白に近い広い範囲」を飛ばす',
+      '    // 例: tol=0.3 → luma が 0.7〜1.0 の領域が対象',
+      '    float edge0 = 1.0 - clamp( lmChromaTolerance, 0.0, 1.0 );',
+      '    float edge1 = edge0 + clamp( lmChromaFeather, 0.0, 1.0 ) * 0.25;', // feather で境界幅を調整
+      '',
+      '    float k = smoothstep( edge0, edge1, lmLuma );',
+      '',
+      '    // ほぼ完全に白地な領域は深度も含めて完全に捨てる',
+      '    if ( k >= 0.999 ) {',
+      '      discard;',
+      '    }',
+      '',
+      '    // 境界部分はフェードアウトさせてジャギを抑える',
+      '    diffuseColor.a *= ( 1.0 - k );',
+      '  }',
+      '  // --- end chroma clip ---',
+      ''
+    ].join('\n');
+
+    shader.fragmentShader = shader.fragmentShader.replace(hook, injection + hook);
+    shader.__lm_chroma_patched = true;
+  }
+
+  /**
+   * 個々の THREE.Material に対して chroma パッチを設定
+   */
+  function ensureMaterialPatchedForChroma(material, state) {
+    if (!material || !material.isMaterial) return;
+
+    // 透明表現と discard の両立をさせるための基本設定
+    material.transparent = true;
+    material.depthWrite = true;
+    material.depthTest = true;
+
+    // onBeforeCompile はマテリアル単位で一度だけ差し込めばよい
+    var originalOnBeforeCompile = material.onBeforeCompile;
 
     material.onBeforeCompile = function (shader) {
-      const src = shader.fragmentShader;
-
-      // PBR 系ならだいたいこの行が存在するはず
-      const anchor = 'gl_FragColor = vec4( outgoingLight, diffuseColor.a );';
-      const idx = src.indexOf(anchor);
-
-      if (idx === -1) {
-        warn('no gl_FragColor hook; chroma disabled for material', material.name);
-        return;
+      if (typeof originalOnBeforeCompile === 'function') {
+        originalOnBeforeCompile.call(this, shader);
       }
 
-      const injected =
-        src.slice(0, idx) +
-        chunk + '\n' +
-        src.slice(idx);
+      patchShaderForChroma(shader);
 
-      shader.fragmentShader = injected;
-      log('shader patched for material', material.name);
+      if (shader.uniforms.lmChromaEnabled) {
+        shader.uniforms.lmChromaEnabled.value = !!state.enabled;
+      }
+      if (shader.uniforms.lmChromaTolerance) {
+        shader.uniforms.lmChromaTolerance.value =
+          typeof state.tolerance === 'number' ? state.tolerance : 0.0;
+      }
+      if (shader.uniforms.lmChromaFeather) {
+        shader.uniforms.lmChromaFeather.value =
+          typeof state.feather === 'number' ? state.feather : 0.0;
+      }
+
+      material.userData.__lm_chromaShader = shader;
     };
 
-    material.__lm_hasChromaClip = true;
+    // 再コンパイルを促す
     material.needsUpdate = true;
   }
 
-  // 内部コア: 正規化済み params を受けて実際に適用
-  function applyChromaCore (params) {
-    const key = params.materialKey || params.key;
-    if (!key) {
-      warn('applyChromaCore called without materialKey', params);
+  /**
+   * シーン内の「指定された material.name を持つマテリアル」に対して
+   * chroma 設定を適用
+   */
+  function applyChromaToScene(materialKey, options) {
+    if (!materialKey) {
+      warn('applyChromaToScene called without materialKey');
       return;
     }
 
-    log('applyChromaCore', JSON.stringify(params));
+    var bridge = window.__lm_viewer_bridge;
+    if (!bridge || typeof bridge.getScene !== 'function') {
+      warn('no viewer bridge / getScene not ready');
+      return;
+    }
 
-    const materials = collectMaterialsByKey(key);
-    materials.forEach(function (m) {
-      applyClipToMaterial(m, params);
+    var scene = bridge.getScene && bridge.getScene();
+    if (!scene) {
+      warn('scene not ready yet');
+      return;
+    }
+
+    var state = {
+      enabled: !!options.enabled,
+      tolerance:
+        typeof options.tolerance === 'number' ? options.tolerance : 0.0,
+      feather: typeof options.feather === 'number' ? options.feather : 0.0
+    };
+
+    scene.traverse(function (obj) {
+      if (!obj.isMesh) return;
+
+      var mats = obj.material;
+      if (!mats) return;
+      if (!Array.isArray(mats)) mats = [mats];
+
+      for (var i = 0; i < mats.length; i++) {
+        var mat = mats[i];
+        if (!mat || !mat.name) continue;
+        if (mat.name !== materialKey) continue;
+
+        ensureMaterialPatchedForChroma(mat, state);
+
+        // すでにコンパイル済みで userData に shader があれば、直接 uniform を更新
+        var shader = mat.userData.__lm_chromaShader;
+        if (shader) {
+          if (shader.uniforms.lmChromaEnabled) {
+            shader.uniforms.lmChromaEnabled.value = state.enabled;
+          }
+          if (shader.uniforms.lmChromaTolerance) {
+            shader.uniforms.lmChromaTolerance.value = state.tolerance;
+          }
+          if (shader.uniforms.lmChromaFeather) {
+            shader.uniforms.lmChromaFeather.value = state.feather;
+          }
+        }
+      }
     });
-
-    log('chroma applied to', materials.length, 'material(s) for key', key);
   }
 
-  // 互換レイヤ: どんな呼び方でもここに集約する
-  //
-  // 1) オブジェクト形式:
-  //    applyChroma({ materialKey, enabled, colorHex, tolerance, feather })
-  //
-  // 2) 位置引数形式:
-  //    applyChroma(materialKey, enabled, colorHex, tolerance, feather)
-  //
-  function applyChromaUniversal () {
-    let params;
-
-    if (arguments.length === 1 && typeof arguments[0] === 'object') {
-      params = Object.assign(
-        {
-          enabled: true,
-          colorHex: '#ffffff',
-          tolerance: 0.15,
-          feather: 0.5
-        },
-        arguments[0] || {}
-      );
-    } else if (arguments.length >= 1 && typeof arguments[0] === 'string') {
-      params = {
-        materialKey: arguments[0],
-        enabled: arguments.length > 1 ? !!arguments[1] : true,
-        colorHex: arguments.length > 2 ? (arguments[2] || '#ffffff') : '#ffffff',
-        tolerance: arguments.length > 3 ? (arguments[3] || 0.15) : 0.15,
-        feather: arguments.length > 4 ? (arguments[4] || 0.5) : 0.5
-      };
-    } else {
-      warn('applyChromaUniversal called with unexpected args', arguments);
-      return;
-    }
-
-    log('applyChromaUniversal', params);
-    applyChromaCore(params);
+  /**
+   * オーケストレータ側から呼ばれる公開 API
+   *
+   * 既存実装との互換性を考えて、いくつか名前違いのメソッド／グローバル名を
+   * まとめて生やしておく。
+   */
+  function apiApplyChroma(opts) {
+    opts = opts || {};
+    log('apply chroma', opts);
+    applyChromaToScene(opts.materialKey, {
+      enabled: opts.enabled,
+      tolerance: opts.tolerance,
+      feather: opts.feather
+    });
   }
 
-  // 公開 API オブジェクト
-  const api = {
-    // メイン
-    applyChroma: applyChromaUniversal,
+  var api = {
+    // メイン想定
+    applyChroma: apiApplyChroma,
 
-    // 旧名っぽいものを全部ラップしておく
-    applyChromaKey: applyChromaUniversal,
-    chromaKey: applyChromaUniversal,
-    setChroma: applyChromaUniversal
+    // 互換用エイリアス（過去の実装で違う名前を使っていても拾えるように）
+    applyChromaForKey: apiApplyChroma,
+    setChroma: apiApplyChroma,
+    updateChroma: apiApplyChroma
   };
 
-  // 既存のどの呼び名でも拾えるように同じオブジェクト／関数を複数名で公開
-  global.__LM_MATERIAL_RUNTIME = api;
-  global.__LM_MATERIALS_RUNTIME = api;
-  global.__lm_materialRuntime = api;
-  global.__lm_material_runtime = api;
-
-  // 関数として直接持っていそうなケースもカバー
-  global.__lm_applyChroma = applyChromaUniversal;
-  global.__LM_APPLY_CHROMA = applyChromaUniversal;
-  global.applyChromaKey = applyChromaUniversal;
+  // グローバル公開名も複数用意しておく（どれかに既存コードがぶら下がっている想定）
+  window.__lm_material_runtime_patch = api;
+  window.__LM_MaterialRuntime = api;
+  window.__LM_MaterialsRuntime = api;
+  window.__LM_MaterialsRuntimePatch = api;
 
   log('ready');
-
-})(window);
+})();
