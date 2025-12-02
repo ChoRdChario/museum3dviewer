@@ -32,6 +32,7 @@ function ensureRenderer() {
   renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
   renderer.setPixelRatio(window.devicePixelRatio || 1);
   renderer.setSize(canvas.clientWidth || 800, canvas.clientHeight || 600, false);
+  // three r160+ では outputEncoding 廃止だが、既存コードとの互換のため一旦そのまま
   renderer.outputEncoding = THREE.sRGBEncoding;
 
   scene = new THREE.Scene();
@@ -510,4 +511,5 @@ export {
   removePinMarker,
   setPinSelected,
   rebuildMaterialIndex,
+  loadGlbFromDrive,   // ★ これを追加
 };
