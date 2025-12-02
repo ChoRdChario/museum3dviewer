@@ -151,7 +151,7 @@
     const br = getViewerBridge();
     if (!br || typeof br.setPinSelected !== 'function') return;
     try{
-      br.setPinSelected(id || null, !!id);
+      br.setPinSelected(id || null);
     }catch(e){
       warn('setPinSelected failed', e);
     }
@@ -246,7 +246,10 @@
     });
   }
 
-  function selectItem(id){
+  function selectItem(id, opts){
+    opts = opts || {};
+    const fromViewer = !!opts.fromViewer;
+
     store.selectedId = id || null;
     if (elList){
       $$('.lm-cap-row', elList).forEach(row=>{
@@ -255,7 +258,7 @@
     }
     const it = store.items.find(x=>x.id===id);
     if (!it){
-      syncViewerSelection(null);
+      if (!fromViewer) syncViewerSelection(null);
       if (elTitle) elTitle.value = '';
       if (elBody)  elBody.value  = '';
       renderImages(); // clear image selection highlight
@@ -265,7 +268,7 @@
     }
     if (elTitle) elTitle.value = it.title || '';
     if (elBody)  elBody.value  = it.body  || '';
-    syncViewerSelection(it.pos ? it.id : null);
+    if (!fromViewer) syncViewerSelection(it.pos ? it.id : null);
     renderImages(); // update image highlight for this caption
     renderPreview();
     emitItemSelected(it);

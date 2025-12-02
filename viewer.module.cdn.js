@@ -43,6 +43,7 @@ const renderCallbacks = new Set();            // fn({renderer, scene, camera})
 const shiftPickHandlers = new Set();          // fn({point, event, hit})
 const pinMarkers = new Map();                 // id -> Object3D
 const pinSelectHandlers = new Set();          // fn({id})
+let isDispatchingPinSelect = false;
 
 let animationFrameId = null;
 let resizeHandlerInstalled = false;
@@ -607,10 +608,16 @@ export function onPinSelect(fn) {
 }
 
 export function setPinSelected(id) {
-  for (const fn of pinSelectHandlers) {
-    try { fn({ id }); } catch (e) {
-      console.warn('[viewer.module] pinSelect handler error', e);
+  if (isDispatchingPinSelect) return;
+  isDispatchingPinSelect = true;
+  try {
+    for (const fn of pinSelectHandlers) {
+      try { fn(id); } catch (e) {
+        console.warn('[viewer.module] pinSelect handler error', e);
+      }
     }
+  } finally {
+    isDispatchingPinSelect = false;
   }
 }
 
