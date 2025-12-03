@@ -41,7 +41,6 @@
     }
   }
 
-
   // Store (stable on window to survive reload of this script)
   const store = window.__LM_CAPTION_STORE || (window.__LM_CAPTION_STORE = {
     currentColor: '#eab308',
@@ -102,7 +101,6 @@
     });
   }
 
-
   function onItemSelected(fn){
     if (typeof fn === 'function') selectListeners.push(fn);
   }
@@ -150,7 +148,7 @@
   }
 
   function syncViewerSelection(id){
-    // viewer 側からの選択通知などで再入した場合はスキップして循環を防ぐ
+    // prevent recursive pin selection loops between UI and viewer
     if (isSyncingViewerSelection) return;
 
     const br = getViewerBridge();
@@ -158,7 +156,7 @@
 
     isSyncingViewerSelection = true;
     try{
-      br.setPinSelected(id || null, !!id);
+      br.setPinSelected(id || null);
     }catch(e){
       warn('setPinSelected failed', e);
     }finally{
@@ -267,7 +265,7 @@
       syncViewerSelection(null);
       if (elTitle) elTitle.value = '';
       if (elBody)  elBody.value  = '';
-      renderImages(); // clear image selection highlight
+      renderImages();
       renderPreview();
       emitItemSelected(null);
       return;
@@ -275,10 +273,11 @@
     if (elTitle) elTitle.value = it.title || '';
     if (elBody)  elBody.value  = it.body  || '';
     syncViewerSelection(it.pos ? it.id : null);
-    renderImages(); // update image highlight for this caption
+    renderImages();
     renderPreview();
     emitItemSelected(it);
   }
+
   function removeItem(id){
     const idx = store.items.findIndex(x=>x.id===id);
     if (idx === -1) return;
@@ -299,7 +298,7 @@
       warn('removePinMarker failed', e);
     }
 
-    // Sheets へ削除通知（ソフトデリートは caption.sheet.bridge 側）
+    // Sheets へ削除通知
     if (removed && removed.id){
       emitItemDeleted(removed);
     }else{
@@ -308,7 +307,7 @@
 
     refreshList();
     renderImages();
-  renderPreview();
+    renderPreview();
   }
 
   // --- Title / Body input wiring ----------------------------------------------
@@ -414,7 +413,6 @@
       label.textContent = imgInfo.name || '(image)';
       wrap.appendChild(label);
 
-      // detach button (visible on hover / when attached)
       const detach = document.createElement('button');
       detach.type = 'button';
       detach.textContent = '×';
@@ -458,7 +456,6 @@
           scheduleChanged(cur);
           refreshList();
           renderImages();
-  renderPreview();
           renderPreview();
         }
       });
@@ -471,18 +468,18 @@
           log('image click ignored (no caption selected)');
           return;
         }
-        // attach (no toggle; detach is handled by × button)
         cur.imageFileId = imgInfo.id;
         cur.image = imgInfo;
         scheduleChanged(cur);
-        refreshList();   // 🖼 マーク更新
-        renderImages();  // ハイライト更新
+        refreshList();
+        renderImages();
         renderPreview();
       });
 
       elImages.appendChild(wrap);
     });
   }
+
   if (elRefreshImg){
     elRefreshImg.addEventListener('click', ()=>{
       try{
@@ -521,14 +518,12 @@
     refreshList();
     syncPinsFromItems();
     renderImages();
-  renderPreview();
     renderPreview();
   }
 
   function setImages(images){
     store.images = images || [];
     renderImages();
-  renderPreview();
     renderPreview();
   }
 
@@ -565,14 +560,13 @@
     emitItemAdded(item);
   }
 
-  // fallback click: GL canvas 上の Shift+クリック
   function installFallbackClick(){
     const area = document.getElementById('gl') ||
                  document.querySelector('#viewer,#glCanvas,#glcanvas');
     if (!area) return;
     area.addEventListener('click', (ev)=>{
       if (!ev.shiftKey) return;
-      if (preferWorldClicks) return; // viewer 側で world 座標を扱う場合はそちらを優先
+      if (preferWorldClicks) return;
       const rect = area.getBoundingClientRect();
       const x = (ev.clientX - rect.left) / rect.width;
       const y = (ev.clientY - rect.top) / rect.height;
@@ -585,10 +579,13 @@
     const br = getViewerBridge();
     if (!br || typeof br.onCanvasShiftPick !== 'function') return;
     try{
-      br.onCanvasShiftPick((world)=>{
-        if (!world) return;
+      br.onCanvasShiftPick((payload)=>{
+        if (!payload || !payload.point) return;
+        const p = payload.point;
+        if (typeof p.x !== 'number' || typeof p.y !== 'number' || typeof p.z !== 'number') return;
         preferWorldClicks = true;
-        addCaptionAt(0.5, 0.5, world);
+        // Store only world-space coordinates on the item; Sheets / overlay both expect pos.{x,y,z}
+        addCaptionAt(0.5, 0.5, { x: p.x, y: p.y, z: p.z });
       });
       worldHookInstalled = true;
       log('world-space hook installed');
@@ -618,8 +615,8 @@
     get items(){ return store.items; },
     get images(){ return store.images; },
     get selectedId(){ return store.selectedId; }
-  };  window.__LM_CAPTION_UI.__ver = 'A2';
-
+  };
+  window.__LM_CAPTION_UI.__ver = 'A2';
 
   // initial render
   renderColors();
