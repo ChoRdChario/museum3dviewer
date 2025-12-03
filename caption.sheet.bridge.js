@@ -249,7 +249,6 @@
     log('update row', item.id, 'row', rowIndex);
   }
 
-  
   async function softDeleteRow(spreadsheetId, sheetTitle, item){
     if (!item || !item.rowIndex){
       warn('softDeleteRow: missing rowIndex; skip', item && item.id);
@@ -265,7 +264,7 @@
     log('soft delete row', item.id, 'row', rowIndex);
   }
 
-// --- main: sheet-context handler -------------------------------------------
+  // --- main: sheet-context handler -------------------------------------------
   async function handleSheetContext(detail){
     const spreadsheetId = String(detail.spreadsheetId || '');
     let sheetGid = detail.sheetGid;
@@ -324,7 +323,7 @@
           });
           addedHookBound = true;
         }
-        // subscribe for edits (title/body)
+        // subscribe for edits (title/body/pos/image)
         if (typeof ui.onItemChanged === 'function' && !changedHookBound){
           ui.onItemChanged(it=>{
             if (!ctx.spreadsheetId || !ctx.sheetTitle) return;

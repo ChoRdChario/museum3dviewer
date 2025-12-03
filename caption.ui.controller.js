@@ -41,7 +41,6 @@
     }
   }
 
-
   // Store (stable on window to survive reload of this script)
   const store = window.__LM_CAPTION_STORE || (window.__LM_CAPTION_STORE = {
     currentColor: '#eab308',
@@ -101,7 +100,6 @@
       try{ fn(item); }catch(e){ console.error(TAG,'onItemDeleted handler failed', e); }
     });
   }
-
 
   function onItemSelected(fn){
     if (typeof fn === 'function') selectListeners.push(fn);
@@ -273,6 +271,7 @@
     renderPreview();
     emitItemSelected(it);
   }
+
   function removeItem(id){
     const idx = store.items.findIndex(x=>x.id===id);
     if (idx === -1) return;
@@ -302,7 +301,7 @@
 
     refreshList();
     renderImages();
-  renderPreview();
+    renderPreview();
   }
 
   // --- Title / Body input wiring ----------------------------------------------
@@ -452,7 +451,6 @@
           scheduleChanged(cur);
           refreshList();
           renderImages();
-  renderPreview();
           renderPreview();
         }
       });
@@ -477,6 +475,7 @@
       elImages.appendChild(wrap);
     });
   }
+
   if (elRefreshImg){
     elRefreshImg.addEventListener('click', ()=>{
       try{
@@ -515,14 +514,12 @@
     refreshList();
     syncPinsFromItems();
     renderImages();
-  renderPreview();
     renderPreview();
   }
 
   function setImages(images){
     store.images = images || [];
     renderImages();
-  renderPreview();
     renderPreview();
   }
 
@@ -612,8 +609,8 @@
     get items(){ return store.items; },
     get images(){ return store.images; },
     get selectedId(){ return store.selectedId; }
-  };  window.__LM_CAPTION_UI.__ver = 'A2';
-
+  };
+  window.__LM_CAPTION_UI.__ver = 'A2';
 
   // initial render
   renderColors();
