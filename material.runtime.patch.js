@@ -1,9 +1,9 @@
 // material.runtime.patch.js
-// LociMyu material runtime patch – chroma-key config bridge only
-// v3.14  (A案: viewer.module にシェーダフックを一本化)
+// LociMyu material runtime patch – chroma-key, double-sided, unlit bridging
+// v3.13
 
 (function () {
-  const TAG = '[mat-rt v3.14]';
+  const TAG = '[mat-rt v3.13]';
 
   function log() {
     console.log.apply(console, [TAG, ...arguments]);
@@ -21,8 +21,6 @@
   };
 
   // materialKey ごとの設定キャッシュ
-  //   key: materialKey (例: 'texture.002')
-  //   value: { enabled, colorHex, tolerance, feather }
   const chromaByKey = new Map();
 
   // 0–1 クランプ
@@ -50,9 +48,6 @@
   }
 
   // applyMaterialProps から来る props からクロマ設定を吸い上げる
-  //   - props.chromaEnable / chromaColor / chromaTolerance / chromaFeather
-  //   - props.chroma.{enabled,colorHex,tolerance,feather}
-  // など、複数の表現に対応
   function normalizeChromaFromProps(prevCfg, props) {
     const cfg = Object.assign({}, DEFAULT_CHROMA, prevCfg || {});
     if (!props || typeof props !== 'object') return cfg;
@@ -124,24 +119,136 @@
     return cfg;
   }
 
-  // ---------------------------------------------------------------------------
-  //  viewer.applyMaterialProps の後ろにぶら下がって、
-  //  「いまどのマテリアルにどんなクロマ設定が乗っているか」を記録するだけの処理。
-  //  シェーダ(onBeforeCompile)には一切介入しない。
-  // ---------------------------------------------------------------------------
-  function handleApplyMaterialProps(bridge, materialKey, props) {
-    if (!materialKey) return;
-    const prev = chromaByKey.get(materialKey);
-    const cfg = normalizeChromaFromProps(prev, props || {});
-    chromaByKey.set(materialKey, cfg);
-    log('set chroma config', materialKey, cfg);
+  // シーンから materialKey に対応する THREE.Material を拾う
+  function findMaterialsForKey(bridge, materialKey) {
+    const mats = [];
+    if (!bridge || !bridge.getScene) return mats;
+    const scene = bridge.getScene();
+    if (!scene || !scene.traverse) return mats;
+
+    scene.traverse(function (obj) {
+      if (!obj || !obj.isMesh) return;
+      let mat = obj.material;
+      if (!mat) return;
+      if (Array.isArray(mat)) {
+        mat.forEach(function (m) {
+          if (!m) return;
+          const key =
+            (m.userData && (m.userData.lmMatKey || m.userData.matKey)) ||
+            m.name;
+          if (key === materialKey) mats.push(m);
+        });
+      } else {
+        const key =
+          (mat.userData && (mat.userData.lmMatKey || mat.userData.matKey)) ||
+          mat.name;
+        if (key === materialKey) mats.push(mat);
+      }
+    });
+
+    return mats;
   }
 
-  // ---------------------------------------------------------------------------
-  //  viewer bridge の applyMaterialProps をパッチ
-  //   - 元の処理（viewer.module 側）を先に実行
-  //   - そのあと handleApplyMaterialProps でキャッシュ更新のみ行う
-  // ---------------------------------------------------------------------------
+  function ensureChromaUniforms(material) {
+    material.userData = material.userData || {};
+    if (material.userData.__lmChromaUniforms) {
+      return material.userData.__lmChromaUniforms;
+    }
+
+    const uniforms = {
+      uLmChromaEnabled: { value: 0 },
+      uLmChromaColor: { value: { x: 1, y: 1, z: 1 } },
+      uLmChromaTolerance: { value: 0.0 },
+      uLmChromaFeather: { value: 0.0 },
+    };
+
+    const origOnBeforeCompile = material.onBeforeCompile || null;
+    material.onBeforeCompile = function (shader) {
+      // 既存 onBeforeCompile を尊重
+      if (origOnBeforeCompile) {
+        try {
+          origOnBeforeCompile.call(this, shader);
+        } catch (e) {
+          warn('orig onBeforeCompile error', e);
+        }
+      }
+
+      // ユニフォームを注入
+      shader.uniforms.uLmChromaEnabled =
+        shader.uniforms.uLmChromaEnabled || uniforms.uLmChromaEnabled;
+      shader.uniforms.uLmChromaColor =
+        shader.uniforms.uLmChromaColor || uniforms.uLmChromaColor;
+      shader.uniforms.uLmChromaTolerance =
+        shader.uniforms.uLmChromaTolerance || uniforms.uLmChromaTolerance;
+      shader.uniforms.uLmChromaFeather =
+        shader.uniforms.uLmChromaFeather || uniforms.uLmChromaFeather;
+
+      // フラグ
+      shader.defines = shader.defines || {};
+      shader.defines.LM_USE_CHROMA_KEY = 1;
+
+      // map サンプリング部分を書き換え
+      const hook =
+        '#ifdef USE_MAP\n' +
+        '\tvec4 texelColor = texture2D( map, vUv );';
+
+      if (shader.fragmentShader.indexOf(hook) !== -1) {
+        shader.fragmentShader = shader.fragmentShader.replace(
+          hook,
+          [
+            '#ifdef USE_MAP',
+            '\tvec4 texelColor = texture2D( map, vUv );',
+            '\t#ifdef LM_USE_CHROMA_KEY',
+            '\t\tvec3 lmSample = texelColor.rgb;',
+            '\t\tfloat lmDist = distance(lmSample, uLmChromaColor);',
+            '\t\tfloat lmEdgeLo = max(uLmChromaTolerance - uLmChromaFeather, 0.0);',
+            '\t\tfloat lmEdgeHi = min(uLmChromaTolerance + uLmChromaFeather, 1.732);',
+            '\t\tfloat lmAlpha = smoothstep(lmEdgeLo, lmEdgeHi, lmDist);',
+            '\t\tif (uLmChromaEnabled > 0.5 && lmAlpha < 0.0001) discard;',
+            '\t#endif',
+          ].join('\n')
+        );
+      } else {
+        // フォールバック：map 周りにフックが見つからない場合もある
+        warn('map hook not found; chroma may not work for this material');
+      }
+    };
+
+    material.userData.__lmChromaUniforms = uniforms;
+    return uniforms;
+  }
+
+  function applyChromaToMaterials(bridge, materialKey, cfg) {
+    const mats = findMaterialsForKey(bridge, materialKey);
+    if (!mats.length) {
+      log('no materials found for key', materialKey);
+      return;
+    }
+
+    const rgb = hexToRGB(cfg.colorHex);
+    mats.forEach(function (mat) {
+      const uniforms = ensureChromaUniforms(mat);
+      uniforms.uLmChromaEnabled.value = cfg.enabled ? 1 : 0;
+      uniforms.uLmChromaColor.value.x = rgb.r;
+      uniforms.uLmChromaColor.value.y = rgb.g;
+      uniforms.uLmChromaColor.value.z = rgb.b;
+      uniforms.uLmChromaTolerance.value = clamp01(cfg.tolerance);
+      uniforms.uLmChromaFeather.value = clamp01(cfg.feather);
+      mat.needsUpdate = true;
+    });
+
+    log('applied chroma to', materialKey, 'mats=', mats.length, cfg);
+  }
+
+  // applyMaterialProps をフックして、クロマ設定を反映
+  function handleApplyMaterialProps(bridge, materialKey, props) {
+    const prev = chromaByKey.get(materialKey);
+    const cfg = normalizeChromaFromProps(prev, props);
+    chromaByKey.set(materialKey, cfg);
+    log('set chroma config', materialKey, cfg);
+    applyChromaToMaterials(bridge, materialKey, cfg);
+  }
+
   function patchViewerBridgeOnce() {
     const bridge = window.__lm_viewer_bridge;
     if (!bridge) return false;
@@ -156,66 +263,22 @@
     }
 
     bridge.applyMaterialProps = function (materialKey, props) {
-      // 先に元の処理（不透明度・ダブルサイド・シェーダ uniform 更新など）を実行
+      // 先に元の処理（不透明度・ダブルサイドなど）を実行
       origApply(materialKey, props);
       try {
         handleApplyMaterialProps(bridge, materialKey, props || {});
       } catch (e) {
-        warn('applyMaterialProps chroma cache error', e);
+        warn('applyMaterialProps chroma error', e);
       }
     };
 
     bridge.__lmChromaPatched = true;
-    log('patched viewer bridge.applyMaterialProps (cache only)');
+    log('patched viewer bridge.applyMaterialProps');
     return true;
   }
 
-  // ---------------------------------------------------------------------------
-  //  material.orchestrator.js から呼ばれるエントリ:
-  //    window.__lm_applyChromaForKey(materialKey, props)
-  //
-  //  ここでもシェーダには触らず、
-  //   - chromaByKey キャッシュ更新
-  //   - viewer.applyMaterialProps() を使って viewer.module 側に値を渡す
-  //  だけを行う。
-  // ---------------------------------------------------------------------------
-  function applyChromaForKey(materialKey, props) {
-    if (!materialKey) return;
-
-    const bridge = window.__lm_viewer_bridge;
-    if (!bridge || typeof bridge.applyMaterialProps !== 'function') {
-      warn('applyChromaForKey: viewer bridge missing');
-      return;
-    }
-
-    const prev = chromaByKey.get(materialKey);
-    const cfg = normalizeChromaFromProps(prev, props || {});
-    chromaByKey.set(materialKey, cfg);
-
-    // viewer.module 側の applyMaterialProps が理解できる形に整形
-    const viewerProps = {
-      chromaEnable: cfg.enabled,
-      chromaColor: cfg.colorHex,
-      chromaTolerance: cfg.tolerance,
-      chromaFeather: cfg.feather,
-    };
-
-    try {
-      bridge.applyMaterialProps(materialKey, viewerProps);
-      log('applyChromaForKey -> viewer', materialKey, viewerProps);
-    } catch (e) {
-      warn('applyChromaForKey error', e);
-    }
-  }
-
-  // グローバル公開（material.orchestrator.js から呼ばれる）
-  window.__lm_applyChromaForKey = applyChromaForKey;
-
-  // ---------------------------------------------------------------------------
-  //  Boot
-  // ---------------------------------------------------------------------------
   function boot() {
-    log('ready (config bridge only)');
+    log('ready');
 
     // ポーリングで viewer bridge を待つ（既に在れば即パッチ）
     let tries = 0;

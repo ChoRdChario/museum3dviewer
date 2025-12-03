@@ -170,24 +170,12 @@ uniform float uChromaFeather;
         `
 #include <dithering_fragment>
 if (uChromaEnable > 0.5) {
-  // Key color and current pixel color distance in RGB space (0.0 - ~1.732)
   vec3 keyColor = uChromaColor.rgb;
   float dist = distance(diffuseColor.rgb, keyColor);
-
-  // Tolerance +/- feather defines the smooth band
-  float edgeLo = max(uChromaTolerance - uChromaFeather, 0.0);
-  float edgeHi = uChromaTolerance + uChromaFeather;
-
-  // dist <= edgeLo -> mask ~= 0,  dist >= edgeHi -> mask ~= 1
-  float mask = smoothstep(edgeLo, edgeHi, dist);
-
-  // Treat near-key-color region as fully cut out (no depth write)
-  if (mask < 0.001) {
-    discard;
-  }
-
-  // Feather band: gradually reduce alpha
-  diffuseColor.a *= mask;
+  float a = smoothstep(uChromaTolerance,
+                       uChromaTolerance + uChromaFeather,
+                       dist);
+  diffuseColor.a *= a;
 }
 `
       );
