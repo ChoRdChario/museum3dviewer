@@ -111,8 +111,6 @@
   }
 
   // --- viewer bridge + pins ---------------------------------------------------
-  let isSyncingViewerSelection = false;
-
   function getViewerBridge(){
     try{
       const pr = window.__lm_pin_runtime;
@@ -148,19 +146,12 @@
   }
 
   function syncViewerSelection(id){
-    // prevent recursive pin selection loops between UI and viewer
-    if (isSyncingViewerSelection) return;
-
     const br = getViewerBridge();
     if (!br || typeof br.setPinSelected !== 'function') return;
-
-    isSyncingViewerSelection = true;
     try{
-      br.setPinSelected(id || null);
+      br.setPinSelected(id || null, !!id);
     }catch(e){
       warn('setPinSelected failed', e);
-    }finally{
-      isSyncingViewerSelection = false;
     }
   }
 
@@ -265,7 +256,7 @@
       syncViewerSelection(null);
       if (elTitle) elTitle.value = '';
       if (elBody)  elBody.value  = '';
-      renderImages();
+      renderImages(); // clear image selection highlight
       renderPreview();
       emitItemSelected(null);
       return;
@@ -273,11 +264,10 @@
     if (elTitle) elTitle.value = it.title || '';
     if (elBody)  elBody.value  = it.body  || '';
     syncViewerSelection(it.pos ? it.id : null);
-    renderImages();
+    renderImages(); // update image highlight for this caption
     renderPreview();
     emitItemSelected(it);
   }
-
   function removeItem(id){
     const idx = store.items.findIndex(x=>x.id===id);
     if (idx === -1) return;
@@ -298,7 +288,7 @@
       warn('removePinMarker failed', e);
     }
 
-    // Sheets へ削除通知
+    // Sheets へ削除通知（ソフトデリートは caption.sheet.bridge 側）
     if (removed && removed.id){
       emitItemDeleted(removed);
     }else{
@@ -413,6 +403,7 @@
       label.textContent = imgInfo.name || '(image)';
       wrap.appendChild(label);
 
+      // detach button (visible on hover / when attached)
       const detach = document.createElement('button');
       detach.type = 'button';
       detach.textContent = '×';
@@ -468,18 +459,18 @@
           log('image click ignored (no caption selected)');
           return;
         }
+        // attach (no toggle; detach is handled by × button)
         cur.imageFileId = imgInfo.id;
         cur.image = imgInfo;
         scheduleChanged(cur);
-        refreshList();
-        renderImages();
+        refreshList();   // 🖼 マーク更新
+        renderImages();  // ハイライト更新
         renderPreview();
       });
 
       elImages.appendChild(wrap);
     });
   }
-
   if (elRefreshImg){
     elRefreshImg.addEventListener('click', ()=>{
       try{
@@ -494,16 +485,45 @@
   function normalizeItem(raw){
     raw = raw || {};
     const id = raw.id || newId();
-    const pos = raw.pos || (raw.x!=null && raw.y!=null && raw.z!=null
-      ? { x:Number(raw.x), y:Number(raw.y), z:Number(raw.z) }
-      : null);
+
+    // 2D 画面座標（旧仕様との互換用）
+    const x = (raw.x != null) ? Number(raw.x) : null;
+    const y = (raw.y != null) ? Number(raw.y) : null;
+
+    // 3D world 座標（pos / posX,posY,posZ / 旧 x,y,z のいずれかから復元）
+    let pos = null;
+    if (raw.pos && typeof raw.pos === 'object' &&
+        raw.pos.x != null && raw.pos.y != null && raw.pos.z != null){
+      pos = {
+        x: Number(raw.pos.x),
+        y: Number(raw.pos.y),
+        z: Number(raw.pos.z)
+      };
+    } else if (raw.posX != null && raw.posY != null && raw.posZ != null){
+      pos = {
+        x: Number(raw.posX),
+        y: Number(raw.posY),
+        z: Number(raw.posZ)
+      };
+    } else if (raw.x != null && raw.y != null && raw.z != null){
+      // 旧形式で world 座標を x,y,z に入れていたケースのため
+      pos = {
+        x: Number(raw.x),
+        y: Number(raw.y),
+        z: Number(raw.z)
+      };
+    }
+
     const imageFileId = raw.imageFileId || (raw.image && raw.image.id) || null;
     const image = raw.image || null;
+
     return {
       id,
       title: raw.title || '',
       body: raw.body || '',
       color: raw.color || '#eab308',
+      x,
+      y,
       pos,
       imageFileId,
       image,
@@ -541,12 +561,28 @@
     lastAddAtMs = tNow;
 
     const ts = new Date().toISOString();
+
+    // world 引数は {x,y,z} を想定し、プレーンなオブジェクトにして保持
+    let pos = null;
+    if (world && typeof world === 'object' &&
+        world.x != null && world.y != null && world.z != null){
+      pos = {
+        x: Number(world.x),
+        y: Number(world.y),
+        z: Number(world.z)
+      };
+    }
+
     const item = {
       id: newId(),
       title: '(untitled)',
       body: '',
       color: store.currentColor,
-      pos: world || null,
+      // 2D screen 座標（overlay 側との互換用）
+      x: (typeof x === 'number') ? x : null,
+      y: (typeof y === 'number') ? y : null,
+      // 3D world 座標（pin / Sheets 用）
+      pos,
       imageFileId: null,
       image: null,
       createdAt: ts,
@@ -560,13 +596,14 @@
     emitItemAdded(item);
   }
 
+  // fallback click: GL canvas 上の Shift+クリック
   function installFallbackClick(){
     const area = document.getElementById('gl') ||
                  document.querySelector('#viewer,#glCanvas,#glcanvas');
     if (!area) return;
     area.addEventListener('click', (ev)=>{
       if (!ev.shiftKey) return;
-      if (preferWorldClicks) return;
+      if (preferWorldClicks) return; // viewer 側で world 座標を扱う場合はそちらを優先
       const rect = area.getBoundingClientRect();
       const x = (ev.clientX - rect.left) / rect.width;
       const y = (ev.clientY - rect.top) / rect.height;
@@ -579,13 +616,11 @@
     const br = getViewerBridge();
     if (!br || typeof br.onCanvasShiftPick !== 'function') return;
     try{
-      br.onCanvasShiftPick((payload)=>{
-        if (!payload || !payload.point) return;
-        const p = payload.point;
-        if (typeof p.x !== 'number' || typeof p.y !== 'number' || typeof p.z !== 'number') return;
+      br.onCanvasShiftPick((world)=>{
+        if (!world) return;
         preferWorldClicks = true;
-        // Store only world-space coordinates on the item; Sheets / overlay both expect pos.{x,y,z}
-        addCaptionAt(0.5, 0.5, { x: p.x, y: p.y, z: p.z });
+        // world 座標を優先。画面座標はとりあえず中央に置く（x,y=0.5）
+        addCaptionAt(0.5, 0.5, world);
       });
       worldHookInstalled = true;
       log('world-space hook installed');
@@ -615,8 +650,7 @@
     get items(){ return store.items; },
     get images(){ return store.images; },
     get selectedId(){ return store.selectedId; }
-  };
-  window.__LM_CAPTION_UI.__ver = 'A2';
+  };  window.__LM_CAPTION_UI.__ver = 'A2';
 
   // initial render
   renderColors();
