@@ -145,13 +145,21 @@
     }
   }
 
+  // viewer ←→ UI のループ防止用フラグ
+  let _syncingViewerSelection = false;
+
   function syncViewerSelection(id){
     const br = getViewerBridge();
     if (!br || typeof br.setPinSelected !== 'function') return;
+    if (_syncingViewerSelection) return;
+    _syncingViewerSelection = true;
     try{
-      br.setPinSelected(id || null, !!id);
+      // 第2引数は付けず、もともとの想定どおり id のみ渡す
+      br.setPinSelected(id || null);
     }catch(e){
       warn('setPinSelected failed', e);
+    } finally {
+      _syncingViewerSelection = false;
     }
   }
 
@@ -268,6 +276,7 @@
     renderPreview();
     emitItemSelected(it);
   }
+
   function removeItem(id){
     const idx = store.items.findIndex(x=>x.id===id);
     if (idx === -1) return;
@@ -471,6 +480,7 @@
       elImages.appendChild(wrap);
     });
   }
+
   if (elRefreshImg){
     elRefreshImg.addEventListener('click', ()=>{
       try{
@@ -485,10 +495,6 @@
   function normalizeItem(raw){
     raw = raw || {};
     const id = raw.id || newId();
-
-    // 2D 画面座標（旧仕様との互換用）
-    const x = (raw.x != null) ? Number(raw.x) : null;
-    const y = (raw.y != null) ? Number(raw.y) : null;
 
     // 3D world 座標（pos / posX,posY,posZ / 旧 x,y,z のいずれかから復元）
     let pos = null;
@@ -516,14 +522,11 @@
 
     const imageFileId = raw.imageFileId || (raw.image && raw.image.id) || null;
     const image = raw.image || null;
-
     return {
       id,
       title: raw.title || '',
       body: raw.body || '',
       color: raw.color || '#eab308',
-      x,
-      y,
       pos,
       imageFileId,
       image,
@@ -561,28 +564,12 @@
     lastAddAtMs = tNow;
 
     const ts = new Date().toISOString();
-
-    // world 引数は {x,y,z} を想定し、プレーンなオブジェクトにして保持
-    let pos = null;
-    if (world && typeof world === 'object' &&
-        world.x != null && world.y != null && world.z != null){
-      pos = {
-        x: Number(world.x),
-        y: Number(world.y),
-        z: Number(world.z)
-      };
-    }
-
     const item = {
       id: newId(),
       title: '(untitled)',
       body: '',
       color: store.currentColor,
-      // 2D screen 座標（overlay 側との互換用）
-      x: (typeof x === 'number') ? x : null,
-      y: (typeof y === 'number') ? y : null,
-      // 3D world 座標（pin / Sheets 用）
-      pos,
+      pos: world || null,
       imageFileId: null,
       image: null,
       createdAt: ts,
@@ -651,6 +638,7 @@
     get images(){ return store.images; },
     get selectedId(){ return store.selectedId; }
   };  window.__LM_CAPTION_UI.__ver = 'A2';
+
 
   // initial render
   renderColors();
