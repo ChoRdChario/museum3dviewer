@@ -544,16 +544,12 @@ const TAG = '[caption-overlay]';
         br.onRenderTick(updateLines);
       }
       if (typeof br.onPinSelect === 'function') {
-        br.onPinSelect((payload) => {
+        br.onPinSelect((id) => {
           try {
             const ui = ensureCaptionUI();
-            if (!ui || typeof ui.selectItem !== 'function') return;
-
-            const id = (payload && typeof payload === 'object' && 'id' in payload)
-              ? payload.id
-              : payload;
-
-            ui.selectItem(id, { fromViewer: true });
+            if (ui && typeof ui.selectItem === 'function') {
+              ui.selectItem(id);
+            }
           } catch (e) {
             warn('onPinSelect -> selectItem failed', e);
           }

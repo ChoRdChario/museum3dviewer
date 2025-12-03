@@ -41,7 +41,6 @@
     }
   }
 
-
   // Store (stable on window to survive reload of this script)
   const store = window.__LM_CAPTION_STORE || (window.__LM_CAPTION_STORE = {
     currentColor: '#eab308',
@@ -102,7 +101,6 @@
     });
   }
 
-
   function onItemSelected(fn){
     if (typeof fn === 'function') selectListeners.push(fn);
   }
@@ -147,13 +145,21 @@
     }
   }
 
+  // viewer ←→ UI のループ防止用フラグ
+  let _syncingViewerSelection = false;
+
   function syncViewerSelection(id){
     const br = getViewerBridge();
     if (!br || typeof br.setPinSelected !== 'function') return;
+    if (_syncingViewerSelection) return;
+    _syncingViewerSelection = true;
     try{
+      // 第2引数は付けず、もともとの想定どおり id のみ渡す
       br.setPinSelected(id || null);
     }catch(e){
       warn('setPinSelected failed', e);
+    } finally {
+      _syncingViewerSelection = false;
     }
   }
 
@@ -246,10 +252,7 @@
     });
   }
 
-  function selectItem(id, opts){
-    opts = opts || {};
-    const fromViewer = !!opts.fromViewer;
-
+  function selectItem(id){
     store.selectedId = id || null;
     if (elList){
       $$('.lm-cap-row', elList).forEach(row=>{
@@ -258,7 +261,7 @@
     }
     const it = store.items.find(x=>x.id===id);
     if (!it){
-      if (!fromViewer) syncViewerSelection(null);
+      syncViewerSelection(null);
       if (elTitle) elTitle.value = '';
       if (elBody)  elBody.value  = '';
       renderImages(); // clear image selection highlight
@@ -268,11 +271,12 @@
     }
     if (elTitle) elTitle.value = it.title || '';
     if (elBody)  elBody.value  = it.body  || '';
-    if (!fromViewer) syncViewerSelection(it.pos ? it.id : null);
+    syncViewerSelection(it.pos ? it.id : null);
     renderImages(); // update image highlight for this caption
     renderPreview();
     emitItemSelected(it);
   }
+
   function removeItem(id){
     const idx = store.items.findIndex(x=>x.id===id);
     if (idx === -1) return;
@@ -302,7 +306,7 @@
 
     refreshList();
     renderImages();
-  renderPreview();
+    renderPreview();
   }
 
   // --- Title / Body input wiring ----------------------------------------------
@@ -452,7 +456,6 @@
           scheduleChanged(cur);
           refreshList();
           renderImages();
-  renderPreview();
           renderPreview();
         }
       });
@@ -477,6 +480,7 @@
       elImages.appendChild(wrap);
     });
   }
+
   if (elRefreshImg){
     elRefreshImg.addEventListener('click', ()=>{
       try{
@@ -491,9 +495,31 @@
   function normalizeItem(raw){
     raw = raw || {};
     const id = raw.id || newId();
-    const pos = raw.pos || (raw.x!=null && raw.y!=null && raw.z!=null
-      ? { x:Number(raw.x), y:Number(raw.y), z:Number(raw.z) }
-      : null);
+
+    // 3D world 座標（pos / posX,posY,posZ / 旧 x,y,z のいずれかから復元）
+    let pos = null;
+    if (raw.pos && typeof raw.pos === 'object' &&
+        raw.pos.x != null && raw.pos.y != null && raw.pos.z != null){
+      pos = {
+        x: Number(raw.pos.x),
+        y: Number(raw.pos.y),
+        z: Number(raw.pos.z)
+      };
+    } else if (raw.posX != null && raw.posY != null && raw.posZ != null){
+      pos = {
+        x: Number(raw.posX),
+        y: Number(raw.posY),
+        z: Number(raw.posZ)
+      };
+    } else if (raw.x != null && raw.y != null && raw.z != null){
+      // 旧形式で world 座標を x,y,z に入れていたケースのため
+      pos = {
+        x: Number(raw.x),
+        y: Number(raw.y),
+        z: Number(raw.z)
+      };
+    }
+
     const imageFileId = raw.imageFileId || (raw.image && raw.image.id) || null;
     const image = raw.image || null;
     return {
@@ -515,14 +541,12 @@
     refreshList();
     syncPinsFromItems();
     renderImages();
-  renderPreview();
     renderPreview();
   }
 
   function setImages(images){
     store.images = images || [];
     renderImages();
-  renderPreview();
     renderPreview();
   }
 
@@ -582,6 +606,7 @@
       br.onCanvasShiftPick((world)=>{
         if (!world) return;
         preferWorldClicks = true;
+        // world 座標を優先。画面座標はとりあえず中央に置く（x,y=0.5）
         addCaptionAt(0.5, 0.5, world);
       });
       worldHookInstalled = true;
