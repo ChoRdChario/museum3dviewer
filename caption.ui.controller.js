@@ -113,6 +113,8 @@
   }
 
   // --- viewer bridge + pins ---------------------------------------------------
+  let isSyncingViewerSelection = false;
+
   function getViewerBridge(){
     try{
       const pr = window.__lm_pin_runtime;
@@ -148,12 +150,19 @@
   }
 
   function syncViewerSelection(id){
+    // viewer 側からの選択通知などで再入した場合はスキップして循環を防ぐ
+    if (isSyncingViewerSelection) return;
+
     const br = getViewerBridge();
     if (!br || typeof br.setPinSelected !== 'function') return;
+
+    isSyncingViewerSelection = true;
     try{
       br.setPinSelected(id || null, !!id);
     }catch(e){
       warn('setPinSelected failed', e);
+    }finally{
+      isSyncingViewerSelection = false;
     }
   }
 
