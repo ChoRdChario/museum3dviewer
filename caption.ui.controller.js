@@ -145,20 +145,21 @@
     }
   }
 
-  // viewer ←→ UI のループ防止用フラグ
   let _syncingViewerSelection = false;
 
   function syncViewerSelection(id){
     const br = getViewerBridge();
     if (!br || typeof br.setPinSelected !== 'function') return;
-    if (_syncingViewerSelection) return;
+    if (_syncingViewerSelection){
+      log('skip re-entrant syncViewerSelection', id);
+      return;
+    }
     _syncingViewerSelection = true;
     try{
-      // 第2引数は付けず、もともとの想定どおり id のみ渡す
       br.setPinSelected(id || null);
     }catch(e){
       warn('setPinSelected failed', e);
-    } finally {
+    }finally{
       _syncingViewerSelection = false;
     }
   }
@@ -252,7 +253,10 @@
     });
   }
 
-  function selectItem(id){
+  function selectItem(id, opts){
+    opts = opts || {};
+    const fromViewer = !!opts.fromViewer;
+
     store.selectedId = id || null;
     if (elList){
       $$('.lm-cap-row', elList).forEach(row=>{
@@ -261,7 +265,7 @@
     }
     const it = store.items.find(x=>x.id===id);
     if (!it){
-      syncViewerSelection(null);
+      if (!fromViewer) syncViewerSelection(null);
       if (elTitle) elTitle.value = '';
       if (elBody)  elBody.value  = '';
       renderImages(); // clear image selection highlight
@@ -271,7 +275,7 @@
     }
     if (elTitle) elTitle.value = it.title || '';
     if (elBody)  elBody.value  = it.body  || '';
-    syncViewerSelection(it.pos ? it.id : null);
+    if (!fromViewer) syncViewerSelection(it.pos ? it.id : null);
     renderImages(); // update image highlight for this caption
     renderPreview();
     emitItemSelected(it);
@@ -495,31 +499,9 @@
   function normalizeItem(raw){
     raw = raw || {};
     const id = raw.id || newId();
-
-    // 3D world 座標（pos / posX,posY,posZ / 旧 x,y,z のいずれかから復元）
-    let pos = null;
-    if (raw.pos && typeof raw.pos === 'object' &&
-        raw.pos.x != null && raw.pos.y != null && raw.pos.z != null){
-      pos = {
-        x: Number(raw.pos.x),
-        y: Number(raw.pos.y),
-        z: Number(raw.pos.z)
-      };
-    } else if (raw.posX != null && raw.posY != null && raw.posZ != null){
-      pos = {
-        x: Number(raw.posX),
-        y: Number(raw.posY),
-        z: Number(raw.posZ)
-      };
-    } else if (raw.x != null && raw.y != null && raw.z != null){
-      // 旧形式で world 座標を x,y,z に入れていたケースのため
-      pos = {
-        x: Number(raw.x),
-        y: Number(raw.y),
-        z: Number(raw.z)
-      };
-    }
-
+    const pos = raw.pos || (raw.x!=null && raw.y!=null && raw.z!=null
+      ? { x:Number(raw.x), y:Number(raw.y), z:Number(raw.z) }
+      : null);
     const imageFileId = raw.imageFileId || (raw.image && raw.image.id) || null;
     const image = raw.image || null;
     return {
@@ -603,10 +585,10 @@
     const br = getViewerBridge();
     if (!br || typeof br.onCanvasShiftPick !== 'function') return;
     try{
+      // viewer 側で world 座標を扱える場合は、常にそちらを優先して使う
+      preferWorldClicks = true;
       br.onCanvasShiftPick((world)=>{
         if (!world) return;
-        preferWorldClicks = true;
-        // world 座標を優先。画面座標はとりあえず中央に置く（x,y=0.5）
         addCaptionAt(0.5, 0.5, world);
       });
       worldHookInstalled = true;
@@ -637,8 +619,8 @@
     get items(){ return store.items; },
     get images(){ return store.images; },
     get selectedId(){ return store.selectedId; }
-  };  window.__LM_CAPTION_UI.__ver = 'A2';
-
+  };
+  window.__LM_CAPTION_UI.__ver = 'A2';
 
   // initial render
   renderColors();
