@@ -58,7 +58,7 @@
 
   window.addEventListener('lm:mat-opacity', (e) => {
     const d = (e && e.detail) || {};
-    // If new persistence layer is available, rely on LM_MaterialsPersist instead
+    // If the new LM_MaterialsPersist layer is available, rely on it instead of the legacy queue
     if (window.LM_MaterialsPersist && typeof window.LM_MaterialsPersist.upsert === 'function') {
       return;
     }

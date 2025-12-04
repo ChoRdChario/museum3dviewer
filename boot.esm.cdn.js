@@ -274,7 +274,7 @@ window.addEventListener("lm:load-glb", async (ev)=>{
       console.error("[auth] signin failed", e);
       console.error("[auth] 提供方法: URL に ?lm_client_id=YOUR_CLIENT_ID を付けるか、localStorage.LM_GIS_CLIENT_ID に設定してください。");
     }
-  }, { passive:true });
+  });
 })();
 
 export {
