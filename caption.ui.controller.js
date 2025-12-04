@@ -556,6 +556,21 @@
   let lastAddAtMs = 0;
 
   function addCaptionAt(x, y, world){
+    // Normalize world parameter to a pure {x,y,z} if a full payload was passed
+    let worldPos = null;
+    if (world && typeof world === 'object') {
+      // Already a {x,y,z}
+      if (typeof world.x === 'number' && typeof world.y === 'number' && typeof world.z === 'number') {
+        worldPos = { x: world.x, y: world.y, z: world.z };
+      // viewer.module.cdn.js payload: { point:{x,y,z}, event, hit }
+      } else if (world.point &&
+                 typeof world.point.x === 'number' &&
+                 typeof world.point.y === 'number' &&
+                 typeof world.point.z === 'number') {
+        worldPos = { x: world.point.x, y: world.point.y, z: world.point.z };
+      }
+    }
+
     const tNow = Date.now();
     if (tNow - lastAddAtMs < 150) {
       log('skip duplicate addCaptionAt');
@@ -569,7 +584,7 @@
       title: '(untitled)',
       body: '',
       color: store.currentColor,
-      pos: world || null,
+      pos: worldPos,
       imageFileId: null,
       image: null,
       createdAt: ts,
