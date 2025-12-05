@@ -1,4 +1,0 @@
-
-/* Keep sheet dropdown width fixed */
-#sheet-select-wrapper, #save-target-sheet-wrapper{ width:240px; max-width:100%; display:inline-block; vertical-align:middle; }
-#sheet-select, #save-target-sheet{ width:100%; max-width:100%; }
