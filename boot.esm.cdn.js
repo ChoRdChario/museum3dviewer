@@ -230,6 +230,7 @@ async function putHeaderOnce(spreadsheetId, rangeA1, values){
   const token = await __lm_getAccessToken();
   const headers = { "Authorization": `Bearer ${token}`, "Content-Type":"application/json" };
   const body = {
+    valueInputOption: "RAW",
     data: [{
       range: rangeA1,
       values: [values],
