@@ -1,13 +1,13 @@
 /*!
  * LociMyu ESM/CDN — boot (foundation, enhanced client_id discovery + auth button wire)
- * VERSION_TAG:V6_12b_FOUNDATION_AUTH_CTX_MAT_HDR_CLIENTID
+ * VERSION_TAG:V6_12b_FOUNDATION_AUTH_CTX_MAT_HDR_CLIENTID_FIXED
  */
 
 const LOG = (...a)=>console.log(...a);
 const warn=(...a)=>console.warn(...a);
 const err=(...a)=>console.error(...a);
 
-window.LM_VERSION_TAG = "V6_12b_FOUNDATION_AUTH_CTX_MAT_HDR_CLIENTID";
+window.LM_VERSION_TAG = "V6_12b_FOUNDATION_AUTH_CTX_MAT_HDR_CLIENTID_FIXED";
 window.LM_SCOPES = window.LM_SCOPES || [
   "https://www.googleapis.com/auth/spreadsheets",
   "https://www.googleapis.com/auth/drive.readonly",
@@ -71,6 +71,15 @@ function pickClientId(){
       || pickClientIdFromGlobals()
       || pickClientIdFromMeta()
       || null;
+}
+
+/**
+ * 互換用の DOM ベース resolver。
+ * 既存コードからは pickClientIdFromDOM() を参照しているので、
+ * 実装としては pickClientId() をそのまま委譲する。
+ */
+function pickClientIdFromDOM(){
+  return pickClientId();
 }
 
 /* =========================
@@ -269,8 +278,11 @@ async function ensureMaterialsHeader(spreadsheetId){
     "note3",
   ]);
 }
+
+// グローバル公開
 window.__lm_ensureMaterialsHeader = window.__lm_ensureMaterialsHeader || ensureMaterialsHeader;
 window.ensureMaterialsHeader = window.ensureMaterialsHeader || ensureMaterialsHeader;
+window.__lm_getAccessToken = window.__lm_getAccessToken || __lm_getAccessToken;
 
 /* Drive GLB load bridge: listen for lm:load-glb and resolve via Drive */
 window.addEventListener("lm:load-glb", async (ev)=>{
