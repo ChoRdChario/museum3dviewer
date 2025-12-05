@@ -11,7 +11,7 @@
   const warn=(...a)=>console.warn(TAG, ...a);
 
   // Helpers
-  const $ = (sel,root=document)=>root.querySelector(sel);
+  const $  = (sel,root=document)=>root.querySelector(sel);
   const $$ = (sel,root=document)=>Array.from(root.querySelectorAll(sel));
 
   // Root hooks
@@ -21,25 +21,38 @@
   }
 
   // Elements
-  const elColorList  = $('#pinColorChips');
-  const elAddBtn     = $('#btnAddCaption');
-  const elTitle      = $('#captionTitle');
-  const elBody       = $('#captionBody');
-  const elList       = $('#captionList');
-  const elCoordX     = $('#captionCoordX');
-  const elCoordY     = $('#captionCoordY');
-  const elCoordZ     = $('#captionCoordZ');
-  const elImagesWrap = $('#captionImagesWrap');
-  const elAddImageBtn= $('#btnAddImage');
-  const elRefreshImgBtn = $('#btnRefreshImages');
+  const elColorList    = $('#pinColorChips');
+  const elAddBtn       = $('#btnAddCaption');
+  const elTitle        = $('#captionTitle');
+  const elBody         = $('#captionBody');
+  const elList         = $('#captionList');
+  const elCoordX       = $('#captionCoordX');
+  const elCoordY       = $('#captionCoordY');
+  const elCoordZ       = $('#captionCoordZ');
+  const elImagesWrap   = $('#captionImagesWrap');
+  const elAddImageBtn  = $('#btnAddImage');
+  const elRefreshImgBtn= $('#btnRefreshImages');
 
-  if (!elColorList || !elAddBtn || !elTitle || !elBody || !elList){
-    return warn('base elements missing; skip init');
+  // 必須: Title / Body / List。これが無いなら本当に UI が無いとみなして終了。
+  if (!elTitle || !elBody || !elList){
+    return warn('essential elements missing; skip init', {
+      elTitle: !!elTitle,
+      elBody:  !!elBody,
+      elList:  !!elList,
+    });
+  }
+  // 任意: カラー行と追加ボタンは無くても続行できる
+  if (!elColorList || !elAddBtn){
+    warn('optional elements missing; continue with partial UI', {
+      elColorList: !!elColorList,
+      elAddBtn:    !!elAddBtn,
+    });
   }
 
   // ---- State ----
   const store = {
-    items: [],    // {id, title, body, color, pos:{x,y,z}, images:[], createdAt, updatedAt}
+    // {id, title, body, color, pos:{x,y,z}, images:[], createdAt, updatedAt}
+    items: [],
     selectedId: null,
     activeColor: null,
     idCounter: 0,
@@ -49,7 +62,7 @@
   function getViewerBridge(){
     try{
       if (window.__lm_viewer_bridge) return window.__lm_viewer_bridge;
-      if (window.viewerBridge) return window.viewerBridge;
+      if (window.viewerBridge)       return window.viewerBridge;
       if (window.__lm_pin_runtime && typeof window.__lm_pin_runtime.getBridge === 'function'){
         const b = window.__lm_pin_runtime.getBridge();
         if (b) return b;
@@ -65,7 +78,11 @@
     const p = item.pos;
     try{
       // viewer.module.cdn.js 側の仕様に合わせて position:{x,y,z} を渡す
-      br.addPinMarker({ id:item.id, position:{ x:p.x, y:p.y, z:p.z }, color:item.color });
+      br.addPinMarker({
+        id: item.id,
+        position:{ x:p.x, y:p.y, z:p.z },
+        color: item.color,
+      });
     }catch(e){
       warn('addPinMarker failed', e);
     }
@@ -76,7 +93,9 @@
     if (!br || typeof br.clearPins !== 'function' || typeof br.addPinMarker !== 'function') return;
     try{
       br.clearPins();
-      store.items.forEach(it=>{ if (it.pos) addPinForItem(it); });
+      store.items.forEach(it=>{
+        if (it.pos) addPinForItem(it);
+      });
     }catch(e){
       warn('syncPinsFromItems failed', e);
     }
@@ -102,7 +121,7 @@
       const rect = ev.target.closest('canvas')?.getBoundingClientRect();
       if (!rect) return null;
       const x = (ev.clientX - rect.left) / rect.width;
-      const y = (ev.clientY - rect.top)  / rect.height;
+      const y = (ev.clientY - rect.top) / rect.height;
       const world = br.onCanvasShiftPick(x, y);
       if (!world || typeof world.x!=='number') return null;
       return world;
@@ -123,6 +142,7 @@
     if (!elColorList) return;
     const chips = $$('.pin-color-chip', elColorList);
     if (!chips.length) return;
+
     chips.forEach(ch=>{
       ch.addEventListener('click', ()=>{
         const color = ch.dataset.color || ch.style.backgroundColor || '#ff0000';
@@ -131,6 +151,7 @@
         ch.classList.add('active');
       });
     });
+
     // default
     const first = chips[0];
     if (first){
@@ -142,6 +163,7 @@
 
   // ---- UI Rendering ----
   function renderList(){
+    if (!elList) return;
     elList.innerHTML = '';
     store.items.forEach(item=>{
       const li = document.createElement('li');
@@ -168,45 +190,49 @@
         li.classList.add('selected');
       }
 
-      li.addEventListener('click', ()=>{
-        selectItem(item.id);
-      });
-
+      li.addEventListener('click', ()=>{ selectItem(item.id); });
       elList.appendChild(li);
     });
   }
 
   function renderDetail(){
+    if (!elTitle || !elBody) return;
+
     const item = store.items.find(it=>it.id === store.selectedId) || null;
+
     if (!item){
       elTitle.value = '';
-      elBody.value = '';
-      elCoordX.value = '';
-      elCoordY.value = '';
-      elCoordZ.value = '';
-      elImagesWrap.innerHTML = '';
+      elBody.value  = '';
+      if (elCoordX)      elCoordX.value = '';
+      if (elCoordY)      elCoordY.value = '';
+      if (elCoordZ)      elCoordZ.value = '';
+      if (elImagesWrap)  elImagesWrap.innerHTML = '';
       return;
     }
+
     elTitle.value = item.title || '';
-    elBody.value = item.body || '';
+    elBody.value  = item.body  || '';
+
     if (item.pos){
-      elCoordX.value = String(item.pos.x ?? '');
-      elCoordY.value = String(item.pos.y ?? '');
-      elCoordZ.value = String(item.pos.z ?? '');
+      if (elCoordX) elCoordX.value = String(item.pos.x ?? '');
+      if (elCoordY) elCoordY.value = String(item.pos.y ?? '');
+      if (elCoordZ) elCoordZ.value = String(item.pos.z ?? '');
     }else{
-      elCoordX.value = '';
-      elCoordY.value = '';
-      elCoordZ.value = '';
+      if (elCoordX) elCoordX.value = '';
+      if (elCoordY) elCoordY.value = '';
+      if (elCoordZ) elCoordZ.value = '';
     }
 
     // Images (simple list)
-    elImagesWrap.innerHTML = '';
-    (item.images || []).forEach(url=>{
-      const img = document.createElement('img');
-      img.className='caption-image-thumb';
-      img.src = url;
-      elImagesWrap.appendChild(img);
-    });
+    if (elImagesWrap){
+      elImagesWrap.innerHTML = '';
+      (item.images || []).forEach(url=>{
+        const img = document.createElement('img');
+        img.className='caption-image-thumb';
+        img.src = url;
+        elImagesWrap.appendChild(img);
+      });
+    }
   }
 
   function selectItem(id){
@@ -218,20 +244,21 @@
 
   // ---- Add caption (from button + Shift+Click hook) ----
   function addCaptionAt(pos){
-    const id = nextId();
+    const id    = nextId();
     const color = store.activeColor || '#ff0000';
-    const now = new Date().toISOString();
+    const now   = new Date().toISOString();
 
     const item = {
       id,
-      title: elTitle.value || '',
-      body: elBody.value || '',
+      title: elTitle ? (elTitle.value || '') : '',
+      body:  elBody  ? (elBody.value  || '') : '',
       color,
       pos: pos || null,
       images: [],
       createdAt: now,
       updatedAt: now,
     };
+
     store.items.push(item);
     store.selectedId = id;
     renderList();
@@ -254,7 +281,7 @@
     // caption.viewer.overlay.js 側から dispatch されるイベントを受ける
     document.addEventListener('lm:world-click', (ev)=>{
       const detail = ev.detail || {};
-      const world = detail.world;
+      const world  = detail.world;
       if (!world || typeof world.x!=='number') return;
       addCaptionAt(world);
     });
@@ -282,28 +309,34 @@
   }
 
   // ---- Events ----
-  elAddBtn.addEventListener('click', ()=>{
-    // World pos は overlay 経由のイベントでセットされる想定だが、
-    // ここでは pos=null としてとりあえず追加（後から編集可）
-    addCaptionAt(null);
-  });
+  if (elAddBtn){
+    elAddBtn.addEventListener('click', ()=>{
+      // World pos は overlay 経由のイベントでセットされる想定だが、
+      // ここでは pos=null としてとりあえず追加（後から編集可）
+      addCaptionAt(null);
+    });
+  }
 
-  elTitle.addEventListener('input', ()=>{
-    const item = store.items.find(it=>it.id === store.selectedId);
-    if (!item) return;
-    item.title = elTitle.value;
-    item.updatedAt = new Date().toISOString();
-    renderList();
-    notifySelectionChanged();
-  });
+  if (elTitle){
+    elTitle.addEventListener('input', ()=>{
+      const item = store.items.find(it=>it.id === store.selectedId);
+      if (!item) return;
+      item.title     = elTitle.value;
+      item.updatedAt = new Date().toISOString();
+      renderList();
+      notifySelectionChanged();
+    });
+  }
 
-  elBody.addEventListener('input', ()=>{
-    const item = store.items.find(it=>it.id === store.selectedId);
-    if (!item) return;
-    item.body = elBody.value;
-    item.updatedAt = new Date().toISOString();
-    notifySelectionChanged();
-  });
+  if (elBody){
+    elBody.addEventListener('input', ()=>{
+      const item = store.items.find(it=>it.id === store.selectedId);
+      if (!item) return;
+      item.body      = elBody.value;
+      item.updatedAt = new Date().toISOString();
+      notifySelectionChanged();
+    });
+  }
 
   // Images: external loader module manages the actual URLs / refresh
   if (elRefreshImgBtn){
@@ -326,6 +359,5 @@
   installWorldSpaceHook();
   renderList();
   renderDetail();
-
   log('ready');
 })();
