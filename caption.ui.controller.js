@@ -14,55 +14,94 @@
   const $ = (sel,root=document)=>root.querySelector(sel);
   const $$ = (sel,root=document)=>Array.from(root.querySelectorAll(sel));
 
-  // Root hooks
-  const pane = $('#pane-caption');
-  if(!pane){
-    return warn('pane not found; skip');
-  }
+  const COLORS = [
+    '#f97373','#facc15','#4ade80','#22c55e',
+    '#38bdf8','#60a5fa','#a855f7','#f97316',
+    '#ec4899','#8b5cf6','#0ea5e9','#22c55e'
+  ];
 
-  // Elements
-  const elColorList  = $('#pinColorChips', pane);
-  const elFilterList = $('#pinFilterChips', pane);
-  const elList       = $('#caption-list', pane);
-  const elTitle      = $('#caption-title', pane);
-  const elBody       = $('#caption-body', pane);
-  const elImages     = $('#images-grid', pane);
-  const elImgStatus  = $('#images-status', pane);
-  const elRefreshImg = $('#btnRefreshImages', pane);
-  let elPreview = $('#caption-image-preview', pane);
-  if (!elPreview && elImages && elImages.parentElement){
-    elPreview = document.createElement('div');
-    elPreview.id = 'caption-image-preview';
-    elPreview.className = 'lm-cap-preview';
-    try{
-      elImages.parentElement.insertBefore(elPreview, elImages);
-    }catch(e){
-      warn('preview insert failed', e);
-    }
-  }
+  const FILTERS = [
+    {id:'all', label:'All'},
+    {id:'img', label:'With image'},
+    {id:'noimg', label:'No image'}
+  ];
 
-
-  // Store (stable on window to survive reload of this script)
-  const store = window.__LM_CAPTION_STORE || (window.__LM_CAPTION_STORE = {
-    currentColor: '#eab308',
-    filter: new Set(),
+  const store = {
     items: [],
+    images: [],
     selectedId: null,
-    images: []
-  });
+    filterId: 'all'
+  };
 
-  const PALETTE = ['#facc15','#f97316','#ef4444','#ec4899','#8b5cf6','#3b82f6','#0ea5e9','#22c55e','#14b8a6','#a3a3a3'];
-
-  function newId(){
-    return 'c_' + Math.random().toString(36).slice(2,10);
-  }
-
-  // --- small event hub for Sheets bridge --------------------------------------
   const addListeners = [];
   const changeListeners = [];
   const deleteListeners = [];
-  const selectListeners = []; // caption selection listeners
-  const dirtyTimers = new Map(); // id -> raf id
+  const selectListeners = [];
+
+  function getViewerBridge(){
+    try{
+      if (window.__lm_pin_runtime && typeof window.__lm_pin_runtime.getViewerBridge === 'function') {
+        return window.__lm_pin_runtime.getViewerBridge();
+      }
+    }catch(e){
+      warn('pin-runtime bridge lookup failed', e);
+    }
+    try{
+      if (window.__lm_viewer_bridge) return window.__lm_viewer_bridge;
+      if (window.viewerBridge) return window.viewerBridge;
+    }catch(e){
+      warn('viewer bridge lookup failed', e);
+    }
+    return null;
+  }
+
+  function getPinRuntime(){
+    return window.__lm_pin_runtime || null;
+  }
+
+  function setItems(items){
+    store.items = Array.isArray(items) ? items.slice() : [];
+    refreshList();
+    syncPinsFromItems();
+  }
+
+  function setImages(images){
+    store.images = Array.isArray(images) ? images.slice() : [];
+    renderImages();
+  }
+
+  function setSelectedId(id){
+    store.selectedId = id;
+    refreshListSelection();
+    syncPinsSelection();
+  }
+
+  function findItem(id){
+    return store.items.find(it=>it.id===id) || null;
+  }
+
+  function upsertItem(item){
+    const idx = store.items.findIndex(it=>it.id===item.id);
+    if (idx === -1) {
+      store.items.push(item);
+      emitItemAdded(item);
+    } else {
+      store.items[idx] = item;
+      emitItemChanged(item);
+    }
+    refreshList();
+    syncPinsFromItems();
+  }
+
+  function removeItem(id){
+    const idx = store.items.findIndex(it=>it.id===id);
+    if (idx === -1) return;
+    const [item] = store.items.splice(idx,1);
+    if (store.selectedId === id) store.selectedId = null;
+    refreshList();
+    syncPinsFromItems();
+    emitItemDeleted(item);
+  }
 
   function onItemAdded(fn){
     if (typeof fn === 'function') addListeners.push(fn);
@@ -81,17 +120,6 @@
       try{ fn(item); }catch(e){ console.error(TAG,'onItemChanged handler failed', e); }
     });
   }
-  function scheduleChanged(item){
-    if (!item || !item.id) return;
-    const id = item.id;
-    const prev = dirtyTimers.get(id);
-    if (prev) cancelAnimationFrame(prev);
-    const t = requestAnimationFrame(()=>{
-      dirtyTimers.delete(id);
-      emitItemChanged(item);
-    });
-    dirtyTimers.set(id, t);
-  }
 
   function onItemDeleted(fn){
     if (typeof fn === 'function') deleteListeners.push(fn);
@@ -102,7 +130,6 @@
     });
   }
 
-
   function onItemSelected(fn){
     if (typeof fn === 'function') selectListeners.push(fn);
   }
@@ -112,493 +139,362 @@
     });
   }
 
-  // --- viewer bridge + pins ---------------------------------------------------
-  function getViewerBridge(){
-    try{
-      const pr = window.__lm_pin_runtime;
-      if (pr && typeof pr.getBridge === 'function'){
-        const b = pr.getBridge();
-        if (b) return b;
-      }
-    }catch(e){}
-    return window.__lm_viewer_bridge || window.viewerBridge || null;
+  // DOM refs
+  const root = document.querySelector('#pane-caption') || document.body;
+  const elColorChips = root.querySelector('#pinColorChips');
+  const elFilterChips = root.querySelector('#pinFilterChips');
+  const elList = root.querySelector('#caption-list');
+  const elTitle = root.querySelector('#caption-title');
+  const elBody  = root.querySelector('#caption-body');
+  const elImagesGrid = root.querySelector('#images-grid');
+  const elImagesStatus = root.querySelector('#images-status');
+
+  if (!elColorChips || !elFilterChips || !elList || !elTitle || !elBody) {
+    warn('essential elements missing; skip init', {
+      elTitle: !!elTitle,
+      elBody: !!elBody,
+      elList: !!elList
+    });
+    return;
   }
 
-  function addPinForItem(item){
-    const br = getViewerBridge();
-    if (!br || typeof br.addPinMarker !== 'function') return;
-    if (!item.pos) return;
-    const p = item.pos;
-    try{
-      br.addPinMarker({ id:item.id, x:p.x, y:p.y, z:p.z, color:item.color });
-    }catch(e){
-      warn('addPinMarker failed', e);
+  let currentColor = COLORS[0];
+
+  function renderColors(){
+    elColorChips.innerHTML = '';
+    COLORS.forEach(c=>{
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'chip';
+      b.style.background = c;
+      if (c === currentColor) b.style.boxShadow = '0 0 0 2px #fff';
+      b.addEventListener('click', ()=>{
+        currentColor = c;
+        renderColors();
+      });
+      elColorChips.appendChild(b);
+    });
+  }
+
+  function renderFilters(){
+    elFilterChips.innerHTML = '';
+    FILTERS.forEach(f=>{
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.textContent = f.label;
+      b.className = 'pill' + (store.filterId === f.id ? ' active':'');
+      b.addEventListener('click', ()=>{
+        store.filterId = f.id;
+        renderFilters();
+        refreshList();
+      });
+      elFilterChips.appendChild(b);
+    });
+  }
+
+  function makeRow(item){
+    const row = document.createElement('div');
+    row.className = 'lm-cap-row';
+    row.dataset.id = item.id;
+
+    const sw = document.createElement('div');
+    sw.className = 'lm-cap-sw';
+    sw.style.background = item.color || '#60a5fa';
+
+    const title = document.createElement('div');
+    title.className = 'lm-cap-title';
+    title.textContent = item.title || '(untitled)';
+
+    const imgMark = document.createElement('div');
+    imgMark.className = 'lm-cap-imgmark';
+    imgMark.textContent = item.imageFileId ? '🖼' : '';
+
+    const delBtn = document.createElement('button');
+    delBtn.className = 'lm-cap-del';
+    delBtn.textContent = '×';
+
+    row.appendChild(sw);
+    row.appendChild(title);
+    row.appendChild(imgMark);
+    row.appendChild(delBtn);
+
+    row.addEventListener('click', (ev)=>{
+      if (ev.target === delBtn) return;
+      setSelectedId(item.id);
+      emitItemSelected(item);
+      elTitle.value = item.title || '';
+      elBody.value  = item.body  || '';
+    });
+
+    delBtn.addEventListener('click', (ev)=>{
+      ev.stopPropagation();
+      if (confirm('Delete this caption?')) {
+        removeItem(item.id);
+      }
+    });
+
+    return row;
+  }
+
+  function applyFilter(items){
+    switch(store.filterId){
+      case 'img':   return items.filter(it=>!!it.imageFileId);
+      case 'noimg': return items.filter(it=>!it.imageFileId);
+      default:      return items;
     }
+  }
+
+  function refreshList(){
+    elList.innerHTML = '';
+    const filtered = applyFilter(store.items);
+    filtered.forEach(item=>{
+      const row = makeRow(item);
+      if (item.id === store.selectedId) row.classList.add('selected');
+      elList.appendChild(row);
+    });
+  }
+
+  function refreshListSelection(){
+    const rows = $$('.lm-cap-row', elList);
+    rows.forEach(r=>{
+      if (r.dataset.id === store.selectedId) r.classList.add('selected');
+      else r.classList.remove('selected');
+    });
+  }
+
+  function renderImages(){
+    if (!elImagesGrid) return;
+    elImagesGrid.innerHTML = '';
+    if (!store.images.length) {
+      elImagesStatus.textContent = 'No images detected in GLB folder.';
+      return;
+    }
+    elImagesStatus.textContent = store.images.length + ' images';
+    store.images.forEach(img=>{
+      const wrap = document.createElement('button');
+      wrap.type = 'button';
+      wrap.style.border = '0';
+      wrap.style.padding = '0';
+      wrap.style.background = 'transparent';
+      wrap.style.cursor = 'pointer';
+      wrap.style.display = 'inline-block';
+
+      const elImg = document.createElement('img');
+      elImg.src = img.thumbUrl || img.url;
+      elImg.alt = img.name || '';
+      elImg.style.width = '88px';
+      elImg.style.height = '88px';
+      elImg.style.objectFit = 'cover';
+      elImg.style.borderRadius = '8px';
+      elImg.loading = 'lazy';
+
+      wrap.appendChild(elImg);
+      wrap.addEventListener('click', ()=>{
+        const it = findItem(store.selectedId);
+        if (!it) return;
+        it.imageFileId = img.id;
+        upsertItem(it);
+        elImagesStatus.textContent = `Linked to: ${img.name || img.id}`;
+      });
+
+      elImagesGrid.appendChild(wrap);
+    });
   }
 
   function syncPinsFromItems(){
+    const pinRt = getPinRuntime();
     const br = getViewerBridge();
-    if (!br || typeof br.clearPins !== 'function' || typeof br.addPinMarker !== 'function') return;
+    if (!pinRt || !br) return;
+
     try{
-      br.clearPins();
-      store.items.forEach(it=>{ if (it.pos) addPinForItem(it); });
+      pinRt.clearPins();
     }catch(e){
-      warn('syncPinsFromItems failed', e);
+      warn('clearPins failed', e);
     }
+
+    store.items.forEach(it=>{
+      if (!it.pos) return;
+      try{
+        pinRt.addPinMarker({
+          id: it.id,
+          pos: it.pos,
+          color: it.color || '#60a5fa',
+          selected: it.id === store.selectedId
+        });
+      }catch(e){
+        warn('addPinMarker failed for', it.id, e);
+      }
+    });
   }
 
-  function syncViewerSelection(id){
-    const br = getViewerBridge();
-    if (!br || typeof br.setPinSelected !== 'function') return;
+  function syncPinsSelection(){
+    const pinRt = getPinRuntime();
+    if (!pinRt) return;
     try{
-      br.setPinSelected(id || null, !!id);
+      pinRt.setPinSelected(store.selectedId || null);
     }catch(e){
       warn('setPinSelected failed', e);
     }
   }
 
-  // --- colors / filters -------------------------------------------------------
-  function renderColors(){
-    if (!elColorList) return;
-    elColorList.innerHTML = '';
-    PALETTE.forEach(col=>{
-      const btn = document.createElement('button');
-      btn.type = 'button';
-      btn.className = 'pill';
-      btn.style.backgroundColor = col;
-      if (store.currentColor === col) btn.classList.add('active');
-      btn.addEventListener('click', ()=>{
-        store.currentColor = col;
-        renderColors();
-      });
-      elColorList.appendChild(btn);
-    });
-  }
-
-  function renderFilters(){
-    if (!elFilterList) return;
-    elFilterList.innerHTML = '';
-    PALETTE.forEach(col=>{
-      const btn = document.createElement('button');
-      btn.type = 'button';
-      btn.className = 'pill';
-      btn.style.backgroundColor = col;
-      if (store.filter.has(col)) btn.classList.add('active');
-      btn.addEventListener('click', ()=>{
-        if (store.filter.has(col)) store.filter.delete(col);
-        else store.filter.add(col);
-        renderFilters();
-        refreshList();
-      });
-      elFilterList.appendChild(btn);
-    });
-  }
-
-  function filteredItems(){
-    const active = store.filter.size ? store.filter : null;
-    if (!active) return store.items.slice();
-    return store.items.filter(it => active.has(it.color));
-  }
-
-  // --- caption list -----------------------------------------------------------
-  function refreshList(){
-    if (!elList) return;
-    elList.innerHTML = '';
-    const items = filteredItems();
-    items.forEach(it=>{
-      const row = document.createElement('div');
-      row.className = 'lm-cap-row';
-      row.dataset.id = it.id;
-
-      const sw = document.createElement('span');
-      sw.className = 'lm-cap-sw';
-      sw.style.backgroundColor = it.color || '#eab308';
-
-      const title = document.createElement('span');
-      title.className = 'lm-cap-title';
-      title.textContent = it.title || '(untitled)';
-
-      const imgMark = document.createElement('span');
-      imgMark.className = 'lm-cap-imgmark';
-      if (it.imageFileId || (it.image && (it.image.id || it.image.url))) imgMark.textContent = '🖼';
-
-      const delBtn = document.createElement('button');
-      delBtn.type = 'button';
-      delBtn.className = 'lm-cap-del';
-      delBtn.textContent = '×';
-      delBtn.addEventListener('click', (ev)=>{
-        ev.stopPropagation();
-        removeItem(it.id);
-      });
-
-      row.appendChild(sw);
-      row.appendChild(title);
-      row.appendChild(imgMark);
-      row.appendChild(delBtn);
-
-      if (store.selectedId === it.id) row.classList.add('selected');
-
-      row.addEventListener('click', ()=>{
-        selectItem(it.id);
-      });
-
-      elList.appendChild(row);
-    });
-  }
-
   function selectItem(id){
-    store.selectedId = id || null;
-    if (elList){
-      $$('.lm-cap-row', elList).forEach(row=>{
-        row.classList.toggle('selected', row.dataset.id === id);
-      });
-    }
-    const it = store.items.find(x=>x.id===id);
-    if (!it){
-      syncViewerSelection(null);
-      if (elTitle) elTitle.value = '';
-      if (elBody)  elBody.value  = '';
-      renderImages(); // clear image selection highlight
-      renderPreview();
-      emitItemSelected(null);
-      return;
-    }
-    if (elTitle) elTitle.value = it.title || '';
-    if (elBody)  elBody.value  = it.body  || '';
-    syncViewerSelection(it.pos ? it.id : null);
-    renderImages(); // update image highlight for this caption
-    renderPreview();
+    const it = findItem(id);
+    if (!it) return;
+    setSelectedId(id);
+    elTitle.value = it.title || '';
+    elBody.value  = it.body  || '';
     emitItemSelected(it);
   }
-  function removeItem(id){
-    const idx = store.items.findIndex(x=>x.id===id);
-    if (idx === -1) return;
-    const removed = store.items.splice(idx,1)[0] || null;
-    if (store.selectedId === id) store.selectedId = null;
 
-    // 3D ピンも削除／再構築
-    try{
-      const br = getViewerBridge();
-      if (br){
-        if (typeof br.removePinMarker === 'function'){
-          br.removePinMarker(id);
-        }else if (typeof br.clearPins === 'function' && typeof br.addPinMarker === 'function'){
-          syncPinsFromItems();
-        }
-      }
-    }catch(e){
-      warn('removePinMarker failed', e);
+  function addCaptionAt(x,y,world){
+    if (!world || typeof world.x !== 'number') {
+      warn('addCaptionAt: invalid world', world);
     }
+    const id = 'c_' + Math.random().toString(36).slice(2,10);
+    const now = new Date().toISOString();
+    const baseColor = currentColor || COLORS[0];
 
-    // Sheets へ削除通知（ソフトデリートは caption.sheet.bridge 側）
-    if (removed && removed.id){
-      emitItemDeleted(removed);
-    }else{
-      emitItemDeleted({ id });
-    }
-
-    refreshList();
-    renderImages();
-  renderPreview();
-  }
-
-  // --- Title / Body input wiring ----------------------------------------------
-  if (elTitle){
-    let rafId = 0;
-    elTitle.addEventListener('input', ()=>{
-      const id = store.selectedId; if (!id) return;
-      const it = store.items.find(x=>x.id===id); if (!it) return;
-      it.title = elTitle.value;
-      if (rafId) cancelAnimationFrame(rafId);
-      rafId = requestAnimationFrame(()=>refreshList());
-      scheduleChanged(it);
-    });
-  }
-
-  if (elBody){
-    let rafId = 0;
-    elBody.addEventListener('input', ()=>{
-      const id = store.selectedId; if (!id) return;
-      const it = store.items.find(x=>x.id===id); if (!it) return;
-      it.body = elBody.value;
-      if (rafId) cancelAnimationFrame(rafId);
-      rafId = requestAnimationFrame(()=>{});
-      scheduleChanged(it);
-    });
-  }
-
-  // --- Images grid ------------------------------------------------------------
-  function getSelectedItem(){
-    if (!store.selectedId) return null;
-    return store.items.find(x=>x.id === store.selectedId) || null;
-  }
-
-  function renderPreview(){
-    if (!elPreview) return;
-    const sel = getSelectedItem();
-    elPreview.innerHTML = '';
-    if (!sel || !(sel.imageFileId || (sel.image && sel.image.id))){
-      elPreview.style.display = 'none';
-      return;
-    }
-    const imgId = sel.imageFileId || (sel.image && sel.image.id);
-    const list = store.images || [];
-    const meta = (list.find(it => it.id === imgId) || sel.image || null);
-    if (!meta){
-      elPreview.style.display = 'none';
-      return;
-    }
-    const url = meta.thumbUrl || meta.thumbnailUrl || meta.url || meta.webContentLink || meta.webViewLink || '';
-    if (!url){
-      elPreview.style.display = 'none';
-      return;
-    }
-    const label = document.createElement('div');
-    label.className = 'lm-cap-preview-label';
-    label.textContent = 'Attached image';
-    const img = document.createElement('img');
-    img.src = url;
-    img.alt = meta.name || '';
-    img.loading = 'lazy';
-    img.decoding = 'async';
-    elPreview.appendChild(label);
-    elPreview.appendChild(img);
-    elPreview.style.display = 'block';
-  }
-
-  function renderImages(){
-    if (!elImages) return;
-    // enforce grid layout from JS (3 columns) in case CSS is old
-    elImages.style.display = 'grid';
-    elImages.style.gridTemplateColumns = 'repeat(3, minmax(72px, 1fr))';
-    elImages.style.gap = '6px';
-    elImages.style.maxHeight = '360px';
-    elImages.style.overflowY = 'auto';
-
-    const list = store.images || [];
-    elImages.innerHTML = '';
-    const selected = getSelectedItem();
-    const selectedImageId = selected && (selected.imageFileId || (selected.image && selected.image.id));
-
-    if (!list.length){
-      if (elImgStatus) elImgStatus.textContent = '画像はまだありません';
-      return;
-    }
-
-    if (elImgStatus) elImgStatus.textContent = `${list.length} 枚の画像`;
-
-    list.forEach(imgInfo=>{
-      const wrap = document.createElement('button');
-      wrap.type = 'button';
-      wrap.className = 'lm-img-item';
-      wrap.dataset.id = imgInfo.id;
-
-      const img = document.createElement('img');
-      img.loading = 'lazy';
-      img.decoding = 'async';
-      img.src = imgInfo.thumbUrl || imgInfo.thumbnailUrl || imgInfo.url || '';
-      img.alt = imgInfo.name || '';
-      wrap.appendChild(img);
-
-      const label = document.createElement('div');
-      label.className = 'lm-img-label';
-      label.textContent = imgInfo.name || '(image)';
-      wrap.appendChild(label);
-
-      // detach button (visible on hover / when attached)
-      const detach = document.createElement('button');
-      detach.type = 'button';
-      detach.textContent = '×';
-      detach.title = 'Detach image';
-      detach.style.position = 'absolute';
-      detach.style.top = '2px';
-      detach.style.right = '2px';
-      detach.style.width = '16px';
-      detach.style.height = '16px';
-      detach.style.border = 'none';
-      detach.style.borderRadius = '999px';
-      detach.style.padding = '0';
-      detach.style.fontSize = '11px';
-      detach.style.lineHeight = '1';
-      detach.style.background = 'rgba(15,23,42,0.9)';
-      detach.style.color = '#e5e7eb';
-      detach.style.cursor = 'pointer';
-      detach.style.opacity = '0';
-      detach.style.transition = 'opacity .12s ease-out';
-      wrap.style.position = 'relative';
-
-      if (selectedImageId && selectedImageId === imgInfo.id){
-        wrap.classList.add('active');
-        detach.style.opacity = '1';
-      }
-
-      wrap.addEventListener('mouseenter', ()=>{ detach.style.opacity = '1'; });
-      wrap.addEventListener('mouseleave', ()=>{
-        if (!(selectedImageId && selectedImageId === imgInfo.id)){
-          detach.style.opacity = '0';
-        }
-      });
-
-      detach.addEventListener('click', (ev)=>{
-        ev.stopPropagation();
-        const cur = getSelectedItem();
-        if (!cur) return;
-        if (cur.imageFileId && cur.imageFileId === imgInfo.id){
-          cur.imageFileId = null;
-          cur.image = null;
-          scheduleChanged(cur);
-          refreshList();
-          renderImages();
-  renderPreview();
-          renderPreview();
-        }
-      });
-
-      wrap.appendChild(detach);
-
-      wrap.addEventListener('click', ()=>{
-        const cur = getSelectedItem();
-        if (!cur){
-          log('image click ignored (no caption selected)');
-          return;
-        }
-        // attach (no toggle; detach is handled by × button)
-        cur.imageFileId = imgInfo.id;
-        cur.image = imgInfo;
-        scheduleChanged(cur);
-        refreshList();   // 🖼 マーク更新
-        renderImages();  // ハイライト更新
-        renderPreview();
-      });
-
-      elImages.appendChild(wrap);
-    });
-  }
-  if (elRefreshImg){
-    elRefreshImg.addEventListener('click', ()=>{
-      try{
-        document.dispatchEvent(new Event('lm:refresh-images'));
-      }catch(e){
-        warn('refresh-images event failed', e);
-      }
-    });
-  }
-
-  // --- Public API for other modules -------------------------------------------
-  function normalizeItem(raw){
-    raw = raw || {};
-    const id = raw.id || newId();
-    const pos = raw.pos || (raw.x!=null && raw.y!=null && raw.z!=null
-      ? { x:Number(raw.x), y:Number(raw.y), z:Number(raw.z) }
-      : null);
-    const imageFileId = raw.imageFileId || (raw.image && raw.image.id) || null;
-    const image = raw.image || null;
-    return {
-      id,
-      title: raw.title || '',
-      body: raw.body || '',
-      color: raw.color || '#eab308',
-      pos,
-      imageFileId,
-      image,
-      createdAt: raw.createdAt || null,
-      updatedAt: raw.updatedAt || null,
-      rowIndex: raw.rowIndex || null
-    };
-  }
-
-  function setItems(items){
-    store.items = (items || []).map(normalizeItem);
-    refreshList();
-    syncPinsFromItems();
-    renderImages();
-  renderPreview();
-    renderPreview();
-  }
-
-  function setImages(images){
-    store.images = images || [];
-    renderImages();
-  renderPreview();
-    renderPreview();
-  }
-
-  // --- caption creation --------------------------------------------------------
-  let preferWorldClicks = false;
-  let worldHookInstalled = false;
-  let lastAddAtMs = 0;
-
-  function addCaptionAt(x, y, world){
-    const tNow = Date.now();
-    if (tNow - lastAddAtMs < 150) {
-      log('skip duplicate addCaptionAt');
-      return;
-    }
-    lastAddAtMs = tNow;
-
-    const ts = new Date().toISOString();
     const item = {
-      id: newId(),
-      title: '(untitled)',
-      body: '',
-      color: store.currentColor,
+      id,
+      title: elTitle.value || '(untitled)',
+      body: elBody.value || '',
+      color: baseColor,
       pos: world || null,
+      posX: world ? world.x : null,
+      posY: world ? world.y : null,
+      posZ: world ? world.z : null,
       imageFileId: null,
-      image: null,
-      createdAt: ts,
-      updatedAt: ts,
-      rowIndex: null
+      createdAt: now,
+      updatedAt: now
     };
-    store.items.push(item);
-    refreshList();
-    selectItem(item.id);
-    addPinForItem(item);
-    emitItemAdded(item);
+
+    upsertItem(item);
+    setSelectedId(id);
+    elTitle.value = item.title;
+    elBody.value  = item.body;
+
+    try{
+      const ev = new CustomEvent('lm:caption-added', { detail: { item } });
+      window.dispatchEvent(ev);
+    }catch(e){
+      warn('lm:caption-added dispatch failed', e);
+    }
   }
 
-  // fallback click: GL canvas 上の Shift+クリック
+  let preferWorldClicks = true;
+  let worldHookInstalled = false;
+
+  function tryInstallWorldSpaceHook(){
+    if (worldHookInstalled) return;
+    const br = getViewerBridge();
+    if (!br || typeof br.onCanvasShiftPick !== 'function') return;
+    try{
+      br.onCanvasShiftPick((payload)=>{
+        const world = payload && (payload.point || payload.world || payload);
+        if (!world || typeof world.x !== 'number') return;
+        preferWorldClicks = true;
+        addCaptionAt(0.5, 0.5, world);
+      });
+      worldHookInstalled = true;
+      log('world-space hook installed');
+    }catch(e){
+      warn('onCanvasShiftPick hook failed', e);
+    }
+  }
+
   function installFallbackClick(){
-    const area = document.getElementById('gl') ||
-                 document.querySelector('#viewer,#glCanvas,#glcanvas');
-    if (!area) return;
-    area.addEventListener('click', (ev)=>{
-      if (!ev.shiftKey) return;
-      if (preferWorldClicks) return; // viewer 側で world 座標を扱う場合はそちらを優先
-      const rect = area.getBoundingClientRect();
-      const x = (ev.clientX - rect.left) / rect.width;
-      const y = (ev.clientY - rect.top) / rect.height;
-      addCaptionAt(x, y, null);
+    const canvas = document.querySelector('#gl, canvas');
+    if (!canvas) return;
+    canvas.addEventListener('dblclick',(ev)=>{
+      if (preferWorldClicks) return;
+      const rect = canvas.getBoundingClientRect();
+      const nx = (ev.clientX - rect.left) / rect.width;
+      const ny = (ev.clientY - rect.top)  / rect.height;
+      const br = getViewerBridge();
+      const world = br && typeof br.projectPoint === 'function'
+        ? br.projectPoint({x:nx,y:ny})
+        : null;
+      addCaptionAt(nx, ny, world);
     });
   }
 
-function tryInstallWorldSpaceHook(){
-  if (worldHookInstalled) return;
-  const br = getViewerBridge();
-  if (!br || typeof br.onCanvasShiftPick !== 'function') return;
+  window.addEventListener('lm:scene-ready',            tryInstallWorldSpaceHook, { passive:true });
+  window.addEventListener('lm:scene-deep-ready',       tryInstallWorldSpaceHook, { passive:true });
+  window.addEventListener('lm:viewer-bridge-available',tryInstallWorldSpaceHook, { passive:true });
+
+  installFallbackClick();
+
+  function wireSheetBridge(){
+    window.addEventListener('lm:caption-items-from-sheet',(ev)=>{
+      const items = (ev && ev.detail && ev.detail.items) || [];
+      setItems(items);
+    }, {passive:true});
+
+    window.addEventListener('lm:caption-images-from-sheet',(ev)=>{
+      const images = (ev && ev.detail && ev.detail.images) || [];
+      setImages(images);
+    }, {passive:true});
+
+    window.addEventListener('lm:caption-updated-from-sheet',(ev)=>{
+      const item = (ev && ev.detail && ev.detail.item) || null;
+      if (!item || !item.id) return;
+      upsertItem(item);
+    }, {passive:true});
+
+    window.addEventListener('lm:caption-deleted-from-sheet',(ev)=>{
+      const id = (ev && ev.detail && ev.detail.id) || null;
+      if (!id) return;
+      removeItem(id);
+    }, {passive:true});
+  }
+
+  wireSheetBridge();
+
+  elTitle.addEventListener('change', ()=>{
+    const it = findItem(store.selectedId);
+    if (!it) return;
+    it.title = elTitle.value;
+    it.updatedAt = new Date().toISOString();
+    upsertItem(it);
+  });
+
+  elBody.addEventListener('change', ()=>{
+    const it = findItem(store.selectedId);
+    if (!it) return;
+    it.body = elBody.value;
+    it.updatedAt = new Date().toISOString();
+    upsertItem(it);
+  });
+
+  const btnRefreshImages = root.querySelector('#btnRefreshImages');
+  if (btnRefreshImages) {
+    btnRefreshImages.addEventListener('click', ()=>{
+      try{
+        const ev = new CustomEvent('lm:refresh-images',{detail:{}});
+        window.dispatchEvent(ev);
+      }catch(e){
+        warn('lm:refresh-images dispatch failed', e);
+      }
+    });
+  }
+
+  // initial render
+  renderColors();
+  window.addEventListener('lm:scene-ready',            function(){ try{ syncPinsFromItems(); }catch(_){ } }, { passive:true });
+
+  renderFilters();
+  refreshList();
+  renderImages();
+  renderPreview();
+  try{ syncPinsFromItems(); }catch(_){}
+
   try{
-    // viewer.module.cdn.js 側からは { point, event, hit } が渡される
-    br.onCanvasShiftPick(({ point } = {})=>{
-      if (!point) return;
-      // world 座標を使うモードに移行
-      preferWorldClicks = true;
-      // pos には Three.Vector3 (point) をそのまま入れる
-      addCaptionAt(0.5, 0.5, point);
-    });
-    worldHookInstalled = true;
-    log('world-space hook installed');
+    const ev = new CustomEvent('lm:caption-ui-ready',{detail:{}});
+    window.dispatchEvent(ev);
   }catch(e){
-    warn('onCanvasShiftPick hook failed', e);
+    warn('lm:caption-ui-ready dispatch failed', e);
   }
-}
 
-
-installFallbackClick();
-tryInstallWorldSpaceHook();
-document.addEventListener('lm:viewer-bridge-ready', tryInstallWorldSpaceHook, { passive:true });
-window.addEventListener('lm:scene-ready',            tryInstallWorldSpaceHook, { passive:true });
-
-
-  // Expose UI API
   window.__LM_CAPTION_UI = {
     addCaptionAt,
     refreshList,
@@ -606,26 +502,17 @@ window.addEventListener('lm:scene-ready',            tryInstallWorldSpaceHook, {
     removeItem,
     setItems,
     setImages,
+    syncPinsFromItems,
+    getViewerBridge,
     onItemAdded,
     onItemChanged,
     onItemDeleted,
     onItemSelected,
     registerDeleteListener: onItemDeleted,
+    getItems(){ return store.items; },
     get items(){ return store.items; },
     get images(){ return store.images; },
     get selectedId(){ return store.selectedId; }
-  };  window.__LM_CAPTION_UI.__ver = 'A2';
-
-
-  // initial render
-  renderColors();
-  renderFilters();
-  refreshList();
-  renderImages();
-  renderPreview();
-
-  try{
-    document.dispatchEvent(new Event('lm:caption-ui-ready'));
-  }catch(_){}
-  log('ready');
+  };
+  window.__LM_CAPTION_UI.__ver = 'A2';
 })();
