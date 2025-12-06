@@ -591,6 +591,7 @@ function tryInstallWorldSpaceHook(){
   }
 }
 
+
 installFallbackClick();
 tryInstallWorldSpaceHook();
 document.addEventListener('lm:viewer-bridge-ready', tryInstallWorldSpaceHook, { passive:true });
