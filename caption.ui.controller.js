@@ -10,6 +10,14 @@
   const log=(...a)=>console.log(TAG, ...a);
   const warn=(...a)=>console.warn(TAG, ...a);
 
+  // Preview renderer (v6.6 stub)
+  // Legacy callers expect renderPreview() to exist, but the dedicated
+  // preview pane UI has been retired. This stub keeps the call safe
+  // without changing any behaviour.
+  function renderPreview() {
+    // no-op on purpose
+  }
+
   // Helpers
   const $ = (sel,root=document)=>root.querySelector(sel);
   const $$ = (sel,root=document)=>Array.from(root.querySelectorAll(sel));
@@ -32,6 +40,10 @@
     selectedId: null,
     filterId: 'all'
   };
+
+  // ★ グローバルストアとして公開（設計どおりに戻す）
+  // 他モジュール（overlay など）やデバッグ用に参照可能にする。
+  window.__LM_CAPTION_STORE = store;
 
   const addListeners = [];
   const changeListeners = [];

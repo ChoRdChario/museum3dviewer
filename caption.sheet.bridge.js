@@ -2,7 +2,7 @@
 // - Listens to lm:sheet-context (spreadsheetId + sheetGid [+ sheetTitle])
 // - Resolves sheet title from gid via LM_SHEET_GIDMAP (or uses provided sheetTitle)
 // - Ensures header row on the active caption sheet
-// - Loads existing captions into __LM_CAPTION_UI
+// - Loads existing captions into __LM_CAPTION_UI + broadcasts events
 // - Appends newly added captions (Shift+Click) to the sheet
 // - Updates title/body edits back to the same row
 (function(){
@@ -24,6 +24,16 @@
   let addedHookBound = false;
   let changedHookBound = false;
   let deletedHookBound = false;
+
+  // --- event helper -----------------------------------------------------------
+  function dispatchSafe(type, detail){
+    try{
+      const ev = new CustomEvent(type, { detail });
+      window.dispatchEvent(ev);
+    }catch(e){
+      warn(type+' dispatch failed', e);
+    }
+  }
 
   // --- auth helper (prefers __lm_fetchJSONAuth) -------------------------------
   async function authJSON(url, init){
@@ -94,7 +104,7 @@
     return uiPromise;
   }
 
-  // --- sheet title resolution (gid -> title) ---------------------------------
+  // --- sheet title resolution (gid -> title) ----------------------------------
   async function resolveSheetTitle(spreadsheetId, sheetGid){
     if (!spreadsheetId) return null;
     const gid = sheetGid && String(sheetGid).trim();
@@ -231,6 +241,9 @@
     item.rowIndex = rowIndex;
 
     log('append row', id, 'row', rowIndex);
+
+    // UI / overlay 向けに「シート由来の更新」としてブロードキャスト
+    dispatchSafe('lm:caption-updated-from-sheet', { item });
   }
 
   async function updateRow(spreadsheetId, sheetTitle, item){
@@ -247,9 +260,10 @@
     item.createdAt = createdAt || item.createdAt;
     item.updatedAt = updatedAt;
     log('update row', item.id, 'row', rowIndex);
+
+    dispatchSafe('lm:caption-updated-from-sheet', { item });
   }
 
-  
   async function softDeleteRow(spreadsheetId, sheetTitle, item){
     if (!item || !item.rowIndex){
       warn('softDeleteRow: missing rowIndex; skip', item && item.id);
@@ -263,9 +277,11 @@
     const empty = new Array(HEADER.length).fill('');
     await authJSON(url, { method:'PUT', body: JSON.stringify({ values:[empty] }), rawResponse:true });
     log('soft delete row', item.id, 'row', rowIndex);
+
+    dispatchSafe('lm:caption-deleted-from-sheet', { id: item.id, rowIndex });
   }
 
-// --- main: sheet-context handler -------------------------------------------
+  // --- main: sheet-context handler -------------------------------------------
   async function handleSheetContext(detail){
     const spreadsheetId = String(detail.spreadsheetId || '');
     let sheetGid = detail.sheetGid;
@@ -308,10 +324,14 @@
       const maxRow = items.reduce((m,it)=> Math.max(m, it.rowIndex || 1), 1);
       ctx.nextRowIndex = maxRow + 1;
 
+      // ★ 設計どおり：まずイベントで全体にブロードキャスト
+      dispatchSafe('lm:caption-items-from-sheet', { items });
+
+      // 併せて UI があれば直接同期（既存挙動）
       const ui = await waitCaptionUI();
       if (ui && typeof ui.setItems === 'function'){
         ui.setItems(items);
-      }else{
+      }else if (!ui){
         warn('caption UI missing setItems');
       }
 
