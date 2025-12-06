@@ -1,530 +1,498 @@
-// [caption.ui.controller] Phase A2 — caption UI + pin bridge + Sheets hooks + image attach
-// Defensive: runs even if other bridges are missing.
-(function(){
-  if (window.__LM_CAPTION_UI && window.__LM_CAPTION_UI.__ver && String(window.__LM_CAPTION_UI.__ver).startsWith('A2')) {
-    console.log('[caption.ui.controller]', 'already loaded');
+(function () {
+  const TAG = "[caption.ui.controller]";
+  console.log(TAG, "world-space hook installed");
+
+  const elPanel = document.querySelector("#panel-caption");
+  if (!elPanel) {
+    console.warn(TAG, "panel not found");
     return;
   }
 
-  const TAG='[caption.ui.controller]';
-  const log=(...a)=>console.log(TAG, ...a);
-  const warn=(...a)=>console.warn(TAG, ...a);
+  // ────────────────────────────────────────────────
+  // DOM 構築
+  // ────────────────────────────────────────────────
 
-  // Preview renderer (v6.6 stub)
-  // Legacy callers expect renderPreview() to exist, but the dedicated
-  // preview pane UI has been retired. This stub keeps the call safe
-  // without changing any behaviour.
-  function renderPreview() {
-    // no-op on purpose
+  const elCaptionColorRow = elPanel.querySelector("[data-caption-color-row]");
+  const elCaptionFilterRow = elPanel.querySelector("[data-caption-filter-row]");
+  const elCaptionList = elPanel.querySelector("[data-caption-list]");
+  const elCaptionTitle = elPanel.querySelector("[data-caption-title]");
+  const elCaptionBody = elPanel.querySelector("[data-caption-body]");
+  const elCaptionImages = elPanel.querySelector("[data-caption-images]");
+  const elCaptionImageTemplate = elPanel.querySelector(
+    "[data-caption-image-template]"
+  );
+  const elCaptionImageList = elPanel.querySelector("[data-caption-image-list]");
+
+  if (
+    !elCaptionColorRow ||
+    !elCaptionFilterRow ||
+    !elCaptionList ||
+    !elCaptionTitle ||
+    !elCaptionBody ||
+    !elCaptionImages ||
+    !elCaptionImageTemplate ||
+    !elCaptionImageList
+  ) {
+    console.warn(TAG, "some caption panel elements not found");
+    return;
   }
 
-  // Helpers
-  const $ = (sel,root=document)=>root.querySelector(sel);
-  const $$ = (sel,root=document)=>Array.from(root.querySelectorAll(sel));
+  // ────────────────────────────────────────────────
+  // カラーパレット
+  // ────────────────────────────────────────────────
 
-  const COLORS = [
-    '#f97373','#facc15','#4ade80','#22c55e',
-    '#38bdf8','#60a5fa','#a855f7','#f97316',
-    '#ec4899','#8b5cf6','#0ea5e9','#22c55e'
+  const COLOR_KEYS = [
+    "#ffb3ba",
+    "#ffdfba",
+    "#ffffba",
+    "#baffc9",
+    "#bae1ff",
+    "#e2baff",
+    "#ffbaff",
+    "#ffd1b3",
+    "#d1ffb3",
+    "#b3ffff",
   ];
 
-  const FILTERS = [
-    {id:'all', label:'All'},
-    {id:'img', label:'With image'},
-    {id:'noimg', label:'No image'}
-  ];
+  function initColorPalette() {
+    COLOR_KEYS.forEach((color) => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "lm-pin-color";
+      btn.style.backgroundColor = color;
+      btn.setAttribute("data-color", color);
+      btn.addEventListener("click", () => {
+        setCurrentColor(color);
+      });
+      elCaptionColorRow.appendChild(btn);
+    });
+  }
+
+  // ────────────────────────────────────────────────
+  // フィルタ（All / With image / No image）
+  // ────────────────────────────────────────────────
+
+  const FILTER_KEYS = ["all", "with-image", "no-image"];
+
+  function initFilterButtons() {
+    FILTER_KEYS.forEach((key) => {
+      const label = document.createElement("label");
+      label.className = "lm-caption-filter-option";
+
+      const radio = document.createElement("input");
+      radio.type = "radio";
+      radio.name = "caption-filter";
+      radio.value = key;
+
+      const span = document.createElement("span");
+      span.textContent =
+        key === "all"
+          ? "All"
+          : key === "with-image"
+          ? "With image"
+          : "No image";
+
+      label.appendChild(radio);
+      label.appendChild(span);
+      elCaptionFilterRow.appendChild(label);
+
+      radio.addEventListener("change", () => {
+        if (radio.checked) {
+          setFilter(key);
+        }
+      });
+    });
+  }
+
+  // ────────────────────────────────────────────────
+  // 内部ストア
+  // ────────────────────────────────────────────────
 
   const store = {
     items: [],
-    images: [],
-    selectedId: null,
-    filterId: 'all'
+    activeId: null,
+    currentColor: COLOR_KEYS[0],
+    filter: "all",
+    lastAddAtMs: 0,
   };
 
-  // ★ グローバルストアとして公開（設計どおりに戻す）
-  // 他モジュール（overlay など）やデバッグ用に参照可能にする。
-  window.__LM_CAPTION_STORE = store;
-
-  const addListeners = [];
-  const changeListeners = [];
-  const deleteListeners = [];
-  const selectListeners = [];
-
-  function getViewerBridge(){
-    try{
-      if (window.__lm_pin_runtime && typeof window.__lm_pin_runtime.getViewerBridge === 'function') {
-        return window.__lm_pin_runtime.getViewerBridge();
-      }
-    }catch(e){
-      warn('pin-runtime bridge lookup failed', e);
-    }
-    try{
-      if (window.__lm_viewer_bridge) return window.__lm_viewer_bridge;
-      if (window.viewerBridge) return window.viewerBridge;
-    }catch(e){
-      warn('viewer bridge lookup failed', e);
-    }
-    return null;
+  function findItemById(id) {
+    return store.items.find((it) => it.id === id) || null;
   }
 
-  function getPinRuntime(){
+  function applyFilter(items) {
+    if (store.filter === "all") return items;
+    if (store.filter === "with-image") {
+      return items.filter((it) => !!it.imageFileId);
+    }
+    if (store.filter === "no-image") {
+      return items.filter((it) => !it.imageFileId);
+    }
+    return items;
+  }
+
+  // ────────────────────────────────────────────────
+  // ビューア／ピンランタイムへの橋渡し
+  // ────────────────────────────────────────────────
+
+  function getPinRuntime() {
     return window.__lm_pin_runtime || null;
   }
 
-  function setItems(items){
-    store.items = Array.isArray(items) ? items.slice() : [];
-    refreshList();
-    syncPinsFromItems();
+  function getViewerBridge() {
+    const pinRuntime = getPinRuntime();
+    if (!pinRuntime) return null;
+    return pinRuntime.getViewerBridge();
   }
 
-  function setImages(images){
-    store.images = Array.isArray(images) ? images.slice() : [];
-    renderImages();
+  function projectToScreen(world) {
+    const bridge = getViewerBridge();
+    if (!bridge || typeof bridge.projectPoint !== "function") return null;
+    return bridge.projectPoint(world);
   }
 
-  function setSelectedId(id){
-    store.selectedId = id;
-    refreshListSelection();
-    syncPinsSelection();
+  function clearAllPinMarkers() {
+    const pinRuntime = getPinRuntime();
+    if (!pinRuntime || typeof pinRuntime.clearPins !== "function") return;
+    pinRuntime.clearPins();
   }
 
-  function findItem(id){
-    return store.items.find(it=>it.id===id) || null;
-  }
+  function addPinMarkerForItem(item) {
+    const pinRuntime = getPinRuntime();
+    if (!pinRuntime || typeof pinRuntime.addPinMarker !== "function") return;
 
-  function upsertItem(item){
-    const idx = store.items.findIndex(it=>it.id===item.id);
-    if (idx === -1) {
-      store.items.push(item);
-      emitItemAdded(item);
-    } else {
-      store.items[idx] = item;
-      emitItemChanged(item);
-    }
-    refreshList();
-    syncPinsFromItems();
-  }
-
-  function removeItem(id){
-    const idx = store.items.findIndex(it=>it.id===id);
-    if (idx === -1) return;
-    const [item] = store.items.splice(idx,1);
-    if (store.selectedId === id) store.selectedId = null;
-    refreshList();
-    syncPinsFromItems();
-    emitItemDeleted(item);
-  }
-
-  function onItemAdded(fn){
-    if (typeof fn === 'function') addListeners.push(fn);
-  }
-  function emitItemAdded(item){
-    addListeners.forEach(fn=>{
-      try{ fn(item); }catch(e){ console.error(TAG,'onItemAdded handler failed', e); }
-    });
-  }
-
-  function onItemChanged(fn){
-    if (typeof fn === 'function') changeListeners.push(fn);
-  }
-  function emitItemChanged(item){
-    changeListeners.forEach(fn=>{
-      try{ fn(item); }catch(e){ console.error(TAG,'onItemChanged handler failed', e); }
-    });
-  }
-
-  function onItemDeleted(fn){
-    if (typeof fn === 'function') deleteListeners.push(fn);
-  }
-  function emitItemDeleted(item){
-    deleteListeners.forEach(fn=>{
-      try{ fn(item); }catch(e){ console.error(TAG,'onItemDeleted handler failed', e); }
-    });
-  }
-
-  function onItemSelected(fn){
-    if (typeof fn === 'function') selectListeners.push(fn);
-  }
-  function emitItemSelected(item){
-    selectListeners.forEach(fn=>{
-      try{ fn(item); }catch(e){ console.error(TAG,'onItemSelected handler failed', e); }
-    });
-  }
-
-  // DOM refs
-  const root = document.querySelector('#pane-caption') || document.body;
-  const elColorChips = root.querySelector('#pinColorChips');
-  const elFilterChips = root.querySelector('#pinFilterChips');
-  const elList = root.querySelector('#caption-list');
-  const elTitle = root.querySelector('#caption-title');
-  const elBody  = root.querySelector('#caption-body');
-  const elImagesGrid = root.querySelector('#images-grid');
-  const elImagesStatus = root.querySelector('#images-status');
-
-  if (!elColorChips || !elFilterChips || !elList || !elTitle || !elBody) {
-    warn('essential elements missing; skip init', {
-      elTitle: !!elTitle,
-      elBody: !!elBody,
-      elList: !!elList
-    });
-    return;
-  }
-
-  let currentColor = COLORS[0];
-
-  function renderColors(){
-    elColorChips.innerHTML = '';
-    COLORS.forEach(c=>{
-      const b = document.createElement('button');
-      b.type = 'button';
-      b.className = 'chip';
-      b.style.background = c;
-      if (c === currentColor) b.style.boxShadow = '0 0 0 2px #fff';
-      b.addEventListener('click', ()=>{
-        currentColor = c;
-        renderColors();
-      });
-      elColorChips.appendChild(b);
-    });
-  }
-
-  function renderFilters(){
-    elFilterChips.innerHTML = '';
-    FILTERS.forEach(f=>{
-      const b = document.createElement('button');
-      b.type = 'button';
-      b.textContent = f.label;
-      b.className = 'pill' + (store.filterId === f.id ? ' active':'');
-      b.addEventListener('click', ()=>{
-        store.filterId = f.id;
-        renderFilters();
-        refreshList();
-      });
-      elFilterChips.appendChild(b);
-    });
-  }
-
-  function makeRow(item){
-    const row = document.createElement('div');
-    row.className = 'lm-cap-row';
-    row.dataset.id = item.id;
-
-    const sw = document.createElement('div');
-    sw.className = 'lm-cap-sw';
-    sw.style.background = item.color || '#60a5fa';
-
-    const title = document.createElement('div');
-    title.className = 'lm-cap-title';
-    title.textContent = item.title || '(untitled)';
-
-    const imgMark = document.createElement('div');
-    imgMark.className = 'lm-cap-imgmark';
-    imgMark.textContent = item.imageFileId ? '🖼' : '';
-
-    const delBtn = document.createElement('button');
-    delBtn.className = 'lm-cap-del';
-    delBtn.textContent = '×';
-
-    row.appendChild(sw);
-    row.appendChild(title);
-    row.appendChild(imgMark);
-    row.appendChild(delBtn);
-
-    row.addEventListener('click', (ev)=>{
-      if (ev.target === delBtn) return;
-      setSelectedId(item.id);
-      emitItemSelected(item);
-      elTitle.value = item.title || '';
-      elBody.value  = item.body  || '';
-    });
-
-    delBtn.addEventListener('click', (ev)=>{
-      ev.stopPropagation();
-      if (confirm('Delete this caption?')) {
-        removeItem(item.id);
-      }
-    });
-
-    return row;
-  }
-
-  function applyFilter(items){
-    switch(store.filterId){
-      case 'img':   return items.filter(it=>!!it.imageFileId);
-      case 'noimg': return items.filter(it=>!it.imageFileId);
-      default:      return items;
-    }
-  }
-
-  function refreshList(){
-    elList.innerHTML = '';
-    const filtered = applyFilter(store.items);
-    filtered.forEach(item=>{
-      const row = makeRow(item);
-      if (item.id === store.selectedId) row.classList.add('selected');
-      elList.appendChild(row);
-    });
-  }
-
-  function refreshListSelection(){
-    const rows = $$('.lm-cap-row', elList);
-    rows.forEach(r=>{
-      if (r.dataset.id === store.selectedId) r.classList.add('selected');
-      else r.classList.remove('selected');
-    });
-  }
-
-  function renderImages(){
-    if (!elImagesGrid) return;
-    elImagesGrid.innerHTML = '';
-    if (!store.images.length) {
-      elImagesStatus.textContent = 'No images detected in GLB folder.';
-      return;
-    }
-    elImagesStatus.textContent = store.images.length + ' images';
-    store.images.forEach(img=>{
-      const wrap = document.createElement('button');
-      wrap.type = 'button';
-      wrap.style.border = '0';
-      wrap.style.padding = '0';
-      wrap.style.background = 'transparent';
-      wrap.style.cursor = 'pointer';
-      wrap.style.display = 'inline-block';
-
-      const elImg = document.createElement('img');
-      elImg.src = img.thumbUrl || img.url;
-      elImg.alt = img.name || '';
-      elImg.style.width = '88px';
-      elImg.style.height = '88px';
-      elImg.style.objectFit = 'cover';
-      elImg.style.borderRadius = '8px';
-      elImg.loading = 'lazy';
-
-      wrap.appendChild(elImg);
-      wrap.addEventListener('click', ()=>{
-        const it = findItem(store.selectedId);
-        if (!it) return;
-        it.imageFileId = img.id;
-        upsertItem(it);
-        elImagesStatus.textContent = `Linked to: ${img.name || img.id}`;
-      });
-
-      elImagesGrid.appendChild(wrap);
-    });
-  }
-
-  function syncPinsFromItems(){
-    const pinRt = getPinRuntime();
-    const br = getViewerBridge();
-    if (!pinRt || !br) return;
-
-    try{
-      pinRt.clearPins();
-    }catch(e){
-      warn('clearPins failed', e);
-    }
-
-    store.items.forEach(it=>{
-      if (!it.pos) return;
-      try{
-        pinRt.addPinMarker({
-          id: it.id,
-          pos: it.pos,
-          color: it.color || '#60a5fa',
-          selected: it.id === store.selectedId
-        });
-      }catch(e){
-        warn('addPinMarker failed for', it.id, e);
-      }
-    });
-  }
-
-  function syncPinsSelection(){
-    const pinRt = getPinRuntime();
-    if (!pinRt) return;
-    try{
-      pinRt.setPinSelected(store.selectedId || null);
-    }catch(e){
-      warn('setPinSelected failed', e);
-    }
-  }
-
-  function selectItem(id){
-    const it = findItem(id);
-    if (!it) return;
-    setSelectedId(id);
-    elTitle.value = it.title || '';
-    elBody.value  = it.body  || '';
-    emitItemSelected(it);
-  }
-
-  function addCaptionAt(x,y,world){
-    if (!world || typeof world.x !== 'number') {
-      warn('addCaptionAt: invalid world', world);
-    }
-    const id = 'c_' + Math.random().toString(36).slice(2,10);
-    const now = new Date().toISOString();
-    const baseColor = currentColor || COLORS[0];
-
-    const item = {
-      id,
-      title: elTitle.value || '(untitled)',
-      body: elBody.value || '',
-      color: baseColor,
-      pos: world || null,
-      posX: world ? world.x : null,
-      posY: world ? world.y : null,
-      posZ: world ? world.z : null,
-      imageFileId: null,
-      createdAt: now,
-      updatedAt: now
+    const world = {
+      x: item.posX,
+      y: item.posY,
+      z: item.posZ,
     };
 
-    upsertItem(item);
-    setSelectedId(id);
-    elTitle.value = item.title;
-    elBody.value  = item.body;
-
-    try{
-      const ev = new CustomEvent('lm:caption-added', { detail: { item } });
-      window.dispatchEvent(ev);
-    }catch(e){
-      warn('lm:caption-added dispatch failed', e);
-    }
-  }
-
-  let preferWorldClicks = true;
-  let worldHookInstalled = false;
-
-  function tryInstallWorldSpaceHook(){
-    if (worldHookInstalled) return;
-    const br = getViewerBridge();
-    if (!br || typeof br.onCanvasShiftPick !== 'function') return;
-    try{
-      br.onCanvasShiftPick((payload)=>{
-        const world = payload && (payload.point || payload.world || payload);
-        if (!world || typeof world.x !== 'number') return;
-        preferWorldClicks = true;
-        addCaptionAt(0.5, 0.5, world);
-      });
-      worldHookInstalled = true;
-      log('world-space hook installed');
-    }catch(e){
-      warn('onCanvasShiftPick hook failed', e);
-    }
-  }
-
-  function installFallbackClick(){
-    const canvas = document.querySelector('#gl, canvas');
-    if (!canvas) return;
-    canvas.addEventListener('dblclick',(ev)=>{
-      if (preferWorldClicks) return;
-      const rect = canvas.getBoundingClientRect();
-      const nx = (ev.clientX - rect.left) / rect.width;
-      const ny = (ev.clientY - rect.top)  / rect.height;
-      const br = getViewerBridge();
-      const world = br && typeof br.projectPoint === 'function'
-        ? br.projectPoint({x:nx,y:ny})
-        : null;
-      addCaptionAt(nx, ny, world);
+    pinRuntime.addPinMarker({
+      id: item.id,
+      world,
+      color: item.color,
+      selected: store.activeId === item.id,
     });
   }
 
-  window.addEventListener('lm:scene-ready',            tryInstallWorldSpaceHook, { passive:true });
-  window.addEventListener('lm:scene-deep-ready',       tryInstallWorldSpaceHook, { passive:true });
-  window.addEventListener('lm:viewer-bridge-available',tryInstallWorldSpaceHook, { passive:true });
-
-  installFallbackClick();
-
-  function wireSheetBridge(){
-    window.addEventListener('lm:caption-items-from-sheet',(ev)=>{
-      const items = (ev && ev.detail && ev.detail.items) || [];
-      setItems(items);
-    }, {passive:true});
-
-    window.addEventListener('lm:caption-images-from-sheet',(ev)=>{
-      const images = (ev && ev.detail && ev.detail.images) || [];
-      setImages(images);
-    }, {passive:true});
-
-    window.addEventListener('lm:caption-updated-from-sheet',(ev)=>{
-      const item = (ev && ev.detail && ev.detail.item) || null;
-      if (!item || !item.id) return;
-      upsertItem(item);
-    }, {passive:true});
-
-    window.addEventListener('lm:caption-deleted-from-sheet',(ev)=>{
-      const id = (ev && ev.detail && ev.detail.id) || null;
-      if (!id) return;
-      removeItem(id);
-    }, {passive:true});
+  function setSelectedPin(id) {
+    const pinRuntime = getPinRuntime();
+    if (!pinRuntime || typeof pinRuntime.setPinSelected !== "function") return;
+    pinRuntime.setPinSelected(id);
   }
 
-  wireSheetBridge();
+  // ────────────────────────────────────────────────
+  // DOM レンダリング
+  // ────────────────────────────────────────────────
 
-  elTitle.addEventListener('change', ()=>{
-    const it = findItem(store.selectedId);
-    if (!it) return;
-    it.title = elTitle.value;
-    it.updatedAt = new Date().toISOString();
-    upsertItem(it);
-  });
-
-  elBody.addEventListener('change', ()=>{
-    const it = findItem(store.selectedId);
-    if (!it) return;
-    it.body = elBody.value;
-    it.updatedAt = new Date().toISOString();
-    upsertItem(it);
-  });
-
-  const btnRefreshImages = root.querySelector('#btnRefreshImages');
-  if (btnRefreshImages) {
-    btnRefreshImages.addEventListener('click', ()=>{
-      try{
-        const ev = new CustomEvent('lm:refresh-images',{detail:{}});
-        window.dispatchEvent(ev);
-      }catch(e){
-        warn('lm:refresh-images dispatch failed', e);
+  function renderColorPalette() {
+    const buttons = elCaptionColorRow.querySelectorAll("[data-color]");
+    buttons.forEach((btn) => {
+      const color = btn.getAttribute("data-color");
+      if (color === store.currentColor) {
+        btn.classList.add("active");
+      } else {
+        btn.classList.remove("active");
       }
     });
   }
 
-  // initial render
-  renderColors();
-  window.addEventListener('lm:scene-ready',            function(){ try{ syncPinsFromItems(); }catch(_){ } }, { passive:true });
-
-  renderFilters();
-  refreshList();
-  renderImages();
-  renderPreview();
-  try{ syncPinsFromItems(); }catch(_){}
-
-  try{
-    const ev = new CustomEvent('lm:caption-ui-ready',{detail:{}});
-    window.dispatchEvent(ev);
-  }catch(e){
-    warn('lm:caption-ui-ready dispatch failed', e);
+  function renderFilter() {
+    const radios = elCaptionFilterRow.querySelectorAll(
+      'input[type="radio"][name="caption-filter"]'
+    );
+    radios.forEach((radio) => {
+      radio.checked = radio.value === store.filter;
+    });
   }
 
-  window.__LM_CAPTION_UI = {
+  function renderList() {
+    elCaptionList.innerHTML = "";
+
+    const filtered = applyFilter(store.items);
+    filtered.forEach((item) => {
+      const row = document.createElement("div");
+      row.className = "lm-caption-row";
+      row.setAttribute("data-caption-id", item.id);
+
+      const colorDot = document.createElement("span");
+      colorDot.className = "lm-caption-color-dot";
+      colorDot.style.backgroundColor = item.color;
+
+      const titleSpan = document.createElement("span");
+      titleSpan.className = "lm-caption-title";
+      titleSpan.textContent = item.title || "(untitled)";
+
+      row.appendChild(colorDot);
+      row.appendChild(titleSpan);
+
+      row.addEventListener("click", () => {
+        selectCaption(item.id);
+      });
+
+      elCaptionList.appendChild(row);
+    });
+  }
+
+  function renderDetail() {
+    const active = store.activeId
+      ? findItemById(store.activeId)
+      : store.items[0] || null;
+
+    if (!active) {
+      elCaptionTitle.value = "";
+      elCaptionBody.value = "";
+      elCaptionImages.classList.add("hidden");
+      elCaptionImageList.innerHTML = "";
+      return;
+    }
+
+    if (store.activeId !== active.id) {
+      store.activeId = active.id;
+    }
+
+    elCaptionTitle.value = active.title || "";
+    elCaptionBody.value = active.body || "";
+
+    renderImageList(active);
+  }
+
+  function renderImageList(item) {
+    elCaptionImageList.innerHTML = "";
+
+    if (!item.imageFileId) {
+      elCaptionImages.classList.add("hidden");
+      return;
+    }
+
+    elCaptionImages.classList.remove("hidden");
+
+    const clone = elCaptionImageTemplate.content
+      .cloneNode(true)
+      .querySelector("[data-caption-image-item]");
+
+    const img = clone.querySelector("img");
+    img.src = `https://drive.google.com/thumbnail?sz=w200-h200&id=${encodeURIComponent(
+      item.imageFileId
+    )}`;
+
+    elCaptionImageList.appendChild(clone);
+  }
+
+  function renderPins() {
+    clearAllPinMarkers();
+    const filtered = applyFilter(store.items);
+    filtered.forEach((item) => {
+      addPinMarkerForItem(item);
+    });
+  }
+
+  function renderAll() {
+    renderColorPalette();
+    renderFilter();
+    renderList();
+    renderDetail();
+    renderPins();
+  }
+
+  // ────────────────────────────────────────────────
+  // アクション
+  // ────────────────────────────────────────────────
+
+  function setCurrentColor(color) {
+    store.currentColor = color;
+    renderColorPalette();
+  }
+
+  function setFilter(filterKey) {
+    if (!FILTER_KEYS.includes(filterKey)) return;
+    store.filter = filterKey;
+    renderList();
+    renderPins();
+  }
+
+  function addItemFromSheet(raw) {
+    const item = {
+      id: raw.id,
+      title: raw.title || "",
+      body: raw.body || "",
+      color: raw.color || COLOR_KEYS[0],
+      posX: Number(raw.posX) || 0,
+      posY: Number(raw.posY) || 0,
+      posZ: Number(raw.posZ) || 0,
+      imageFileId: raw.imageFileId || "",
+      createdAt: raw.createdAt || "",
+      updatedAt: raw.updatedAt || "",
+    };
+
+    const existingIndex = store.items.findIndex((it) => it.id === item.id);
+    if (existingIndex >= 0) {
+      store.items[existingIndex] = item;
+    } else {
+      store.items.push(item);
+    }
+  }
+
+  function setItemsFromSheet(rows) {
+    store.items = [];
+    rows.forEach((raw) => addItemFromSheet(raw));
+    store.activeId = store.items[0] ? store.items[0].id : null;
+    renderAll();
+  }
+
+  function addCaptionAt(world) {
+    const now = Date.now();
+    if (now - store.lastAddAtMs < 300) {
+      console.log(TAG, "skip addCaptionAt (debounce)");
+      return null;
+    }
+    store.lastAddAtMs = now;
+
+    const id = "c_" + Math.random().toString(36).slice(2, 10);
+
+    const base = {
+      id,
+      title: "",
+      body: "",
+      color: store.currentColor,
+      posX: world.x,
+      posY: world.y,
+      posZ: world.z,
+      imageFileId: "",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    store.items.push(base);
+    store.activeId = id;
+
+    renderAll();
+
+    dispatchCaptionAdded(base);
+
+    return base;
+  }
+
+  function updateActiveCaption(fields) {
+    const active = store.activeId
+      ? findItemById(store.activeId)
+      : store.items[0] || null;
+    if (!active) return;
+
+    Object.assign(active, fields, {
+      updatedAt: new Date().toISOString(),
+    });
+
+    renderAll();
+    dispatchCaptionUpdated(active);
+  }
+
+  function selectCaption(id) {
+    const item = findItemById(id);
+    if (!item) return;
+    store.activeId = id;
+    renderAll();
+    setSelectedPin(id);
+    dispatchCaptionSelected(item);
+  }
+
+  function deleteActiveCaption() {
+    const active = store.activeId
+      ? findItemById(store.activeId)
+      : store.items[0] || null;
+    if (!active) return;
+
+    const idx = store.items.findIndex((it) => it.id === active.id);
+    if (idx >= 0) {
+      store.items.splice(idx, 1);
+    }
+
+    const next =
+      store.items[idx] ||
+      store.items[idx - 1] ||
+      store.items[0] ||
+      null;
+
+    store.activeId = next ? next.id : null;
+
+    renderAll();
+    dispatchCaptionDeleted(active);
+  }
+
+  // ────────────────────────────────────────────────
+  // イベントディスパッチ（他モジュール連携用）
+  // ────────────────────────────────────────────────
+
+  function dispatchCaptionAdded(item) {
+    window.dispatchEvent(
+      new CustomEvent("lm:caption-added", {
+        detail: { item },
+      })
+    );
+  }
+
+  function dispatchCaptionUpdated(item) {
+    window.dispatchEvent(
+      new CustomEvent("lm:caption-updated", {
+        detail: { item },
+      })
+    );
+  }
+
+  function dispatchCaptionDeleted(item) {
+    window.dispatchEvent(
+      new CustomEvent("lm:caption-deleted", {
+        detail: { item },
+      })
+    );
+  }
+
+  function dispatchCaptionSelected(item) {
+    window.dispatchEvent(
+      new CustomEvent("lm:caption-selected", {
+        detail: { item },
+      })
+    );
+  }
+
+  // ────────────────────────────────────────────────
+  // DOM イベント配線
+  // ────────────────────────────────────────────────
+
+  elCaptionTitle.addEventListener("input", () => {
+    updateActiveCaption({ title: elCaptionTitle.value });
+  });
+
+  elCaptionBody.addEventListener("input", () => {
+    updateActiveCaption({ body: elCaptionBody.value });
+  });
+
+  elCaptionBody.addEventListener("keydown", (ev) => {
+    if (ev.key === "Enter" && (ev.metaKey || ev.ctrlKey)) {
+      ev.preventDefault();
+      deleteActiveCaption();
+    }
+  });
+
+  // ────────────────────────────────────────────────
+  // 外から呼ばれる公開 API
+  // ────────────────────────────────────────────────
+
+  const ui = {
+    setItemsFromSheet,
     addCaptionAt,
-    refreshList,
-    selectItem,
-    removeItem,
-    setItems,
-    setImages,
-    syncPinsFromItems,
-    getViewerBridge,
-    onItemAdded,
-    onItemChanged,
-    onItemDeleted,
-    onItemSelected,
-    registerDeleteListener: onItemDeleted,
-    getItems(){ return store.items; },
-    get items(){ return store.items; },
-    get images(){ return store.images; },
-    get selectedId(){ return store.selectedId; }
+    selectCaption,
+    setFilter,
+    setCurrentColor,
+    deleteActiveCaption,
   };
-  window.__LM_CAPTION_UI.__ver = 'A2';
+
+  window.__LM_CAPTION_UI = ui;
+
+  // 初期化
+  initColorPalette();
+  initFilterButtons();
+  renderAll();
+
+  console.log(TAG, "ready");
 })();
