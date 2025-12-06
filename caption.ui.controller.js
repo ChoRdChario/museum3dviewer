@@ -10,15 +10,6 @@
   const log=(...a)=>console.log(TAG, ...a);
   const warn=(...a)=>console.warn(TAG, ...a);
 
-  // Preview renderer (v6.6 stub)
-  // Legacy callers expect renderPreview() to exist, but the dedicated
-  // preview pane UI has been retired. This stub keeps the call safe
-  // without changing any behaviour.
-  function renderPreview() {
-    // no-op on purpose
-  }
-
-
   // Helpers
   const $ = (sel,root=document)=>root.querySelector(sel);
   const $$ = (sel,root=document)=>Array.from(root.querySelectorAll(sel));
