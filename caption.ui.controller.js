@@ -11,7 +11,7 @@
   const warn=(...a)=>console.warn(TAG, ...a);
 
   // Helpers
-  const $  = (sel,root=document)=>root.querySelector(sel);
+  const $ = (sel,root=document)=>root.querySelector(sel);
   const $$ = (sel,root=document)=>Array.from(root.querySelectorAll(sel));
 
   // Root hooks
@@ -21,50 +21,103 @@
   }
 
   // Elements
-  const elColorList    = $('#pinColorChips');
-  const elAddBtn       = $('#btnAddCaption');
-  const elTitle        = $('#captionTitle');
-  const elBody         = $('#captionBody');
-  const elList         = $('#captionList');
-  const elCoordX       = $('#captionCoordX');
-  const elCoordY       = $('#captionCoordY');
-  const elCoordZ       = $('#captionCoordZ');
-  const elImagesWrap   = $('#captionImagesWrap');
-  const elAddImageBtn  = $('#btnAddImage');
-  const elRefreshImgBtn= $('#btnRefreshImages');
-
-  // 必須: Title / Body / List。これが無いなら本当に UI が無いとみなして終了。
-  if (!elTitle || !elBody || !elList){
-    return warn('essential elements missing; skip init', {
-      elTitle: !!elTitle,
-      elBody:  !!elBody,
-      elList:  !!elList,
-    });
-  }
-  // 任意: カラー行と追加ボタンは無くても続行できる
-  if (!elColorList || !elAddBtn){
-    warn('optional elements missing; continue with partial UI', {
-      elColorList: !!elColorList,
-      elAddBtn:    !!elAddBtn,
-    });
+  const elColorList  = $('#pinColorChips', pane);
+  const elFilterList = $('#pinFilterChips', pane);
+  const elList       = $('#caption-list', pane);
+  const elTitle      = $('#caption-title', pane);
+  const elBody       = $('#caption-body', pane);
+  const elImages     = $('#images-grid', pane);
+  const elImgStatus  = $('#images-status', pane);
+  const elRefreshImg = $('#btnRefreshImages', pane);
+  let elPreview = $('#caption-image-preview', pane);
+  if (!elPreview && elImages && elImages.parentElement){
+    elPreview = document.createElement('div');
+    elPreview.id = 'caption-image-preview';
+    elPreview.className = 'lm-cap-preview';
+    try{
+      elImages.parentElement.insertBefore(elPreview, elImages);
+    }catch(e){
+      warn('preview insert failed', e);
+    }
   }
 
-  // ---- State ----
-  const store = {
-    // {id, title, body, color, pos:{x,y,z}, images:[], createdAt, updatedAt}
+
+  // Store (stable on window to survive reload of this script)
+  const store = window.__LM_CAPTION_STORE || (window.__LM_CAPTION_STORE = {
+    currentColor: '#eab308',
+    filter: new Set(),
     items: [],
     selectedId: null,
-    activeColor: null,
-    idCounter: 0,
-  };
+    images: []
+  });
 
-  // ---- Viewer bridge (Three scene + overlay hook) ----
+  const PALETTE = ['#facc15','#f97316','#ef4444','#ec4899','#8b5cf6','#3b82f6','#0ea5e9','#22c55e','#14b8a6','#a3a3a3'];
+
+  function newId(){
+    return 'c_' + Math.random().toString(36).slice(2,10);
+  }
+
+  // --- small event hub for Sheets bridge --------------------------------------
+  const addListeners = [];
+  const changeListeners = [];
+  const deleteListeners = [];
+  const selectListeners = []; // caption selection listeners
+  const dirtyTimers = new Map(); // id -> raf id
+
+  function onItemAdded(fn){
+    if (typeof fn === 'function') addListeners.push(fn);
+  }
+  function emitItemAdded(item){
+    addListeners.forEach(fn=>{
+      try{ fn(item); }catch(e){ console.error(TAG,'onItemAdded handler failed', e); }
+    });
+  }
+
+  function onItemChanged(fn){
+    if (typeof fn === 'function') changeListeners.push(fn);
+  }
+  function emitItemChanged(item){
+    changeListeners.forEach(fn=>{
+      try{ fn(item); }catch(e){ console.error(TAG,'onItemChanged handler failed', e); }
+    });
+  }
+  function scheduleChanged(item){
+    if (!item || !item.id) return;
+    const id = item.id;
+    const prev = dirtyTimers.get(id);
+    if (prev) cancelAnimationFrame(prev);
+    const t = requestAnimationFrame(()=>{
+      dirtyTimers.delete(id);
+      emitItemChanged(item);
+    });
+    dirtyTimers.set(id, t);
+  }
+
+  function onItemDeleted(fn){
+    if (typeof fn === 'function') deleteListeners.push(fn);
+  }
+  function emitItemDeleted(item){
+    deleteListeners.forEach(fn=>{
+      try{ fn(item); }catch(e){ console.error(TAG,'onItemDeleted handler failed', e); }
+    });
+  }
+
+
+  function onItemSelected(fn){
+    if (typeof fn === 'function') selectListeners.push(fn);
+  }
+  function emitItemSelected(item){
+    selectListeners.forEach(fn=>{
+      try{ fn(item); }catch(e){ console.error(TAG,'onItemSelected handler failed', e); }
+    });
+  }
+
+  // --- viewer bridge + pins ---------------------------------------------------
   function getViewerBridge(){
     try{
-      if (window.__lm_viewer_bridge) return window.__lm_viewer_bridge;
-      if (window.viewerBridge)       return window.viewerBridge;
-      if (window.__lm_pin_runtime && typeof window.__lm_pin_runtime.getBridge === 'function'){
-        const b = window.__lm_pin_runtime.getBridge();
+      const pr = window.__lm_pin_runtime;
+      if (pr && typeof pr.getBridge === 'function'){
+        const b = pr.getBridge();
         if (b) return b;
       }
     }catch(e){}
@@ -77,12 +130,7 @@
     if (!item.pos) return;
     const p = item.pos;
     try{
-      // viewer.module.cdn.js 側の仕様に合わせて position:{x,y,z} を渡す
-      br.addPinMarker({
-        id: item.id,
-        position:{ x:p.x, y:p.y, z:p.z },
-        color: item.color,
-      });
+      br.addPinMarker({ id:item.id, x:p.x, y:p.y, z:p.z, color:item.color });
     }catch(e){
       warn('addPinMarker failed', e);
     }
@@ -93,271 +141,486 @@
     if (!br || typeof br.clearPins !== 'function' || typeof br.addPinMarker !== 'function') return;
     try{
       br.clearPins();
-      store.items.forEach(it=>{
-        if (it.pos) addPinForItem(it);
-      });
+      store.items.forEach(it=>{ if (it.pos) addPinForItem(it); });
     }catch(e){
       warn('syncPinsFromItems failed', e);
     }
   }
 
-  function setPinSelected(id){
+  function syncViewerSelection(id){
     const br = getViewerBridge();
     if (!br || typeof br.setPinSelected !== 'function') return;
     try{
-      br.setPinSelected(id);
+      br.setPinSelected(id || null, !!id);
     }catch(e){
       warn('setPinSelected failed', e);
     }
   }
 
-  function projectToWorldFromOverlay(ev){
-    const br = getViewerBridge();
-    if (!br || typeof br.onCanvasShiftPick!=='function'){
-      warn('projectToWorldFromOverlay: no onCanvasShiftPick');
-      return null;
-    }
-    try{
-      const rect = ev.target.closest('canvas')?.getBoundingClientRect();
-      if (!rect) return null;
-      const x = (ev.clientX - rect.left) / rect.width;
-      const y = (ev.clientY - rect.top) / rect.height;
-      const world = br.onCanvasShiftPick(x, y);
-      if (!world || typeof world.x!=='number') return null;
-      return world;
-    }catch(e){
-      warn('projectToWorldFromOverlay failed', e);
-      return null;
-    }
-  }
-
-  // ---- ID helper ----
-  function nextId(){
-    store.idCounter += 1;
-    return 'c_' + Math.random().toString(36).slice(2,10);
-  }
-
-  // ---- Color chips ----
-  function initColorChips(){
+  // --- colors / filters -------------------------------------------------------
+  function renderColors(){
     if (!elColorList) return;
-    const chips = $$('.pin-color-chip', elColorList);
-    if (!chips.length) return;
-
-    chips.forEach(ch=>{
-      ch.addEventListener('click', ()=>{
-        const color = ch.dataset.color || ch.style.backgroundColor || '#ff0000';
-        store.activeColor = color;
-        chips.forEach(c=>c.classList.remove('active'));
-        ch.classList.add('active');
+    elColorList.innerHTML = '';
+    PALETTE.forEach(col=>{
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'pill';
+      btn.style.backgroundColor = col;
+      if (store.currentColor === col) btn.classList.add('active');
+      btn.addEventListener('click', ()=>{
+        store.currentColor = col;
+        renderColors();
       });
+      elColorList.appendChild(btn);
     });
-
-    // default
-    const first = chips[0];
-    if (first){
-      const color = first.dataset.color || first.style.backgroundColor || '#ff0000';
-      store.activeColor = color;
-      first.classList.add('active');
-    }
   }
 
-  // ---- UI Rendering ----
-  function renderList(){
+  function renderFilters(){
+    if (!elFilterList) return;
+    elFilterList.innerHTML = '';
+    PALETTE.forEach(col=>{
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'pill';
+      btn.style.backgroundColor = col;
+      if (store.filter.has(col)) btn.classList.add('active');
+      btn.addEventListener('click', ()=>{
+        if (store.filter.has(col)) store.filter.delete(col);
+        else store.filter.add(col);
+        renderFilters();
+        refreshList();
+      });
+      elFilterList.appendChild(btn);
+    });
+  }
+
+  function filteredItems(){
+    const active = store.filter.size ? store.filter : null;
+    if (!active) return store.items.slice();
+    return store.items.filter(it => active.has(it.color));
+  }
+
+  // --- caption list -----------------------------------------------------------
+  function refreshList(){
     if (!elList) return;
     elList.innerHTML = '';
-    store.items.forEach(item=>{
-      const li = document.createElement('li');
-      li.className = 'caption-item';
-      li.dataset.id = item.id;
+    const items = filteredItems();
+    items.forEach(it=>{
+      const row = document.createElement('div');
+      row.className = 'lm-cap-row';
+      row.dataset.id = it.id;
 
-      const colorDot = document.createElement('span');
-      colorDot.className = 'caption-color-dot';
-      colorDot.style.backgroundColor = item.color || '#ccc';
+      const sw = document.createElement('span');
+      sw.className = 'lm-cap-sw';
+      sw.style.backgroundColor = it.color || '#eab308';
 
-      const titleSpan = document.createElement('span');
-      titleSpan.className = 'caption-title';
-      titleSpan.textContent = item.title || '(no title)';
+      const title = document.createElement('span');
+      title.className = 'lm-cap-title';
+      title.textContent = it.title || '(untitled)';
 
-      const bodySpan = document.createElement('span');
-      bodySpan.className = 'caption-body-snippet';
-      bodySpan.textContent = item.body || '';
+      const imgMark = document.createElement('span');
+      imgMark.className = 'lm-cap-imgmark';
+      if (it.imageFileId || (it.image && (it.image.id || it.image.url))) imgMark.textContent = '🖼';
 
-      li.appendChild(colorDot);
-      li.appendChild(titleSpan);
-      li.appendChild(bodySpan);
-
-      if (item.id === store.selectedId){
-        li.classList.add('selected');
-      }
-
-      li.addEventListener('click', ()=>{ selectItem(item.id); });
-      elList.appendChild(li);
-    });
-  }
-
-  function renderDetail(){
-    if (!elTitle || !elBody) return;
-
-    const item = store.items.find(it=>it.id === store.selectedId) || null;
-
-    if (!item){
-      elTitle.value = '';
-      elBody.value  = '';
-      if (elCoordX)      elCoordX.value = '';
-      if (elCoordY)      elCoordY.value = '';
-      if (elCoordZ)      elCoordZ.value = '';
-      if (elImagesWrap)  elImagesWrap.innerHTML = '';
-      return;
-    }
-
-    elTitle.value = item.title || '';
-    elBody.value  = item.body  || '';
-
-    if (item.pos){
-      if (elCoordX) elCoordX.value = String(item.pos.x ?? '');
-      if (elCoordY) elCoordY.value = String(item.pos.y ?? '');
-      if (elCoordZ) elCoordZ.value = String(item.pos.z ?? '');
-    }else{
-      if (elCoordX) elCoordX.value = '';
-      if (elCoordY) elCoordY.value = '';
-      if (elCoordZ) elCoordZ.value = '';
-    }
-
-    // Images (simple list)
-    if (elImagesWrap){
-      elImagesWrap.innerHTML = '';
-      (item.images || []).forEach(url=>{
-        const img = document.createElement('img');
-        img.className='caption-image-thumb';
-        img.src = url;
-        elImagesWrap.appendChild(img);
+      const delBtn = document.createElement('button');
+      delBtn.type = 'button';
+      delBtn.className = 'lm-cap-del';
+      delBtn.textContent = '×';
+      delBtn.addEventListener('click', (ev)=>{
+        ev.stopPropagation();
+        removeItem(it.id);
       });
-    }
+
+      row.appendChild(sw);
+      row.appendChild(title);
+      row.appendChild(imgMark);
+      row.appendChild(delBtn);
+
+      if (store.selectedId === it.id) row.classList.add('selected');
+
+      row.addEventListener('click', ()=>{
+        selectItem(it.id);
+      });
+
+      elList.appendChild(row);
+    });
   }
 
   function selectItem(id){
-    store.selectedId = id;
-    renderList();
-    renderDetail();
-    setPinSelected(id);
-  }
-
-  // ---- Add caption (from button + Shift+Click hook) ----
-  function addCaptionAt(pos){
-    const id    = nextId();
-    const color = store.activeColor || '#ff0000';
-    const now   = new Date().toISOString();
-
-    const item = {
-      id,
-      title: elTitle ? (elTitle.value || '') : '',
-      body:  elBody  ? (elBody.value  || '') : '',
-      color,
-      pos: pos || null,
-      images: [],
-      createdAt: now,
-      updatedAt: now,
-    };
-
-    store.items.push(item);
-    store.selectedId = id;
-    renderList();
-    renderDetail();
-    addPinForItem(item);
-    emitItemAdded(item);
-  }
-
-  function emitItemAdded(item){
-    document.dispatchEvent(new CustomEvent('lm:caption-added', { detail:{ item } }));
-  }
-
-  // ---- Shift+Click -> world position -> add caption ----
-  function installWorldSpaceHook(){
-    const br = getViewerBridge();
-    if (!br || typeof br.onCanvasShiftPick!=='function'){
-      warn('installWorldSpaceHook: no onCanvasShiftPick on bridge');
+    store.selectedId = id || null;
+    if (elList){
+      $$('.lm-cap-row', elList).forEach(row=>{
+        row.classList.toggle('selected', row.dataset.id === id);
+      });
+    }
+    const it = store.items.find(x=>x.id===id);
+    if (!it){
+      syncViewerSelection(null);
+      if (elTitle) elTitle.value = '';
+      if (elBody)  elBody.value  = '';
+      renderImages(); // clear image selection highlight
+      renderPreview();
+      emitItemSelected(null);
       return;
     }
-    // caption.viewer.overlay.js 側から dispatch されるイベントを受ける
-    document.addEventListener('lm:world-click', (ev)=>{
-      const detail = ev.detail || {};
-      const world  = detail.world;
-      if (!world || typeof world.x!=='number') return;
-      addCaptionAt(world);
-    });
+    if (elTitle) elTitle.value = it.title || '';
+    if (elBody)  elBody.value  = it.body  || '';
+    syncViewerSelection(it.pos ? it.id : null);
+    renderImages(); // update image highlight for this caption
+    renderPreview();
+    emitItemSelected(it);
+  }
+  function removeItem(id){
+    const idx = store.items.findIndex(x=>x.id===id);
+    if (idx === -1) return;
+    const removed = store.items.splice(idx,1)[0] || null;
+    if (store.selectedId === id) store.selectedId = null;
+
+    // 3D ピンも削除／再構築
+    try{
+      const br = getViewerBridge();
+      if (br){
+        if (typeof br.removePinMarker === 'function'){
+          br.removePinMarker(id);
+        }else if (typeof br.clearPins === 'function' && typeof br.addPinMarker === 'function'){
+          syncPinsFromItems();
+        }
+      }
+    }catch(e){
+      warn('removePinMarker failed', e);
+    }
+
+    // Sheets へ削除通知（ソフトデリートは caption.sheet.bridge 側）
+    if (removed && removed.id){
+      emitItemDeleted(removed);
+    }else{
+      emitItemDeleted({ id });
+    }
+
+    refreshList();
+    renderImages();
+  renderPreview();
   }
 
-  // ---- Sheets bridge: append / load ----
-  function getSheetBridge(){
-    return window.__lm_caption_sheet_bridge || null;
-  }
-
-  function setItems(items){
-    store.items = Array.isArray(items) ? items.slice() : [];
-    renderList();
-    renderDetail();
-    syncPinsFromItems();
-  }
-
-  function getItems(){
-    return store.items.slice();
-  }
-
-  function notifySelectionChanged(){
-    const item = store.items.find(it=>it.id === store.selectedId) || null;
-    document.dispatchEvent(new CustomEvent('lm:caption-selection', { detail:{ item } }));
-  }
-
-  // ---- Events ----
-  if (elAddBtn){
-    elAddBtn.addEventListener('click', ()=>{
-      // World pos は overlay 経由のイベントでセットされる想定だが、
-      // ここでは pos=null としてとりあえず追加（後から編集可）
-      addCaptionAt(null);
-    });
-  }
-
+  // --- Title / Body input wiring ----------------------------------------------
   if (elTitle){
+    let rafId = 0;
     elTitle.addEventListener('input', ()=>{
-      const item = store.items.find(it=>it.id === store.selectedId);
-      if (!item) return;
-      item.title     = elTitle.value;
-      item.updatedAt = new Date().toISOString();
-      renderList();
-      notifySelectionChanged();
+      const id = store.selectedId; if (!id) return;
+      const it = store.items.find(x=>x.id===id); if (!it) return;
+      it.title = elTitle.value;
+      if (rafId) cancelAnimationFrame(rafId);
+      rafId = requestAnimationFrame(()=>refreshList());
+      scheduleChanged(it);
     });
   }
 
   if (elBody){
+    let rafId = 0;
     elBody.addEventListener('input', ()=>{
-      const item = store.items.find(it=>it.id === store.selectedId);
-      if (!item) return;
-      item.body      = elBody.value;
-      item.updatedAt = new Date().toISOString();
-      notifySelectionChanged();
+      const id = store.selectedId; if (!id) return;
+      const it = store.items.find(x=>x.id===id); if (!it) return;
+      it.body = elBody.value;
+      if (rafId) cancelAnimationFrame(rafId);
+      rafId = requestAnimationFrame(()=>{});
+      scheduleChanged(it);
     });
   }
 
-  // Images: external loader module manages the actual URLs / refresh
-  if (elRefreshImgBtn){
-    elRefreshImgBtn.addEventListener('click', ()=>{
-      document.dispatchEvent(new Event('lm:caption-images-refresh'));
+  // --- Images grid ------------------------------------------------------------
+  function getSelectedItem(){
+    if (!store.selectedId) return null;
+    return store.items.find(x=>x.id === store.selectedId) || null;
+  }
+
+  function renderPreview(){
+    if (!elPreview) return;
+    const sel = getSelectedItem();
+    elPreview.innerHTML = '';
+    if (!sel || !(sel.imageFileId || (sel.image && sel.image.id))){
+      elPreview.style.display = 'none';
+      return;
+    }
+    const imgId = sel.imageFileId || (sel.image && sel.image.id);
+    const list = store.images || [];
+    const meta = (list.find(it => it.id === imgId) || sel.image || null);
+    if (!meta){
+      elPreview.style.display = 'none';
+      return;
+    }
+    const url = meta.thumbUrl || meta.thumbnailUrl || meta.url || meta.webContentLink || meta.webViewLink || '';
+    if (!url){
+      elPreview.style.display = 'none';
+      return;
+    }
+    const label = document.createElement('div');
+    label.className = 'lm-cap-preview-label';
+    label.textContent = 'Attached image';
+    const img = document.createElement('img');
+    img.src = url;
+    img.alt = meta.name || '';
+    img.loading = 'lazy';
+    img.decoding = 'async';
+    elPreview.appendChild(label);
+    elPreview.appendChild(img);
+    elPreview.style.display = 'block';
+  }
+
+  function renderImages(){
+    if (!elImages) return;
+    // enforce grid layout from JS (3 columns) in case CSS is old
+    elImages.style.display = 'grid';
+    elImages.style.gridTemplateColumns = 'repeat(3, minmax(72px, 1fr))';
+    elImages.style.gap = '6px';
+    elImages.style.maxHeight = '360px';
+    elImages.style.overflowY = 'auto';
+
+    const list = store.images || [];
+    elImages.innerHTML = '';
+    const selected = getSelectedItem();
+    const selectedImageId = selected && (selected.imageFileId || (selected.image && selected.image.id));
+
+    if (!list.length){
+      if (elImgStatus) elImgStatus.textContent = '画像はまだありません';
+      return;
+    }
+
+    if (elImgStatus) elImgStatus.textContent = `${list.length} 枚の画像`;
+
+    list.forEach(imgInfo=>{
+      const wrap = document.createElement('button');
+      wrap.type = 'button';
+      wrap.className = 'lm-img-item';
+      wrap.dataset.id = imgInfo.id;
+
+      const img = document.createElement('img');
+      img.loading = 'lazy';
+      img.decoding = 'async';
+      img.src = imgInfo.thumbUrl || imgInfo.thumbnailUrl || imgInfo.url || '';
+      img.alt = imgInfo.name || '';
+      wrap.appendChild(img);
+
+      const label = document.createElement('div');
+      label.className = 'lm-img-label';
+      label.textContent = imgInfo.name || '(image)';
+      wrap.appendChild(label);
+
+      // detach button (visible on hover / when attached)
+      const detach = document.createElement('button');
+      detach.type = 'button';
+      detach.textContent = '×';
+      detach.title = 'Detach image';
+      detach.style.position = 'absolute';
+      detach.style.top = '2px';
+      detach.style.right = '2px';
+      detach.style.width = '16px';
+      detach.style.height = '16px';
+      detach.style.border = 'none';
+      detach.style.borderRadius = '999px';
+      detach.style.padding = '0';
+      detach.style.fontSize = '11px';
+      detach.style.lineHeight = '1';
+      detach.style.background = 'rgba(15,23,42,0.9)';
+      detach.style.color = '#e5e7eb';
+      detach.style.cursor = 'pointer';
+      detach.style.opacity = '0';
+      detach.style.transition = 'opacity .12s ease-out';
+      wrap.style.position = 'relative';
+
+      if (selectedImageId && selectedImageId === imgInfo.id){
+        wrap.classList.add('active');
+        detach.style.opacity = '1';
+      }
+
+      wrap.addEventListener('mouseenter', ()=>{ detach.style.opacity = '1'; });
+      wrap.addEventListener('mouseleave', ()=>{
+        if (!(selectedImageId && selectedImageId === imgInfo.id)){
+          detach.style.opacity = '0';
+        }
+      });
+
+      detach.addEventListener('click', (ev)=>{
+        ev.stopPropagation();
+        const cur = getSelectedItem();
+        if (!cur) return;
+        if (cur.imageFileId && cur.imageFileId === imgInfo.id){
+          cur.imageFileId = null;
+          cur.image = null;
+          scheduleChanged(cur);
+          refreshList();
+          renderImages();
+  renderPreview();
+          renderPreview();
+        }
+      });
+
+      wrap.appendChild(detach);
+
+      wrap.addEventListener('click', ()=>{
+        const cur = getSelectedItem();
+        if (!cur){
+          log('image click ignored (no caption selected)');
+          return;
+        }
+        // attach (no toggle; detach is handled by × button)
+        cur.imageFileId = imgInfo.id;
+        cur.image = imgInfo;
+        scheduleChanged(cur);
+        refreshList();   // 🖼 マーク更新
+        renderImages();  // ハイライト更新
+        renderPreview();
+      });
+
+      elImages.appendChild(wrap);
+    });
+  }
+  if (elRefreshImg){
+    elRefreshImg.addEventListener('click', ()=>{
+      try{
+        document.dispatchEvent(new Event('lm:refresh-images'));
+      }catch(e){
+        warn('refresh-images event failed', e);
+      }
     });
   }
 
-  // ---- Integration with caption.sheet.bridge.js ----
+  // --- Public API for other modules -------------------------------------------
+  function normalizeItem(raw){
+    raw = raw || {};
+    const id = raw.id || newId();
+    const pos = raw.pos || (raw.x!=null && raw.y!=null && raw.z!=null
+      ? { x:Number(raw.x), y:Number(raw.y), z:Number(raw.z) }
+      : null);
+    const imageFileId = raw.imageFileId || (raw.image && raw.image.id) || null;
+    const image = raw.image || null;
+    return {
+      id,
+      title: raw.title || '',
+      body: raw.body || '',
+      color: raw.color || '#eab308',
+      pos,
+      imageFileId,
+      image,
+      createdAt: raw.createdAt || null,
+      updatedAt: raw.updatedAt || null,
+      rowIndex: raw.rowIndex || null
+    };
+  }
+
+  function setItems(items){
+    store.items = (items || []).map(normalizeItem);
+    refreshList();
+    syncPinsFromItems();
+    renderImages();
+  renderPreview();
+    renderPreview();
+  }
+
+  function setImages(images){
+    store.images = images || [];
+    renderImages();
+  renderPreview();
+    renderPreview();
+  }
+
+  // --- caption creation --------------------------------------------------------
+  let preferWorldClicks = false;
+  let worldHookInstalled = false;
+  let lastAddAtMs = 0;
+
+  function addCaptionAt(x, y, world){
+    const tNow = Date.now();
+    if (tNow - lastAddAtMs < 150) {
+      log('skip duplicate addCaptionAt');
+      return;
+    }
+    lastAddAtMs = tNow;
+
+    const ts = new Date().toISOString();
+    const item = {
+      id: newId(),
+      title: '(untitled)',
+      body: '',
+      color: store.currentColor,
+      pos: world || null,
+      imageFileId: null,
+      image: null,
+      createdAt: ts,
+      updatedAt: ts,
+      rowIndex: null
+    };
+    store.items.push(item);
+    refreshList();
+    selectItem(item.id);
+    addPinForItem(item);
+    emitItemAdded(item);
+  }
+
+  // fallback click: GL canvas 上の Shift+クリック
+  function installFallbackClick(){
+    const area = document.getElementById('gl') ||
+                 document.querySelector('#viewer,#glCanvas,#glcanvas');
+    if (!area) return;
+    area.addEventListener('click', (ev)=>{
+      if (!ev.shiftKey) return;
+      if (preferWorldClicks) return; // viewer 側で world 座標を扱う場合はそちらを優先
+      const rect = area.getBoundingClientRect();
+      const x = (ev.clientX - rect.left) / rect.width;
+      const y = (ev.clientY - rect.top) / rect.height;
+      addCaptionAt(x, y, null);
+    });
+  }
+
+  function tryInstallWorldSpaceHook(){
+    if (worldHookInstalled) return;
+    const br = getViewerBridge();
+    if (!br || typeof br.onCanvasShiftPick !== 'function') return;
+    try{
+      br.onCanvasShiftPick((world)=>{
+        if (!world) return;
+        preferWorldClicks = true;
+        addCaptionAt(0.5, 0.5, world);
+      });
+      worldHookInstalled = true;
+      log('world-space hook installed');
+    }catch(e){
+      warn('onCanvasShiftPick hook failed', e);
+    }
+  }
+
+  installFallbackClick();
+  tryInstallWorldSpaceHook();
+  document.addEventListener('lm:viewer-bridge-ready', tryInstallWorldSpaceHook, { passive:true });
+  window.addEventListener('lm:scene-ready',            tryInstallWorldSpaceHook, { passive:true });
+
+  // Expose UI API
   window.__LM_CAPTION_UI = {
-    __ver: 'A2',
-    setItems,
-    getItems,
+    addCaptionAt,
+    refreshList,
     selectItem,
-    syncPinsFromItems,
-  };
+    removeItem,
+    setItems,
+    setImages,
+    onItemAdded,
+    onItemChanged,
+    onItemDeleted,
+    onItemSelected,
+    registerDeleteListener: onItemDeleted,
+    get items(){ return store.items; },
+    get images(){ return store.images; },
+    get selectedId(){ return store.selectedId; }
+  };  window.__LM_CAPTION_UI.__ver = 'A2';
 
-  // ---- Init ----
-  initColorChips();
-  installWorldSpaceHook();
-  renderList();
-  renderDetail();
+
+  // initial render
+  renderColors();
+  renderFilters();
+  refreshList();
+  renderImages();
+  renderPreview();
+
+  try{
+    document.dispatchEvent(new Event('lm:caption-ui-ready'));
+  }catch(_){}
   log('ready');
 })();
