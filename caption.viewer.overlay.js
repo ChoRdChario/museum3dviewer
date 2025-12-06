@@ -157,28 +157,31 @@
   }
 
   // ---- Mouse / Shift+Click hook ----
-  function installShiftClickHook(){
-    viewerCanvas.addEventListener('click', (ev)=>{
-      if (!ev.shiftKey) return;
-      const br = ensureViewerBridge();
-      if (!br || typeof br.onCanvasShiftPick!=='function') return;
-
-      const rect = viewerCanvas.getBoundingClientRect();
-      const x = (ev.clientX - rect.left) / rect.width;
-      const y = (ev.clientY - rect.top)  / rect.height;
-
-      try{
-        const world = br.onCanvasShiftPick(x, y);
-        if (!world || typeof world.x!=='number') {
-          warn('onCanvasShiftPick returned invalid world', world);
-          return;
-        }
-        document.dispatchEvent(new CustomEvent('lm:world-click', { detail:{ world } }));
-      }catch(e){
-        warn('onCanvasShiftPick failed', e);
-      }
-    });
+function installShiftClickHook(){
+  const br = ensureViewerBridge();
+  if (!br || typeof br.onCanvasShiftPick !== 'function') {
+    warn('onCanvasShiftPick not available on viewer bridge');
+    return;
   }
+
+  try{
+    br.onCanvasShiftPick(({ point } = {})=>{
+      const world = point;
+      if (!world || typeof world.x !== 'number') {
+        warn('onCanvasShiftPick delivered invalid world', world);
+        return;
+      }
+      // world 座標をキャプション UI 側に伝えるイベント
+      document.dispatchEvent(
+        new CustomEvent('lm:world-click', { detail:{ world } })
+      );
+    });
+    log('shift-pick hook installed via viewer bridge');
+  }catch(e){
+    warn('onCanvasShiftPick hook failed', e);
+  }
+}
+
 
   // ---- Caption UI integration ----
   function setItems(items){
