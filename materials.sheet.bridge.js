@@ -57,8 +57,17 @@
   });
 
   window.addEventListener('lm:mat-opacity', (e) => {
-    const d = e.detail || {};
-    enqueue({ updatedAt: d.updatedAt || new Date().toISOString(), updatedBy: d.updatedBy || 'ui', materialKey: d.materialKey, opacity: d.opacity });
+    const d = (e && e.detail) || {};
+    // If the new LM_MaterialsPersist layer is available, rely on it instead of the legacy queue
+    if (window.LM_MaterialsPersist && typeof window.LM_MaterialsPersist.upsert === 'function') {
+      return;
+    }
+    enqueue({
+      updatedAt: d.updatedAt || new Date().toISOString(),
+      updatedBy: d.updatedBy || 'ui',
+      materialKey: d.materialKey,
+      opacity: d.opacity
+    });
   });
 
   let tries = 0;

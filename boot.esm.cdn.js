@@ -1,13 +1,13 @@
 /*!
  * LociMyu ESM/CDN — boot (foundation, enhanced client_id discovery + auth button wire)
- * VERSION_TAG:V6_12b_FOUNDATION_AUTH_CTX_MAT_HDR_CLIENTID
+ * VERSION_TAG:V6_12b_FOUNDATION_AUTH_CTX_MAT_HDR_CLIENTID_FIXED
  */
 
 const LOG = (...a)=>console.log(...a);
 const warn=(...a)=>console.warn(...a);
 const err=(...a)=>console.error(...a);
 
-window.LM_VERSION_TAG = "V6_12b_FOUNDATION_AUTH_CTX_MAT_HDR_CLIENTID";
+window.LM_VERSION_TAG = "V6_12b_FOUNDATION_AUTH_CTX_MAT_HDR_CLIENTID_FIXED";
 window.LM_SCOPES = window.LM_SCOPES || [
   "https://www.googleapis.com/auth/spreadsheets",
   "https://www.googleapis.com/auth/drive.readonly",
@@ -21,181 +21,214 @@ window.LM_SCOPES = window.LM_SCOPES || [
  *   2) button#auth-signin[data-client-id]
  *   3) localStorage.LM_GIS_CLIENT_ID
  *   4) window.GIS_CLIENT_ID / window.__LM_CLIENT_ID
- *   5) <meta name="google-signin-client_id">
- *   6) <meta name="google-oauth-client_id">  <-- index.html 側の親設定
- *   ========================= */
-function pickClientIdFromDOM(){
+ *   5) <meta name="google-signin-client_id" content=...>
+ * ======================== */
+
+function pickClientIdFromURL(){
   try{
     const u = new URL(location.href);
-    const fromUrl = u.searchParams.get("lm_client_id") || u.searchParams.get("client_id");
-    if (fromUrl && fromUrl.trim()) {
-      localStorage.setItem("LM_GIS_CLIENT_ID", fromUrl.trim());
-      return fromUrl.trim();
-    }
+    const v = u.searchParams.get('lm_client_id') || u.searchParams.get('client_id');
+    if (v) return v;
   }catch(e){}
-
-  const btn = document.querySelector("#auth-signin");
-  if (btn && btn.dataset && btn.dataset.clientId && btn.dataset.clientId.trim()){
-    const v = btn.dataset.clientId.trim();
-    localStorage.setItem("LM_GIS_CLIENT_ID", v);
-    return v;
-  }
-
-  const ls = localStorage.getItem("LM_GIS_CLIENT_ID");
-  if (ls && ls.trim()) return ls.trim();
-
-  if (typeof window.GIS_CLIENT_ID === "string" && window.GIS_CLIENT_ID.trim()) return window.GIS_CLIENT_ID.trim();
-  if (typeof window.__LM_CLIENT_ID === "string" && window.__LM_CLIENT_ID.trim()) return window.__LM_CLIENT_ID.trim();
-
-  const m = document.querySelector('meta[name="google-signin-client_id"]');
-  if (m && m.content && m.content.trim()) return m.content.trim();
-
-  const mo = document.querySelector('meta[name="google-oauth-client_id"]');
-  if (mo && mo.content && mo.content.trim()) return mo.content.trim();
-
   return null;
 }
-window.__LM_DEBUG = Object.assign(window.__LM_DEBUG||{}, { pickClientIdFromDOM });
 
-/* GIS load single-flight */
-let _gisLoading=null, _gisReady=false;
-async function loadGISOnce(){
-  if (_gisReady) return;
-  if (_gisLoading) return _gisLoading;
-  _gisLoading = new Promise((resolve,reject)=>{
-    if (window.google && window.google.accounts && window.google.accounts.oauth2){
-      _gisReady = true; LOG("[auth] GIS already loaded"); resolve(); return;
-    }
-    const s=document.createElement("script");
-    s.src="https://accounts.google.com/gsi/client";
-    s.async=true; s.defer=true;
-    s.onload=()=>{ _gisReady=true; LOG("[auth] GIS loaded"); resolve(); };
-    s.onerror=(e)=>{ err("[auth] GIS load failed", e); reject(e); };
-    document.head.appendChild(s);
-  });
-  return _gisLoading;
+function pickClientIdFromButton(){
+  try{
+    const b = document.querySelector('#auth-signin[data-client-id]');
+    if (b && b.dataset.clientId) return b.dataset.clientId;
+  }catch(e){}
+  return null;
 }
 
-/* Public token getter (single-flight + cache) */
-let _tokClient=null, _tokInflight=null, _tokCache=null, _tokCacheExp=0;
-let _pendingResolve=null, _pendingReject=null;
+function pickClientIdFromLocalStorage(){
+  try{
+    const v = localStorage.getItem('LM_GIS_CLIENT_ID');
+    if (v) return v;
+  }catch(e){}
+  return null;
+}
+
+function pickClientIdFromGlobals(){
+  try{
+    return window.GIS_CLIENT_ID || window.__LM_CLIENT_ID || null;
+  }catch(e){}
+  return null;
+}
+
+function pickClientIdFromMeta(){
+  try{
+    const m = document.querySelector('meta[name="google-signin-client_id"]');
+    if (m && m.content) return m.content;
+  }catch(e){}
+  return null;
+}
+
+function pickClientId(){
+  return pickClientIdFromURL()
+      || pickClientIdFromButton()
+      || pickClientIdFromLocalStorage()
+      || pickClientIdFromGlobals()
+      || pickClientIdFromMeta()
+      || null;
+}
+
+/**
+ * 互換用の DOM ベース resolver。
+ * 既存コードからは pickClientIdFromDOM() を参照しているので、
+ * 実装としては pickClientId() をそのまま委譲する。
+ */
+function pickClientIdFromDOM(){
+  return pickClientId();
+}
+
+/* =========================
+ * GIS / token bootstrap
+ * ======================== */
+
+let _gisLoaded = false;
+let _tokenClient = null;
+let _accessToken = null;
+
+async function loadGISOnce(){
+  if (_gisLoaded) return;
+  if (window.google && window.google.accounts && window.google.accounts.oauth2){
+    _gisLoaded = true;
+    return;
+  }
+  await new Promise((resolve,reject)=>{
+    const s = document.createElement('script');
+    s.src = 'https://accounts.google.com/gsi/client';
+    s.async = true;
+    s.onload = ()=>{ _gisLoaded = true; resolve(); };
+    s.onerror = (e)=>reject(e);
+    document.head.appendChild(s);
+  });
+}
+
 async function __lm_getAccessToken(){
-  const now = Date.now();
-  if (_tokCache && now < _tokCacheExp - 10_000) return _tokCache;
+  if (_accessToken) return _accessToken;
 
   await loadGISOnce();
-  const clientId = pickClientIdFromDOM();
-  if (!clientId) throw new Error("[auth] client_id not found. Provide window.GIS_CLIENT_ID or meta[name='google-signin-client_id'] or meta[name='google-oauth-client_id'] or URL ?lm_client_id=... or localStorage.LM_GIS_CLIENT_ID");
 
-  if (!_tokClient){
-    if (!window.google || !window.google.accounts || !window.google.accounts.oauth2){
-      throw new Error("[auth] GIS not ready after load");
-    }
-    _tokClient = window.google.accounts.oauth2.initTokenClient({
+  const clientId = pickClientId();
+  if (!clientId){
+    throw new Error('[auth] no client_id resolved');
+  }
+
+  if (!_tokenClient){
+    _tokenClient = window.google.accounts.oauth2.initTokenClient({
       client_id: clientId,
-      scope: (window.LM_SCOPES||[]).join(" "),
+      scope: window.LM_SCOPES.join(' '),
       callback: (resp)=>{
-        if (resp.error){
-          err("[auth] token error", resp);
-          if (_pendingReject) _pendingReject(resp);
-          _pendingResolve = _pendingReject = null;
-          _tokInflight=null;
-          window.dispatchEvent(new CustomEvent("lm:signin-error", { detail:{ error:resp } }));
-          return;
+        if (resp && resp.access_token){
+          _accessToken = resp.access_token;
+          LOG('[auth] token ok');
+        }else{
+          err('[auth] token missing in callback', resp);
         }
-        LOG("[auth] token ok");
-        _tokCache = resp.access_token;
-        _tokCacheExp = Date.now() + 50*60*1000;
-        if (_pendingResolve) _pendingResolve(resp.access_token);
-        _pendingResolve = _pendingReject = null;
-        window.dispatchEvent(new CustomEvent("lm:signin-ok", { detail:{ ok:true }}));
       },
     });
   }
-  if (_tokInflight) return _tokInflight;
-  _tokInflight = new Promise((resolve, reject)=>{
-    _pendingResolve = resolve; _pendingReject = reject;
-    try{ _tokClient.requestAccessToken({ prompt: "" }); }
-    catch(e){ _tokInflight=null; reject(e); }
-  }).finally(()=>{ _tokInflight=null; });
-  return _tokInflight;
-}
-window.__lm_getAccessToken = __lm_getAccessToken;
 
-/* Drive helper: resolve GLB URL in Drive to Blob via Files API */
+  await new Promise((resolve,reject)=>{
+    try{
+      _tokenClient.requestAccessToken();
+      const t = Date.now();
+      const id = setInterval(()=>{
+        if (_accessToken){
+          clearInterval(id);
+          resolve();
+        }else if (Date.now()-t>30000){
+          clearInterval(id);
+          reject(new Error('timeout waiting token'));
+        }
+      }, 500);
+    }catch(e){
+      reject(e);
+    }
+  });
+
+  return _accessToken;
+}
+
+/* =========================
+ * Drive GLB resolver
+ * ======================== */
+
 async function resolveDriveGlbToBlob(src){
+  if (!src) throw new Error('resolveDriveGlbToBlob: no src');
+  // src may be URL or fileId
+  let fileId = src;
+  try{
+    const u = new URL(src);
+    if (u.searchParams.get('id')){
+      fileId = u.searchParams.get('id');
+    }else if (/\/d\/([^/]+)/.test(u.pathname)){
+      fileId = RegExp.$1;
+    }
+  }catch(_){}
+  if (!fileId) throw new Error('resolveDriveGlbToBlob: no fileId');
+
   const token = await __lm_getAccessToken();
-  const headers = { "Authorization": `Bearer ${token}` };
-  let fileIdMatch = null;
-
-  if (typeof src === "string"){
-    // pattern: https://drive.google.com/file/d/<id>/view?usp=...
-    const m1 = src.match(/\/file\/d\/([^/]+)/);
-    if (m1) fileIdMatch = m1[1];
-    // pattern: https://drive.google.com/open?id=<id>
-    const m2 = src.match(/[?&]id=([^&]+)/);
-    if (!fileIdMatch && m2) fileIdMatch = m2[1];
+  const url = `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?alt=media`;
+  const res = await fetch(url, {
+    headers: { 'Authorization': `Bearer ${token}` }
+  });
+  if (!res.ok){
+    throw new Error('[drive] GLB fetch failed '+res.status);
   }
-  const fileId = fileIdMatch || src.id || src.fileId || src;
-  if (!fileId) throw new Error("[drive] cannot resolve fileId from src");
-
-  const metaRes = await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?alt=json&fields=id,name,mimeType`, { headers });
-  if (!metaRes.ok) throw new Error("[drive] meta fetch failed "+metaRes.status);
-  const meta = await metaRes.json();
-  LOG("[drive] meta", meta);
-
-  const downloadRes = await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?alt=media`, { headers });
-  if (!downloadRes.ok) throw new Error("[drive] download failed "+downloadRes.status);
-  return await downloadRes.blob();
+  return await res.blob();
 }
 
-/* Materials sheet helpers */
+/* =========================
+ * __LM_MATERIALS sheet helpers
+ * ======================== */
+
 async function ensureMaterialsSheet(spreadsheetId){
   const token = await __lm_getAccessToken();
-  const headers = {
-    "Authorization": `Bearer ${token}`,
-    "Content-Type": "application/json",
-  };
-  const getRes = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}?fields=sheets.properties`, { headers });
-  if (!getRes.ok){
-    throw new Error("[mat-sheet] get sheets failed "+getRes.status);
+  const headers = { "Authorization": `Bearer ${token}`, "Content-Type":"application/json" };
+  const metaRes = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}?includeGridData=false`, {
+    headers
+  });
+  if (!metaRes.ok){
+    throw new Error("[mat-sheet] meta fetch failed "+metaRes.status);
   }
-  const data = await getRes.json();
-  const sheets = (data.sheets||[]).map(s=>s.properties || {});
-  const found = sheets.find(p=>p.title==="__LM_MATERIALS");
-  if (found) return { spreadsheetId, sheetId: found.sheetId, title: found.title };
+  const meta = await metaRes.json();
+  const existing = (meta.sheets || []).find(s=>s.properties && s.properties.title==="__LM_MATERIALS");
+  if (existing && existing.properties && existing.properties.sheetId!=null){
+    LOG("[mat-sheet] __LM_MATERIALS exists sheetId", existing.properties.sheetId);
+    return existing.properties.sheetId;
+  }
 
   const body = {
     requests: [{
       addSheet: {
         properties: {
           title: "__LM_MATERIALS",
-          gridProperties: { rowCount: 1000, columnCount: 20 },
-        },
-      },
-    }],
+          gridProperties: { rowCount: 1000, columnCount: 14 }
+        }
+      }
+    }]
   };
-  const batchRes = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}:batchUpdate`, {
+  const res = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}:batchUpdate`, {
     method: "POST",
     headers,
     body: JSON.stringify(body),
   });
-  if (!batchRes.ok){
-    throw new Error("[mat-sheet] create __LM_MATERIALS failed "+batchRes.status);
+  if (!res.ok){
+    throw new Error("[mat-sheet] addSheet failed "+res.status);
   }
-  const batchJson = await batchRes.json();
-  const reply = (batchJson.replies||[])[0] || {};
-  const props = reply.addSheet && reply.addSheet.properties;
-  LOG("[mat-sheet] created __LM_MATERIALS", props);
-  return { spreadsheetId, sheetId: props.sheetId, title: props.title };
+  const json = await res.json();
+  const sheetId = json.replies && json.replies[0] && json.replies[0].addSheet &&
+                  json.replies[0].addSheet.properties && json.replies[0].addSheet.properties.sheetId;
+  LOG("[mat-sheet] created __LM_MATERIALS sheetId", sheetId);
+  return sheetId;
 }
 
 async function putHeaderOnce(spreadsheetId, rangeA1, values){
   const token = await __lm_getAccessToken();
-  const headers = {
-    "Authorization": `Bearer ${token}`,
-    "Content-Type": "application/json",
-  };
+  const headers = { "Authorization": `Bearer ${token}`, "Content-Type":"application/json" };
   const body = {
     valueInputOption: "RAW",
     data: [{
@@ -247,6 +280,11 @@ async function ensureMaterialsHeader(spreadsheetId){
   ]);
 }
 
+// グローバル公開
+window.__lm_ensureMaterialsHeader = window.__lm_ensureMaterialsHeader || ensureMaterialsHeader;
+window.ensureMaterialsHeader = window.ensureMaterialsHeader || ensureMaterialsHeader;
+window.__lm_getAccessToken = window.__lm_getAccessToken || __lm_getAccessToken;
+
 /* Drive GLB load bridge: listen for lm:load-glb and resolve via Drive */
 window.addEventListener("lm:load-glb", async (ev)=>{
   try{
@@ -259,25 +297,44 @@ window.addEventListener("lm:load-glb", async (ev)=>{
   }catch(e){ console.error("[drive] lm:load-glb failed", e); }
 });
 
-/* ========= Auto-wire auth button if present ========= */
-(function autoWireAuthButton(){
-  const btn = document.querySelector("#auth-signin");
-  if (!btn) return;
-  if (btn.dataset && btn.dataset.lmAuthWired) return;
-  btn.dataset.lmAuthWired = "1";
-  btn.addEventListener("click", async (ev)=>{
-    ev.preventDefault();
+/* =========================
+ * Sign-in button wiring
+ * ======================== */
+
+async function wireAuthButton(){
+  const btn = document.getElementById('auth-signin');
+  if (!btn){
+    warn('[auth] button#auth-signin not found');
+    return;
+  }
+  btn.addEventListener('click', async ()=>{
     try{
       await __lm_getAccessToken();
-      console.log("[auth] signin ok (button)");
+      LOG('[auth] signin ok (button)');
+      window.dispatchEvent(new Event('lm:auth-ok'));
     }catch(e){
-      console.error("[auth] signin failed", e);
-      console.error("[auth] 提供方法: URL に ?lm_client_id=YOUR_CLIENT_ID を付けるか、localStorage.LM_GIS_CLIENT_ID に設定してください。");
+      err('[auth] signin failed', e);
+      alert('Sign-in failed: '+e.message);
     }
-  }, { passive:true });
-})();
+  });
+}
+
+/* bootstrap */
+(async function(){
+  try{
+    await wireAuthButton();
+  }catch(e){
+    err('[boot] wireAuthButton failed', e);
+  }
+})().catch(e=>err('[boot] init error', e));
 
 export {
+  pickClientId,
+  pickClientIdFromURL,
+  pickClientIdFromButton,
+  pickClientIdFromLocalStorage,
+  pickClientIdFromGlobals,
+  pickClientIdFromMeta,
   pickClientIdFromDOM,
   loadGISOnce,
   __lm_getAccessToken,
