@@ -18,6 +18,7 @@
     // no-op on purpose
   }
 
+
   // Helpers
   const $ = (sel,root=document)=>root.querySelector(sel);
   const $$ = (sel,root=document)=>Array.from(root.querySelectorAll(sel));
@@ -40,10 +41,6 @@
     selectedId: null,
     filterId: 'all'
   };
-
-  // ★ グローバルストアとして公開（設計どおりに戻す）
-  // 他モジュール（overlay など）やデバッグ用に参照可能にする。
-  window.__LM_CAPTION_STORE = store;
 
   const addListeners = [];
   const changeListeners = [];
