@@ -1,210 +1,110 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
-// --- Viewer state ----------------------------------------------------------
+/**
+ * LociMyu viewer module
+ *
+ * Public API (used by glb.btn.bridge.v3.js):
+ *   addPinMarker, applyMaterialProps, clearPins, ensureViewer, getScene,
+ *   listMaterials, loadGlbFromDrive, onCanvasShiftPick, onPinSelect,
+ *   onRenderTick, projectPoint, removePinMarker, resetAllMaterials,
+ *   resetMaterial, setCurrentGlbId, setPinSelected
+ *
+ * Extended material properties:
+ *   props.opacity        : number 0..1
+ *   props.doubleSided    : boolean
+ *   props.unlitLike      : boolean
+ *   props.chromaEnable   : boolean
+ *   props.chromaColor    : "#rrggbb"
+ *   props.chromaTolerance: number
+ *   props.chromaFeather  : number
+ */
 
-let scene, camera, renderer, controls;
-let canvas;
-let gltfLoader;
+console.log('[viewer.module] Three version', THREE.REVISION);
+
+// ---------------------------------------------------------------------------
+// Core state
+// ---------------------------------------------------------------------------
+
+let renderer = null;
+let scene = null;
+let camera = null;
+let controls = null;
+let canvasRef = null;
+let gltfRoot = null;
 let currentGlbId = null;
+
+const raycaster = new THREE.Raycaster();
+const pointerNdc = new THREE.Vector2();
+const materialsByName = Object.create(null);   // materialName -> [material]
+const materialBaselines = new Map();          // material -> baselineProps
+const renderCallbacks = new Set();            // fn({renderer, scene, camera})
+const shiftPickHandlers = new Set();          // fn({point, event, hit})
+const pinMarkers = new Map();                 // id -> Object3D
+const pinSelectHandlers = new Set();          // fn({id})
+
 let animationFrameId = null;
+let resizeHandlerInstalled = false;
 
-const materialsByName = {};
-const materialBaselines = new Map();
-
-const pinMarkers = new Map();
-let pinGroup = null;
-
-const renderTickHandlers = new Set();
-
-// --- Init / ensure viewer --------------------------------------------------
-
-function ensureRenderer() {
-  if (renderer && canvas) return;
-
-  canvas = document.getElementById('viewerCanvas');
-  if (!canvas) {
-    canvas = document.createElement('canvas');
-    canvas.id = 'viewerCanvas';
-    document.body.appendChild(canvas);
-  }
-
-  renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
-  renderer.setPixelRatio(window.devicePixelRatio || 1);
-  renderer.setSize(canvas.clientWidth || 800, canvas.clientHeight || 600, false);
-  renderer.outputEncoding = THREE.sRGBEncoding;
-
-  scene = new THREE.Scene();
-  scene.background = null;
-
-  const aspect = (canvas.clientWidth || 800) / (canvas.clientHeight || 600);
-  camera = new THREE.PerspectiveCamera(45, aspect, 0.1, 1000);
-  camera.position.set(0, 2, 5);
-
-  const light = new THREE.HemisphereLight(0xffffff, 0x444444, 1.0);
-  light.position.set(0, 1, 0);
-  scene.add(light);
-
-  const dirLight = new THREE.DirectionalLight(0xffffff, 0.6);
-  dirLight.position.set(5, 10, 7.5);
-  scene.add(dirLight);
-
-  const { OrbitControls } = window.THREE_ADDONS || {};
-  if (OrbitControls) {
-    controls = new OrbitControls(camera, renderer.domElement);
-    controls.enableDamping = true;
-  }
-
-  gltfLoader = new GLTFLoader();
-}
+// ---------------------------------------------------------------------------
+// Internal helpers
+// ---------------------------------------------------------------------------
 
 function ensureRenderLoop() {
   if (animationFrameId != null) return;
 
-  function loop() {
+  const loop = () => {
     animationFrameId = requestAnimationFrame(loop);
-    if (controls) controls.update();
-    for (const fn of renderTickHandlers) {
-      try { fn(); } catch (e) {
-        console.warn('[viewer.module] render tick error', e);
+    if (!renderer || !scene || !camera) return;
+
+    if (controls) {
+      try { controls.update(); } catch (e) {
+        console.warn('[viewer.module] controls.update error', e);
       }
     }
-    renderer.render(scene, camera);
-  }
+
+    for (const fn of renderCallbacks) {
+      try { fn({ renderer, scene, camera }); }
+      catch (e) { console.warn('[viewer.module] render callback error', e); }
+    }
+
+    try {
+      renderer.render(scene, camera);
+    } catch (e) {
+      console.warn('[viewer.module] render error', e);
+    }
+  };
+
   loop();
 }
 
-// --- Pins -------------------------------------------------------------------
+function ensureResizeHandler() {
+  if (resizeHandlerInstalled || !canvasRef) return;
+  resizeHandlerInstalled = true;
 
-function ensurePinGroup() {
-  if (pinGroup) return;
-  pinGroup = new THREE.Group();
-  pinGroup.name = 'LociMyuPins';
-  scene.add(pinGroup);
-}
+  const handleResize = () => {
+    if (!renderer || !camera || !canvasRef) return;
+    const width  = canvasRef.clientWidth  || canvasRef.width  || 800;
+    const height = canvasRef.clientHeight || canvasRef.height || 600;
+    camera.aspect = width / Math.max(height, 1);
+    camera.updateProjectionMatrix();
+    renderer.setSize(width, height, false);
+  };
 
-function addPinMarker(id, position, color = 0x00ff00) {
-  ensurePinGroup();
-  const geometry = new THREE.SphereGeometry(0.02, 16, 16);
-  const material = new THREE.MeshBasicMaterial({ color });
-  const mesh = new THREE.Mesh(geometry, material);
-  mesh.position.copy(position);
-  mesh.userData.pinId = id;
-  pinGroup.add(mesh);
-  pinMarkers.set(id, mesh);
-}
-
-function removePinMarker(id) {
-  const mesh = pinMarkers.get(id);
-  if (!mesh || !pinGroup) return;
-  pinGroup.remove(mesh);
-  mesh.geometry.dispose();
-  mesh.material.dispose();
-  pinMarkers.delete(id);
-}
-
-function clearPins() {
-  if (!pinGroup) return;
-  for (const mesh of pinMarkers.values()) {
-    pinGroup.remove(mesh);
-    mesh.geometry.dispose();
-    mesh.material.dispose();
-  }
-  pinMarkers.clear();
-}
-
-function setPinSelected(id, selected) {
-  const mesh = pinMarkers.get(id);
-  if (!mesh) return;
-  mesh.scale.setScalar(selected ? 1.6 : 1.0);
-  if (mesh.material && mesh.material.color) {
-    mesh.material.color.offsetHSL(0, 0, selected ? 0.2 : -0.2);
-  }
-}
-
-// --- GLB load --------------------------------------------------------------
-
-function resetScene() {
-  // dispose previous
-  clearPins();
-  if (scene) {
-    const toRemove = [];
-    scene.traverse(obj => {
-      if (obj.isMesh || obj.isGroup) {
-        if (obj.userData && obj.userData.__lmRoot) {
-          toRemove.push(obj);
-        }
-      }
-    });
-    toRemove.forEach(obj => {
-      scene.remove(obj);
-      if (obj.isMesh && obj.geometry) obj.geometry.dispose();
-      if (obj.isMesh && obj.material) {
-        const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
-        mats.forEach(m => {
-          if (!m) return;
-          if (m.map) m.map.dispose();
-          m.dispose();
-        });
-      }
-    });
-  }
-
-  for (const k of Object.keys(materialsByName)) delete materialsByName[k];
-  materialBaselines.clear();
-}
-
-function loadGlbFromDrive(fileUrl, fileId) {
-  ensureRenderer();
-  ensureRenderLoop();
-
-  resetScene();
-
-  console.log('[viewer.module] loading GLB', fileId || fileUrl);
-
-  gltfLoader.load(
-    fileUrl,
-    (gltf) => {
-      const root = gltf.scene || gltf.scenes[0];
-      root.userData.__lmRoot = true;
-      scene.add(root);
-
-      // center and frame
-      const box = new THREE.Box3().setFromObject(root);
-      const size = box.getSize(new THREE.Vector3());
-      const center = box.getCenter(new THREE.Vector3());
-
-      root.position.sub(center);
-
-      const maxDim = Math.max(size.x, size.y, size.z);
-      const fov = camera.fov * (Math.PI / 180);
-      let cameraZ = Math.abs(maxDim / (2 * Math.tan(fov / 2)));
-      cameraZ *= 1.5;
-
-      camera.position.set(0, maxDim * 0.2, cameraZ);
-      camera.lookAt(new THREE.Vector3(0, 0, 0));
-      if (controls) {
-        controls.target.set(0, 0, 0);
-        controls.update();
-      }
-
-      rebuildMaterialIndex();
-      currentGlbId = fileId;
-      emitSceneReady();
-    },
-    undefined,
-    (err) => {
-      console.error('[viewer.module] gltf load error', err);
-    }
-  );
+  window.addEventListener('resize', handleResize);
+  handleResize();
 }
 
 function emitSceneReady() {
   try {
-    const ev = new CustomEvent('lm:scene-ready', {
-      detail: { scene, camera, renderer, glbId: currentGlbId }
-    });
-    window.dispatchEvent(ev);
+    window.__LM_SCENE = scene;
+    window.__LM_CAMERA = camera;
+    window.__LM_RENDERER = renderer;
+    window.__LM_VIEWER_CANVAS = canvasRef;
+    window.dispatchEvent(new CustomEvent('lm:scene-ready', {
+      detail: { scene, camera, renderer, canvas: canvasRef, glbId: currentGlbId }
+    }));
   } catch (e) {
     console.warn('[viewer.module] scene-ready dispatch failed', e);
   }
@@ -262,7 +162,6 @@ uniform float uChromaFeather;
     }
 
     // (1) クロマキー注入: <dithering_fragment> の直後
-    //     → キー色近傍は discard、エッジのみフェザー
     // ----------------------------------------------------------------
     const tokenDither = '#include <dithering_fragment>';
     if (src.includes(tokenDither)) {
@@ -271,24 +170,12 @@ uniform float uChromaFeather;
         `
 #include <dithering_fragment>
 if (uChromaEnable > 0.5) {
-  // Key color and current pixel color distance in RGB space (0.0 - ~1.732)
   vec3 keyColor = uChromaColor.rgb;
   float dist = distance(diffuseColor.rgb, keyColor);
-
-  // Tolerance +/- feather defines the smooth band
-  float edgeLo = max(uChromaTolerance - uChromaFeather, 0.0);
-  float edgeHi = uChromaTolerance + uChromaFeather;
-
-  // dist <= edgeLo -> mask ~= 0,  dist >= edgeHi -> mask ~= 1
-  float mask = smoothstep(edgeLo, edgeHi, dist);
-
-  // Treat near-key-color region as fully cut out (no depth write)
-  if (mask < 0.001) {
-    discard;
-  }
-
-  // Feather band: gradually reduce alpha
-  diffuseColor.a *= mask;
+  float a = smoothstep(uChromaTolerance,
+                       uChromaTolerance + uChromaFeather,
+                       dist);
+  diffuseColor.a *= a;
 }
 `
       );
@@ -314,8 +201,6 @@ if (uUnlit > 0.5) {
   mat.needsUpdate = true;
 }
 
-// --- Materials index / apply ----------------------------------------------
-
 function rebuildMaterialIndex() {
   for (const k of Object.keys(materialsByName)) delete materialsByName[k];
   materialBaselines.clear();
@@ -330,12 +215,12 @@ function rebuildMaterialIndex() {
       (materialsByName[name] || (materialsByName[name] = [])).push(m);
       if (!materialBaselines.has(m)) {
         materialBaselines.set(m, {
-          opacity:    m.opacity,
-          transparent:m.transparent,
-          side:       m.side,
+          opacity: m.opacity,
+          transparent: m.transparent,
+          side: m.side,
           toneMapped: m.toneMapped !== undefined ? m.toneMapped : true,
           depthWrite: m.depthWrite,
-          depthTest:  m.depthTest
+          depthTest: m.depthTest
         });
       }
       patchMaterialShader(m);
@@ -349,56 +234,200 @@ function getMaterialsByName(name) {
   return materialsByName[name] || [];
 }
 
+function handleCanvasShiftClick(ev) {
+  if (!ev.shiftKey || !scene || !camera || !canvasRef) return;
+
+  const rect = canvasRef.getBoundingClientRect();
+  if (rect.width <= 0 || rect.height <= 0) return;
+
+  const x = ((ev.clientX - rect.left) / rect.width) * 2 - 1;
+  const y = -((ev.clientY - rect.top) / rect.height) * 2 + 1;
+  pointerNdc.set(x, y);
+  raycaster.setFromCamera(pointerNdc, camera);
+
+  const intersects = raycaster.intersectObjects(scene.children, true);
+  const hit = intersects[0];
+  if (!hit) return;
+
+  const p = hit.point;
+  const payload = {
+    point: { x: p.x, y: p.y, z: p.z },
+    event: ev,
+    hit
+  };
+
+  for (const fn of shiftPickHandlers) {
+    try { fn(payload); } catch (e) {
+      console.warn('[viewer.module] shift-pick handler error', e);
+    }
+  }
+}
+
+function disposeGltfRoot() {
+  if (!gltfRoot || !scene) return;
+  try {
+    scene.remove(gltfRoot);
+  } catch (e) {
+    console.warn('[viewer.module] remove gltfRoot failed', e);
+  }
+  gltfRoot.traverse(obj => {
+    if (!obj.isMesh) return;
+    const geom = obj.geometry;
+    const mat  = obj.material;
+    if (geom && typeof geom.dispose === 'function') geom.dispose();
+    if (Array.isArray(mat)) {
+      for (const m of mat) {
+        if (m && typeof m.dispose === 'function') m.dispose();
+      }
+    } else if (mat && typeof mat.dispose === 'function') {
+      mat.dispose();
+    }
+  });
+  gltfRoot = null;
+}
+
+// ---------------------------------------------------------------------------
+// Public API: viewer bootstrap
+// ---------------------------------------------------------------------------
+
+export async function ensureViewer(opts = {}) {
+  const canvas = opts.canvas || opts.el || opts.dom || opts;
+
+  if (!canvas || typeof canvas.getContext !== 'function') {
+    throw new Error('[viewer.module] ensureViewer: canvas is required');
+  }
+
+  if (renderer && canvasRef === canvas && scene && camera) {
+    return { renderer, scene, camera };
+  }
+
+  canvasRef = canvas;
+
+  renderer = new THREE.WebGLRenderer({
+    canvas,
+    antialias: true,
+    alpha: true
+  });
+
+  // three r15x 系の仕様に合わせる
+  renderer.outputColorSpace = THREE.SRGBColorSpace;
+  renderer.useLegacyLights = false;
+
+  scene = new THREE.Scene();
+
+  const width  = canvas.clientWidth  || canvas.width  || 800;
+  const height = canvas.clientHeight || canvas.height || 600;
+  camera = new THREE.PerspectiveCamera(45, width / Math.max(height, 1), 0.1, 2000);
+  camera.position.set(0, 0, 5);
+
+  controls = new OrbitControls(camera, canvas);
+  controls.enableDamping = true;
+  controls.dampingFactor = 0.1;
+  controls.target.set(0, 0, 0);
+  controls.update();
+
+  const hemi = new THREE.HemisphereLight(0xffffff, 0x444444, 1.0);
+  hemi.position.set(0, 1, 0);
+  scene.add(hemi);
+
+  const dir = new THREE.DirectionalLight(0xffffff, 1.0);
+  dir.position.set(5, 10, 7.5);
+  scene.add(dir);
+
+  canvas.removeEventListener('click', handleCanvasShiftClick);
+  canvas.addEventListener('click', handleCanvasShiftClick);
+
+  ensureResizeHandler();
+  ensureRenderLoop();
+  emitSceneReady();
+
+  console.log('[viewer.module] viewer initialized');
+
+  return { renderer, scene, camera };
+}
+
+// GLB fetch from Drive
+async function fetchGlbArrayBuffer(fileId, token) {
+  const url = `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?alt=media`;
+  const res = await fetch(url, {
+    method: 'GET',
+    headers: {
+      'Authorization': `Bearer ${token}`
+    }
+  });
+  if (!res.ok) {
+    throw new Error(`[viewer.module] Drive fetch failed ${res.status} ${res.statusText}`);
+  }
+  return await res.arrayBuffer();
+}
+
+export async function loadGlbFromDrive(fileId, opts = {}) {
+  if (!renderer || !scene || !camera || !canvasRef) {
+    throw new Error('[viewer.module] loadGlbFromDrive: call ensureViewer() first');
+  }
+  if (!opts || !opts.token) {
+    throw new Error('[viewer.module] loadGlbFromDrive: token is required');
+  }
+
+  const token = opts.token;
+  console.log('[viewer.module] loadGlbFromDrive', fileId);
+
+  const loader = new GLTFLoader();
+  const arrayBuffer = await fetchGlbArrayBuffer(fileId, token);
+
+  disposeGltfRoot();
+
+  await new Promise((resolve, reject) => {
+    loader.parse(
+      arrayBuffer,
+      '',
+      gltf => {
+        gltfRoot = gltf.scene || gltf.scenes[0];
+        if (!gltfRoot) {
+          reject(new Error('GLTF has no scene'));
+          return;
+        }
+
+        scene.add(gltfRoot);
+
+        const box = new THREE.Box3().setFromObject(gltfRoot);
+        const size = new THREE.Vector3();
+        const center = new THREE.Vector3();
+        box.getSize(size);
+        box.getCenter(center);
+
+        const maxDim = Math.max(size.x, size.y, size.z, 1e-3);
+        const fov = THREE.MathUtils.degToRad(camera.fov);
+        let distance = maxDim / (2 * Math.tan(fov / 2));
+        distance *= 1.5;
+
+        const dz = new THREE.Vector3(0, 0, 1);
+        camera.position.copy(center).addScaledVector(dz, distance);
+        camera.near = maxDim / 100;
+        camera.far  = maxDim * 100;
+        camera.updateProjectionMatrix();
+
+        if (controls) {
+          controls.target.copy(center);
+          controls.update();
+        }
+
+        rebuildMaterialIndex();
+        currentGlbId = fileId;
+        emitSceneReady();
+        resolve();
+      },
+      err => reject(err || new Error('GLTFLoader parse error'))
+    );
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Materials API
+// ---------------------------------------------------------------------------
+
 export function listMaterials() {
   return Object.keys(materialsByName);
-}
-
-export function resetAllMaterials() {
-  for (const [mat, baseline] of materialBaselines.entries()) {
-    mat.opacity    = baseline.opacity;
-    mat.transparent= baseline.transparent;
-    mat.side       = baseline.side;
-    if ('toneMapped' in mat) mat.toneMapped = baseline.toneMapped;
-    mat.depthWrite = baseline.depthWrite;
-    mat.depthTest  = baseline.depthTest;
-
-    const uniforms = mat.userData && mat.userData.__lmUniforms;
-    if (uniforms) {
-      uniforms.uUnlit.value           = 0.0;
-      uniforms.uChromaEnable.value    = 0.0;
-      uniforms.uChromaTolerance.value = 0.0;
-      uniforms.uChromaFeather.value   = 0.0;
-      uniforms.uChromaColor.value.set(0, 0, 0);
-    }
-
-    mat.needsUpdate = true;
-  }
-}
-
-export function resetMaterial(name) {
-  const mats = getMaterialsByName(name);
-  if (!mats.length) return;
-  for (const mat of mats) {
-    const baseline = materialBaselines.get(mat);
-    if (!baseline) continue;
-    mat.opacity    = baseline.opacity;
-    mat.transparent= baseline.transparent;
-    mat.side       = baseline.side;
-    if ('toneMapped' in mat) mat.toneMapped = baseline.toneMapped;
-    mat.depthWrite = baseline.depthWrite;
-    mat.depthTest  = baseline.depthTest;
-
-    const uniforms = mat.userData && mat.userData.__lmUniforms;
-    if (uniforms) {
-      uniforms.uUnlit.value           = 0.0;
-      uniforms.uChromaEnable.value    = 0.0;
-      uniforms.uChromaTolerance.value = 0.0;
-      uniforms.uChromaFeather.value   = 0.0;
-      uniforms.uChromaColor.value.set(0, 0, 0);
-    }
-
-    mat.needsUpdate = true;
-  }
 }
 
 export function applyMaterialProps(materialName, props = {}) {
@@ -406,6 +435,7 @@ export function applyMaterialProps(materialName, props = {}) {
   if (!mats.length) return;
 
   for (const mat of mats) {
+    // scalar props
     if (typeof props.opacity === 'number') {
       mat.opacity = props.opacity;
       const uniforms = mat.userData && mat.userData.__lmUniforms;
@@ -417,6 +447,7 @@ export function applyMaterialProps(materialName, props = {}) {
       mat.side = props.doubleSided ? THREE.DoubleSide : THREE.FrontSide;
     }
 
+    // uniforms
     const uniforms = mat.userData && mat.userData.__lmUniforms;
     if (uniforms) {
       if (typeof props.unlitLike !== 'undefined' && uniforms.uUnlit) {
@@ -446,68 +477,154 @@ export function applyMaterialProps(materialName, props = {}) {
   }
 }
 
-// --- Projection / picking helper -------------------------------------------
+export function resetMaterial(materialName) {
+  const mats = getMaterialsByName(materialName);
+  if (!mats.length) return;
+
+  for (const mat of mats) {
+    const base = materialBaselines.get(mat);
+    if (!base) continue;
+
+    Object.assign(mat, {
+      opacity:    base.opacity,
+      transparent: base.transparent,
+      side:        base.side,
+      toneMapped:  base.toneMapped,
+      depthWrite:  base.depthWrite,
+      depthTest:   base.depthTest
+    });
+
+    const uniforms = mat.userData && mat.userData.__lmUniforms;
+    if (uniforms) {
+      uniforms.uUnlit.value           = 0.0;
+      uniforms.uChromaEnable.value    = 0.0;
+      uniforms.uChromaColor.value.set(0, 0, 0);
+      uniforms.uChromaTolerance.value = 0.0;
+      uniforms.uChromaFeather.value   = 0.0;
+    }
+
+    mat.needsUpdate = true;
+  }
+}
+
+export function resetAllMaterials() {
+  for (const name of Object.keys(materialsByName)) {
+    resetMaterial(name);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Pins / overlay
+// ---------------------------------------------------------------------------
 
 export function getScene() {
   return scene;
 }
 
-export function projectPoint(worldPosition) {
-  if (!camera || !renderer) return null;
-  const vector = worldPosition.clone().project(camera);
-  const widthHalf  = (renderer.domElement.clientWidth  || 1) / 2;
-  const heightHalf = (renderer.domElement.clientHeight || 1) / 2;
+export function projectPoint(pos) {
+  if (!camera || !canvasRef || !pos) return null;
+
+  const v = new THREE.Vector3(pos.x, pos.y, pos.z);
+  v.project(camera);
+
   return {
-    x: ( vector.x * widthHalf ) + widthHalf,
-    y: ( -vector.y * heightHalf ) + heightHalf
+    x: (v.x + 1) / 2,
+    y: 1 - (v.y + 1) / 2,
+    z: v.z
   };
 }
 
-export function onCanvasShiftPick(handler) {
-  // 外部スクリプト側で実装されている想定
-  // ここではダミー（viewer.bridge.autobind 側で上書きされる）
-  console.warn('[viewer.module] onCanvasShiftPick default impl; should be overridden');
+export function addPinMarker(pin) {
+  if (!scene) return;
+  if (!pin || !pin.id || !pin.position) return;
+
+  removePinMarker(pin.id);
+
+  const geom = new THREE.SphereGeometry(0.01, 8, 8);
+  const mat  = new THREE.MeshBasicMaterial({ color: 0xff0000 });
+  const mesh = new THREE.Mesh(geom, mat);
+  mesh.position.set(pin.position.x, pin.position.y, pin.position.z);
+  mesh.userData.__lmPin = { id: pin.id, data: pin };
+
+  scene.add(mesh);
+  pinMarkers.set(pin.id, mesh);
 }
 
-export function onPinSelect(handler) {
-  // 外部スクリプト側で実装されている想定
-  console.warn('[viewer.module] onPinSelect default impl; should be overridden');
+export function removePinMarker(pinId) {
+  if (!scene) return;
+  const mesh = pinMarkers.get(pinId);
+  if (!mesh) return;
+
+  try {
+    scene.remove(mesh);
+  } catch (e) {
+    console.warn('[viewer.module] removePinMarker failed', e);
+  }
+
+  if (mesh.geometry && typeof mesh.geometry.dispose === 'function') {
+    mesh.geometry.dispose();
+  }
+  if (mesh.material && typeof mesh.material.dispose === 'function') {
+    mesh.material.dispose();
+  }
+  pinMarkers.delete(pinId);
 }
 
-// --- Render tick subscription ----------------------------------------------
+export function clearPins() {
+  for (const id of Array.from(pinMarkers.keys())) {
+    removePinMarker(id);
+  }
+}
 
 export function onRenderTick(fn) {
-  if (typeof fn === 'function') {
-    renderTickHandlers.add(fn);
+  if (typeof fn !== 'function') return () => {};
+  renderCallbacks.add(fn);
+  return () => { renderCallbacks.delete(fn); };
+}
+
+export function onCanvasShiftPick(fn) {
+  if (typeof fn !== 'function') return () => {};
+  shiftPickHandlers.add(fn);
+  return () => { shiftPickHandlers.delete(fn); };
+}
+
+export function onPinSelect(fn) {
+  if (typeof fn !== 'function') return () => {};
+  pinSelectHandlers.add(fn);
+  return () => { pinSelectHandlers.delete(fn); };
+}
+
+export function setPinSelected(id) {
+  for (const fn of pinSelectHandlers) {
+    try { fn({ id }); } catch (e) {
+      console.warn('[viewer.module] pinSelect handler error', e);
+    }
   }
-  return () => renderTickHandlers.delete(fn);
-}
-
-// --- Public entrypoints ----------------------------------------------------
-
-export function ensureViewer() {
-  ensureRenderer();
-  ensureRenderLoop();
-}
-
-export function loadGlbFromUrl(url, id) {
-  return loadGlbFromDrive(url, id);
 }
 
 export function setCurrentGlbId(id) {
   currentGlbId = id;
 }
 
-export function addPin(position, color) {
-  const id = `pin-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  addPinMarker(id, position, color);
-  return id;
-}
+// ---------------------------------------------------------------------------
+// default export
+// ---------------------------------------------------------------------------
 
-export {
+export default {
+  ensureViewer,
+  loadGlbFromDrive,
+  listMaterials,
+  applyMaterialProps,
+  resetMaterial,
+  resetAllMaterials,
+  getScene,
+  projectPoint,
   addPinMarker,
-  clearPins,
   removePinMarker,
+  clearPins,
+  onRenderTick,
+  onCanvasShiftPick,
+  onPinSelect,
   setPinSelected,
-  rebuildMaterialIndex,
+  setCurrentGlbId
 };
