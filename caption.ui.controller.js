@@ -576,13 +576,12 @@ function tryInstallWorldSpaceHook(){
   const br = getViewerBridge();
   if (!br || typeof br.onCanvasShiftPick !== 'function') return;
   try{
-    // viewer.module.cdn.js 側の仕様:
-    //   onCanvasShiftPick(fn) で fn({point, event, hit}) が呼ばれる
+    // viewer.module.cdn.js 側からは { point, event, hit } が渡される
     br.onCanvasShiftPick(({ point } = {})=>{
       if (!point) return;
-      // 一度 world 座標フローが有効になったら、フォールバックの 2D クリックは無効化
+      // world 座標を使うモードに移行
       preferWorldClicks = true;
-      // pos は Three.Vector3 (world) を保存する
+      // pos には Three.Vector3 (point) をそのまま入れる
       addCaptionAt(0.5, 0.5, point);
     });
     worldHookInstalled = true;
