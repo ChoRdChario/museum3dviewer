@@ -14,16 +14,33 @@
   // DOM 構築
   // ────────────────────────────────────────────────
 
-  const elCaptionColorRow = elPanel.querySelector("[data-caption-color-row]");
-  const elCaptionFilterRow = elPanel.querySelector("[data-caption-filter-row]");
-  const elCaptionList = elPanel.querySelector("[data-caption-list]");
-  const elCaptionTitle = elPanel.querySelector("[data-caption-title]");
-  const elCaptionBody = elPanel.querySelector("[data-caption-body]");
-  const elCaptionImages = elPanel.querySelector("[data-caption-images]");
-  const elCaptionImageTemplate = elPanel.querySelector(
-    "[data-caption-image-template]"
-  );
-  const elCaptionImageList = elPanel.querySelector("[data-caption-image-list]");
+  const elCaptionColorRow =
+    elPanel.querySelector("[data-caption-color-row]") ||
+    document.getElementById("pinColorChips");
+  const elCaptionFilterRow =
+    elPanel.querySelector("[data-caption-filter-row]") ||
+    document.getElementById("pinFilterChips");
+  const elCaptionList =
+    elPanel.querySelector("[data-caption-list]") ||
+    elPanel.querySelector("#caption-list") ||
+    document.getElementById("caption-list");
+  const elCaptionTitle =
+    elPanel.querySelector("[data-caption-title]") ||
+    elPanel.querySelector("#caption-title") ||
+    document.getElementById("caption-title");
+  const elCaptionBody =
+    elPanel.querySelector("[data-caption-body]") ||
+    elPanel.querySelector("#caption-body") ||
+    document.getElementById("caption-body");
+  const elCaptionImages =
+    elPanel.querySelector("[data-caption-images]") ||
+    elPanel.querySelector("#images-grid") ||
+    document.getElementById("images-grid");
+  const elCaptionImageTemplate =
+    elPanel.querySelector("[data-caption-image-template]") ||
+    document.querySelector("[data-caption-image-template]");
+  let elCaptionImageList =
+    elPanel.querySelector("[data-caption-image-list]") || elCaptionImages;
 
   if (
     !elCaptionColorRow ||
@@ -318,6 +335,15 @@
   };
 
   window.__LM_CAPTION_UI = api;
+
+  // Caption UI ready event for images loader & others
+  try {
+    document.dispatchEvent(
+      new CustomEvent("lm:caption-ui-ready", { detail: { panel: elPanel } })
+    );
+  } catch (e) {
+    console.warn(TAG, "failed to dispatch lm:caption-ui-ready", e);
+  }
 
   // 初期起動
   initColorPalette();
