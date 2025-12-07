@@ -249,31 +249,40 @@
   })();
   </script>
 
+
   <script>
   (function(){
     const files = [
-      './caption.ui.controller.js',
       './caption.sheet.bridge.js',
-      './caption.images.loader.js',
-      './pin.runtime.bridge.js'
+      './pin.runtime.bridge.js',
+      './caption.ui.controller.js',
+      './caption.images.loader.js'
     ];
-    files.forEach(f=>{
-      fetch(f,{method:'HEAD'}).then(r=>{
-        if(r && r.ok){
-          const s=document.createElement('script');
-          s.type = f.endsWith('.js') ? 'module' : 'text/javascript';
-          s.src=f;
-          document.body.appendChild(s);
-          console.log('[caption] loaded', f);
-        } else {
-          console.log('[caption] skipped (not present)', f);
-        }
-      }).catch(()=>console.log('[caption] check skipped', f));
+    files.forEach(function(f){
+      try {
+        fetch(f,{method:'HEAD'}).then(function(r){
+          if(r && r.ok){
+            var s = document.createElement('script');
+            s.src = f;
+            document.body.appendChild(s);
+            console.log('[caption] loaded', f);
+          } else {
+            console.log('[caption] skipped (not present)', f);
+          }
+        }).catch(function(){
+          console.log('[caption] check skipped', f);
+        });
+      } catch(e){
+        console.log('[caption] loader error', f, e);
+      }
     });
   })();
   </script>
 
-<script>
+  <script type="module" src="./glb.btn.bridge.v3.js"></script>
+  <script src="./viewer.bridge.autobind.js"></script>
+
+  <script>
   (function(){
     try {
       fetch('./content.js',{method:'HEAD'}).then(function(r){
