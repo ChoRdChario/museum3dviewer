@@ -1,4 +1,4 @@
-(function () {
+function __lm_caption_ui_bootstrap(){
   const TAG = "[caption.ui.controller]";
   console.log(TAG, "world-space hook installed");
 
@@ -349,4 +349,13 @@
   initColorPalette();
   initFilterButtons();
   renderList();
+}
+}
+
+(function(){
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', __lm_caption_ui_bootstrap, { once: true });
+  } else {
+    __lm_caption_ui_bootstrap();
+  }
 })();
