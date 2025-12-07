@@ -17,12 +17,11 @@
   }
 
   // ---- Overlay root ----
-  const viewerCanvas =
-    document.getElementById('viewer-canvas') ||
-    document.getElementById('gl');
+  const viewerCanvas = document.getElementById('gl');
   if (!viewerCanvas){
-    return warn('viewer canvas not found; skip overlay init');
+    return warn('gl canvas not found; skip overlay init');
   }
+
   let overlayRoot = document.getElementById('captionOverlayRoot');
   if (!overlayRoot){
     overlayRoot = document.createElement('div');
