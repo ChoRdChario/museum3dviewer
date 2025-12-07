@@ -1,4 +1,4 @@
-function __lm_caption_ui_bootstrap(){
+(function () {
   const TAG = "[caption.ui.controller]";
   console.log(TAG, "world-space hook installed");
 
@@ -14,7 +14,7 @@ function __lm_caption_ui_bootstrap(){
   // DOM 構築
   // ────────────────────────────────────────────────
 
-  const elCaptionColorRow =
+    const elCaptionColorRow =
     elPanel.querySelector("[data-caption-color-row]") ||
     document.getElementById("pinColorChips");
   const elCaptionFilterRow =
@@ -349,13 +349,4 @@ function __lm_caption_ui_bootstrap(){
   initColorPalette();
   initFilterButtons();
   renderList();
-}
-}
-
-(function(){
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', __lm_caption_ui_bootstrap, { once: true });
-  } else {
-    __lm_caption_ui_bootstrap();
-  }
 })();

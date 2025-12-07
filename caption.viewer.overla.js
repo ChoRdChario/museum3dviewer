@@ -1,5 +1,5 @@
 // caption.viewer.overlay.js — overlay canvas + caption windows
-(function(){
+function __lm_caption_overlay_bootstrap(){
   const TAG = '[caption-overlay]';
   const log  = (...a)=>console.log(TAG, ...a);
   const warn = (...a)=>console.warn(TAG, ...a);
@@ -17,12 +17,14 @@
   }
 
   // ---- Overlay root ----
-  const viewerCanvas = document.getElementById('gl');
+  const viewerCanvas =
+    document.getElementById('viewer-canvas') ||
+    document.getElementById('gl');
   if (!viewerCanvas){
-    return warn('gl canvas not found; skip overlay init');
+    return warn('viewer canvas not found; skip overlay init');
   }
 
-  let overlayRoot = document.getElementById('captionOverlayRoot');
+let overlayRoot = document.getElementById('captionOverlayRoot');
   if (!overlayRoot){
     overlayRoot = document.createElement('div');
     overlayRoot.id = 'captionOverlayRoot';
@@ -228,4 +230,13 @@ function installShiftClickHook(){
   });
 
   log('overlay fully bound');
+}
+}
+
+(function(){
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', __lm_caption_overlay_bootstrap, { once: true });
+  } else {
+    __lm_caption_overlay_bootstrap();
+  }
 })();
