@@ -251,6 +251,30 @@
 
   <script>
   (function(){
+    const files = [
+      './caption.ui.controller.js',
+      './caption.sheet.bridge.js',
+      './caption.images.loader.js',
+      './pin.runtime.bridge.js'
+    ];
+    files.forEach(f=>{
+      fetch(f,{method:'HEAD'}).then(r=>{
+        if(r && r.ok){
+          const s=document.createElement('script');
+          s.type = f.endsWith('.js') ? 'module' : 'text/javascript';
+          s.src=f;
+          document.body.appendChild(s);
+          console.log('[caption] loaded', f);
+        } else {
+          console.log('[caption] skipped (not present)', f);
+        }
+      }).catch(()=>console.log('[caption] check skipped', f));
+    });
+  })();
+  </script>
+
+<script>
+  (function(){
     try {
       fetch('./content.js',{method:'HEAD'}).then(function(r){
         if(r && r.ok){
