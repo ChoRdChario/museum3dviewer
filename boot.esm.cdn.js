@@ -150,6 +150,24 @@ async function resolveDriveGlbToBlob(src){
 }
 
 /* Materials sheet helpers */
+const MAT_HEADER = [
+  "materialKey",   // A
+  "opacity",       // B
+  "doubleSided",   // C
+  "unlitLike",     // D
+  "chromaEnable",  // E
+  "chromaColor",   // F
+  "chromaTolerance", // G
+  "chromaFeather",   // H
+  "roughness",     // I
+  "metalness",     // J
+  "emissiveHex",   // K
+  "updatedAt",     // L
+  "updatedBy",     // M
+  "sheetGid",      // N
+];
+
+
 async function ensureMaterialsSheet(spreadsheetId){
   const token = await __lm_getAccessToken();
   const headers = {
@@ -214,38 +232,32 @@ async function putHeaderOnce(spreadsheetId, rangeA1, values){
   LOG("[mat-sheet] header updated", rangeA1);
 }
 
+
 async function ensureMaterialsHeader(spreadsheetId){
   await ensureMaterialsSheet(spreadsheetId);
   const token = await __lm_getAccessToken();
   const headers = { "Authorization": `Bearer ${token}` };
   const range = "__LM_MATERIALS!A1:N1";
-  const getRes = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(range)}`, { headers });
+  const url = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(range)}`;
+  const getRes = await fetch(url, { headers });
   if (!getRes.ok){
-    throw new Error("[mat-sheet] header get failed "+getRes.status);
+    throw new Error("[mat-sheet] header get failed " + getRes.status);
   }
   const json = await getRes.json();
   const rows = json.values || [];
-  if (rows.length>0 && rows[0] && rows[0].length>0){
-    LOG("[mat-sheet] header already present");
+  const cur = rows[0] || [];
+  const expect = MAT_HEADER.map(String);
+  const current = cur.map(String);
+  const same = current.length === expect.length && current.every((v, i) => v === expect[i]);
+  if (same){
+    LOG("[mat-sheet] header already present & up-to-date");
     return;
   }
-  await putHeaderOnce(spreadsheetId, range, [
-    "sheetGid",
-    "materialKey",
-    "opacity",
-    "doubleSided",
-    "unlitLike",
-    "chromaKeyEnabled",
-    "chromaKeyColor",
-    "chromaKeyTolerance",
-    "chromaKeyFeather",
-    "timestamp",
-    "user",
-    "note1",
-    "note2",
-    "note3",
-  ]);
+  await putHeaderOnce(spreadsheetId, range, MAT_HEADER);
+  LOG("[mat-sheet] header reset to canonical schema");
 }
+
+window.__lm_ensureMaterialsHeader = ensureMaterialsHeader;
 
 /* Drive GLB load bridge: listen for lm:load-glb and resolve via Drive */
 window.addEventListener("lm:load-glb", async (ev)=>{
