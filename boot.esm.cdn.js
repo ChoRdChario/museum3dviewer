@@ -241,14 +241,14 @@ async function ensureMaterialsHeader(spreadsheetId){
   const url = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(range)}`;
   const getRes = await fetch(url, { headers });
   if (!getRes.ok){
-    throw new Error("[mat-sheet] header get failed " + getRes.status);
+    throw new Error("[mat-sheet] header get failed "+getRes.status);
   }
   const json = await getRes.json();
   const rows = json.values || [];
   const cur = rows[0] || [];
   const expect = MAT_HEADER.map(String);
   const current = cur.map(String);
-  const same = current.length === expect.length && current.every((v, i) => v === expect[i]);
+  const same = current.length === expect.length && current.every((v, i)=>v === expect[i]);
   if (same){
     LOG("[mat-sheet] header already present & up-to-date");
     return;
