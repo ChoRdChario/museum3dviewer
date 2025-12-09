@@ -1,8 +1,9 @@
-// [viewer-bridge.autobind] simplified auto-binding for __lm_viewer_bridge
-// This script only tries to reuse existing viewer bridge objects that are
-// explicitly exposed on window (window.__lm_viewer_bridge / window.viewerBridge).
-// It no longer scans arbitrary window properties, to avoid accidentally binding
-// to unrelated objects such as __lm_pin_runtime.
+/*! viewer.bridge.autobind.js
+ * Bind window.__lm_viewer_bridge for consumers that don't know who created it.
+ * - 優先: すでに存在する window.__lm_viewer_bridge
+ * - フォールバック: window.viewerBridge / window.* をスキャン
+ * lm:scene-ready 発火後も数回だけリトライする。
+ */
 (function(){
   const LOG_PREFIX = "[viewer-bridge.autobind]";
   const BRIDGE_KEYS = ["addPinMarker", "clearPins"];
@@ -13,66 +14,77 @@
 
   function looksLikeBridge(v){
     if (!v || typeof v !== "object") return false;
-    for (const k of BRIDGE_KEYS){
-      if (typeof v[k] !== "function") return false;
-    }
-    return true;
+    return BRIDGE_KEYS.every((k) => typeof v[k] === "function");
   }
 
-  function bindFrom(source, v){
-    if (!looksLikeBridge(v)) return false;
-    window.__lm_viewer_bridge = v;
-    try {
-      console.log(LOG_PREFIX, "bound __lm_viewer_bridge from", source);
-    } catch(e) {}
+  function bindFrom(source, candidate){
+    if (!candidate || !looksLikeBridge(candidate)) return false;
+    window.__lm_viewer_bridge = candidate;
     bound = true;
+    try{
+      console.log(LOG_PREFIX, "bound __lm_viewer_bridge from", source);
+    }catch(_){}
+    try{
+      document.dispatchEvent(new Event("lm:viewer-bridge-ready"));
+    }catch(e){
+      try{ console.warn(LOG_PREFIX, "dispatch lm:viewer-bridge-ready failed", e); }catch(_){}
+    }
     return true;
   }
 
   function tryExisting(){
     if (bound) return true;
-
-    if (looksLikeBridge(window.__lm_viewer_bridge)) {
-      return bindFrom("existing window.__lm_viewer_bridge", window.__lm_viewer_bridge);
+    // 1) 明示的にセットされたブリッジを最優先
+    if (looksLikeBridge(window.__lm_viewer_bridge)){
+      return bindFrom("existing __lm_viewer_bridge", window.__lm_viewer_bridge);
     }
-
-    if (looksLikeBridge(window.viewerBridge)) {
+    // 2) 旧来の window.viewerBridge も候補にする
+    if (looksLikeBridge(window.viewerBridge)){
       return bindFrom("window.viewerBridge", window.viewerBridge);
     }
+    return false;
+  }
 
+  function scanWindow(){
+    if (bound) return true;
+    tries++;
+    if (tries > MAX_TRIES) return false;
+    try{
+      for (const key in window){
+        try{
+          const v = window[key];
+          if (bindFrom(`window["${key}"]`, v)) return true;
+        }catch(_){}
+      }
+    }catch(e){
+      try{ console.warn(LOG_PREFIX, "scanWindow failed", e); }catch(_){}
+    }
     return false;
   }
 
   function poll(){
     if (bound) return;
-    tries++;
-    if (tryExisting()) {
-      return;
-    }
-    if (tries >= MAX_TRIES) {
-      try {
-        console.log(LOG_PREFIX, "gave up auto-binding after", tries, "tries");
-      } catch(e) {}
+    if (tryExisting()) return;
+    if (scanWindow()) return;
+    if (tries >= MAX_TRIES){
+      try{ console.warn(LOG_PREFIX, "gave up after", tries, "tries"); }catch(_){}
       return;
     }
     setTimeout(poll, RETRY_MS);
   }
 
-  if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", poll, { once: true });
+  if (document.readyState === "loading"){
+    document.addEventListener("DOMContentLoaded", poll, { once:true });
   } else {
     poll();
   }
 
-  // When the viewer scene is ready (GLB loaded), the viewer bridge is usually
-  // assembled by glb.btn.bridge.v3. Hook this event to retry binding with a
-  // fresh budget of attempts.
-  document.addEventListener("lm:scene-ready", function(){
-    if (bound) return;
-    tries = 0;
-    try {
-      console.log(LOG_PREFIX, "lm:scene-ready -> retry binding");
-    } catch(e) {}
-    poll();
+  // シーン準備後にも一度だけリトライしておく
+  document.addEventListener("lm:scene-ready", () => {
+    if (!bound){
+      try{ console.log(LOG_PREFIX, "scene-ready => rescan"); }catch(_){}
+      tries = 0;
+      poll();
+    }
   });
 })();
