@@ -20,21 +20,25 @@
   }
 
   async function ensureToken() {
-    const mod = window.__lm_gauth_module;
-    if (!mod || typeof mod.ensureToken !== "function") {
-      console.warn(TAG, "gauth module not ready");
+    // In the new auth model, token management is handled by auth.fetch.bridge.js.
+    // This bridge only needs to ensure that the global fetch wrapper exists.
+    const fetchAuth = window.__lm_fetchJSONAuth;
+    if (typeof fetchAuth !== "function") {
+      console.warn(TAG, "__lm_fetchJSONAuth not ready");
       return null;
     }
-    return mod.ensureToken();
+    // We do not need the token value itself here; the wrapper acquires it lazily.
+    return "ok";
   }
 
+  // Delegate to the global auth bridge (installed by auth.fetch.bridge.js)
   async function __lm_fetchJSONAuth(url, options) {
-    const mod = window.__lm_auth_fetch_bridge;
-    if (!mod || typeof mod.fetchJSON !== "function") {
-      console.warn(TAG, "auth.fetch.bridge not ready");
-      throw new Error("auth.fetch.bridge not ready");
+    const fetchAuth = window.__lm_fetchJSONAuth;
+    if (typeof fetchAuth !== "function") {
+      console.warn(TAG, "__lm_fetchJSONAuth not ready");
+      throw new Error("__lm_fetchJSONAuth not ready");
     }
-    return mod.fetchJSON(url, options);
+    return fetchAuth(url, options);
   }
 
   function buildSheetUrl(spreadsheetId, path) {
