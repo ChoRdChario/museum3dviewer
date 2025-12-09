@@ -147,7 +147,10 @@
     }
   }
 
+  let suppressViewerSelectionSync = false;
+
   function syncViewerSelection(id){
+    if (suppressViewerSelectionSync) return;
     const br = getViewerBridge();
     if (!br || typeof br.setPinSelected !== 'function') return;
     try{
@@ -156,6 +159,7 @@
       warn('setPinSelected failed', e);
     }
   }
+
 
   // --- colors / filters -------------------------------------------------------
   function renderColors(){
@@ -606,6 +610,7 @@
     onItemDeleted,
     onItemSelected,
     registerDeleteListener: onItemDeleted,
+    __setSuppressViewerSync(flag){ suppressViewerSelectionSync = !!flag; },
     get items(){ return store.items; },
     get images(){ return store.images; },
     get selectedId(){ return store.selectedId; }
