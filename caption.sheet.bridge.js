@@ -20,26 +20,26 @@
   }
 
   async function ensureToken() {
-    // In the new auth model, token management is handled by auth.fetch.bridge.js.
-    // This bridge only needs to ensure that the global fetch wrapper exists.
-    const fetchAuth = window.__lm_fetchJSONAuth;
-    if (typeof fetchAuth !== "function") {
-      console.warn(TAG, "__lm_fetchJSONAuth not ready");
+    // Caption bridge (A2) — in new arch, auth.fetch.bridge.js exposes
+    // window.__lm_fetchJSONAuth which already takes care of tokens.
+    const fn = window.__lm_fetchJSONAuth;
+    if (!fn || typeof fn !== "function") {
+      console.warn(TAG, "auth.fetch.bridge not ready");
       return null;
     }
-    // We do not need the token value itself here; the wrapper acquires it lazily.
+    // Nothing to return; the presence of the bridge is enough.
     return "ok";
   }
 
-  // Delegate to the global auth bridge (installed by auth.fetch.bridge.js)
   async function __lm_fetchJSONAuth(url, options) {
-    const fetchAuth = window.__lm_fetchJSONAuth;
-    if (typeof fetchAuth !== "function") {
-      console.warn(TAG, "__lm_fetchJSONAuth not ready");
-      throw new Error("__lm_fetchJSONAuth not ready");
+    const fn = window.__lm_fetchJSONAuth;
+    if (!fn || typeof fn !== "function") {
+      console.warn(TAG, "auth.fetch.bridge not ready");
+      throw new Error("auth.fetch.bridge not ready");
     }
-    return fetchAuth(url, options);
+    return fn(url, options);
   }
+
 
   function buildSheetUrl(spreadsheetId, path) {
     return (
@@ -203,29 +203,51 @@
     const ui = await waitCaptionUI();
     if (!ui) return;
 
-    ui.setItemsFromSheet(rows);
+    // A2 UI compatibility:
+    // - old UI exposes ui.setItems(items) and registration-style ui.onItemAdded(fn)
+    // - newer UI may expose ui.setItemsFromSheet(rows) and property-style handlers
+    if (typeof ui.setItems === "function") {
+      ui.setItems(rows);
+    } else if (typeof ui.setItemsFromSheet === "function") {
+      ui.setItemsFromSheet(rows);
+    } else {
+      console.warn(TAG, "caption UI: no setItems / setItemsFromSheet");
+    }
 
-    ui.onItemAdded = async (item) => {
+    const handleAdded = async (item) => {
       const rowIndex = await appendRow(spreadsheetId, sheetTitle, item);
+      // old UI uses rowIndex; keep compatibility
       item._rowIndex = rowIndex;
+      item.rowIndex = rowIndex;
     };
 
-    ui.onItemDeleted = async (item) => {
-      if (!item._rowIndex) {
+    const handleDeleted = async (item) => {
+      const rowIndex = item._rowIndex || item.rowIndex;
+      if (!rowIndex) {
         console.warn(TAG, "no rowIndex for delete", item.id);
         return;
       }
-      await deleteRow(spreadsheetId, sheetGid, item._rowIndex);
+      await deleteRow(spreadsheetId, sheetGid, rowIndex);
     };
-  }
 
-  window.addEventListener("lm:sheet-context", async (ev) => {
-    const ctx = ev.detail;
-    console.log(TAG, "sheet-context", ctx);
-    try {
-      await handleSheetContext(ctx);
-    } catch (err) {
-      console.error(TAG, "sheet-context error", err);
+    if (typeof ui.onItemAdded === "function") {
+      // registration-style
+      ui.onItemAdded(handleAdded);
+    } else {
+      // property-style
+      ui.onItemAdded = handleAdded;
+    }
+
+    if (typeof ui.onItemDeleted === "function") {
+      ui.onItemDeleted(handleDeleted);
+      if (typeof ui.registerDeleteListener === "function") {
+        ui.registerDeleteListener(handleDeleted);
+      }
+    } else {
+      ui.onItemDeleted = handleDeleted;
+    }
+  }
+  console.error(TAG, "sheet-context error", err);
     }
   });
 
