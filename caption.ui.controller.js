@@ -152,16 +152,15 @@
     const fromViewer = !!(options && options.fromViewer);
     const br = getViewerBridge();
     if (!br || typeof br.setPinSelected !== 'function') return;
-    // When selection originates from the viewer itself, do not echo it back
-    // to the viewer to avoid infinite pinSelect loops.
+
+    // ビューア側から来た選択イベントは「送り返さない」
+    // （無限 pinSelect ループ防止）
     if (fromViewer) return;
+
     try{
       br.setPinSelected(id || null, !!id);
     }catch(e){
       warn('syncViewerSelection failed', e);
-    }
-  }catch(e){
-      warn('setPinSelected failed', e);
     }
   }
 
