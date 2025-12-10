@@ -147,10 +147,7 @@
     }
   }
 
-  let suppressViewerSelectionSync = false;
-
   function syncViewerSelection(id){
-    if (suppressViewerSelectionSync) return;
     const br = getViewerBridge();
     if (!br || typeof br.setPinSelected !== 'function') return;
     try{
@@ -574,48 +571,35 @@
     });
   }
 
-  function tryInstallWorldSpaceHook(){
+    function tryInstallWorldSpaceHook(){
     if (worldHookInstalled) return;
     const br = getViewerBridge();
     if (!br || typeof br.onCanvasShiftPick !== 'function') return;
     try{
-      br.onCanvasShiftPick((arg1, arg2)=>{
-        // 受け取り方の互換レイヤー
-        //  1) onCanvasShiftPick(world)
-        //  2) onCanvasShiftPick(screen, world)
-        //  3) onCanvasShiftPick(payload) // payload.point に world 座標
-        let world = null;
+      // viewer 側の world-space フックが有効な場合は、以後は常にそちらを優先
+      preferWorldClicks = true;
 
-        if (arg2 && typeof arg2 === 'object') {
-          // パターン 2: (screen, world)
-          world = arg2;
-        } else if (arg1 && typeof arg1 === 'object') {
-          // パターン 1 or 3
-          if (typeof arg1.x === 'number' &&
-              typeof arg1.y === 'number' &&
-              typeof arg1.z === 'number') {
-            // パターン 1: world そのもの
-            world = arg1;
-          } else if (arg1.point &&
-                     typeof arg1.point.x === 'number' &&
-                     typeof arg1.point.y === 'number' &&
-                     typeof arg1.point.z === 'number') {
-            // パターン 3: payload.point
-            world = arg1.point;
+      br.onCanvasShiftPick((world)=>{
+        if (!world) return;
+
+        // viewer.bridge から projectPoint が提供されていれば、world → NDC(0–1) へ変換して
+        // その座標をキャプションのスクリーン位置として利用する。
+        let nx = 0.5;
+        let ny = 0.5;
+        try{
+          if (typeof br.projectPoint === 'function') {
+            const p = br.projectPoint(world);
+            if (p && typeof p.x === 'number' && typeof p.y === 'number') {
+              nx = p.x;
+              ny = p.y;
+            }
           }
+        }catch(e){
+          // 失敗した場合は 0.5 / 0.5 にフォールバック
+          warn('projectPoint failed; fallback to center', e);
         }
 
-        if (!world) {
-          warn('onCanvasShiftPick payload without world point', arg1, arg2);
-          return;
-        }
-
-        preferWorldClicks = true;
-        addCaptionAt(0.5, 0.5, {
-          x: world.x,
-          y: world.y,
-          z: world.z
-        });
+        addCaptionAt(nx, ny, world);
       });
 
       worldHookInstalled = true;
@@ -624,7 +608,6 @@
       warn('onCanvasShiftPick hook failed', e);
     }
   }
-
 
   installFallbackClick();
   tryInstallWorldSpaceHook();
@@ -644,7 +627,6 @@
     onItemDeleted,
     onItemSelected,
     registerDeleteListener: onItemDeleted,
-    __setSuppressViewerSync(flag){ suppressViewerSelectionSync = !!flag; },
     get items(){ return store.items; },
     get images(){ return store.images; },
     get selectedId(){ return store.selectedId; }
