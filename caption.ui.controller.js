@@ -147,12 +147,20 @@
     }
   }
 
-  function syncViewerSelection(id){
+  function syncViewerSelection(id, opts){
+    const options = opts || {};
+    const fromViewer = !!(options && options.fromViewer);
     const br = getViewerBridge();
     if (!br || typeof br.setPinSelected !== 'function') return;
+    // When selection originates from the viewer itself, do not echo it back
+    // to the viewer to avoid infinite pinSelect loops.
+    if (fromViewer) return;
     try{
       br.setPinSelected(id || null, !!id);
     }catch(e){
+      warn('syncViewerSelection failed', e);
+    }
+  }catch(e){
       warn('setPinSelected failed', e);
     }
   }
@@ -246,27 +254,41 @@
     });
   }
 
-  function selectItem(id){
+  function selectItem(id, opts){
+    const options = opts || {};
+    const fromViewer = !!(options && options.source === 'viewer');
+
     store.selectedId = id || null;
+
     if (elList){
       $$('.lm-cap-row', elList).forEach(row=>{
         row.classList.toggle('selected', row.dataset.id === id);
       });
     }
-    const it = store.items.find(x=>x.id===id);
+
+    const it = store.items.find(it=>it.id === id) || null;
+
     if (!it){
-      syncViewerSelection(null);
+      // Clear editors when nothing is selected
       if (elTitle) elTitle.value = '';
-      if (elBody)  elBody.value  = '';
-      renderImages(); // clear image selection highlight
+      if (elBody) elBody.value = '';
+      syncViewerSelection(null, {fromViewer});
+      renderImages();
       renderPreview();
       emitItemSelected(null);
       return;
     }
+
     if (elTitle) elTitle.value = it.title || '';
-    if (elBody)  elBody.value  = it.body  || '';
-    syncViewerSelection(it.pos ? it.id : null);
-    renderImages(); // update image highlight for this caption
+    if (elBody) elBody.value = it.body || '';
+
+    // Keep existing behaviour for viewer sync: only sync when we actually have
+    // a 3D pin position. When selection originates from the viewer, the call
+    // is marked with fromViewer so that syncViewerSelection does not echo it
+    // back to the viewer.
+    syncViewerSelection(it.pos ? it.id : null, {fromViewer});
+
+    renderImages();
     renderPreview();
     emitItemSelected(it);
   }
@@ -571,37 +593,16 @@
     });
   }
 
-    function tryInstallWorldSpaceHook(){
+  function tryInstallWorldSpaceHook(){
     if (worldHookInstalled) return;
     const br = getViewerBridge();
     if (!br || typeof br.onCanvasShiftPick !== 'function') return;
     try{
-      // viewer 側の world-space フックが有効な場合は、以後は常にそちらを優先
-      preferWorldClicks = true;
-
       br.onCanvasShiftPick((world)=>{
         if (!world) return;
-
-        // viewer.bridge から projectPoint が提供されていれば、world → NDC(0–1) へ変換して
-        // その座標をキャプションのスクリーン位置として利用する。
-        let nx = 0.5;
-        let ny = 0.5;
-        try{
-          if (typeof br.projectPoint === 'function') {
-            const p = br.projectPoint(world);
-            if (p && typeof p.x === 'number' && typeof p.y === 'number') {
-              nx = p.x;
-              ny = p.y;
-            }
-          }
-        }catch(e){
-          // 失敗した場合は 0.5 / 0.5 にフォールバック
-          warn('projectPoint failed; fallback to center', e);
-        }
-
-        addCaptionAt(nx, ny, world);
+        preferWorldClicks = true;
+        addCaptionAt(0.5, 0.5, world);
       });
-
       worldHookInstalled = true;
       log('world-space hook installed');
     }catch(e){

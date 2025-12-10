@@ -548,16 +548,7 @@ const TAG = '[caption-overlay]';
           try {
             const ui = ensureCaptionUI();
             if (ui && typeof ui.selectItem === 'function') {
-              if (typeof ui.__setSuppressViewerSync === 'function') {
-                ui.__setSuppressViewerSync(true);
-              }
-              try {
-                ui.selectItem(id);
-              } finally {
-                if (typeof ui.__setSuppressViewerSync === 'function') {
-                  ui.__setSuppressViewerSync(false);
-                }
-              }
+              ui.selectItem(id, {source: 'viewer'});
             }
           } catch (e) {
             warn('onPinSelect -> selectItem failed', e);
