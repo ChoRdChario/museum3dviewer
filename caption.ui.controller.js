@@ -160,7 +160,6 @@
     }
   }
 
-
   // --- colors / filters -------------------------------------------------------
   function renderColors(){
     if (!elColorList) return;
@@ -580,17 +579,52 @@
     const br = getViewerBridge();
     if (!br || typeof br.onCanvasShiftPick !== 'function') return;
     try{
-      br.onCanvasShiftPick((world)=>{
-        if (!world) return;
+      br.onCanvasShiftPick((arg1, arg2)=>{
+        // 受け取り方の互換レイヤー
+        //  1) onCanvasShiftPick(world)
+        //  2) onCanvasShiftPick(screen, world)
+        //  3) onCanvasShiftPick(payload) // payload.point に world 座標
+        let world = null;
+
+        if (arg2 && typeof arg2 === 'object') {
+          // パターン 2: (screen, world)
+          world = arg2;
+        } else if (arg1 && typeof arg1 === 'object') {
+          // パターン 1 or 3
+          if (typeof arg1.x === 'number' &&
+              typeof arg1.y === 'number' &&
+              typeof arg1.z === 'number') {
+            // パターン 1: world そのもの
+            world = arg1;
+          } else if (arg1.point &&
+                     typeof arg1.point.x === 'number' &&
+                     typeof arg1.point.y === 'number' &&
+                     typeof arg1.point.z === 'number') {
+            // パターン 3: payload.point
+            world = arg1.point;
+          }
+        }
+
+        if (!world) {
+          warn('onCanvasShiftPick payload without world point', arg1, arg2);
+          return;
+        }
+
         preferWorldClicks = true;
-        addCaptionAt(0.5, 0.5, world);
+        addCaptionAt(0.5, 0.5, {
+          x: world.x,
+          y: world.y,
+          z: world.z
+        });
       });
+
       worldHookInstalled = true;
       log('world-space hook installed');
     }catch(e){
       warn('onCanvasShiftPick hook failed', e);
     }
   }
+
 
   installFallbackClick();
   tryInstallWorldSpaceHook();
