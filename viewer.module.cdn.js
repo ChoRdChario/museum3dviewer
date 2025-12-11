@@ -527,11 +527,29 @@ export function projectPoint(pos) {
   const v = new THREE.Vector3(pos.x, pos.y, pos.z);
   v.project(camera);
 
-  return {
-    x: (v.x + 1) / 2,
-    y: 1 - (v.y + 1) / 2,
-    z: v.z
-  };
+  const rect = (typeof canvasRef.getBoundingClientRect === 'function')
+    ? canvasRef.getBoundingClientRect()
+    : null;
+
+  const width = rect && rect.width ? rect.width
+    : (canvasRef.clientWidth || canvasRef.width || (typeof window !== 'undefined' ? window.innerWidth : 0));
+
+  const height = rect && rect.height ? rect.height
+    : (canvasRef.clientHeight || canvasRef.height || (typeof window !== 'undefined' ? window.innerHeight : 0));
+
+  if (!width || !height) {
+    // フォールバックとして 0..1 の正規化座標を返す
+    return {
+      x: (v.x + 1) / 2,
+      y: 1 - (v.y + 1) / 2,
+      z: v.z
+    };
+  }
+
+  const x = (rect ? rect.left : 0) + (v.x + 1) / 2 * width;
+  const y = (rect ? rect.top  : 0) + (1 - (v.y + 1) / 2) * height;
+
+  return { x, y, z: v.z };
 }
 
 export function addPinMarker(pin) {

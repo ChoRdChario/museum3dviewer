@@ -65,7 +65,32 @@ const TAG = '[caption-overlay]';
     return root;
   }
 
-  function ensureCaptionUI() {
+  
+
+  function getCanvasRect() {
+    try {
+      const canvas = document.getElementById('gl');
+      if (canvas && typeof canvas.getBoundingClientRect === 'function') {
+        const r = canvas.getBoundingClientRect();
+        if (r && r.width && r.height) {
+          return r;
+        }
+      }
+    } catch (_) {}
+
+    const vw = window.innerWidth  || document.documentElement.clientWidth  || 0;
+    const vh = window.innerHeight || document.documentElement.clientHeight || 0;
+    return {
+      left: 0,
+      top: 0,
+      right: vw,
+      bottom: vh,
+      width: vw,
+      height: vh
+    };
+  }
+
+function ensureCaptionUI() {
     return window.__LM_CAPTION_UI || null;
   }
 
@@ -432,19 +457,16 @@ const TAG = '[caption-overlay]';
                          typeof p.z === 'number');
       if (!hasCoords) return null;
 
-      // viewer.module.cdn.js の projectPoint(pos:{x,y,z}) は 0..1 の正規化座標を返すので、
-      // ここでビューポートのピクセル座標に変換する
-      const spNorm = br.projectPoint({ x: p.x, y: p.y, z: p.z });
-      if (!spNorm) return null;
+      const sp = br.projectPoint({ x: p.x, y: p.y, z: p.z });
+      if (!sp || typeof sp.x !== 'number' || typeof sp.y !== 'number') {
+        return null;
+      }
 
-      const vw = window.innerWidth  || document.documentElement.clientWidth  || 0;
-      const vh = window.innerHeight || document.documentElement.clientHeight || 0;
-      if (!vw || !vh) return null;
-
+      // viewer.module.cdn.js 側でキャンバス基準のピクセル座標に変換済み
       return {
-        x: spNorm.x * vw,
-        y: spNorm.y * vh,
-        z: spNorm.z
+        x: sp.x,
+        y: sp.y,
+        z: sp.z
       };
     } catch (e) {
       warn('projectPoint failed', e);
@@ -452,20 +474,40 @@ const TAG = '[caption-overlay]';
     }
   }
 
-  function positionWindowNearItem(state) {
+function positionWindowNearItem(state) {
     const el = state.el;
     const item = state.item;
     if (!el || !item) return;
+
     const sp = projectItemToScreen(item);
     if (!sp) return;
-    const vw = window.innerWidth || document.documentElement.clientWidth;
-    const vh = window.innerHeight || document.documentElement.clientHeight;
+
+    const canvasRect = getCanvasRect();
+    const margin = 16;
 
     const rect = el.getBoundingClientRect();
     const preferredX = sp.x + 24;
     const preferredY = sp.y - rect.height * 0.3;
-    let x = Math.min(Math.max(preferredX, 16), vw - rect.width - 16);
-    let y = Math.min(Math.max(preferredY, 16), vh - rect.height - 16);
+
+    let minX = canvasRect.left + margin;
+    let maxX = canvasRect.right - rect.width - margin;
+    let minY = canvasRect.top + margin;
+    let maxY = canvasRect.bottom - rect.height - margin;
+
+    // キャンバス情報が取得できなかった場合はウィンドウ全体でフォールバック
+    if (!isFinite(minX) || !isFinite(maxX) || minX > maxX) {
+      const vw = window.innerWidth || document.documentElement.clientWidth || 0;
+      minX = margin;
+      maxX = vw ? (vw - rect.width - margin) : margin;
+    }
+    if (!isFinite(minY) || !isFinite(maxY) || minY > maxY) {
+      const vh = window.innerHeight || document.documentElement.clientHeight || 0;
+      minY = margin;
+      maxY = vh ? (vh - rect.height - margin) : margin;
+    }
+
+    let x = Math.min(Math.max(preferredX, minX), maxX);
+    let y = Math.min(Math.max(preferredY, minY), maxY);
 
     el.style.left = x + 'px';
     el.style.top = y + 'px';
@@ -474,7 +516,8 @@ const TAG = '[caption-overlay]';
     state.lastScreenPos = sp;
   }
 
-  function updateLines() {
+  
+function updateLines() {
     ensureOverlayRoot();
     const br = ensureViewerBridge();
     if (!svgLayer || !br || typeof br.projectPoint !== 'function') return;
@@ -510,10 +553,31 @@ const TAG = '[caption-overlay]';
       svgLayer.appendChild(line);
 
       if (state.mode === 'auto') {
+        const canvasRect = getCanvasRect();
+        const margin = 16;
+
         const preferredX = sp.x + 24;
         const preferredY = sp.y - rect.height * 0.3;
-        let x = Math.min(Math.max(preferredX, 16), vw - rect.width - 16);
-        let y = Math.min(Math.max(preferredY, 16), vh - rect.height - 16);
+
+        let minX = canvasRect.left + margin;
+        let maxX = canvasRect.right - rect.width - margin;
+        let minY = canvasRect.top + margin;
+        let maxY = canvasRect.bottom - rect.height - margin;
+
+        if (!isFinite(minX) || !isFinite(maxX) || minX > maxX) {
+          const vw = window.innerWidth || document.documentElement.clientWidth || 0;
+          minX = margin;
+          maxX = vw ? (vw - rect.width - margin) : margin;
+        }
+        if (!isFinite(minY) || !isFinite(maxY) || minY > maxY) {
+          const vh = window.innerHeight || document.documentElement.clientHeight || 0;
+          minY = margin;
+          maxY = vh ? (vh - rect.height - margin) : margin;
+        }
+
+        let x = Math.min(Math.max(preferredX, minX), maxX);
+        let y = Math.min(Math.max(preferredY, minY), maxY);
+
         el.style.left = x + 'px';
         el.style.top = y + 'px';
         state.manualOffset.x = x;
