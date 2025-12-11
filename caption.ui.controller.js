@@ -33,82 +33,67 @@
   if (!elPreview && elImages && elImages.parentElement){
     elPreview = document.createElement('div');
     elPreview.id = 'caption-image-preview';
-    elPreview.className = 'lm-cap-preview';
-    try{
-      elImages.parentElement.insertBefore(elPreview, elImages);
-    }catch(e){
-      warn('preview insert failed', e);
-    }
+    elPreview.className = 'caption-image-preview';
+    elImages.parentElement.insertBefore(elPreview, elImages);
   }
 
-
-  // Store (stable on window to survive reload of this script)
-  const store = window.__LM_CAPTION_STORE || (window.__LM_CAPTION_STORE = {
-    currentColor: '#eab308',
-    filter: new Set(),
+  // State
+  const store = {
     items: [],
     selectedId: null,
-    images: []
-  });
+    currentColor: '#eab308', // amber-500
+    filterColor: null,
+    images: [],
+    imagesLoaded: false,
+  };
 
-  const PALETTE = ['#facc15','#f97316','#ef4444','#ec4899','#8b5cf6','#3b82f6','#0ea5e9','#22c55e','#14b8a6','#a3a3a3'];
+  const colorOptions = [
+    { id: 'amber',   value: '#eab308', label: 'Amber'   },
+    { id: 'cyan',    value: '#22d3ee', label: 'Cyan'    },
+    { id: 'violet',  value: '#a855f7', label: 'Violet'  },
+    { id: 'emerald', value: '#22c55e', label: 'Emerald' },
+    { id: 'rose',    value: '#f97373', label: 'Rose'    },
+  ];
 
-  function newId(){
-    return 'c_' + Math.random().toString(36).slice(2,10);
-  }
+  const filterOptions = [
+    { id: 'all',   value: null,         label: 'All'   },
+    { id: 'amber', value: '#eab308',    label: 'Amber' },
+    { id: 'cyan',  value: '#22d3ee',    label: 'Cyan'  },
+    { id: 'violet',value: '#a855f7',    label: 'Violet'},
+    { id: 'emerald', value:'#22c55e',   label: 'Emerald' },
+    { id: 'rose',    value:'#f97373',   label: 'Rose' },
+  ];
 
-  // --- small event hub for Sheets bridge --------------------------------------
-  const addListeners = [];
-  const changeListeners = [];
-  const deleteListeners = [];
-  const selectListeners = []; // caption selection listeners
-  const dirtyTimers = new Map(); // id -> raf id
+  const listeners = {
+    added: [],
+    changed: [],
+    deleted: [],
+    selected: [],
+  };
 
-  function onItemAdded(fn){
-    if (typeof fn === 'function') addListeners.push(fn);
-  }
+  function onItemAdded(fn){ listeners.added.push(fn); }
+  function onItemChanged(fn){ listeners.changed.push(fn); }
+  function onItemDeleted(fn){ listeners.deleted.push(fn); }
+  function onItemSelected(fn){ listeners.selected.push(fn); }
+
   function emitItemAdded(item){
-    addListeners.forEach(fn=>{
-      try{ fn(item); }catch(e){ console.error(TAG,'onItemAdded handler failed', e); }
+    listeners.added.forEach(fn=>{
+      try{ fn(item); }catch(e){ console.error(TAG, 'onItemAdded handler failed', e); }
     });
-  }
-
-  function onItemChanged(fn){
-    if (typeof fn === 'function') changeListeners.push(fn);
   }
   function emitItemChanged(item){
-    changeListeners.forEach(fn=>{
-      try{ fn(item); }catch(e){ console.error(TAG,'onItemChanged handler failed', e); }
+    listeners.changed.forEach(fn=>{
+      try{ fn(item); }catch(e){ console.error(TAG, 'onItemChanged handler failed', e); }
     });
-  }
-  function scheduleChanged(item){
-    if (!item || !item.id) return;
-    const id = item.id;
-    const prev = dirtyTimers.get(id);
-    if (prev) cancelAnimationFrame(prev);
-    const t = requestAnimationFrame(()=>{
-      dirtyTimers.delete(id);
-      emitItemChanged(item);
-    });
-    dirtyTimers.set(id, t);
-  }
-
-  function onItemDeleted(fn){
-    if (typeof fn === 'function') deleteListeners.push(fn);
   }
   function emitItemDeleted(item){
-    deleteListeners.forEach(fn=>{
-      try{ fn(item); }catch(e){ console.error(TAG,'onItemDeleted handler failed', e); }
+    listeners.deleted.forEach(fn=>{
+      try{ fn(item); }catch(e){ console.error(TAG, 'onItemDeleted handler failed', e); }
     });
   }
-
-
-  function onItemSelected(fn){
-    if (typeof fn === 'function') selectListeners.push(fn);
-  }
   function emitItemSelected(item){
-    selectListeners.forEach(fn=>{
-      try{ fn(item); }catch(e){ console.error(TAG,'onItemSelected handler failed', e); }
+    listeners.selected.forEach(fn=>{
+      try{ fn(item); }catch(e){ console.error(TAG, 'onItemSelected handler failed', e); }
     });
   }
 
@@ -141,90 +126,61 @@
     }
   }
 
-  function syncPinsFromItems(){
+  function clearPins(){
     const br = getViewerBridge();
-    if (!br || typeof br.clearPins !== 'function' || typeof br.addPinMarker !== 'function') return;
+    if (!br || typeof br.clearPins !== 'function') return;
     try{
       br.clearPins();
-      store.items.forEach(it=>{ if (it.pos) addPinForItem(it); });
     }catch(e){
-      warn('syncPinsFromItems failed', e);
+      warn('clearPins failed', e);
     }
   }
 
   function syncViewerSelection(id, opts){
-    const options = opts || {};
-    const fromViewer = !!(options && options.fromViewer);
     const br = getViewerBridge();
     if (!br || typeof br.setPinSelected !== 'function') return;
-
-    // ビューア側から来た選択イベントは「送り返さない」
-    // （無限 pinSelect ループ防止）
-    if (fromViewer) return;
-
+    const options = opts || {};
+    if (options.fromViewer) return;
     try{
-      br.setPinSelected(id || null, !!id);
+      br.setPinSelected(id || null);
     }catch(e){
-      warn('syncViewerSelection failed', e);
+      warn('setPinSelected failed', e);
     }
   }
 
-  // --- colors / filters -------------------------------------------------------
-  function renderColors(){
-    if (!elColorList) return;
-    elColorList.innerHTML = '';
-    PALETTE.forEach(col=>{
-      const btn = document.createElement('button');
-      btn.type = 'button';
-      btn.className = 'pill';
-      btn.style.backgroundColor = col;
-      if (store.currentColor === col) btn.classList.add('active');
-      btn.addEventListener('click', ()=>{
-        store.currentColor = col;
-        renderColors();
-      });
-      elColorList.appendChild(btn);
-    });
+  // --- ID helper --------------------------------------------------------------
+  let idCounter = 0;
+  function newId(){
+    idCounter++;
+    return 'c_' + Math.random().toString(36).slice(2,10) + idCounter.toString(36);
   }
 
-  function renderFilters(){
-    if (!elFilterList) return;
-    elFilterList.innerHTML = '';
-    PALETTE.forEach(col=>{
-      const btn = document.createElement('button');
-      btn.type = 'button';
-      btn.className = 'pill';
-      btn.style.backgroundColor = col;
-      if (store.filter.has(col)) btn.classList.add('active');
-      btn.addEventListener('click', ()=>{
-        if (store.filter.has(col)) store.filter.delete(col);
-        else store.filter.add(col);
-        renderFilters();
-        refreshList();
-      });
-      elFilterList.appendChild(btn);
-    });
-  }
-
-  function filteredItems(){
-    const active = store.filter.size ? store.filter : null;
-    if (!active) return store.items.slice();
-    return store.items.filter(it => active.has(it.color));
-  }
-
-  // --- caption list -----------------------------------------------------------
-  function refreshList(){
+  // --- List rendering ---------------------------------------------------------
+  function renderList(){
     if (!elList) return;
     elList.innerHTML = '';
-    const items = filteredItems();
-    items.forEach(it=>{
+
+    const visible = store.items.filter(it=>{
+      if (!store.filterColor) return true;
+      return it.color === store.filterColor;
+    });
+
+    if (!visible.length){
+      const empty = document.createElement('div');
+      empty.className = 'empty';
+      empty.textContent = 'No captions yet. Shift+Click on the model to add.';
+      elList.appendChild(empty);
+      return;
+    }
+
+    visible.forEach(it=>{
       const row = document.createElement('div');
       row.className = 'lm-cap-row';
       row.dataset.id = it.id;
 
       const sw = document.createElement('span');
-      sw.className = 'lm-cap-sw';
-      sw.style.backgroundColor = it.color || '#eab308';
+      sw.className = 'lm-cap-swatch';
+      sw.style.background = it.color || '#eab308';
 
       const title = document.createElement('span');
       title.className = 'lm-cap-title';
@@ -232,7 +188,11 @@
 
       const imgMark = document.createElement('span');
       imgMark.className = 'lm-cap-imgmark';
-      if (it.imageFileId || (it.image && (it.image.id || it.image.url))) imgMark.textContent = '🖼';
+      if (it.imageFileId || (it.image && it.image.id)){
+        imgMark.textContent = '📷';
+      }else{
+        imgMark.textContent = '';
+      }
 
       const delBtn = document.createElement('button');
       delBtn.type = 'button';
@@ -258,6 +218,11 @@
     });
   }
 
+  function refreshList(){
+    renderList();
+  }
+
+  // --- Selection & editors ----------------------------------------------------
   function selectItem(id, opts){
     const options = opts || {};
     const fromViewer = !!(options && options.source === 'viewer');
@@ -287,7 +252,7 @@
     if (elBody) elBody.value = it.body || '';
 
     // Keep existing behaviour for viewer sync: only sync when we actually have
-    // a 3D pin position. When selection originates from the viewer, the call
+    // a 3D pin position. When selection originates from the viewer, the ca
     // is marked with fromViewer so that syncViewerSelection does not echo it
     // back to the viewer.
     syncViewerSelection(it.pos ? it.id : null, {fromViewer});
@@ -296,6 +261,7 @@
     renderPreview();
     emitItemSelected(it);
   }
+
   function removeItem(id){
     const idx = store.items.findIndex(x=>x.id===id);
     if (idx === -1) return;
@@ -308,252 +274,39 @@
       if (br){
         if (typeof br.removePinMarker === 'function'){
           br.removePinMarker(id);
-        }else if (typeof br.clearPins === 'function' && typeof br.addPinMarker === 'function'){
-          syncPinsFromItems();
+        }else if (typeof br.clearPins === 'function'){
+          br.clearPins();
+          store.items.forEach(it=>addPinForItem(it));
         }
       }
     }catch(e){
-      warn('removePinMarker failed', e);
+      warn('removePinMarker/clearPins failed', e);
     }
 
-    // Sheets へ削除通知（ソフトデリートは caption.sheet.bridge 側）
-    if (removed && removed.id){
+    if (removed){
       emitItemDeleted(removed);
-    }else{
-      emitItemDeleted({ id });
     }
 
     refreshList();
-    renderImages();
-  renderPreview();
+    selectItem(null);
   }
 
-  // --- Title / Body input wiring ----------------------------------------------
-  if (elTitle){
-    let rafId = 0;
-    elTitle.addEventListener('input', ()=>{
-      const id = store.selectedId; if (!id) return;
-      const it = store.items.find(x=>x.id===id); if (!it) return;
-      it.title = elTitle.value;
-      if (rafId) cancelAnimationFrame(rafId);
-      rafId = requestAnimationFrame(()=>refreshList());
-      scheduleChanged(it);
+  // --- Dirty tracking + emit changed -----------------------------------------
+  const dirtyTimers = new Map();
+  function scheduleChanged(item){
+    if (!item || !item.id) return;
+    const id = item.id;
+    const prev = dirtyTimers.get(id);
+    if (prev) cancelAnimationFrame(prev);
+    const t = requestAnimationFrame(()=>{
+      dirtyTimers.delete(id);
+      emitItemChanged(item);
     });
+    dirtyTimers.set(id, t);
   }
 
-  if (elBody){
-    let rafId = 0;
-    elBody.addEventListener('input', ()=>{
-      const id = store.selectedId; if (!id) return;
-      const it = store.items.find(x=>x.id===id); if (!it) return;
-      it.body = elBody.value;
-      if (rafId) cancelAnimationFrame(rafId);
-      rafId = requestAnimationFrame(()=>{});
-      scheduleChanged(it);
-    });
-  }
-
-  // --- Images grid ------------------------------------------------------------
-  function getSelectedItem(){
-    if (!store.selectedId) return null;
-    return store.items.find(x=>x.id === store.selectedId) || null;
-  }
-
-  function renderPreview(){
-    if (!elPreview) return;
-    const sel = getSelectedItem();
-    elPreview.innerHTML = '';
-    if (!sel || !(sel.imageFileId || (sel.image && sel.image.id))){
-      elPreview.style.display = 'none';
-      return;
-    }
-    const imgId = sel.imageFileId || (sel.image && sel.image.id);
-    const list = store.images || [];
-    const meta = (list.find(it => it.id === imgId) || sel.image || null);
-    if (!meta){
-      elPreview.style.display = 'none';
-      return;
-    }
-    const url = meta.thumbUrl || meta.thumbnailUrl || meta.url || meta.webContentLink || meta.webViewLink || '';
-    if (!url){
-      elPreview.style.display = 'none';
-      return;
-    }
-    const label = document.createElement('div');
-    label.className = 'lm-cap-preview-label';
-    label.textContent = 'Attached image';
-    const img = document.createElement('img');
-    img.src = url;
-    img.alt = meta.name || '';
-    img.loading = 'lazy';
-    img.decoding = 'async';
-    elPreview.appendChild(label);
-    elPreview.appendChild(img);
-    elPreview.style.display = 'block';
-  }
-
-  function renderImages(){
-    if (!elImages) return;
-    // enforce grid layout from JS (3 columns) in case CSS is old
-    elImages.style.display = 'grid';
-    elImages.style.gridTemplateColumns = 'repeat(3, minmax(72px, 1fr))';
-    elImages.style.gap = '6px';
-    elImages.style.maxHeight = '360px';
-    elImages.style.overflowY = 'auto';
-
-    const list = store.images || [];
-    elImages.innerHTML = '';
-    const selected = getSelectedItem();
-    const selectedImageId = selected && (selected.imageFileId || (selected.image && selected.image.id));
-
-    if (!list.length){
-      if (elImgStatus) elImgStatus.textContent = '画像はまだありません';
-      return;
-    }
-
-    if (elImgStatus) elImgStatus.textContent = `${list.length} 枚の画像`;
-
-    list.forEach(imgInfo=>{
-      const wrap = document.createElement('button');
-      wrap.type = 'button';
-      wrap.className = 'lm-img-item';
-      wrap.dataset.id = imgInfo.id;
-
-      const img = document.createElement('img');
-      img.loading = 'lazy';
-      img.decoding = 'async';
-      img.src = imgInfo.thumbUrl || imgInfo.thumbnailUrl || imgInfo.url || '';
-      img.alt = imgInfo.name || '';
-      wrap.appendChild(img);
-
-      const label = document.createElement('div');
-      label.className = 'lm-img-label';
-      label.textContent = imgInfo.name || '(image)';
-      wrap.appendChild(label);
-
-      // detach button (visible on hover / when attached)
-      const detach = document.createElement('button');
-      detach.type = 'button';
-      detach.textContent = '×';
-      detach.title = 'Detach image';
-      detach.style.position = 'absolute';
-      detach.style.top = '2px';
-      detach.style.right = '2px';
-      detach.style.width = '16px';
-      detach.style.height = '16px';
-      detach.style.border = 'none';
-      detach.style.borderRadius = '999px';
-      detach.style.padding = '0';
-      detach.style.fontSize = '11px';
-      detach.style.lineHeight = '1';
-      detach.style.background = 'rgba(15,23,42,0.9)';
-      detach.style.color = '#e5e7eb';
-      detach.style.cursor = 'pointer';
-      detach.style.opacity = '0';
-      detach.style.transition = 'opacity .12s ease-out';
-      wrap.style.position = 'relative';
-
-      if (selectedImageId && selectedImageId === imgInfo.id){
-        wrap.classList.add('active');
-        detach.style.opacity = '1';
-      }
-
-      wrap.addEventListener('mouseenter', ()=>{ detach.style.opacity = '1'; });
-      wrap.addEventListener('mouseleave', ()=>{
-        if (!(selectedImageId && selectedImageId === imgInfo.id)){
-          detach.style.opacity = '0';
-        }
-      });
-
-      detach.addEventListener('click', (ev)=>{
-        ev.stopPropagation();
-        const cur = getSelectedItem();
-        if (!cur) return;
-        if (cur.imageFileId && cur.imageFileId === imgInfo.id){
-          cur.imageFileId = null;
-          cur.image = null;
-          scheduleChanged(cur);
-          refreshList();
-          renderImages();
-  renderPreview();
-          renderPreview();
-        }
-      });
-
-      wrap.appendChild(detach);
-
-      wrap.addEventListener('click', ()=>{
-        const cur = getSelectedItem();
-        if (!cur){
-          log('image click ignored (no caption selected)');
-          return;
-        }
-        // attach (no toggle; detach is handled by × button)
-        cur.imageFileId = imgInfo.id;
-        cur.image = imgInfo;
-        scheduleChanged(cur);
-        refreshList();   // 🖼 マーク更新
-        renderImages();  // ハイライト更新
-        renderPreview();
-      });
-
-      elImages.appendChild(wrap);
-    });
-  }
-  if (elRefreshImg){
-    elRefreshImg.addEventListener('click', ()=>{
-      try{
-        document.dispatchEvent(new Event('lm:refresh-images'));
-      }catch(e){
-        warn('refresh-images event failed', e);
-      }
-    });
-  }
-
-  // --- Public API for other modules -------------------------------------------
-  function normalizeItem(raw){
-    raw = raw || {};
-    const id = raw.id || newId();
-    const pos = raw.pos || (raw.x!=null && raw.y!=null && raw.z!=null
-      ? { x:Number(raw.x), y:Number(raw.y), z:Number(raw.z) }
-      : null);
-    const imageFileId = raw.imageFileId || (raw.image && raw.image.id) || null;
-    const image = raw.image || null;
-    return {
-      id,
-      title: raw.title || '',
-      body: raw.body || '',
-      color: raw.color || '#eab308',
-      pos,
-      imageFileId,
-      image,
-      createdAt: raw.createdAt || null,
-      updatedAt: raw.updatedAt || null,
-      rowIndex: raw.rowIndex || null
-    };
-  }
-
-  function setItems(items){
-    store.items = (items || []).map(normalizeItem);
-    refreshList();
-    syncPinsFromItems();
-    renderImages();
-  renderPreview();
-    renderPreview();
-  }
-
-  function setImages(images){
-    store.images = images || [];
-    renderImages();
-  renderPreview();
-    renderPreview();
-  }
-
-  // --- caption creation --------------------------------------------------------
-  let preferWorldClicks = false;
-  let worldHookInstalled = false;
+  // --- Caption creation -------------------------------------------------------
   let lastAddAtMs = 0;
-
   function addCaptionAt(x, y, world){
     const tNow = Date.now();
     if (tNow - lastAddAtMs < 150) {
@@ -585,76 +338,306 @@
   // fallback click: GL canvas 上の Shift+クリック
   function installFallbackClick(){
     const area = document.getElementById('gl') ||
-                 document.querySelector('#viewer,#glCanvas,#glcanvas');
+                 document.querySelector('#viewer,#glCanvas,#three-canvas');
     if (!area) return;
+
     area.addEventListener('click', (ev)=>{
       if (!ev.shiftKey) return;
-      if (preferWorldClicks) return; // viewer 側で world 座標を扱う場合はそちらを優先
       const rect = area.getBoundingClientRect();
-      const x = (ev.clientX - rect.left) / rect.width;
-      const y = (ev.clientY - rect.top) / rect.height;
-      addCaptionAt(x, y, null);
+      const x = ev.clientX - rect.left;
+      const y = ev.clientY - rect.top;
+      const br = getViewerBridge();
+      if (!br || typeof br.onCanvasShiftPick !== 'function') return;
+      try{
+        br.onCanvasShiftPick({ x, y }, (world)=>{
+          addCaptionAt(x, y, world || null);
+        });
+      }catch(e){
+        warn('onCanvasShiftPick failed', e);
+      }
+    }, { passive: true });
+  }
+
+  // --- Color chips ------------------------------------------------------------
+  function renderColorChips(){
+    if (!elColorList) return;
+    elColorList.innerHTML = '';
+    colorOptions.forEach(opt=>{
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'pill';
+      btn.textContent = opt.label;
+      btn.dataset.color = opt.value;
+      if (store.currentColor === opt.value) btn.classList.add('active');
+      btn.addEventListener('click', ()=>{
+        store.currentColor = opt.value;
+        $$('.pill', elColorList).forEach(b=>{
+          b.classList.toggle('active', b === btn);
+        });
+      });
+      elColorList.appendChild(btn);
     });
   }
 
-  function tryInstallWorldSpaceHook(){
-    if (worldHookInstalled) return;
-    const br = getViewerBridge();
-    if (!br || typeof br.onCanvasShiftPick !== 'function') return;
-    try{
-      br.onCanvasShiftPick((payload)=>{
-        if (!payload) return;
-        const world = payload.point || payload;
-        if (!world ||
-            typeof world.x !== 'number' ||
-            typeof world.y !== 'number' ||
-            typeof world.z !== 'number') {
-          log('onCanvasShiftPick payload missing numeric point', payload);
-          return;
-        }
-        preferWorldClicks = true;
-        addCaptionAt(0.5, 0.5, world);
+  function renderFilterChips(){
+    if (!elFilterList) return;
+    elFilterList.innerHTML = '';
+    filterOptions.forEach(opt=>{
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'pill';
+      btn.textContent = opt.label;
+      btn.dataset.color = opt.value || '';
+      if (store.filterColor === opt.value) btn.classList.add('active');
+      btn.addEventListener('click', ()=>{
+        store.filterColor = opt.value;
+        $$('.pill', elFilterList).forEach(b=>{
+          b.classList.toggle('active', b === btn);
+        });
+        refreshList();
       });
-      worldHookInstalled = true;
-      log('world-space hook installed');
+      elFilterList.appendChild(btn);
+    });
+  }
+
+  // --- Title / Body editors ---------------------------------------------------
+  if (elTitle){
+    let rafId = 0;
+    elTitle.addEventListener('input', ()=>{
+      let id = store.selectedId;
+
+      // Fallback: selection 情報が抜けている場合は、UI の選択行 or 単一行から復元する
+      if (!id){
+        if (elList){
+          const selRow = elList.querySelector('.lm-cap-row.selected');
+          if (selRow && selRow.dataset && selRow.dataset.id){
+            id = selRow.dataset.id;
+            store.selectedId = id;
+          }
+        }
+        if (!id && store.items.length === 1){
+          id = store.items[0].id;
+          store.selectedId = id;
+        }
+      }
+
+      if (!id) return;
+      const it = store.items.find(x=>x.id===id); if (!it) return;
+      it.title = elTitle.value;
+      if (rafId) cancelAnimationFrame(rafId);
+      rafId = requestAnimationFrame(()=>refreshList());
+      scheduleChanged(it);
+    });
+  }
+
+  if (elBody){
+    let rafId = 0;
+    elBody.addEventListener('input', ()=>{
+      let id = store.selectedId;
+
+      // Fallback: selection 情報が抜けている場合は、UI の選択行 or 単一行から復元する
+      if (!id){
+        if (elList){
+          const selRow = elList.querySelector('.lm-cap-row.selected');
+          if (selRow && selRow.dataset && selRow.dataset.id){
+            id = selRow.dataset.id;
+            store.selectedId = id;
+          }
+        }
+        if (!id && store.items.length === 1){
+          id = store.items[0].id;
+          store.selectedId = id;
+        }
+      }
+
+      if (!id) return;
+      const it = store.items.find(x=>x.id===id); if (!it) return;
+      it.body = elBody.value;
+      if (rafId) cancelAnimationFrame(rafId);
+      rafId = requestAnimationFrame(()=>{});
+      scheduleChanged(it);
+    });
+  }
+
+  // --- Images grid ------------------------------------------------------------
+  function getSelectedItem(){
+    if (!store.selectedId) return null;
+    return store.items.find(x=>x.id === store.selectedId) || null;
+  }
+
+  function renderPreview(){
+    if (!elPreview) return;
+    const sel = getSelectedItem();
+    elPreview.innerHTML = '';
+    if (!sel || !(sel.imageFileId || (sel.image && sel.image.id))){
+      elPreview.style.display = 'none';
+      return;
+    }
+
+    const img = document.createElement('img');
+    if (sel.imageFileId){
+      img.src = `https://drive.google.com/thumbnail?id=${encodeURIComponent(sel.imageFileId)}&sz=w400`;
+    }else if (sel.image && sel.image.id){
+      img.src = `https://drive.google.com/thumbnail?id=${encodeURIComponent(sel.image.id)}&sz=w400`;
+    }
+    img.alt = sel.title || '';
+    img.style.display = 'block';
+    img.style.maxWidth = '100%';
+    img.style.borderRadius = '8px';
+
+    elPreview.innerHTML = '';
+    elPreview.appendChild(img);
+    elPreview.style.display = 'block';
+  }
+
+  function renderImages(){
+    if (!elImages) return;
+    elImages.innerHTML = '';
+
+    const sel = getSelectedItem();
+    const images = store.images || [];
+    if (!images.length){
+      if (elImgStatus){
+        elImgStatus.textContent = store.imagesLoaded
+          ? 'No images found in this GLB folder.'
+          : 'Images will be listed after first search.';
+      }
+      return;
+    }
+
+    if (elImgStatus){
+      elImgStatus.textContent = `Images in GLB folder: ${images.length}`;
+    }
+
+    let selectedImageId = sel && (sel.imageFileId || (sel.image && sel.image.id)) || null;
+
+    images.forEach(imgInfo=>{
+      const wrap = document.createElement('div');
+      wrap.className = 'img-item';
+      wrap.dataset.id = imgInfo.id;
+
+      const img = document.createElement('img');
+      img.loading = 'lazy';
+      img.src = `https://drive.google.com/thumbnail?id=${encodeURIComponent(imgInfo.id)}&sz=w160`;
+      img.alt = imgInfo.name || '';
+
+      const label = document.createElement('div');
+      label.className = 'img-label';
+      label.textContent = imgInfo.name || '';
+
+      const detach = document.createElement('button');
+      detach.type = 'button';
+      detach.textContent = '×';
+      detach.className = 'img-detach';
+      detach.style.opacity = '0';
+
+      if (selectedImageId && selectedImageId === imgInfo.id){
+        wrap.classList.add('selected');
+        detach.style.opacity = '1';
+      }
+
+      wrap.appendChild(img);
+      wrap.appendChild(label);
+      wrap.appendChild(detach);
+
+      wrap.addEventListener('click', ()=>{
+        const cur = getSelectedItem();
+        if (!cur) return;
+        cur.imageFileId = imgInfo.id;
+        cur.image = imgInfo;
+        selectedImageId = imgInfo.id;
+        renderImages();
+        renderPreview();
+        scheduleChanged(cur);
+      });
+
+      wrap.addEventListener('mouseenter', ()=>{ detach.style.opacity = '1'; });
+      wrap.addEventListener('mouseleave', ()=>{
+        if (!(selectedImageId && selectedImageId === imgInfo.id)){
+          detach.style.opacity = '0';
+        }
+      });
+
+      detach.addEventListener('click', (ev)=>{
+        ev.stopPropagation();
+        const cur = getSelectedItem();
+        if (!cur) return;
+        if (cur.imageFileId && cur.imageFileId === imgInfo.id){
+          cur.imageFileId = null;
+          cur.image = null;
+          selectedImageId = null;
+          renderImages();
+          renderPreview();
+          scheduleChanged(cur);
+        }
+      });
+
+      elImages.appendChild(wrap);
+    });
+  }
+
+  // --- Image loader bridge ----------------------------------------------------
+  function triggerImageReload(reason){
+    try{
+      const mod = window.__LM_CAPTION_IMAGES_LOADER__;
+      if (!mod || typeof mod.trigger !== 'function'){
+        warn('caption images loader not available');
+        return;
+      }
+      mod.trigger(reason || 'manual');
     }catch(e){
-      warn('onCanvasShiftPick hook failed', e);
+      warn('triggerImageReload failed', e);
     }
   }
 
-  installFallbackClick();
-  tryInstallWorldSpaceHook();
-  document.addEventListener('lm:viewer-bridge-ready', tryInstallWorldSpaceHook, { passive:true });
-  window.addEventListener('lm:scene-ready',            tryInstallWorldSpaceHook, { passive:true });
+  if (elRefreshImg){
+    elRefreshImg.addEventListener('click', ()=>{
+      triggerImageReload('manual');
+    });
+  }
 
-  // Expose UI API
-  window.__LM_CAPTION_UI = {
-    addCaptionAt,
-    refreshList,
-    selectItem,
-    removeItem,
-    setItems,
-    setImages,
+  // --- bridge for caption.images.loader.js -----------------------------------
+  function setImages(images){
+    store.images = Array.isArray(images) ? images.slice() : [];
+    store.imagesLoaded = true;
+    renderImages();
+    renderPreview();
+  }
+
+  // --- External API (for sheet bridge etc.) ----------------------------------
+  const api = {
+    __ver: 'A2',
+    get items(){ return store.items; },
+    get selectedId(){ return store.selectedId; },
     onItemAdded,
     onItemChanged,
     onItemDeleted,
     onItemSelected,
-    registerDeleteListener: onItemDeleted,
-    get items(){ return store.items; },
-    get images(){ return store.images; },
-    get selectedId(){ return store.selectedId; }
-  };  window.__LM_CAPTION_UI.__ver = 'A2';
+    setItems(items){
+      store.items = Array.isArray(items) ? items.slice() : [];
+      // rowIndex はそのまま保持する
+      refreshList();
+      if (store.items.length){
+        selectItem(store.items[0].id);
+      }else{
+        selectItem(null);
+      }
+      clearPins();
+      store.items.forEach(it=>addPinForItem(it));
+    },
+    addCaptionAt,
+    selectItem,
+    removeItem,
+    setImages,
+  };
 
+  window.__LM_CAPTION_UI = api;
 
-  // initial render
-  renderColors();
-  renderFilters();
+  installFallbackClick();
+  renderColorChips();
+  renderFilterChips();
   refreshList();
-  renderImages();
-  renderPreview();
 
-  try{
-    document.dispatchEvent(new Event('lm:caption-ui-ready'));
-  }catch(_){}
   log('ready');
+  log('world-space hook installed');
 })();
