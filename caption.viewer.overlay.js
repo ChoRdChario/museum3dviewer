@@ -426,8 +426,14 @@ const TAG = '[caption-overlay]';
       return null;
     }
     try {
-      const p = item.pos;
-      return br.projectPoint(p.x, p.y, p.z);
+      const p = item.pos || {};
+      const hasCoords = (typeof p.x === 'number' &&
+                         typeof p.y === 'number' &&
+                         typeof p.z === 'number');
+      if (!hasCoords) return null;
+
+      // viewer.module.cdn.js の projectPoint(pos:{x,y,z}) に合わせる
+      return br.projectPoint({ x:p.x, y:p.y, z:p.z });
     } catch (e) {
       warn('projectPoint failed', e);
       return null;

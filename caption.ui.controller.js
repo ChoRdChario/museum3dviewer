@@ -127,10 +127,15 @@
   function addPinForItem(item){
     const br = getViewerBridge();
     if (!br || typeof br.addPinMarker !== 'function') return;
-    if (!item.pos) return;
-    const p = item.pos;
+    if (!item || !item.pos) return;
+    const p = item.pos || {};
+    const hasCoords = (typeof p.x === 'number' &&
+                       typeof p.y === 'number' &&
+                       typeof p.z === 'number');
+    if (!hasCoords) return;
+    const pos = { x:p.x, y:p.y, z:p.z };
     try{
-      br.addPinMarker({ id:item.id, x:p.x, y:p.y, z:p.z, color:item.color });
+      br.addPinMarker({ id:item.id, position: pos, color:item.color });
     }catch(e){
       warn('addPinMarker failed', e);
     }
@@ -597,8 +602,16 @@
     const br = getViewerBridge();
     if (!br || typeof br.onCanvasShiftPick !== 'function') return;
     try{
-      br.onCanvasShiftPick((world)=>{
-        if (!world) return;
+      br.onCanvasShiftPick((payload)=>{
+        if (!payload) return;
+        const world = payload.point || payload;
+        if (!world ||
+            typeof world.x !== 'number' ||
+            typeof world.y !== 'number' ||
+            typeof world.z !== 'number') {
+          log('onCanvasShiftPick payload missing numeric point', payload);
+          return;
+        }
         preferWorldClicks = true;
         addCaptionAt(0.5, 0.5, world);
       });
