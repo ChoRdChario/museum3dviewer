@@ -84,13 +84,28 @@
   function scheduleChanged(item){
     if (!item || !item.id) return;
     const id = item.id;
-    const prev = dirtyTimers.get(id);
-    if (prev) cancelAnimationFrame(prev);
-    const t = requestAnimationFrame(()=>{
-      dirtyTimers.delete(id);
+
+    // Fail-safe: fire change immediately so all bridges (Sheets, overlay, etc.)
+    // definitely receive the event, even if rAF / coalescing logic is skipped.
+    try {
       emitItemChanged(item);
-    });
-    dirtyTimers.set(id, t);
+    } catch (e) {
+      console.error(TAG, 'scheduleChanged immediate emit failed', e);
+    }
+
+    if (typeof requestAnimationFrame === 'function') {
+      const prev = dirtyTimers.get(id);
+      if (prev) cancelAnimationFrame(prev);
+      const t = requestAnimationFrame(()=>{
+        dirtyTimers.delete(id);
+        try {
+          emitItemChanged(item);
+        } catch (e) {
+          console.error(TAG, 'scheduleChanged deferred emit failed', e);
+        }
+      });
+      dirtyTimers.set(id, t);
+    }
   }
 
   function onItemDeleted(fn){
@@ -332,23 +347,7 @@
   if (elTitle){
     let rafId = 0;
     elTitle.addEventListener('input', ()=>{
-      // 通常は store.selectedId を使うが、selection 情報が抜けている場合は
-      // リストの選択行や単一要素から復元するフォールバックを入れる
-      let id = store.selectedId;
-
-      if (!id && elList){
-        const selRow = elList.querySelector('.lm-cap-row.selected');
-        if (selRow && selRow.dataset && selRow.dataset.id){
-          id = selRow.dataset.id;
-          store.selectedId = id;
-        }
-      }
-      if (!id && store.items.length === 1){
-        id = store.items[0].id;
-        store.selectedId = id;
-      }
-
-      if (!id) return;
+      const id = store.selectedId; if (!id) return;
       const it = store.items.find(x=>x.id===id); if (!it) return;
       it.title = elTitle.value;
       if (rafId) cancelAnimationFrame(rafId);
@@ -360,23 +359,7 @@
   if (elBody){
     let rafId = 0;
     elBody.addEventListener('input', ()=>{
-      // 通常は store.selectedId を使うが、selection 情報が抜けている場合は
-      // リストの選択行や単一要素から復元するフォールバックを入れる
-      let id = store.selectedId;
-
-      if (!id && elList){
-        const selRow = elList.querySelector('.lm-cap-row.selected');
-        if (selRow && selRow.dataset && selRow.dataset.id){
-          id = selRow.dataset.id;
-          store.selectedId = id;
-        }
-      }
-      if (!id && store.items.length === 1){
-        id = store.items[0].id;
-        store.selectedId = id;
-      }
-
-      if (!id) return;
+      const id = store.selectedId; if (!id) return;
       const it = store.items.find(x=>x.id===id); if (!it) return;
       it.body = elBody.value;
       if (rafId) cancelAnimationFrame(rafId);
