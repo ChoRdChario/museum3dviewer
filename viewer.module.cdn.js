@@ -541,7 +541,23 @@ export function addPinMarker(pin) {
   removePinMarker(pin.id);
 
   const geom = new THREE.SphereGeometry(0.01, 8, 8);
-  const mat  = new THREE.MeshBasicMaterial({ color: 0xff0000 });
+
+  // ピンカラー: UI / シートから渡される pin.color を優先し、なければ赤
+  let color = 0xff0000;
+  try {
+    if (pin.color != null) {
+      if (typeof pin.color === 'number') {
+        color = pin.color;
+      } else if (typeof pin.color === 'string') {
+        const c = new THREE.Color(pin.color);
+        color = c;
+      }
+    }
+  } catch (e) {
+    try { console.warn('[viewer.module] invalid pin color', pin.color, e); } catch (_) {}
+  }
+
+  const mat  = new THREE.MeshBasicMaterial({ color });
   const mesh = new THREE.Mesh(geom, mat);
   mesh.position.set(pin.position.x, pin.position.y, pin.position.z);
   mesh.userData.__lmPin = { id: pin.id, data: pin };
@@ -549,7 +565,6 @@ export function addPinMarker(pin) {
   scene.add(mesh);
   pinMarkers.set(pin.id, mesh);
 }
-
 export function removePinMarker(pinId) {
   if (!scene) return;
   const mesh = pinMarkers.get(pinId);

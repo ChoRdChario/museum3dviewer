@@ -432,8 +432,20 @@ const TAG = '[caption-overlay]';
                          typeof p.z === 'number');
       if (!hasCoords) return null;
 
-      // viewer.module.cdn.js の projectPoint(pos:{x,y,z}) に合わせる
-      return br.projectPoint({ x:p.x, y:p.y, z:p.z });
+      // viewer.module.cdn.js の projectPoint(pos:{x,y,z}) は 0..1 の正規化座標を返すので、
+      // ここでビューポートのピクセル座標に変換する
+      const spNorm = br.projectPoint({ x: p.x, y: p.y, z: p.z });
+      if (!spNorm) return null;
+
+      const vw = window.innerWidth  || document.documentElement.clientWidth  || 0;
+      const vh = window.innerHeight || document.documentElement.clientHeight || 0;
+      if (!vw || !vh) return null;
+
+      return {
+        x: spNorm.x * vw,
+        y: spNorm.y * vh,
+        z: spNorm.z
+      };
     } catch (e) {
       warn('projectPoint failed', e);
       return null;
