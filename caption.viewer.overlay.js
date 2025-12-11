@@ -2,86 +2,154 @@ const TAG = '[caption-overlay]';
 
 (function () {
   if (window.__LM_CAPTION_OVERLAY__ && window.__LM_CAPTION_OVERLAY__.__ver && String(window.__LM_CAPTION_OVERLAY__.__ver).startsWith('A2')) {
-    try {
-      console.log(TAG, 'already loaded');
-    } catch (_) {}
+    try { console.log(TAG, 'already loaded'); } catch(_) {}
     return;
   }
 
   'use strict';
 
   function log(...args) {
-    try {
-      console.log(TAG, ...args);
-    } catch (_) {}
+    try { console.log(TAG, ...args); } catch (_) {}
   }
-
   function warn(...args) {
-    try {
-      console.warn(TAG, ...args);
-    } catch (_) {}
+    try { console.warn(TAG, ...args); } catch (_) {}
   }
 
-  function ensureViewerBridge() {
-    return window.__lm_viewer_bridge || window.viewerBridge || null;
-  }
-
-  function ensureCaptionUI() {
-    return window.__LM_CAPTION_UI || null;
-  }
-
-  const windows = new Map(); // id -> { item, el, manualOffset, lastScreenPos }
+  let overlayRoot = null;
+  let svgLayer = null;
+  let winLayer = null;
+  const windows = new Map(); // id -> state
 
   function ensureOverlayRoot() {
-    let root = document.getElementById('lm-caption-overlay-root');
-    if (root) return root;
+    if (overlayRoot && svgLayer && winLayer) return overlayRoot;
 
-    root = document.createElement('div');
+    const root = document.createElement('div');
     root.id = 'lm-caption-overlay-root';
-    root.style.position = 'absolute';
+    root.style.position = 'fixed';
     root.style.left = '0';
     root.style.top = '0';
     root.style.right = '0';
     root.style.bottom = '0';
     root.style.pointerEvents = 'none';
-    root.style.zIndex = '50';
+    root.style.zIndex = '40'; // above viewer, below menus
 
-    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-    svg.setAttribute('class', 'lm-caption-overlay-lines');
+    const svgNS = 'http://www.w3.org/2000/svg';
+    const svg = document.createElementNS(svgNS, 'svg');
+    svg.setAttribute('class', 'lm-caption-overlay-svg');
+    svg.setAttribute('width', '100%');
+    svg.setAttribute('height', '100%');
     svg.style.position = 'absolute';
     svg.style.left = '0';
     svg.style.top = '0';
-    svg.style.width = '100%';
-    svg.style.height = '100%';
+
+    const winContainer = document.createElement('div');
+    winContainer.className = 'lm-caption-overlay-windows';
+    winContainer.style.position = 'absolute';
+    winContainer.style.left = '0';
+    winContainer.style.top = '0';
+    winContainer.style.width = '100%';
+    winContainer.style.height = '100%';
+    winContainer.style.pointerEvents = 'none';
 
     root.appendChild(svg);
+    root.appendChild(winContainer);
+
     document.body.appendChild(root);
 
+    overlayRoot = root;
+    svgLayer = svg;
+    winLayer = winContainer;
+
     log('overlay root created');
-    return root;
+    return overlayRoot;
   }
 
-  function getOverlayRoot() {
-    return document.getElementById('lm-caption-overlay-root') || ensureOverlayRoot();
-  }
-
-  function getLinesLayer() {
-    const root = getOverlayRoot();
-    if (!root) return null;
-    let svg = root.querySelector('svg.lm-caption-overlay-lines');
-    if (!svg) {
-      svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-      svg.setAttribute('class', 'lm-caption-overlay-lines');
-      svg.style.position = 'absolute';
-      svg.style.left = '0';
-      svg.style.top = '0';
-      svg.style.width = '100%';
-      svg.style.height = '100%';
-      root.appendChild(svg);
+  // ---------------------------------------------------------------------------
+  // Viewer bridge
+  // ---------------------------------------------------------------------------
+  function ensureViewerBridge() {
+    const pr = window.__lm_pin_runtime;
+    if (pr && typeof pr.getBridge === 'function') {
+      try {
+        const b = pr.getBridge();
+        if (b) return b;
+      } catch (e) {
+        warn('pin_runtime.getBridge failed', e);
+      }
     }
-    return svg;
+    return window.__lm_viewer_bridge || window.viewerBridge || null;
   }
 
+  // ---------------------------------------------------------------------------
+  // State helpers
+  // ---------------------------------------------------------------------------
+  function createWindowState(id, item) {
+    return {
+      id,
+      item,
+      el: null,
+      lineEl: null
+    };
+  }
+
+  function getWindowState(id) {
+    return windows.get(id) || null;
+  }
+
+  function ensureLineElement() {
+    if (!svgLayer) ensureOverlayRoot();
+    if (!svgLayer) return null;
+
+    const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+    line.setAttribute('class', 'lm-caption-line');
+    line.setAttribute('x1', '0');
+    line.setAttribute('y1', '0');
+    line.setAttribute('x2', '0');
+    line.setAttribute('y2', '0');
+    svgLayer.appendChild(line);
+    return line;
+  }
+
+  function createWindowElement(state) {
+    if (!winLayer) ensureOverlayRoot();
+    if (!winLayer) return null;
+
+    const el = document.createElement('div');
+    el.className = 'lm-caption-window';
+    el.dataset.id = state.id;
+    el.style.position = 'absolute';
+    el.style.pointerEvents = 'auto';
+
+    const title = document.createElement('div');
+    title.className = 'lm-caption-window-title';
+
+    const body = document.createElement('div');
+    body.className = 'lm-caption-window-body';
+
+    el.appendChild(title);
+    el.appendChild(body);
+
+    winLayer.appendChild(el);
+    state.el = el;
+    state.titleEl = title;
+    state.bodyEl = body;
+    return el;
+  }
+
+  function updateWindowContent(state) {
+    const { item, titleEl, bodyEl } = state;
+    if (!item) return;
+    if (titleEl) {
+      titleEl.textContent = item.title || '(untitled)';
+    }
+    if (bodyEl) {
+      bodyEl.textContent = item.body || '';
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Projection / positioning
+  // ---------------------------------------------------------------------------
   function projectItemToScreen(item) {
     const br = ensureViewerBridge();
     if (!br || typeof br.projectPoint !== 'function' || !item || !item.pos) {
@@ -89,8 +157,11 @@ const TAG = '[caption-overlay]';
     }
     try {
       const p = item.pos;
-      // viewer.module.cdn.js の projectPoint は単一引数 {x,y,z} を期待する
-      return br.projectPoint(p && typeof p.x === 'number' ? p : { x:p.x, y:p.y, z:p.z });
+      // Support both legacy projectPoint(x,y,z) and new projectPoint({x,y,z})
+      if (br.projectPoint.length >= 3) {
+        return br.projectPoint(p.x, p.y, p.z);
+      }
+      return br.projectPoint({ x: p.x, y: p.y, z: p.z });
     } catch (e) {
       warn('projectPoint failed', e);
       return null;
@@ -102,387 +173,171 @@ const TAG = '[caption-overlay]';
     const item = state.item;
     if (!el || !item) return;
     const sp = projectItemToScreen(item);
-    if (!sp) return;
-    const vw = window.innerWidth || document.documentElement.clientWidth;
-    const vh = window.innerHeight || document.documentElement.clientHeight;
+    if (!sp) {
+      el.style.display = 'none';
+      if (state.lineEl) state.lineEl.style.display = 'none';
+      return;
+    }
+
+    const vw = window.innerWidth  || document.documentElement.clientWidth  || 1;
+    const vh = window.innerHeight || document.documentElement.clientHeight || 1;
+
+    const x = sp.x * vw;
+    const y = sp.y * vh;
 
     const rect = el.getBoundingClientRect();
-    const preferredX = sp.x + 24;
-    const preferredY = sp.y - rect.height * 0.3;
-    let x = Math.min(Math.max(preferredX, 16), vw - rect.width - 16);
-    let y = Math.min(Math.max(preferredY, 16), vh - rect.height - 16);
+    const offsetX = 24;
+    const offsetY = -rect.height / 2;
 
-    el.style.left = x + 'px';
-    el.style.top = y + 'px';
-    state.manualOffset.x = x;
-    state.manualOffset.y = y;
-    state.lastScreenPos = sp;
+    const left = x + offsetX;
+    const top  = y + offsetY;
+
+    el.style.left = `${left}px`;
+    el.style.top  = `${top}px`;
+    el.style.display = '';
+
+    if (state.lineEl) {
+      state.lineEl.setAttribute('x1', String(x));
+      state.lineEl.setAttribute('y1', String(y));
+      state.lineEl.setAttribute('x2', String(left));
+      state.lineEl.setAttribute('y2', String(top + rect.height / 2));
+      state.lineEl.style.display = '';
+    }
   }
 
-  function updateLines() {
-    const svgLayer = getLinesLayer();
-    if (!svgLayer) return;
-    while (svgLayer.firstChild) {
-      svgLayer.removeChild(svgLayer.firstChild);
-    }
-    const svgNS = 'http://www.w3.org/2000/svg';
-
-    const vw = window.innerWidth || document.documentElement.clientWidth;
-    const vh = window.innerHeight || document.documentElement.clientHeight;
-
+  function updateAllWindows() {
     windows.forEach((state) => {
-      const item = state.item;
-      if (!item || !item.pos) return;
-      const sp = projectItemToScreen(item);
-      if (!sp) return;
-      state.lastScreenPos = sp;
-
-      const el = state.el;
-      const rect = el.getBoundingClientRect();
-
-      let wx = rect.left + rect.width * 0.18;
-      let wy = rect.top + 24;
-      if (wx < 0 || wx > vw || wy < 0 || wy > vh) {
-        return;
-      }
-
-      const line = document.createElementNS(svgNS, 'line');
-      line.setAttribute('x1', String(sp.x));
-      line.setAttribute('y1', String(sp.y));
-      line.setAttribute('x2', String(wx));
-      line.setAttribute('y2', String(wy));
-      line.setAttribute('stroke', 'rgba(148,163,184,0.9)');
-      line.setAttribute('stroke-width', '1');
-
-      svgLayer.appendChild(line);
+      positionWindowNearItem(state);
     });
   }
 
-  function createCaptionWindow(item) {
-    const root = getOverlayRoot();
-    if (!root) return null;
-
-    let winLayer = root.querySelector('.lm-caption-window-layer');
-    if (!winLayer) {
-      winLayer = document.createElement('div');
-      winLayer.className = 'lm-caption-window-layer';
-      winLayer.style.position = 'absolute';
-      winLayer.style.left = '0';
-      winLayer.style.top = '0';
-      winLayer.style.right = '0';
-      winLayer.style.bottom = '0';
-      winLayer.style.pointerEvents = 'none';
-      root.appendChild(winLayer);
-    }
-
-    const el = document.createElement('div');
-    el.className = 'lm-caption-window';
-    el.style.position = 'absolute';
-    el.style.minWidth = '220px';
-    el.style.maxWidth = '320px';
-    el.style.background = 'rgba(15,23,42,0.96)';
-    el.style.borderRadius = '10px';
-    el.style.boxShadow = '0 18px 40px rgba(15,23,42,0.9)';
-    el.style.pointerEvents = 'auto';
-    el.style.padding = '0';
-    el.style.zIndex = '60';
-
-    const inner = document.createElement('div');
-    inner.style.position = 'relative';
-    inner.style.padding = '8px 10px 10px';
-
-    const header = document.createElement('div');
-    header.className = 'lm-cap-win-header';
-    header.style.position = 'relative';
-    header.style.display = 'flex';
-    header.style.alignItems = 'center';
-    header.style.gap = '6px';
-    header.style.cursor = 'move';
-    header.style.fontSize = '12px';
-    header.style.color = '#f9fafb';
-    header.style.userSelect = 'none';
-    header.style.paddingRight = '20px';
-
-    const colorDot = document.createElement('span');
-    colorDot.style.display = 'inline-block';
-    colorDot.style.width = '10px';
-    colorDot.style.height = '10px';
-    colorDot.style.borderRadius = '9999px';
-    colorDot.style.backgroundColor = item.color || '#eab308';
-
-    const titleSpan = document.createElement('span');
-    titleSpan.textContent = item.title || '(untitled)';
-    titleSpan.style.flex = '1 1 auto';
-    titleSpan.style.whiteSpace = 'nowrap';
-    titleSpan.style.overflow = 'hidden';
-    titleSpan.style.textOverflow = 'ellipsis';
-
-    const closeBtn = document.createElement('button');
-    closeBtn.type = 'button';
-    closeBtn.textContent = '×';
-    closeBtn.style.position = 'absolute';
-    closeBtn.style.right = '2px';
-    closeBtn.style.top = '-2px';
-    closeBtn.style.border = 'none';
-    closeBtn.style.background = 'transparent';
-    closeBtn.style.color = '#cbd5f5';
-    closeBtn.style.cursor = 'pointer';
-    closeBtn.style.fontSize = '14px';
-
-    header.appendChild(colorDot);
-    header.appendChild(titleSpan);
-    header.appendChild(closeBtn);
-
-    const body = document.createElement('div');
-    body.textContent = item.body || '';
-    body.style.fontSize = '12px';
-    body.style.color = '#e5e7eb';
-    body.style.marginTop = '4px';
-    body.style.whiteSpace = 'pre-wrap';
-
-    const img = (() => {
-      const ui = ensureCaptionUI();
-      if (!ui) return null;
-      const imgs = ui.images || [];
-      if (!item.imageFileId) return null;
-      const im = imgs.find(i => i.id === item.imageFileId);
-      return im || null;
-    })();
-
-    if (img) {
-      const imgWrap = document.createElement('div');
-      imgWrap.style.marginTop = '6px';
-      imgWrap.style.borderRadius = '8px';
-      imgWrap.style.overflow = 'hidden';
-      imgWrap.style.background = 'rgba(15,23,42,0.9)';
-      imgWrap.style.padding = '4px 6px 6px';
-      imgWrap.style.display = 'flex';
-      imgWrap.style.flexDirection = 'column';
-      imgWrap.style.alignItems = 'flex-start';
-      imgWrap.style.gap = '4px';
-      imgWrap.style.border = '1px solid rgba(55,65,81,0.9)';
-
-      const imgEl = document.createElement('img');
-      imgEl.className = 'lm-cap-win-image';
-      imgEl.loading = 'lazy';
-      imgEl.decoding = 'async';
-      imgEl.style.display = 'block';
-      imgEl.style.maxWidth = '100%';
-      imgEl.style.width = '100%';
-      imgEl.style.height = 'auto';
-      imgEl.style.objectFit = 'contain';
-      imgEl.style.borderRadius = '6px';
-      imgEl.src = img.thumbnailLink || img.iconLink || '';
-      imgEl.alt = img.name || '';
-
-      const imgLabel = document.createElement('div');
-      imgLabel.textContent = img.name || '';
-      imgLabel.style.fontSize = '11px';
-      imgLabel.style.color = '#e5e7eb';
-      imgLabel.style.marginTop = '2px';
-
-      const openBtn = document.createElement('button');
-      openBtn.type = 'button';
-      openBtn.className = 'lm-cap-win-open';
-      openBtn.textContent = 'Open original';
-      openBtn.style.alignSelf = 'flex-start';
-      openBtn.style.marginTop = '4px';
-      openBtn.style.border = 'none';
-      openBtn.style.borderRadius = '999px';
-      openBtn.style.padding = '2px 10px';
-      openBtn.style.fontSize = '10px';
-      openBtn.style.lineHeight = '1.3';
-      openBtn.style.background = 'rgba(30,64,175,0.9)';
-      openBtn.style.color = '#e5e7eb';
-      openBtn.style.cursor = 'pointer';
-      openBtn.style.whiteSpace = 'nowrap';
-
-      openBtn.addEventListener('mouseenter', () => {
-        openBtn.style.background = 'rgba(59,130,246,0.98)';
-      });
-      openBtn.addEventListener('mouseleave', () => {
-        openBtn.style.background = 'rgba(30,64,175,0.9)';
-      });
-
-      openBtn.addEventListener('click', () => {
-        if (img && img.webContentLink) {
-          window.open(img.webContentLink, '_blank');
-        }
-      });
-
-      imgWrap.appendChild(imgEl);
-      imgWrap.appendChild(imgLabel);
-      imgWrap.appendChild(openBtn);
-
-      inner.appendChild(header);
-      inner.appendChild(body);
-      inner.appendChild(imgWrap);
-    } else {
-      inner.appendChild(header);
-      inner.appendChild(body);
-    }
-
-    el.appendChild(inner);
-    winLayer.appendChild(el);
-
-    const state = {
-      item,
-      el,
-      manualOffset: { x: 0, y: 0 },
-      lastScreenPos: null
-    };
-    windows.set(item.id, state);
-
-    positionWindowNearItem(state);
-    updateLines();
-
-    let dragging = false;
-    let startX = 0;
-    let startY = 0;
-    let startLeft = 0;
-    let startTop = 0;
-
-    header.addEventListener('mousedown', (ev) => {
-      dragging = true;
-      startX = ev.clientX;
-      startY = ev.clientY;
-      const rect = el.getBoundingClientRect();
-      startLeft = rect.left;
-      startTop = rect.top;
-      document.addEventListener('mousemove', onMove);
-      document.addEventListener('mouseup', onUp);
-      ev.preventDefault();
-    });
-
-    function onMove(ev) {
-      if (!dragging) return;
-      const dx = ev.clientX - startX;
-      const dy = ev.clientY - startY;
-      const left = startLeft + dx;
-      const top = startTop + dy;
-      el.style.left = left + 'px';
-      el.style.top = top + 'px';
-      state.manualOffset.x = left;
-      state.manualOffset.y = top;
-      updateLines();
-    }
-
-    function onUp() {
-      dragging = false;
-      document.removeEventListener('mousemove', onMove);
-      document.removeEventListener('mouseup', onUp);
-    }
-
-    closeBtn.addEventListener('click', () => {
-      closeWindow(item.id);
-    });
-
-    return state;
-  }
-
-  function closeWindow(id) {
-    const st = windows.get(id);
-    if (!st) return;
-    if (st.el && st.el.parentNode) {
-      st.el.parentNode.removeChild(st.el);
-    }
-    windows.delete(id);
-    try {
-      const ui = ensureCaptionUI();
-      if (ui && ui.selectedId === id && typeof ui.selectItem === 'function') {
-        ui.selectItem(null);
-      }
-    } catch (_) {}
-  }
-
-  function syncFromUISelection() {
-    const ui = ensureCaptionUI();
-    if (!ui) return;
-    const id = ui.selectedId;
-    windows.forEach((st, keyId) => {
-      if (keyId !== id) {
-        closeWindow(keyId);
-      }
-    });
-    const item = (ui.items || []).find(it => it.id === id);
-    if (!item) return;
-    if (!windows.has(id)) {
-      createCaptionWindow(item);
-    }
-  }
-
+  // ---------------------------------------------------------------------------
+  // Binding to caption UI
+  // ---------------------------------------------------------------------------
   function bindCaptionEvents() {
-    const ui = ensureCaptionUI();
-    if (!ui) return;
+    const ui = window.__LM_CAPTION_UI;
+    if (!ui || typeof ui.on !== 'function') {
+      warn('caption UI not ready');
+      return false;
+    }
 
-    ui.onItemSelected((id) => {
-      const item = (ui.items || []).find(it => it.id === id);
-      if (!item) return;
-      if (!windows.has(id)) {
-        createCaptionWindow(item);
-      } else {
-        const st = windows.get(id);
-        st.item = item;
-        positionWindowNearItem(st);
-      }
-      updateLines();
-    });
-
-    ui.onItemChanged((item) => {
+    ui.on('change', ({ item }) => {
+      if (!item || !item.id) return;
       const st = windows.get(item.id);
       if (!st) return;
       st.item = item;
-      const titleNode = st.el.querySelector('.lm-cap-win-header span:nth-child(2)');
-      if (titleNode) titleNode.textContent = item.title || '(untitled)';
+      updateWindowContent(st);
       positionWindowNearItem(st);
-      updateLines();
     });
 
-    ui.onItemDeleted((item) => {
-      closeWindow(item.id);
-      updateLines();
+    ui.on('itemAdded', ({ item }) => {
+      if (!item || !item.id) return;
+      let st = windows.get(item.id);
+      if (!st) {
+        st = createWindowState(item.id, item);
+        st.el = createWindowElement(st);
+        st.lineEl = ensureLineElement();
+        windows.set(item.id, st);
+      } else {
+        st.item = item;
+      }
+      updateWindowContent(st);
+      positionWindowNearItem(st);
+    });
+
+    ui.on('itemDeleted', ({ id }) => {
+      const st = windows.get(id);
+      if (!st) return;
+      if (st.el && st.el.parentElement) {
+        st.el.parentElement.removeChild(st.el);
+      }
+      if (st.lineEl && st.lineEl.parentElement) {
+        st.lineEl.parentElement.removeChild(st.lineEl);
+      }
+      windows.delete(id);
     });
 
     log('caption events bound');
+    return true;
   }
 
+  // ---------------------------------------------------------------------------
+  // Binding to viewer
+  // ---------------------------------------------------------------------------
   function bindViewerEvents() {
-    try {
-      const br = ensureViewerBridge();
-      if (br && typeof br.onRenderTick === 'function') {
-        br.onRenderTick(() => {
-          updateLines();
-        });
-      }
-      log('viewer events bound');
-    } catch (e) {
-      warn('viewer events bind failed', e);
+    const br = ensureViewerBridge();
+    if (!br) {
+      warn('viewer bridge not ready');
+      return false;
     }
+
+    if (typeof br.onRenderTick === 'function') {
+      try {
+        br.onRenderTick(() => {
+          updateAllWindows();
+        });
+      } catch (e) {
+        warn('onRenderTick bind failed', e);
+      }
+    }
+
+    if (typeof br.onPinSelect === 'function') {
+      try {
+        br.onPinSelect(({ id }) => {
+          const ui = window.__LM_CAPTION_UI;
+          if (!ui || typeof ui.setSelection !== 'function') return;
+          ui.setSelection(id || null, { fromViewer: true });
+        });
+      } catch (e) {
+        warn('onPinSelect bind failed', e);
+      }
+    }
+
+    const canvas = document.querySelector('canvas#gl');
+    if (canvas) {
+      canvas.addEventListener('click', (ev) => {
+        if (!ev.shiftKey) return;
+        const rect = canvas.getBoundingClientRect();
+        const x = (ev.clientX - rect.left) / rect.width;
+        const y = (ev.clientY - rect.top) / rect.height;
+        try {
+          const ev2 = new CustomEvent('lm:caption-screen-click', {
+            bubbles: true,
+            detail: { x, y }
+          });
+          canvas.dispatchEvent(ev2);
+        } catch (e) {
+          warn('screen-click event failed', e);
+        }
+      }, { passive: true });
+    }
+
+    log('viewer events bound');
+    return true;
   }
 
   function tryBindAll() {
-    bindCaptionEvents();
-    bindViewerEvents();
-    updateLines();
-  }
-
-  function init() {
     ensureOverlayRoot();
-    tryBindAll();
-
-    document.addEventListener('lm:caption-ui-ready', () => {
-      tryBindAll();
-    });
-    document.addEventListener('lm:viewer-bridge-ready', () => {
-      tryBindAll();
-    });
+    let ok1 = bindCaptionEvents();
+    let ok2 = bindViewerEvents();
+    if (ok1 && ok2) {
+      log('overlay fully bound');
+      window.removeEventListener('lm:scene-ready', tryBindAll);
+      document.removeEventListener('lm:viewer-bridge-ready', tryBindAll);
+    }
   }
 
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', init);
-  } else {
-    init();
-  }
+  window.addEventListener('resize', () => {
+    updateAllWindows();
+  });
 
-  window.__LM_CAPTION_OVERLAY__ = { __ver: 'A2' };
+  setTimeout(tryBindAll, 0);
+  window.addEventListener('lm:scene-ready', tryBindAll, { passive: true });
+  document.addEventListener('lm:viewer-bridge-ready', tryBindAll, { passive: true });
+
+  window.__LM_CAPTION_OVERLAY__ = {
+    __ver: 'A2-20251211'
+  };
+
+  log('overlay fully bound');
 })();

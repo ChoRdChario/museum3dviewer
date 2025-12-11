@@ -22,32 +22,58 @@
 
   // Elements
   const elColorList  = $('#pinColorChips', pane);
-  const elFilterList = $('#pinColorFilters', pane);
+  const elFilterList = $('#pinFilterChips', pane);
   const elList       = $('#caption-list', pane);
-  const elDetail     = $('#caption-detail', pane);
-  const elPreview    = $('#caption-preview', pane);
-  const elImagesWrap = $('#caption-images-wrap', pane);
+  const elTitle      = $('#caption-title', pane);
+  const elBody       = $('#caption-body', pane);
+  const elImages     = $('#images-grid', pane);
+  const elImgStatus  = $('#images-status', pane);
+  const elRefreshImg = $('#btnRefreshImages', pane);
+  let elPreview = $('#caption-image-preview', pane);
+  if (!elPreview && elImages && elImages.parentElement){
+    elPreview = document.createElement('div');
+    elPreview.id = 'caption-image-preview';
+    elPreview.className = 'lm-cap-preview';
+    try{
+      elImages.parentElement.insertBefore(elPreview, elImages);
+    }catch(e){
+      console.warn(TAG, 'preview insert failed', e);
+    }
+  }
 
-  // Color palette (fixed set)
-  const PALETTE = [
-    '#eab308', // amber
-    '#22c55e', // green
-    '#0ea5e9', // sky
-    '#a855f7', // purple
-    '#f97316', // orange
-    '#f43f5e'  // rose
-  ];
+  if (!elList || !elTitle || !elBody) {
+    return warn('required elements not found; skip');
+  }
 
-  // Global store (per-page; survives reloads within same tab)
-  const store = window.__LM_CAPTION_STORE = window.__LM_CAPTION_STORE || {
+  // Store (shared across reloads)
+  const store = window.__LM_CAPTION_STORE || (window.__LM_CAPTION_STORE = {
+    currentColor: '#eab308',
+    filter: new Set(),
     items: [],
     selectedId: null,
-    images: [],
-    filter: new Set(),
-    currentColor: '#eab308'
-  };
+    images: []
+  });
 
-  // --- viewer bridge helpers ---------------------------------------------------
+  const PALETTE = ['#facc15','#f97316','#ef4444','#ec4899','#8b5cf6','#3b82f6','#0ea5e9','#22c55e','#14b8a6','#a3a3a3'];
+
+  function newId(){
+    return 'c_' + Math.random().toString(36).slice(2,10);
+  }
+
+  function nowIso(){
+    try{
+      return new Date().toISOString();
+    }catch(e){
+      return null;
+    }
+  }
+
+  // Current context (Sheet bridgeから与えられる)
+  let sheetContext = null; // { spreadsheetId, sheetGid, sheetTitle, nextRowIndex }
+
+  // ---------------------------------------------------------------------------
+  // Viewer bridge helpers
+  // ---------------------------------------------------------------------------
   function getViewerBridge(){
     try{
       const pr = window.__lm_pin_runtime;
@@ -65,7 +91,7 @@
     if (!item.pos) return;
     const p = item.pos;
     try{
-      // viewer.module.cdn.js の addPinMarker は { id, position:{x,y,z}, color? } 形式
+      // 新 API: addPinMarker({ id, position:{x,y,z}, color })
       br.addPinMarker({ id:item.id, position:{ x:p.x, y:p.y, z:p.z }, color:item.color });
     }catch(e){
       warn('addPinMarker failed', e);
@@ -85,65 +111,34 @@
 
   function syncViewerSelection(id, opts){
     const options = opts || {};
-    const fromViewer = !!(options && options.source === 'viewer');
-
+    const fromViewer = !!(options && options.fromViewer);
     const br = getViewerBridge();
     if (!br || typeof br.setPinSelected !== 'function') return;
 
-    if (fromViewer) {
-      return;
-    }
+    // ビューア側から来た選択イベントは「送り返さない」
+    // （無限 pinSelect ループ防止）
+    if (fromViewer) return;
 
     try{
-      br.setPinSelected(id || null);
+      br.setPinSelected(id || null, !!id);
     }catch(e){
-      warn('setPinSelected failed', e);
+      warn('syncViewerSelection failed', e);
     }
   }
 
-  function setupViewerPinSelection(){
-    const br = getViewerBridge();
-    if (!br || typeof br.onPinSelect !== 'function') return;
-    try{
-      br.onPinSelect((payload)=>{
-        const id = payload && payload.id;
-        if (!id) return;
-        const item = store.items.find(it=>it.id===id);
-        if (!item) return;
-        selectItem(id, { source:'viewer' });
-      });
-    }catch(e){
-      warn('onPinSelect hook failed', e);
-    }
-  }
-
-  // --- ID & items --------------------------------------------------------------
-  function newId(){
-    return 'c_'+Math.random().toString(36).slice(2,10);
-  }
-
-  function normalizeItem(raw){
-    const it = Object.assign({}, raw||{});
-    if (!it.id) it.id = newId();
-    if (!it.color) it.color = '#eab308';
-    if (it.pos && typeof it.pos.x !== 'number') it.pos = null;
-    return it;
-  }
-
-  function findItem(id){
-    return store.items.find(it=>it.id===id) || null;
-  }
-
-  // --- list & filters ----------------------------------------------------------
+  // --- colors / filters -------------------------------------------------------
   function renderColors(){
     if (!elColorList) return;
     elColorList.innerHTML = '';
     PALETTE.forEach(col=>{
       const btn = document.createElement('button');
       btn.type = 'button';
-      btn.className = 'chip';
+      btn.className = 'lm-pin-color-chip';
+      btn.dataset.color = col;
       btn.style.backgroundColor = col;
-      if (store.currentColor === col) btn.classList.add('active');
+      if (store.currentColor === col){
+        btn.classList.add('selected');
+      }
       btn.addEventListener('click', ()=>{
         store.currentColor = col;
         renderColors();
@@ -155,287 +150,413 @@
   function renderFilters(){
     if (!elFilterList) return;
     elFilterList.innerHTML = '';
-    PALETTE.forEach(col=>{
+    const colors = PALETTE;
+    colors.forEach(col=>{
       const btn = document.createElement('button');
       btn.type = 'button';
-      btn.className = 'pill';
+      btn.className = 'lm-pin-filter-chip';
+      btn.dataset.color = col;
       btn.style.backgroundColor = col;
-      if (store.filter.has(col)) btn.classList.add('active');
+      if (store.filter.has(col)){
+        btn.classList.add('active');
+      }
       btn.addEventListener('click', ()=>{
-        if (store.filter.has(col)) store.filter.delete(col);
-        else store.filter.add(col);
+        if (store.filter.has(col)){
+          store.filter.delete(col);
+        }else{
+          store.filter.add(col);
+        }
         renderFilters();
-        refreshList();
+        renderList();
       });
       elFilterList.appendChild(btn);
     });
+
+    const clearBtn = document.createElement('button');
+    clearBtn.type = 'button';
+    clearBtn.className = 'lm-pin-filter-chip lm-pin-filter-clear';
+    clearBtn.textContent = 'All';
+    if (store.filter.size === 0){
+      clearBtn.classList.add('active');
+    }
+    clearBtn.addEventListener('click', ()=>{
+      store.filter.clear();
+      renderFilters();
+      renderList();
+    });
+    elFilterList.appendChild(clearBtn);
   }
 
-  function filteredItems(){
-    const active = store.filter.size ? store.filter : null;
-    if (!active) return store.items.slice();
-    return store.items.filter(it => active.has(it.color));
+  function filterItemsForView(){
+    if (!store.filter || store.filter.size === 0) return store.items.slice();
+    return store.items.filter(it=>store.filter.has(it.color));
   }
 
-  // --- caption list -----------------------------------------------------------
-  function refreshList(){
+  // --- list rendering ---------------------------------------------------------
+  function renderList(){
     if (!elList) return;
     elList.innerHTML = '';
-    const items = filteredItems();
+
+    const items = filterItemsForView();
+    if (!items || items.length === 0){
+      const empty = document.createElement('div');
+      empty.className = 'lm-caption-empty';
+      empty.textContent = 'No captions yet.';
+      elList.appendChild(empty);
+      return;
+    }
+
     items.forEach(it=>{
       const row = document.createElement('div');
       row.className = 'lm-caption-row';
       row.dataset.id = it.id;
 
       const dot = document.createElement('span');
-      dot.className = 'dot';
+      dot.className = 'lm-caption-dot';
       dot.style.backgroundColor = it.color || '#eab308';
 
-      const title = document.createElement('span');
-      title.className = 'title';
+      const title = document.createElement('div');
+      title.className = 'lm-caption-title';
       title.textContent = it.title || '(untitled)';
 
-      const meta = document.createElement('span');
-      meta.className = 'meta';
-      meta.textContent = it.createdAt ? new Date(it.createdAt).toLocaleString() : '';
+      const body = document.createElement('div');
+      body.className = 'lm-caption-body-preview';
+      body.textContent = it.body || '';
 
       row.appendChild(dot);
       row.appendChild(title);
-      row.appendChild(meta);
+      row.appendChild(body);
 
-      if (store.selectedId === it.id) row.classList.add('selected');
+      if (store.selectedId === it.id){
+        row.classList.add('selected');
+      }
 
       row.addEventListener('click', ()=>{
-        selectItem(it.id);
+        selectItem(it.id, { fromList:true });
       });
 
       elList.appendChild(row);
     });
   }
 
-  function selectItem(id, opts){
+  function findItem(id){
+    return store.items.find(it=>it.id === id) || null;
+  }
+
+  function setSelection(id, opts){
     const options = opts || {};
-    const fromViewer = !!(options && options.source === 'viewer');
+    const fromViewer = !!options.fromViewer;
 
     store.selectedId = id || null;
-    refreshList();
-    renderDetail();
+    renderList();
 
+    const item = id ? findItem(id) : null;
+    if (item){
+      elTitle.value = item.title || '';
+      elBody.value  = item.body || '';
+      if (item.imageFileId){
+        highlightThumbnail(item.imageFileId);
+      }else{
+        clearPreview();
+      }
+    }else{
+      elTitle.value = '';
+      elBody.value  = '';
+      clearPreview();
+    }
+
+    // viewer 側への同期（viewer→UI のときは送らない）
     if (!fromViewer){
-      syncViewerSelection(id || null, { source:'ui' });
-    }
-
-    emitItemSelected(store.selectedId);
-  }
-
-  function removeItem(id){
-    const idx = store.items.findIndex(it=>it.id===id);
-    if (idx>=0){
-      const [removed] = store.items.splice(idx,1);
-      if (store.selectedId===id){
-        store.selectedId = null;
-      }
-      refreshList();
-      renderDetail();
-      syncPinsFromItems();
-      emitItemDeleted(removed);
+      syncViewerSelection(id, { fromViewer:false });
     }
   }
 
-  // --- detail panel ------------------------------------------------------------
-  function renderDetail(){
-    if (!elDetail) return;
-    const item = findItem(store.selectedId);
-    elDetail.innerHTML = '';
+  function selectItem(id, opts){
+    setSelection(id, opts || {});
+  }
 
-    if (!item){
-      const msg = document.createElement('div');
-      msg.className = 'empty';
-      msg.textContent = 'ピンを Shift+クリックしてキャプションを追加してください。';
-      elDetail.appendChild(msg);
+  // --- preview / images -------------------------------------------------------
+  function clearPreview(){
+    if (!elPreview) return;
+    elPreview.innerHTML = '';
+    elPreview.style.display = 'none';
+  }
+
+  function renderPreview(fileId){
+    if (!elPreview){
+      clearPreview();
+      return;
+    }
+    elPreview.innerHTML = '';
+    if (!fileId){
+      elPreview.style.display = 'none';
       return;
     }
 
-    const title = document.createElement('input');
-    title.type = 'text';
-    title.className = 'lm-caption-title-input';
-    title.value = item.title || '';
-    title.addEventListener('input', ()=>{
-      item.title = title.value;
-      item.updatedAt = new Date().toISOString();
-      emitItemChanged(item);
-      refreshList();
-      renderPreview();
+    const img = document.createElement('img');
+    img.className = 'lm-cap-preview-img';
+    img.loading = 'lazy';
+    img.alt = '';
+    img.src = `https://drive.google.com/thumbnail?sz=w512-h512&id=${encodeURIComponent(fileId)}`;
+    img.addEventListener('error', ()=>{
+      elPreview.style.display = 'none';
     });
-
-    const body = document.createElement('textarea');
-    body.className = 'lm-caption-body-input';
-    body.value = item.body || '';
-    body.addEventListener('input', ()=>{
-      item.body = body.value;
-      item.updatedAt = new Date().toISOString();
-      emitItemChanged(item);
-      renderPreview();
-    });
-
-    const footer = document.createElement('div');
-    footer.className = 'lm-caption-detail-footer';
-
-    const colorLabel = document.createElement('span');
-    colorLabel.textContent = 'Color';
-
-    const colorDots = document.createElement('div');
-    colorDots.className = 'color-dots';
-
-    PALETTE.forEach(col=>{
-      const dot = document.createElement('button');
-      dot.type = 'button';
-      dot.className = 'mini-dot';
-      dot.style.backgroundColor = col;
-      if (item.color === col) dot.classList.add('active');
-      dot.addEventListener('click', ()=>{
-        item.color = col;
-        store.currentColor = col;
-        item.updatedAt = new Date().toISOString();
-        emitItemChanged(item);
-        renderDetail();
-        refreshList();
-        syncPinsFromItems();
-        renderPreview();
-      });
-      colorDots.appendChild(dot);
-    });
-
-    footer.appendChild(colorLabel);
-    footer.appendChild(colorDots);
-
-    const deleteBtn = document.createElement('button');
-    deleteBtn.type = 'button';
-    deleteBtn.className = 'danger';
-    deleteBtn.textContent = '削除';
-    deleteBtn.addEventListener('click', ()=>{
-      if (item.id) removeItem(item.id);
-    });
-
-    elDetail.appendChild(title);
-    elDetail.appendChild(body);
-    elDetail.appendChild(footer);
-    elDetail.appendChild(deleteBtn);
+    elPreview.appendChild(img);
+    elPreview.style.display = '';
   }
 
-  // --- images preview ----------------------------------------------------------
-  function renderImages(){
-    if (!elImagesWrap) return;
-    elImagesWrap.innerHTML = '';
-
-    const imgs = store.images || [];
-    if (!imgs.length){
-      const msg = document.createElement('div');
-      msg.className = 'empty';
-      msg.textContent = 'この GLB に紐づく画像はまだありません。';
-      elImagesWrap.appendChild(msg);
-      return;
-    }
-
-    const list = document.createElement('div');
-    list.className = 'lm-caption-image-list';
-
-    const selected = findItem(store.selectedId);
-
-    imgs.forEach(img=>{
-      const card = document.createElement('button');
-      card.type = 'button';
-      card.className = 'image-card';
-
-      const thumb = document.createElement('img');
-      thumb.loading = 'lazy';
-      thumb.decoding = 'async';
-      thumb.src = img.thumbnailLink || img.iconLink || '';
-      thumb.alt = img.name || '';
-
-      const name = document.createElement('div');
-      name.className = 'name';
-      name.textContent = img.name || '';
-
-      card.appendChild(thumb);
-      card.appendChild(name);
-
-      if (selected && selected.imageFileId === img.id){
-        card.classList.add('active');
+  function highlightThumbnail(fileId){
+    if (!elImages) return;
+    const thumbs = $$('.lm-cap-image-thumb', elImages);
+    thumbs.forEach(th=>{
+      const fid = th.dataset.fileId || '';
+      if (fid === fileId){
+        th.classList.add('selected');
+      }else{
+        th.classList.remove('selected');
       }
-
-      card.addEventListener('click', ()=>{
-        const item = findItem(store.selectedId);
-        if (!item) return;
-        if (item.imageFileId === img.id){
-          item.imageFileId = null;
-        }else{
-          item.imageFileId = img.id;
-        }
-        item.updatedAt = new Date().toISOString();
-        emitItemChanged(item);
-        renderImages();
-        renderPreview();
-      });
-
-      list.appendChild(card);
     });
-
-    elImagesWrap.appendChild(list);
+    renderPreview(fileId);
   }
 
   function setImages(images){
     store.images = images || [];
-    renderImages();
-    renderPreview();
-  }
+    if (!elImages) return;
+    elImages.innerHTML = '';
 
-  // --- caption creation --------------------------------------------------------
-  let preferWorldClicks = false;
-  let worldHookInstalled = false;
-  let lastAddAtMs = 0;
-
-  function addCaptionAt(x, y, world){
-    const tNow = Date.now();
-    if (tNow - lastAddAtMs < 150) {
-      log('skip duplicate addCaptionAt');
+    if (!images || images.length === 0){
+      if (elImgStatus){
+        elImgStatus.textContent = 'No images found in GLB folder.';
+      }
       return;
     }
-    lastAddAtMs = tNow;
 
-    const ts = new Date().toISOString();
-    const item = {
-      id: newId(),
-      title: '(untitled)',
-      body: '',
-      color: store.currentColor,
-      pos: world || null,
-      imageFileId: null,
-      image: null,
-      createdAt: ts,
-      updatedAt: ts,
-      rowIndex: null
-    };
-    store.items.push(item);
-    refreshList();
-    selectItem(item.id);
-    addPinForItem(item);
-    emitItemAdded(item);
+    images.forEach(img=>{
+      const el = document.createElement('button');
+      el.type = 'button';
+      el.className = 'lm-cap-image-thumb';
+      el.dataset.fileId = img.id;
+      el.title = img.name || '';
+      el.style.backgroundImage = `url("https://drive.google.com/thumbnail?sz=w128-h128&id=${encodeURIComponent(img.id)}")`;
+      el.addEventListener('click', ()=>{
+        const item = store.selectedId ? findItem(store.selectedId) : null;
+        if (!item) return;
+        item.imageFileId = img.id;
+        highlightThumbnail(img.id);
+        renderPreview(img.id);
+        emitChange(item, { field:'imageFileId' });
+      });
+      elImages.appendChild(el);
+    });
+
+    if (elImgStatus){
+      elImgStatus.textContent = `${images.length} images`;
+    }
+
+    // selection に紐づくプレビューを再描画
+    const cur = store.selectedId ? findItem(store.selectedId) : null;
+    if (cur && cur.imageFileId){
+      highlightThumbnail(cur.imageFileId);
+    }else{
+      clearPreview();
+    }
   }
 
-  // fallback click: GL canvas 上の Shift+クリック
-  function installFallbackClick(){
-    const area = document.getElementById('gl') ||
-                 document.querySelector('#viewer,#glCanvas,#glcanvas');
-    if (!area) return;
-    area.addEventListener('click', (ev)=>{
-      if (!ev.shiftKey) return;
-      if (preferWorldClicks) return; // viewer 側で world 座標を扱う場合はそちらを優先
-      const rect = area.getBoundingClientRect();
-      const x = (ev.clientX - rect.left) / rect.width;
-      const y = (ev.clientY - rect.top) / rect.height;
-      addCaptionAt(x, y, null);
+  function setImageStatus(text){
+    if (!elImgStatus) return;
+    elImgStatus.textContent = text || '';
+  }
+
+  // --- item helpers -----------------------------------------------------------
+  function normalizePos(raw){
+    if (!raw) return null;
+    if (typeof raw.x === 'number' && typeof raw.y === 'number' && typeof raw.z === 'number'){
+      return { x:raw.x, y:raw.y, z:raw.z };
+    }
+    if (Array.isArray(raw) && raw.length >= 3){
+      const [x,y,z] = raw;
+      if (typeof x === 'number' && typeof y === 'number' && typeof z === 'number'){
+        return { x, y, z };
+      }
+    }
+    return null;
+  }
+
+  function normalizeItem(raw){
+    if (!raw) return null;
+    const pos = normalizePos(raw.pos || raw.position || null);
+    const imageFileId = raw.imageFileId || raw.imageId || null;
+    const image = raw.image || null;
+    return {
+      id: String(raw.id || newId()),
+      title: raw.title || '',
+      body: raw.body || '',
+      color: raw.color || '#eab308',
+      pos,
+      imageFileId,
+      image,
+      createdAt: raw.createdAt || null,
+      updatedAt: raw.updatedAt || null,
+      rowIndex: raw.rowIndex || null
+    };
+  }
+
+  function setItems(items){
+    store.items = Array.isArray(items)
+      ? items.map(normalizeItem).filter(Boolean)
+      : [];
+    renderList();
+    syncPinsFromItems();
+  }
+
+  function upsertItem(newItem){
+    const idx = store.items.findIndex(it=>it.id === newItem.id);
+    if (idx >= 0){
+      store.items.splice(idx,1,newItem);
+    }else{
+      store.items.push(newItem);
+    }
+    renderList();
+    syncPinsFromItems();
+  }
+
+  function removeItem(id){
+    const idx = store.items.findIndex(it=>it.id === id);
+    if (idx < 0) return;
+    store.items.splice(idx,1);
+    if (store.selectedId === id){
+      store.selectedId = null;
+      elTitle.value = '';
+      elBody.value  = '';
+      clearPreview();
+    }
+    renderList();
+    syncPinsFromItems();
+  }
+
+  // --- events to outside (Sheet bridge 等) ------------------------------------
+  const emitter = (function(){
+    const listeners = {};
+    return {
+      on(ev, fn){
+        if (!listeners[ev]) listeners[ev] = new Set();
+        listeners[ev].add(fn);
+        return ()=>listeners[ev].delete(fn);
+      },
+      emit(ev, payload){
+        (listeners[ev] || []).forEach(fn=>{
+          try{ fn(payload); }catch(e){ warn('listener error', e); }
+        });
+      }
+    };
+  })();
+
+  function on(ev, fn){ return emitter.on(ev, fn); }
+
+  function emitChange(item, opts){
+    emitter.emit('change', { item, opts:opts || {} });
+  }
+
+  function emitAdd(item, opts){
+    emitter.emit('itemAdded', { item, opts:opts || {} });
+  }
+
+  function emitDelete(id, opts){
+    emitter.emit('itemDeleted', { id, opts:opts || {} });
+  }
+
+  // --- form handlers ----------------------------------------------------------
+  function handleTitleChange(){
+    const id = store.selectedId;
+    if (!id) return;
+    const item = findItem(id);
+    if (!item) return;
+    item.title = elTitle.value || '';
+    item.updatedAt = nowIso();
+    upsertItem(item);
+    emitChange(item, { field:'title' });
+  }
+
+  function handleBodyChange(){
+    const id = store.selectedId;
+    if (!id) return;
+    const item = findItem(id);
+    if (!item) return;
+    item.body = elBody.value || '';
+    item.updatedAt = nowIso();
+    upsertItem(item);
+    emitChange(item, { field:'body' });
+  }
+
+  // --- add caption ------------------------------------------------------------
+  let lastClickPos = { x:0.5, y:0.5 };  // fallback のスクリーン座標
+  let preferWorldClicks = false;
+  let worldHookInstalled = false;
+
+  function addCaptionAt(screenX, screenY, worldPos){
+    const id   = newId();
+    const now  = nowIso();
+    const pos  = normalizePos(worldPos) || null;
+
+    const item = {
+      id,
+      title: '',
+      body: '',
+      color: store.currentColor || '#eab308',
+      pos,
+      imageFileId: null,
+      image: null,
+      createdAt: now,
+      updatedAt: now,
+      rowIndex: null
+    };
+
+    upsertItem(item);
+    selectItem(id);
+
+    // viewer 側 pin 追加
+    addPinForItem(item);
+
+    emitAdd(item, { screen:{x:screenX,y:screenY}, world:pos });
+  }
+
+  // --- DOM events -------------------------------------------------------------
+  elTitle.addEventListener('change', handleTitleChange);
+  elBody.addEventListener('change', handleBodyChange);
+
+  if (elRefreshImg){
+    elRefreshImg.addEventListener('click', ()=>{
+      try{
+        const ev = new CustomEvent('lm:caption-images-refresh', { bubbles:true });
+        elRefreshImg.dispatchEvent(ev);
+      }catch(e){
+        warn('refresh images event failed', e);
+      }
     });
+  }
+
+  // viewer overlay からのクリック座標を受け取る（fallback 用）
+  document.addEventListener('lm:caption-screen-click', (ev)=>{
+    if (!ev || !ev.detail) return;
+    const d = ev.detail;
+    if (typeof d.x === 'number' && typeof d.y === 'number'){
+      lastClickPos = { x:d.x, y:d.y };
+    }
+  }, { passive:true });
+
+  function handleCanvasShiftClick(ev){
+    if (preferWorldClicks) return; // world-space hook が優先
+    const pos = lastClickPos || { x:0.5, y:0.5 };
+    addCaptionAt(pos.x, pos.y, null);
+  }
+
+  function installFallbackClick(){
+    const canvas = document.querySelector('canvas#gl');
+    if (!canvas) return;
+    canvas.addEventListener('click', (ev)=>{
+      if (!ev.shiftKey) return;
+      handleCanvasShiftClick(ev);
+    }, { passive:true });
   }
 
   function tryInstallWorldSpaceHook(){
@@ -445,15 +566,13 @@
     try{
       br.onCanvasShiftPick((payload)=>{
         if (!payload) return;
-        // viewer.module.cdn.js 側のコールバック payload は {point:{x,y,z}, event, hit}
-        // 旧バージョン互換として payload 自体が {x,y,z} の場合も許容する
-        const p = payload.point || payload;
-        if (!p || typeof p.x !== 'number' || typeof p.y !== 'number' || typeof p.z !== 'number') {
-          log('onCanvasShiftPick payload has no numeric point', p);
+        const world = payload.point || payload;
+        if (!world || typeof world.x !== 'number' || typeof world.y !== 'number' || typeof world.z !== 'number') {
+          log('onCanvasShiftPick payload missing numeric point', payload);
           return;
         }
         preferWorldClicks = true;
-        addCaptionAt(0.5, 0.5, { x:p.x, y:p.y, z:p.z });
+        addCaptionAt(0.5, 0.5, { x: world.x, y: world.y, z: world.z });
       });
       worldHookInstalled = true;
       log('world-space hook installed');
@@ -467,155 +586,21 @@
   document.addEventListener('lm:viewer-bridge-ready', tryInstallWorldSpaceHook, { passive:true });
   window.addEventListener('lm:scene-ready',            tryInstallWorldSpaceHook, { passive:true });
 
-  // --- preview panel -----------------------------------------------------------
-  function resolveImageForItem(item){
-    if (!item || !item.imageFileId) return null;
-    const imgs = store.images || [];
-    return imgs.find(im=>im.id===item.imageFileId) || null;
-  }
-
-  function renderPreview(){
-    if (!elPreview) return;
-    elPreview.innerHTML = '';
-
-    const item = findItem(store.selectedId);
-    if (!item){
-      const msg = document.createElement('div');
-      msg.className = 'empty';
-      msg.textContent = '左のリストからキャプションを選択してください。';
-      elPreview.appendChild(msg);
-      return;
-    }
-
-    const card = document.createElement('div');
-    card.className = 'lm-caption-preview-card';
-
-    const title = document.createElement('div');
-    title.className = 'title';
-    title.textContent = item.title || '(untitled)';
-
-    const body = document.createElement('div');
-    body.className = 'body';
-    body.textContent = item.body || '';
-
-    const meta = document.createElement('div');
-    meta.className = 'meta';
-    meta.textContent = item.createdAt ? new Date(item.createdAt).toLocaleString() : '';
-
-    const tag = document.createElement('span');
-    tag.className = 'tag';
-    tag.textContent = 'Pin';
-
-    const header = document.createElement('div');
-    header.className = 'header';
-    header.appendChild(tag);
-    header.appendChild(title);
-
-    const img = resolveImageForItem(item);
-    if (img){
-      const figure = document.createElement('figure');
-      figure.className = 'preview-image';
-
-      const im = document.createElement('img');
-      im.loading = 'lazy';
-      im.decoding = 'async';
-      im.src = img.thumbnailLink || img.iconLink || '';
-      im.alt = img.name || '';
-
-      const cap = document.createElement('figcaption');
-      cap.textContent = img.name || '';
-
-      figure.appendChild(im);
-      figure.appendChild(cap);
-      card.appendChild(figure);
-    }
-
-    card.appendChild(header);
-    card.appendChild(body);
-    card.appendChild(meta);
-
-    elPreview.appendChild(card);
-  }
-
-  // --- external API ------------------------------------------------------------
-  const addListeners = [];
-  const changeListeners = [];
-  const deleteListeners = [];
-  const selectListeners = [];
-
-  function onItemAdded(fn){
-    if (typeof fn === 'function') addListeners.push(fn);
-  }
-  function onItemChanged(fn){
-    if (typeof fn === 'function') changeListeners.push(fn);
-  }
-  function onItemDeleted(fn){
-    if (typeof fn === 'function') deleteListeners.push(fn);
-  }
-  function onItemSelected(fn){
-    if (typeof fn === 'function') selectListeners.push(fn);
-  }
-
-  function emitItemAdded(item){
-    addListeners.forEach(fn=>{
-      try{ fn(item); }catch(e){ warn('onItemAdded listener failed', e); }
-    });
-  }
-  function emitItemChanged(item){
-    changeListeners.forEach(fn=>{
-      try{ fn(item); }catch(e){ warn('onItemChanged listener failed', e); }
-    });
-  }
-  function emitItemDeleted(item){
-    deleteListeners.forEach(fn=>{
-      try{ fn(item); }catch(e){ warn('onItemDeleted listener failed', e); }
-    });
-  }
-  function emitItemSelected(id){
-    selectListeners.forEach(fn=>{
-      try{ fn(id); }catch(e){ warn('onItemSelected listener failed', e); }
-    });
-  }
-
-  function setItems(items){
-    store.items = (items || []).map(normalizeItem);
-    refreshList();
-    syncPinsFromItems();
-    renderImages();
-    renderPreview();
-  }
-
-  function setImagesExternal(images){
-    setImages(images);
-  }
-
+  // Expose UI API
   window.__LM_CAPTION_UI = {
-    addCaptionAt,
-    refreshList,
-    selectItem,
-    removeItem,
+    __ver: 'A2-20251211',
+    on,
     setItems,
-    setImages: setImagesExternal,
-    onItemAdded,
-    onItemChanged,
-    onItemDeleted,
-    onItemSelected,
-    registerDeleteListener: onItemDeleted,
-    get items(){ return store.items; },
-    get images(){ return store.images; },
-    get selectedId(){ return store.selectedId; }
-  };  window.__LM_CAPTION_UI.__ver = 'A2';
+    setSelection,
+    setImages,
+    setImageStatus,
+    getStore(){
+      return store;
+    },
+    setSheetContext(ctx){
+      sheetContext = ctx || null;
+    }
+  };
 
-
-  // initial render
-  renderColors();
-  renderFilters();
-  refreshList();
-  renderImages();
-  renderPreview();
-
-  try{
-    document.dispatchEvent(new Event('lm:caption-ui-ready'));
-  }catch(_){}
   log('ready');
 })();
