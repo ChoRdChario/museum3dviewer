@@ -50,6 +50,19 @@
     selectedId: null,
     images: []
   });
+  function getSelectedIdValue() {
+    const sel = store.selectedId;
+    if (!sel) return null;
+    if (typeof sel === 'string') return sel;
+    if (typeof sel === 'object' && sel.id) return sel.id;
+    try {
+      return String(sel);
+    } catch (e) {
+      return null;
+    }
+  }
+
+
 
   const PALETTE = ['#facc15','#f97316','#ef4444','#ec4899','#8b5cf6','#3b82f6','#0ea5e9','#22c55e','#14b8a6','#a3a3a3'];
 
@@ -263,7 +276,7 @@
       row.appendChild(imgMark);
       row.appendChild(delBtn);
 
-      if (store.selectedId === it.id) row.classList.add('selected');
+      if (getSelectedIdValue() === it.id) row.classList.add('selected');
 
       row.addEventListener('click', ()=>{
         selectItem(it.id);
@@ -315,7 +328,7 @@
     const idx = store.items.findIndex(x=>x.id===id);
     if (idx === -1) return;
     const removed = store.items.splice(idx,1)[0] || null;
-    if (store.selectedId === id) store.selectedId = null;
+    if (getSelectedIdValue() === id) store.selectedId = null;
 
     // 3D ピンも削除／再構築
     try{
@@ -347,7 +360,7 @@
   if (elTitle){
     let rafId = 0;
     elTitle.addEventListener('input', ()=>{
-      const id = store.selectedId; if (!id) return;
+      const id = getSelectedIdValue(); if (!id) return;
       const it = store.items.find(x=>x.id===id); if (!it) return;
       it.title = elTitle.value;
       if (rafId) cancelAnimationFrame(rafId);
@@ -359,7 +372,7 @@
   if (elBody){
     let rafId = 0;
     elBody.addEventListener('input', ()=>{
-      const id = store.selectedId; if (!id) return;
+      const id = getSelectedIdValue(); if (!id) return;
       const it = store.items.find(x=>x.id===id); if (!it) return;
       it.body = elBody.value;
       if (rafId) cancelAnimationFrame(rafId);
@@ -370,8 +383,9 @@
 
   // --- Images grid ------------------------------------------------------------
   function getSelectedItem(){
-    if (!store.selectedId) return null;
-    return store.items.find(x=>x.id === store.selectedId) || null;
+    const sid = getSelectedIdValue();
+    if (!sid) return null;
+    return store.items.find(x=>x.id === sid) || null;
   }
 
   function renderPreview(){
