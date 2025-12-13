@@ -35,13 +35,6 @@ let canvasRef = null;
 let gltfRoot = null;
 let currentGlbId = null;
 
-// --- Views / camera & background state ---
-let __lm_bg_hex = '';
-let __lm_bg_alpha = 0; // 0 = unset/transparent (CSS background)
-let __lm_pending_bg = null; // {hex, alpha} before renderer exists
-let __lm_last_persp_fov = 45;
-let __lm_ortho_height = null; // view height at target distance for orthographic
-
 const raycaster = new THREE.Raycaster();
 const pointerNdc = new THREE.Vector2();
 const materialsByName = Object.create(null);   // materialName -> [material]
@@ -94,23 +87,24 @@ function ensureResizeHandler() {
     if (!renderer || !camera || !canvasRef) return;
     const width  = canvasRef.clientWidth  || canvasRef.width  || 800;
     const height = canvasRef.clientHeight || canvasRef.height || 600;
-const aspect = width / Math.max(height, 1);
-// Perspective vs Orthographic
-if (camera && camera.isPerspectiveCamera) {
-  camera.aspect = aspect;
-  camera.updateProjectionMatrix();
-} else if (camera && camera.isOrthographicCamera) {
-  // Maintain orthographic view height
-  const h = (__lm_ortho_height != null ? __lm_ortho_height : Math.max(1, (camera.top - camera.bottom)));
-  const halfH = h / 2;
-  const halfW = halfH * aspect;
-  camera.left = -halfW;
-  camera.right = halfW;
-  camera.top = halfH;
-  camera.bottom = -halfH;
-  camera.updateProjectionMatrix();
-}
-renderer.setSize(width, height, false);
+    const aspect = width / Math.max(height, 1);
+
+    if (camera.isPerspectiveCamera) {
+      camera.aspect = aspect;
+      camera.updateProjectionMatrix();
+    } else if (camera.isOrthographicCamera) {
+      // keep vertical size (__lm_ortho_height) and adapt width by aspect
+      const h = (__lm_ortho_height != null) ? __lm_ortho_height : Math.max(1, (camera.top - camera.bottom));
+      const halfH = h / 2;
+      const halfW = halfH * aspect;
+      camera.left = -halfW;
+      camera.right = halfW;
+      camera.top = halfH;
+      camera.bottom = -halfH;
+      camera.updateProjectionMatrix();
+    }
+
+    renderer.setSize(width, height, false);
   };
 
   window.addEventListener('resize', handleResize);
@@ -334,21 +328,7 @@ export async function ensureViewer(opts = {}) {
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.useLegacyLights = false;
 
-  // default: transparent background (unset). UI can set opaque via setBackgroundColor.
-  try {
-    renderer.setClearColor(0x000000, 0);
-    __lm_bg_hex = '';
-    __lm_bg_alpha = 0;
-  } catch(e) {}
-  // apply pending background if it was set before renderer existed
-  if (__lm_pending_bg) {
-    try { renderer.setClearColor(__lm_pending_bg.hexInt || 0x000000, (__lm_pending_bg.alpha ?? 0)); } catch(e) {}
-    __lm_bg_hex = ((__lm_pending_bg.alpha ?? 0) ? (__lm_pending_bg.hexStr || '') : '');
-    __lm_bg_alpha = ((__lm_pending_bg.alpha ?? 0) ? 1 : 0);
-    __lm_pending_bg = null;
-  }
-
-scene = new THREE.Scene();
+  scene = new THREE.Scene();
 
   const width  = canvas.clientWidth  || canvas.width  || 800;
   const height = canvas.clientHeight || canvas.height || 600;
@@ -441,11 +421,6 @@ export async function loadGlbFromDrive(fileId, opts = {}) {
         camera.near = maxDim / 100;
         camera.far  = maxDim * 100;
         camera.updateProjectionMatrix();
-        // If currently orthographic, update frustum height to fit model.
-        if (camera && camera.isOrthographicCamera) {
-          __lm_ortho_height = Math.max(1, maxDim * 1.6);
-          __lm_updateOrthoFrustum();
-        }
 
         if (controls) {
           controls.target.copy(center);
@@ -675,15 +650,19 @@ export function setPinSelected(id) {
   }
 }
 
-export function setCurrentGlbId(id
+export function setCurrentGlbId(id) {
+  currentGlbId = id;
+}
 
-/* ===========================================================================
- * Views API (Phase 1)
- * - Projection toggle (Perspective / Orthographic)
- * - Camera state get/set
- * - Background color set/reset (unset = transparent, use CSS background)
- * - Model bounds (for direction presets)
- * =========================================================================== */
+
+// ---------------------------------------------------------------------------
+// Views API (Phase 1: runtime-only)
+// ---------------------------------------------------------------------------
+
+let __lm_bg_hex = null;          // "#rrggbb" when explicitly set
+let __lm_bg_unset = true;        // true => "unset" (transparent, CSS background)
+let __lm_ortho_height = null;    // vertical view size in world units (for Ortho)
+let __lm_last_persp_fov = 45;    // last known perspective fov
 
 function __lm_normHex(hex) {
   if (hex == null) return null;
@@ -694,167 +673,166 @@ function __lm_normHex(hex) {
   if (!/^[0-9a-fA-F]{6}$/.test(s)) return null;
   return '#' + s.toLowerCase();
 }
-
 function __lm_hexToInt(hex6) {
-  const s = hex6.replace('#','');
+  const s = String(hex6).replace('#', '');
   return parseInt(s, 16);
 }
-
 function __lm_getCanvasWH() {
   const w = (canvasRef && (canvasRef.clientWidth || canvasRef.width)) || 800;
   const h = (canvasRef && (canvasRef.clientHeight || canvasRef.height)) || 600;
   return { w, h, aspect: w / Math.max(h, 1) };
 }
-
-function __lm_updateOrthoFrustum() {
-  if (!camera || !camera.isOrthographicCamera) return;
-  const { aspect } = __lm_getCanvasWH();
-  const h = (__lm_ortho_height != null) ? __lm_ortho_height : Math.max(1, (camera.top - camera.bottom));
-  const halfH = h / 2;
-  const halfW = halfH * aspect;
-  camera.left = -halfW;
-  camera.right = halfW;
-  camera.top = halfH;
-  camera.bottom = -halfH;
-  camera.updateProjectionMatrix();
-}
-
-function __lm_applyBg(hexStr, alpha) {
-  const a = (alpha == null) ? 1 : alpha;
-  if (!renderer) {
-    __lm_pending_bg = {
-      hexStr: hexStr || '',
-      hexInt: hexStr ? __lm_hexToInt(hexStr) : 0x000000,
-      alpha: a
-    };
-    return;
-  }
+function __lm_rebuildControls(targetVec3) {
+  if (!canvasRef || !camera) return;
   try {
-    renderer.setClearColor(hexStr ? __lm_hexToInt(hexStr) : 0x000000, a);
-  } catch(e) {}
-}
-
-export function setBackgroundColor(hex) {
-  const norm = __lm_normHex(hex);
-  if (!norm) {
-    // unset: transparent, rely on CSS background
-    __lm_bg_hex = '';
-    __lm_bg_alpha = 0;
-    __lm_applyBg('', 0);
-    return;
+    const old = controls;
+    controls = new OrbitControls(camera, canvasRef);
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.1;
+    if (targetVec3) controls.target.copy(targetVec3);
+    else if (old && old.target) controls.target.copy(old.target);
+    controls.update();
+  } catch (e) {
+    console.warn('[viewer.module] rebuild controls failed', e);
   }
-  __lm_bg_hex = norm;
-  __lm_bg_alpha = 1;
-  __lm_applyBg(norm, 1);
 }
 
 export function getBackgroundColor() {
-  return (__lm_bg_alpha ? __lm_bg_hex : '');
+  return __lm_bg_unset ? null : __lm_bg_hex;
+}
+
+export function setBackgroundColor(hex) {
+  if (!renderer) return;
+  const n = __lm_normHex(hex);
+  if (!n) {
+    // Unset => transparent, let CSS background show through
+    __lm_bg_hex = null;
+    __lm_bg_unset = true;
+    try { renderer.setClearColor(0x000000, 0); } catch (e) {}
+    return;
+  }
+  __lm_bg_hex = n;
+  __lm_bg_unset = false;
+  try { renderer.setClearColor(__lm_hexToInt(n), 1); } catch (e) {}
 }
 
 export function getCameraState() {
-  if (!camera) return null;
-  const type = camera.isOrthographicCamera ? 'orthographic' : 'perspective';
-  const t = (controls && controls.target) ? controls.target : new THREE.Vector3(0,0,0);
+  const type = (camera && camera.isOrthographicCamera) ? 'orthographic' : 'perspective';
+  const eye = camera ? camera.position : new THREE.Vector3();
+  const up = camera ? camera.up : new THREE.Vector3(0, 1, 0);
+  const tgt = (controls && controls.target) ? controls.target : new THREE.Vector3();
+
   const state = {
     type,
-    eye: { x: camera.position.x, y: camera.position.y, z: camera.position.z },
-    target: { x: t.x, y: t.y, z: t.z },
-    up: { x: camera.up.x, y: camera.up.y, z: camera.up.z }
+    eye: { x: eye.x, y: eye.y, z: eye.z },
+    target: { x: tgt.x, y: tgt.y, z: tgt.z },
+    up: { x: up.x, y: up.y, z: up.z }
   };
-  if (type === 'perspective') {
-    state.fov = (typeof camera.fov === 'number' ? camera.fov : __lm_last_persp_fov);
+
+  if (camera && camera.isPerspectiveCamera) {
+    state.fov = camera.fov;
+  } else if (camera && camera.isOrthographicCamera) {
+    state.orthoHeight = Math.max(0.0001, (camera.top - camera.bottom));
   }
   return state;
 }
 
-export function setCameraState(state) {
-  if (!state || !camera) return;
-  try {
-    if (state.type && (state.type === 'orthographic') && camera.isPerspectiveCamera) {
-      setProjection('orthographic');
-    } else if (state.type && (state.type === 'perspective') && camera.isOrthographicCamera) {
-      setProjection('perspective');
-    }
-  } catch(e) {}
-
+export function setProjection(mode) {
+  if (!renderer || !canvasRef) return;
+  const m = String(mode || '').toLowerCase();
+  if (m !== 'perspective' && m !== 'orthographic') return;
   if (!camera) return;
 
-  if (state.eye && isFinite(state.eye.x) && isFinite(state.eye.y) && isFinite(state.eye.z)) {
-    camera.position.set(+state.eye.x, +state.eye.y, +state.eye.z);
-  }
-  if (state.up && isFinite(state.up.x) && isFinite(state.up.y) && isFinite(state.up.z)) {
-    camera.up.set(+state.up.x, +state.up.y, +state.up.z);
-  }
-
-  if (controls && state.target && isFinite(state.target.x) && isFinite(state.target.y) && isFinite(state.target.z)) {
-    controls.target.set(+state.target.x, +state.target.y, +state.target.z);
-  }
-
-  if (camera.isPerspectiveCamera && typeof state.fov === 'number' && isFinite(state.fov)) {
-    camera.fov = +state.fov;
-    __lm_last_persp_fov = camera.fov;
-  }
-
-  if (camera.isOrthographicCamera && typeof state.orthoHeight === 'number' && isFinite(state.orthoHeight)) {
-    __lm_ortho_height = +state.orthoHeight;
-    __lm_updateOrthoFrustum();
-  }
-
-  try { camera.updateProjectionMatrix(); } catch(_) {}
-  try { controls && controls.update(); } catch(_) {}
-}
-
-export function setProjection(mode) {
-  if (!canvasRef || !camera) return null;
-  const want = (mode === 'orthographic') ? 'orthographic' : 'perspective';
-  if (want === 'orthographic' && camera.isOrthographicCamera) return getCameraState();
-  if (want === 'perspective' && camera.isPerspectiveCamera) return getCameraState();
+  const wantOrtho = (m === 'orthographic');
+  const isOrtho = !!camera.isOrthographicCamera;
+  if (wantOrtho === isOrtho) return;
 
   const { aspect } = __lm_getCanvasWH();
 
-  const target = (controls && controls.target) ? controls.target.clone() : new THREE.Vector3(0,0,0);
   const eye = camera.position.clone();
   const up = camera.up.clone();
-  const dist = eye.distanceTo(target) || 5;
+  const tgt = (controls && controls.target) ? controls.target.clone() : new THREE.Vector3(0, 0, 0);
 
-  // remember fov before switching away from perspective
-  if (camera.isPerspectiveCamera && typeof camera.fov === 'number') {
-    __lm_last_persp_fov = camera.fov;
-  }
+  // distance from eye to target (used for sensible default)
+  const dist = Math.max(0.0001, eye.distanceTo(tgt));
 
-  const near = (typeof camera.near === 'number') ? camera.near : 0.1;
-  const far  = (typeof camera.far === 'number')  ? camera.far  : 2000;
+  if (wantOrtho) {
+    // derive ortho vertical size from current perspective fov + distance
+    if (camera.isPerspectiveCamera) __lm_last_persp_fov = camera.fov;
+    const fov = (camera.isPerspectiveCamera ? camera.fov : __lm_last_persp_fov) * Math.PI / 180;
+    const viewH = 2 * dist * Math.tan(fov / 2);
+    __lm_ortho_height = Math.max(0.0001, viewH);
 
-  if (want === 'orthographic') {
-    const fov = __lm_last_persp_fov || 45;
-    // match perspective apparent height at the target distance
-    const h = 2 * dist * Math.tan(THREE.MathUtils.degToRad(fov / 2));
-    __lm_ortho_height = (isFinite(h) && h > 0) ? h : (__lm_ortho_height || 10);
     const halfH = __lm_ortho_height / 2;
     const halfW = halfH * aspect;
-    camera = new THREE.OrthographicCamera(-halfW, halfW, halfH, -halfH, near, far);
+
+    const ortho = new THREE.OrthographicCamera(-halfW, halfW, halfH, -halfH, camera.near, camera.far);
+    ortho.position.copy(eye);
+    ortho.up.copy(up);
+    ortho.lookAt(tgt);
+
+    camera = ortho;
+    __lm_rebuildControls(tgt);
   } else {
-    const fov = __lm_last_persp_fov || 45;
-    camera = new THREE.PerspectiveCamera(fov, aspect, near, far);
+    // restore perspective (fov from last known)
+    const persp = new THREE.PerspectiveCamera(__lm_last_persp_fov || 45, aspect, camera.near, camera.far);
+    persp.position.copy(eye);
+    persp.up.copy(up);
+    persp.lookAt(tgt);
+
+    camera = persp;
+    __lm_rebuildControls(tgt);
   }
 
-  camera.position.copy(eye);
-  camera.up.copy(up);
-  camera.updateProjectionMatrix();
+  try { window.__LM_CAMERA = camera; } catch (e) {}
+  try { emitSceneReady(); } catch (e) {}
+}
 
-  // rebuild controls to point at the new camera
-  try { controls && controls.dispose && controls.dispose(); } catch(_) {}
-  controls = new OrbitControls(camera, canvasRef);
-  controls.enableDamping = true;
-  controls.dampingFactor = 0.1;
-  controls.target.copy(target);
-  controls.update();
+export function setCameraState(state) {
+  if (!state || !camera) return;
 
-  // Ensure frustum correct for current size
-  if (camera.isOrthographicCamera) __lm_updateOrthoFrustum();
+  const desired = (state.type || state.cameraType || '').toLowerCase();
+  if (desired === 'orthographic' || desired === 'perspective') {
+    setProjection(desired);
+  }
+  if (!camera) return;
 
-  return getCameraState();
+  const tgt = state.target || state.lookAt || state.center;
+  if (state.eye) {
+    camera.position.set(state.eye.x, state.eye.y, state.eye.z);
+  }
+  if (state.up) {
+    camera.up.set(state.up.x, state.up.y, state.up.z);
+  }
+
+  if (tgt) {
+    if (controls && controls.target) controls.target.set(tgt.x, tgt.y, tgt.z);
+    try { camera.lookAt(tgt.x, tgt.y, tgt.z); } catch (e) {}
+  }
+
+  if (camera.isPerspectiveCamera && typeof state.fov === 'number' && isFinite(state.fov)) {
+    camera.fov = state.fov;
+    __lm_last_persp_fov = state.fov;
+    camera.updateProjectionMatrix();
+  }
+
+  if (camera.isOrthographicCamera) {
+    const h = (typeof state.orthoHeight === 'number' && isFinite(state.orthoHeight)) ? state.orthoHeight : null;
+    if (h != null) {
+      __lm_ortho_height = Math.max(0.0001, h);
+      // resize handler will apply aspect; apply immediately too
+      const { aspect } = __lm_getCanvasWH();
+      const halfH = __lm_ortho_height / 2;
+      const halfW = halfH * aspect;
+      camera.left = -halfW;
+      camera.right = halfW;
+      camera.top = halfH;
+      camera.bottom = -halfH;
+      camera.updateProjectionMatrix();
+    }
+  }
+
+  try { if (controls) controls.update(); } catch (e) {}
 }
 
 export function getModelBounds() {
@@ -866,21 +844,16 @@ export function getModelBounds() {
     const size = new THREE.Vector3();
     box.getCenter(center);
     box.getSize(size);
-    const maxDim = Math.max(size.x, size.y, size.z);
+    const radius = size.length() / 2;
     return {
       center: { x: center.x, y: center.y, z: center.z },
       size: { x: size.x, y: size.y, z: size.z },
-      min: { x: box.min.x, y: box.min.y, z: box.min.z },
-      max: { x: box.max.x, y: box.max.y, z: box.max.z },
-      maxDim
+      radius
     };
-  } catch(e) {
+  } catch (e) {
+    console.warn('[viewer.module] getModelBounds failed', e);
     return null;
   }
-}
-
-) {
-  currentGlbId = id;
 }
 
 // ---------------------------------------------------------------------------
@@ -896,13 +869,6 @@ export default {
   resetAllMaterials,
   getScene,
   projectPoint,
-  // Views API
-  getCameraState,
-  setCameraState,
-  setProjection,
-  setBackgroundColor,
-  getBackgroundColor,
-  getModelBounds,
   addPinMarker,
   removePinMarker,
   clearPins,
@@ -910,5 +876,11 @@ export default {
   onCanvasShiftPick,
   onPinSelect,
   setPinSelected,
-  setCurrentGlbId
+  setCurrentGlbId,
+  getCameraState,
+  setCameraState,
+  setProjection,
+  setBackgroundColor,
+  getBackgroundColor,
+  getModelBounds
 };

@@ -93,12 +93,6 @@
       border-color:rgba(255,255,255,0.9);
       transform:translateY(-1px);
     }
-
-/* Views pane */
-.views-dir-grid{display:grid;grid-template-columns:repeat(2, minmax(0, 1fr));gap:8px}
-.views-dir-grid .vbtn{padding:10px 8px;border-radius:10px;border:1px solid var(--line);background:#0c1016;color:var(--fg);cursor:pointer}
-.views-dir-grid .vbtn:disabled{opacity:.45;cursor:default}
-.views-bg-row input[type="text"]{width:120px}
 </style>
 
   <script id="lm-optional-contentjs">
@@ -179,7 +173,18 @@
     #panel-material.lm-panel-material.card{display:none;}
     #pane-material .card{width:100%;box-sizing:border-box;}
     #pane-material .controls{overflow:visible;}
-  </style>
+  
+/* --- Views tab additions (Phase 1) --- */
+#pane-views .hd{font-weight:600;margin:0 0 6px 0;font-size:12px;opacity:.9;}
+#pane-views .grp{margin:10px 0;padding:10px;border:1px solid rgba(255,255,255,.08);border-radius:10px;background:rgba(255,255,255,.03);}
+#pane-views .row{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
+#pane-views .views-dir-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;}
+#pane-views .views-dir-grid .vdir{padding:8px 10px;border-radius:10px;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.04);color:inherit;cursor:pointer;}
+#pane-views .views-dir-grid .vdir:disabled{opacity:.4;cursor:not-allowed;}
+#pane-views .views-bg-row input[type="text"]{width:90px;padding:6px 8px;border-radius:10px;border:1px solid rgba(255,255,255,.12);background:rgba(0,0,0,.2);color:inherit;}
+#pane-views .views-bg-row input[type="color"]{width:44px;height:34px;padding:0;border:none;background:transparent;}
+#pane-views .hint{font-size:11px;opacity:.75;margin-top:6px;}
+</style>
 
   <style id="lm-material-layout-fix">
     /* ===== Material pane: overflow & wrapping fixes ===== */
@@ -302,41 +307,38 @@
 
       <section id="pane-views" class="pane" data-pane="views">
         <div class="grp">
-          <h4>View presets</h4>
-          <div class="row">
-            <button id="view-save" disabled>Save view</button>
-            <span class="hint">Phase 1: runtime only</span>
-          </div>
-          <div id="views-preset-list" class="hint" style="margin-top:8px;display:none"></div>
+          <div class="hd">View presets</div>
+          <button id="view-save">Save view</button>
+          <div id="views-preset-list" class="views-preset-list"></div>
         </div>
 
         <div class="grp">
-          <h4>Projection</h4>
+          <div class="hd">Projection</div>
           <div class="row">
-            <label><input id="proj-ortho" type="checkbox" disabled> Orthographic</label>
+            <label><input id="proj-ortho" type="checkbox"> Orthographic</label>
           </div>
         </div>
 
         <div class="grp">
-          <h4>Camera direction</h4>
+          <div class="hd">Camera direction</div>
           <div class="views-dir-grid">
-            <button class="vbtn" data-dir="+x" disabled>+X</button>
-            <button class="vbtn" data-dir="-x" disabled>-X</button>
-            <button class="vbtn" data-dir="+y" disabled>+Y</button>
-            <button class="vbtn" data-dir="-y" disabled>-Y</button>
-            <button class="vbtn" data-dir="+z" disabled>+Z</button>
-            <button class="vbtn" data-dir="-z" disabled>-Z</button>
+            <button class="vdir" type="button" data-vdir="+x">+X</button>
+            <button class="vdir" type="button" data-vdir="-x">-X</button>
+            <button class="vdir" type="button" data-vdir="+y">+Y</button>
+            <button class="vdir" type="button" data-vdir="-y">-Y</button>
+            <button class="vdir" type="button" data-vdir="+z">+Z</button>
+            <button class="vdir" type="button" data-vdir="-z">-Z</button>
           </div>
         </div>
 
         <div class="grp">
-          <h4>Background</h4>
+          <div class="hd">Background</div>
           <div class="row views-bg-row">
-            <input id="view-bg-color" type="color" value="#202124" disabled>
-            <input id="view-bg-hex" type="text" placeholder="unset" inputmode="text" autocapitalize="off" autocomplete="off" spellcheck="false" disabled>
-            <button id="view-bg-reset" disabled>Reset</button>
+            <input id="bg-color" type="color" value="#202124" aria-label="Background color"/>
+            <input id="bg-hex" type="text" value="" placeholder="#rrggbb" maxlength="7" spellcheck="false" />
+            <button id="bg-reset" type="button">Reset</button>
           </div>
-          <div class="hint">Reset returns to unset (uses the app background)</div>
+          <div class="hint">Reset = unset (transparent; use default CSS background)</div>
         </div>
       </section>
     </aside>
@@ -364,6 +366,7 @@
   <script src="./caption.sheet.selector.js"></script>
   <script type="module" src="./materials.sheet.bridge.js"></script>
   <script type="module" src="./material.orchestrator.js"></script>
+  <script type="module" src="./views.ui.controller.js"></script>
 
   <script>
   (() => {
@@ -490,7 +493,6 @@
   <script src="./content.js"></script>
   <script type="module" src="./glb.btn.bridge.v3.js"></script>
   <script src="./viewer.bridge.autobind.js"></script>
-  <script src="./views.ui.controller.js"></script>
   <script src="./pin.runtime.bridge.js"></script>
 </body>
 </html>
