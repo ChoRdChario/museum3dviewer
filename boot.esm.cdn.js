@@ -168,6 +168,93 @@ const MAT_HEADER = [
 ];
 
 
+const VIEWS_HEADER = [
+  "id",             // A
+  "captionSheetGid",// B
+  "name",           // C
+  "bgColor",        // D
+  "cameraType",     // E
+  "eyeX",           // F
+  "eyeY",           // G
+  "eyeZ",           // H
+  "targetX",        // I
+  "targetY",        // J
+  "targetZ",        // K
+  "upX",            // L
+  "upY",            // M
+  "upZ",            // N
+  "fov",            // O
+  "createdAt",      // P
+  "updatedAt",      // Q
+];
+
+async function ensureViewsSheet(spreadsheetId){
+  const token = await __lm_getAccessToken();
+  const headers = {
+    "Authorization": `Bearer ${token}`,
+    "Content-Type": "application/json",
+  };
+  const getRes = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}?fields=sheets.properties`, { headers });
+  if (!getRes.ok){
+    throw new Error("[views-sheet] get sheets failed "+getRes.status);
+  }
+  const data = await getRes.json();
+  const sheets = (data.sheets||[]).map(s=>s.properties || {});
+  const found = sheets.find(p=>p.title==="__LM_VIEWS");
+  if (found) return { spreadsheetId, sheetId: found.sheetId, title: found.title };
+
+  const body = {
+    requests: [{
+      addSheet: {
+        properties: {
+          title: "__LM_VIEWS",
+          gridProperties: { rowCount: 1000, columnCount: 20 },
+        },
+      },
+    }],
+  };
+  const batchRes = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}:batchUpdate`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify(body),
+  });
+  if (!batchRes.ok){
+    throw new Error("[views-sheet] create __LM_VIEWS failed "+batchRes.status);
+  }
+  const batchJson = await batchRes.json();
+  const reply = (batchJson.replies||[])[0] || {};
+  const props = reply.addSheet && reply.addSheet.properties;
+  LOG("[views-sheet] created __LM_VIEWS", props || {});
+  return { spreadsheetId, sheetId: (props && props.sheetId) || "", title: "__LM_VIEWS" };
+}
+
+async function ensureViewsHeader(spreadsheetId){
+  await ensureViewsSheet(spreadsheetId);
+  const token = await __lm_getAccessToken();
+  const headers = { "Authorization": `Bearer ${token}` };
+  const range = "__LM_VIEWS!A1:Q1";
+  const url = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(range)}`;
+  const getRes = await fetch(url, { headers });
+  if (!getRes.ok){
+    throw new Error("[views-sheet] header get failed "+getRes.status);
+  }
+  const json = await getRes.json();
+  const rows = json.values || [];
+  const cur = rows[0] || [];
+  const expect = VIEWS_HEADER.map(String);
+  const current = cur.map(String);
+  const same = current.length === expect.length && current.every((v, i)=>v === expect[i]);
+  if (same){
+    LOG("[views-sheet] header already present & up-to-date");
+    return;
+  }
+  await putHeaderOnce(spreadsheetId, range, VIEWS_HEADER);
+  LOG("[views-sheet] header reset to canonical schema");
+}
+
+window.__lm_ensureViewsHeader = ensureViewsHeader;
+
+
 async function ensureMaterialsSheet(spreadsheetId){
   const token = await __lm_getAccessToken();
   const headers = {
