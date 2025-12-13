@@ -93,6 +93,12 @@
       border-color:rgba(255,255,255,0.9);
       transform:translateY(-1px);
     }
+
+/* Views pane */
+.views-dir-grid{display:grid;grid-template-columns:repeat(2, minmax(0, 1fr));gap:8px}
+.views-dir-grid .vbtn{padding:10px 8px;border-radius:10px;border:1px solid var(--line);background:#0c1016;color:var(--fg);cursor:pointer}
+.views-dir-grid .vbtn:disabled{opacity:.45;cursor:default}
+.views-bg-row input[type="text"]{width:120px}
 </style>
 
   <script id="lm-optional-contentjs">
@@ -296,10 +302,42 @@
 
       <section id="pane-views" class="pane" data-pane="views">
         <div class="grp">
-          <button id="view-save">Save view</button>
-          <div class="row"><label><input id="proj-ortho" type="checkbox"> Orthographic</input></label></div>
+          <h4>View presets</h4>
+          <div class="row">
+            <button id="view-save" disabled>Save view</button>
+            <span class="hint">Phase 1: runtime only</span>
+          </div>
+          <div id="views-preset-list" class="hint" style="margin-top:8px;display:none"></div>
         </div>
-        <div id="views-preset-list"></div>
+
+        <div class="grp">
+          <h4>Projection</h4>
+          <div class="row">
+            <label><input id="proj-ortho" type="checkbox" disabled> Orthographic</label>
+          </div>
+        </div>
+
+        <div class="grp">
+          <h4>Camera direction</h4>
+          <div class="views-dir-grid">
+            <button class="vbtn" data-dir="+x" disabled>+X</button>
+            <button class="vbtn" data-dir="-x" disabled>-X</button>
+            <button class="vbtn" data-dir="+y" disabled>+Y</button>
+            <button class="vbtn" data-dir="-y" disabled>-Y</button>
+            <button class="vbtn" data-dir="+z" disabled>+Z</button>
+            <button class="vbtn" data-dir="-z" disabled>-Z</button>
+          </div>
+        </div>
+
+        <div class="grp">
+          <h4>Background</h4>
+          <div class="row views-bg-row">
+            <input id="view-bg-color" type="color" value="#202124" disabled>
+            <input id="view-bg-hex" type="text" placeholder="unset" inputmode="text" autocapitalize="off" autocomplete="off" spellcheck="false" disabled>
+            <button id="view-bg-reset" disabled>Reset</button>
+          </div>
+          <div class="hint">Reset returns to unset (uses the app background)</div>
+        </div>
       </section>
     </aside>
   </div>
@@ -452,6 +490,7 @@
   <script src="./content.js"></script>
   <script type="module" src="./glb.btn.bridge.v3.js"></script>
   <script src="./viewer.bridge.autobind.js"></script>
+  <script src="./views.ui.controller.js"></script>
   <script src="./pin.runtime.bridge.js"></script>
 </body>
 </html>

@@ -160,7 +160,9 @@
         'ensureViewer','loadGlbFromDrive','listMaterials','getScene',
         'onCanvasShiftPick','onPinSelect','addPinMarker','clearPins',
         'removePinMarker','setPinSelected','onRenderTick','projectPoint',
-        'resetAllMaterials','resetMaterial','setCurrentGlbId','applyMaterialProps'
+        'resetAllMaterials','resetMaterial','setCurrentGlbId','applyMaterialProps',
+        // Views API
+        'getCameraState','setCameraState','setProjection','setBackgroundColor','getBackgroundColor','getModelBounds'
       ];
 
       keys.forEach((k) => {
