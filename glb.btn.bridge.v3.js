@@ -159,7 +159,7 @@
       const keys = [
         'ensureViewer','loadGlbFromDrive','listMaterials','getScene',
         'onCanvasShiftPick','onPinSelect','addPinMarker','clearPins',
-        'removePinMarker','setPinSelected','onRenderTick','projectPoint',
+        'removePinMarker','setPinSelected','setPinColorFilter','getPinColorFilter','pulsePin','onRenderTick','projectPoint',
         'resetAllMaterials','resetMaterial','setCurrentGlbId','applyMaterialProps',
         'getCameraState','setCameraState','setProjection','setBackgroundColor','getBackgroundColor','getModelBounds'
       ];

@@ -23,6 +23,8 @@
   // Elements
   const elColorList  = $('#pinColorChips', pane);
   const elFilterList = $('#pinFilterChips', pane);
+  let elFilterStatus = $('#pinFilterStatus', pane);
+  let elFilterClear  = $('#btnClearPinFilter', pane);
   const elList       = $('#caption-list', pane);
   const elTitle      = $('#caption-title', pane);
   const elBody       = $('#caption-body', pane);
@@ -172,6 +174,7 @@
     try{
       br.clearPins();
       store.items.forEach(it=>{ if (it.pos) addPinForItem(it); });
+      applyPinFilter();
     }catch(e){
       warn('syncPinsFromItems failed', e);
     }
@@ -220,21 +223,62 @@
       btn.type = 'button';
       btn.className = 'pill';
       btn.style.backgroundColor = col;
-      if (store.filter.has(col)) btn.classList.add('active');
+      const isOn = store.filter.has(col);
+      if (isOn) btn.classList.add('active');
+      try{ btn.setAttribute('aria-pressed', isOn ? 'true' : 'false'); }catch(_){ }
       btn.addEventListener('click', ()=>{
         if (store.filter.has(col)) store.filter.delete(col);
         else store.filter.add(col);
         renderFilters();
-        refreshList();
+        updateFilterStatus();
+        applyPinFilter();
       });
       elFilterList.appendChild(btn);
     });
   }
 
+
+  function updateFilterStatus(){
+    const n = store.filter ? store.filter.size : 0;
+    if (elFilterStatus){
+      elFilterStatus.textContent = n ? (`Filter: ${n} color${n===1?'':'s'}`) : 'Filter: OFF';
+    }
+    if (elFilterList){
+      try{ elFilterList.dataset.activeCount = String(n); }catch(_){}
+    }
+    if (elFilterClear){
+      elFilterClear.disabled = !n;
+    }
+  }
+
+  function applyPinFilter(){
+    const br = getViewerBridge();
+    if (!br || typeof br.setPinColorFilter !== 'function') return;
+    try{
+      const colors = Array.from(store.filter || []);
+      const selId = getSelectedIdValue();
+      br.setPinColorFilter(colors, { alwaysShowId: selId || null });
+    }catch(e){
+      warn('setPinColorFilter failed', e);
+    }
+  }
+
+  function bindFilterClearButton(){
+    if (!elFilterClear) return;
+    if (elFilterClear.__lmBound) return;
+    elFilterClear.__lmBound = true;
+    elFilterClear.addEventListener('click', ()=>{
+      try{ store.filter.clear(); }catch(_){ store.filter = new Set(); }
+      renderFilters();
+      updateFilterStatus();
+      applyPinFilter();
+    });
+  }
+
   function filteredItems(){
-    const active = store.filter.size ? store.filter : null;
-    if (!active) return store.items.slice();
-    return store.items.filter(it => active.has(it.color));
+    // List filtering is intentionally disabled:
+    // the filter now hides pins in the viewer while keeping the list visible.
+    return store.items.slice();
   }
 
   // --- caption list -----------------------------------------------------------
@@ -316,6 +360,15 @@
     // is marked with fromViewer so that syncViewerSelection does not echo it
     // back to the viewer.
     syncViewerSelection(it.pos ? it.id : null, {fromViewer});
+
+    // Visual aid: pulse the selected pin in the viewer
+    try{
+      const br = getViewerBridge();
+      if (it.pos && br && typeof br.pulsePin === 'function') br.pulsePin(it.id);
+    }catch(e){ warn('pulsePin failed', e); }
+
+    // Keep selected pin visible even when a color filter is active
+    applyPinFilter();
 
     renderImages();
     renderPreview();
@@ -605,6 +658,7 @@
     refreshList();
     selectItem(item.id);
     addPinForItem(item);
+    applyPinFilter();
     emitItemAdded(item);
   }
 
@@ -675,6 +729,9 @@
   // initial render
   renderColors();
   renderFilters();
+  updateFilterStatus();
+  bindFilterClearButton();
+  applyPinFilter();
   refreshList();
   renderImages();
   renderPreview();

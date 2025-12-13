@@ -597,6 +597,7 @@ export function addPinMarker(pin) {
 
   scene.add(mesh);
   pinMarkers.set(pin.id, mesh);
+  try{ __lm_applyPinColorFilter(); }catch(_){ }
 }
 export function removePinMarker(pinId) {
   if (!scene) return;
@@ -623,6 +624,161 @@ export function clearPins() {
     removePinMarker(id);
   }
 }
+
+
+// --- Pin visibility filter / pulse (UI tuning) -------------------------------
+
+let __lm_pin_color_filter = null;      // Set("#rrggbb") or null
+let __lm_pin_filter_always_id = null;  // id to force visible (e.g., selected)
+
+function __lm_pinColorToHex(pinColor, mesh){
+  // Prefer explicit pinColor (string) from caption store; fallback to mesh material
+  try{
+    if (pinColor != null){
+      if (typeof pinColor === 'string'){
+        return __lm_normHex(pinColor);
+      }
+      if (typeof pinColor === 'number' && isFinite(pinColor)){
+        const s = (pinColor >>> 0).toString(16).padStart(6,'0');
+        return '#' + s.slice(-6).toLowerCase();
+      }
+    }
+  }catch(_){}
+  try{
+    const c = mesh && mesh.material && mesh.material.color;
+    if (c && typeof c.getHexString === 'function'){
+      return '#' + c.getHexString().toLowerCase();
+    }
+  }catch(_){}
+  return null;
+}
+
+function __lm_applyPinColorFilter(){
+  const active = (__lm_pin_color_filter && __lm_pin_color_filter.size) ? __lm_pin_color_filter : null;
+  for (const [id, mesh] of pinMarkers.entries()){
+    if (!mesh) continue;
+    if (!active){
+      mesh.visible = true;
+      continue;
+    }
+    if (__lm_pin_filter_always_id && String(id) === String(__lm_pin_filter_always_id)){
+      mesh.visible = true;
+      continue;
+    }
+    const data = (mesh.userData && mesh.userData.__lmPin && mesh.userData.__lmPin.data) ? mesh.userData.__lmPin.data : null;
+    const hex = __lm_pinColorToHex(data && data.color, mesh);
+    mesh.visible = !!(hex && active.has(hex));
+  }
+}
+
+export function setPinColorFilter(colors, opts){
+  // colors: array of "#rrggbb" strings (can be empty / null)
+  // opts: { alwaysShowId?: string }
+  let set = null;
+  try{
+    const arr = Array.isArray(colors) ? colors : (colors ? [colors] : []);
+    for (const c of arr){
+      const hex = __lm_normHex(c);
+      if (!hex) continue;
+      if (!set) set = new Set();
+      set.add(hex);
+    }
+  }catch(_){ set = null; }
+
+  __lm_pin_color_filter = set;
+  __lm_pin_filter_always_id = (opts && opts.alwaysShowId) ? String(opts.alwaysShowId) : null;
+
+  try{ __lm_applyPinColorFilter(); }catch(e){
+    console.warn('[viewer.module] apply pin filter failed', e);
+  }
+}
+
+export function getPinColorFilter(){
+  try{
+    if (!__lm_pin_color_filter) return [];
+    return Array.from(__lm_pin_color_filter.values());
+  }catch(_){
+    return [];
+  }
+}
+
+// Pulse effect (visual aid for selected pin)
+const __lm_pin_pulses = new Map(); // pinId -> { mesh, startMs, durMs }
+let __lm_pulse_tick_installed = false;
+
+function __lm_removePulse(pinId){
+  const st = __lm_pin_pulses.get(pinId);
+  if (!st || !st.mesh) { __lm_pin_pulses.delete(pinId); return; }
+  try{ if (scene) scene.remove(st.mesh); }catch(_){}
+  try{ if (st.mesh.geometry && st.mesh.geometry.dispose) st.mesh.geometry.dispose(); }catch(_){}
+  try{ if (st.mesh.material && st.mesh.material.dispose) st.mesh.material.dispose(); }catch(_){}
+  __lm_pin_pulses.delete(pinId);
+}
+
+function __lm_ensurePulseTick(){
+  if (__lm_pulse_tick_installed) return;
+  __lm_pulse_tick_installed = true;
+  renderCallbacks.add(({camera})=>{
+    if (!camera) return;
+    const now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+    for (const [pinId, st] of Array.from(__lm_pin_pulses.entries())){
+      const mesh = st.mesh;
+      if (!mesh) { __lm_pin_pulses.delete(pinId); continue; }
+      const t = (now - st.startMs) / Math.max(st.durMs, 1);
+      if (t >= 1){
+        __lm_removePulse(pinId);
+        continue;
+      }
+      // easeOutCubic
+      const tt = 1 - Math.pow(1 - t, 3);
+      const s = 1 + tt * 6.0; // scale up to ~7x
+      mesh.scale.setScalar(s);
+
+      if (mesh.material){
+        mesh.material.opacity = Math.max(0, 0.9 * (1 - t));
+      }
+      // billboard
+      try{ mesh.quaternion.copy(camera.quaternion); }catch(_){}
+    }
+  });
+}
+
+export function pulsePin(pinId, opts){
+  const id = pinId != null ? String(pinId) : '';
+  if (!id) return false;
+  const marker = pinMarkers.get(id);
+  if (!marker || !scene) return false;
+
+  // Ensure selected pin is visible even if a filter is active
+  try{ marker.visible = true; }catch(_){}
+
+  // Replace existing pulse for this pin (coalesce)
+  try{ __lm_removePulse(id); }catch(_){}
+
+  const rIn = 0.012;
+  const rOut = 0.018;
+  const geom = new THREE.RingGeometry(rIn, rOut, 32);
+  const mat = new THREE.MeshBasicMaterial({
+    color: 0xffffff,
+    transparent: true,
+    opacity: 0.9,
+    depthTest: false,
+    depthWrite: false,
+    side: THREE.DoubleSide
+  });
+  const ring = new THREE.Mesh(geom, mat);
+  ring.renderOrder = 999;
+  ring.position.copy(marker.position);
+
+  scene.add(ring);
+
+  const now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+  __lm_pin_pulses.set(id, { mesh: ring, startMs: now, durMs: 750 });
+
+  __lm_ensurePulseTick();
+  return true;
+}
+
 
 export function onRenderTick(fn) {
   if (typeof fn !== 'function') return () => {};
