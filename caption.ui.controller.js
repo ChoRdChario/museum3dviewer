@@ -20,6 +20,41 @@
     return warn('pane not found; skip');
   }
 
+
+  // Ensure right-hand panels render above world-space caption overlay
+  try {
+    const panelIds = ['pane-caption', 'panel-material', 'pane-views', 'panel-views'];
+    panelIds.forEach(function(id){
+      var el = document.getElementById(id);
+      if (!el) return;
+      try {
+        var cs = window.getComputedStyle(el);
+        if (!cs || cs.position === 'static') {
+          el.style.position = 'relative';
+        }
+        el.style.zIndex = '99999';
+      } catch(e) {
+        // non-critical
+      }
+    });
+
+    ['.lm-panel-caption', '.lm-panel-material', '.lm-panel-views'].forEach(function(sel){
+      Array.prototype.forEach.call(document.querySelectorAll(sel), function(el){
+        try {
+          var cs = window.getComputedStyle(el);
+          if (!cs || cs.position === 'static') {
+            el.style.position = 'relative';
+          }
+          el.style.zIndex = '99999';
+        } catch(e) {
+          // non-critical
+        }
+      });
+    });
+  } catch(e) {
+    // non-critical
+  }
+
   // Elements
   const elColorList  = $('#pinColorChips', pane);
   const elFilterList = $('#pinFilterChips', pane);
