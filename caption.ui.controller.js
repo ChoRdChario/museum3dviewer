@@ -98,14 +98,8 @@
     if (!item || !item.id) return;
     const id = item.id;
 
-    // Fail-safe: fire change immediately so all bridges (Sheets, overlay, etc.)
-    // definitely receive the event, even if rAF / coalescing logic is skipped.
-    try {
-      emitItemChanged(item);
-    } catch (e) {
-      console.error(TAG, 'scheduleChanged immediate emit failed', e);
-    }
-
+    // Coalesce multiple quick changes (title, body, image, position...) into
+    // a single notification per animation frame to avoid hammering Sheets API.
     if (typeof requestAnimationFrame === 'function') {
       const prev = dirtyTimers.get(id);
       if (prev) cancelAnimationFrame(prev);
@@ -118,6 +112,9 @@
         }
       });
       dirtyTimers.set(id, t);
+    } else {
+      // Fallback for environments without rAF
+      emitItemChanged(item);
     }
   }
 

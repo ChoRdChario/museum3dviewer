@@ -18,6 +18,10 @@
 
   const HEADER = ['id','title','body','color','posX','posY','posZ','imageFileId','createdAt','updatedAt'];
 
+  // Sheets 書き込みスロットル（同一行への PUT を 2 秒に 1 回までに制限）
+  const UPDATE_THROTTLE_MS = 2000;
+  const lastUpdateAt = new Map(); // key: item.id or "row:<rowIndex>" → timestamp(ms)
+
   // ctx.sheetTitle は「今この UI がバインドしているシート名」
   let ctx = { spreadsheetId:'', sheetGid:'', sheetTitle:'', nextRowIndex:2 };
   let uiPromise = null;
@@ -234,10 +238,26 @@
   }
 
   async function updateRow(spreadsheetId, sheetTitle, item){
-    if (!item || !item.id || !item.rowIndex){
+    if (!item){
+      return;
+    }
+    if (!item.id || !item.rowIndex){
       // rowIndex が無い場合は安全のため append にフォールバック
       return appendRow(spreadsheetId, sheetTitle, item);
     }
+
+    // 同じ行への書き込み頻度を制限
+    const key = item.id || (`row:${item.rowIndex}`);
+    const nowTs = Date.now();
+    const last = lastUpdateAt.get(key) || 0;
+    const delta = nowTs - last;
+    if (delta < UPDATE_THROTTLE_MS){
+      // 短時間に連続する更新はスキップ（次の一定時間後の更新で上書きされる想定）
+      log('update row throttled', key, 'delta', delta);
+      return;
+    }
+    lastUpdateAt.set(key, nowTs);
+
     const { row, createdAt, updatedAt } = itemToRow(item, 'update');
     const rowIndex = item.rowIndex;
     const a1 = `A${rowIndex}:J${rowIndex}`;
@@ -323,7 +343,7 @@
           });
           addedHookBound = true;
         }
-        // subscribe for edits (title/body)
+        // subscribe for edits (title/body/pos/image 等)
         if (typeof ui.onItemChanged === 'function' && !changedHookBound){
           ui.onItemChanged(it=>{
             if (!ctx.spreadsheetId || !ctx.sheetTitle) return;
