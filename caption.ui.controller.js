@@ -481,15 +481,6 @@
       });
     }
 
-    if (fromViewer && elList && id){
-      try{
-        const row = elList.querySelector('.lm-cap-row[data-id="'+ String(id).replace(/"/g,'\\"') +'"]');
-        if (row && typeof row.scrollIntoView === 'function'){
-          row.scrollIntoView({ block:'nearest', behavior:'smooth' });
-        }
-      }catch(e){ /* ignore */ }
-    }
-
     const it = store.items.find(it=>it.id === id) || null;
 
     if (!it){
@@ -800,7 +791,14 @@
 
   function addCaptionAt(x, y, world){
     const tNow = Date.now();
+    const tPerf = (typeof performance !== 'undefined' && performance.now) ? performance.now() : null;
+    try{
+      log('[dbg:addCaptionAt] called', { x, y, hasWorld: !!world, world: world||null, preferWorldClicks, worldHookInstalled, dtSinceLast: (tNow - lastAddAtMs), tNow, tPerf });
+    }catch(_){ }
     if (tNow - lastAddAtMs < 150) {
+      try{
+        log('[dbg:addCaptionAt] skip duplicate', { x, y, hasWorld: !!world, world: world||null, dtSinceLast: (tNow - lastAddAtMs), tNow });
+      }catch(_){ }
       log('skip duplicate addCaptionAt');
       return;
     }
@@ -845,6 +843,10 @@
       const rect = area.getBoundingClientRect();
       const x = (ev.clientX - rect.left) / rect.width;
       const y = (ev.clientY - rect.top) / rect.height;
+      const tPerf = (typeof performance !== 'undefined' && performance.now) ? performance.now() : null;
+      try{
+        log('[dbg:fallbackClick] fired', { shift: !!ev.shiftKey, preferWorldClicks, x, y, clientX: ev.clientX, clientY: ev.clientY, tNow: Date.now(), tPerf });
+      }catch(_){ }
       addCaptionAt(x, y, null);
     });
   }
@@ -855,6 +857,12 @@
     if (!br || typeof br.onCanvasShiftPick !== 'function') return;
     try{
       br.onCanvasShiftPick((payload)=>{
+        const tPerf = (typeof performance !== 'undefined' && performance.now) ? performance.now() : null;
+        try{
+          const keys = payload && typeof payload === 'object' ? Object.keys(payload) : null;
+          const pt = payload && (payload.point || payload);
+          log('[dbg:onCanvasShiftPick] fired', { keys, hasPoint: !!(payload && payload.point), point: (pt && typeof pt==='object') ? {x:pt.x,y:pt.y,z:pt.z} : pt, preferWorldClicks, worldHookInstalled, tNow: Date.now(), tPerf });
+        }catch(_){ }
         if (!payload) return;
         const world = payload.point || payload;
         if (!world ||
@@ -865,6 +873,7 @@
           return;
         }
         preferWorldClicks = true;
+        try{ log('[dbg:onCanvasShiftPick] set preferWorldClicks=true'); }catch(_){ }
         addCaptionAt(0.5, 0.5, world);
       });
       worldHookInstalled = true;
