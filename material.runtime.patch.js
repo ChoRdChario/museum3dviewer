@@ -1,9 +1,9 @@
 // material.runtime.patch.js
-// v3.14.2 — chroma cutout via shader discard (no blending), hooked at viewer bridge
+// v3.14.3 — chroma cutout via shader discard (no blending), hooked at viewer bridge
 import * as THREE from 'three';
 
 const global = window;
-const TAG = '[mat-rt v3.14.2]';
+const TAG = '[mat-rt v3.14.3]';
 
 const __LM_RT_ALREADY = (global.__LM_MaterialsRuntime && global.__LM_MaterialsRuntime.__v === '3.14.2');
 if (__LM_RT_ALREADY) {
@@ -165,7 +165,6 @@ function patchMaterialShaderForChroma(material, materialKey) {
     // Three.js r159 では Map 用 UV 変数が vMapUv の場合がある。
     // ここを誤ると「見た目が変わらない」(誤サンプルで距離が常に外れる) になりやすい。
     // 既存のシェーダ断片文字列
-    let frag = shader.fragmentShader;
 
     // 追加 uniform + feature flag
     const header = `
@@ -315,7 +314,7 @@ function waitForBridge() {
 
 // ----- 公開 API（簡易版。将来拡張用） -----
 const runtime = {
-  __v: '3.14.1',
+  __v: '3.14.3',
   setChromaConfig,
   applyChromaNow: function (materialKey) {
     const bridge = getViewerBridge();
