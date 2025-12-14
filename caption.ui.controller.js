@@ -393,8 +393,7 @@
     if (!br || typeof br.setPinColorFilter !== 'function') return;
     try{
       const colors = Array.from(store.filter || []);
-      const selId = getSelectedIdValue();
-      br.setPinColorFilter(colors, { alwaysShowId: selId || null });
+      br.setPinColorFilter(colors);
     }catch(e){
       warn('setPinColorFilter failed', e);
     }

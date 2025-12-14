@@ -749,8 +749,8 @@ export function pulsePin(pinId, opts){
   const marker = pinMarkers.get(id);
   if (!marker || !scene) return false;
 
-  // Ensure selected pin is visible even if a filter is active
-  try{ marker.visible = true; }catch(_){}
+  // Respect active filter: if the marker is currently not visible, do not pulse
+  if (marker.visible === false) return false;
 
   // Replace existing pulse for this pin (coalesce)
   try{ __lm_removePulse(id); }catch(_){}
