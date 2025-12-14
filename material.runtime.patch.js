@@ -20,10 +20,25 @@
     // props.chroma 形式と、フラットな chromaEnabled 形式の両方に対応
     const src = raw.chroma || raw;
 
+    const pickBool = (...vals) => {
+      for (const v of vals) {
+        if (typeof v === 'boolean') return v;
+        if (typeof v === 'number') return v !== 0;
+        if (typeof v === 'string') {
+          const s = v.trim().toLowerCase();
+          if (s === 'true' || s === '1' || s === 'yes' || s === 'on') return true;
+          if (s === 'false' || s === '0' || s === 'no' || s === 'off') return false;
+        }
+      }
+      return false;
+    };
+
+    // NOTE: The rest of the codebase historically used `chromaEnable`.
+    // Keep accepting `chromaEnabled` too (older runtime experiments).
     const enabled =
       typeof src.enabled === 'boolean'
         ? src.enabled
-        : !!src.chromaEnabled;
+        : pickBool(src.chromaEnable, src.chromaEnabled);
 
     const colorHex =
       src.colorHex ||
