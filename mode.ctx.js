@@ -1,46 +1,47 @@
 // mode.ctx.js
-// URL-driven app mode/context (minimal, globally accessible)
-// - mode=view : view-only experience (no persistence)
-// - glb=<Drive fileId>
-//
-// This module intentionally avoids importing other modules.
+// Centralized URL context (mode=view etc.) for LociMyu.
+// Exposes:
+//   window.__LM_LINK_CTX = { mode, glbId }
+//   window.__LM_IS_VIEW_MODE = boolean
+//   window.isViewMode(), window.getLinkContext(), window.refreshLinkContext()
 
-function _parseLinkContext(loc = window.location) {
+function parseLinkContext() {
   try {
-    const u = new URL(String(loc.href));
+    const u = new URL(window.location.href);
     const sp = u.searchParams;
-    const modeRaw = (sp.get('mode') || '').trim().toLowerCase();
-    const mode = modeRaw || 'edit';
-    const glbId = (sp.get('glb') || '').trim();
+    const mode = (sp.get('mode') || '').toLowerCase();
+    const glbId = sp.get('glb') || sp.get('glbId') || '';
     return { mode, glbId };
   } catch (e) {
-    // Extremely defensive: in case URL parsing fails.
-    return { mode: 'edit', glbId: '' };
+    return { mode: '', glbId: '' };
   }
 }
 
-let __LM_LINK_CTX = _parseLinkContext();
-
-export function getLinkContext() {
-  // Return a shallow copy to discourage accidental mutation.
-  return { ...__LM_LINK_CTX };
-}
-
-export function isViewMode() {
-  return String(__LM_LINK_CTX?.mode || '').toLowerCase() === 'view';
+function applyLinkContext(ctx) {
+  window.__LM_LINK_CTX = ctx;
+  window.__LM_IS_VIEW_MODE = ctx.mode === 'view';
 }
 
 export function refreshLinkContext() {
-  __LM_LINK_CTX = _parseLinkContext();
-  window.__LM_LINK_CTX = { ...__LM_LINK_CTX };
-  window.__LM_IS_VIEW_MODE = isViewMode();
-  return getLinkContext();
+  const ctx = parseLinkContext();
+  applyLinkContext(ctx);
+  return ctx;
 }
 
-// Expose globally for non-module scripts.
-// NOTE: keep names stable to reduce future refactors.
-window.__LM_LINK_CTX = { ...__LM_LINK_CTX };
-window.__LM_IS_VIEW_MODE = isViewMode();
-window.isViewMode = isViewMode;
-window.getLinkContext = getLinkContext;
+export function getLinkContext() {
+  if (!window.__LM_LINK_CTX) refreshLinkContext();
+  return window.__LM_LINK_CTX;
+}
+
+export function isViewMode() {
+  const ctx = getLinkContext();
+  return ctx.mode === 'view';
+}
+
+// Back-compat: attach helpers to window so non-module scripts can use them.
 window.refreshLinkContext = refreshLinkContext;
+window.getLinkContext = getLinkContext;
+window.isViewMode = isViewMode;
+
+// Init immediately.
+refreshLinkContext();

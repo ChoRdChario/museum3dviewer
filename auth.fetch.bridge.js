@@ -5,7 +5,6 @@
 // Usage: import('./auth.fetch.bridge.js').then(m=>m.default()).then(fetchAuth=>fetchAuth(url, opts))
 
 import './persist.guard.js';
-
 const READY_EVENT = "lm:auth-bridge-ready";
 
 async function getToken() {
@@ -23,15 +22,8 @@ function installFetchOnce() {
   if (window.__lm_fetchJSONAuth) return window.__lm_fetchJSONAuth;
 
   async function __lm_fetchJSONAuth(url, { method='GET', headers={}, body, json, rawResponse=false } = {}){
-    // View mode must never persist/modify remote state.
-    const guard = window.__lm_persistGuard;
-    if (guard && guard.shouldBlock && guard.shouldBlock({ method, url })){
-      const detail = { method: String(method||'GET').toUpperCase(), url: String(url||'') };
-      try{ guard.dispatchBlocked && guard.dispatchBlocked(detail); }catch(_){ }
-      console.warn('[auth.bridge] blocked write (view mode)', detail);
-      throw (guard.blockedError ? guard.blockedError(method, url) : new Error('[view] write blocked'));
-    }
-
+    // view mode: block all persistence writes centrally
+    window.__lm_persistGuard?.assertAllowed(method, url);
     const token = await getToken();
     const h = new Headers(headers || {});
     h.set('Authorization', `Bearer ${token}`);

@@ -5,18 +5,6 @@
 (function(){
   if (typeof window.__lm_fetchJSONAuth === 'function') return;
   window.__lm_fetchJSONAuth = async (url, init = {}) => {
-    // ensure persist guard
-    try{ await import('./persist.guard.js'); }catch(_){ }
-
-    const method = String((init && init.method) || 'GET').toUpperCase();
-    const guard = window.__lm_persistGuard;
-    if (guard && guard.shouldBlock && guard.shouldBlock({ method, url })){
-      const detail = { method, url: String(url||'') };
-      try{ guard.dispatchBlocked && guard.dispatchBlocked(detail); }catch(_){ }
-      console.warn('[auth-shim v2] blocked write (view mode)', detail);
-      throw (guard.blockedError ? guard.blockedError(method, url) : new Error('[view] write blocked'));
-    }
-
     const { ensureToken, getAccessToken } = await import('./gauth.module.js');
     const tok = (await ensureToken?.()) || (await getAccessToken?.());
     if (!tok) throw new Error('no token');
@@ -36,6 +24,14 @@
       if (!headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
     }
 
+    // view mode: block all persistence writes centrally (shim path)
+    try {
+      const m = String(init.method || 'GET').toUpperCase();
+      if (window.__lm_persistGuard?.assertAllowed) window.__lm_persistGuard.assertAllowed(m, url);
+      else if (window.__LM_IS_VIEW_MODE === true && ['POST','PUT','PATCH','DELETE'].includes(m)) {
+        throw new Error(`[persist.guard] blocked write in view mode: ${m} ${url}`);
+      }
+    } catch (e) { throw e; }
     const res = await fetch(url, { ...init, headers, body });
     if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text()}`);
     const ct = res.headers.get('content-type') || '';
