@@ -5,6 +5,18 @@
 (function(){
   if (typeof window.__lm_fetchJSONAuth === 'function') return;
   window.__lm_fetchJSONAuth = async (url, init = {}) => {
+    // ensure persist guard
+    try{ await import('./persist.guard.js'); }catch(_){ }
+
+    const method = String((init && init.method) || 'GET').toUpperCase();
+    const guard = window.__lm_persistGuard;
+    if (guard && guard.shouldBlock && guard.shouldBlock({ method, url })){
+      const detail = { method, url: String(url||'') };
+      try{ guard.dispatchBlocked && guard.dispatchBlocked(detail); }catch(_){ }
+      console.warn('[auth-shim v2] blocked write (view mode)', detail);
+      throw (guard.blockedError ? guard.blockedError(method, url) : new Error('[view] write blocked'));
+    }
+
     const { ensureToken, getAccessToken } = await import('./gauth.module.js');
     const tok = (await ensureToken?.()) || (await getAccessToken?.());
     if (!tok) throw new Error('no token');
