@@ -1,9 +1,9 @@
 // material.runtime.patch.js
-// v3.12 — chroma clip via shader discard, hooked at viewer bridge
+// v3.13 — chroma clip via shader discard, UV channel aware (uses vMapUv), hooked at viewer bridge
 (function (global) {
-  const TAG = '[mat-rt v3.12]';
+  const TAG = '[mat-rt v3.13]';
 
-  if (global.__LM_MaterialsRuntime && global.__LM_MaterialsRuntime.__v === '3.12') {
+  if (global.__LM_MaterialsRuntime && global.__LM_MaterialsRuntime.__v === '3.13') {
     console.log(TAG, 'already loaded');
     return;
   }
@@ -157,6 +157,9 @@
       material.userData.__lmChromaUniforms = shader.uniforms;
 
       let frag = shader.fragmentShader;
+      // Three.js r159 では Map 用 UV 変数が vMapUv の場合がある。
+      // ここを誤ると「見た目が変わらない」(誤サンプルで距離が常に外れる) になりやすい。
+      const uvVar = frag.includes('vMapUv') ? 'vMapUv' : 'vUv';
 
       const header = `
 uniform bool uLmChromaEnabled;
@@ -174,7 +177,7 @@ uniform float uLmChromaFeather;
 #ifdef USE_LM_CHROMA
   #ifdef USE_MAP
     // sample original baseColor (同じ UV で再サンプリング)
-    vec4 lmTexel = texture2D( map, vUv );
+	    vec4 lmTexel = texture2D( map, ${uvVar} );
     lmTexel = mapTexelToLinear( lmTexel );
     vec3 lmColor = lmTexel.rgb;
     float lmDist = length(lmColor - uLmChromaColor);
@@ -289,7 +292,7 @@ uniform float uLmChromaFeather;
 
   // ----- 公開 API（簡易版。将来拡張用） -----
   const runtime = {
-    __v: '3.12',
+    __v: '3.13',
     setChromaConfig,
     applyChromaNow: function (materialKey) {
       const bridge = getViewerBridge();
