@@ -496,9 +496,7 @@ export function applyMaterialProps(materialName, props = {}) {
     // scalar props
     if (typeof props.opacity === 'number') {
       mat.opacity = props.opacity;
-      const uniforms = mat.userData && mat.userData.__lmUniforms;
-      const chromaOn = uniforms && uniforms.uChromaEnable && uniforms.uChromaEnable.value > 0.5;
-      mat.transparent = props.opacity < 1.0 || chromaOn;
+      mat.transparent = props.opacity < 1.0; // chroma handled by material.runtime.patch (cutout/discard)
     }
 
     if (typeof props.doubleSided !== 'undefined') {
@@ -513,22 +511,12 @@ export function applyMaterialProps(materialName, props = {}) {
         if ('toneMapped' in mat) mat.toneMapped = !props.unlitLike;
       }
 
-      if (typeof props.chromaEnable !== 'undefined' && uniforms.uChromaEnable) {
-        uniforms.uChromaEnable.value = props.chromaEnable ? 1.0 : 0.0;
-      }
+      // NOTE: chroma* props are intentionally ignored here.
+      // Chroma-key is implemented as cutout/discard in material.runtime.patch.js to avoid transparency sorting artifacts.
 
-      if (typeof props.chromaColor === 'string' && uniforms.uChromaColor) {
-        try { uniforms.uChromaColor.value.set(props.chromaColor); }
-        catch (e) { console.warn('[viewer.module] invalid chromaColor', props.chromaColor, e); }
-      }
 
-      if (typeof props.chromaTolerance === 'number' && uniforms.uChromaTolerance) {
-        uniforms.uChromaTolerance.value = props.chromaTolerance;
-      }
 
-      if (typeof props.chromaFeather === 'number' && uniforms.uChromaFeather) {
-        uniforms.uChromaFeather.value = props.chromaFeather;
-      }
+
     }
 
     mat.needsUpdate = true;
