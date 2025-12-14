@@ -1,14 +1,14 @@
 // material.runtime.patch.js
-// v3.14 — chroma cutout via shader discard (no blending), hooked at viewer bridge
+// v3.14.1 — chroma cutout via shader discard (no blending), hooked at viewer bridge
 import * as THREE from 'three';
 
 const global = window;
-const TAG = '[mat-rt v3.14]';
+const TAG = '[mat-rt v3.14.1]';
 
-if (global.__LM_MaterialsRuntime && global.__LM_MaterialsRuntime.__v === '3.14') {
+const __LM_RT_ALREADY = (global.__LM_MaterialsRuntime && global.__LM_MaterialsRuntime.__v === '3.14.1');
+if (__LM_RT_ALREADY) {
   console.log(TAG, 'already loaded');
-  return;
-}
+} else {
 
 // ----- 内部状態 -----
 const state = {
@@ -309,7 +309,7 @@ function waitForBridge() {
 
 // ----- 公開 API（簡易版。将来拡張用） -----
 const runtime = {
-  __v: '3.14',
+  __v: '3.14.1',
   setChromaConfig,
   applyChromaNow: function (materialKey) {
     const bridge = getViewerBridge();
@@ -322,3 +322,5 @@ global.__LM_MaterialsRuntime = runtime;
 console.log(TAG, 'ready');
 
 waitForBridge();
+
+} // end __LM_RT_ALREADY guard
