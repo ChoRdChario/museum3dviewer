@@ -276,136 +276,112 @@
   // Z1 から表示名を一括で読み、ドロップダウンに反映
   // spreadsheetIdOverride / selectElOverride は、他モジュールが <select> を再構築した直後に
   // 再同期させたいケース向け。
-  async function syncDisplayNamesFromZ1(spreadsheetIdOverride, selectElOverride) {
-    const sel = selectElOverride || findSheetSelect();
-    if (!sel) return;
+  async function syncDisplayNamesFromZ1(spreadsheetId, authFetch, selectEl) {
+  if (!spreadsheetId || typeof authFetch !== "function" || !selectEl) return;
 
-    let spreadsheetId =
-      (spreadsheetIdOverride || "") ||
-      window.__LM_ACTIVE_SPREADSHEET_ID ||
-      window.currentSpreadsheetId ||
-      "";
-
-    // ctx.bridge が少し遅れるケースに備えて短時間だけ待つ
-    if (!spreadsheetId) {
-      for (let t = 0; t < 5 && !spreadsheetId; t++) {
-        await new Promise((r) => setTimeout(r, 60));
-        spreadsheetId =
-          window.__LM_ACTIVE_SPREADSHEET_ID ||
-          window.currentSpreadsheetId ||
-          "";
-      }
-    }
-    if (!spreadsheetId) {
-      warn("syncDisplayNamesFromZ1: spreadsheetId missing");
-      return;
-    }
-
-    const NS = window.LM_SHEET_GIDMAP;
-    if (!NS || typeof NS.fetchSheetMap !== "function") {
-      warn("syncDisplayNamesFromZ1: LM_SHEET_GIDMAP not available");
-      return;
-    }
-
-    try {
-      const { authFetch, token } = await getAuthFetchAndToken();
-      const map = await NS.fetchSheetMap(spreadsheetId);
-      const byId = map && map.byId;
-      if (!byId) return;
-
-      const ranges = [];
-      const gidForRange = [];
-
-      for (const [gidStr, meta] of Object.entries(byId)) {
-        const gid = Number(gidStr);
-        if (!meta || !meta.title) continue;
-        const range = buildRange(meta.title, "Z1");
-        ranges.push(range);
-        gidForRange.push(gid);
-      }
-
-      if (!ranges.length) return;
-
-      const qs = ranges
-        .map((r) => "ranges=" + encodeURIComponent(r))
-        .join("&");
-      const url =
-        SHEETS_ROOT +
-        "/" +
-        encodeURIComponent(spreadsheetId) +
-        "/values:batchGet?" +
-        qs;
-
-      const json = await authFetch(url, {});
-      const result = {};
-      const vr = (json && json.valueRanges) || [];
-
-      // range: "'シート2'!Z1" の形式
-      for (const item of vr) {
-        const range = item.range || "";
-        const values = item.values || [];
-        const val =
-          values[0] && values[0][0] != null ? String(values[0][0]) : "";
-        if (!val) continue;
-
-        let sheetTitle = null;
-        const m = range.match(/^'(.+)'!/);
-        if (m) {
-          sheetTitle = m[1].replace(/''/g, "'");
-        } else {
-          const idx = range.indexOf("!");
-          sheetTitle = idx >= 0 ? range.slice(0, idx) : range;
-        }
-
-        if (!sheetTitle) continue;
-
-        // 対応する gid を探す
-        for (const [gidStr, meta] of Object.entries(byId)) {
-          if (meta && meta.title === sheetTitle) {
-            result[Number(gidStr)] = val;
-            break;
-          }
-        }
-      }
-
-      // DOM に反映
-      for (const opt of Array.from(sel.options || [])) {
-        if (!opt.value) continue;
-        const gid = Number(opt.value);
-        if (Number.isNaN(gid)) continue;
-        const name = result[gid];
-        if (name) {
-          updateOptionTextAndDataset(opt, name);
-        }
-      }
-
-      // currentSheetTitle / label も更新
-      const currentOpt =
-        (sel.selectedOptions && sel.selectedOptions[0]) ||
-        sel.options[sel.selectedIndex] ||
-        null;
-      if (currentOpt && currentOpt.textContent) {
-        window.currentSheetTitle = currentOpt.textContent.trim();
-        const label = $("sheet-rename-label");
-        if (label) label.textContent = window.currentSheetTitle;
-      }
-
-      log("display-names synced from Z1");
-    } catch (e) {
-      warn("syncDisplayNamesFromZ1 failed", e);
-    }
+  const GM = window.__lm_gids;
+  if (!GM || typeof GM.fetchSheetMap !== "function") {
+    console.warn("[sheet-rename] gidmap not ready; skip display-name sync");
+    return;
   }
 
-  // Expose for other modules (e.g., caption.sheet.selector.js) to re-sync display names
-  // after rebuilding the <select> options.
+  // Resolve gid -> actual sheetTitle (stable across display-name changes)
+  let sheetTitleByGid = {};
   try {
-    window.__lm_syncSheetDisplayNamesFromZ1 = syncDisplayNamesFromZ1;
+    const map = await GM.fetchSheetMap(spreadsheetId, authFetch);
+    sheetTitleByGid = (map && map.sheetTitleByGid) ? map.sheetTitleByGid : {};
   } catch (e) {
-    // ignore
+    console.warn("[sheet-rename] fetchSheetMap failed; skip display-name sync", e);
+    return;
   }
 
-  // --- legacy: real title rename (現在は未使用) -------------------------
-  async function sheetsUpdateTitle(
+  const options = Array.from(selectEl.options || []);
+  const gids = options
+    .map((o) => String(o.value || "").trim())
+    .filter(Boolean);
+
+  if (!gids.length) return;
+
+  const targets = gids
+    .map((gid) => ({ gid, title: sheetTitleByGid[gid] }))
+    .filter((x) => !!x.title);
+
+  if (!targets.length) return;
+
+  const displayNameByGid = {};
+
+  // ---- Attempt #1: batchGet (fast path). If it fails (400 etc), fall back to per-sheet GET.
+  try {
+    const ranges = targets.map((s) => buildRange(s.title, "Z1"));
+    const qs = ranges.map((r) => "ranges=" + encodeURIComponent(r)).join("&");
+    const url =
+      "https://sheets.googleapis.com/v4/spreadsheets/" +
+      encodeURIComponent(spreadsheetId) +
+      "/values:batchGet?" +
+      qs;
+
+    const json = await authFetch(url);
+    const valueRanges = Array.isArray(json && json.valueRanges) ? json.valueRanges : [];
+
+    // NOTE: Google typically returns valueRanges in requested order; use index mapping.
+    for (let i = 0; i < targets.length; i++) {
+      const vr = valueRanges[i];
+      const v = (vr && vr.values && vr.values[0]) ? vr.values[0][0] : undefined;
+      const s = (typeof v === "string") ? v.trim() : (v == null ? "" : String(v).trim());
+      if (s) displayNameByGid[targets[i].gid] = s;
+    }
+  } catch (e) {
+    console.warn("[sheet-rename] batchGet Z1 failed; falling back to per-sheet GET", e);
+  }
+
+  // ---- Attempt #2: per-sheet values/{range} (robust path)
+  async function fetchZ1(sheetTitle) {
+    const a1 = buildRange(sheetTitle, "Z1"); // includes quoting when needed
+    const enc = encodeURIComponent(a1); // path segment encode
+    const url =
+      "https://sheets.googleapis.com/v4/spreadsheets/" +
+      encodeURIComponent(spreadsheetId) +
+      "/values/" +
+      enc;
+
+    const json = await authFetch(url);
+    const v = (json && json.values && json.values[0]) ? json.values[0][0] : undefined;
+    return (typeof v === "string") ? v.trim() : (v == null ? "" : String(v).trim());
+  }
+
+  for (const t of targets) {
+    if (displayNameByGid[t.gid]) continue;
+    try {
+      const s = await fetchZ1(t.title);
+      if (s) displayNameByGid[t.gid] = s;
+    } catch (e) {
+      // ignore; we will fall back to sheet title
+    }
+  }
+
+  // Apply labels to existing options (do NOT change option value=gid)
+  for (const opt of options) {
+    const gid = String(opt.value || "").trim();
+    if (!gid) continue;
+
+    // Preserve original sheetTitle for future reference (even after opt.textContent changes)
+    const canonicalTitle = sheetTitleByGid[gid] || "";
+    if (canonicalTitle && !opt.dataset.lmSheetTitle) {
+      opt.dataset.lmSheetTitle = canonicalTitle;
+    }
+
+    const label =
+      displayNameByGid[gid] ||
+      opt.dataset.lmSheetTitle ||
+      canonicalTitle ||
+      opt.textContent ||
+      gid;
+
+    opt.textContent = label;
+  }
+}
+
+async function sheetsUpdateTitle(
     spreadsheetId,
     sheetId,
     newTitle,
