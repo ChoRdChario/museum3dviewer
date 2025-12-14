@@ -107,6 +107,19 @@
 
     sel.value = selectedValue || '';
 
+    // The sheet list is rebuilt here (options are recreated). If the project uses
+    // a "display name" stored in each sheet's Z1 (sheet-rename.module.js), we
+    // must re-sync option labels after rebuilding, otherwise the UI falls back to
+    // raw sheet titles.
+    try {
+      const fn = window.__lm_syncSheetDisplayNamesFromZ1;
+      if (typeof fn === 'function') {
+        await fn(spreadsheetId, sel);
+      }
+    } catch (e) {
+      warn('display name sync failed', e);
+    }
+
     // rename UI 用のグローバル更新
     const gidStr = sel.value;
     window.currentSpreadsheetId = spreadsheetId || window.currentSpreadsheetId || '';

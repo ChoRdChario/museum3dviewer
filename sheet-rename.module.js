@@ -271,11 +271,14 @@
   }
 
   // Z1 から表示名を一括で読み、ドロップダウンに反映
-  async function syncDisplayNamesFromZ1() {
-    const sel = findSheetSelect();
+  // spreadsheetIdOverride / selectElOverride は、他モジュールが <select> を再構築した直後に
+  // 再同期させたいケース向け。
+  async function syncDisplayNamesFromZ1(spreadsheetIdOverride, selectElOverride) {
+    const sel = selectElOverride || findSheetSelect();
     if (!sel) return;
 
     let spreadsheetId =
+      (spreadsheetIdOverride || "") ||
       window.__LM_ACTIVE_SPREADSHEET_ID ||
       window.currentSpreadsheetId ||
       "";
@@ -388,6 +391,14 @@
     } catch (e) {
       warn("syncDisplayNamesFromZ1 failed", e);
     }
+  }
+
+  // Expose for other modules (e.g., caption.sheet.selector.js) to re-sync display names
+  // after rebuilding the <select> options.
+  try {
+    window.__lm_syncSheetDisplayNamesFromZ1 = syncDisplayNamesFromZ1;
+  } catch (e) {
+    // ignore
   }
 
   // --- legacy: real title rename (現在は未使用) -------------------------
