@@ -68,6 +68,109 @@
 
   const PALETTE = ['#facc15','#f97316','#ef4444','#ec4899','#8b5cf6','#3b82f6','#0ea5e9','#22c55e','#14b8a6','#a3a3a3'];
 
+  // --- Pin filter colors (used colors only; checkmark means VISIBLE) ----------
+  let __lm_usedFilterColors = [];
+
+  function __lm_normHexLocal(v){
+    if (!v) return null;
+    if (typeof v !== 'string') v = String(v);
+    v = v.trim();
+    if (!v) return null;
+    // #rgb or #rrggbb
+    if (v[0] === '#'){
+      const s = v.toLowerCase();
+      if (/^#[0-9a-f]{6}$/.test(s)) return s;
+      if (/^#[0-9a-f]{3}$/.test(s)){
+        return '#' + s[1]+s[1] + s[2]+s[2] + s[3]+s[3];
+      }
+      return null;
+    }
+    // rgb(r,g,b)
+    const m = v.match(/^rgb\s*\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})\s*\)$/i);
+    if (m){
+      const r = Math.max(0, Math.min(255, parseInt(m[1],10)));
+      const g = Math.max(0, Math.min(255, parseInt(m[2],10)));
+      const b = Math.max(0, Math.min(255, parseInt(m[3],10)));
+      return '#' + [r,g,b].map(n=>n.toString(16).padStart(2,'0')).join('');
+    }
+    return null;
+  }
+
+  function __lm_computeUsedFilterColors(){
+    const used = new Set();
+    try{
+      (store.items || []).forEach(it=>{
+        const hex = __lm_normHexLocal(it && it.color);
+        if (hex) used.add(hex);
+      });
+    }catch(_){}
+
+    // Order: palette order first, then the rest (stable lexicographic)
+    const out = [];
+    const rest = new Set(used);
+    PALETTE.forEach(c=>{
+      const hex = __lm_normHexLocal(c);
+      if (hex && rest.has(hex)){
+        out.push(hex);
+        rest.delete(hex);
+      }
+    });
+    const tail = Array.from(rest);
+    tail.sort();
+    return out.concat(tail);
+  }
+
+  function __lm_refreshUsedFilterColors(){
+    __lm_usedFilterColors = __lm_computeUsedFilterColors();
+    return __lm_usedFilterColors;
+  }
+
+  function __lm_getUsedFilterColors(){
+    return __lm_usedFilterColors || [];
+  }
+
+  function syncFilterToUsedColors(){
+    // Keeps store.filter as "VISIBLE colors set" (never empty when colors exist).
+    const prevUsed = __lm_getUsedFilterColors();
+    const prevUsedCount = prevUsed.length;
+    const active = (store.filter instanceof Set) ? store.filter : (store.filter = new Set());
+    const wasAll = (prevUsedCount > 0) && (active.size === prevUsedCount);
+
+    const used = __lm_refreshUsedFilterColors();
+    const usedCount = used.length;
+
+    if (!usedCount){
+      active.clear();
+      return;
+    }
+
+    const usedSet = new Set(used);
+
+    if (wasAll || active.size === 0){
+      active.clear();
+      used.forEach(c=>active.add(c));
+      return;
+    }
+
+    // Intersect with used colors (drop colors no longer used on this sheet),
+    // and normalize to canonical "#rrggbb" strings.
+    const next = new Set();
+    Array.from(active).forEach(c=>{
+      const hex = __lm_normHexLocal(c);
+      if (hex && usedSet.has(hex)) next.add(hex);
+    });
+
+    active.clear();
+    next.forEach(c=>active.add(c));
+
+    // Never allow empty selection when there are used colors
+    if (active.size === 0){
+      used.forEach(c=>active.add(c));
+    }
+  }
+
+
+
   function newId(){
     return 'c_' + Math.random().toString(36).slice(2,10);
   }
@@ -217,39 +320,73 @@
 
   function renderFilters(){
     if (!elFilterList) return;
+    // Filter chips show ONLY colors that are actually used on the current caption sheet.
+    const used = __lm_getUsedFilterColors();
     elFilterList.innerHTML = '';
-    PALETTE.forEach(col=>{
+    if (!used || !used.length){
+      return;
+    }
+    used.forEach(col=>{
       const btn = document.createElement('button');
       btn.type = 'button';
       btn.className = 'pill';
       btn.style.backgroundColor = col;
-      const isOn = store.filter.has(col);
+
+      const isOn = (store.filter instanceof Set) ? store.filter.has(col) : false;
       if (isOn) btn.classList.add('active');
-      try{ btn.setAttribute('aria-pressed', isOn ? 'true' : 'false'); }catch(_){ }
+      try{ btn.setAttribute('aria-pressed', isOn ? 'true' : 'false'); }catch(_){}
+
       btn.addEventListener('click', ()=>{
-        if (store.filter.has(col)) store.filter.delete(col);
-        else store.filter.add(col);
+        const active = (store.filter instanceof Set) ? store.filter : (store.filter = new Set());
+        if (active.has(col)){
+          if (active.size <= 1){
+            // Do not allow an empty visible set. Instead, revert to "show all used".
+            active.clear();
+            used.forEach(c=>active.add(c));
+          }else{
+            active.delete(col);
+          }
+        }else{
+          active.add(col);
+        }
         renderFilters();
         updateFilterStatus();
         applyPinFilter();
       });
+
       elFilterList.appendChild(btn);
     });
   }
 
 
+
   function updateFilterStatus(){
-    const n = store.filter ? store.filter.size : 0;
+    const used = __lm_getUsedFilterColors();
+    const usedCount = used ? used.length : 0;
+    const active = (store.filter instanceof Set) ? store.filter : null;
+    const activeCount = active ? active.size : 0;
+
     if (elFilterStatus){
-      elFilterStatus.textContent = n ? (`Filter: ${n} color${n===1?'':'s'}`) : 'Filter: OFF';
+      if (!usedCount){
+        elFilterStatus.textContent = 'Filter: (no pins)';
+      }else if (activeCount >= usedCount){
+        elFilterStatus.textContent = `Filter: All (${usedCount})`;
+      }else{
+        elFilterStatus.textContent = `Filter: ${activeCount}/${usedCount}`;
+      }
     }
     if (elFilterList){
-      try{ elFilterList.dataset.activeCount = String(n); }catch(_){}
+      try{
+        elFilterList.dataset.usedCount = String(usedCount);
+        elFilterList.dataset.activeCount = String(activeCount);
+      }catch(_){}
     }
     if (elFilterClear){
-      elFilterClear.disabled = !n;
+      // Clear means "show all used". Disable when already all, or when there are no pins.
+      elFilterClear.disabled = (!usedCount) || (activeCount >= usedCount);
     }
   }
+
 
   function applyPinFilter(){
     const br = getViewerBridge();
@@ -268,12 +405,18 @@
     if (elFilterClear.__lmBound) return;
     elFilterClear.__lmBound = true;
     elFilterClear.addEventListener('click', ()=>{
-      try{ store.filter.clear(); }catch(_){ store.filter = new Set(); }
+      const active = (store.filter instanceof Set) ? store.filter : (store.filter = new Set());
+      active.clear();
+      const used = __lm_getUsedFilterColors();
+      if (used && used.length){
+        used.forEach(c=>active.add(c));
+      }
       renderFilters();
       updateFilterStatus();
       applyPinFilter();
     });
   }
+
 
   function filteredItems(){
     // List filtering is intentionally disabled:
@@ -401,9 +544,15 @@
       emitItemDeleted({ id });
     }
 
+    // Used colors may have changed; keep filter chips/state consistent.
+    try{ syncFilterToUsedColors(); }catch(_){}
+    renderFilters();
+    updateFilterStatus();
+    applyPinFilter();
+
     refreshList();
     renderImages();
-  renderPreview();
+    renderPreview();
   }
 
   // --- Title / Body input wiring ----------------------------------------------
@@ -614,12 +763,20 @@
 
   function setItems(items){
     store.items = (items || []).map(normalizeItem);
+
+    // Filter chips are derived from used colors on this sheet.
+    try{ syncFilterToUsedColors(); }catch(_){}
+
+    renderFilters();
+    updateFilterStatus();
+    applyPinFilter();
+
     refreshList();
     syncPinsFromItems();
     renderImages();
-  renderPreview();
     renderPreview();
   }
+
 
   function setImages(images){
     store.images = images || [];
@@ -655,9 +812,16 @@
       rowIndex: null
     };
     store.items.push(item);
+
+    // Used-colors filter chips may change when a new pin is added.
+    try{ syncFilterToUsedColors(); }catch(_){}
+    renderFilters();
+    updateFilterStatus();
+
     refreshList();
     selectItem(item.id);
     addPinForItem(item);
+
     applyPinFilter();
     emitItemAdded(item);
   }
@@ -728,6 +892,7 @@
 
   // initial render
   renderColors();
+  try{ syncFilterToUsedColors(); }catch(_){}
   renderFilters();
   updateFilterStatus();
   bindFilterClearButton();
