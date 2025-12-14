@@ -839,6 +839,7 @@
     if (!area) return;
     area.addEventListener('click', (ev)=>{
       if (!ev.shiftKey) return;
+      if (worldHookInstalled) return; // A案: world-hook が入っているなら fallback は使わない（初回座標欠落対策）
       if (preferWorldClicks) return; // viewer 側で world 座標を扱う場合はそちらを優先
       const rect = area.getBoundingClientRect();
       const x = (ev.clientX - rect.left) / rect.width;
