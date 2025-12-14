@@ -204,8 +204,11 @@
   const SHEETS_ROOT = "https://sheets.googleapis.com/v4/spreadsheets";
 
   function buildRange(sheetTitle, a1) {
-    const safeTitle = String(sheetTitle || "").replace(/'/g, "''");
-    return `'${safeTitle}'!${a1}`;
+    // NOTE: For Sheets API query params, quoting sheet titles (e.g., 'Sheet 1'!A1)
+    // can cause 400 in some cases. Prefer raw title with URL encoding.
+    // Sheet titles cannot contain '!'. Spaces and non-ASCII are handled by encodeURIComponent.
+    const title = String(sheetTitle || "");
+    return `${title}!${a1}`;
   }
 
   // Z1 に表示名を書き込む
