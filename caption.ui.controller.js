@@ -481,6 +481,15 @@
       });
     }
 
+    if (fromViewer && elList && id){
+      try{
+        const row = elList.querySelector('.lm-cap-row[data-id="'+ String(id).replace(/"/g,'\\"') +'"]');
+        if (row && typeof row.scrollIntoView === 'function'){
+          row.scrollIntoView({ block:'nearest', behavior:'smooth' });
+        }
+      }catch(e){ /* ignore */ }
+    }
+
     const it = store.items.find(it=>it.id === id) || null;
 
     if (!it){

@@ -278,6 +278,47 @@ function handleCanvasShiftClick(ev) {
   }
 }
 
+
+function handleCanvasPinClick(ev) {
+  // Normal click: select pin -> emit onPinSelect handlers.
+  // Do not interfere with shift-click (used for placing new captions).
+  if (ev && ev.shiftKey) return;
+  if (!scene || !camera || !canvasRef) return;
+  // Only handle primary button if present
+  if (ev && typeof ev.button === 'number' && ev.button !== 0) return;
+
+  // If no pins, nothing to do
+  if (!pinMarkers || pinMarkers.size === 0) return;
+
+  const rect = canvasRef.getBoundingClientRect();
+  if (rect.width <= 0 || rect.height <= 0) return;
+
+  const x = ((ev.clientX - rect.left) / rect.width) * 2 - 1;
+  const y = -((ev.clientY - rect.top) / rect.height) * 2 + 1;
+  pointerNdc.set(x, y);
+  raycaster.setFromCamera(pointerNdc, camera);
+
+  // Intersect only pin meshes so model geometry does not steal the click.
+  const objs = Array.from(pinMarkers.values());
+  const intersects = raycaster.intersectObjects(objs, true);
+  const hit = intersects[0];
+  if (!hit) return;
+
+  // Resolve id from userData, allow nested hits just in case
+  let obj = hit.object;
+  let pid = null;
+  for (let i = 0; i < 3 && obj; i++) {
+    if (obj.userData && obj.userData.__lmPin && obj.userData.__lmPin.id) { pid = obj.userData.__lmPin.id; break; }
+    obj = obj.parent;
+  }
+  if (!pid) return;
+
+  // Prevent bubbling into UI overlay clicks, etc.
+  try { ev.stopPropagation(); } catch (_) {}
+
+  setPinSelected(pid);
+}
+
 function disposeGltfRoot() {
   if (!gltfRoot || !scene) return;
   try {
@@ -351,6 +392,8 @@ export async function ensureViewer(opts = {}) {
 
   canvas.removeEventListener('click', handleCanvasShiftClick);
   canvas.addEventListener('click', handleCanvasShiftClick);
+  canvas.removeEventListener('click', handleCanvasPinClick);
+  canvas.addEventListener('click', handleCanvasPinClick);
 
   ensureResizeHandler();
   ensureRenderLoop();
@@ -800,7 +843,7 @@ export function onPinSelect(fn) {
 
 export function setPinSelected(id) {
   for (const fn of pinSelectHandlers) {
-    try { fn({ id }); } catch (e) {
+    try { fn(id); } catch (e) {
       console.warn('[viewer.module] pinSelect handler error', e);
     }
   }
