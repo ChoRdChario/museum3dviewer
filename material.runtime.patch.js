@@ -1,11 +1,11 @@
 // material.runtime.patch.js
-// v3.14.1 — chroma cutout via shader discard (no blending), hooked at viewer bridge
+// v3.14.2 — chroma cutout via shader discard (no blending), hooked at viewer bridge
 import * as THREE from 'three';
 
 const global = window;
-const TAG = '[mat-rt v3.14.1]';
+const TAG = '[mat-rt v3.14.2]';
 
-const __LM_RT_ALREADY = (global.__LM_MaterialsRuntime && global.__LM_MaterialsRuntime.__v === '3.14.1');
+const __LM_RT_ALREADY = (global.__LM_MaterialsRuntime && global.__LM_MaterialsRuntime.__v === '3.14.2');
 if (__LM_RT_ALREADY) {
   console.log(TAG, 'already loaded');
 } else {
@@ -164,8 +164,10 @@ function patchMaterialShaderForChroma(material, materialKey) {
     let frag = shader.fragmentShader;
     // Three.js r159 では Map 用 UV 変数が vMapUv の場合がある。
     // ここを誤ると「見た目が変わらない」(誤サンプルで距離が常に外れる) になりやすい。
-    const uvVar = frag.includes('vMapUv') ? 'vMapUv' : 'vUv';
+    // 既存のシェーダ断片文字列
+    let frag = shader.fragmentShader;
 
+    // 追加 uniform + feature flag
     const header = `
 uniform bool uLmChromaEnabled;
 uniform vec3 uLmChromaColor;
@@ -178,19 +180,17 @@ uniform float uLmChromaFeather;
       frag = header + frag;
     }
 
+    // NOTE:
+    // - vUv/vMapUv 等の varying に依存すると、材質種別や three.js 内部変更でコンパイルが壊れやすい。
+    // - ここでは map_fragment 後に確実に存在する "diffuseColor" をキーにして discard する。
+    //   (diffuseColor はベース色で、マップ適用後も保持される)
     const hookBlock = `
 #ifdef USE_LM_CHROMA
-#ifdef USE_MAP
-  // sample original baseColor (同じ UV で再サンプリング)
-	    vec4 lmTexel = texture2D( map, ${uvVar} );
-  lmTexel = mapTexelToLinear( lmTexel );
-  vec3 lmColor = lmTexel.rgb;
-  float lmDist = length(lmColor - uLmChromaColor);
-
   if (uLmChromaEnabled) {
-    // feather 0: 純粋なクリップ、>0 ならエッジを少しだけ残す
+    float lmDist = length(diffuseColor.rgb - uLmChromaColor);
     float tol = uLmChromaTolerance;
     float feather = max(uLmChromaFeather, 0.0);
+
     if (feather <= 0.0001) {
       if (lmDist < tol) {
         discard;
@@ -203,16 +203,22 @@ uniform float uLmChromaFeather;
     }
   }
 #endif
-#endif
 `;
 
-    if (frag.includes('#include <output_fragment>')) {
+    // まず安定して存在する include を狙う（dithering_fragment は多くの材質で末尾付近にある）
+    if (frag.includes('#include <dithering_fragment>')) {
+      frag = frag.replace(
+        '#include <dithering_fragment>',
+        hookBlock + '\n#include <dithering_fragment>'
+      );
+    } else if (frag.includes('#include <output_fragment>')) {
+      // 念のため: output_fragment を持つ場合はこちらでもOK
       frag = frag.replace(
         '#include <output_fragment>',
         hookBlock + '\n#include <output_fragment>'
       );
     } else {
-      // 保険：output_fragment ブロックが無い場合は main の末尾に差し込む
+      // 保険：末尾に差し込む（main の終端直前）
       const mainEnd = frag.lastIndexOf('}');
       if (mainEnd !== -1) {
         frag =
@@ -222,7 +228,7 @@ uniform float uLmChromaFeather;
           '\n' +
           frag.slice(mainEnd);
       }
-      console.warn(TAG, 'no <output_fragment> hook; injected fallback block for', key);
+      console.warn(TAG, 'no hook include; injected fallback block for', key);
     }
 
     shader.fragmentShader = frag;
