@@ -791,6 +791,8 @@
 
   function addCaptionAt(x, y, world){
     const tNow = Date.now();
+    if (tNow - lastAddAtMs < 150) {
+      log('skip duplicate addCaptionAt');
       return;
     }
     lastAddAtMs = tNow;
@@ -835,6 +837,7 @@
       const rect = area.getBoundingClientRect();
       const x = (ev.clientX - rect.left) / rect.width;
       const y = (ev.clientY - rect.top) / rect.height;
+      addCaptionAt(x, y, null);
     });
   }
 
@@ -857,7 +860,8 @@
           log('onCanvasShiftPick payload missing numeric point', payload);
           return;
         }
-        preferWorldClicks = true;addCaptionAt(0.5, 0.5, world);
+        preferWorldClicks = true;
+        addCaptionAt(0.5, 0.5, world);
       });
       worldHookInstalled = true;
       log('world-space hook installed');
