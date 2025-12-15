@@ -203,11 +203,28 @@
   // --- Sheets helper: display-name via Z1 -------------------------------
   const SHEETS_ROOT = "https://sheets.googleapis.com/v4/spreadsheets";
 
+  function isSystemSheetTitle(title) {
+    return /^__LM_/i.test(String(title || ""));
+  }
+
+  function quoteSheetTitle(title) {
+    // Always quote sheet titles for robust A1 notation (unicode / spaces / symbols).
+    // Inside single quotes, single quote must be doubled.
+    const t = String(title || "").replace(/'/g, "''");
+    return `'${t}'`;
+  }
+
+  function encodeA1ForUrl(a1) {
+    // encodeURIComponent leaves some characters unescaped (e.g. ' ! ( ) *).
+    // Sheets API accepts percent-encoded forms; we fully encode these for safety.
+    return encodeURIComponent(a1).replace(/[!'()*]/g, (c) =>
+      "%" + c.charCodeAt(0).toString(16).toUpperCase()
+    );
+  }
+
   function buildRange(sheetTitle, a1) {
-    // NOTE: For Sheets API query params, quoting sheet titles (e.g., 'Sheet 1'!A1)
-    // can cause 400 in some cases. Prefer raw title with URL encoding.
-    // Sheet titles cannot contain '!'. Spaces and non-ASCII are handled by encodeURIComponent.
-    const title = String(sheetTitle || "");
+    // Always quote to be safe across unicode / spaces / punctuation.
+    const title = quoteSheetTitle(sheetTitle);
     return `${title}!${a1}`;
   }
 
@@ -237,7 +254,7 @@
       "/" +
       encodeURIComponent(spreadsheetId) +
       "/values/" +
-      encodeURIComponent(range) +
+      encodeA1ForUrl(range) +
       "?valueInputOption=RAW";
 
     const body = {
@@ -304,7 +321,10 @@
 
   const targets = gids
     .map((gid) => ({ gid, title: sheetTitleByGid[gid] }))
-    .filter((x) => !!x.title);
+    .filter((x) => !!x.title)
+    // System sheets do not need user-facing display-name sync.
+    // Including them can make batchGet fail when the sheet hasn't been ensured yet.
+    .filter((x) => !isSystemSheetTitle(x.title));
 
   if (!targets.length) return;
 
@@ -313,7 +333,7 @@
   // ---- Attempt #1: batchGet (fast path). If it fails (400 etc), fall back to per-sheet GET.
   try {
     const ranges = targets.map((s) => buildRange(s.title, "Z1"));
-    const qs = ranges.map((r) => "ranges=" + encodeURIComponent(r)).join("&");
+    const qs = ranges.map((r) => "ranges=" + encodeA1ForUrl(r)).join("&");
     const url =
       "https://sheets.googleapis.com/v4/spreadsheets/" +
       encodeURIComponent(spreadsheetId) +
@@ -337,7 +357,7 @@
   // ---- Attempt #2: per-sheet values/{range} (robust path)
   async function fetchZ1(sheetTitle) {
     const a1 = buildRange(sheetTitle, "Z1"); // includes quoting when needed
-    const enc = encodeURIComponent(a1); // path segment encode
+    const enc = encodeA1ForUrl(a1); // path segment encode
     const url =
       "https://sheets.googleapis.com/v4/spreadsheets/" +
       encodeURIComponent(spreadsheetId) +
