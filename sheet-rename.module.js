@@ -1,3 +1,7 @@
+  // ---- Sheet Name Registry (v1) ----
+  // Avoid per-sheet Z1 batchGet (A1-notation encoding pitfalls). Store display names in a dedicated sheet.
+  const SHEET_NAME_REGISTRY_TITLE = '__LM_SHEET_NAMES';
+  const SHEET_NAME_REGISTRY_HEADER = ['sheetGid', 'displayName', 'sheetTitle', 'updatedAt'];
 /*! sheet-rename.module.js — v3 (display-name via Z1, gid-first, __lm_fetchJSONAuth) */
 (function () {
   const DEBUG =
@@ -214,7 +218,101 @@
     return `'${t}'`;
   }
 
-  function encodeA1ForUrl(a1) {
+    async function fetchSheetProps(spreadsheetId) {
+    const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}?fields=sheets(properties(sheetId,title))`;
+    const data = await __lm_fetchJSONAuth(url);
+    const sheets = data?.sheets || [];
+    return sheets.map(s => ({
+      sheetId: String(s?.properties?.sheetId ?? ''),
+      title: String(s?.properties?.title ?? '')
+    })).filter(s => s.sheetId && s.title);
+  }
+
+  async function ensureSheetNameRegistrySheet(spreadsheetId) {
+    const props = await fetchSheetProps(spreadsheetId);
+    const found = props.find(s => s.title === SHEET_NAME_REGISTRY_TITLE);
+    if (!found) {
+      const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}:batchUpdate`;
+      const payload = { requests: [{ addSheet: { properties: { title: SHEET_NAME_REGISTRY_TITLE } } }] };
+      await __lm_fetchJSONAuth(url, { method: 'POST', body: JSON.stringify(payload) });
+    }
+    await ensureRegistryHeader(spreadsheetId);
+  }
+
+  async function ensureRegistryHeader(spreadsheetId) {
+    const headerRange = `${SHEET_NAME_REGISTRY_TITLE}!A1:D1`;
+    const getUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(headerRange)}`;
+    let current = null;
+    try {
+      const got = await __lm_fetchJSONAuth(getUrl);
+      current = got?.values?.[0] || null;
+    } catch (e) {
+      // ignore - we'll attempt to write header
+    }
+    const want = SHEET_NAME_REGISTRY_HEADER;
+    const same = Array.isArray(current) && current.length >= want.length && want.every((v, i) => String(current[i] ?? '') === v);
+    if (same) return;
+
+    const putUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(headerRange)}?valueInputOption=RAW`;
+    const payload = { range: headerRange, majorDimension: 'ROWS', values: [want] };
+    await __lm_fetchJSONAuth(putUrl, { method: 'PUT', body: JSON.stringify(payload) });
+  }
+
+  async function readSheetNameRegistry(spreadsheetId) {
+    await ensureSheetNameRegistrySheet(spreadsheetId);
+    const rowsRange = `${SHEET_NAME_REGISTRY_TITLE}!A2:D`;
+    const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(rowsRange)}`;
+    const data = await __lm_fetchJSONAuth(url);
+    const rows = data?.values || [];
+    const gidToDisplayName = new Map();
+    const gidToSheetTitle = new Map();
+    const gidToRowNumber = new Map(); // 1-based row number in sheet
+    for (let i = 0; i < rows.length; i++) {
+      const r = rows[i] || [];
+      const gid = String(r[0] ?? '').trim();
+      if (!gid) continue;
+      const displayName = String(r[1] ?? '').trim();
+      const sheetTitle = String(r[2] ?? '').trim();
+      if (displayName) gidToDisplayName.set(gid, displayName);
+      if (sheetTitle) gidToSheetTitle.set(gid, sheetTitle);
+      gidToRowNumber.set(gid, 2 + i);
+    }
+    return { gidToDisplayName, gidToSheetTitle, gidToRowNumber };
+  }
+
+  async function upsertSheetNameRegistry(spreadsheetId, sheetGid, displayName, sheetTitle) {
+    await ensureSheetNameRegistrySheet(spreadsheetId);
+    const gid = String(sheetGid ?? '').trim();
+    if (!gid) return;
+    const now = new Date().toISOString();
+    const { gidToRowNumber } = await readSheetNameRegistry(spreadsheetId);
+    const rowNo = gidToRowNumber.get(gid);
+
+    if (rowNo) {
+      const range = `${SHEET_NAME_REGISTRY_TITLE}!A${rowNo}:D${rowNo}`;
+      const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}?valueInputOption=RAW`;
+      const values = [[gid, String(displayName ?? ''), String(sheetTitle ?? ''), now]];
+      await __lm_fetchJSONAuth(url, { method: 'PUT', body: JSON.stringify({ range, majorDimension: 'ROWS', values }) });
+      return;
+    }
+
+    const appendRange = `${SHEET_NAME_REGISTRY_TITLE}!A:D`;
+    const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(appendRange)}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`;
+    const values = [[gid, String(displayName ?? ''), String(sheetTitle ?? ''), now]];
+    await __lm_fetchJSONAuth(url, { method: 'POST', body: JSON.stringify({ range: appendRange, majorDimension: 'ROWS', values }) });
+  }
+
+  async function appendSheetNameRegistryRows(spreadsheetId, rows) {
+    if (!Array.isArray(rows) || rows.length === 0) return;
+    await ensureSheetNameRegistrySheet(spreadsheetId);
+    const appendRange = `${SHEET_NAME_REGISTRY_TITLE}!A:D`;
+    const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(appendRange)}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`;
+    await __lm_fetchJSONAuth(url, { method: 'POST', body: JSON.stringify({ range: appendRange, majorDimension: 'ROWS', values: rows }) });
+  }
+
+
+
+function encodeA1ForUrl(a1) {
     // encodeURIComponent leaves some characters unescaped (e.g. ' ! ( ) *).
     // Sheets API accepts percent-encoded forms; we fully encode these for safety.
     return encodeURIComponent(a1).replace(/[!'()*]/g, (c) =>
@@ -293,116 +391,51 @@
   // Z1 から表示名を一括で読み、ドロップダウンに反映
   // spreadsheetIdOverride / selectElOverride は、他モジュールが <select> を再構築した直後に
   // 再同期させたいケース向け。
-  async function syncDisplayNamesFromZ1(spreadsheetId, authFetch, selectEl) {
-  if (!spreadsheetId || typeof authFetch !== "function" || !selectEl) return;
-
-  // NOTE: the gid-map implementation is exposed as window.LM_SHEET_GIDMAP
-  // (see sheet.gid.map.js). Earlier patches mistakenly referenced
-  // window.__lm_gids, which does not exist in the current runtime.
-  const GM = window.LM_SHEET_GIDMAP;
-  if (!GM || typeof GM.fetchSheetMap !== "function") {
-    console.warn("[sheet-rename] gidmap not ready; skip display-name sync");
-    return;
-  }
-
-  // Resolve gid -> actual sheetTitle (stable across display-name changes)
-  let sheetTitleByGid = {};
-  try {
-    const map = await GM.fetchSheetMap(spreadsheetId, authFetch);
-    sheetTitleByGid = (map && map.sheetTitleByGid) ? map.sheetTitleByGid : {};
-  } catch (e) {
-    console.warn("[sheet-rename] fetchSheetMap failed; skip display-name sync", e);
-    return;
-  }
-
-  const options = Array.from(selectEl.options || []);
-  const gids = options
-    .map((o) => String(o.value || "").trim())
-    .filter(Boolean);
-
-  if (!gids.length) return;
-
-  const targets = gids
-    .map((gid) => ({ gid, title: sheetTitleByGid[gid] }))
-    .filter((x) => !!x.title)
-    // System sheets do not need user-facing display-name sync.
-    // Including them can make batchGet fail when the sheet hasn't been ensured yet.
-    .filter((x) => !isSystemSheetTitle(x.title));
-
-  if (!targets.length) return;
-
-  const displayNameByGid = {};
-
-  // ---- Attempt #1: batchGet (fast path). If it fails (400 etc), fall back to per-sheet GET.
-  try {
-    const ranges = targets.map((s) => buildRange(s.title, "Z1"));
-    const qs = ranges.map((r) => "ranges=" + encodeA1ForUrl(r)).join("&");
-    const url =
-      "https://sheets.googleapis.com/v4/spreadsheets/" +
-      encodeURIComponent(spreadsheetId) +
-      "/values:batchGet?" +
-      qs;
-
-    const json = await authFetch(url);
-    const valueRanges = Array.isArray(json && json.valueRanges) ? json.valueRanges : [];
-
-    // NOTE: Google typically returns valueRanges in requested order; use index mapping.
-    for (let i = 0; i < targets.length; i++) {
-      const vr = valueRanges[i];
-      const v = (vr && vr.values && vr.values[0]) ? vr.values[0][0] : undefined;
-      const s = (typeof v === "string") ? v.trim() : (v == null ? "" : String(v).trim());
-      if (s) displayNameByGid[targets[i].gid] = s;
-    }
-  } catch (e) {
-    console.warn("[sheet-rename] batchGet Z1 failed; falling back to per-sheet GET", e);
-  }
-
-  // ---- Attempt #2: per-sheet values/{range} (robust path)
-  async function fetchZ1(sheetTitle) {
-    const a1 = buildRange(sheetTitle, "Z1"); // includes quoting when needed
-    const enc = encodeA1ForUrl(a1); // path segment encode
-    const url =
-      "https://sheets.googleapis.com/v4/spreadsheets/" +
-      encodeURIComponent(spreadsheetId) +
-      "/values/" +
-      enc;
-
-    const json = await authFetch(url);
-    const v = (json && json.values && json.values[0]) ? json.values[0][0] : undefined;
-    return (typeof v === "string") ? v.trim() : (v == null ? "" : String(v).trim());
-  }
-
-  for (const t of targets) {
-    if (displayNameByGid[t.gid]) continue;
+      async function syncDisplayNamesFromZ1(spreadsheetId, sheets, selectEl) {
+    // NOTE: legacy name kept for compatibility. We now read from the registry sheet to avoid Z1 batchGet.
     try {
-      const s = await fetchZ1(t.title);
-      if (s) displayNameByGid[t.gid] = s;
-    } catch (e) {
-      // ignore; we will fall back to sheet title
+      const { gidToDisplayName, gidToRowNumber } = await readSheetNameRegistry(spreadsheetId);
+
+      // Seed missing entries in one shot (best-effort), so the registry becomes complete over time.
+      if (Array.isArray(sheets)) {
+        const now = new Date().toISOString();
+        const toAppend = [];
+        for (const s of sheets) {
+          const gid = String(s?.gid ?? '').trim();
+          const title = String(s?.title ?? '').trim();
+          if (!gid || !title) continue;
+          if (isSystemSheetTitle(title)) continue;
+          if (gidToRowNumber.has(gid)) continue;
+          toAppend.push([gid, title, title, now]);
+          gidToDisplayName.set(gid, title);
+        }
+        if (toAppend.length) {
+          try { await appendSheetNameRegistryRows(spreadsheetId, toAppend); } catch (e) { /* ignore */ }
+        }
+      }
+
+      let updated = 0;
+      const opts = Array.from(selectEl?.options || []);
+      for (const opt of opts) {
+        const gid = String(opt?.value ?? '').trim();
+        if (!gid) continue;
+        const displayName = gidToDisplayName.get(gid);
+        if (!displayName) continue;
+        if (opt.textContent !== displayName) {
+          opt.textContent = displayName;
+          updated++;
+        }
+        opt.dataset.displayName = displayName;
+      }
+      console.log('[sheet-rename] display names synced from registry', { updated, total: opts.length });
+    } catch (err) {
+      console.warn('[sheet-rename] registry sync failed (leaving sheet titles as-is)', err);
     }
   }
 
-  // Apply labels to existing options (do NOT change option value=gid)
-  for (const opt of options) {
-    const gid = String(opt.value || "").trim();
-    if (!gid) continue;
 
-    // Preserve original sheetTitle for future reference (even after opt.textContent changes)
-    const canonicalTitle = sheetTitleByGid[gid] || "";
-    if (canonicalTitle && !opt.dataset.lmSheetTitle) {
-      opt.dataset.lmSheetTitle = canonicalTitle;
-    }
 
-    const label =
-      displayNameByGid[gid] ||
-      opt.dataset.lmSheetTitle ||
-      canonicalTitle ||
-      opt.textContent ||
-      gid;
 
-    opt.textContent = label;
-  }
-}
 
 async function sheetsUpdateTitle(
     spreadsheetId,

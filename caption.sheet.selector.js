@@ -204,7 +204,16 @@
       body: JSON.stringify(body)
     });
 
-    // gid マップを更新してから select を再構築
+    
+    // Sheet name registry (best-effort)
+    try {
+      if (window.__lm_upsertSheetNameRegistry) {
+        await window.__lm_upsertSheetNameRegistry(spreadsheetId, String(gid), name, name);
+      }
+    } catch (e) {
+      console.warn('[cap-sheet-select] registry upsert failed', e);
+    }
+// gid マップを更新してから select を再構築
     try {
       window.LM_SHEET_GIDMAP &&
         window.LM_SHEET_GIDMAP.invalidateMap &&
