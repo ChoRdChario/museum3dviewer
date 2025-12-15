@@ -296,7 +296,10 @@
   async function syncDisplayNamesFromZ1(spreadsheetId, authFetch, selectEl) {
   if (!spreadsheetId || typeof authFetch !== "function" || !selectEl) return;
 
-  const GM = window.__lm_gids;
+  // NOTE: the gid-map implementation is exposed as window.LM_SHEET_GIDMAP
+  // (see sheet.gid.map.js). Earlier patches mistakenly referenced
+  // window.__lm_gids, which does not exist in the current runtime.
+  const GM = window.LM_SHEET_GIDMAP;
   if (!GM || typeof GM.fetchSheetMap !== "function") {
     console.warn("[sheet-rename] gidmap not ready; skip display-name sync");
     return;
@@ -632,8 +635,20 @@ async function sheetsUpdateTitle(
     wireSheetRenameEvents();
     wireSelectChange();
     updateSheetRenameView("view");
-    // シート一覧と gid → title のマップが揃った後、Z1 から表示名を同期
-    syncDisplayNamesFromZ1();
+    // シート一覧と gid→title のマップが揃った後、Z1 から表示名を同期
+    // ※このUIの自動マウントは、save.locatorやselectorより先に走ることがあるため
+    // ここでは「分かる範囲で」同期を試みる（確実な同期は selector 側からも呼ぶ）。
+    try {
+      const ctx = window.__lm_ctx || {};
+      const spreadsheetId = ctx.spreadsheetId;
+      const sel = document.getElementById("sheetSelect");
+      const authFetch = window.__lm_fetchJSONAuth || window.__lm_fetchJSON;
+      if (spreadsheetId && sel && typeof authFetch === "function") {
+        syncDisplayNamesFromZ1(spreadsheetId, authFetch, sel);
+      }
+    } catch (e) {
+      console.warn("[sheet-rename] sync attempt skipped", e);
+    }
     log("UI mounted");
     return true;
   }
@@ -653,6 +668,30 @@ async function sheetsUpdateTitle(
       if (mountSheetRenameUI() || --tries <= 0) clearInterval(tm);
     }, 200);
   })();
+
+  // expose helpers for classic scripts (non-module)
+  // caption.sheet.selector.js expects this name.
+  window.__lm_syncSheetDisplayNamesFromZ1 = async function (spreadsheetId, a, b) {
+    // supported signatures:
+    //   (spreadsheetId, selectEl)
+    //   (spreadsheetId, authFetch, selectEl)
+    let authFetch = null;
+    let selectEl = null;
+
+    if (a && typeof a === "function") {
+      authFetch = a;
+      selectEl = b;
+    } else {
+      selectEl = a;
+      authFetch = window.__lm_fetchJSONAuth || window.__lm_fetchJSON;
+    }
+
+    return syncDisplayNamesFromZ1(spreadsheetId, authFetch, selectEl);
+  };
+
+  // for manual debugging
+  window.__lm_applySheetRename = applySheetRename;
+
 
   // optional export for manual re-mount
   window.mountSheetRenameUI = mountSheetRenameUI;
