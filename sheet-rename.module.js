@@ -114,23 +114,33 @@
         (sel.selectedOptions && sel.selectedOptions[0]) ||
         sel.options[sel.selectedIndex] ||
         null;
-      const displayName = opt && opt.textContent ? opt.textContent.trim() : "";
-      const sheetTitle = (opt && opt.dataset && opt.dataset.sheetTitle) ? String(opt.dataset.sheetTitle).trim() : ((opt && opt.dataset && opt.dataset.actualTitle) ? String(opt.dataset.actualTitle).trim() : displayName);
+
+      const displayName =
+        opt && opt.textContent ? String(opt.textContent).trim() : "";
+
+      // IMPORTANT:
+      // - displayName: what user sees in the dropdown (registry-driven)
+      // - sheetTitle : the actual sheet tab name used for Sheets API range/A1 refs
+      const sheetTitle =
+        opt && opt.dataset && opt.dataset.sheetTitle
+          ? String(opt.dataset.sheetTitle).trim()
+          : opt && opt.dataset && opt.dataset.actualTitle
+            ? String(opt.dataset.actualTitle).trim()
+            : displayName;
+
       const id = opt && opt.value ? Number(opt.value) : null;
 
-      if (id != null && !Number.isNaN(id)) {
-        window.currentSheetId = id;
-      } else {
-        window.currentSheetId = null;
-      }
-      if (title) window.currentSheetDisplayName = displayName;
-      window.currentSheetTitle = sheetTitle;
+      window.currentSheetId =
+        id != null && !Number.isNaN(id) ? id : null;
+      window.currentSheetDisplayName = displayName || "";
+      window.currentSheetTitle = sheetTitle || "";
 
-      sel.title = title || "";
+      // tooltip
+      sel.title = displayName || "";
 
       const label = $("sheet-rename-label");
       const edit = $("sheet-rename-edit");
-      if (label) label.textContent = title || "(no sheet)";
+      if (label) label.textContent = displayName || "(no sheet)";
       if (edit) edit.disabled = !(window.currentSheetId != null);
     };
 
