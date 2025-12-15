@@ -94,6 +94,10 @@
       const opt = document.createElement('option');
       opt.value = String(s.gid);
       opt.textContent = s.title;
+      // Keep actual tab title even if UI label is later replaced by displayName
+      opt.dataset.sheetTitle = String(s.title || "");
+      // Initial displayName is the actual title; may be overwritten by registry sync
+      opt.dataset.displayName = String(s.title || "");
       sel.appendChild(opt);
       if (activeNum !== null && s.gid === activeNum) {
         selectedValue = opt.value;
@@ -114,7 +118,7 @@
     try {
       const fn = window.__lm_syncSheetDisplayNamesFromZ1;
       if (typeof fn === 'function') {
-        await fn(spreadsheetId, sel);
+        await fn(spreadsheetId, entries, sel);
       }
     } catch (e) {
       warn('display name sync failed', e);
@@ -125,7 +129,8 @@
     window.currentSpreadsheetId = spreadsheetId || window.currentSpreadsheetId || '';
     window.currentSheetId = gidStr ? Number(gidStr) : null;
     const opt = gidStr && sel.selectedOptions && sel.selectedOptions[0];
-    window.currentSheetTitle = opt ? (opt.textContent || '').trim() : '';
+    window.currentSheetDisplayName = opt ? (opt.textContent || "").trim() : "";
+    window.currentSheetTitle = opt ? ((opt.dataset && opt.dataset.sheetTitle) ? String(opt.dataset.sheetTitle).trim() : (opt.textContent || "").trim()) : "";
 
     // シートが決まっていれば context に反映（ただし変わった時だけ）
     if (spreadsheetId && gidStr) {
