@@ -1,59 +1,131 @@
 // LociMyu - app.share.entry.js
-// Share entry (Phase 1 scaffolding).
-// New policy: Share mode loads a reduced, safe set. Write-capable modules are not loaded.
-// This build wires the loader + guard + basic UI notice. Viewer wiring will be added in the next step.
+// Share entry (Step 3: Sign-in + GLB load + read-only sheet/captions).
+// Policy: Share safety is guaranteed by NOT loading write-capable modules.
+// Guard remains as an insurance policy.
 
 import './share.fetch.guard.js';
 import './boot.share.cdn.js';
 import './glb.btn.bridge.share.js';
+import './share.sheet.read.js';
 
-// Mark core Share-only modules (best-effort)
-try { (window.__LM_DIAG?.loaded || (window.__LM_DIAG.loaded=[])).push('share.fetch.guard.js','boot.share.cdn.js','glb.btn.bridge.share.js'); } catch(_e) {}
-
-function markLoaded(src) {
-  try { (window.__LM_DIAG?.loaded || (window.__LM_DIAG.loaded=[])).push(src); } catch(_e) {}
+function diagPush(...srcs){
+  try{
+    const d = window.__LM_DIAG || (window.__LM_DIAG = { loaded: [] });
+    (d.loaded || (d.loaded=[])).push(...srcs);
+  }catch(_e){}
 }
+diagPush('share.fetch.guard.js','boot.share.cdn.js','glb.btn.bridge.share.js','share.sheet.read.js');
 
-function appendInline(code) {
-  const s = document.createElement('script');
-  s.textContent = code || '';
-  (document.body || document.documentElement).appendChild(s);
-}
-
-function showNotice() {
-  const right = document.querySelector('#right') || document.body;
-  const box = document.createElement('div');
-  box.className = 'panel';
-  box.style.borderColor = '#3a3f46';
-  box.innerHTML = `
-    <h4>Share Mode</h4>
-    <div style="opacity:.9">
-      This build is running the new Share architecture (safe-by-design: write modules are not loaded).
-      Share Sign-in is now wired (readonly scopes). Viewer wiring (read-only Drive/Sheets, find-only locator, and read-only controllers) will be enabled in the next step.
-    </div>
-    <div style="margin-top:10px; opacity:.85">
-      Diagnostics: open Console and run <code>__LM_DIAG.loaded</code> to verify loaded modules.
-    </div>
-  `;
-  right.prepend(box);
-
-  // Disable obvious "edit" affordances if they exist in DOM (best-effort only).
-  const disableIds = ['btnSave','btnSaveView','btnSaveMaterial','btnAddCaption','btnNewSheet','save-target-create'];
-  disableIds.forEach(id => {
-    const el = document.getElementById(id);
-    if (el) {
-      el.disabled = true;
-      el.style.opacity = '0.5';
-      el.style.pointerEvents = 'none';
-    }
+function loadClassic(src){
+  return new Promise((resolve, reject)=>{
+    const s = document.createElement('script');
+    s.src = src;
+    s.async = false;
+    s.onload = ()=>{ diagPush(src); resolve(); };
+    s.onerror = (e)=>reject(e);
+    document.head.appendChild(s);
   });
 }
 
-console.log('[lm-entry] Share entry starting…');
+function disableWritesUI(){
+  // Disable any obvious "create/save" affordances in Share
+  const ids = [
+    '#save-target-create',
+    '#btnSaveView',
+    '#btnSaveViewDebounced',
+    '#btnRenameSheet',
+  ];
+  ids.forEach(sel=>{
+    const el = document.querySelector(sel);
+    if (el){
+      el.disabled = true;
+      el.style.opacity = '0.5';
+      el.style.pointerEvents = 'none';
+      el.title = 'Disabled in Share Mode';
+    }
+  });
 
-// Re-enable tab switching logic (was previously inline in index.html).
-markLoaded('inline:tabs');
-appendInline("\n    (function(){\n      const tabs = document.querySelectorAll('[role=\"tab\"]');\n      const panes = document.querySelectorAll('.pane');\n      tabs.forEach(t => t.addEventListener('click', () => {\n        tabs.forEach(x => x.setAttribute('aria-selected', String(x===t)));\n        panes.forEach(p => p.dataset.active = String(p.dataset.pane===t.dataset.tab));\n      }));\n    })();\n  ");
+  // Disable caption edit inputs (view-only)
+  const capInputs = ['#caption-title','#caption-body','#btnRefreshImages'];
+  capInputs.forEach(sel=>{
+    const el = document.querySelector(sel);
+    if (el){
+      el.disabled = true;
+      el.style.opacity = '0.6';
+      el.title = 'View-only in Share Mode';
+    }
+  });
 
-showNotice();
-console.log('[lm-entry] Share entry ready (scaffolding).');
+  // Prevent delete/backspace actions from bubbling into caption UI handlers
+  document.addEventListener('keydown', (ev)=>{
+    const k = ev.key;
+    if (k === 'Delete' || k === 'Backspace'){
+      ev.stopImmediatePropagation();
+    }
+  }, true);
+}
+
+function showNotice(){
+  const right = document.querySelector('#right') || document.body;
+  const box = document.createElement('div');
+  box.className = 'panel';
+  box.innerHTML = `
+    <h4>Share Mode</h4>
+    <div class="muted">
+      Read-only build. Sheets/Drive writes are blocked by design (write modules are not loaded) and by guard (non-GET blocked).
+      <div style="margin-top:6px">Diagnostics: open Console and run <code>__LM_DIAG.loaded</code>.</div>
+    </div>
+  `;
+  // put at top
+  right.insertBefore(box, right.firstChild);
+}
+
+function ensureTabsWork(){
+  // Re-enable tab switching logic (was previously inline in index.html).
+  try{
+    const tabs = document.querySelectorAll('.tab');
+    const panes = document.querySelectorAll('.pane');
+    tabs.forEach(t=>t.addEventListener('click', ()=>{
+      tabs.forEach(x=>x.classList.toggle('active', x===t));
+      panes.forEach(p=>p.classList.toggle('active', p.dataset.pane===t.dataset.tab));
+    }));
+  }catch(_e){}
+}
+
+function hardDisableCaptionAdd(){
+  // Block Shift+click add caption by neutralizing viewer bridge hook point.
+  document.addEventListener('lm:viewer-bridge-ready', ()=>{
+    try{
+      const br = window.__lm_viewer_bridge;
+      if (br && typeof br.onCanvasShiftPick === 'function'){
+        // Replace with no-op registrar
+        br.onCanvasShiftPick = function(_cb){
+          console.log('[share] blocked onCanvasShiftPick registrar');
+        };
+      }
+    }catch(_e){}
+  }, { once:false });
+}
+
+async function boot(){
+  console.log('[lm-entry] Share entry starting…');
+
+  showNotice();
+  ensureTabsWork();
+  disableWritesUI();
+  hardDisableCaptionAdd();
+
+  // Load safe, read-only UI components (classic scripts)
+  // Note: We intentionally DO NOT load caption.sheet.bridge.js or persist modules.
+  try{
+    await loadClassic('./pin.runtime.bridge.js');
+    await loadClassic('./caption.viewer.overlay.js');
+    await loadClassic('./caption.ui.controller.js');
+  }catch(e){
+    console.warn('[lm-entry] failed to load share UI scripts', e);
+  }
+
+  console.log('[lm-entry] Share entry ready.');
+}
+
+boot();

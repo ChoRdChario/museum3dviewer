@@ -211,6 +211,10 @@
       await mod.loadGlbFromDrive(fileId, { token });
     }catch(e){ err('loadGlbFromDrive threw', e); safeHide(); throw e; }
     setTimeout(safeHide, 120);
+    try{ window.__LM_CURRENT_GLB_ID__ = fileId; }catch(_e){}
+    try{ document.dispatchEvent(new CustomEvent('lm:glb-loaded', { detail:{ glbFileId:fileId } })); }catch(_e){}
+    try{ document.dispatchEvent(new Event('lm:scene-ready')); }catch(_e){}
+
     // share: skip ensure save sheet
     // await postLoadEnsureSaveSheet(fileId);
 

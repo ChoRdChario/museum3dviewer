@@ -133,4 +133,37 @@ window.__lm_getAccessToken = __lm_getAccessToken;
   }, { passive:false });
 })();
 
+
+// --- Authenticated fetch helpers (Share: GET-only) ---------------------------
+window.__lm_fetchAuth = async function __lm_fetchAuth(url, init){
+  init = init || {};
+  const method = String(init.method || 'GET').toUpperCase();
+  const SAFE = (method === 'GET' || method === 'HEAD' || method === 'OPTIONS');
+  if (!SAFE){
+    const e = new Error('[share] blocked non-GET in __lm_fetchAuth: ' + method);
+    e.code = 'LM_SHARE_BLOCK';
+    throw e;
+  }
+  const token = await window.__lm_getAccessToken();
+  const headers = new Headers(init.headers || {});
+  if (!headers.has('Authorization')) headers.set('Authorization', 'Bearer ' + token);
+  return fetch(url, Object.assign({}, init, { method, headers }));
+};
+
+window.__lm_fetchJSONAuth = async function __lm_fetchJSONAuth(url, init){
+  const res = await window.__lm_fetchAuth(url, init);
+  const text = await res.text();
+  let data = null;
+  try{ data = text ? JSON.parse(text) : null; }catch(_e){ data = null; }
+  if (!res.ok){
+    const e = new Error('[share] HTTP ' + res.status + ' for ' + url);
+    e.status = res.status;
+    e.body = text;
+    e.data = data;
+    throw e;
+  }
+  return data;
+};
+// ---------------------------------------------------------------------------
+
 LOG("[boot/share] ready (auth wired, readonly scopes)");
