@@ -4,6 +4,10 @@
 // This build wires the loader + guard + basic UI notice. Viewer wiring will be added in the next step.
 
 import './share.fetch.guard.js';
+import './boot.share.cdn.js';
+
+// Mark core Share-only modules (best-effort)
+try { (window.__LM_DIAG?.loaded || (window.__LM_DIAG.loaded=[])).push('share.fetch.guard.js','boot.share.cdn.js'); } catch(_e) {}
 
 function markLoaded(src) {
   try { (window.__LM_DIAG?.loaded || (window.__LM_DIAG.loaded=[])).push(src); } catch(_e) {}
@@ -24,7 +28,7 @@ function showNotice() {
     <h4>Share Mode</h4>
     <div style="opacity:.9">
       This build is running the new Share architecture (safe-by-design: write modules are not loaded).
-      Viewer wiring (read-only Drive/Sheets, find-only locator, and read-only controllers) will be enabled in the next step.
+      Share Sign-in is now wired (readonly scopes). Viewer wiring (read-only Drive/Sheets, find-only locator, and read-only controllers) will be enabled in the next step.
     </div>
     <div style="margin-top:10px; opacity:.85">
       Diagnostics: open Console and run <code>__LM_DIAG.loaded</code> to verify loaded modules.
