@@ -130,7 +130,7 @@ window.__lm_getAccessToken = __lm_getAccessToken;
       ERR("[auth/share] signin failed", e);
       ERR("[auth/share] Provide client_id via meta[name='google-oauth-client_id'] or ?lm_client_id=... or localStorage.LM_GIS_CLIENT_ID");
     }
-  }, { passive:true });
+  }, { passive:false });
 })();
 
 LOG("[boot/share] ready (auth wired, readonly scopes)");

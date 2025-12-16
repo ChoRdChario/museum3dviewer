@@ -5,9 +5,10 @@
 
 import './share.fetch.guard.js';
 import './boot.share.cdn.js';
+import './glb.btn.bridge.share.js';
 
 // Mark core Share-only modules (best-effort)
-try { (window.__LM_DIAG?.loaded || (window.__LM_DIAG.loaded=[])).push('share.fetch.guard.js','boot.share.cdn.js'); } catch(_e) {}
+try { (window.__LM_DIAG?.loaded || (window.__LM_DIAG.loaded=[])).push('share.fetch.guard.js','boot.share.cdn.js','glb.btn.bridge.share.js'); } catch(_e) {}
 
 function markLoaded(src) {
   try { (window.__LM_DIAG?.loaded || (window.__LM_DIAG.loaded=[])).push(src); } catch(_e) {}
@@ -37,7 +38,7 @@ function showNotice() {
   right.prepend(box);
 
   // Disable obvious "edit" affordances if they exist in DOM (best-effort only).
-  const disableIds = ['btnSave','btnSaveView','btnSaveMaterial','btnAddCaption','btnNewSheet'];
+  const disableIds = ['btnSave','btnSaveView','btnSaveMaterial','btnAddCaption','btnNewSheet','save-target-create'];
   disableIds.forEach(id => {
     const el = document.getElementById(id);
     if (el) {
