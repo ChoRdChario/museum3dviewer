@@ -107,13 +107,17 @@
 	      warn('sheet name registry fetch failed', e);
 	    }
 
-    // placeholder はできるだけ維持
-    let placeholder = sel.querySelector('option[value=""]');
-    if (!placeholder) {
-      placeholder = document.createElement('option');
-      placeholder.value = '';
-      placeholder.textContent = 'Select sheet…';
-    }
+	    // Replace the temporary "Loading..." option with a stable placeholder label.
+	    // (We create/keep an option[value=""] so existing code paths remain safe,
+	    //  but we don't want "Loading..." to persist after the list is populated.)
+	    let placeholder = sel.querySelector('option[value=""]');
+	    if (!placeholder) {
+	      placeholder = document.createElement('option');
+	      placeholder.value = '';
+	    }
+	    placeholder.textContent = 'Select sheet…';
+	    placeholder.disabled = true;
+	    placeholder.selected = false;
 
     sel.innerHTML = '';
     sel.appendChild(placeholder);
