@@ -58,9 +58,27 @@
     const btn = $('#save-target-create');
     if (!sel) return;
 
+		// Avoid a brief flash of raw sheet titles (e.g. "シート1", "シート2") by
+		// keeping the selector disabled while we resolve displayNames.
+		sel.disabled = true;
+		sel.innerHTML = '';
+		const loadingOpt = document.createElement('option');
+		loadingOpt.value = '';
+		loadingOpt.textContent = 'Loading…';
+		loadingOpt.selected = true;
+		sel.appendChild(loadingOpt);
+
     const GM = window.LM_SHEET_GIDMAP;
     if (!GM || typeof GM.fetchSheetMap !== 'function') {
       warn('LM_SHEET_GIDMAP missing');
+	      // Do not leave the selector in a disabled loading state.
+	      sel.disabled = false;
+	      sel.innerHTML = '';
+	      const ph = document.createElement('option');
+	      ph.value = '';
+	      ph.textContent = 'Select sheet…';
+	      ph.selected = true;
+	      sel.appendChild(ph);
       return;
     }
 
@@ -73,6 +91,21 @@
       }))
       .filter(s => s.title && !/^__LM_/.test(s.title || '')) // __LM_ 系は除外
       .sort((a, b) => a.index - b.index);
+
+	    // Best-effort: resolve displayName map before we build options, so we don't
+	    // render raw sheet titles and then swap them later.
+	    let gidToDisplayName = null;
+	    try {
+	      const getReg = window.__lm_getSheetNameRegistry;
+	      if (typeof getReg === 'function') {
+	        const reg = await getReg({ spreadsheetId });
+	        if (reg && reg.gidToDisplayName && typeof reg.gidToDisplayName.get === 'function') {
+	          gidToDisplayName = reg.gidToDisplayName;
+	        }
+	      }
+	    } catch (e) {
+	      warn('sheet name registry fetch failed', e);
+	    }
 
     // placeholder はできるだけ維持
     let placeholder = sel.querySelector('option[value=""]');
@@ -90,19 +123,25 @@
       : null;
 
     let selectedValue = null;
-    for (const s of entries) {
+	    for (const s of entries) {
       const opt = document.createElement('option');
       opt.value = String(s.gid);
-      opt.textContent = s.title;
+	      const label = (gidToDisplayName && gidToDisplayName.get(String(s.gid)))
+	        ? String(gidToDisplayName.get(String(s.gid)))
+	        : String(s.title);
+	      opt.textContent = label;
       // Keep actual tab title even if UI label is later replaced by displayName
       opt.dataset.sheetTitle = String(s.title || "");
-      // Initial displayName is the actual title; may be overwritten by registry sync
-      opt.dataset.displayName = String(s.title || "");
+	      // displayName is the UI label (may differ from the actual sheet title)
+	      opt.dataset.displayName = label;
       sel.appendChild(opt);
       if (activeNum !== null && s.gid === activeNum) {
         selectedValue = opt.value;
       }
-    }
+	    }
+
+	    // Loading phase complete.
+	    sel.disabled = false;
 
     // アクティブ gid が無い場合は先頭を選ぶ
     if (!selectedValue && entries.length > 0) {
@@ -115,14 +154,18 @@
     // a "display name" stored in each sheet's Z1 (sheet-rename.module.js), we
     // must re-sync option labels after rebuilding, otherwise the UI falls back to
     // raw sheet titles.
-    try {
-      const fn = window.__lm_syncSheetDisplayNamesFromZ1;
-      if (typeof fn === 'function') {
-        await fn(spreadsheetId, entries, sel);
-      }
-    } catch (e) {
-      warn('display name sync failed', e);
-    }
+	    try {
+	      // Legacy compatibility: if we could not resolve displayNames here, fall back
+	      // to the existing sync hook.
+	      if (!gidToDisplayName || (gidToDisplayName.size === 0)) {
+	        const fn = window.__lm_syncSheetDisplayNamesFromZ1;
+	        if (typeof fn === 'function') {
+	          await fn(spreadsheetId, entries, sel);
+	        }
+	      }
+	    } catch (e) {
+	      warn('display name sync failed', e);
+	    }
 
     // rename UI 用のグローバル更新
     const gidStr = sel.value;
