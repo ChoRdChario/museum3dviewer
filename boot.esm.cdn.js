@@ -189,13 +189,6 @@ const VIEWS_HEADER = [
 ];
 
 async function ensureViewsSheet(spreadsheetId){
-  if (!spreadsheetId) return null;
-  if (window.__LM_IS_SHARE_MODE || window.__LM_IS_VIEW_MODE || (window.__LM_MODE && window.__LM_MODE.isShareMode)) {
-    // Do not create sheets in Share mode.
-    const exist = await findSheetByTitle(spreadsheetId, SHEET_TITLE);
-    return exist || null;
-  }
-
   const token = await __lm_getAccessToken();
   const headers = {
     "Authorization": `Bearer ${token}`,
@@ -236,12 +229,6 @@ async function ensureViewsSheet(spreadsheetId){
 }
 
 async function ensureViewsHeader(spreadsheetId){
-  if (!spreadsheetId) return;
-  if (window.__LM_IS_SHARE_MODE || window.__LM_IS_VIEW_MODE || (window.__LM_MODE && window.__LM_MODE.isShareMode)) {
-    console.info('[views-sheet] Share mode: skip header ensure');
-    return;
-  }
-
   await ensureViewsSheet(spreadsheetId);
   const token = await __lm_getAccessToken();
   const headers = { "Authorization": `Bearer ${token}` };
@@ -269,13 +256,6 @@ window.__lm_ensureViewsHeader = ensureViewsHeader;
 
 
 async function ensureMaterialsSheet(spreadsheetId){
-  if (!spreadsheetId) return null;
-  if (window.__LM_IS_SHARE_MODE || window.__LM_IS_VIEW_MODE || (window.__LM_MODE && window.__LM_MODE.isShareMode)) {
-    // Do not create sheets in Share mode.
-    const exist = await findSheetByTitle(spreadsheetId, SHEET_TITLE);
-    return exist || null;
-  }
-
   const token = await __lm_getAccessToken();
   const headers = {
     "Authorization": `Bearer ${token}`,
@@ -341,12 +321,6 @@ async function putHeaderOnce(spreadsheetId, rangeA1, values){
 
 
 async function ensureMaterialsHeader(spreadsheetId){
-  if (!spreadsheetId) return;
-  if (window.__LM_IS_SHARE_MODE || window.__LM_IS_VIEW_MODE || (window.__LM_MODE && window.__LM_MODE.isShareMode)) {
-    console.info('[mat-sheet] Share mode: skip header ensure');
-    return;
-  }
-
   await ensureMaterialsSheet(spreadsheetId);
   const token = await __lm_getAccessToken();
   const headers = { "Authorization": `Bearer ${token}` };

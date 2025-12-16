@@ -98,15 +98,13 @@ async function listSheets(spreadsheetId){
   return list;
 }
 
-async function ensureMaterialsHeader(spreadsheetId, opts = {}) {
+async function ensureMaterialsHeader(spreadsheetId){
   const fetchAuth = await needAuth();
 
   // Delegate header/schema creation to boot-side helper if available
   if (typeof window.__lm_ensureMaterialsHeader === 'function'){
     try{
-      if (ensure) {
-    await window.__lm_ensureMaterialsHeader(spreadsheetId);
-  }
+      await window.__lm_ensureMaterialsHeader(spreadsheetId);
     }catch(e){
       console.warn('[save.locator] __lm_ensureMaterialsHeader failed', e);
     }
@@ -129,7 +127,7 @@ async function ensureMaterialsHeader(spreadsheetId, opts = {}) {
 }
 
 
-async function ensureDefaultCaptionSheet(spreadsheetId, opts = {}) {
+async function ensureDefaultCaptionSheet(spreadsheetId){
   const fetchAuth = await needAuth();
   const props = await listSheets(spreadsheetId);
   // Find first non-materials sheet
