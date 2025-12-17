@@ -41,86 +41,35 @@ function __lm_shareLoadedList(){
   }
 }
 
-function __lm_shareEnsureBadge(){
+
+
+function __lm_shareShowWarning(message, details){
+  // Compact warning: do not create an overlapping badge/banner.
+  // Instead, remember a flag for showNotice() to render a subtle warning style.
   try{
-    if (document.getElementById('lm-share-badge')) return;
-
-    if (!document.getElementById('lm-share-badge-style')){
-      const st = document.createElement('style');
-      st.id = 'lm-share-badge-style';
-      st.textContent = `
-        #lm-share-badge{
-          position: fixed;
-          top: 10px;
-          right: 10px;
-          z-index: 99999;
-          padding: 6px 10px;
-          border-radius: 999px;
-          font: 12px/1.2 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
-          letter-spacing: .2px;
-          background: rgba(30,30,30,.86);
-          color: #fff;
-          border: 1px solid rgba(255,255,255,.14);
-          box-shadow: 0 6px 18px rgba(0,0,0,.35);
-          user-select: none;
-          pointer-events: none;
-        }
-        #lm-share-warning{
-          position: fixed;
-          top: 44px;
-          right: 10px;
-          z-index: 99999;
-          max-width: 420px;
-          padding: 10px 12px;
-          border-radius: 12px;
-          font: 12px/1.35 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
-          background: rgba(180,40,40,.92);
-          color: #fff;
-          border: 1px solid rgba(255,255,255,.18);
-          box-shadow: 0 10px 22px rgba(0,0,0,.35);
-        }
-        #lm-share-warning code{ background: rgba(0,0,0,.25); padding: 1px 4px; border-radius: 6px; }
-      `;
-      document.head.appendChild(st);
-    }
-
-    const badge = document.createElement('div');
-    badge.id = 'lm-share-badge';
-    badge.textContent = 'Share (read-only: no saves)';
-    document.body.appendChild(badge);
+    window.__LM_SHARE_SAFETY_WARN = true;
+    window.__LM_SHARE_SAFETY_MSG = message || 'Share safety warning';
+    window.__LM_SHARE_SAFETY_DETAILS = details || null;
+    console.error('[lm-share] ' + (message||'Share safety warning'), details||'');
   }catch(_e){}
 }
 
-function __lm_shareShowWarning(forbiddenHits){
-  try{
-    if (document.getElementById('lm-share-warning')) return;
-    const box = document.createElement('div');
-    box.id = 'lm-share-warning';
-    const list = (forbiddenHits || []).slice(0, 8).map(s=>`<code>${String(s)}</code>`).join(' ');
-    box.innerHTML = `
-      <div style="font-weight:700;margin-bottom:6px">Share safety warning</div>
-      <div style="opacity:.95">
-        Forbidden write-capable modules appear to be loaded:
-        <div style="margin-top:6px">${list || '<code>(unknown)</code>'}</div>
-        <div style="margin-top:8px;opacity:.9">
-          Check <code>__LM_DIAG.loaded</code> and the Share entry load list.
-        </div>
-      </div>
-    `;
-    document.body.appendChild(box);
-  }catch(_e){}
-}
 
 function __lm_shareRunStartupDiagnostics(){
-  const loaded = __lm_shareLoadedList();
-  const hits = __LM_SHARE_FORBIDDEN.filter(f => loaded.some(s => (s || '').includes(f)));
-  if (hits.length){
-    console.error('[share][diag] forbidden modules loaded:', hits, loaded);
-    __lm_shareShowWarning(hits);
-    return false;
+  // Startup diagnostic: ensure forbidden write-capable modules are not loaded in Share.
+  // This must not allocate fixed-position UI (to avoid interfering with the Share chip).
+  try{
+    const loaded = (window.__LM_DIAG && Array.isArray(window.__LM_DIAG.loaded)) ? window.__LM_DIAG.loaded.slice() : [];
+    const hits = __LM_SHARE_FORBIDDEN.filter((name)=> loaded.some((p)=> String(p).includes(name)));
+    if (hits.length){
+      __lm_shareShowWarning('Forbidden modules detected in Share mode', { hits, loaded });
+    }else{
+      // keep a trace for debugging
+      console.log('[lm-share] diagnostics ok (no forbidden modules)');
+    }
+  }catch(e){
+    console.warn('[lm-share] diagnostics error', e);
   }
-  console.log('[share][diag] ok (no forbidden modules detected)');
-  return true;
 }
 // --- /Share-mode diagnostics & UX affordances ---
 
@@ -355,7 +304,6 @@ function hardDisableCaptionAdd(){
 
 async function boot(){
   console.log('[lm-entry] Share entry starting…');
-  __lm_shareEnsureBadge();
   __lm_shareRunStartupDiagnostics();
 
   showNotice();
