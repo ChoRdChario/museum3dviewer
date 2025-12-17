@@ -47,7 +47,7 @@
   // Store (stable on window to survive reload of this script)
   const store = window.__LM_CAPTION_STORE || (window.__LM_CAPTION_STORE = {
     currentColor: '#eab308',
-    filter: new Set(),
+    filter: null, // null = filter OFF (show all); Set() = filter ON (empty means show none)
     items: [],
     selectedId: null,
     images: []
@@ -332,23 +332,34 @@
       btn.className = 'pill';
       btn.style.backgroundColor = col;
 
-      const isOn = (store.filter instanceof Set) ? store.filter.has(col) : false;
+      const f = store.filter;
+      const isOn = (f === null) ? true : ((f instanceof Set) ? f.has(col) : false);
       if (isOn) btn.classList.add('active');
       try{ btn.setAttribute('aria-pressed', isOn ? 'true' : 'false'); }catch(_){}
 
       btn.addEventListener('click', ()=>{
-        const active = (store.filter instanceof Set) ? store.filter : (store.filter = new Set());
+        // filter semantics:
+        //   store.filter === null  => OFF (show all)
+        //   store.filter is Set()  => ON  (empty => show none)
+        let active;
+        if (store.filter === null){
+          // First interaction turns filter ON with "all used" selected
+          active = new Set();
+          used.forEach(c=>active.add(c));
+          store.filter = active;
+        }else if (store.filter instanceof Set){
+          active = store.filter;
+        }else{
+          active = (store.filter = new Set());
+        }
+
         if (active.has(col)){
-          if (active.size <= 1){
-            // Do not allow an empty visible set. Instead, revert to "show all used".
-            active.clear();
-            used.forEach(c=>active.add(c));
-          }else{
-            active.delete(col);
-          }
+          // Allow empty set (show none)
+          active.delete(col);
         }else{
           active.add(col);
         }
+
         renderFilters();
         updateFilterStatus();
         applyPinFilter();
@@ -363,12 +374,18 @@
   function updateFilterStatus(){
     const used = __lm_getUsedFilterColors();
     const usedCount = used ? used.length : 0;
-    const active = (store.filter instanceof Set) ? store.filter : null;
+
+    const f = store.filter;
+    const active = (f instanceof Set) ? f : null;
     const activeCount = active ? active.size : 0;
 
     if (elFilterStatus){
       if (!usedCount){
         elFilterStatus.textContent = 'Filter: (no pins)';
+      }else if (f === null){
+        elFilterStatus.textContent = `Filter: OFF (All ${usedCount})`;
+      }else if (activeCount === 0){
+        elFilterStatus.textContent = `Filter: None (0/${usedCount})`;
       }else if (activeCount >= usedCount){
         elFilterStatus.textContent = `Filter: All (${usedCount})`;
       }else{
@@ -378,12 +395,12 @@
     if (elFilterList){
       try{
         elFilterList.dataset.usedCount = String(usedCount);
-        elFilterList.dataset.activeCount = String(activeCount);
+        elFilterList.dataset.activeCount = String((f === null) ? usedCount : activeCount);
       }catch(_){}
     }
     if (elFilterClear){
-      // Clear means "show all used". Disable when already all, or when there are no pins.
-      elFilterClear.disabled = (!usedCount) || (activeCount >= usedCount);
+      // Clear turns OFF (show all). Disable when already OFF or when no pins exist.
+      elFilterClear.disabled = (!usedCount) || (f === null);
     }
   }
 
@@ -392,8 +409,15 @@
     const br = getViewerBridge();
     if (!br || typeof br.setPinColorFilter !== 'function') return;
     try{
-      const colors = Array.from(store.filter || []);
-      br.setPinColorFilter(colors);
+      const f = store.filter;
+      if (f === null){
+        // OFF = show all pins
+        br.setPinColorFilter(null);
+      }else{
+        // ON = show subset; empty => show none
+        const colors = Array.from((f instanceof Set) ? f : []);
+        br.setPinColorFilter(colors);
+      }
     }catch(e){
       warn('setPinColorFilter failed', e);
     }
@@ -404,12 +428,8 @@
     if (elFilterClear.__lmBound) return;
     elFilterClear.__lmBound = true;
     elFilterClear.addEventListener('click', ()=>{
-      const active = (store.filter instanceof Set) ? store.filter : (store.filter = new Set());
-      active.clear();
-      const used = __lm_getUsedFilterColors();
-      if (used && used.length){
-        used.forEach(c=>active.add(c));
-      }
+      // Clear = turn filter OFF (show all pins)
+      store.filter = null;
       renderFilters();
       updateFilterStatus();
       applyPinFilter();

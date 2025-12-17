@@ -685,7 +685,7 @@ function __lm_pinColorToHex(pinColor, mesh){
 }
 
 function __lm_applyPinColorFilter(){
-  const active = (__lm_pin_color_filter && __lm_pin_color_filter.size) ? __lm_pin_color_filter : null;
+  const active = (__lm_pin_color_filter === null) ? null : __lm_pin_color_filter;
   for (const [id, mesh] of pinMarkers.entries()){
     if (!mesh) continue;
     if (!active){
@@ -703,16 +703,24 @@ function __lm_applyPinColorFilter(){
 }
 
 export function setPinColorFilter(colors, opts){
-  // colors: array of "#rrggbb" strings (can be empty / null)
+  // colors: array of "#rrggbb" strings
+  //   - null/undefined => filter OFF (show all)
+  //   - []             => filter ON but empty (show none)
+  //   - ["#rrggbb",..] => filter ON (show subset)
   // opts: { alwaysShowId?: string }
   let set = null;
   try{
-    const arr = Array.isArray(colors) ? colors : (colors ? [colors] : []);
-    for (const c of arr){
-      const hex = __lm_normHex(c);
-      if (!hex) continue;
-      if (!set) set = new Set();
-      set.add(hex);
+    if (Array.isArray(colors) && colors.length === 0){
+      // Explicit empty list means "hide all pins"
+      set = new Set();
+    }else{
+      const arr = Array.isArray(colors) ? colors : (colors ? [colors] : []);
+      for (const c of arr){
+        const hex = __lm_normHex(c);
+        if (!hex) continue;
+        if (!set) set = new Set();
+        set.add(hex);
+      }
     }
   }catch(_){ set = null; }
 
