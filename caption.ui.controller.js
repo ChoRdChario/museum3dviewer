@@ -577,24 +577,70 @@
   // --- Title / Body input wiring ----------------------------------------------
   if (elTitle){
     let rafId = 0;
+    let composing = false;
+    let justCommitted = false;
+
+    elTitle.addEventListener('compositionstart', ()=>{ composing = true; });
+    elTitle.addEventListener('compositionend', ()=>{
+      composing = false;
+      justCommitted = true;
+      const id = getSelectedIdValue(); if (!id) return;
+      const it = store.items.find(x=>x.id===id); if (!it) return;
+      it.title = elTitle.value;
+      scheduleChanged(it);
+      setTimeout(()=>{ justCommitted = false; }, 0);
+    });
+
     elTitle.addEventListener('input', ()=>{
       const id = getSelectedIdValue(); if (!id) return;
       const it = store.items.find(x=>x.id===id); if (!it) return;
       it.title = elTitle.value;
       if (rafId) cancelAnimationFrame(rafId);
       rafId = requestAnimationFrame(()=>refreshList());
+      if (composing) return;
+      if (justCommitted) return;
+      scheduleChanged(it);
+    });
+
+    elTitle.addEventListener('blur', ()=>{
+      const id = getSelectedIdValue(); if (!id) return;
+      const it = store.items.find(x=>x.id===id); if (!it) return;
+      it.title = elTitle.value;
       scheduleChanged(it);
     });
   }
 
   if (elBody){
     let rafId = 0;
+    let composing = false;
+    let justCommitted = false;
+
+    elBody.addEventListener('compositionstart', ()=>{ composing = true; });
+    elBody.addEventListener('compositionend', ()=>{
+      composing = false;
+      justCommitted = true;
+      const id = getSelectedIdValue(); if (!id) return;
+      const it = store.items.find(x=>x.id===id); if (!it) return;
+      it.body = elBody.value;
+      scheduleChanged(it);
+      setTimeout(()=>{ justCommitted = false; }, 0);
+    });
+
     elBody.addEventListener('input', ()=>{
       const id = getSelectedIdValue(); if (!id) return;
       const it = store.items.find(x=>x.id===id); if (!it) return;
       it.body = elBody.value;
       if (rafId) cancelAnimationFrame(rafId);
       rafId = requestAnimationFrame(()=>{});
+      if (composing) return;
+      if (justCommitted) return;
+      scheduleChanged(it);
+    });
+
+    elBody.addEventListener('blur', ()=>{
+      const id = getSelectedIdValue(); if (!id) return;
+      const it = store.items.find(x=>x.id===id); if (!it) return;
+      it.body = elBody.value;
       scheduleChanged(it);
     });
   }
