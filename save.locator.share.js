@@ -42,7 +42,10 @@ export async function findExistingSaveSheetByGlbId(glbFileId){
 
 export function dispatchSheetContext(ctx){
   try{
-    window.__LM_SHEET_CTX__ = Object.assign({}, ctx || {});
+    // Keep both legacy and new ctx keys for compatibility.
+    const v = Object.assign({}, ctx || {});
+    window.__LM_SHEET_CTX__ = v;
+    window.__LM_SHEET_CTX = v;
   }catch(_e){}
   try{
     document.dispatchEvent(new CustomEvent('lm:sheet-context', { detail: ctx || {} }));

@@ -8,6 +8,7 @@ import './boot.share.cdn.js';
 import './glb.btn.bridge.share.js';
 import './share.sheet.read.js';
 import './share.views.read.js';
+import './material.runtime.patch.js';
 
 function diagPush(...srcs){
   try{
@@ -15,7 +16,7 @@ function diagPush(...srcs){
     (d.loaded || (d.loaded=[])).push(...srcs);
   }catch(_e){}
 }
-diagPush('share.fetch.guard.js','boot.share.cdn.js','glb.btn.bridge.share.js','share.sheet.read.js');
+diagPush('share.fetch.guard.js','boot.share.cdn.js','glb.btn.bridge.share.js','share.sheet.read.js','share.views.read.js','material.runtime.patch.js');
 
 function loadClassic(src){
   return new Promise((resolve, reject)=>{
@@ -222,6 +223,12 @@ async function boot(){
     // Read-only image listing (Drive folder siblings). Safe: GET-only via Share auth fetch.
     await loadClassic('./caption.images.loader.js');
     await loadClassic('./views.ui.controller.share.js');
+
+    // Material tab (read-only persistence):
+    // - dropdown population (scene -> #materialSelect)
+    // - orchestrator applies sheet values (if present) and allows local tweaks (no save)
+    await loadClassic('./material.dropdown.sync.v1.js');
+    await loadClassic('./material.orchestrator.js');
   }catch(e){
     console.warn('[lm-entry] failed to load share UI scripts', e);
   }

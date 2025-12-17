@@ -166,4 +166,16 @@ window.__lm_fetchJSONAuth = async function __lm_fetchJSONAuth(url, init){
 };
 // ---------------------------------------------------------------------------
 
+// --- No-op persistence stubs (Share: never writes) --------------------------
+// Some legacy orchestrators call persistence modules opportunistically.
+// In Share we provide minimal stubs so UI interactions remain smooth.
+if (!window.LM_MaterialsPersist) {
+  window.LM_MaterialsPersist = {
+    upsert: async function(){ return { skipped:true, mode:'share' }; },
+    ensureHeaders: async function(){ return { skipped:true, mode:'share' }; },
+    flush: async function(){ return { skipped:true, mode:'share' }; }
+  };
+}
+// ---------------------------------------------------------------------------
+
 LOG("[boot/share] ready (auth wired, readonly scopes)");
