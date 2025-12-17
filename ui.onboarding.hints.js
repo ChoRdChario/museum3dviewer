@@ -1,0 +1,110 @@
+/* ui.onboarding.hints.js — v1.0
+ * Purpose: Encourage first action (Sign in / Load) and guide Load via hover tip.
+ * Scope: Edit + Share (read-only safe).
+ */
+(() => {
+  const TAG = '[lm-onboard]';
+  const STORE_KEY = 'lm_onboard_v1';
+
+  function loadState() {
+    try { return JSON.parse(localStorage.getItem(STORE_KEY) || '{}'); }
+    catch { return {}; }
+  }
+  function saveState(s) {
+    try { localStorage.setItem(STORE_KEY, JSON.stringify(s)); } catch {}
+  }
+  const state = loadState();
+
+  function markDone(k) { state[k] = true; saveState(state); }
+  function isDone(k) { return !!state[k]; }
+
+  function $(sel) { return document.querySelector(sel); }
+
+  function applyPulse(el, key) {
+    if (!el || isDone(key)) return;
+    el.classList.add('lm-attn-pulse');
+    // Remove pulse on first user click as minimum.
+    el.addEventListener('click', () => {
+      el.classList.remove('lm-attn-pulse');
+      markDone(key);
+      console.log(TAG, 'dismissed', key);
+    }, { once: true });
+  }
+
+  function wireLoadTooltip(btn) {
+    if (!btn) return;
+    const tip = [
+      '手順:',
+      '1) （必要なら）Sign in',
+      '2) GLBファイルをGoogleドライブに置く',
+      '3) 共有リンク / ファイルID を左の入力欄に貼る',
+      '4) Load を押す'
+    ].join('\\n');
+    btn.setAttribute('data-tip', tip);
+    btn.classList.add('lm-has-tip');
+    // Also keep a normal title as fallback (some browsers ignore pseudo tooltip on touch).
+    if (!btn.getAttribute('title')) btn.setAttribute('title', tip);
+  }
+
+  function onDomReady() {
+    const btnSignin = $('#auth-signin');
+    const btnLoad = $('#btnGlb');
+
+    // Always guide Load; it is a core entry point in both modes.
+    applyPulse(btnLoad, 'load');
+    wireLoadTooltip(btnLoad);
+
+    // Sign-in prompt: only if the button exists (share/edit both have it).
+    applyPulse(btnSignin, 'signin');
+
+    // Stronger: if token is acquired by any flow, mark signin done.
+    // Wrap __lm_getAccessToken when it becomes available (boot scripts may load after DOM).
+    const tryWrapGetToken = () => {
+      const w = window;
+      if (typeof w.__lm_getAccessToken !== 'function') return false;
+      if (w.__lm_getAccessToken.__lm_wrapped) return true;
+
+      const orig = w.__lm_getAccessToken;
+      const wrapped = async function(...args) {
+        const t = await orig.apply(this, args);
+        if (t) {
+          if (!isDone('signin')) {
+            markDone('signin');
+            const b = $('#auth-signin');
+            if (b) b.classList.remove('lm-attn-pulse');
+            console.log(TAG, 'signin detected via token');
+          }
+        }
+        return t;
+      };
+      wrapped.__lm_wrapped = true;
+      w.__lm_getAccessToken = wrapped;
+      return true;
+    };
+
+    if (!tryWrapGetToken()) {
+      let n = 0;
+      const itv = setInterval(() => {
+        n++;
+        if (tryWrapGetToken() || n > 24) clearInterval(itv); // ~6s max
+      }, 250);
+    }
+
+
+    // If GLB load completes, mark load done and remove pulse.
+    document.addEventListener('lm:glb-loaded', () => {
+      if (!isDone('load')) {
+        markDone('load');
+        const b = $('#btnGlb');
+        if (b) b.classList.remove('lm-attn-pulse');
+        console.log(TAG, 'glb loaded; load hint cleared');
+      }
+    }, { passive: true });
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', onDomReady, { once: true });
+  } else {
+    onDomReady();
+  }
+})();

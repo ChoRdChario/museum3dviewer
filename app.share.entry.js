@@ -7,6 +7,7 @@ import './glb.url.prefill.js';
 import './share.fetch.guard.js';
 import './init.ready.gate.js';
 import './boot.share.cdn.js';
+import './ui.onboarding.hints.js';
 import './glb.btn.bridge.share.js';
 import './share.sheet.read.js';
 import './share.views.read.js';

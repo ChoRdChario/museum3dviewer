@@ -1,5 +1,6 @@
 import './glb.url.prefill.js';
 import './edit.sharelink.ui.js';
+import './ui.onboarding.hints.js';
 
 // LociMyu - app.edit.entry.js (generated from original index.html scripts)
 // Loads the original script chain in the same order, preserving module/classic script types.

@@ -1,0 +1,59 @@
+/* ui.onboarding.hints.css — v1.0
+ * Purpose: Subtle first-click affordances for Sign in / Load without changing layout.
+ */
+
+@media (prefers-reduced-motion: reduce) {
+  .lm-attn-pulse { animation: none !important; }
+}
+
+.lm-attn-pulse {
+  animation: lmPulse 1.6s ease-in-out infinite;
+  outline: none;
+}
+
+.lm-attn-pulse:focus-visible {
+  box-shadow: 0 0 0 2px rgba(255,255,255,0.35), 0 0 0 6px rgba(255,255,255,0.18);
+}
+
+@keyframes lmPulse {
+  0%   { box-shadow: 0 0 0 0 rgba(255,255,255,0.10), 0 0 0 0 rgba(255,255,255,0.00); transform: translateZ(0) scale(1); }
+  55%  { box-shadow: 0 0 0 6px rgba(255,255,255,0.18), 0 0 0 14px rgba(255,255,255,0.06); transform: translateZ(0) scale(1.01); }
+  100% { box-shadow: 0 0 0 0 rgba(255,255,255,0.10), 0 0 0 0 rgba(255,255,255,0.00); transform: translateZ(0) scale(1); }
+}
+
+/* Hover tooltip for Load button (safe, local to button) */
+#btnGlb.lm-has-tip { position: relative; }
+
+#btnGlb.lm-has-tip:hover::after,
+#btnGlb.lm-has-tip:focus-visible::after {
+  content: attr(data-tip);
+  position: absolute;
+  left: 50%;
+  top: calc(100% + 8px);
+  transform: translateX(-50%);
+  z-index: 9999;
+  width: min(360px, 86vw);
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(10,10,10,0.92);
+  color: #eaeaea;
+  font-size: 12px;
+  line-height: 1.35;
+  white-space: normal;
+  text-align: left;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.55);
+  pointer-events: none; /* avoid stealing hover */
+}
+
+#btnGlb.lm-has-tip:hover::before,
+#btnGlb.lm-has-tip:focus-visible::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: calc(100% + 2px);
+  transform: translateX(-50%);
+  border: 6px solid transparent;
+  border-bottom-color: rgba(10,10,10,0.92);
+  z-index: 10000;
+  pointer-events: none;
+}
