@@ -1,4 +1,4 @@
-/* ui.onboarding.hints.css — v1.0
+/* ui.onboarding.hints.css — v1.1
  * Purpose: Subtle first-click affordances for Sign in / Load without changing layout.
  */
 
@@ -30,17 +30,20 @@
   position: absolute;
   /* Align to the button's right edge so the bubble grows leftwards (avoids overflowing to the right). */
   right: 0;
-  top: calc(100% + 8px);
+  bottom: calc(100% + 10px);
   z-index: 9999;
   width: max-content;
-  max-width: min(280px, 86vw);
-  padding: 10px 12px;
+  max-width: min(240px, 86vw);
+  padding: 8px 10px;
   border-radius: 10px;
-  background: rgba(10,10,10,0.92);
+  background: rgba(10,10,10,0.96);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid rgba(255,255,255,0.10);
   color: #eaeaea;
   font-size: 12px;
   line-height: 1.35;
-  white-space: normal;
+  white-space: nowrap;
   text-align: left;
   box-shadow: 0 10px 30px rgba(0,0,0,0.55);
   pointer-events: none; /* avoid stealing hover */
@@ -51,9 +54,9 @@
   content: "";
   position: absolute;
   right: 14px;
-  top: calc(100% + 2px);
+  bottom: calc(100% + 4px);
   border: 6px solid transparent;
-  border-bottom-color: rgba(10,10,10,0.92);
+  border-top-color: rgba(10,10,10,0.92);
   z-index: 10000;
   pointer-events: none;
 }
