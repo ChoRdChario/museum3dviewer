@@ -121,6 +121,8 @@
       opacity:0.9;
     }
     button.mini:hover{ opacity:1; }
+    a.mini-link{display:inline-block;font-size:12px;color:var(--acc);text-decoration:none;border:1px solid var(--line);padding:6px 10px;border-radius:999px;opacity:0.9;line-height:1;}
+    a.mini-link:hover{opacity:1;color:var(--text);}
 
 </style>
 
@@ -128,8 +130,9 @@
 <meta content="width=device-width,initial-scale=1" name="viewport"/>
 <title>LociMyu α</title>
 <link href="data:," rel="icon"/>
-<meta content="595200751510-ncahnf7edci6b9925becn5to49r6cguv.apps.googleusercontent.com" name="google-oauth-client_id"/>
-<meta content="AIzaSyCUnTCr5yWUWPdEXST9bKP1LpgawU5rIbI" name="google-api-key"/>
+<meta content="" name="google-oauth-client_id"/>
+<meta content="" name="google-api-key"/>
+<script src="./config.js"></script>
 <script async="" defer="" src="https://accounts.google.com/gsi/client"></script>
 <style>
     :root{
@@ -236,6 +239,7 @@
 <header id="topbar">
 <div id="brand">LociMyu α</div>
 <div class="row" style="gap:6px;flex:0 0 auto">
+<a class="mini-link" href="./privacy.html" target="_blank" rel="noopener">Privacy</a>
 <button id="auth-signin">Sign in</button>
 </div>
 </header>
