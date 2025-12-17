@@ -577,65 +577,29 @@
   // --- Title / Body input wiring ----------------------------------------------
   if (elTitle){
     let rafId = 0;
-    let composing = false;
-    let skipNextInput = false;
-
-    elTitle.addEventListener('compositionstart', ()=>{
-      composing = true;
-    });
-
-    elTitle.addEventListener('compositionend', ()=>{
-      composing = false;
-      skipNextInput = true;
-      const id = getSelectedIdValue(); if (!id) return;
-      const it = store.items.find(x=>x.id===id); if (!it) return;
-      it.title = elTitle.value;
-      if (rafId) cancelAnimationFrame(rafId);
-      rafId = requestAnimationFrame(()=>refreshList());
-      scheduleChanged(it);
-    });
-
     elTitle.addEventListener('input', ()=>{
       const id = getSelectedIdValue(); if (!id) return;
       const it = store.items.find(x=>x.id===id); if (!it) return;
       it.title = elTitle.value;
       if (rafId) cancelAnimationFrame(rafId);
       rafId = requestAnimationFrame(()=>refreshList());
-      if (skipNextInput){ skipNextInput = false; return; }
-      if (composing) return;
       scheduleChanged(it);
     });
-  }if (elBody){
+  }
+
+  if (elBody){
     let rafId = 0;
-    let composing = false;
-    let skipNextInput = false;
-
-    elBody.addEventListener('compositionstart', ()=>{
-      composing = true;
-    });
-
-    elBody.addEventListener('compositionend', ()=>{
-      composing = false;
-      skipNextInput = true;
-      const id = getSelectedIdValue(); if (!id) return;
-      const it = store.items.find(x=>x.id===id); if (!it) return;
-      it.body = elBody.value;
-      if (rafId) cancelAnimationFrame(rafId);
-      rafId = requestAnimationFrame(()=>{});
-      scheduleChanged(it);
-    });
-
     elBody.addEventListener('input', ()=>{
       const id = getSelectedIdValue(); if (!id) return;
       const it = store.items.find(x=>x.id===id); if (!it) return;
       it.body = elBody.value;
       if (rafId) cancelAnimationFrame(rafId);
       rafId = requestAnimationFrame(()=>{});
-      if (skipNextInput){ skipNextInput = false; return; }
-      if (composing) return;
       scheduleChanged(it);
     });
-  }// --- Images grid ------------------------------------------------------------
+  }
+
+  // --- Images grid ------------------------------------------------------------
   function getSelectedItem(){
     const sid = getSelectedIdValue();
     if (!sid) return null;

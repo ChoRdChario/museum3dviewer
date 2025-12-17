@@ -104,7 +104,9 @@ async function ensureMaterialsHeader(spreadsheetId, opts = {}) {
   // Delegate header/schema creation to boot-side helper if available
   if (typeof window.__lm_ensureMaterialsHeader === 'function'){
     try{
-      await window.__lm_ensureMaterialsHeader(spreadsheetId);
+      if (ensure) {
+    await window.__lm_ensureMaterialsHeader(spreadsheetId);
+  }
     }catch(e){
       console.warn('[save.locator] __lm_ensureMaterialsHeader failed', e);
     }
