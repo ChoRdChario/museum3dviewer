@@ -1,4 +1,64 @@
+/* ===== Sheet rename UI layout (Edit mode) =====
+   Goal: keep buttons compact; give the rename input the space.
+   Works for both legacy DOM (#sheet-select) and current DOM (#save-target-sheet).
+*/
 
-/* Keep sheet dropdown width fixed */
-#sheet-select-wrapper, #save-target-sheet-wrapper{ width:240px; max-width:100%; display:inline-block; vertical-align:middle; }
-#sheet-select, #save-target-sheet{ width:100%; max-width:100%; }
+#sheet-select-wrapper,
+#save-target-sheet-wrapper{
+  flex:1 1 auto;
+  min-width:0;
+  display:flex;
+  align-items:center;
+  gap:6px;
+}
+
+#sheet-select,
+#save-target-sheet{
+  flex:1 1 auto;
+  min-width:0;
+  width:100%;
+  max-width:100%;
+}
+
+/* Rename controls live next to the select */
+#sheet-rename-root{
+  flex:1 1 auto;
+  min-width:0;
+  display:flex;
+  align-items:center;
+  gap:6px;
+}
+
+/* Icon buttons: square, compact */
+.sheet-rename-ui .sr-btn{
+  width:32px;
+  height:32px;
+  padding:0;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  border-radius:8px;
+  line-height:1;
+}
+
+/* Rename input should be the primary width consumer */
+.sheet-rename-ui .sr-input{
+  flex:1 1 auto;
+  min-width:0;
+  width:100%;
+  max-width:none;
+}
+
+/* When renaming, hide the select to avoid squashing everything */
+#save-target-sheet-wrapper.is-renaming > #save-target-sheet{
+  display:none;
+}
+#sheet-select-wrapper.is-renaming > #sheet-select{
+  display:none;
+}
+
+/* Optional: busy state also hides select (keeps the row stable) */
+#save-target-sheet-wrapper.is-busy > #save-target-sheet,
+#sheet-select-wrapper.is-busy > #sheet-select{
+  display:none;
+}

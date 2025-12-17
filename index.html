@@ -149,6 +149,20 @@
     input[type="text"]{width:100%;box-sizing:border-box}
     .row{display:flex;gap:8px;align-items:center}
     .row > *{flex:1}
+
+    /* ===== Top controls: inputs grow, buttons stay compact ===== */
+    .ctrl-row{flex-wrap:nowrap}
+    .ctrl-row > *{flex:0 0 auto}
+    .ctrl-row input[type="text"],
+    .ctrl-row select,
+    .ctrl-row #save-target-sheet-wrapper{flex:1 1 auto; min-width:0}
+    .ctrl-row button{flex:0 0 auto; width:auto; min-width:96px; padding:6px 12px}
+    /* Keep Create/Load from dominating on wide screens */
+    #btnGlb, #save-target-create{min-width:96px}
+
+    /* Make the sheet row resilient when rename UI is mounted */
+    .sheet-row{align-items:center}
+
     .tabs{display:flex;border-bottom:1px solid var(--line)}
     .tabs button{flex:1;border:0;border-bottom:2px solid transparent;padding:8px 12px;
       background:transparent;color:var(--acc);cursor:pointer}
@@ -226,11 +240,11 @@
 </div>
 </header>
 <div class="pad" style="border-bottom:1px solid var(--line)">
-<div class="row">
+<div class="row ctrl-row">
 <input id="glbUrl" placeholder="Drive fileId / GLB URL" type="text"/>
 <button id="btnGlb">Load</button>
 </div>
-<div class="row" style="margin-top:8px">
+<div class="row ctrl-row sheet-row" style="margin-top:8px">
 <select id="save-target-sheet"><option value="">Select sheet…</option></select>
 <button id="save-target-create">Create</button>
 </div>

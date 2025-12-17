@@ -71,6 +71,13 @@
 
   // --- view state ------------------------------------------------------
   function updateSheetRenameView(mode) {
+    const rootEl = $("sheet-rename-root");
+    const wrapperEl = rootEl && rootEl.parentElement;
+    if (wrapperEl && wrapperEl.classList) {
+      wrapperEl.classList.toggle("is-renaming", mode === "edit");
+      wrapperEl.classList.toggle("is-busy", mode === "busy");
+    }
+
     const label = $("sheet-rename-label");
     const input = $("sheet-rename-input");
     const ok = $("sheet-rename-ok");
@@ -666,10 +673,11 @@ async function sheetsUpdateTitle(
     root.style.display = "inline-flex";
     root.style.alignItems = "center";
     root.style.gap = "4px";
+    root.style.flex = "1 1 auto";
     root.innerHTML = [
       '<button id="sheet-rename-edit" class="sr-btn sr-edit" type="button" title="Rename sheet">✎</button>',
       '<span id="sheet-rename-label" class="sr-label">(no sheet)</span>',
-      '<input id="sheet-rename-input" class="sr-input" type="text" style="display:none;max-width:160px;">',
+      '<input id="sheet-rename-input" class="sr-input" type="text" style="display:none;">',
       '<button id="sheet-rename-ok" class="sr-btn sr-ok" type="button" title="Apply" style="display:none;">✓</button>',
       '<button id="sheet-rename-cancel" class="sr-btn sr-cancel" type="button" title="Cancel" style="display:none;">×</button>',
       '<span id="sheet-rename-spin" class="sr-spin" aria-hidden="true" style="display:none;">⏳</span>',
