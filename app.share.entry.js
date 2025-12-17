@@ -268,18 +268,62 @@ function disableCaptionImageAttachUI(){
 }
 
 function showNotice(){
+  // Compact, single-line notice (Option B): keep the UI unobtrusive.
+  // Detailed explanation is available via an info tooltip.
   const right = document.querySelector('#right') || document.body;
-  const box = document.createElement('div');
-  box.className = 'panel';
-  box.innerHTML = `
-    <h4>Share Mode</h4>
-    <div class="muted">
-      Read-only build. Sheets/Drive writes are blocked by design (write modules are not loaded) and by guard (non-GET blocked).
-      <div style="margin-top:6px">Diagnostics: open Console and run <code>__LM_DIAG.loaded</code>.</div>
-    </div>
-  `;
-  // put at top
-  right.insertBefore(box, right.firstChild);
+
+  try{
+    // One-time style for the notice line.
+    if (!document.querySelector('style[data-lm-share="notice-line"]')){
+      const st = document.createElement('style');
+      st.setAttribute('data-lm-share', 'notice-line');
+      st.textContent = `
+        .lm-share-notice-line{
+          display:flex; align-items:center; gap:10px;
+          padding:8px 12px; margin:10px 10px 0;
+          border:1px solid rgba(255,255,255,.12);
+          border-radius:12px;
+          background: rgba(255,255,255,.04);
+          color: rgba(255,255,255,.88);
+          font-size:12px; line-height:1.2;
+        }
+        .lm-share-notice-line .lm-share-notice-text{ white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+        .lm-share-notice-line .lm-share-notice-info{
+          margin-left:auto;
+          width:22px; height:22px; padding:0;
+          display:inline-flex; align-items:center; justify-content:center;
+          border-radius:999px;
+          border:1px solid rgba(255,255,255,.18);
+          background: rgba(0,0,0,.12);
+          color: rgba(255,255,255,.82);
+          font-weight:600;
+          cursor:help;
+        }
+        .lm-share-notice-line .lm-share-notice-info:focus{ outline:2px solid rgba(255,255,255,.22); outline-offset:2px; }
+      `;
+      document.head.appendChild(st);
+    }
+  }catch(_e){}
+
+  const line = document.createElement('div');
+  line.className = 'lm-share-notice-line';
+  const text = document.createElement('div');
+  text.className = 'lm-share-notice-text';
+  text.textContent = 'Share (read-only; no saves)';
+
+  const info = document.createElement('button');
+  info.type = 'button';
+  info.className = 'lm-share-notice-info';
+  info.textContent = 'i';
+  info.title = [
+    'Read-only build.',
+    'Sheets/Drive writes are blocked by design (write modules are not loaded) and by guard (non-GET blocked).',
+    'Diagnostics: open Console and run __LM_DIAG.loaded.'
+  ].join(' ');
+
+  line.appendChild(text);
+  line.appendChild(info);
+  right.insertBefore(line, right.firstChild);
 }
 
 function ensureTabsWork(){
