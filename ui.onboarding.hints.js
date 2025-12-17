@@ -44,7 +44,7 @@
   function wireLoadTooltip(btn) {
     if (!btn) return;
     // Use native tooltip (title) so we don't need layout-tuning when copy changes.
-    const tip = 'Googleドライブに保存したGLBモデルをの共有リンクを入力してLoad';
+    const tip = 'Googleドライブに保存したGLBモデルの共有リンクを入力してLoad';
     // Clean up any legacy custom tooltip attributes/classes.
     btn.removeAttribute('data-tip');
     btn.classList.remove('lm-has-tip');
