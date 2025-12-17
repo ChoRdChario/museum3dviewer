@@ -576,8 +576,29 @@
 
   // --- Title / Body input wiring ----------------------------------------------
   if (elTitle){
+    let composingTitle = false;
+    let composingBody = false;
+    elTitle.addEventListener('compositionstart', ()=>{ composingTitle = true; });
+    elTitle.addEventListener('compositionend', ()=>{
+      composingTitle = false;
+      const id = getSelectedIdValue(); if (!id) return;
+      const it = store.items.find(x=>x.id===id); if (!it) return;
+      it.title = elTitle.value;
+      scheduleChanged(it);
+    });
+    if (elBody){
+      elBody.addEventListener('compositionstart', ()=>{ composingBody = true; });
+      elBody.addEventListener('compositionend', ()=>{
+        composingBody = false;
+        const id = getSelectedIdValue(); if (!id) return;
+        const it = store.items.find(x=>x.id===id); if (!it) return;
+        it.body = elBody.value;
+        scheduleChanged(it);
+      });
+    }
     let rafId = 0;
     elTitle.addEventListener('input', ()=>{
+      if (composingTitle) return;
       const id = getSelectedIdValue(); if (!id) return;
       const it = store.items.find(x=>x.id===id); if (!it) return;
       it.title = elTitle.value;
@@ -590,6 +611,7 @@
   if (elBody){
     let rafId = 0;
     elBody.addEventListener('input', ()=>{
+      if (composingBody) return;
       const id = getSelectedIdValue(); if (!id) return;
       const it = store.items.find(x=>x.id===id); if (!it) return;
       it.body = elBody.value;

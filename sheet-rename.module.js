@@ -239,6 +239,12 @@
     })).filter(s => s.sheetId && s.title);
   }
 
+  async function findSheetByTitle(spreadsheetId, title){
+    const props = await fetchSheetProps(spreadsheetId);
+    return props.find(s => s.title === String(title || '')) || null;
+  }
+
+
   async function ensureSheetNameRegistrySheet(spreadsheetId) {
   if (!spreadsheetId) return null;
   const exist = await findSheetByTitle(spreadsheetId, REGISTRY_SHEET_TITLE);
