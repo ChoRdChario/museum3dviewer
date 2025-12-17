@@ -23,6 +23,13 @@ const MANIFEST = [
   },
   {
     "kind": "external",
+    "src": "./init.ready.gate.js",
+    "type": "module",
+    "id": null
+  },
+
+  {
+    "kind": "external",
     "src": "./boot.esm.cdn.js",
     "type": "module",
     "id": null

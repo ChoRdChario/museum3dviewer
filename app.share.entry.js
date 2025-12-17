@@ -4,6 +4,7 @@
 // Guard remains as an insurance policy.
 
 import './share.fetch.guard.js';
+import './init.ready.gate.js';
 import './boot.share.cdn.js';
 import './glb.btn.bridge.share.js';
 import './share.sheet.read.js';
@@ -16,7 +17,7 @@ function diagPush(...srcs){
     (d.loaded || (d.loaded=[])).push(...srcs);
   }catch(_e){}
 }
-diagPush('share.fetch.guard.js','boot.share.cdn.js','glb.btn.bridge.share.js','share.sheet.read.js','share.views.read.js','material.runtime.patch.js');
+diagPush('share.fetch.guard.js','init.ready.gate.js','boot.share.cdn.js','glb.btn.bridge.share.js','share.sheet.read.js','share.views.read.js','material.runtime.patch.js');
 
 // --- Share-mode diagnostics & UX affordances (Step 7) ---
 const __LM_SHARE_FORBIDDEN = [

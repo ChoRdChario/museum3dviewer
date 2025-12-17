@@ -330,6 +330,8 @@
       const ui = await waitCaptionUI();
       if (ui && typeof ui.setItems === 'function'){
         ui.setItems(items);
+        try{ document.dispatchEvent(new CustomEvent('lm:captions-loaded', { detail:{ count: (items||[]).length } })); }catch(_e){}
+        try{ window.__LM_READY_GATE__?.mark?.('captions'); }catch(_e){}
       }else{
         warn('caption UI missing setItems');
       }
@@ -369,6 +371,7 @@
       }
     }catch(e){
       warn('load captions failed', e);
+      try{ window.__LM_READY_GATE__?.mark?.('captions'); }catch(_e){}
     }
   }
 

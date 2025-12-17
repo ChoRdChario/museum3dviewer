@@ -203,14 +203,30 @@
     const mod = await import('./viewer.module.cdn.js');
     try{ console.log(TAG, 'exports:', Object.keys(mod)); }catch(_){ }
     ensureViewerBridge(mod);
+
+    const gate = window.__LM_READY_GATE__;
+    let gateRun = 0;
+    try{
+      if (gate && typeof gate.begin === 'function'){
+        gateRun = gate.begin(['glb','sheet','captions','images'], { message:'Loading…', timeoutMs: 20000 });
+      }
+    }catch(_e){ gateRun = 0; }
+
     showOverlay('GLB を読み込んでいます…');
     let safe = true; const safeHide=()=>{ if(safe){ safe=false; hideOverlay(); } };
+
     try{
       await ensureViewerReady(mod);
       const token = await getToken();
       await mod.loadGlbFromDrive(fileId, { token });
-    }catch(e){ err('loadGlbFromDrive threw', e); safeHide(); throw e; }
-    setTimeout(safeHide, 120);
+      try{ gate && gate.mark && gate.mark('glb'); }catch(_e){}
+    }catch(e){
+      err('loadGlbFromDrive threw', e);
+      try{ gate && gate.finish && gate.finish(); }catch(_e){}
+      safeHide();
+      throw e;
+    }
+
     try{ window.__LM_CURRENT_GLB_ID__ = fileId; }catch(_e){}
     try{ document.dispatchEvent(new CustomEvent('lm:glb-loaded', { detail:{ glbFileId:fileId } })); }catch(_e){}
     try{ document.dispatchEvent(new Event('lm:scene-ready')); }catch(_e){}
@@ -219,6 +235,13 @@
     // await postLoadEnsureSaveSheet(fileId);
 
     try{ document.dispatchEvent(new Event('lm:refresh-images')); }catch(_){ }
+
+    if (gateRun){
+      try{ await gate.wait(); }catch(_e){}
+      safeHide();
+    } else {
+      setTimeout(safeHide, 120);
+    }
   }
 
   function wireBtn(){

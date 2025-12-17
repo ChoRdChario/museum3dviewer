@@ -223,20 +223,52 @@
   }
 
   async function loadById(fileId){
-    const mod = await import('./viewer.module.cdn.js');
-    try{ console.log(TAG, 'exports:', Object.keys(mod)); }catch(_){ }
-    ensureViewerBridge(mod);
+    // Gate the UI until sheet/captions/images have settled.
+    const gate = window.__LM_READY_GATE__;
+    let gateRun = 0;
+    try{
+      if (gate && typeof gate.begin === 'function'){
+        gateRun = gate.begin(['glb','sheet','captions','images'], { message:'Loading…', timeoutMs: 20000 });
+      }
+    }catch(_e){ gateRun = 0; }
+
     showOverlay('GLB を読み込んでいます…');
     let safe = true; const safeHide=()=>{ if(safe){ safe=false; hideOverlay(); } };
+
     try{
-      await ensureViewerReady(mod);
+      await ensureViewerReady();
+
+      const mod = window.__lm_viewer_module;
+      if (!mod) throw new Error('viewer.module missing');
+
       const token = await getToken();
       await mod.loadGlbFromDrive(fileId, { token });
-    }catch(e){ err('loadGlbFromDrive threw', e); safeHide(); throw e; }
-    setTimeout(safeHide, 120);
-    await postLoadEnsureSaveSheet(fileId);
-    try{ document.dispatchEvent(new Event('lm:refresh-images')); }catch(_){ }
+
+      // Track GLB id for downstream modules (they may rely on this).
+      try{ window.__LM_CURRENT_GLB_ID__ = fileId; }catch(_e){}
+      try{ gate?.mark?.('glb'); }catch(_e){}
+
+      // Existing pipeline: locate / create save sheet and dispatch sheet-context, etc.
+      await postLoadEnsureSaveSheet(fileId);
+
+      // Images are loaded from GLB folder (Drive). Let the images loader start now.
+      try{ document.dispatchEvent(new Event('lm:refresh-images')); }catch(_e){}
+    }catch(e){
+      err('loadById failed', e);
+      try{ gate?.finish?.(); }catch(_e){}
+      safeHide();
+      throw e;
+    }
+
+    if (gateRun){
+      try{ await gate.wait(); }catch(_e){}
+      safeHide();
+    } else {
+      setTimeout(safeHide, 120);
+    }
   }
+
+
 
   function wireBtn(){
     const btn = document.querySelector('#btnGlb');

@@ -7,6 +7,7 @@
 import { findExistingSaveSheetByGlbId, dispatchSheetContext } from './save.locator.share.js';
 
 const TAG = '[share.sheet.read]';
+const gate = window.__LM_READY_GATE__;
 const SHEETS_BASE = 'https://sheets.googleapis.com/v4/spreadsheets';
 
 function log(...a){ console.log(TAG, ...a); }
@@ -121,10 +122,12 @@ async function loadForSelectedSheet(spreadsheetId, sheets){
     applyItems(items);
     setStatus(`Captions: ${items.length}`);
     log('loaded captions', items.length, 'from', picked.title);
+    try{ gate?.mark?.('captions'); }catch(_e){}
   }catch(e){
     err('failed to read captions', e);
     setStatus('Captions: failed to load (read-only)');
     applyItems([]);
+    try{ gate?.mark?.('captions'); }catch(_e){}
   }
 }
 
@@ -141,12 +144,16 @@ async function start(glbFileId){
 
   if (!ctx?.spreadsheetId){
     dispatchSheetContext({ mode:'share', glbFileId, spreadsheetId:null, parentId:ctx?.parentId||null });
+    try{ gate?.mark?.('sheet'); }catch(_e){}
     setStatus('Spreadsheet: not found (read-only)');
     applyItems([]);
+    try{ gate?.mark?.('captions'); }catch(_e){}
     return;
   }
 
   dispatchSheetContext({ mode:'share', glbFileId, spreadsheetId:ctx.spreadsheetId, parentId:ctx.parentId||null });
+
+  try{ gate?.mark?.('sheet'); }catch(_e){}
 
   setStatus('Spreadsheet: found. Listing sheets…');
   let sheets = [];
