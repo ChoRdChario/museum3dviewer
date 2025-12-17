@@ -28,6 +28,43 @@ function loadClassic(src){
   });
 }
 
+
+function wireTabs(){
+  try{
+    const tabs = Array.from(document.querySelectorAll('nav[role="tablist"] [role="tab"][data-tab]'));
+    const panes = Array.from(document.querySelectorAll('section.pane[data-pane]'));
+    if (!tabs.length || !panes.length){
+      console.warn('[share] tab wiring: tabs/panes not found');
+      return;
+    }
+
+    function activate(name){
+      tabs.forEach(btn=>{
+        const on = (btn.dataset.tab === name);
+        btn.setAttribute('aria-selected', on ? 'true' : 'false');
+      });
+      panes.forEach(p=>{
+        const on = (p.dataset.pane === name);
+        p.setAttribute('data-active', on ? 'true' : 'false');
+      });
+    }
+
+    tabs.forEach(btn=>{
+      btn.addEventListener('click', (ev)=>{
+        ev.preventDefault();
+        ev.stopPropagation();
+        activate(btn.dataset.tab || 'caption');
+      }, {capture:true});
+    });
+
+    const initial = (tabs.find(b=>b.getAttribute('aria-selected') === 'true') || tabs[0])?.dataset?.tab || 'caption';
+    activate(initial);
+    console.log('[share] tab wiring ok');
+  }catch(e){
+    console.warn('[share] tab wiring failed', e);
+  }
+}
+
 function disableWritesUI(){
   // Disable any obvious "create/save" affordances in Share
   const ids = [
@@ -171,6 +208,7 @@ async function boot(){
   showNotice();
   ensureTabsWork();
   disableWritesUI();
+  wireTabs();
   disableCaptionDeleteUI();
   disableCaptionImageAttachUI();
   hardDisableCaptionAdd();
