@@ -1,4 +1,4 @@
-/* ui.onboarding.hints.js — v1.1
+/* ui.onboarding.hints.js — v1.2
  * Purpose: Encourage first action (Sign in / Load) and guide Load via hover tip.
  * Scope: Edit + Share (read-only safe).
  */
@@ -43,11 +43,12 @@
 
   function wireLoadTooltip(btn) {
     if (!btn) return;
-    // Keep copy short (tooltip should not block layout) and avoid literal \n.
-    const tip = 'DriveのGLBリンク/ID → Load（必要なら Sign in）';
-    btn.setAttribute('data-tip', tip);
-    btn.classList.add('lm-has-tip');
-    // Intentionally do NOT set `title`: we use a single custom tooltip to avoid duplicate native cursor tooltips.
+    // Use native tooltip (title) so we don't need layout-tuning when copy changes.
+    const tip = 'Googleドライブに保存したGLBモデルをの共有リンクを入力してLoad';
+    // Clean up any legacy custom tooltip attributes/classes.
+    btn.removeAttribute('data-tip');
+    btn.classList.remove('lm-has-tip');
+    btn.setAttribute('title', tip);
   }
 
   function onDomReady() {

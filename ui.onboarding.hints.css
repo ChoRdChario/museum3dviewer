@@ -1,4 +1,4 @@
-/* ui.onboarding.hints.css — v1.1
+/* ui.onboarding.hints.css — v1.2
  * Purpose: Subtle first-click affordances for Sign in / Load without changing layout.
  */
 
@@ -21,42 +21,3 @@
   100% { box-shadow: 0 0 0 0 rgba(255,255,255,0.10), 0 0 0 0 rgba(255,255,255,0.00); transform: translateZ(0) scale(1); }
 }
 
-/* Hover tooltip for Load button (safe, local to button) */
-#btnGlb.lm-has-tip { position: relative; }
-
-#btnGlb.lm-has-tip:hover::after,
-#btnGlb.lm-has-tip:focus-visible::after {
-  content: attr(data-tip);
-  position: absolute;
-  /* Align to the button's right edge so the bubble grows leftwards (avoids overflowing to the right). */
-  right: 0;
-  bottom: calc(100% + 10px);
-  z-index: 9999;
-  width: max-content;
-  max-width: min(240px, 86vw);
-  padding: 8px 10px;
-  border-radius: 10px;
-  background: rgba(10,10,10,0.96);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
-  border: 1px solid rgba(255,255,255,0.10);
-  color: #eaeaea;
-  font-size: 12px;
-  line-height: 1.35;
-  white-space: nowrap;
-  text-align: left;
-  box-shadow: 0 10px 30px rgba(0,0,0,0.55);
-  pointer-events: none; /* avoid stealing hover */
-}
-
-#btnGlb.lm-has-tip:hover::before,
-#btnGlb.lm-has-tip:focus-visible::before {
-  content: "";
-  position: absolute;
-  right: 14px;
-  bottom: calc(100% + 4px);
-  border: 6px solid transparent;
-  border-top-color: rgba(10,10,10,0.92);
-  z-index: 10000;
-  pointer-events: none;
-}
