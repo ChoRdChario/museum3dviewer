@@ -7,6 +7,7 @@ import './share.fetch.guard.js';
 import './boot.share.cdn.js';
 import './glb.btn.bridge.share.js';
 import './share.sheet.read.js';
+import './share.views.read.js';
 
 function diagPush(...srcs){
   try{
@@ -34,6 +35,7 @@ function disableWritesUI(){
     '#btnSaveView',
     '#btnSaveViewDebounced',
     '#btnRenameSheet',
+    '#view-save',
   ];
   ids.forEach(sel=>{
     const el = document.querySelector(sel);
@@ -181,6 +183,7 @@ async function boot(){
     await loadClassic('./caption.ui.controller.js');
     // Read-only image listing (Drive folder siblings). Safe: GET-only via Share auth fetch.
     await loadClassic('./caption.images.loader.js');
+    await loadClassic('./views.ui.controller.share.js');
   }catch(e){
     console.warn('[lm-entry] failed to load share UI scripts', e);
   }

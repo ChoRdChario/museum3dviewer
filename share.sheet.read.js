@@ -109,6 +109,12 @@ async function loadForSelectedSheet(spreadsheetId, sheets){
     return;
   }
   if (!sel.value) sel.value = String(picked.gid);
+
+  // Update sheet context for downstream consumers (views/materials).
+  try{
+    const baseCtx = window.__LM_SHEET_CTX__ || {};
+    dispatchSheetContext(Object.assign({}, baseCtx, { sheetGid: picked.gid, sheetTitle: picked.title }));
+  }catch(_e){}
   setStatus(`Loading captions from ${picked.title}…`);
   try{
     const items = await readCaptionRows(spreadsheetId, picked.title);
