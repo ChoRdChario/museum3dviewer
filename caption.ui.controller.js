@@ -576,29 +576,17 @@
 
   // --- Title / Body input wiring ----------------------------------------------
   if (elTitle){
-    let composingTitle = false;
-    let composingBody = false;
-    elTitle.addEventListener('compositionstart', ()=>{ composingTitle = true; });
-    elTitle.addEventListener('compositionend', ()=>{
-      composingTitle = false;
-      const id = getSelectedIdValue(); if (!id) return;
-      const it = store.items.find(x=>x.id===id); if (!it) return;
-      it.title = elTitle.value;
-      scheduleChanged(it);
-    });
-    if (elBody){
-      elBody.addEventListener('compositionstart', ()=>{ composingBody = true; });
-      elBody.addEventListener('compositionend', ()=>{
-        composingBody = false;
-        const id = getSelectedIdValue(); if (!id) return;
-        const it = store.items.find(x=>x.id===id); if (!it) return;
-        it.body = elBody.value;
-        scheduleChanged(it);
-      });
-    }
     let rafId = 0;
-    elTitle.addEventListener('input', ()=>{
-      if (composingTitle) return;
+    let composing = false;
+    let skipNextInput = false;
+
+    elTitle.addEventListener('compositionstart', ()=>{
+      composing = true;
+    });
+
+    elTitle.addEventListener('compositionend', ()=>{
+      composing = false;
+      skipNextInput = true;
       const id = getSelectedIdValue(); if (!id) return;
       const it = store.items.find(x=>x.id===id); if (!it) return;
       it.title = elTitle.value;
@@ -606,12 +594,29 @@
       rafId = requestAnimationFrame(()=>refreshList());
       scheduleChanged(it);
     });
-  }
 
-  if (elBody){
+    elTitle.addEventListener('input', ()=>{
+      const id = getSelectedIdValue(); if (!id) return;
+      const it = store.items.find(x=>x.id===id); if (!it) return;
+      it.title = elTitle.value;
+      if (rafId) cancelAnimationFrame(rafId);
+      rafId = requestAnimationFrame(()=>refreshList());
+      if (skipNextInput){ skipNextInput = false; return; }
+      if (composing) return;
+      scheduleChanged(it);
+    });
+  }if (elBody){
     let rafId = 0;
-    elBody.addEventListener('input', ()=>{
-      if (composingBody) return;
+    let composing = false;
+    let skipNextInput = false;
+
+    elBody.addEventListener('compositionstart', ()=>{
+      composing = true;
+    });
+
+    elBody.addEventListener('compositionend', ()=>{
+      composing = false;
+      skipNextInput = true;
       const id = getSelectedIdValue(); if (!id) return;
       const it = store.items.find(x=>x.id===id); if (!it) return;
       it.body = elBody.value;
@@ -619,9 +624,18 @@
       rafId = requestAnimationFrame(()=>{});
       scheduleChanged(it);
     });
-  }
 
-  // --- Images grid ------------------------------------------------------------
+    elBody.addEventListener('input', ()=>{
+      const id = getSelectedIdValue(); if (!id) return;
+      const it = store.items.find(x=>x.id===id); if (!it) return;
+      it.body = elBody.value;
+      if (rafId) cancelAnimationFrame(rafId);
+      rafId = requestAnimationFrame(()=>{});
+      if (skipNextInput){ skipNextInput = false; return; }
+      if (composing) return;
+      scheduleChanged(it);
+    });
+  }// --- Images grid ------------------------------------------------------------
   function getSelectedItem(){
     const sid = getSelectedIdValue();
     if (!sid) return null;
