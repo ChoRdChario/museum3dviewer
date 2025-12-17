@@ -45,8 +45,9 @@ function disableWritesUI(){
     }
   });
 
-  // Disable caption edit inputs (view-only)
-  const capInputs = ['#caption-title','#caption-body','#btnRefreshImages'];
+  // Disable caption text edits (view-only)
+  // NOTE: Images refresh is read-only and safe, so we keep it enabled.
+  const capInputs = ['#caption-title','#caption-body'];
   capInputs.forEach(sel=>{
     const el = document.querySelector(sel);
     if (el){
@@ -90,6 +91,32 @@ function disableCaptionDeleteUI(){
       ev.preventDefault();
       ev.stopImmediatePropagation();
       console.log('[share] delete disabled (caption list)');
+    }catch(_e){}
+  }, true);
+}
+
+function disableCaptionImageAttachUI(){
+  // Share is view-only: prevent attaching/detaching images to captions.
+  // We still load and show the image gallery and preview for existing attachments.
+  try{
+    const style = document.createElement('style');
+    style.setAttribute('data-lm-share', 'caption-image-attach-off');
+    style.textContent = `
+      #pane-caption #images-grid .lm-img-item { cursor: default !important; }
+      #pane-caption #images-grid .lm-img-item button { display:none !important; }
+    `;
+    document.head.appendChild(style);
+  }catch(_e){}
+
+  // Capture clicks before caption.ui.controller handlers.
+  document.addEventListener('click', (ev)=>{
+    try{
+      const t = ev.target;
+      const item = t && t.closest ? t.closest('#pane-caption #images-grid .lm-img-item') : null;
+      if (!item) return;
+      ev.preventDefault();
+      ev.stopImmediatePropagation();
+      // No-op: gallery is for viewing only in Share.
     }catch(_e){}
   }, true);
 }
@@ -143,6 +170,7 @@ async function boot(){
   ensureTabsWork();
   disableWritesUI();
   disableCaptionDeleteUI();
+  disableCaptionImageAttachUI();
   hardDisableCaptionAdd();
 
   // Load safe, read-only UI components (classic scripts)
@@ -151,6 +179,8 @@ async function boot(){
     await loadClassic('./pin.runtime.bridge.js');
     await loadClassic('./caption.viewer.overlay.js');
     await loadClassic('./caption.ui.controller.js');
+    // Read-only image listing (Drive folder siblings). Safe: GET-only via Share auth fetch.
+    await loadClassic('./caption.images.loader.js');
   }catch(e){
     console.warn('[lm-entry] failed to load share UI scripts', e);
   }
