@@ -3,6 +3,7 @@
 // Policy: Share safety is guaranteed by NOT loading write-capable modules.
 // Guard remains as an insurance policy.
 
+import './glb.url.prefill.js';
 import './share.fetch.guard.js';
 import './init.ready.gate.js';
 import './boot.share.cdn.js';

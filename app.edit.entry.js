@@ -1,3 +1,6 @@
+import './glb.url.prefill.js';
+import './edit.sharelink.ui.js';
+
 // LociMyu - app.edit.entry.js (generated from original index.html scripts)
 // Loads the original script chain in the same order, preserving module/classic script types.
 // This keeps Edit mode behavior identical while enabling Share mode to load a different safe set.
