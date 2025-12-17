@@ -28,11 +28,12 @@
 #btnGlb.lm-has-tip:focus-visible::after {
   content: attr(data-tip);
   position: absolute;
-  left: 50%;
+  /* Align to the button's right edge so the bubble grows leftwards (avoids overflowing to the right). */
+  right: 0;
   top: calc(100% + 8px);
-  transform: translateX(-50%);
   z-index: 9999;
-  width: min(360px, 86vw);
+  width: max-content;
+  max-width: min(280px, 86vw);
   padding: 10px 12px;
   border-radius: 10px;
   background: rgba(10,10,10,0.92);
@@ -49,9 +50,8 @@
 #btnGlb.lm-has-tip:focus-visible::before {
   content: "";
   position: absolute;
-  left: 50%;
+  right: 14px;
   top: calc(100% + 2px);
-  transform: translateX(-50%);
   border: 6px solid transparent;
   border-bottom-color: rgba(10,10,10,0.92);
   z-index: 10000;

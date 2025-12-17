@@ -4,7 +4,15 @@
  */
 (() => {
   const TAG = '[lm-onboard]';
-  const STORE_KEY = 'lm_onboard_v1';
+  // v2: store per-mode keys so Share onboarding is not suppressed by Edit usage.
+  const STORE_KEY = 'lm_onboard_v2';
+
+  function getModeKeyPrefix() {
+    try {
+      if (typeof window.__lm_isShareMode === 'function' && window.__lm_isShareMode()) return 'share';
+    } catch {}
+    return 'edit';
+  }
 
   function loadState() {
     try { return JSON.parse(localStorage.getItem(STORE_KEY) || '{}'); }
@@ -15,8 +23,10 @@
   }
   const state = loadState();
 
-  function markDone(k) { state[k] = true; saveState(state); }
-  function isDone(k) { return !!state[k]; }
+  const modePrefix = getModeKeyPrefix();
+  const keyOf = (k) => `${modePrefix}:${k}`;
+  function markDone(k) { state[keyOf(k)] = true; saveState(state); }
+  function isDone(k) { return !!state[keyOf(k)]; }
 
   function $(sel) { return document.querySelector(sel); }
 
@@ -33,13 +43,8 @@
 
   function wireLoadTooltip(btn) {
     if (!btn) return;
-    const tip = [
-      '手順:',
-      '1) （必要なら）Sign in',
-      '2) GLBファイルをGoogleドライブに置く',
-      '3) 共有リンク / ファイルID を左の入力欄に貼る',
-      '4) Load を押す'
-    ].join('\\n');
+    // Keep copy short (tooltip should not block layout) and avoid literal \n.
+    const tip = 'DriveのGLB共有リンク/IDを入力 → Load（必要なら Sign in）';
     btn.setAttribute('data-tip', tip);
     btn.classList.add('lm-has-tip');
     // Also keep a normal title as fallback (some browsers ignore pseudo tooltip on touch).
@@ -68,12 +73,10 @@
       const wrapped = async function(...args) {
         const t = await orig.apply(this, args);
         if (t) {
-          if (!isDone('signin')) {
-            markDone('signin');
-            const b = $('#auth-signin');
-            if (b) b.classList.remove('lm-attn-pulse');
-            console.log(TAG, 'signin detected via token');
-          }
+          if (!isDone('signin')) markDone('signin');
+          const b = $('#auth-signin');
+          if (b) b.classList.remove('lm-attn-pulse');
+          console.log(TAG, 'signin detected via token');
         }
         return t;
       };
