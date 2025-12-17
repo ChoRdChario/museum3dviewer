@@ -218,7 +218,6 @@ function disableCaptionImageAttachUI(){
 
 function showNotice(){
   // Compact, single-line notice (Option B): keep the UI unobtrusive.
-  // Detailed explanation is available via an info tooltip.
   const right = document.querySelector('#right') || document.body;
 
   try{
@@ -260,18 +259,7 @@ function showNotice(){
   text.className = 'lm-share-notice-text';
   text.textContent = 'Share (read-only; no saves)';
 
-  const info = document.createElement('button');
-  info.type = 'button';
-  info.className = 'lm-share-notice-info';
-  info.textContent = 'i';
-  info.title = [
-    'Read-only build.',
-    'Sheets/Drive writes are blocked by design (write modules are not loaded) and by guard (non-GET blocked).',
-    'Diagnostics: open Console and run __LM_DIAG.loaded.'
-  ].join(' ');
-
   line.appendChild(text);
-  line.appendChild(info);
   right.insertBefore(line, right.firstChild);
 }
 
