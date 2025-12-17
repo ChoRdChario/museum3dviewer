@@ -128,6 +128,22 @@
     throw new Error('no token provider');
   }
 
+  // Ensure viewer.module is available.
+  // Prefer existing globals, otherwise lazy-load viewer.module.cdn.js.
+  // This avoids relying on polling-based autobind ordering.
+  async function ensureViewerModule(){
+    if (window.__lm_viewer_module) return window.__lm_viewer_module;
+    try{
+      const mod = await import('./viewer.module.cdn.js');
+      window.__lm_viewer_module = mod;
+      try{ ensureViewerBridge(mod); }catch(_e){}
+      return mod;
+    }catch(e){
+      err('failed to import viewer.module.cdn.js', e);
+      return null;
+    }
+  }
+
   async function ensureViewerReady(mod){
     try{
       if (typeof mod.ensureViewer === 'function'){
@@ -236,10 +252,10 @@
     let safe = true; const safeHide=()=>{ if(safe){ safe=false; hideOverlay(); } };
 
     try{
-      await ensureViewerReady();
-
-      const mod = window.__lm_viewer_module;
+      const mod = await ensureViewerModule();
       if (!mod) throw new Error('viewer.module missing');
+
+      await ensureViewerReady(mod);
 
       const token = await getToken();
       await mod.loadGlbFromDrive(fileId, { token });
