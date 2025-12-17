@@ -65,6 +65,35 @@ function disableWritesUI(){
   }, true);
 }
 
+function disableCaptionDeleteUI(){
+  // Share is view-only: prevent accidental removal from the in-memory list.
+  // caption.ui.controller.js renders a "×" delete button that calls removeItem().
+  // We keep the shared controller and hard-disable only this affordance in Share.
+  try{
+    const style = document.createElement('style');
+    style.setAttribute('data-lm-share', 'caption-delete-off');
+    style.textContent = `
+      #pane-caption #caption-list .lm-cap-del {
+        display: none !important;
+        pointer-events: none !important;
+      }
+    `;
+    document.head.appendChild(style);
+  }catch(_e){}
+
+  // Extra safety: block clicks even if CSS is overridden.
+  document.addEventListener('click', (ev)=>{
+    try{
+      const t = ev.target;
+      const btn = t && t.closest ? t.closest('#pane-caption #caption-list .lm-cap-del') : null;
+      if (!btn) return;
+      ev.preventDefault();
+      ev.stopImmediatePropagation();
+      console.log('[share] delete disabled (caption list)');
+    }catch(_e){}
+  }, true);
+}
+
 function showNotice(){
   const right = document.querySelector('#right') || document.body;
   const box = document.createElement('div');
@@ -113,6 +142,7 @@ async function boot(){
   showNotice();
   ensureTabsWork();
   disableWritesUI();
+  disableCaptionDeleteUI();
   hardDisableCaptionAdd();
 
   // Load safe, read-only UI components (classic scripts)
