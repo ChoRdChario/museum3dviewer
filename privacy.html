@@ -1,65 +1,565 @@
 <!doctype html>
 <html lang="ja">
 <head>
-  <meta charset="utf-8"/>
-  <meta name="viewport" content="width=device-width,initial-scale=1"/>
-  <title>LociMyu α - プライバシーポリシー</title>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta name="color-scheme" content="light dark" />
+  <title>Privacy / Guide — LociMyu α</title>
   <style>
-    :root{color-scheme:dark}
-    body{margin:0;background:#0f1115;color:#cbd5e1;font:14px/1.7 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
-    main{max-width:900px;margin:0 auto;padding:24px}
-    h1{font-size:20px;margin:0 0 16px}
-    h2{font-size:16px;margin:22px 0 8px}
-    p,li{opacity:.95}
-    a{color:#93c5fd}
-    code{background:#111827;padding:2px 6px;border-radius:6px}
-    .box{border:1px solid #1f2937;border-radius:12px;background:#0b0d11;padding:14px 16px}
-    .muted{opacity:.75}
-  </style>
+    :root{
+      --bg: #f6f6f7;
+      --paper: #ffffff;
+      --ink: #141416;
+      --muted: #667085;
+      --line: rgba(20,20,22,.10);
+      --line-strong: rgba(20,20,22,.16);
+      --shadow: 0 10px 35px rgba(15, 23, 42, .08);
+      --shadow-soft: 0 6px 18px rgba(15, 23, 42, .06);
+      --accent: rgba(47, 107, 255, .12);   /* soft blue wash */
+      --accent2: rgba(255, 75, 179, .10);  /* soft pink wash */
+      --chip: rgba(20,20,22,.06);
+      --radius: 18px;
+      --radius2: 26px;
+      --max: 980px;
+      --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue",
+              "Noto Sans JP", "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Yu Gothic", "Meiryo", Arial, sans-serif;
+    }
+
+    /* Light-first; keep readable on dark mode too (browser will adapt minimal) */
+    html,body{height:100%;}
+    body{
+      margin:0;
+      font-family: var(--sans);
+      color: var(--ink);
+      background:
+        radial-gradient(1200px 700px at 16% -10%, var(--accent) 0%, transparent 60%),
+        radial-gradient(900px 520px at 92% 0%, var(--accent2) 0%, transparent 58%),
+        linear-gradient(var(--bg), var(--bg));
+    }
+
+    a{color:inherit;}
+    .wrap{max-width: var(--max); margin: 0 auto; padding: 22px 16px 56px;}
+    .topbar{
+      display:flex; align-items:center; justify-content:space-between;
+      gap:12px;
+      padding: 10px 4px 18px;
+    }
+    .brand{
+      display:flex; align-items:baseline; gap:10px;
+      letter-spacing:.02em;
+    }
+    .brand .name{font-weight: 780; font-size: 18px;}
+    .brand .alpha{
+      font-size: 12px; font-weight: 700;
+      padding: 2px 10px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: rgba(255,255,255,.65);
+      backdrop-filter: blur(6px);
+    }
+    .nav{
+      display:flex; align-items:center; gap:10px;
+      flex-wrap:wrap;
+    }
+    .nav a{
+      text-decoration:none;
+      font-size: 12.5px;
+      color: rgba(20,20,22,.82);
+      padding: 8px 10px;
+      border-radius: 999px;
+      border: 1px solid transparent;
+    }
+    .nav a:hover{border-color: var(--line); background: rgba(255,255,255,.55);}
+    .nav a.primary{
+      border-color: var(--line);
+      background: rgba(255,255,255,.70);
+      box-shadow: var(--shadow-soft);
+    }
+
+    .hero{
+      position:relative;
+      border: 1px solid var(--line);
+      border-radius: var(--radius2);
+      background: rgba(255,255,255,.78);
+      box-shadow: var(--shadow);
+      overflow:hidden;
+      padding: 22px 18px;
+    }
+    .hero::before{
+      content:"PRIVACY";
+      position:absolute;
+      left: -6px;
+      top: 8px;
+      font-weight: 900;
+      letter-spacing: .16em;
+      font-size: 58px;
+      color: transparent;
+      -webkit-text-stroke: 1px rgba(20,20,22,.08);
+      text-stroke: 1px rgba(20,20,22,.08);
+      opacity: .95;
+      pointer-events:none;
+      user-select:none;
+      white-space:nowrap;
+      transform: translateZ(0);
+    }
+    .hero .kicker{
+      position:relative;
+      font-size: 12px;
+      letter-spacing: .14em;
+      text-transform: uppercase;
+      color: rgba(20,20,22,.55);
+      margin: 0 0 8px;
+    }
+    h1{
+      position:relative;
+      margin: 0 0 10px;
+      font-size: 28px;
+      letter-spacing: .02em;
+      line-height: 1.22;
+    }
+    .subtitle{
+      position:relative;
+      margin: 0;
+      color: var(--muted);
+      line-height: 1.7;
+      font-size: 14px;
+      max-width: 72ch;
+    }
+
+    .chips{display:flex; flex-wrap:wrap; gap:8px; margin-top: 14px;}
+    .chip{
+      font-size: 12px;
+      padding: 7px 10px;
+      border-radius: 999px;
+      background: rgba(255,255,255,.7);
+      border: 1px solid var(--line);
+    }
+    .chip code{font-family: var(--mono); font-size: 11px; background: transparent;}
+    .chip strong{font-weight: 750;}
+
+    .grid{
+      display:grid;
+      grid-template-columns: 1fr;
+      gap: 14px;
+      margin-top: 14px;
+    }
+    @media (min-width: 880px){
+      .grid{grid-template-columns: 1.05fr .95fr;}
+      #privacy{grid-column: 1 / -1;}
+      .hero{padding: 24px 22px;}
+      .hero::before{font-size: 62px;}
+    }
+
+    .card{
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: rgba(255,255,255,.86);
+      box-shadow: var(--shadow-soft);
+      padding: 16px 16px 14px;
+    }
+    .card h2{
+      margin: 0 0 8px;
+      font-size: 15px;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      color: rgba(20,20,22,.80);
+    }
+    .card h3{
+      margin: 14px 0 6px;
+      font-size: 15px;
+    }
+    .meta{
+      color: var(--muted);
+      font-size: 12.5px;
+      margin: 0 0 10px;
+    }
+    .card p, .card li{
+      color: rgba(20,20,22,.88);
+      line-height: 1.78;
+      font-size: 14px;
+    }
+    .card ul{
+      margin: 8px 0 0 18px;
+      padding: 0;
+    }
+    .card li{margin: 4px 0;}
+    .note{
+      margin-top: 10px;
+      padding: 10px 12px;
+      border-radius: 14px;
+      border: 1px solid var(--line);
+      background: rgba(20,20,22,.035);
+      color: rgba(20,20,22,.82);
+      font-size: 13px;
+      line-height: 1.7;
+    }
+    .note code{font-family: var(--mono); font-size: 12px;}
+    .steps{counter-reset: step;}
+    .steps li{
+      margin: 8px 0;
+      padding-left: 2px;
+    }
+    .steps li::marker{
+      font-weight: 800;
+      color: rgba(20,20,22,.65);
+    }
+    .kbd{
+      font-family: var(--mono);
+      font-size: 12px;
+      padding: 2px 7px;
+      border-radius: 8px;
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,.72);
+      box-shadow: 0 1px 0 rgba(0,0,0,.03);
+    }
+
+    .footer{
+      margin-top: 18px;
+      color: rgba(20,20,22,.60);
+      font-size: 12.5px;
+      line-height: 1.6;
+      padding: 0 4px;
+    }
+
+    /* Print-friendly */
+    @media print{
+      body{background:#fff;}
+      .hero,.card{box-shadow:none; background:#fff;}
+      .nav{display:none;}
+    }
+  
+    details.details{
+      margin-top:12px;
+      border:1px solid rgba(15,23,42,.10);
+      border-radius:16px;
+      background: rgba(255,255,255,.78);
+      overflow:hidden;
+    }
+    details.details > summary{
+      list-style:none;
+      cursor:pointer;
+      padding:14px 16px;
+      font-weight:800;
+      letter-spacing:.02em;
+      display:flex;
+      align-items:center;
+      gap:10px;
+    }
+    details.details > summary::-webkit-details-marker{ display:none; }
+    details.details > summary:after{
+      content:"＋";
+      margin-left:auto;
+      font-weight:900;
+      opacity:.55;
+    }
+    details.details[open] > summary:after{ content:"—"; opacity:.5; }
+    .details-body{
+      padding: 0 16px 14px 16px;
+      color: var(--muted);
+    }
+    
+  
+    .details-body h4{
+      margin: 14px 0 6px;
+      font-size: 13px;
+      letter-spacing: .04em;
+      color: rgba(20,20,22,.82);
+    }
+    .details-body ul{
+      margin: 6px 0 12px 18px;
+    }
+    .details-body li{ margin: 6px 0; }
+
+</style>
 </head>
 <body>
-<main>
-  <h1>プライバシーポリシー（LociMyu α）</h1>
+  <div class="wrap">
+    <div class="topbar">
+      <div class="brand">
+        <div class="name">LociMyu</div>
+        <div class="alpha">α</div>
+      </div>
+      <div class="nav" aria-label="quick links">
+        <a class="primary" href="#quickstart">Quick Start</a>
+        <a href="#features">機能ガイド</a>
+        <a href="#privacy">Privacy</a>
+        <a href="#share">Share mode</a>
+        <a href="#faq">FAQ</a>
+      </div>
+    </div>
 
-  <div class="box">
-    <p class="muted">最終更新: 2025-12-17</p>
-    <p>
-      LociMyu α は、Webブラウザ上で 3D（GLB）モデルにキャプション（ピン）や表示設定を付与するツールです。
-      本ツールは、ユーザー自身の Google Drive / Google Sheets を保存先として利用します。
+    <section class="hero">
+      <p class="kicker">privacy / guide</p>
+      <h1>プライバシーと使い方（LociMyu α）</h1>
+      <p class="subtitle">
+        LociMyu α は、Webブラウザ上で <strong>GLB（3D）モデル</strong>にキャプション（ピン）や表示設定を付与するツールです。
+        保存先は <strong>ユーザー自身の Google Drive / Google Sheets</strong>。本ツールは独自サーバーに個人情報を保存しません。
+      </p>
+
+      <div class="chips" aria-label="highlights">
+        <div class="chip"><strong>保存先:</strong> あなたのDrive / Sheets</div>
+        <div class="chip"><strong>画像:</strong> <code>GLB</code> と同じフォルダから一覧表示</div>
+        <div class="chip"><strong>Share:</strong> 書き込み無し（閲覧共有向け）</div>
+      </div>
+    </section>
+
+    <div class="grid">
+      <section id="quickstart" class="card">
+        <h2>Quick Start</h2>
+        <p class="meta">最短で「読み込み → 編集 → 共有」まで進める手順です。詳しい機能説明は後ろにまとめています。</p>
+
+        <h3>フェーズ1) 準備（Drive側）</h3>
+        <ol class="steps">
+          <li>Google Drive に任意のフォルダを作成します（例: <span class="kbd">LociMyu Save</span>）。</li>
+          <li>そのフォルダに <strong>GLBファイル</strong> を入れます。</li>
+          <li>キャプションに添付したい画像があれば、<strong>同じフォルダ</strong>に画像も入れます（PNG/JPG/HEIC等）。</li>
+          <li><strong>フォルダの共有設定</strong>を整えます：フォルダを右クリック → <span class="kbd">共有</span>。</li>
+          <li>共同編集したい相手がいる場合は、招待して権限を <strong>編集者</strong> にします（閲覧だけなら <strong>閲覧者</strong> でOK）。</li>
+          <li>不特定の相手に共有したい場合は、リンク共有を <strong>「リンクを知っている全員：閲覧者」</strong> などに設定します（公開範囲は用途に合わせて）。</li>
+        </ol>
+        <div class="note">
+          画像は「GLBと同じDriveフォルダ内の画像を一覧表示して選ぶ」仕様です。
+          ツール内の <span class="kbd">Refresh images</span> で一覧を再読み込みできます。<br><br><strong>ポイント：</strong> LociMyu の Share リンクは「リンク自体が公開」でも、Drive 側で閲覧権限が無い人は中身を見られません。<br>共有したい相手が見られる権限（フォルダ/ファイルの共有設定）になっているか、必ず確認してください。
+        </div>
+
+        <h3>フェーズ2) ツール内の準備（サインイン → GLBロード）</h3>
+        <ul>
+          <li><span class="kbd">Sign in</span> でGoogleログイン。</li>
+          <li>DriveのファイルURL（またはファイルID）を入力して <span class="kbd">Load</span>。</li>
+          <li>初回は、保存先のスプレッドシートが見つからない場合に限り、ツール側が「作成してよいか」を案内します（同じフォルダ内に作成）。</li>
+          <li>シートを選択して編集を開始します。</li>
+        </ul>
+
+        <h3>フェーズ3) 編集（まずはここだけ）</h3>
+        <ol class="steps">
+          <li>モデル上をクリックしてピンを追加し、<span class="kbd">Title</span> / <span class="kbd">Body</span> を入力します。</li>
+          <li>画像を付けたい場合は、下の画像一覧から選びます（必要なら <span class="kbd">Refresh images</span>）。</li>
+          <li><span class="kbd">Material</span> と <span class="kbd">Views</span> は「見やすくするための表示調整」です（詳細は後半）。</li>
+        </ol>
+
+        <h3>フェーズ4) Share（閲覧用リンク）</h3>
+        <ol class="steps">
+          <li><span class="kbd">Share</span> を押してリンクを作成。</li>
+          <li>共有相手がモデルや画像を見られるよう、Drive側の共有設定（閲覧範囲）も合わせて調整します。</li>
+        </ol>
+      </section>
+
+      <section id="features" class="card" style="margin-top:14px;">
+        <h2>機能ガイド（必要な人だけ）</h2>
+        <p class="meta">ここから先は「知りたい人向け」です。必要になったときに、該当箇所だけ開いて読めるようにしています。</p>
+        <div class="note">
+          先に <a href="#quickstart">Quick Start</a> を一周してから戻ってくるのがおすすめです。
+          「どのタブで何ができるか」「削除や共有の挙動」など、つまずきやすい点もここにまとめています。
+        </div>
+
+        <details class="details">
+          <summary>Caption：ピンとキャプション</summary>
+          <div class="details-body">
+            <h4>キャプションシート選択</h4>
+            <ul>
+              <li>右上の <span class="kbd">Select sheet…</span>（ドロップダウン）で、編集対象のキャプションシートを切り替えます。</li>
+              <li>シートを切り替えると、<strong>ピン / キャプション一覧 / 画像添付</strong> などもそのシートの内容に切り替わります。</li>
+            </ul>
+
+            <h4>キャプションシートの追加とシート名編集</h4>
+            <ul>
+              <li><span class="kbd">Create</span>：新しいキャプションシートを作成します。</li>
+              <li>鉛筆アイコン：シートの<strong>表示名（displayName）</strong>を変更します。<br>
+                ※ 実際のシート名（sheetTitle）を直接リネームするのではなく、管理シート（<code>__LM_SHEET_NAMES</code>）に表示名を保存します。</li>
+              <li>表示名は、シート切り替えや再読み込み後も維持されます（管理シートに正しく保存されている場合）。</li>
+            </ul>
+
+            <h4>ピンカラー</h4>
+            <ul>
+              <li><span class="kbd">Pin color</span> で、作成するピン（キャプション）の色を選びます。</li>
+              <li>色は「分類」や「状態管理」に便利です（例：要確認/確定/参考 など）。</li>
+            </ul>
+
+            <h4>ピンカラーフィルター</h4>
+            <ul>
+              <li><span class="kbd">Filter</span> で、特定色のピンだけを表示できます。</li>
+              <li>ピンが多いモデルでも、関心領域だけに絞って確認できます。</li>
+            </ul>
+
+            <h4>キャプションタイトルとテキスト編集</h4>
+            <ul>
+              <li>キャプションを選択すると、下部の <span class="kbd">Title</span> / <span class="kbd">Body</span> で内容を編集できます。</li>
+              <li>入力内容は、編集モードでは Drive/Sheets に保存されます（Share モードでは保存されません）。</li>
+            </ul>
+
+            <h4>キャプションリスト（選択・削除）</h4>
+            <ul>
+              <li>右ペインの <span class="kbd">Caption list</span> から、キャプションを選択できます（モデル上のピン選択とも同期します）。</li>
+              <li>不要になったキャプションは、リスト上の削除操作で消せます。<br>
+                ※ 削除すると、シート上の該当行も削除/無効化されます。誤削除が不安な場合は、事前にシートをコピーしてバックアップしてください。</li>
+            </ul>
+
+            <h4>キャプションウィンドウから元画像へアクセス</h4>
+            <ul>
+              <li>画像を添付している場合、サムネイルやリンクから <strong>元画像（Drive）</strong> を開けます。</li>
+              <li>「画像が見つからない」場合は、<span class="kbd">Refresh images</span> を押して一覧を再取得してください。</li>
+            </ul>
+          </div>
+        </details>
+
+        <details class="details">
+          <summary>Material：見た目を調整して観察しやすく</summary>
+          <div class="details-body">
+            <h4>対象マテリアル選択</h4>
+            <ul>
+              <li><span class="kbd">Material</span> タブで、編集対象のマテリアルをドロップダウンから選択します。</li>
+              <li>選択したマテリアルに対して、下の設定が適用されます。</li>
+            </ul>
+
+            <h4>透明度（Opacity）</h4>
+            <ul>
+              <li>透明度スライダーで、選択中マテリアルの透過度を調整します。</li>
+              <li>内部構造の観察や、テクスチャが強すぎるときの視認性改善に便利です。</li>
+            </ul>
+
+            <h4>両面描画（Double-sided）</h4>
+            <ul>
+              <li>薄い板状メッシュ（ポリゴンが片面のもの）で裏面が見えない場合、両面描画を ON にします。</li>
+              <li>観察用途では有効ですが、描画負荷が増える場合があります。</li>
+            </ul>
+
+            <h4>Unlit風（照明の影響を弱める）</h4>
+            <ul>
+              <li>モデルが暗すぎる/陰影が強すぎる場合、Unlit風を ON にすると見やすくなることがあります。</li>
+              <li>「完全なUnlit」ではなく、観察しやすい見え方を狙ったモードです（モデルによって効き方が異なります）。</li>
+            </ul>
+
+            <h4>クロマキー（特定色を抜く）</h4>
+            <ul>
+              <li>背景がグリーン/ブルーなどで塗られているモデルを、色指定で透明化（または目立たなく）できます。</li>
+              <li>色ピッカーで基準色を選び、許容値（しきい値）で「抜く範囲」を調整します。</li>
+              <li>抜きすぎた場合は許容値を下げる、または Reset / OFF に戻してください。</li>
+            </ul>
+          </div>
+        </details>
+
+        <details class="details">
+          <summary>Views：視点・投影・背景</summary>
+          <div class="details-body">
+            <h4>視点保存（View presets）</h4>
+            <ul>
+              <li>モデルを回して「この角度が見たい」という状態を作ります。</li>
+              <li><span class="kbd">Save view</span> で現在の視点を保存し、後から呼び出せるようにします。</li>
+            </ul>
+
+            <h4>平行投影（Orthographic）</h4>
+            <ul>
+              <li>遠近感を弱め、寸法感を崩さずに観察したい場合に有効です。</li>
+              <li>ON/OFF は <span class="kbd">Orthographic</span> の切り替えで行います。</li>
+            </ul>
+
+            <h4>カメラ位置（Camera direction）</h4>
+            <ul>
+              <li><span class="kbd">+X/-X</span>、<span class="kbd">+Y/-Y</span>、<span class="kbd">+Z/-Z</span> で、軸方向からモデルを見るためのショートカットです。</li>
+              <li>「正面/側面/上面」など、定点観察に向いています。</li>
+            </ul>
+
+            <h4>背景（Background）</h4>
+            <ul>
+              <li>背景色を変更して、モデルが見やすい色に調整できます。</li>
+              <li><span class="kbd">Reset</span> で「未設定（CSS既定の背景）」に戻します。</li>
+            </ul>
+          </div>
+        </details>
+
+        
+        <details id="share" class="details">
+          <summary>Share mode（保存しない共有）</summary>
+          <div class="details-body">
+            <p class="meta">閲覧・共有向け（「触って試せる」けど「保存しない」）</p>
+            <p>
+              <strong>シェアリンクの作り方：</strong>画面上部の <span class="kbd">Share</span> ボタンを押して共有用URLを生成します。
+              表示されたリンクをコピーして送ってください（表示が無い場合は、ブラウザのアドレスバーのURLをコピーしてください）。
+            </p>
+            <p>
+              Shareモードは「閲覧・共有」を目的としたモードです。Shareモードでは<strong>保存（書き込み）処理をロードしない</strong>設計で、
+              Google Drive / Google Sheets への書き込みが行われないようにしています。
+            </p>
+            <div class="note">
+              共有リンクを配布する前に、Drive側の共有設定（閲覧範囲）を確認してください。
+              「見せたい人だけに見せる」運用も可能です。
+            </div>
+          </div>
+        </details>
+
+
+        <details class="details">
+          <summary>保存先の構成（どこに何が保存される？）</summary>
+          <div class="details-body">
+            <ul>
+              <li>キャプションや表示設定は、あなたの <strong>Google Sheets</strong> に保存されます。</li>
+              <li>画像はアップロードされず、あなたの <strong>Google Drive</strong>（GLBと同じフォルダ）から参照されます。</li>
+              <li>管理用に <code>__LM_MATERIALS</code> / <code>__LM_VIEWS</code> / <code>__LM_SHEET_NAMES</code> などのシートが作られます（削除すると設定が失われる可能性があります）。</li>
+              <li>「壊したくない」場合は、スプレッドシートを <strong>コピー</strong> してから試すのが安全です。</li>
+            </ul>
+          </div>
+        </details>
+      </section>
+
+      <section id="privacy" class="card">
+        <h2>Privacy</h2>
+        <p class="meta">最終更新: 2025-12-20</p>
+
+        <h3>収集する情報</h3>
+        <ul>
+          <li>本ツールは、独自のサーバーへ個人情報を送信・保存しません。</li>
+          <li>ログインのために Google の認証（OAuth）を利用します。</li>
+          <li>ツールの動作のため、Google Drive / Google Sheets API へのアクセスが発生します（読み込み・保存）。</li>
+        </ul>
+
+        <h3>保存される場所</h3>
+        <ul>
+          <li>キャプション（ピン）・表示設定は、あなたの Google Sheets（スプレッドシート）に保存されます。</li>
+          <li>画像は、あなたの Google Drive（GLBと同じフォルダ）から参照されます。</li>
+        </ul>
+
+        <h3>保存される内容の例</h3>
+        <ul>
+          <li>キャプション本文、タイトル、ピン色、3D座標（posX/Y/Z）</li>
+          <li>添付画像の参照情報（同フォルダ内の画像）</li>
+          <li>Material / Views の設定（例: 透明度、投影設定、背景色、視点プリセット 等）</li>
+          <li>シート表示名の管理（表示名と実シート名の対応）</li>
+        </ul>
+
+        <div class="note">
+          重要: Google Drive / Sheets の共有範囲は、あなたが設定した権限に従います。
+          意図しない公開を避けるため、共有設定は必ず確認してください。
+        </div>
+      </section>
+    </div>
+
+<section id="faq" class="card" style="margin-top:14px;">
+      <h2>FAQ</h2>
+
+      <h3>Q. 画像一覧に出てこない</h3>
+      <ul>
+        <li>画像がGLBと同じDriveフォルダに入っているか確認してください。</li>
+        <li><span class="kbd">Refresh images</span> を押して再読み込みしてください。</li>
+      </ul>
+
+      <h3>Q. 共有相手がモデル/画像を見られない</h3>
+      <ul>
+        <li>Drive側で、該当フォルダ（またはファイル）に閲覧権限が付与されているか確認してください。</li>
+      </ul>
+
+      <h3>Q. 何かあった時の問い合わせ先は？</h3>
+      <p>
+        不具合・要望・連絡は <a href="mailto:locimyu@gmail.com">locimyu@gmail.com</a> までお願いします。<br>
+        可能であれば、利用URL・ブラウザ・コンソールログ（赤エラー）も添えてください。<br>
+        公開リポジトリの Issue でも受け付けます。
+      </p>
+    </section>
+
+    <p class="footer">
+      このページは「プライバシー」と「最小マニュアル」を兼ねています。内容はα版公開の進行に合わせて順次拡充します。
+      印刷にも耐えるよう、過度な装飾は避けています。
     </p>
   </div>
-
-  <h2>収集する情報</h2>
-  <ul>
-    <li>本ツールは、独自のサーバーへ個人情報を送信・保存しません。</li>
-    <li>ログインのために Google の認証（OAuth）を利用します。</li>
-  </ul>
-
-  <h2>アクセスするデータと目的</h2>
-  <ul>
-    <li><b>Google Drive</b>: GLBファイルの読み込み、および関連データ（画像等）の読み込み・保存のため</li>
-    <li><b>Google Sheets</b>: キャプションやツール設定（例：マテリアル設定）を保存・読み込みするため</li>
-  </ul>
-
-  <h2>保存される場所</h2>
-  <ul>
-    <li>保存先は <b>ユーザー自身の Google Drive / Google Sheets</b> です。</li>
-    <li>本ツール開発者が管理する外部サーバーに、これらの内容を複製して保存しません。</li>
-  </ul>
-
-  <h2>Shareモードについて</h2>
-  <p>
-    Shareモードは「閲覧・共有」を目的としたモードです。Shareモードでは、保存（書き込み）処理をロードしない設計で、
-    Google Drive / Google Sheets への書き込みが行われないようにしています。
-  </p>
-
-  <h2>お問い合わせ</h2>
-  <p>
-    問い合わせ先は、公開リポジトリの Issue などに掲載します。
-    （公開前の段階では、まずは開発者へ直接ご連絡ください）
-  </p>
-
-  <p class="muted">この文書はα版公開のための最小構成です。必要に応じて内容を拡充します。</p>
-</main>
 </body>
 </html>
