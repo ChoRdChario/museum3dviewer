@@ -305,36 +305,6 @@ async function maybeLoad(){
     try{ dirBtns.forEach(b=>b.disabled = dis); }catch(_){}
   }
 
-  // init.ready.gate.js temporarily disables all controls in #ui while async
-  // loads are settling, then restores each control's previous disabled state.
-  // If Views enables controls during the gate window, the gate may later revert
-  // them back to disabled. To avoid "perma-grey" in Edit mode, we:
-  //  - delay enabling while the gate is active, and
-  //  - retry enabling on lm:ready-gate-done.
-
-  function isGateBusy(){
-    try{
-      const ui = document.getElementById('ui');
-      if (!ui) return false;
-      return ui.classList.contains('lm-busy') || ui.getAttribute('aria-busy') === 'true';
-    }catch(_){
-      return false;
-    }
-  }
-
-  function clearGateRestoreMarkers(){
-    try{
-      const list = [elOrtho, elBgColor, elBgHex, elBgReset, ...dirBtns];
-      list.forEach(el=>{
-        if (el && el.dataset && el.dataset.lmPrevDisabled != null){
-          delete el.dataset.lmPrevDisabled;
-        }
-      });
-    }catch(_){ }
-  }
-
-  let __views_wantsEnabled = false;
-
   function setBgUiUnset(){
     elBgHex.value = '';
     elBgHex.placeholder = 'unset';
@@ -374,23 +344,13 @@ async function maybeLoad(){
   function enableIfReady(){
     const b = getBridge();
     if (!b) { setEnabled(false); return; }
-
-    function markReadyAndMaybeEnable(){
-      __views_wantsEnabled = true;
-      // If the ready-gate is active, do not enable now; the gate would later
-      // restore the previous disabled state and we would end up perma-grey.
-      if (isGateBusy()) return;
-      clearGateRestoreMarkers();
-      setEnabled(true);
-      syncFromViewer();
-      scheduleSave();
-    }
-
     // GLB loaded => we should have bounds
     if (typeof b.getModelBounds === 'function'){
       const bd = b.getModelBounds();
       if (bd && bd.center && bd.size){
-        markReadyAndMaybeEnable();
+        setEnabled(true);
+        syncFromViewer();
+      scheduleSave();
         return;
       }
     }
@@ -400,7 +360,9 @@ async function maybeLoad(){
       let meshes = 0;
       try{ sc && sc.traverse(o=>{ if(o && o.isMesh) meshes++; }); }catch(_){}
       if (meshes > 0){
-        markReadyAndMaybeEnable();
+        setEnabled(true);
+        syncFromViewer();
+      scheduleSave();
         return;
       }
     }
@@ -516,13 +478,6 @@ async function maybeLoad(){
   // Initial state: disabled until scene is ready
   setEnabled(false);
   setBgUiUnset();
-
-  // When the readiness gate releases the UI, re-apply Views enablement.
-  // (Gate events are dispatched on `document`, not on `window`.)
-  document.addEventListener('lm:ready-gate-done', ()=>{
-    if (!__views_wantsEnabled) return;
-    setTimeout(enableIfReady, 0);
-  });
 
 
 // Track sheet context changes (caption sheet switch)
