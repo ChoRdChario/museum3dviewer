@@ -615,7 +615,7 @@ async function sheetsUpdateTitle(
       // 成功時は currentSheetTitle / option は既に newTitle になっているので何もしない
       log("rename success (registry)", newTitle);
     }
-    catch (e) {
+} catch (e) {
       // 失敗したらロールバック
       label.textContent = before;
       if (opt) updateOptionTextAndDataset(opt, before);
@@ -748,21 +748,28 @@ async function sheetsUpdateTitle(
   // expose helpers for classic scripts (non-module)
   // caption.sheet.selector.js expects this name.
   window.__lm_syncSheetDisplayNamesFromZ1 = async function (spreadsheetId, a, b) {
-    // supported signatures:
-    //   (spreadsheetId, selectEl)
-    //   (spreadsheetId, authFetch, selectEl)
-    let authFetch = null;
+    // Supported signatures:
+    // 1) (spreadsheetId, sheetsArray, selectEl)  <-- preferred (used by caption.sheet.selector.js)
+    // 2) (spreadsheetId, authFetchFn, selectEl)  <-- legacy
+    // 3) (spreadsheetId, selectEl)              <-- legacy
+    const isSelectEl = (x) => !!(x && x.tagName && String(x.tagName).toUpperCase() === 'SELECT');
+
+    let sheets = null;
     let selectEl = null;
 
-    if (a && typeof a === "function") {
-      authFetch = a;
+    if (Array.isArray(a)) {
+      sheets = a;
       selectEl = b;
-    } else {
+    } else if (typeof a === 'function') {
+      // legacy authFetch, ignore (we now use window.__lm_fetchJSONAuth internally)
+      selectEl = b;
+    } else if (isSelectEl(a)) {
       selectEl = a;
-      authFetch = window.__lm_fetchJSONAuth || window.__lm_fetchJSON;
+    } else if (isSelectEl(b)) {
+      selectEl = b;
     }
 
-    return syncDisplayNamesFromZ1(spreadsheetId, authFetch, selectEl);
+    return syncDisplayNamesFromZ1(spreadsheetId, sheets, selectEl);
   };
 
   // for manual debugging
