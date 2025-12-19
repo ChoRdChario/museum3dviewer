@@ -246,7 +246,7 @@
 
   async function ensureSheetNameRegistrySheet(spreadsheetId) {
   if (!spreadsheetId) return null;
-  const exist = await findSheetByTitle(spreadsheetId, REGISTRY_SHEET_TITLE);
+  const exist = await findSheetByTitle(spreadsheetId, SHEET_NAME_REGISTRY_TITLE);
   if (exist) return exist;
   if (isShareMode()) {
     return null;
@@ -580,23 +580,42 @@ async function sheetsUpdateTitle(
       return;
     }
 
-    // API 呼び出し (Z1 書き込み)
+    // API 呼び出し (registry 書き込み)
     try {
       input.disabled = ok.disabled = cancel.disabled = true;
       spin.style.display = "inline-block";
 
-      const { authFetch, token } = await getAuthFetchAndToken();
-      await sheetsPutDisplayName(
+      // Share mode: allow local rename only (no persistence)
+      if (isShareMode()) {
+        log("rename skipped (share-mode)", newTitle);
+        return;
+      }
+
+      // Resolve actual sheetTitle for the gid (best-effort)
+      let sheetTitle = "";
+      try {
+        const NS = window.LM_SHEET_GIDMAP;
+        if (NS && typeof NS.fetchSheetMap === "function") {
+          const map = await NS.fetchSheetMap(spreadsheetId);
+          const byId = map && map.byId;
+          const meta = byId && byId[Number(window.currentSheetId)];
+          if (meta && meta.title) sheetTitle = String(meta.title);
+        }
+      } catch (e2) {
+        // ignore (best-effort)
+      }
+
+      await upsertSheetNameRegistry(
         spreadsheetId,
         window.currentSheetId,
         newTitle,
-        authFetch,
-        token
+        sheetTitle || before
       );
 
       // 成功時は currentSheetTitle / option は既に newTitle になっているので何もしない
-      log("rename success (Z1 display-name)", newTitle);
-    } catch (e) {
+      log("rename success (registry)", newTitle);
+    }
+} catch (e) {
       // 失敗したらロールバック
       label.textContent = before;
       if (opt) updateOptionTextAndDataset(opt, before);
