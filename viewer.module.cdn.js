@@ -604,7 +604,7 @@ export function addPinMarker(pin) {
 
   removePinMarker(pin.id);
 
-  const geom = new THREE.SphereGeometry(0.01, 8, 8);
+  const geom = new THREE.SphereGeometry(0.006, 8, 8);
 
   // ピンカラー: UI / シートから渡される pin.color を優先し、なければ赤
   let color = 0xff0000;
@@ -794,8 +794,8 @@ export function pulsePin(pinId, opts){
   // Replace existing pulse for this pin (coalesce)
   try{ __lm_removePulse(id); }catch(_){}
 
-  const rIn = 0.012;
-  const rOut = 0.018;
+  const rIn = 0.0072;// 60% size
+  const rOut = 0.0108;// 60% size
   const geom = new THREE.RingGeometry(rIn, rOut, 32);
   const mat = new THREE.MeshBasicMaterial({
     color: 0xffffff,
