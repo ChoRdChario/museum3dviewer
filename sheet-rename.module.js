@@ -69,6 +69,42 @@
     opt.dataset.title = title;
   }
 
+
+  // --- shared state for select wiring ---------------------------------
+  let __sr_lastSelect = null;
+  let __sr_selectMO = null;
+  let __sr_domMO = null;
+
+  function syncCurrentFromSelect(sel) {
+    sel = sel || findSheetSelect();
+    if (!sel) return;
+
+    const opt =
+      (sel.selectedOptions && sel.selectedOptions[0]) ||
+      sel.options[sel.selectedIndex] ||
+      null;
+
+    const gidStr = opt && opt.value != null ? String(opt.value).trim() : "";
+    const gidNum = gidStr ? Number(gidStr) : NaN;
+
+    const displayName = opt ? String(opt.textContent || "").trim() : "";
+    const sheetTitle =
+      opt && opt.dataset && opt.dataset.sheetTitle
+        ? String(opt.dataset.sheetTitle).trim()
+        : displayName;
+
+    window.currentSheetId = Number.isFinite(gidNum) ? gidNum : null;
+    window.currentSheetDisplayName = displayName;
+    window.currentSheetTitle = sheetTitle;
+
+    // Tooltip: show displayName (not necessarily the actual sheet title).
+    sel.title = displayName || "";
+
+    const edit = $("sheet-rename-edit");
+    if (edit) edit.disabled = !(window.currentSheetId != null);
+    const label = $("sheet-rename-label");
+    if (label) label.textContent = window.currentSheetDisplayName || "(no sheet)";
+  }
   // --- view state ------------------------------------------------------
   function updateSheetRenameView(mode) {
     const rootEl = $("sheet-rename-root");
@@ -86,7 +122,7 @@
     const spin = $("sheet-rename-spin");
     if (!input || !ok || !cancel || !edit || !spin) return;
 
-    const title = (window.currentSheetTitle || "").trim();
+    const title = (window.currentSheetDisplayName || window.currentSheetTitle || "").trim();
 
     if (mode === "edit") {
       if (label) label.style.display = "none";
@@ -117,42 +153,55 @@
     }
   }
 
-  function wireSelectChange() {
+  
+function wireSelectChange() {
     const sel = findSheetSelect();
     if (!sel) return;
-    const syncFromSelect = () => {
-      const opt =
-        (sel.selectedOptions && sel.selectedOptions[0]) ||
-        sel.options[sel.selectedIndex] ||
-        null;
-      const title =
-        opt && opt.textContent ? opt.textContent.trim() : "";
-      const id = opt && opt.value ? Number(opt.value) : null;
 
-      if (id != null && !Number.isNaN(id)) {
-        window.currentSheetId = id;
-      } else {
-        window.currentSheetId = null;
-      }
-      if (title) window.currentSheetTitle = title;
+    // If the <select> node got replaced, rewire against the latest node.
+    if (__sr_lastSelect !== sel) {
+      __sr_lastSelect = sel;
+      // Stop observing the previous select.
+      try { if (__sr_selectMO) __sr_selectMO.disconnect(); } catch (_) {}
+      __sr_selectMO = null;
+    }
 
-      sel.title = title || "";
+    // Bind once per select node.
+    if (!sel.__lm_sheet_rename_wired) {
+      sel.__lm_sheet_rename_wired = true;
 
-      const label = $("sheet-rename-label");
-      const edit = $("sheet-rename-edit");
-      if (label) label.textContent = title || "(no sheet)";
-      if (edit) edit.disabled = !(window.currentSheetId != null);
-    };
+      sel.addEventListener(
+        "change",
+        () => {
+          syncCurrentFromSelect(sel);
+        },
+        { passive: true }
+      );
 
-    syncFromSelect();
-    sel.addEventListener("change", syncFromSelect, { passive: true });
-    new MutationObserver(syncFromSelect).observe(sel, {
-      childList: true,
-      subtree: true,
-    });
+      // Options are rebuilt dynamically; keep globals in sync.
+      __sr_selectMO = new MutationObserver(() => {
+        syncCurrentFromSelect(sel);
+      });
+      __sr_selectMO.observe(sel, { childList: true, subtree: true });
+    }
+
+    // Ensure a DOM watcher exists so we can recover if other modules rebuild the selector.
+    if (!__sr_domMO) {
+      __sr_domMO = new MutationObserver(() => {
+        const latest = findSheetSelect();
+        if (latest && latest !== __sr_lastSelect) {
+          // Rewire and (if needed) move the rename UI next to the new selector.
+          mountSheetRenameUI();
+        }
+      });
+      __sr_domMO.observe(document.documentElement || document.body, { childList: true, subtree: true });
+    }
+
+    syncCurrentFromSelect(sel);
   }
 
-  // --- auth helper (unified with A系) ----------------------------------
+  // --- auth helper ----------------------------------------------------
+  // (unified with A系) ----------------------------------
   async function getAuthFetchAndToken() {
     // 1) __lm_fetchJSONAuth があればそれを最優先（token 内部取得）
     if (typeof window.__lm_fetchJSONAuth === "function") {
@@ -246,21 +295,42 @@
 
   async function ensureSheetNameRegistrySheet(spreadsheetId) {
   if (!spreadsheetId) return null;
+
+  // 1) Fast path: find by title (cached metadata)
   const exist = await findSheetByTitle(spreadsheetId, SHEET_NAME_REGISTRY_TITLE);
   if (exist) return exist;
-  if (isShareMode()) {
-    return null;
-  }
 
-    const props = await fetchSheetProps(spreadsheetId);
-    const found = props.find(s => s.title === SHEET_NAME_REGISTRY_TITLE);
-    if (!found) {
-      const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}:batchUpdate`;
-      const payload = { requests: [{ addSheet: { properties: { title: SHEET_NAME_REGISTRY_TITLE } } }] };
-      await __lm_fetchJSONAuth(url, { method: 'POST', body: JSON.stringify(payload) });
-    }
-    await ensureRegistryHeader(spreadsheetId);
+  // 2) Check the spreadsheet metadata once (covers cases where findSheetByTitle is stale)
+  let props = [];
+  try {
+    props = await fetchSheetProps(spreadsheetId);
+  } catch (_) {
+    props = [];
   }
+  const found = props.find((s) => s && s.title === SHEET_NAME_REGISTRY_TITLE);
+  if (found) return found;
+
+  // 3) Share mode must never create sheets.
+  if (isShareMode()) return null;
+
+  // 4) Create the registry sheet, then ensure header.
+  const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}:batchUpdate`;
+  const payload = {
+    requests: [
+      { addSheet: { properties: { title: SHEET_NAME_REGISTRY_TITLE } } },
+    ],
+  };
+  await __lm_fetchJSONAuth(url, { method: "POST", body: JSON.stringify(payload) });
+  await ensureRegistryHeader(spreadsheetId);
+
+  // 5) Return the newly created sheet props (best-effort).
+  try {
+    props = await fetchSheetProps(spreadsheetId);
+  } catch (_) {
+    props = [];
+  }
+  return props.find((s) => s && s.title === SHEET_NAME_REGISTRY_TITLE) || { title: SHEET_NAME_REGISTRY_TITLE };
+}
 
   async function ensureRegistryHeader(spreadsheetId) {
     const headerRange = `${SHEET_NAME_REGISTRY_TITLE}!A1:D1`;
@@ -514,6 +584,7 @@ async function sheetsUpdateTitle(
   }
 
   // --- applySheetRename (Z1 display-name版) -----------------------------
+  
   async function applySheetRename() {
     const input = $("sheet-rename-input");
     const spin = $("sheet-rename-spin");
@@ -523,103 +594,95 @@ async function sheetsUpdateTitle(
     const sel = findSheetSelect();
     if (!input || !spin || !ok || !cancel || !label || !sel) return;
 
-    if (window.currentSheetId == null) {
-      wireSelectChange();
-      if (window.currentSheetId == null) return;
-    }
+    // Ensure we have a current selection (some modules rebuild the <select>).
+    syncCurrentFromSelect(sel);
+    if (window.currentSheetId == null) return;
 
-    const before = window.currentSheetTitle || "";
-    const newTitle = (input.value || "").trim();
-    const opt = sel.querySelector(
-      `option[value="${window.currentSheetId}"]`
-    );
+    const opt = sel.querySelector(`option[value="${window.currentSheetId}"]`);
+    const beforeDisplayName =
+      (window.currentSheetDisplayName || (opt && opt.textContent) || "").trim();
+    const sheetTitle =
+      (opt && opt.dataset && opt.dataset.sheetTitle)
+        ? String(opt.dataset.sheetTitle).trim()
+        : (window.currentSheetTitle || beforeDisplayName);
 
-    // 不正 or 変更なし or 長すぎる → 何もしない
-    if (!newTitle || newTitle === before || newTitle.length > 100) {
+    const newDisplayName = (input.value || "").trim();
+
+    // invalid / unchanged / too long → no-op
+    if (!newDisplayName || newDisplayName === beforeDisplayName || newDisplayName.length > 100) {
       updateSheetRenameView("view");
       return;
     }
 
-    // 表示名としての重複チェック（実シート名とは無関係）
+    // Duplicate check (UI labels must be unique)
     for (const o of Array.from(sel.options || [])) {
-      if ((o.textContent || "").trim() === newTitle) {
+      if ((o.textContent || "").trim() === newDisplayName) {
         updateSheetRenameView("view");
         return;
       }
     }
 
-    // 楽観的 UI 更新
-    label.textContent = newTitle;
-    if (opt) updateOptionTextAndDataset(opt, newTitle);
-    window.currentSheetTitle = newTitle;
+    // optimistic UI update
+    label.textContent = newDisplayName;
+    if (opt) updateOptionTextAndDataset(opt, newDisplayName);
+    window.currentSheetDisplayName = newDisplayName;
     updateSheetRenameView("view");
 
-    // spreadsheetId を __LM_ACTIVE_SPREADSHEET_ID 優先で取得
+    // spreadsheetId: prefer __LM_ACTIVE_SPREADSHEET_ID
     let spreadsheetId =
       window.__LM_ACTIVE_SPREADSHEET_ID ||
       window.currentSpreadsheetId ||
+      (window.__lm_ctx && window.__lm_ctx.spreadsheetId) ||
       "";
 
-    // ctx.bridge が少し遅れるケースに備えて短時間だけ待つ
+    // ctx.bridge may lag; wait briefly
     if (!spreadsheetId) {
       for (let t = 0; t < 5 && !spreadsheetId; t++) {
         await new Promise((r) => setTimeout(r, 60));
         spreadsheetId =
           window.__LM_ACTIVE_SPREADSHEET_ID ||
           window.currentSpreadsheetId ||
+          (window.__lm_ctx && window.__lm_ctx.spreadsheetId) ||
           "";
       }
     }
 
     if (!spreadsheetId) {
-      // 失敗したらロールバック
-      label.textContent = before;
-      if (opt) updateOptionTextAndDataset(opt, before);
-      window.currentSheetTitle = before;
+      // rollback
+      label.textContent = beforeDisplayName || "(no sheet)";
+      if (opt) updateOptionTextAndDataset(opt, beforeDisplayName);
+      window.currentSheetDisplayName = beforeDisplayName;
       warn("rename failed", new Error("spreadsheetId missing"));
       return;
     }
 
-    // API 呼び出し (registry 書き込み)
+    // Share mode must not write.
+    if (String(window.__LM_MODE || "").toLowerCase() === "share") {
+      label.textContent = beforeDisplayName || "(no sheet)";
+      if (opt) updateOptionTextAndDataset(opt, beforeDisplayName);
+      window.currentSheetDisplayName = beforeDisplayName;
+      warn("rename blocked in share mode");
+      return;
+    }
+
+    // API call: write to __LM_SHEET_NAMES registry (not per-sheet Z1).
     try {
       input.disabled = ok.disabled = cancel.disabled = true;
       spin.style.display = "inline-block";
 
-      // Share mode: allow local rename only (no persistence)
-      if (isShareMode()) {
-        log("rename skipped (share-mode)", newTitle);
-        return;
-      }
-
-      // Resolve actual sheetTitle for the gid (best-effort)
-      let sheetTitle = "";
-      try {
-        const NS = window.LM_SHEET_GIDMAP;
-        if (NS && typeof NS.fetchSheetMap === "function") {
-          const map = await NS.fetchSheetMap(spreadsheetId);
-          const byId = map && map.byId;
-          const meta = byId && byId[Number(window.currentSheetId)];
-          if (meta && meta.title) sheetTitle = String(meta.title);
-        }
-      } catch (e2) {
-        // ignore (best-effort)
-      }
-
       await upsertSheetNameRegistry(
         spreadsheetId,
         window.currentSheetId,
-        newTitle,
-        sheetTitle || before
+        newDisplayName,
+        sheetTitle
       );
 
-      // 成功時は currentSheetTitle / option は既に newTitle になっているので何もしない
-      log("rename success (registry)", newTitle);
-    }
-} catch (e) {
-      // 失敗したらロールバック
-      label.textContent = before;
-      if (opt) updateOptionTextAndDataset(opt, before);
-      window.currentSheetTitle = before;
+      log("rename success (registry)", { sheetGid: window.currentSheetId, displayName: newDisplayName });
+    } catch (e) {
+      // rollback
+      label.textContent = beforeDisplayName || "(no sheet)";
+      if (opt) updateOptionTextAndDataset(opt, beforeDisplayName);
+      window.currentSheetDisplayName = beforeDisplayName;
       warn("rename failed", e);
     } finally {
       input.disabled = ok.disabled = cancel.disabled = false;
@@ -627,7 +690,7 @@ async function sheetsUpdateTitle(
     }
   }
 
-  // --- UI events -------------------------------------------------------
+// --- UI events -------------------------------------------------------
   function wireSheetRenameEvents() {
     const label = $("sheet-rename-label");
     const input = $("sheet-rename-input");
@@ -640,6 +703,8 @@ async function sheetsUpdateTitle(
     edit.addEventListener(
       "click",
       () => {
+        // Some flows rebuild the <select>; re-sync at click time.
+        syncCurrentFromSelect();
         if (!(window.currentSheetId != null)) return;
         updateSheetRenameView("edit");
       },
@@ -649,6 +714,7 @@ async function sheetsUpdateTitle(
     label.addEventListener(
       "click",
       () => {
+        syncCurrentFromSelect();
         if (!(window.currentSheetId != null)) return;
         updateSheetRenameView("edit");
       },
@@ -716,11 +782,11 @@ async function sheetsUpdateTitle(
     // ここでは「分かる範囲で」同期を試みる（確実な同期は selector 側からも呼ぶ）。
     try {
       const ctx = window.__lm_ctx || {};
-      const spreadsheetId = ctx.spreadsheetId;
-      const sel = document.getElementById("sheetSelect");
-      const authFetch = window.__lm_fetchJSONAuth || window.__lm_fetchJSON;
-      if (spreadsheetId && sel && typeof authFetch === "function") {
-        syncDisplayNamesFromZ1(spreadsheetId, authFetch, sel);
+      const spreadsheetId = ctx.spreadsheetId || window.currentSpreadsheetId || window.__LM_ACTIVE_SPREADSHEET_ID;
+      const sel2 = findSheetSelect();
+      if (spreadsheetId && sel2) {
+        // Best-effort: update option labels from registry (if available).
+        syncDisplayNamesFromZ1(spreadsheetId, null, sel2).catch(() => {});
       }
     } catch (e) {
       console.warn("[sheet-rename] sync attempt skipped", e);
@@ -748,33 +814,59 @@ async function sheetsUpdateTitle(
   // expose helpers for classic scripts (non-module)
   // caption.sheet.selector.js expects this name.
   window.__lm_syncSheetDisplayNamesFromZ1 = async function (spreadsheetId, a, b) {
-    // Supported signatures:
-    // 1) (spreadsheetId, sheetsArray, selectEl)  <-- preferred (used by caption.sheet.selector.js)
-    // 2) (spreadsheetId, authFetchFn, selectEl)  <-- legacy
-    // 3) (spreadsheetId, selectEl)              <-- legacy
-    const isSelectEl = (x) => !!(x && x.tagName && String(x.tagName).toUpperCase() === 'SELECT');
-
+    // supported signatures:
+    //   (spreadsheetId, selectEl)
+    //   (spreadsheetId, sheetsArray, selectEl)
+    //   (spreadsheetId, authFetch, selectEl)  // legacy
     let sheets = null;
     let selectEl = null;
 
-    if (Array.isArray(a)) {
+    // legacy: (spreadsheetId, authFetch, selectEl)
+    if (a && typeof a === "function") {
+      selectEl = b;
+      // We no longer need authFetch here; registry reads go through __lm_fetchJSONAuth internally.
+      sheets = null;
+    } else if (Array.isArray(a)) {
       sheets = a;
       selectEl = b;
-    } else if (typeof a === 'function') {
-      // legacy authFetch, ignore (we now use window.__lm_fetchJSONAuth internally)
-      selectEl = b;
-    } else if (isSelectEl(a)) {
+    } else {
       selectEl = a;
-    } else if (isSelectEl(b)) {
-      selectEl = b;
+      sheets = null;
     }
 
+    if (!selectEl) selectEl = findSheetSelect();
     return syncDisplayNamesFromZ1(spreadsheetId, sheets, selectEl);
   };
 
   // for manual debugging
   window.__lm_applySheetRename = applySheetRename;
 
+
+  // Registry helpers for other modules (e.g., caption.sheet.selector.js)
+  window.__lm_getSheetNameRegistry = async function ({ spreadsheetId } = {}) {
+    if (!spreadsheetId) {
+      spreadsheetId =
+        window.__LM_ACTIVE_SPREADSHEET_ID ||
+        window.currentSpreadsheetId ||
+        (window.__lm_ctx && window.__lm_ctx.spreadsheetId) ||
+        "";
+    }
+    if (!spreadsheetId) return { rows: [], gidToDisplayName: new Map(), gidToTitle: new Map() };
+    return readSheetNameRegistry(spreadsheetId);
+  };
+
+  window.__lm_upsertSheetNameRegistry = async function ({ spreadsheetId, sheetGid, displayName, sheetTitle } = {}) {
+    if (!spreadsheetId) {
+      spreadsheetId =
+        window.__LM_ACTIVE_SPREADSHEET_ID ||
+        window.currentSpreadsheetId ||
+        (window.__lm_ctx && window.__lm_ctx.spreadsheetId) ||
+        "";
+    }
+    if (!spreadsheetId || sheetGid == null || !displayName) return false;
+    await upsertSheetNameRegistry(spreadsheetId, sheetGid, displayName, sheetTitle || "");
+    return true;
+  };
 
   // optional export for manual re-mount
   window.mountSheetRenameUI = mountSheetRenameUI;
