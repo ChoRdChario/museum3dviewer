@@ -231,6 +231,32 @@ let __views_saving = false;
 let __views_saveTimer = null;
 let __views_pendingSave = false;
 
+let __views_readyPollTimer = null;
+let __views_readyPollTries = 0;
+const __VIEWS_READY_POLL_MS = 250;
+const __VIEWS_READY_POLL_MAX = 120; // ~30s
+
+function armReadyPoll(restart=false){
+  try{
+    if (__views_readyPollTimer){
+      if (!restart) return;
+      clearInterval(__views_readyPollTimer);
+      __views_readyPollTimer = null;
+    }
+    __views_readyPollTries = 0;
+    __views_readyPollTimer = setInterval(()=>{
+      __views_readyPollTries++;
+      let ok = false;
+      try{ ok = !!enableIfReady(); }catch(_e){}
+      if (ok || __views_readyPollTries >= __VIEWS_READY_POLL_MAX){
+        clearInterval(__views_readyPollTimer);
+        __views_readyPollTimer = null;
+      }
+    }, __VIEWS_READY_POLL_MS);
+  }catch(_e){}
+}
+
+
 function canPersist(){
   const b = getBridge();
   return !!(__views_ctx && __views_ctx.spreadsheetId && __views_ctx.sheetGid && b && typeof b.getCameraState === 'function');
@@ -343,7 +369,7 @@ async function maybeLoad(){
 
   function enableIfReady(){
     const b = getBridge();
-    if (!b) { setEnabled(false); return; }
+    if (!b) { setEnabled(false); return false; }
     // GLB loaded => we should have bounds
     if (typeof b.getModelBounds === 'function'){
       const bd = b.getModelBounds();
@@ -351,7 +377,7 @@ async function maybeLoad(){
         setEnabled(true);
         syncFromViewer();
       scheduleSave();
-        return;
+        return true;
       }
     }
     // fallback: if scene has meshes
@@ -363,10 +389,11 @@ async function maybeLoad(){
         setEnabled(true);
         syncFromViewer();
       scheduleSave();
-        return;
+        return true;
       }
     }
     setEnabled(false);
+    return false;
   }
 
   function applyProjection(){
@@ -488,17 +515,26 @@ window.addEventListener('lm:sheet-context', (ev)=>{
   setTimeout(maybeLoad, 0);
 });
 
+  // Viewer bridge becomes ready (module imported); re-check readiness and arm polling
+  document.addEventListener('lm:viewer-bridge-ready', ()=>{ setTimeout(()=>{ enableIfReady(); armReadyPoll(true); }, 0); });
+
   // Enable on scene-ready (fires at init and after GLB load; we re-check readiness)
-  window.addEventListener('lm:scene-ready', ()=>{ setTimeout(enableIfReady, 0); setTimeout(maybeLoad, 0); });
+  window.addEventListener('lm:scene-ready', ()=>{ setTimeout(()=>{ enableIfReady(); armReadyPoll(true); }, 0); setTimeout(maybeLoad, 0); });
 
   // Also re-check after GLB load signal if present
-  window.addEventListener('lm:glb-loaded', ()=>{ setTimeout(enableIfReady, 0); setTimeout(maybeLoad, 0); });
+  window.addEventListener('lm:glb-loaded', ()=>{ setTimeout(()=>{ enableIfReady(); armReadyPoll(true); }, 0); setTimeout(maybeLoad, 0); });
 
-  // Try a couple times on startup (in case bridge is late)
-  setTimeout(enableIfReady, 800);
+  // Try on startup (in case bridge/model is late)
+  setTimeout(()=>{ enableIfReady(); armReadyPoll(true); }, 800);
   setTimeout(maybeLoad, 900);
-  setTimeout(enableIfReady, 2000);
+  setTimeout(()=>{ enableIfReady(); armReadyPoll(true); }, 2000);
   setTimeout(maybeLoad, 2100);
+
+  // When user presses Load, arm polling because model load completion timing is variable
+  try{
+    const btn = document.getElementById('btnGlb') || document.querySelector('button#btnGlb,[data-action="load-glb"]');
+    if (btn) btn.addEventListener('click', ()=>{ armReadyPoll(true); }, { passive:true });
+  }catch(_e){}
 
   log('armed');
 })();
