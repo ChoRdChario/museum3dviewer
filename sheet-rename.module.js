@@ -615,7 +615,7 @@ async function sheetsUpdateTitle(
       // 成功時は currentSheetTitle / option は既に newTitle になっているので何もしない
       log("rename success (registry)", newTitle);
     }
-} catch (e) {
+    catch (e) {
       // 失敗したらロールバック
       label.textContent = before;
       if (opt) updateOptionTextAndDataset(opt, before);
