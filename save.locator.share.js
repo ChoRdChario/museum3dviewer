@@ -41,14 +41,17 @@ export async function findExistingSaveSheetByGlbId(glbFileId){
 }
 
 export function dispatchSheetContext(ctx){
+  // Share mode needs to interop with modules that listen on BOTH window and document.
+  // Also keep both global aliases in sync.
   try{
-    // Keep both legacy and new ctx keys for compatibility.
-    const v = Object.assign({}, ctx || {});
+    const v = (ctx && typeof ctx === 'object') ? ctx : {};
     window.__LM_SHEET_CTX__ = v;
     window.__LM_SHEET_CTX = v;
-  }catch(_e){}
-  try{
-    document.dispatchEvent(new CustomEvent('lm:sheet-context', { detail: ctx || {} }));
+
+    const ev1 = new CustomEvent('lm:sheet-context', { detail: v });
+    const ev2 = new CustomEvent('lm:sheet-context', { detail: v });
+    window.dispatchEvent(ev1);
+    document.dispatchEvent(ev2);
   }catch(e){
     // non-fatal
   }

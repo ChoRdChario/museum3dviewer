@@ -53,6 +53,34 @@ async function listSheets(spreadsheetId){
   return sheets;
 }
 
+async function readSheetDisplayNameMap(spreadsheetId){
+  // Reads optional displayName registry sheet: __LM_SHEET_NAMES
+  // Schema (A:D):
+  // A: sheetGid, B: sheetTitle, C: displayName, D: updatedAt
+  const map = new Map();
+  if(!spreadsheetId) return map;
+
+  const fetchJSON = window.__lm_fetchJSONAuth;
+  if(typeof fetchJSON !== 'function') return map;
+
+  const range = '__LM_SHEET_NAMES!A2:D';
+  const url = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(range)}?valueRenderOption=UNFORMATTED_VALUE`;
+
+  try{
+    const res = await fetchJSON(url);
+    const rows = Array.isArray(res?.values) ? res.values : [];
+    for(const r of rows){
+      if(!Array.isArray(r) || r.length < 3) continue;
+      const gid = String(r[0] ?? '').trim();
+      const displayName = String(r[2] ?? '').trim();
+      if(gid && displayName) map.set(gid, displayName);
+    }
+  }catch(e){
+    // Registry sheet may not exist; ignore.
+  }
+  return map;
+}
+
 async function readCaptionRows(spreadsheetId, sheetTitle){
   const fetchJSON = window.__lm_fetchJSONAuth;
   const range = `${sheetTitle}!A1:J`;
@@ -166,7 +194,11 @@ async function start(glbFileId){
   }
 
   const sel = document.querySelector('#save-target-sheet');
-  setOptions(sel, sheets.filter(s=>!isSystemSheetTitle(s.title)));
+  const displayNameMap = await readSheetDisplayNameMap(ctx.spreadsheetId);
+  const sheetsForOptions = sheets
+    .filter(s=>!isSystemSheetTitle(s.title))
+    .map(s=>({ gid: s.gid, title: displayNameMap.get(String(s.gid)) || s.title }));
+  setOptions(sel, sheetsForOptions);
   // In Share mode, Create is disabled already; ensure anyway
   const createBtn = document.querySelector('#save-target-create');
   if (createBtn) createBtn.disabled = true;
