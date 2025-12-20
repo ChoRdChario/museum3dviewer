@@ -22,6 +22,42 @@
   const UPDATE_THROTTLE_MS = 2000;
   const lastUpdateAt = new Map(); // key: item.id or "row:<rowIndex>" → timestamp(ms)
 
+  // 高頻度の変更（テキスト入力→画像アタッチ等）で更新が「落ちる」ことを防ぐため、
+  // throttle は単純に捨てず、最後の更新を遅延実行で coalesce する
+  const pendingUpdate = new Map(); // key -> { spreadsheetId, sheetTitle, item }
+  const pendingTimer = new Map();  // key -> timeout id
+
+  function cloneItemSafe(item) {
+    try { return structuredClone(item); } catch (_) {}
+    try { return JSON.parse(JSON.stringify(item)); } catch (_) {}
+    // それでもダメなら参照を返す（最終手段）
+    return item;
+  }
+
+  function scheduleDeferredUpdate(key, spreadsheetId, sheetTitle, item, waitMs) {
+    pendingUpdate.set(key, { spreadsheetId, sheetTitle, item: cloneItemSafe(item) });
+
+    if (pendingTimer.has(key)) return;
+
+    const t = setTimeout(async () => {
+      pendingTimer.delete(key);
+      const p = pendingUpdate.get(key);
+      pendingUpdate.delete(key);
+      if (!p) return;
+
+      // throttle による早期returnを回避するため、最終更新時刻をリセットしてから実行
+      lastUpdateAt.set(key, 0);
+      try {
+        await updateRowForItem(p.spreadsheetId, p.sheetTitle, p.item, '[deferred]');
+      } catch (e) {
+        warn('Deferred update failed:', key, e);
+      }
+    }, Math.max(100, waitMs));
+
+    pendingTimer.set(key, t);
+  }
+
+
   // ctx.sheetTitle は「今この UI がバインドしているシート名」
   let ctx = { spreadsheetId:'', sheetGid:'', sheetTitle:'', nextRowIndex:2 };
   let uiPromise = null;
@@ -251,11 +287,14 @@
     const nowTs = Date.now();
     const last = lastUpdateAt.get(key) || 0;
     const delta = nowTs - last;
-    if (delta < UPDATE_THROTTLE_MS){
-      // 短時間に連続する更新はスキップ（次の一定時間後の更新で上書きされる想定）
-      log('update row throttled', key, 'delta', delta);
+
+    if (delta < UPDATE_THROTTLE_MS) {
+      // 短時間に連続する更新は「捨てずに」遅延実行で coalesce する
+      log('update row throttled (deferred)', key, 'delta', delta);
+      scheduleDeferredUpdate(key, spreadsheetId, sheetTitle, item, (UPDATE_THROTTLE_MS - delta) + 50);
       return;
     }
+
     lastUpdateAt.set(key, nowTs);
 
     const { row, createdAt, updatedAt } = itemToRow(item, 'update');
