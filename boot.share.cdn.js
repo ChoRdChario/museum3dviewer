@@ -67,6 +67,36 @@ async function loadGISOnce(){
   return _gisLoading;
 }
 
+// --- OAuth state (CSRF mitigation) ---
+// NOTE: token responses may or may not echo back `state`; we validate only when provided.
+const _OAUTH_STATE_KEY = "lm_oauth_state_share";
+function _makeOAuthState(len = 18) {
+  try {
+    const b = new Uint8Array(len);
+    crypto.getRandomValues(b);
+    let s = "";
+    for (let i = 0; i < b.length; i++) s += String.fromCharCode(b[i]);
+    // base64url (no padding)
+    return btoa(s).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+  } catch (e) {
+    // Fallback (not cryptographically strong, but better than nothing)
+    return String(Math.random()).slice(2) + String(Date.now());
+  }
+}
+function _issueOAuthState() {
+  const st = _makeOAuthState();
+  try { sessionStorage.setItem(_OAUTH_STATE_KEY, st); } catch (e) {}
+  return st;
+}
+function _consumeOAuthState() {
+  try {
+    const st = sessionStorage.getItem(_OAUTH_STATE_KEY);
+    sessionStorage.removeItem(_OAUTH_STATE_KEY);
+    return st;
+  } catch (e) { return null; }
+}
+// --- end OAuth state ---
+
 let _tokClient=null, _tokInflight=null, _tokCache=null, _tokCacheExp=0;
 let _pendingResolve=null, _pendingReject=null;
 
@@ -82,9 +112,11 @@ async function __lm_getAccessToken(){
     if (!window.google || !window.google.accounts || !window.google.accounts.oauth2){
       throw new Error("[auth/share] GIS not ready");
     }
+    const oauthState = _issueOAuthState();
     _tokClient = window.google.accounts.oauth2.initTokenClient({
       client_id: clientId,
       scope: (window.LM_SCOPES||[]).join(" "),
+      state: oauthState,
       callback: (resp)=>{
         if (resp && resp.error){
           ERR("[auth/share] token error", resp);
