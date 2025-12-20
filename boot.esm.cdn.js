@@ -78,6 +78,18 @@ async function loadGISOnce(){
 
 /* Public token getter (single-flight + cache) */
 let _tokClient=null, _tokInflight=null, _tokCache=null, _tokCacheExp=0;
+// CSRF mitigation: OAuth state parameter for GIS token flow
+let _oauthState = null;
+function _makeOAuthState(){
+  try{
+    const arr = new Uint8Array(16);
+    if (typeof crypto !== "undefined" && crypto.getRandomValues) crypto.getRandomValues(arr);
+    else for (let i=0;i<arr.length;i++) arr[i] = Math.floor(Math.random()*256);
+    return Array.from(arr).map(b=>b.toString(16).padStart(2,"0")).join("");
+  }catch(e){
+    return String(Math.random()).slice(2) + String(Date.now());
+  }
+}
 let _pendingResolve=null, _pendingReject=null;
 async function __lm_getAccessToken(){
   const now = Date.now();
@@ -94,7 +106,14 @@ async function __lm_getAccessToken(){
     _tokClient = window.google.accounts.oauth2.initTokenClient({
       client_id: clientId,
       scope: (window.LM_SCOPES||[]).join(" "),
+      state: (_oauthState = _makeOAuthState()),
       callback: (resp)=>{
+        if (resp && resp.state && _oauthState && resp.state !== _oauthState){
+          err("[auth] state mismatch", {expected:_oauthState, got:resp.state});
+          if (_pendingReject) _pendingReject(new Error("OAuth state mismatch"));
+          _pendingReject = null; _pendingResolve = null;
+          return;
+        }
         if (resp.error){
           err("[auth] token error", resp);
           if (_pendingReject) _pendingReject(resp);
