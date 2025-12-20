@@ -55,24 +55,52 @@ async function listSheets(spreadsheetId){
 
 async function readSheetDisplayNameMap(spreadsheetId){
   // Reads optional displayName registry sheet: __LM_SHEET_NAMES
-  // Schema (A:D):
-  // A: sheetGid, B: sheetTitle, C: displayName, D: updatedAt
+  // NOTE: The column order is defined by sheet-rename.module.js and may evolve.
+  // Current canonical header is:
+  // A: sheetGid, B: displayName, C: sheetTitle, D: updatedAt
   const map = new Map();
   if(!spreadsheetId) return map;
 
   const fetchJSON = window.__lm_fetchJSONAuth;
   if(typeof fetchJSON !== 'function') return map;
 
-  const range = '__LM_SHEET_NAMES!A2:D';
+  // Read header row as well so we can resolve the column indices robustly.
+  const range = '__LM_SHEET_NAMES!A1:D';
   const url = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(range)}?valueRenderOption=UNFORMATTED_VALUE`;
 
   try{
     const res = await fetchJSON(url);
     const rows = Array.isArray(res?.values) ? res.values : [];
-    for(const r of rows){
-      if(!Array.isArray(r) || r.length < 3) continue;
-      const gid = String(r[0] ?? '').trim();
-      const displayName = String(r[2] ?? '').trim();
+    if(!rows.length) return map;
+
+    // Header-aware parsing (preferred)
+    const header = (rows[0] || []).map(v=>String(v||'').trim());
+    const hasHeader = header.includes('sheetGid') || header.includes('displayName');
+
+    let startRow = 0;
+    let iGid = 0;
+    let iDisplayName = 2; // historical fallback
+
+    if(hasHeader){
+      startRow = 1;
+      const idx = (name)=> header.findIndex(h=>h===name);
+      const gi = idx('sheetGid');
+      const di = idx('displayName');
+      if(gi >= 0) iGid = gi;
+      if(di >= 0) iDisplayName = di;
+    }
+
+    for(const r of rows.slice(startRow)){
+      if(!Array.isArray(r) || r.length < 2) continue;
+      const gid = String(r[iGid] ?? '').trim();
+      let displayName = String(r[iDisplayName] ?? '').trim();
+
+      // If no header and the historical index doesn't produce a value,
+      // try the canonical (sheet-rename.module.js) index=1.
+      if(!hasHeader && !displayName && r.length >= 2){
+        displayName = String(r[1] ?? '').trim();
+      }
+
       if(gid && displayName) map.set(gid, displayName);
     }
   }catch(e){
