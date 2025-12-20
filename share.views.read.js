@@ -97,7 +97,10 @@ async function applyLastView(ctx){
 let __lastKey = '';
 function keyOf(ctx){
   if (!ctx) return '';
-  return String(ctx.spreadsheetId||'')+':'+String(ctx.sheetGid||'');
+  // sheetGid can be 0 (first sheet). Preserve 0 by avoiding || fallback.
+  const sid = (ctx.spreadsheetId == null) ? '' : String(ctx.spreadsheetId);
+  const gid = (ctx.sheetGid == null) ? '' : String(ctx.sheetGid);
+  return sid + ':' + gid;
 }
 
 function scheduleApply(ctx){

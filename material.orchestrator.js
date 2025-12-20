@@ -264,7 +264,8 @@
   // --- Data Loading from __LM_MATERIALS ---
 
   async function loadMaterialsForContext(spreadsheetId, sheetGid) {
-    if (!spreadsheetId || !sheetGid) return;
+    // NOTE: sheetGid can be 0 for the first sheet. Treat 0 as a valid gid.
+    if (!spreadsheetId || sheetGid == null || sheetGid === '') return;
     const fetchJSON = window.__lm_fetchJSONAuth;
     if (!fetchJSON) {
       console.warn(LOG_PREFIX, 'No auth fetch available; cannot load materials');
@@ -391,12 +392,14 @@
 
   async function handleSheetContextChange(ctx) {
     const spreadsheetId = ctx && ctx.spreadsheetId;
-    const sheetGid = ctx && ctx.sheetGid;
-    currentSheetGid = sheetGid ? String(sheetGid) : '';
+    // IMPORTANT: Google Sheets' first sheet gid is often 0.
+    // Avoid truthy/falsy checks that would drop gid=0.
+    const sheetGid = ctx && (Object.prototype.hasOwnProperty.call(ctx, 'sheetGid') ? ctx.sheetGid : (ctx.defaultCaptionGid ?? ctx.activeSheetGid));
+    currentSheetGid = (sheetGid == null || sheetGid === '') ? '' : String(sheetGid);
 
     console.log(LOG_PREFIX, 'Sheet Context Change ->', currentSheetGid);
 
-    if (!spreadsheetId || !currentSheetGid) return;
+    if (!spreadsheetId || currentSheetGid === '') return;
 
     // 直近のコンテキストを保持（GLB読み込み順の揺れに備える）
     lastSheetCtx = ctx;

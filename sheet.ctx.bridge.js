@@ -6,7 +6,11 @@
   let cur = { spreadsheetId:'', sheetGid:'' };
 
   function setSheetContext(next){
-    const n = { spreadsheetId: String(next.spreadsheetId||''), sheetGid: String(next.sheetGid||'') };
+    // NOTE: sheetGid can be 0 for the first sheet. Preserve 0.
+    const n = {
+      spreadsheetId: (next.spreadsheetId == null) ? '' : String(next.spreadsheetId),
+      sheetGid: (next.sheetGid == null) ? '' : String(next.sheetGid)
+    };
     if (same(n, cur)){ return false; }
     cur = n;
     window.__LM_ACTIVE_SPREADSHEET_ID = n.spreadsheetId;
