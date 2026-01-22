@@ -532,39 +532,100 @@
     </section>
 
 <section id="privacy" class="card">
-        <h2>Privacy</h2>
-        <p class="meta">最終更新: 2025-12-20</p>
+  <h2>Privacy</h2>
+  <p class="meta">最終更新: 2026-01-20</p>
 
-        <h3>収集する情報</h3>
-        <ul>
-          <li>本ツールは、独自のサーバーへ個人情報を送信・保存しません。</li>
-          <li>ログインのために Google の認証（OAuth）を利用します。</li>
-          <li>ツールの動作のため、Google Drive / Google Sheets API へのアクセスが発生します（読み込み・保存）。</li>
-        </ul>
+  <h3>1. 概要</h3>
+  <p>
+    LociMyu α（以下「本ツール」）は、Webブラウザ上で Google Drive 上の <strong>GLB（3Dモデル）</strong>を読み込み、
+    キャプション（ピン）や表示設定を付与して <strong>Google Sheets</strong> に保存するツールです。
+    本ツールは、機能として<strong>当社独自サーバーに Google ユーザーデータ（Drive/Sheetsの内容）を保存しません</strong>。
+  </p>
 
-        <h3>保存される場所</h3>
-        <ul>
-          <li>キャプション（ピン）・表示設定は、あなたの Google Sheets（スプレッドシート）に保存されます。</li>
-          <li>画像は、あなたの Google Drive（GLBと同じフォルダ）から参照されます。</li>
-        </ul>
+  <h3>2. アクセスするGoogleユーザーデータ（データの種類）</h3>
+  <ul>
+    <li><strong>Google Drive（ファイル）</strong>
+      <ul>
+        <li>GLB（3Dモデル）ファイルの取得（閲覧）</li>
+        <li>GLBと同一フォルダ内の画像ファイルの一覧取得・参照（閲覧）</li>
+        <li>（編集モードのみ）必要に応じて、本ツール用のスプレッドシートを同一フォルダに作成・更新</li>
+      </ul>
+    </li>
+    <li><strong>Google Sheets（スプレッドシート）</strong>
+      <ul>
+        <li>キャプション（タイトル/本文/ピン色/3D座標 等）の読み取り・書き込み</li>
+        <li>表示設定（Material / Views など）の読み取り・書き込み</li>
+        <li>シート表示名の管理（表示名と実シート名の対応情報）の読み取り・書き込み</li>
+      </ul>
+    </li>
+  </ul>
+  <div class="note">
+    <strong>Share mode</strong>（閲覧共有向け）では、キャプション等の<strong>書き込み（保存）を行いません</strong>。
+    ただし、閲覧のために Drive / Sheets の読み取りが発生します。
+  </div>
 
-        <h3>保存される内容の例</h3>
-        <ul>
-          <li>キャプション本文、タイトル、ピン色、3D座標（posX/Y/Z）</li>
-          <li>添付画像の参照情報（同フォルダ内の画像）</li>
-          <li>Material / Views の設定（例: 透明度、投影設定、背景色、視点プリセット 等）</li>
-          <li>シート表示名の管理（表示名と実シート名の対応）</li>
-        </ul>
+  <h3>3. データの使用（利用目的・処理方法）</h3>
+  <ul>
+    <li>Drive 上の GLB/画像をブラウザに読み込み、3D表示およびキャプション編集画面を提供するため</li>
+    <li>キャプションや表示設定を、ユーザーが指定した Google Sheets に保存し、再読み込みできるようにするため</li>
+    <li>ユーザーが作成した Share リンクにより、閲覧用に同じ内容を表示するため（Share mode）</li>
+    <li>本ツールは、取得した Google ユーザーデータを広告配信・マーケティング目的で利用しません</li>
+    <li>本ツールは、取得した Google ユーザーデータを AI/ML（機械学習モデル）の学習・改善のために利用しません</li>
+  </ul>
 
-        <div class="note">
-          重要: Google Drive / Sheets の共有範囲は、あなたが設定した権限に従います。
-          意図しない公開を避けるため、共有設定は必ず確認してください。
-        </div>
-      </section>
+  <h3>4. データ共有（第三者提供の有無）</h3>
+  <ul>
+    <li>当社は、Google ユーザーデータ（Drive/Sheetsの内容）を<strong>第三者へ提供・販売しません</strong>。</li>
+    <li>本ツールのデータ保存先はユーザー自身の Google Drive / Google Sheets であり、
+      <strong>共有の可否・範囲はユーザーが Google Drive 側で設定した権限</strong>（閲覧者/編集者/リンク共有等）に従います。</li>
+    <li>法令遵守、権利侵害対応、不正利用対応等、合理的に必要な場合は、適用法令の範囲で情報を開示することがあります。</li>
+  </ul>
+  <div class="note">
+    本ツールは認証に Google を利用し、また動作のために Google API へ通信します。
+    そのため、Google によるデータ処理については Google のポリシーも適用されます。
+  </div>
+
+  <h3>5. データの保存と保護（セキュリティ）</h3>
+  <ul>
+    <li><strong>保存場所</strong>：キャプションや表示設定はユーザーの Google Sheets に保存され、GLB/画像はユーザーの Google Drive から参照されます。</li>
+    <li><strong>当社サーバーへの保存なし</strong>：本ツールは機能として、Drive/Sheets の内容（GLB、画像、スプレッドシート内容）を当社サーバーに保存しません。</li>
+    <li><strong>通信の保護</strong>：本ツールは HTTPS を利用して通信します。</li>
+    <li><strong>認可</strong>：Google OAuth を利用し、ユーザーの同意に基づき Google API へアクセスします。</li>
+    <li><strong>最小権限</strong>：本ツールは、機能実現に必要な範囲でのみ Google API スコープを要求します。</li>
+    <li><strong>トークンの取り扱い</strong>：アクセストークン等は、原則としてブラウザ上で必要な期間のみ取り扱い、永続的に保存しない設計を採用します。</li>
+  </ul>
+  <div class="note">
+    重要：Google Drive / Sheets 内のデータのアクセス制御（共有設定、閲覧者・編集者の管理等）は、
+    ユーザーの Google アカウントおよび Google Drive の権限設定により管理されます。
+    意図しない公開を避けるため、共有設定は必ず確認してください。
+  </div>
+
+  <h3>6. データの保持と削除</h3>
+  <h3>6-1. 保持期間</h3>
+  <ul>
+    <li>本ツールが取り扱うキャプション等のデータは、ユーザーの Google Drive / Google Sheets に保存されます。</li>
+    <li>当社サーバーに保存されないため、保持期間は<strong>ユーザーが Drive/Sheets 上で当該データを保持している期間</strong>（ユーザーが削除するまで）となります。</li>
+  </ul>
+
+  <h3>6-2. 削除方法（ユーザーが実行できる手順）</h3>
+  <ol class="steps">
+    <li><strong>保存データの削除</strong>：Google Drive 上で、本ツールで使用しているスプレッドシートや関連ファイル（GLB、画像等）を削除します。</li>
+    <li><strong>部分削除</strong>：スプレッドシート内の特定のシート/行（キャプション等）を削除することで、部分的に削除できます。</li>
+    <li><strong>連携解除</strong>：Google アカウントの「第三者アプリのアクセス権」から本ツールのアクセス権を削除（連携解除）することで、以後のアクセスを停止できます。</li>
+    <li><strong>ブラウザのサイトデータ削除</strong>：必要に応じて、ブラウザ設定から本サイトのサイトデータ（キャッシュ等）を削除してください。</li>
+  </ol>
+
+  <h3>7. お問い合わせ</h3>
+  <p>
+    本ポリシー、データの取り扱い、削除手順等に関するお問い合わせは
+    <a href="mailto:locimyu@gmail.com">locimyu@gmail.com</a>
+    までご連絡ください。
+  </p>
+</section>
 
 <section id="terms" class="card">
         <h2>Terms</h2>
-        <p class="muted">最終更新: 2025-12-20</p>
+        <p class="meta">最終更新: 2026-01-20</p>
 
         <h3>1. 適用</h3>
         <p>
@@ -621,8 +682,8 @@
           お問い合わせは <a href="mailto:locimyu@gmail.com">locimyu@gmail.com</a> までお願いします。
         </p>
 
+      </section>
 
-    </p>
   </div>
 </body>
 </html>
