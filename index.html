@@ -135,7 +135,9 @@
     .lm-purpose-title{font-weight:700; font-size:16px; letter-spacing:.02em;}
     .lm-x{width:32px; height:32px; border-radius:10px; border:1px solid var(--line); background:transparent; color:var(--text); cursor:pointer; font-size:18px; line-height:1;}
     .lm-purpose-body p{margin:8px 0;}
-    .lm-purpose-actions{display:flex; gap:8px; margin-top:10px; flex-wrap:wrap;}
+    .lm-purpose-body ol{margin:8px 0 0 18px; padding:0;}
+    .lm-purpose-body li{margin:6px 0;}
+        .lm-purpose-actions{display:flex; gap:8px; margin-top:10px; flex-wrap:wrap;}
     .lm-modal{position:fixed; inset:0; display:none; z-index:9999;}
     .lm-modal.is-open{display:block;}
     .lm-modal-backdrop{position:absolute; inset:0; background:rgba(0,0,0,.55);}
@@ -267,9 +269,22 @@ button,select,input{background:#111827;border:1px solid var(--line);color:var(--
         <button class="lm-x" type="button" data-lm-close aria-label="Close">×</button>
       </div>
       <div class="lm-purpose-body">
-        <p><strong>目的</strong>：Google Drive 上の 3D（GLB）をブラウザで表示し、注釈（ピン）や表示設定を Google Sheets に保存できるビューアです。</p>
+                <p><strong>目的</strong>：Google Drive 上の 3D（GLB）をブラウザで表示し、注釈（ピン）や表示設定を Google Sheets に保存できるビューアです。</p>
         <p class="muted">データはあなたの Google Drive / Sheets に保存されます。LociMyu のサーバーに 3Dモデルやシート内容を保存しません。</p>
+        <ol class="lm-purpose-steps">
+          <li>Google ドライブの任意の場所に、フォルダを作ってください。</li>
+          <li>そのフォルダに、LociMyu で見たい GLB ファイルをアップロードしてください。</li>
+          <li>フォルダの共有設定（閲覧 / 編集権限）を設定してください。編集権限を持つユーザーは LociMyu の編集モードでキャプション編集を保存できます。閲覧権限のみの場合、編集は保存されません。共有範囲は Google ドライブの共有設定に準拠します。</li>
+          <li>GLB ファイルの URL を右ペインの GLB 入力欄に記入して「Load」ボタンを押してください。</li>
+        </ol>
         <p class="muted"><strong>Purpose</strong>: A browser-based viewer for 3D (GLB) files on Google Drive. It can save pins/captions and view settings to Google Sheets. Data stays in your Google Drive/Sheets.</p>
+        <ol class="lm-purpose-steps muted">
+          <li>Create a folder anywhere in Google Drive.</li>
+          <li>Upload the GLB file you want to view with LociMyu into that folder.</li>
+          <li>Configure the folder’s sharing/permissions (viewer/editor). Users with edit permission can edit and save captions in LociMyu’s Edit mode. With view-only permission, edits cannot be saved. The sharing scope follows the folder’s Google Drive sharing settings.</li>
+          <li>Paste the GLB file URL into the GLB field on the right pane, then click “Load”.</li>
+        </ol>
+
         <div class="lm-purpose-actions">
           <a class="mini-link" href="./privacy.html" target="_blank" rel="noopener">PRIVACY＆GUIDE</a>
         </div>
