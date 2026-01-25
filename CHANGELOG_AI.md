@@ -149,3 +149,31 @@ The existing **“Select sheet…”** dropdown is a *worksheet selector* (gid) 
 7. Confirm:
    - A new spreadsheet is created in the selected folder (not My Drive root).
    - The app automatically opens the dataset (sheet context set) and loads the GLB.
+
+
+## Step 02a – Fix Picker 500 errors for Folder/GLB selection
+**Date:** 2026-01-26
+
+### Symptom
+- Folder picker and GLB picker were showing a Google **500** error (docs.google.com/picker...
+  Failed to load resource: the server responded with a status of 500).
+
+### Root cause
+- `dataset.create.ui.js` called `__lm_openPicker()` with string literals (`'FOLDERS'`, `'DOCS'`) instead of Picker constants.
+- `picker.bridge.module.js` expected a **Picker.ViewId constant value** (e.g. `google.picker.ViewId.FOLDERS`) and created the `DocsView` with an invalid/unsupported view id, which can lead to server-side 500 errors.
+
+### What changed
+1. `dataset.create.ui.js`
+   - Uses `window.google.picker.ViewId.FOLDERS` / `.DOCS` when available (falls back to strings only as a last resort).
+   - Adds `includeFolders: true` on folder selection.
+
+2. `picker.bridge.module.js`
+   - Adds robust viewId resolution: accepts either a ViewId constant **or** a string key (maps `'FOLDERS'` → `ViewId.FOLDERS`, etc.).
+   - For folder view (`ViewId.FOLDERS`), enables folder selection (`setSelectFolderEnabled(true)` when supported).
+   - Implements `allowSharedDrives` by enabling `SUPPORT_DRIVES` / `SUPPORT_TEAM_DRIVES` features when available.
+
+### How to test
+1. Sign in.
+2. In the Caption tab, open **New LociMyu dataset**.
+3. Click **Choose folder…** → Picker should open without 500.
+4. Click **Choose GLB…** → Picker should open without 500.

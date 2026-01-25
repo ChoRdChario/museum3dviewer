@@ -73,20 +73,25 @@ async function waitForLoadGlbFn(timeoutMs = 8000){
 }
 
 async function openFolderPicker(){
+  const Picker = window.google?.picker;
+  const viewId = Picker?.ViewId?.FOLDERS || 'FOLDERS';
   const res = await window.__lm_openPicker({
     title: 'Select destination folder',
-    viewId: 'FOLDERS',
+    viewId,
     multiselect: false,
     allowSharedDrives: true,
+    includeFolders: true,
   });
   const doc = res?.docs?.[0];
   return doc ? { id: doc.id, name: doc.name || '' } : null;
 }
 
 async function openGlbPicker(){
+  const Picker = window.google?.picker;
+  const viewId = Picker?.ViewId?.DOCS || 'DOCS';
   const res = await window.__lm_openPicker({
     title: 'Select GLB file',
-    viewId: 'DOCS',
+    viewId,
     multiselect: false,
     allowSharedDrives: true,
     // We intentionally do not mime-filter here; some GLB files may have generic mimeTypes.

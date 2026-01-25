@@ -100,7 +100,16 @@ async function openPicker(opts = {}){
   const includeFolders = !!(opts && opts.includeFolders);
   const fileIds = Array.isArray(opts && opts.fileIds) ? opts.fileIds.filter(Boolean).map(String) : null;
 
-  const viewId = (opts && opts.viewId) || (window.google && window.google.picker && window.google.picker.ViewId && window.google.picker.ViewId.DOCS);
+  // Resolve viewId.
+  // - Accept either Picker.ViewId constant value (recommended)
+  // - Or accept string key like 'DOCS' / 'SPREADSHEETS' / 'FOLDERS'.
+  const Picker = window.google && window.google.picker;
+  let viewId = (opts && opts.viewId) || (Picker && Picker.ViewId && Picker.ViewId.DOCS);
+  try{
+    if (typeof viewId === 'string' && Picker && Picker.ViewId && Picker.ViewId[viewId]){
+      viewId = Picker.ViewId[viewId];
+    }
+  }catch(_e){}
 
   // DocsView supports most configuration; for spreadsheets we pass ViewId.SPREADSHEETS.
   let view;
@@ -117,6 +126,13 @@ async function openPicker(opts = {}){
 
   try{
     if (includeFolders && typeof view.setIncludeFolders === 'function') view.setIncludeFolders(true);
+  }catch(_e){}
+
+  // Folder picking: must explicitly allow selecting folders.
+  try{
+    if (Picker && Picker.ViewId && viewId === Picker.ViewId.FOLDERS && typeof view.setSelectFolderEnabled === 'function'){
+      view.setSelectFolderEnabled(true);
+    }
   }catch(_e){}
 
   // 2025+: pre-navigate to specific file ids
@@ -151,6 +167,16 @@ async function openPicker(opts = {}){
       if (multiselect){
         try{ builder.enableFeature(window.google.picker.Feature.MULTISELECT_ENABLED); }catch(_e){}
       }
+
+      // Shared Drives support (if requested)
+      try{
+        if (opts && opts.allowSharedDrives){
+          const F = window.google.picker.Feature;
+          // Different names exist across Picker versions
+          if (F.SUPPORT_DRIVES) builder.enableFeature(F.SUPPORT_DRIVES);
+          if (F.SUPPORT_TEAM_DRIVES) builder.enableFeature(F.SUPPORT_TEAM_DRIVES);
+        }
+      }catch(_e){}
 
       const picker = builder.build();
       picker.setVisible(true);
