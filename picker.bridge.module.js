@@ -76,8 +76,26 @@ async function ensurePickerReady(){
 }
 
 function mapDocs(data){
-  const docs = (data && data.docs) ? data.docs : [];
-  return docs.map(d=>({
+  const Picker = window.google && window.google.picker;
+  const R = Picker && Picker.Response;
+  let docs = [];
+
+  // Newer runtimes: data.docs (array)
+  if (Array.isArray(data?.docs)){
+    docs = data.docs;
+  }
+  // Classic Picker: data[Response.DOCUMENTS]
+  else if (R && Array.isArray(data?.[R.DOCUMENTS])){
+    docs = data[R.DOCUMENTS];
+  }
+  // Some builds: data.doc or data[Response.DOCUMENT]
+  else if (data?.doc){
+    docs = [data.doc];
+  }else if (R && data?.[R.DOCUMENT]){
+    docs = [data[R.DOCUMENT]];
+  }
+
+  return (docs || []).filter(Boolean).map(d=>({
     id: d.id,
     name: d.name,
     mimeType: d.mimeType,
@@ -151,13 +169,22 @@ async function openPicker(opts = {}){
         const docs = mapDocs(data);
         const doc = docs && docs.length ? docs[0] : null;
 
+        // The Picker invokes the callback for non-terminal lifecycle events such as "loaded".
+        // We must ignore those, otherwise the Promise resolves before the user makes a selection.
+        if (action === 'loaded') return;
+
         if (action === String(window.google.picker.Action.PICKED).toLowerCase()){
           resolve({ action, doc, docs, raw: data });
-        }else if (action === String(window.google.picker.Action.CANCEL).toLowerCase()){
-          resolve({ action, doc: null, docs: [], raw: data });
-        }else{
-          resolve({ action, doc, docs, raw: data });
+          return;
         }
+
+        if (action === String(window.google.picker.Action.CANCEL).toLowerCase()){
+          resolve({ action, doc: null, docs: [], raw: data });
+          return;
+        }
+
+        // Any other action is currently treated as non-terminal.
+        // (Keep this conservative; we can broaden if we find real-world action strings.)
       };
 
       const builder = new window.google.picker.PickerBuilder()
