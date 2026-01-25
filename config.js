@@ -18,6 +18,9 @@
   window.__LM_CLIENT_ID = cfg.google.clientId;
   window.__LM_API_KEY = cfg.google.apiKey;
 
+  // Policy: drive.file only (no folder scanning / no broad Drive access)
+  window.__LM_POLICY_DRIVEFILE_ONLY = true;
+
   // Keep legacy DOM hooks in sync (some modules read from meta tags)
   function setMeta(name, content){
     let m = document.querySelector('meta[name="' + name + '"]');

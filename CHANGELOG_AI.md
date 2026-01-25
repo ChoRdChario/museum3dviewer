@@ -54,3 +54,55 @@
 ## Step01c (2026-01-25) Fix Picker foundation script parse error
 - picker.bridge.js: restored the full Picker foundation implementation and fixed a JavaScript syntax error that prevented app boot.
 - getApiKey(): keeps Step01a behavior (URL-param injection + localStorage caching via `LM_API_KEY`) while retaining the complete Step01 Picker module.
+
+
+## Step 01d – Sheet-first “Open…” UI wiring + drive.file policy flag
+**Date:** 2026-01-25
+
+### What changed
+1. **Enabled drive.file-only runtime policy**
+   - `config.js`: sets `window.__LM_POLICY_DRIVEFILE_ONLY = true;`
+   - Effect: disables folder scanning / sibling listing paths in:
+     - `glb.btn.bridge.v3.js` (skips `save.locator` pipeline)
+     - `caption.images.loader.js` (skips Drive folder image enumeration)
+
+2. **Wired sheet-first dataset opener UI into both entrypoints**
+   - `app.edit.entry.js`: imports
+     - `picker.bridge.module.js`
+     - `dataset.open.ui.js`
+   - `app.share.entry.js`: imports
+     - `picker.bridge.module.js`
+     - `dataset.open.ui.js`
+
+3. **Introduced “Open…” button in the sheet row**
+   - `dataset.open.ui.js` injects an `Open…` button into the existing sheet-row.
+   - Flow:
+     - Opens Picker for a spreadsheet (single-select)
+     - Sets `lm:sheet-context` for that spreadsheet (default non-system sheet)
+     - Reads `__LM_META/glbFileId`; if missing and **Edit mode**, prompts GLB Picker once and persists it
+     - Loads GLB via `window.__LM_LOAD_GLB_BY_ID`
+
+### How to test
+1. Sign in.
+2. Click **Open…** (added next to the sheet selector).
+3. Pick a spreadsheet.
+4. If the sheet has no `__LM_META/glbFileId` and you are in **Edit**, you will be prompted to pick a GLB once.
+5. Confirm:
+   - Sheet selector populates.
+   - GLB loads (no Drive folder scanning behavior should occur).
+
+
+## Step 01e – Fix UI placement to avoid mixing “Spreadsheet file” vs “Worksheet (gid)” concepts
+**Date:** 2026-01-25
+
+### Why
+The existing **“Select sheet…”** dropdown is a *worksheet selector* (gid) inside the active spreadsheet. In Step01d we injected the dataset “Open…” button into the same row, which could be interpreted as operating on worksheets rather than the spreadsheet file itself.
+
+### What changed
+- `dataset.open.ui.js`: moved the dataset opener button into its **own dedicated row** (inserted *above* the worksheet selector row).
+- Button label updated to **“Open spreadsheet…”** to make the file-level intent explicit.
+
+### How to test
+1. Reload the page (Edit/Share).
+2. Confirm a new row **above** “Select sheet…” exists with **Open spreadsheet…**.
+3. Click it → Picker opens → select a spreadsheet → proceeds as Step01d.

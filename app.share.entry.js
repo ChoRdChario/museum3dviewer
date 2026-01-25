@@ -9,10 +9,12 @@ import './init.ready.gate.js';
 import './boot.share.cdn.js';
 import './ui.onboarding.hints.js';
 import './picker.bridge.js';
+import './picker.bridge.module.js';
 import './glb.btn.bridge.share.js';
 import './share.sheet.read.js';
 import './share.views.read.js';
 import './material.runtime.patch.js';
+import './dataset.open.ui.js';
 
 function diagPush(...srcs){
   try{

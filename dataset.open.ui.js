@@ -145,25 +145,38 @@ async function openDatasetFlow(){
 }
 
 function installUI(){
-  const row = document.querySelector('.row.ctrl-row.sheet-row');
-  if (!row) return;
+  // IMPORTANT:
+  // The existing "Select sheet…" dropdown is for a worksheet (gid) INSIDE the
+  // active spreadsheet (caption sheet selector). We must not mix that control
+  // with the spreadsheet file (Drive) selection UI.
+  // Therefore, we insert a *separate* row above the worksheet selector.
+
+  const anchor = document.querySelector('.row.ctrl-row.sheet-row');
+  if (!anchor) return;
   if (document.getElementById('btnPickSpreadsheet')) return;
+
+  const row = document.createElement('div');
+  row.className = 'row ctrl-row';
+  row.style.marginTop = '8px';
+  row.style.gap = '6px';
 
   const btn = document.createElement('button');
   btn.id = 'btnPickSpreadsheet';
   btn.type = 'button';
-  btn.textContent = 'Open…';
+  btn.textContent = 'Open spreadsheet…';
   btn.className = 'mini';
 
   const st = document.createElement('span');
   st.id = 'lm-open-status';
   st.className = 'muted';
-  st.style.marginLeft = '8px';
+  st.style.marginLeft = '4px';
   st.style.fontSize = '12px';
 
-  // Insert at the beginning of sheet row
-  row.insertBefore(btn, row.firstChild);
+  row.appendChild(btn);
   row.appendChild(st);
+
+  // Insert the new row above the worksheet (gid) selector row.
+  anchor.parentNode.insertBefore(row, anchor);
 
   btn.addEventListener('click', (ev)=>{
     ev.preventDefault();

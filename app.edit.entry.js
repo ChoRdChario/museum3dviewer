@@ -2,6 +2,8 @@ import './glb.url.prefill.js';
 import './edit.sharelink.ui.js';
 import './ui.onboarding.hints.js';
 import './picker.bridge.js';
+import './picker.bridge.module.js';
+import './dataset.open.ui.js';
 
 // LociMyu - app.edit.entry.js (generated from original index.html scripts)
 // Loads the original script chain in the same order, preserving module/classic script types.
