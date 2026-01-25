@@ -166,19 +166,23 @@
       try{
         const callback = (data)=>{
           try{
-            const action = data && data.action;
+            // Normalize action casing across variants / browsers.
+            const actionRaw = (data && (data.action ?? data[p.Response.ACTION])) || '';
+            const action = String(actionRaw).toLowerCase();
             if (!action) return;
-            if (action === p.Action.PICKED) {
-              const docs = (data.docs || []).map(d => Object.assign({}, d));
-              resolve({ action: 'PICKED', docs, raw: data });
+
+            if (action === String(p.Action.PICKED).toLowerCase()) {
+              const docs = (data.docs || data[p.Response.DOCUMENTS] || []).map(d => Object.assign({}, d));
+              const doc = docs && docs[0];
+              resolve({ action: 'picked', doc, docs, raw: data });
               return;
             }
-            if (action === p.Action.CANCEL) {
-              resolve({ action: 'CANCEL', raw: data });
+            if (action === String(p.Action.CANCEL).toLowerCase()) {
+              resolve({ action: 'cancel', raw: data });
               return;
             }
             // other actions
-            resolve({ action: String(action), raw: data });
+            resolve({ action, raw: data });
           }catch(e){ reject(e); }
         };
 

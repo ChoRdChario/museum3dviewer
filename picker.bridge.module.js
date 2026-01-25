@@ -143,13 +143,20 @@ async function openPicker(opts = {}){
   return await new Promise((resolve, reject)=>{
     try{
       const callback = (data)=>{
-        const action = data && data.action;
-        if (action === window.google.picker.Action.PICKED){
-          resolve({ action, docs: mapDocs(data) });
-        }else if (action === window.google.picker.Action.CANCEL){
-          resolve({ action, docs: [] });
+        // Some Picker responses use uppercase action strings depending on the runtime.
+        // Normalize to lower-case so callers can reliably compare.
+        const actionRaw = (data && (data.action ?? data[window.google.picker.Response.ACTION])) ?? '';
+        const action = String(actionRaw || '').toLowerCase();
+
+        const docs = mapDocs(data);
+        const doc = docs && docs.length ? docs[0] : null;
+
+        if (action === String(window.google.picker.Action.PICKED).toLowerCase()){
+          resolve({ action, doc, docs, raw: data });
+        }else if (action === String(window.google.picker.Action.CANCEL).toLowerCase()){
+          resolve({ action, doc: null, docs: [], raw: data });
         }else{
-          resolve({ action: String(action || ''), docs: mapDocs(data) });
+          resolve({ action, doc, docs, raw: data });
         }
       };
 

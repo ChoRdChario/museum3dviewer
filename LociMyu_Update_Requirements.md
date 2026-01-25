@@ -244,8 +244,10 @@ Order from top to bottom:
 - Image UI ingestion via `__LM_CAPTION_UI.setImages(...)`
 - HEIC/HEIF acceptance logic currently implemented in legacy image listing code (must be preserved in new list builder)
 
-### 11.3 Picker is not currently implemented
-- Must be added (API load, developer key usage, callbacks, multi-select support).
+### 11.3 Picker implementation status (implemented)
+- Implemented Picker bootstrap + API key wiring + callback plumbing.
+- Implemented spreadsheet picker (open existing dataset) and GLB/folder pickers (create dataset flow).
+- **Guardrail:** normalize Picker callback `action` to lowercase (`picked`/`cancel`) because some environments may emit uppercase variants; consumers must treat action case-insensitively.
 
 ---
 
