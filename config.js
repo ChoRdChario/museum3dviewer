@@ -8,8 +8,8 @@
       version: "α.2025-12-17",
     },
     google: {
-      clientId: "595200751510-ncahnf7edci6b9925becn5to49r6cguv.apps.googleusercontent.com",
-      apiKey: "AIzaSyCUnTCr5yWUWPdEXST9bKP1LpgawU5rIbI",
+      clientId: "157105746935-b594qhhg9a6utksl9ojdf8rrapv38bap.apps.googleusercontent.com",
+      apiKey: "AIzaSyBv-YOqv_Ky61rBJtEmdP-n8auZkQ4lye4",
     },
   };
 

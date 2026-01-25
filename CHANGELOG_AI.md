@@ -38,3 +38,14 @@
 ### Notes / follow-ups
 - This step does **not** yet change UX to be sheet-first; it only establishes the minimum-scope baseline and Picker foundation.
 - Next step will introduce a sheet-selection UI and route dataset loading through the spreadsheet context.
+
+
+## Step01a (2026-01-25) Runtime key injection & persistence
+- config.js: introduced safe runtime injection/persistence behavior to avoid stale/invalid keys; values can be provided via URL params or config and cached in localStorage.
+- picker.bridge.js: API key resolution now supports localStorage persistence (LM_API_KEY) and auto-caches from URL param (lm_api_key/api_key) to avoid re-adding query params each launch.
+- No functional change to scopes; still drive.file-first.
+
+
+## Step01b (2026-01-25) Inject test project keys into config
+- config.js: set Google OAuth clientId and Picker API key for the test project (values intentionally not repeated in logs).
+- This allows Picker to open without URL parameters once deployed (still supports URL override).
