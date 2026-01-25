@@ -155,10 +155,15 @@
       }catch(_e){}
     }
 
-    // Shared Drives support
-    if (options.allowSharedDrives) {
+    // Folder selection / Shared Drives support
+    // - Folder picking requires includeFolders + selectFolderEnabled
+    // - Shared Drives requires enableDrives
+    if (options.includeFolders || options.allowSharedDrives) {
       try{ view.setIncludeFolders(true); }catch(_e){}
-      try{ view.setEnableDrives(true); }catch(_e){}
+      try{ view.setSelectFolderEnabled(true); }catch(_e){}
+      if (options.allowSharedDrives) {
+        try{ view.setEnableDrives(true); }catch(_e){}
+      }
     }
 
     // Promise wrapper around callback-based picker
@@ -181,8 +186,12 @@
               resolve({ action: 'cancel', raw: data });
               return;
             }
-            // other actions
-            resolve({ action, raw: data });
+            // Other actions: do not resolve the promise.
+            // In particular, Google Picker often emits an initial "loaded" action
+            // immediately after opening; resolving on that would prevent the caller
+            // from waiting for a real user selection.
+            try{ console.debug('[picker] action', action, data); }catch(_e){}
+            return;
           }catch(e){ reject(e); }
         };
 

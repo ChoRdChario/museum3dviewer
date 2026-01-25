@@ -5,6 +5,7 @@
 - **Step01 (completed):** drive.file policy flagging + Google Picker foundation + “Open spreadsheet…” UI for spreadsheet-first operation.
 - **Step02 (in progress / implemented in code):** Edit-mode “新規LociMyuデータ作成” panel now requires an explicit **destination folder selection** (Picker) and creates the dataset spreadsheet **inside that folder** (not My Drive root). The spreadsheet is seeded with `__LM_META` and `__LM_IMAGE_STASH`.
 - **Step02a (completed):** Fixed Google Picker **500 error** during folder/GLB selection by normalizing Picker viewId usage (`google.picker.ViewId.*`) and hardening the Picker bridge’s viewId resolution.
+- **Step02b (completed):** Fixed Picker selection handling so callers only receive results on **user intent** (`picked` / `cancel`). The bridge no longer resolves early on the initial `loaded` event, and folder picking explicitly enables folder selection (`includeFolders` + `selectFolderEnabled`).
 - **Next planned:** candidate image Picker + persistence into `__LM_IMAGE_STASH`, and Share-mode sheet-first flow.
 **Version:** 1.2  
 **Date:** 2026-01-26 (Asia/Tokyo)  
