@@ -49,3 +49,8 @@
 ## Step01b (2026-01-25) Inject test project keys into config
 - config.js: set Google OAuth clientId and Picker API key for the test project (values intentionally not repeated in logs).
 - This allows Picker to open without URL parameters once deployed (still supports URL override).
+
+
+## Step01c (2026-01-25) Fix Picker foundation script parse error
+- picker.bridge.js: restored the full Picker foundation implementation and fixed a JavaScript syntax error that prevented app boot.
+- getApiKey(): keeps Step01a behavior (URL-param injection + localStorage caching via `LM_API_KEY`) while retaining the complete Step01 Picker module.

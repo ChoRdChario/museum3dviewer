@@ -54,4 +54,163 @@
     const meta = getMeta('google-api-key');
     if (meta) return meta;
     return '';
-  })();
+  }
+
+  function loadScriptOnce(src, id){
+    return new Promise((resolve, reject)=>{
+      try{
+        if (id && document.getElementById(id)) return resolve();
+        const existing = [...document.scripts].find(s => s && s.src === src);
+        if (existing) return resolve();
+        const s = document.createElement('script');
+        if (id) s.id = id;
+        s.src = src;
+        s.async = true;
+        s.defer = true;
+        s.onload = ()=>resolve();
+        s.onerror = (e)=>reject(new Error('Failed to load script: ' + src));
+        document.head.appendChild(s);
+      }catch(e){ reject(e); }
+    });
+  }
+
+  let _ensurePromise = null;
+  async function ensureLoaded(){
+    if (_ensurePromise) return _ensurePromise;
+    _ensurePromise = (async()=>{
+      // Load gapi (Picker depends on it)
+      if (!window.gapi) {
+        await loadScriptOnce('https://apis.google.com/js/api.js', 'lm-gapi-api-js');
+      }
+      if (!window.gapi) throw new Error('gapi not available after loading api.js');
+
+      // Load picker module
+      await new Promise((resolve, reject)=>{
+        try{
+          window.gapi.load('picker', { callback: resolve, onerror: reject });
+        }catch(e){ reject(e); }
+      });
+
+      if (!window.google || !window.google.picker) {
+        throw new Error('google.picker not available after gapi.load(\'picker\')');
+      }
+
+      LOG('loaded');
+    })();
+    return _ensurePromise;
+  }
+
+  function resolveViewId(v){
+    const p = window.google && window.google.picker;
+    if (!p) return null;
+    const ViewId = p.ViewId;
+    const upper = String(v || '').toUpperCase();
+    if (upper === 'SPREADSHEETS') return ViewId.SPREADSHEETS;
+    if (upper === 'DOCS') return ViewId.DOCS;
+    if (upper === 'FOLDERS') return ViewId.FOLDERS;
+    if (upper === 'IMAGES') return ViewId.DOCS_IMAGES;
+    if (upper === 'ALL') return ViewId.DOCS;
+    return ViewId.DOCS;
+  }
+
+  async function openPicker(opts){
+    const options = opts || {};
+    await ensureLoaded();
+
+    const apiKey = getApiKey();
+    if (!apiKey) throw new Error('Missing API key for Picker (set window.__LM_API_KEY or meta google-api-key)');
+
+    let token = options.oauthToken;
+    if (!token) {
+      if (typeof window.__lm_getAccessToken !== 'function') {
+        throw new Error('Missing oauthToken and __lm_getAccessToken is not available');
+      }
+      token = await window.__lm_getAccessToken();
+    }
+    if (!token) throw new Error('OAuth token not available');
+
+    const p = window.google.picker;
+
+    const origin = (options.origin && String(options.origin).trim()) || location.origin;
+
+    // Build view
+    const viewId = resolveViewId(options.viewId || 'DOCS');
+    let view;
+    try{
+      view = new p.DocsView(viewId);
+    }catch(_e){
+      // fallback
+      view = new p.DocsView();
+    }
+
+    // Mime filter
+    if (Array.isArray(options.mimeTypes) && options.mimeTypes.length) {
+      try{ view.setMimeTypes(options.mimeTypes.join(',')); }catch(_e){}
+    }
+
+    // Pre-navigate to required fileIds (Picker Jan 2025 feature)
+    if (Array.isArray(options.fileIds) && options.fileIds.length) {
+      try{
+        if (typeof view.setFileIds === 'function') view.setFileIds(options.fileIds);
+      }catch(_e){}
+    }
+
+    // Shared Drives support
+    if (options.allowSharedDrives) {
+      try{ view.setIncludeFolders(true); }catch(_e){}
+      try{ view.setEnableDrives(true); }catch(_e){}
+    }
+
+    // Promise wrapper around callback-based picker
+    return new Promise((resolve, reject)=>{
+      try{
+        const callback = (data)=>{
+          try{
+            const action = data && data.action;
+            if (!action) return;
+            if (action === p.Action.PICKED) {
+              const docs = (data.docs || []).map(d => Object.assign({}, d));
+              resolve({ action: 'PICKED', docs, raw: data });
+              return;
+            }
+            if (action === p.Action.CANCEL) {
+              resolve({ action: 'CANCEL', raw: data });
+              return;
+            }
+            // other actions
+            resolve({ action: String(action), raw: data });
+          }catch(e){ reject(e); }
+        };
+
+        let builder = new p.PickerBuilder()
+          .setDeveloperKey(apiKey)
+          .setOAuthToken(token)
+          .setOrigin(origin)
+          .addView(view)
+          .setCallback(callback);
+
+        if (options.title) {
+          try{ builder.setTitle(String(options.title)); }catch(_e){}
+        }
+
+        if (options.multiselect) {
+          builder = builder.enableFeature(p.Feature.MULTISELECT_ENABLED);
+        }
+
+        if (options.allowSharedDrives) {
+          builder = builder.enableFeature(p.Feature.SUPPORT_DRIVES);
+        }
+
+        const picker = builder.build();
+        picker.setVisible(true);
+      }catch(e){
+        ERR('openPicker failed', e);
+        reject(e);
+      }
+    });
+  }
+
+  // Expose
+  window.__lm_pickerEnsureLoaded = ensureLoaded;
+  window.__lm_openPicker = openPicker;
+})();
