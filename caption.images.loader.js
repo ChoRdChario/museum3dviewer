@@ -26,6 +26,14 @@
       ui.setImages([]);
       return;
     }
+
+    // In drive.file mode we must not perform folder scanning/listing.
+    // Images will be provided by the new Picker-based pipeline (Phase B) instead.
+    if (window.__LM_POLICY_DRIVEFILE_ONLY){
+      ui.setImages([]);
+      log('drive.file mode: skip sibling image listing', reason);
+      return;
+    }
     try{
       const mod = await import('./drive.images.list.js');
       const fn = mod.listSiblingImagesByGlbId || mod.listSiblingImages || mod.default;

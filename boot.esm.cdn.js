@@ -10,7 +10,6 @@ const err=(...a)=>console.error(...a);
 window.LM_VERSION_TAG = "V6_12b_FOUNDATION_AUTH_CTX_MAT_HDR_CLIENTID";
 window.LM_SCOPES = window.LM_SCOPES || [
   "https://www.googleapis.com/auth/spreadsheets",
-  "https://www.googleapis.com/auth/drive.readonly",
   "https://www.googleapis.com/auth/drive.file"
 ];
 

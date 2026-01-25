@@ -265,7 +265,16 @@
       try{ gate?.mark?.('glb'); }catch(_e){}
 
       // Existing pipeline: locate / create save sheet and dispatch sheet-context, etc.
-      await postLoadEnsureSaveSheet(fileId);
+      if (!window.__LM_POLICY_DRIVEFILE_ONLY){
+        // Legacy (folder-scan) pipeline.
+        await postLoadEnsureSaveSheet(fileId);
+      } else {
+        // drive.file mode: do not scan folders or auto-locate save sheets.
+        // Sheet context should be established from the user-selected spreadsheet.
+        try{
+          window.__LM_ACTIVE_GLB_ID = fileId;
+        }catch(_e){}
+      }
 
       // Images are loaded from GLB folder (Drive). Let the images loader start now.
       try{ document.dispatchEvent(new Event('lm:refresh-images')); }catch(_e){}
