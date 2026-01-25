@@ -1,9 +1,15 @@
 # LociMyu Update Requirements (Strategic Guideline)
-**Version:** 1.0  
-**Date:** 2026-01-25 (Asia/Tokyo)  
+**Version:** 1.1  
+**Date:** 2026-01-25 (Asia/Tokyo)
+**Updated:** 2026-01-25 (added Development Rules)  
 **Purpose:** This document is the single source of truth for the LociMyu update. It is written to keep development aligned with Google OAuth verification requirements and the agreed UX/architecture decisions. During implementation, when tradeoffs arise, prefer decisions that preserve the principles and invariants in this document.
 
 ---
+
+## Change Log
+- **1.1 (2026-01-25):** Added **Development Rules** section to ensure implementation discipline (SOT reading, updates, quality gates, zip submission).
+- **1.0 (2026-01-25):** Initial strategic requirements.
+
 
 ## 1. Background and Goal
 
@@ -273,3 +279,63 @@ Order from top to bottom:
 - **SOT:** Source of Truth (here: the spreadsheet)
 - **Picker:** Google Picker API selection UI
 - **Traversal:** Drive folder enumeration/search for related files (forbidden by P2)
+---
+
+## 14. Development Rules (AI Operating Procedure)
+
+This section governs *how* implementation is conducted to prevent drift from this document. It is normative.
+
+### R-1. Always read this file first
+Before starting any implementation work, the developer/AI must read **this** requirements file and confirm the planned change does not violate the Principles and Invariants.
+
+### R-2. Update requirements before finalizing code
+If new requirements are discovered, clarified, or changed during development, **update this file first**, then implement. “Code-first, docs-later” is not allowed.
+
+### R-3. Requirements updates must include a minimal changelog
+Any update must increment the **Version**, add/update **Updated** date, and add a brief note in **Change Log** describing what changed and what it impacts.
+
+### R-4. One submission (zip) = one theme
+Each delivery zip should focus on a single coherent theme to simplify review and rollback.
+
+### R-5. Every submission includes a change summary document
+Each delivery zip must include `CHANGELOG_AI.md` with:
+- Purpose
+- Changed files list
+- Verification / smoke-test steps
+- Known limitations (if any)
+
+### R-6. Avoid responsibility conflicts
+Do not overload existing modules with different responsibilities (e.g., keep Drive file rename separate from internal sheet/tab rename).
+
+### R-7. Quality gate before submission
+Before submitting, perform checks until issues are resolved:
+- No syntax errors / load-order errors
+- No repeated critical console errors during core flows
+- Smoke tests for Edit/Share core flows (open dataset, refresh behavior, Share read-only constraints)
+
+### R-8. Scope changes must be explicitly recorded
+Whenever scopes are changed:
+- Update **Required Scopes (Target)** in this file
+- Update code (`boot.*`) accordingly
+- Document expected scopes in `CHANGELOG_AI.md`
+
+### R-9. Hard prohibitions
+Do not re-introduce:
+- Drive traversal / folder enumeration / `files.list`-based discovery (violates P2)
+- Restricted Drive scopes for convenience (violates P1)
+
+### R-10. Submit as a zip
+All deliveries must be bundled as a zip and include:
+- Updated source
+- `CHANGELOG_AI.md`
+- Latest `LociMyu_Update_Requirements.md` if it changed
+
+### R-11. Submission message requirements
+When delivering a zip, include:
+- One-line purpose
+- Key changes (≤5 bullets)
+- Smoke-test steps
+- Known limitations (if any)
+
+### R-12. Deferred items remain deferred
+Items explicitly deferred (e.g., final UI wording) must stay marked as deferred/TBD until agreed; do not silently finalize.
