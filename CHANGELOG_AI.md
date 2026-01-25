@@ -106,3 +106,46 @@ The existing **“Select sheet…”** dropdown is a *worksheet selector* (gid) 
 1. Reload the page (Edit/Share).
 2. Confirm a new row **above** “Select sheet…” exists with **Open spreadsheet…**.
 3. Click it → Picker opens → select a spreadsheet → proceeds as Step01d.
+
+
+## Step 02 – Edit-mode “新規LociMyuデータ作成” panel: user-selected folder + dataset creation
+**Date:** 2026-01-25
+
+### What changed
+1. **Added “New LociMyu dataset” panel to the Caption tab (Edit only)**
+   - New file: `dataset.create.ui.js`
+   - Injects a **collapsible** panel at the top of `#pane-caption`.
+   - Hidden in Share mode.
+
+2. **Destination folder selection is now required (Picker)**
+   - Prevents accidental creation in **My Drive root**.
+   - Folder selection is stored (best-effort) in localStorage for convenience.
+
+3. **Creates the dataset spreadsheet inside the chosen folder (Drive API)**
+   - Uses Drive `files.create` with `mimeType=application/vnd.google-apps.spreadsheet` and `parents=[folderId]`.
+
+4. **Seeds required system sheets + binds GLB**
+   - Ensures `__LM_META` exists and stores `glbFileId`.
+   - Ensures `__LM_IMAGE_STASH` exists (hidden) and writes a minimal header row.
+
+5. **Auto-opens the newly created dataset**
+   - Dispatches `lm:sheet-context` for the created spreadsheet.
+   - Loads the selected GLB via `window.__LM_LOAD_GLB_BY_ID`.
+
+6. **Updated strategic guideline**
+   - `LociMyu_Update_Requirements.md`: added “Current Implementation Status” and clarified the folder-first requirement in the Create flow.
+
+### Why it changed
+- Users must be able to choose where the dataset spreadsheet is created; placing files in My Drive root is not acceptable for low IT-literacy workflows.
+- Under `drive.file`, creation and subsequent access should be scoped and user-driven (Picker-first), avoiding Drive traversal.
+
+### How to test (manual)
+1. Open the app in **Edit mode** and sign in.
+2. Go to **Caption** tab.
+3. Expand **New LociMyu dataset (create caption spreadsheet)**.
+4. Click **Choose folder…** and select the target folder.
+5. Click **Choose GLB…** and select a GLB file.
+6. Optionally set the dataset name, then click **Create dataset**.
+7. Confirm:
+   - A new spreadsheet is created in the selected folder (not My Drive root).
+   - The app automatically opens the dataset (sheet context set) and loads the GLB.

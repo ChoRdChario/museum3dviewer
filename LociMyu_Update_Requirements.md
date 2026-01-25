@@ -1,4 +1,10 @@
 # LociMyu Update Requirements (Strategic Guideline)
+
+## Current Implementation Status
+
+- **Step01 (completed):** drive.file policy flagging + Google Picker foundation + “Open spreadsheet…” UI for spreadsheet-first operation.
+- **Step02 (in progress / implemented in code):** Edit-mode “新規LociMyuデータ作成” panel now requires an explicit **destination folder selection** (Picker) and creates the dataset spreadsheet **inside that folder** (not My Drive root). The spreadsheet is seeded with `__LM_META` and `__LM_IMAGE_STASH`.
+- **Next planned:** candidate image Picker + persistence into `__LM_IMAGE_STASH`, and Share-mode sheet-first flow.
 **Version:** 1.1  
 **Date:** 2026-01-25 (Asia/Tokyo)  
 **Purpose:** This document is the single source of truth for the LociMyu update. It is written to keep development aligned with Google OAuth verification requirements and the agreed UX/architecture decisions. During implementation, when tradeoffs arise, prefer decisions that preserve the principles and invariants in this document.
@@ -134,11 +140,12 @@ Picker is the standard mechanism to “explicitly select” files under `drive.f
 ### 7.1 Edit — Create new dataset (in Caption tab, collapsed UI)
 1. User signs in (Edit scopes).
 2. In Caption tab, user expands **“新規LociMyuデータ作成”** panel.
-3. User selects GLB via Picker (recommended).
-4. App creates a new spreadsheet (LociMyu dataset).
-5. App creates `__LM_META` and stores `glbFileId`.
-6. App creates `__LM_IMAGE_STASH`.
-7. App transitions to “opened dataset” state (dispatch `lm:sheet-context`).
+3. User selects **destination folder** via Picker (required; must not default to My Drive root).
+4. User selects GLB via Picker.
+5. App creates a new spreadsheet (LociMyu dataset) **inside the chosen folder**.
+6. App creates `__LM_META` and stores `glbFileId`.
+7. App creates `__LM_IMAGE_STASH`.
+8. App transitions to “opened dataset” state (dispatch `lm:sheet-context`).
 
 ### 7.2 Edit — Open existing dataset (sheet-first)
 1. User signs in.
@@ -169,6 +176,8 @@ Picker is the standard mechanism to “explicitly select” files under `drive.f
 ### 8.1 Caption tab layout (Edit)
 Order from top to bottom:
 1. **(Collapsed by default) 新規LociMyuデータ作成**
+   - Contains: destination folder selection (Picker), GLB selection (Picker), dataset name input (optional), Create action.
+   - Must not auto-create datasets in My Drive root; folder must be user-selected.
 2. **Current spreadsheet file name + rename UI** (Drive file rename)
 3. **Caption sheet selector**
 4. **Image gallery area** (same placement and visual style as legacy)
