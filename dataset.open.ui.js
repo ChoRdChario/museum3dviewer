@@ -35,7 +35,12 @@ function extractSpreadsheetId(input){
 
 async function getAuthFetch(){
   if (typeof window.__lm_fetchJSONAuth === 'function') return window.__lm_fetchJSONAuth;
-  try{ const m = await import('./auth.fetch.bridge.js'); if (typeof m.default === 'function') return await m.default(); }catch(_e){}
+  // Resolve relative to this module to avoid path issues when the file is served
+  // from a subdirectory (e.g., patch bundles on GH Pages).
+  try{
+    const m = await import(new URL('./auth.fetch.bridge.js', import.meta.url));
+    if (typeof m.default === 'function') return await m.default();
+  }catch(_e){}
   if (typeof window.__lm_fetchJSONAuth === 'function') return window.__lm_fetchJSONAuth;
   throw new Error('auth fetch missing');
 }
@@ -75,11 +80,15 @@ async function waitForLoadGlbFn(timeoutMs = 8000){
 
 async function openSpreadsheetPicker(prefillSpreadsheetId){
   const Picker = window.google?.picker;
-  const viewId = Picker?.ViewId?.SPREADSHEETS || (Picker?.ViewId?.DOCS || undefined);
+  // Use DOCS view + spreadsheet mimeType filter.
+  // This tends to be more robust across Picker runtime versions.
+  const viewId = Picker?.ViewId?.DOCS || undefined;
   const opts = {
     title: 'Select caption spreadsheet',
     viewId,
-    multiselect: false
+    mimeTypes: 'application/vnd.google-apps.spreadsheet',
+    multiselect: false,
+    allowSharedDrives: true
   };
   if (prefillSpreadsheetId) opts.fileIds = [prefillSpreadsheetId];
   const res = await window.__lm_openPicker(opts);
@@ -134,14 +143,33 @@ async function openDatasetFlow(){
   const prefillId = extractSpreadsheetId(input ? input.value : '');
 
   try{
-    setStatus('Opening picker…');
-    const spreadsheetId = await openSpreadsheetPicker(prefillId);
-    if (!spreadsheetId && prefillId){
+    // If the user pasted a URL/ID, prefer validating/opening directly via Sheets API.
+    // This avoids relying on Drive listing behavior that can vary with drive.file.
+    let spreadsheetId = '';
+    if (prefillId){
+      setStatus('Checking spreadsheet…');
+      try{
+        // listSheets uses Sheets API auth; if the user can open it, this succeeds.
+        await listSheets(prefillId);
+        spreadsheetId = prefillId;
+      }catch(e){
+        warn('prefill spreadsheet check failed', e);
+      }
+    }
+
+    if (!spreadsheetId){
+      // Fall back to Picker browsing. If the user supplied an id, attempt to pre-navigate.
+      setStatus('Opening picker…');
+      spreadsheetId = await openSpreadsheetPicker(prefillId || '');
+    }
+
+    if (!spreadsheetId){
       setStatus('');
-      alert('このスプレッドシートは、このGoogleアカウントでは選択できない可能性があります。共有されたアカウントでログインしているか、URL/IDが正しいか確認してください。');
+      if (prefillId){
+        alert('このスプレッドシートは、現在のGoogleアカウントでは選択できない可能性があります。\n\n確認事項:\n- 同じGoogleアカウントでサインインしているか\n- URL/IDが正しいか\n-（ドメイン制限等がある場合）アクセス権があるか');
+      }
       return;
     }
-    if (!spreadsheetId){ setStatus(''); return; }
 
     setStatus('Reading spreadsheet…');
     await setSheetContext(spreadsheetId);
@@ -159,7 +187,7 @@ async function openDatasetFlow(){
       if (!glbId){ setStatus(''); return; }
       try{
         // Store for future use
-        const m = await import('./lm.meta.sheet.module.js');
+        const m = await import(new URL('./lm.meta.sheet.module.js', import.meta.url));
         if (m && typeof m.writeMeta === 'function') await m.writeMeta(spreadsheetId, 'glbFileId', glbId);
       }catch(e){ warn('writeMeta failed', e); }
     }
@@ -196,6 +224,19 @@ function installUI(){
     || Array.from(document.querySelectorAll('button')).find(b=>String(b.textContent||'').trim()==='Open spreadsheet…');
 
   if (existingBtn){
+    // Match the GLB row layout (flex, no overflow)
+    const parent = existingBtn.parentElement;
+    if (parent){
+      parent.style.display = 'flex';
+      parent.style.alignItems = 'center';
+      parent.style.gap = '6px';
+      parent.style.width = '100%';
+      parent.style.boxSizing = 'border-box';
+    }
+    existingBtn.id = 'btnPickSpreadsheet';
+    try{ existingBtn.classList.add('mini'); }catch(_e){}
+    existingBtn.style.flex = '0 0 auto';
+
     // Ensure input exists next to it.
     if (!document.getElementById('lmSpreadsheetUrlInput')){
       const inp = document.createElement('input');
@@ -204,25 +245,29 @@ function installUI(){
       inp.placeholder = 'Paste spreadsheet URL or ID…';
       inp.autocomplete = 'off';
       inp.spellcheck = false;
-      inp.style.flex = '1';
-      inp.style.minWidth = '260px';
+      inp.style.flex = '1 1 0';
+      inp.style.minWidth = '0';
+      inp.style.width = '100%';
+      inp.style.maxWidth = '100%';
       inp.style.padding = '4px 6px';
-      // Try to insert after the button within the same row if possible.
-      const parent = existingBtn.parentElement;
-      if (parent){
-        existingBtn.id = 'btnPickSpreadsheet';
-        parent.insertBefore(inp, existingBtn.nextSibling);
-      }
+      inp.style.boxSizing = 'border-box';
+      // Insert after the button within the same row.
+      if (parent) parent.insertBefore(inp, existingBtn.nextSibling);
     }
 
     // Ensure status element exists.
     if (!document.getElementById('lm-open-status')){
-      const st = document.createElement('span');
+      // Put status on its own line to avoid horizontal overflow.
+      const st = document.createElement('div');
       st.id = 'lm-open-status';
       st.className = 'muted';
-      st.style.marginLeft = '4px';
+      st.style.marginTop = '2px';
       st.style.fontSize = '12px';
-      existingBtn.parentElement?.appendChild(st);
+      st.style.whiteSpace = 'nowrap';
+      st.style.overflow = 'hidden';
+      st.style.textOverflow = 'ellipsis';
+      st.style.maxWidth = '100%';
+      parent?.appendChild(st);
     }
 
     // Attach handler (guarded) for click + Enter.
@@ -245,6 +290,10 @@ function installUI(){
   row.className = 'row ctrl-row';
   row.style.marginTop = '8px';
   row.style.gap = '6px';
+  row.style.display = 'flex';
+  row.style.alignItems = 'center';
+  row.style.width = '100%';
+  row.style.boxSizing = 'border-box';
 
   const btn = document.createElement('button');
   btn.id = 'btnPickSpreadsheet';
@@ -258,22 +307,30 @@ inp.type = 'text';
 inp.placeholder = 'Paste spreadsheet URL or ID…';
 inp.autocomplete = 'off';
 inp.spellcheck = false;
-inp.style.flex = '1';
-inp.style.minWidth = '260px';
+inp.style.flex = '1 1 0';
+inp.style.minWidth = '0';
+inp.style.width = '100%';
+inp.style.maxWidth = '100%';
 inp.style.padding = '4px 6px';
+inp.style.boxSizing = 'border-box';
 
-const st = document.createElement('span');
+const st = document.createElement('div');
   st.id = 'lm-open-status';
   st.className = 'muted';
-  st.style.marginLeft = '4px';
+  st.style.marginTop = '2px';
   st.style.fontSize = '12px';
+  st.style.whiteSpace = 'nowrap';
+  st.style.overflow = 'hidden';
+  st.style.textOverflow = 'ellipsis';
+  st.style.maxWidth = '100%';
 
+  // Keep the main row aligned like GLB row; status sits below.
   row.appendChild(btn);
   row.appendChild(inp);
-  row.appendChild(st);
 
   // Insert the new row above the worksheet (gid) selector row.
   anchor.parentNode.insertBefore(row, anchor);
+  anchor.parentNode.insertBefore(st, anchor);
 
   btn.addEventListener('click', (ev)=>{
     ev.preventDefault();

@@ -230,3 +230,28 @@ The existing **“Select sheet…”** dropdown is a *worksheet selector* (gid) 
 2. In the Caption tab, open **New LociMyu dataset**.
 3. Click **Choose folder…** → Picker should open without 500.
 4. Click **Choose GLB…** → Picker should open without 500.
+
+
+## Step 02h – Spreadsheet URL open UX stabilization (layout + auth import fix)
+**Date:** 2026-01-26
+
+### Symptoms
+- The newly-added “Paste spreadsheet URL/ID” input could overflow the right panel.
+- Pasting a spreadsheet URL/ID still resulted in an empty Picker (“No spreadsheets”), making it impossible to proceed.
+
+### Root causes
+- The row that hosts the new input wasn't fully constrained to the panel's flex layout (min-width / status placement caused horizontal overflow).
+- In some deployments, `dataset.open.ui.js` is served from a subdirectory; relative dynamic imports like `import('./auth.fetch.bridge.js')` can fail, causing the URL/ID pre-validation (Sheets API) to fail and the flow to fall back to Picker.
+
+### What changed
+1. `dataset.open.ui.js`
+   - Reworked layout to match the GLB row: flex row, input `minWidth: 0`, width-constrained, and status rendered on a separate line.
+   - Resolved dynamic imports relative to the module URL (`import(new URL('./auth.fetch.bridge.js', import.meta.url))`) to avoid path issues when hosted under subpaths.
+   - Picker fallback now passes the user-provided spreadsheetId when available (`fileIds` pre-navigation).
+
+### How to test
+1. Sign in.
+2. In the right panel, paste a Google Sheets URL into the new input and press Enter.
+3. Confirm:
+   - The input does not overflow the panel.
+   - The dataset open flow proceeds to “Reading spreadsheet…” (Sheets API validation works), without relying on Drive listing.
