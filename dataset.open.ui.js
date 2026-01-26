@@ -6,7 +6,7 @@
 // - Loads GLB via existing GLB loader bridge
 
 import './persist.guard.js';
-import { getGlbFileId, writeMeta } from './lm.meta.sheet.module.js';
+import { getGlbFileId } from './lm.meta.sheet.read.module.js';
 import './picker.bridge.module.js';
 
 const TAG='[dataset.open.ui]';
@@ -14,6 +14,24 @@ const SHEETS_BASE='https://sheets.googleapis.com/v4/spreadsheets';
 
 function log(...a){ console.log(TAG, ...a); }
 function warn(...a){ console.warn(TAG, ...a); }
+
+
+function extractSpreadsheetId(input){
+  const s = String(input || '').trim();
+  if (!s) return '';
+  // If user pastes just the ID
+  if (/^[a-zA-Z0-9_-]{20,}$/.test(s) && !s.includes('/')) return s;
+  // Google Sheets URL: .../spreadsheets/d/<ID>/...
+  let m = s.match(/\/spreadsheets\/d\/([a-zA-Z0-9_-]+)/);
+  if (m && m[1]) return m[1];
+  // Drive open?id=<ID> or other query param id=
+  m = s.match(/[?&]id=([a-zA-Z0-9_-]+)/);
+  if (m && m[1]) return m[1];
+  // Drive file URL: .../file/d/<ID>/...
+  m = s.match(/\/file\/d\/([a-zA-Z0-9_-]+)/);
+  if (m && m[1]) return m[1];
+  return '';
+}
 
 async function getAuthFetch(){
   if (typeof window.__lm_fetchJSONAuth === 'function') return window.__lm_fetchJSONAuth;
@@ -55,14 +73,16 @@ async function waitForLoadGlbFn(timeoutMs = 8000){
   throw new Error('__LM_LOAD_GLB_BY_ID not ready');
 }
 
-async function openSpreadsheetPicker(){
+async function openSpreadsheetPicker(prefillSpreadsheetId){
   const Picker = window.google?.picker;
   const viewId = Picker?.ViewId?.SPREADSHEETS || (Picker?.ViewId?.DOCS || undefined);
-  const res = await window.__lm_openPicker({
+  const opts = {
     title: 'Select caption spreadsheet',
     viewId,
     multiselect: false
-  });
+  };
+  if (prefillSpreadsheetId) opts.fileIds = [prefillSpreadsheetId];
+  const res = await window.__lm_openPicker(opts);
   const doc = res?.docs?.[0];
   return doc?.id || '';
 }
@@ -100,11 +120,19 @@ async function setSheetContext(spreadsheetId){
 
 async function openDatasetFlow(){
   const status = document.getElementById('lm-open-status');
-  const setStatus = (s)=>{ if (status) status.textContent = s; };
+  const setStatus = \(s\)=>\{ if \(status\) status\.textContent = s; \};
+
+  const input = document.getElementById('lmSpreadsheetUrlInput');
+  const prefillId = extractSpreadsheetId(input ? input.value : '');
 
   try{
     setStatus('Opening picker…');
-    const spreadsheetId = await openSpreadsheetPicker();
+    const spreadsheetId = await openSpreadsheetPicker(prefillId);
+    if (!spreadsheetId && prefillId){
+      setStatus('');
+      alert('このスプレッドシートは、このGoogleアカウントでは選択できない可能性があります。共有されたアカウントでログインしているか、URL/IDが正しいか確認してください。');
+      return;
+    }
     if (!spreadsheetId){ setStatus(''); return; }
 
     setStatus('Reading spreadsheet…');
@@ -123,7 +151,8 @@ async function openDatasetFlow(){
       if (!glbId){ setStatus(''); return; }
       try{
         // Store for future use
-        await writeMeta(spreadsheetId, 'glbFileId', glbId);
+        const m = await import('./lm.meta.sheet.module.js');
+        if (m && typeof m.writeMeta === 'function') await m.writeMeta(spreadsheetId, 'glbFileId', glbId);
       }catch(e){ warn('writeMeta failed', e); }
     }
 
@@ -164,15 +193,26 @@ function installUI(){
   btn.id = 'btnPickSpreadsheet';
   btn.type = 'button';
   btn.textContent = 'Open spreadsheet…';
-  btn.className = 'mini';
+btn.className = 'mini';
 
-  const st = document.createElement('span');
+const inp = document.createElement('input');
+inp.id = 'lmSpreadsheetUrlInput';
+inp.type = 'text';
+inp.placeholder = 'Paste spreadsheet URL or ID…';
+inp.autocomplete = 'off';
+inp.spellcheck = false;
+inp.style.flex = '1';
+inp.style.minWidth = '260px';
+inp.style.padding = '4px 6px';
+
+const st = document.createElement('span');
   st.id = 'lm-open-status';
   st.className = 'muted';
   st.style.marginLeft = '4px';
   st.style.fontSize = '12px';
 
   row.appendChild(btn);
+  row.appendChild(inp);
   row.appendChild(st);
 
   // Insert the new row above the worksheet (gid) selector row.
@@ -182,6 +222,14 @@ function installUI(){
     ev.preventDefault();
     openDatasetFlow();
   });
+
+inp.addEventListener('keydown', (ev)=>{
+  if (ev.key === 'Enter'){
+    ev.preventDefault();
+    openDatasetFlow();
+  }
+});
+
 
   log('UI installed');
 }

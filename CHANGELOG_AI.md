@@ -1,5 +1,34 @@
 # LociMyu Update – AI Changelog
 
+## Step 02f – Spreadsheet URL/fileId prefill via Picker setFileIds + Share-safety meta read split
+**Date:** 2026-01-26
+
+### What changed
+1. **Added spreadsheet URL/fileId input to “Open spreadsheet…” UI**
+   - `dataset.open.ui.js` now includes a paste field (URL or fileId).
+   - The value is parsed into a spreadsheetId and passed to Picker using `fileIds` (DocsView.setFileIds), so the user can finalize selection even when the file does not appear in general listings.
+
+2. **Share-mode safety: removed write-capable meta module from Share load path**
+   - New file: `lm.meta.sheet.read.module.js` (read-only access to `__LM_META` / `glbFileId`).
+   - `dataset.open.ui.js` imports the read-only module; write-back of `glbFileId` (Edit-only) is now via dynamic import of `lm.meta.sheet.module.js`.
+
+### Why
+- Improves UX for cases where the user has only a spreadsheet URL and the file does not reliably appear in Picker listings.
+- Keeps the drive.file policy invariant (“pasted URL/fileId may prefill but must finalize selection via Picker”).
+- Ensures Share entry avoids loading write-capable modules, aligning with Share safety requirements.
+
+### How to test
+1. **Open existing dataset by listing (baseline)**
+   - Click “Open spreadsheet…” and pick a dataset spreadsheet normally.
+2. **Open by pasting URL**
+   - Paste a Google Sheets URL (…/spreadsheets/d/<ID>/…) into the input, press Enter (or click Open).
+   - Confirm Picker opens focused on that spreadsheet; select it; dataset loads.
+3. **Permission-negative case**
+   - Paste a spreadsheet URL that the signed-in account cannot access.
+   - Confirm Picker cannot select it and the app shows a clear message.
+4. **Share mode safety check**
+   - Load Share mode entry and confirm no meta write is attempted; opening a dataset reads `__LM_META` and loads GLB when permitted.
+
 ## Step 01 – drive.file scope normalization + Picker foundation
 **Date:** 2026-01-25
 
