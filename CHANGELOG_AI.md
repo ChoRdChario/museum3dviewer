@@ -1,5 +1,36 @@
 # LociMyu Update – AI Changelog
 
+## Step 02j – Grant access to GLB + caption attachments (from caption sheets column H) and show them in the images panel under drive.file
+**Date:** 2026-01-27
+
+### What changed
+1. **Collect caption attachment fileIds from caption sheets (column H: `imageFileId`)**
+   - `dataset.open.ui.js` now reads caption sheet gids from `__LM_SHEET_NAMES` (column A) and batch-reads each target sheet’s column H.
+   - Values are normalized (accepts raw fileId or Drive URL) and deduplicated.
+   - The resulting list is published as `window.__LM_CANDIDATE_IMAGE_FILEIDS` and triggers `lm:refresh-images`.
+
+2. **Grant access up-front via Picker for all required Drive files (drive.file policy)**
+   - `dataset.open.ui.js` now always calls Picker once per open-flow (before GLB load) with:
+     - `fileIds = [glbFileId, ...attachmentFileIds]`
+     - `multiselect: true`
+     - `viewId: DOCS` (so mixed types are visible)
+
+3. **Populate the Images panel in drive.file mode using explicit fileIds (no folder scanning)**
+   - `caption.images.loader.js` now resolves Drive metadata for `window.__LM_CANDIDATE_IMAGE_FILEIDS` (thumbnail/name/url) via Drive API and calls `__LM_CAPTION_UI.setImages()`.
+   - Keeps the existing “drive.folder sibling listing” path intact for non-drive.file builds.
+
+### Why
+- Under `drive.file`, Drive content access is per-file and must be explicitly granted. The dataset spreadsheet can be opened by URL, but GLB and image attachments still require explicit authorization.
+- Attachments are stored per caption sheet and sheets can be renamed/added, so we must anchor the scan to `__LM_SHEET_NAMES` (gid-based).
+
+### How to test
+1. Open a dataset spreadsheet (by Picker or by pasting the spreadsheet URL/ID).
+2. Confirm a **single** “Grant access to files” Picker appears and includes the GLB plus any attachment files.
+3. Select the GLB and attachment(s) (multi-select) and confirm:
+   - GLB loads (no 404 on `drive/v3/files/<id>?alt=media`).
+   - Images panel lists the attachments (thumbnails may depend on Drive metadata availability).
+4. Add an attachment fileId into column H (`imageFileId`) of a caption sheet, reload, and confirm it appears in the Images panel after the open-flow.
+
 ## Step 02g – Ensure URL input appears even when an older “Open spreadsheet…” button already exists
 **Date:** 2026-01-26
 

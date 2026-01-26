@@ -1,7 +1,11 @@
 // dataset.open.ui.js
-// UI: "Open sheet" button (Drive.file mode)
-// - Opens Google Picker to select a spreadsheet
-// - Reads __LM_META to resolve glbFileId (or prompts user to select GLB in Edit mode)
+// UI: "Open spreadsheet…" button (Drive.file mode)
+// - Accepts spreadsheet URL/ID input (validated via Sheets API).
+// - Falls back to Picker browsing when needed.
+// - Resolves GLB fileId from __LM_META.
+// - In drive.file mode, triggers a Picker selection step to grant access to:
+//   - GLB (required)
+//   - Caption candidate image attachments from __LM_IMAGE_STASH (optional)
 // - Sets sheet-context (spreadsheetId + default caption sheet gid)
 // - Loads GLB via existing GLB loader bridge
 
@@ -15,6 +19,18 @@ const SHEETS_BASE='https://sheets.googleapis.com/v4/spreadsheets';
 function log(...a){ console.log(TAG, ...a); }
 function warn(...a){ console.warn(TAG, ...a); }
 
+function uniq(list){
+  const out=[];
+  const seen=new Set();
+  (list||[]).forEach(v=>{
+    const s=String(v||'').trim();
+    if (!s) return;
+    if (seen.has(s)) return;
+    seen.add(s);
+    out.push(s);
+  });
+  return out;
+}
 
 function extractSpreadsheetId(input){
   const s = String(input || '').trim();
@@ -33,10 +49,25 @@ function extractSpreadsheetId(input){
   return '';
 }
 
+function extractDriveFileId(input){
+  const s = String(input || '').trim();
+  if (!s) return '';
+  // If user pastes just the ID
+  if (/^[a-zA-Z0-9_-]{20,}$/.test(s) && !s.includes('/')) return s;
+  // Drive file URL: .../file/d/<ID>/...
+  let m = s.match(/\/file\/d\/([a-zA-Z0-9_-]+)/);
+  if (m && m[1]) return m[1];
+  // Sheets URL: .../spreadsheets/d/<ID>/...
+  m = s.match(/\/spreadsheets\/d\/([a-zA-Z0-9_-]+)/);
+  if (m && m[1]) return m[1];
+  // open?id=<ID> or other query param id=
+  m = s.match(/[?&]id=([a-zA-Z0-9_-]+)/);
+  if (m && m[1]) return m[1];
+  return '';
+}
+
 async function getAuthFetch(){
   if (typeof window.__lm_fetchJSONAuth === 'function') return window.__lm_fetchJSONAuth;
-  // Resolve relative to this module to avoid path issues when the file is served
-  // from a subdirectory (e.g., patch bundles on GH Pages).
   try{
     const m = await import(new URL('./auth.fetch.bridge.js', import.meta.url));
     if (typeof m.default === 'function') return await m.default();
@@ -63,6 +94,68 @@ async function listSheets(spreadsheetId){
   })).filter(s=>s.gid!=null && s.title);
 }
 
+async function readImageStashFileIds(spreadsheetId){
+  // Deprecated: older plan used __LM_IMAGE_STASH. Kept as a no-op for compatibility.
+  // Current implementation reads attachment fileIds from each caption sheet's column H (imageFileId).
+  return [];
+}
+
+async function readCaptionSheetGids(spreadsheetId){
+  // __LM_SHEET_NAMES has A=sheetGid, B=displayName, C=sheetTitle, D=updatedAt
+  // We rely on gid because the user can rename sheets freely.
+  const fetchJSON = await getAuthFetch();
+  const range = encodeURIComponent('__LM_SHEET_NAMES!A:A');
+  const url = `${SHEETS_BASE}/${encodeURIComponent(spreadsheetId)}/values/${range}?majorDimension=COLUMNS`;
+  try{
+    const data = await fetchJSON(url);
+    const col = (data?.values && data.values[0]) ? data.values[0] : [];
+    const gids = col
+      .map(v=>String(v||'').trim())
+      .filter(Boolean)
+      .filter(v=>!/^(sheetgid|gid)$/i.test(v));
+    return uniq(gids);
+  }catch(e){
+    warn('readCaptionSheetGids failed (non-fatal)', e);
+    return [];
+  }
+}
+
+async function readAttachmentFileIdsFromCaptionSheets(spreadsheetId, sheets){
+  // Each caption sheet has column H header = imageFileId; values are Drive fileIds (or URLs) for attachments.
+  const fetchJSON = await getAuthFetch();
+  const gids = await readCaptionSheetGids(spreadsheetId);
+  const gidSet = new Set((gids||[]).map(g=>String(g)));
+  const targets = (sheets||[]).filter(s=>gidSet.has(String(s.gid)));
+  if (!targets.length) return [];
+
+  const params = new URLSearchParams();
+  params.set('majorDimension', 'COLUMNS');
+  for (const s of targets){
+    // Use sheet title for A1 notation.
+    params.append('ranges', `${s.title}!H:H`);
+  }
+  const url = `${SHEETS_BASE}/${encodeURIComponent(spreadsheetId)}/values:batchGet?${params.toString()}`;
+  try{
+    const data = await fetchJSON(url);
+    const vrs = Array.isArray(data?.valueRanges) ? data.valueRanges : [];
+    const out = [];
+    for (const vr of vrs){
+      const col = (vr?.values && vr.values[0]) ? vr.values[0] : [];
+      for (const cell of col){
+        const raw = String(cell||'').trim();
+        if (!raw) continue;
+        if (/^(imagefileid|image_file_id|fileid|file_id|id)$/i.test(raw)) continue;
+        const id = extractDriveFileId(raw);
+        if (id) out.push(id);
+      }
+    }
+    return uniq(out);
+  }catch(e){
+    warn('readAttachmentFileIdsFromCaptionSheets failed (non-fatal)', e);
+    return [];
+  }
+}
+
 function pickDefaultCaptionSheet(sheets){
   // Prefer first non-system sheet
   const nonSystem = (sheets||[]).filter(s=>!String(s.title).startsWith('__LM_'));
@@ -78,10 +171,14 @@ async function waitForLoadGlbFn(timeoutMs = 8000){
   throw new Error('__LM_LOAD_GLB_BY_ID not ready');
 }
 
+function isLikelyDriveFileAccessError(err){
+  const msg = String(err?.message || err || '').toLowerCase();
+  // viewer.module.cdn.js currently surfaces Drive fetch failures via message.
+  return msg.includes('drive fetch failed') && (msg.includes('404') || msg.includes('403'));
+}
+
 async function openSpreadsheetPicker(prefillSpreadsheetId){
   const Picker = window.google?.picker;
-  // Use DOCS view + spreadsheet mimeType filter.
-  // This tends to be more robust across Picker runtime versions.
   const viewId = Picker?.ViewId?.DOCS || undefined;
   const opts = {
     title: 'Select caption spreadsheet',
@@ -96,16 +193,37 @@ async function openSpreadsheetPicker(prefillSpreadsheetId){
   return doc?.id || '';
 }
 
-async function openGlbPicker(){
+async function openGlbPicker(prefillGlbId){
   const Picker = window.google?.picker;
   const viewId = Picker?.ViewId?.DOCS || undefined;
-  const res = await window.__lm_openPicker({
+  const opts = {
     title: 'Select GLB file',
     viewId,
-    multiselect: false
-  });
+    // Prefer the actual GLB mimeType; allow octet-stream as a fallback.
+    mimeTypes: 'model/gltf-binary,application/octet-stream',
+    multiselect: false,
+    allowSharedDrives: true
+  };
+  if (prefillGlbId) opts.fileIds = [prefillGlbId];
+  const res = await window.__lm_openPicker(opts);
   const doc = res?.docs?.[0];
   return doc?.id || '';
+}
+
+async function openAccessGrantPicker(fileIds){
+  const ids = uniq(fileIds).slice(0, 50);
+  if (!ids.length) return null;
+  const Picker = window.google?.picker;
+  const viewId = Picker?.ViewId?.DOCS || undefined;
+  // Multi-select so user can grant access to multiple required files in one step.
+  const res = await window.__lm_openPicker({
+    title: 'Grant access to files',
+    viewId,
+    multiselect: true,
+    allowSharedDrives: true,
+    fileIds: ids
+  });
+  return res;
 }
 
 async function setSheetContext(spreadsheetId){
@@ -128,8 +246,6 @@ async function setSheetContext(spreadsheetId){
 }
 
 async function openDatasetFlow(){
-  // Guard against double-invocation if an existing build already attached
-  // listeners to the Open button.
   if (window.__LM_OPEN_DATASET_FLOW_RUNNING){
     warn('openDatasetFlow already running');
     return;
@@ -143,13 +259,12 @@ async function openDatasetFlow(){
   const prefillId = extractSpreadsheetId(input ? input.value : '');
 
   try{
-    // If the user pasted a URL/ID, prefer validating/opening directly via Sheets API.
-    // This avoids relying on Drive listing behavior that can vary with drive.file.
     let spreadsheetId = '';
+
+    // 1) Direct open path: validate the pasted id via Sheets API.
     if (prefillId){
       setStatus('Checking spreadsheet…');
       try{
-        // listSheets uses Sheets API auth; if the user can open it, this succeeds.
         await listSheets(prefillId);
         spreadsheetId = prefillId;
       }catch(e){
@@ -157,8 +272,8 @@ async function openDatasetFlow(){
       }
     }
 
+    // 2) Picker fallback.
     if (!spreadsheetId){
-      // Fall back to Picker browsing. If the user supplied an id, attempt to pre-navigate.
       setStatus('Opening picker…');
       spreadsheetId = await openSpreadsheetPicker(prefillId || '');
     }
@@ -172,10 +287,19 @@ async function openDatasetFlow(){
     }
 
     setStatus('Reading spreadsheet…');
-    await setSheetContext(spreadsheetId);
+    const ctx = await setSheetContext(spreadsheetId);
 
-    // Resolve GLB id
+    // Resolve candidate image attachments (drive.file mode: permission is per-file).
+    // Attachments are stored in each caption sheet column H (imageFileId).
+    setStatus('Reading attachments…');
+    const imageIds = await readAttachmentFileIdsFromCaptionSheets(spreadsheetId, ctx?.sheets||[]);
+    try{ window.__LM_CANDIDATE_IMAGE_FILEIDS = imageIds; }catch(_e){}
+    try{ window.dispatchEvent(new CustomEvent('lm:refresh-images')); }catch(_e){}
+
+    // Resolve GLB id.
     let glbId = await getGlbFileId(spreadsheetId);
+    if (glbId && glbId === spreadsheetId) glbId = '';
+
     if (!glbId){
       if (!isEditMode()){
         setStatus('GLB not configured in this sheet');
@@ -183,13 +307,24 @@ async function openDatasetFlow(){
         return;
       }
       setStatus('Select GLB…');
-      glbId = await openGlbPicker();
+      glbId = await openGlbPicker('');
       if (!glbId){ setStatus(''); return; }
+
+      // Store for future use (Edit-only).
       try{
-        // Store for future use
         const m = await import(new URL('./lm.meta.sheet.module.js', import.meta.url));
         if (m && typeof m.writeMeta === 'function') await m.writeMeta(spreadsheetId, 'glbFileId', glbId);
       }catch(e){ warn('writeMeta failed', e); }
+    }
+
+    // In drive.file policy, request access to GLB and image attachments upfront.
+    if (window.__LM_POLICY_DRIVEFILE_ONLY){
+      const ids = uniq([glbId, ...(imageIds||[])]).filter(Boolean);
+      if (ids.length){
+        setStatus('Granting access…');
+        await openAccessGrantPicker(ids);
+        try{ window.dispatchEvent(new CustomEvent('lm:refresh-images')); }catch(_e){}
+      }
     }
 
     setStatus('Loading GLB…');
@@ -197,15 +332,29 @@ async function openDatasetFlow(){
     try{ window.__LM_CURRENT_GLB_ID__ = glbId; }catch(_e){}
 
     const loadFn = await waitForLoadGlbFn();
-    await loadFn(glbId);
+
+    try{
+      await loadFn(glbId);
+    }catch(e){
+      // Common failure mode under drive.file: Drive API returns 404/403 until the user
+      // explicitly selects the file in Picker.
+      if (window.__LM_POLICY_DRIVEFILE_ONLY && isLikelyDriveFileAccessError(e)){
+        setStatus('Grant access to GLB…');
+        await openAccessGrantPicker([glbId, ...(imageIds||[])]);
+        setStatus('Loading GLB…');
+        await loadFn(glbId);
+      } else {
+        throw e;
+      }
+    }
 
     setStatus('');
-    log('dataset opened', { spreadsheetId, glbId });
+    log('dataset opened', { spreadsheetId, glbId, imageIds: (imageIds||[]).length });
   }catch(e){
     warn('openDatasetFlow failed', e);
     try{ alert('Open failed: ' + (e?.message||String(e))); }catch(_e){}
-    const status = document.getElementById('lm-open-status');
-    if (status) status.textContent = '';
+    const status2 = document.getElementById('lm-open-status');
+    if (status2) status2.textContent = '';
   }finally{
     window.__LM_OPEN_DATASET_FLOW_RUNNING = false;
   }
@@ -215,29 +364,26 @@ function installUI(){
   // IMPORTANT:
   // The existing "Select sheet…" dropdown is for a worksheet (gid) INSIDE the
   // active spreadsheet (caption sheet selector). We must not mix that control
-  // with the spreadsheet file (Drive) selection UI.
-  // Therefore, we insert a *separate* row above the worksheet selector.
+  // with the spreadsheet file selection UI.
 
-  // Prefer augmenting an existing Open spreadsheet button if one already exists
-  // (older builds installed a button-only UI).
   const existingBtn = document.getElementById('btnPickSpreadsheet')
     || Array.from(document.querySelectorAll('button')).find(b=>String(b.textContent||'').trim()==='Open spreadsheet…');
 
   if (existingBtn){
-    // Match the GLB row layout (flex, no overflow)
     const parent = existingBtn.parentElement;
     if (parent){
       parent.style.display = 'flex';
       parent.style.alignItems = 'center';
-      parent.style.gap = '6px';
+      parent.style.gap = '8px';
       parent.style.width = '100%';
       parent.style.boxSizing = 'border-box';
     }
+
     existingBtn.id = 'btnPickSpreadsheet';
     try{ existingBtn.classList.add('mini'); }catch(_e){}
     existingBtn.style.flex = '0 0 auto';
 
-    // Ensure input exists next to it.
+    // Ensure input exists in the same row.
     if (!document.getElementById('lmSpreadsheetUrlInput')){
       const inp = document.createElement('input');
       inp.id = 'lmSpreadsheetUrlInput';
@@ -249,15 +395,14 @@ function installUI(){
       inp.style.minWidth = '0';
       inp.style.width = '100%';
       inp.style.maxWidth = '100%';
-      inp.style.padding = '4px 6px';
       inp.style.boxSizing = 'border-box';
-      // Insert after the button within the same row.
-      if (parent) parent.insertBefore(inp, existingBtn.nextSibling);
+
+      // Match GLB row: input first, button second.
+      if (parent) parent.insertBefore(inp, existingBtn);
     }
 
-    // Ensure status element exists.
+    // Ensure status element exists (on its own line to avoid overflow).
     if (!document.getElementById('lm-open-status')){
-      // Put status on its own line to avoid horizontal overflow.
       const st = document.createElement('div');
       st.id = 'lm-open-status';
       st.className = 'muted';
@@ -270,13 +415,12 @@ function installUI(){
       parent?.appendChild(st);
     }
 
-    // Attach handler (guarded) for click + Enter.
-    existingBtn.addEventListener('click', (ev)=>{ ev.preventDefault(); openDatasetFlow(); });
+    existingBtn.addEventListener('click', (ev)=>{ ev.preventDefault(); openDatasetFlow(); }, { passive: false });
     const inp = document.getElementById('lmSpreadsheetUrlInput');
     if (inp){
       inp.addEventListener('keydown', (ev)=>{
         if (ev.key === 'Enter'){ ev.preventDefault(); openDatasetFlow(); }
-      });
+      }, { passive: false });
     }
 
     log('UI augmented (existing button)');
@@ -289,32 +433,27 @@ function installUI(){
   const row = document.createElement('div');
   row.className = 'row ctrl-row';
   row.style.marginTop = '8px';
-  row.style.gap = '6px';
-  row.style.display = 'flex';
-  row.style.alignItems = 'center';
   row.style.width = '100%';
   row.style.boxSizing = 'border-box';
+
+  const inp = document.createElement('input');
+  inp.id = 'lmSpreadsheetUrlInput';
+  inp.type = 'text';
+  inp.placeholder = 'Paste spreadsheet URL or ID…';
+  inp.autocomplete = 'off';
+  inp.spellcheck = false;
 
   const btn = document.createElement('button');
   btn.id = 'btnPickSpreadsheet';
   btn.type = 'button';
   btn.textContent = 'Open spreadsheet…';
-btn.className = 'mini';
+  btn.className = 'mini';
 
-const inp = document.createElement('input');
-inp.id = 'lmSpreadsheetUrlInput';
-inp.type = 'text';
-inp.placeholder = 'Paste spreadsheet URL or ID…';
-inp.autocomplete = 'off';
-inp.spellcheck = false;
-inp.style.flex = '1 1 0';
-inp.style.minWidth = '0';
-inp.style.width = '100%';
-inp.style.maxWidth = '100%';
-inp.style.padding = '4px 6px';
-inp.style.boxSizing = 'border-box';
+  // Match GLB row ordering: input -> button
+  row.appendChild(inp);
+  row.appendChild(btn);
 
-const st = document.createElement('div');
+  const st = document.createElement('div');
   st.id = 'lm-open-status';
   st.className = 'muted';
   st.style.marginTop = '2px';
@@ -324,26 +463,13 @@ const st = document.createElement('div');
   st.style.textOverflow = 'ellipsis';
   st.style.maxWidth = '100%';
 
-  // Keep the main row aligned like GLB row; status sits below.
-  row.appendChild(btn);
-  row.appendChild(inp);
-
-  // Insert the new row above the worksheet (gid) selector row.
   anchor.parentNode.insertBefore(row, anchor);
   anchor.parentNode.insertBefore(st, anchor);
 
-  btn.addEventListener('click', (ev)=>{
-    ev.preventDefault();
-    openDatasetFlow();
-  });
-
-inp.addEventListener('keydown', (ev)=>{
-  if (ev.key === 'Enter'){
-    ev.preventDefault();
-    openDatasetFlow();
-  }
-});
-
+  btn.addEventListener('click', (ev)=>{ ev.preventDefault(); openDatasetFlow(); }, { passive: false });
+  inp.addEventListener('keydown', (ev)=>{
+    if (ev.key === 'Enter'){ ev.preventDefault(); openDatasetFlow(); }
+  }, { passive: false });
 
   log('UI installed');
 }
