@@ -156,6 +156,33 @@ async function seedImageStashHeaders(spreadsheetId){
   });
 }
 
+async function ensureLegacyMaterialsSheet(spreadsheetId){
+  // Prefer legacy helpers (keeps schema consistent with existing save-data).
+  try{
+    if (typeof window.__lm_ensureMaterialsHeader === 'function'){
+      await window.__lm_ensureMaterialsHeader(spreadsheetId);
+      return;
+    }
+  }catch(_e){}
+
+  // Fallback: replicate legacy sheet + header shape.
+  await ensureSheet(spreadsheetId, '__LM_MATERIALS', { hidden: true, rowCount: 2000, columnCount: 14 });
+
+  const header = [
+    'key','target','mode','color','opacity','metalness','roughness',
+    'emissive','emissiveIntensity','normalScale','alphaTest','doubleSided',
+    'depthWrite','notes'
+  ];
+
+  const fetchJSON = await getAuthFetch();
+  const range = encodeURIComponent('__LM_MATERIALS!A1:N1');
+  const url = `${SHEETS_BASE}/${encodeURIComponent(spreadsheetId)}/values/${range}?valueInputOption=RAW`;
+  await fetchJSON(url, {
+    method: 'PUT',
+    json: { values: [header] }
+  });
+}
+
 async function initNewDataset({ folderId, folderName, glbId, datasetName }){
   // 1) Create spreadsheet in chosen folder
   const created = await createSpreadsheetInFolder(folderId, datasetName);
@@ -169,6 +196,10 @@ async function initNewDataset({ folderId, folderName, glbId, datasetName }){
   // Candidate images list (user-manageable)
   await ensureSheet(spreadsheetId, '__LM_IMAGE_STASH', { hidden: true, rowCount: 2000, columnCount: 6 });
   try{ await seedImageStashHeaders(spreadsheetId); }catch(_e){}
+
+  // Legacy compatibility: always create __LM_MATERIALS on new datasets.
+  // (material.orchestrator loads from __LM_MATERIALS!A:N)
+  try{ await ensureLegacyMaterialsSheet(spreadsheetId); }catch(_e){}
 
   // 3) Bind GLB to dataset metadata
   await writeMeta(spreadsheetId, 'glbFileId', glbId);

@@ -3,9 +3,10 @@
 ## Current Implementation Status
 
 - **Step01 (completed):** drive.file policy flagging + Google Picker foundation + “Open spreadsheet…” UI for spreadsheet-first operation.
-- **Step02 (in progress / implemented in code):** Edit-mode “新規LociMyuデータ作成” panel now requires an explicit **destination folder selection** (Picker) and creates the dataset spreadsheet **inside that folder** (not My Drive root). The spreadsheet is seeded with `__LM_META` and `__LM_IMAGE_STASH`.
+- **Step02 (in progress / implemented in code):** Edit-mode “新規LociMyuデータ作成” panel now requires an explicit **destination folder selection** (Picker) and creates the dataset spreadsheet **inside that folder** (not My Drive root). The spreadsheet is seeded with `__LM_META`, `__LM_IMAGE_STASH`, and a legacy-compatible `__LM_MATERIALS`.
 - **Step02a (completed):** Fixed Google Picker **500 error** during folder/GLB selection by normalizing Picker viewId usage (`google.picker.ViewId.*`) and hardening the Picker bridge’s viewId resolution.
-- **Step02b (completed):** Fixed Picker selection handling so callers only receive results on **user intent** (`picked` / `cancel`). The bridge no longer resolves early on the initial `loaded` event (including the ESM module variant `picker.bridge.module.js` that the UI imports), and folder picking explicitly enables folder selection (`includeFolders` + `selectFolderEnabled`).
+- **Step02b (completed):** Fixed Picker selection handling so callers only receive results on **user intent** (`picked` / `cancel`). The bridge no longer resolves early on the initial `loaded` event, and folder picking explicitly enables folder selection (`includeFolders` + `selectFolderEnabled`).
+- **Step02e (completed):** New dataset creation now always creates `__LM_MATERIALS` with the legacy canonical header (`A1:N1`) to keep material save data migration straightforward.
 - **Next planned:** candidate image Picker + persistence into `__LM_IMAGE_STASH`, and Share-mode sheet-first flow.
 **Version:** 1.3  
 **Date:** 2026-01-26 (Asia/Tokyo)  
@@ -132,7 +133,8 @@ Picker is the standard mechanism to “explicitly select” files under `drive.f
 - The application must be able to scan caption sheets to collect all image fileIds referenced by captions.
 
 ### 6.4 Other existing `__LM_*` sheets
-- Existing internal sheets may remain (e.g., materials), but must not break P1–P4.
+- Existing internal sheets may remain (e.g., views), but must not break P1–P4.
+- For **newly created datasets**, the app must ensure `__LM_MATERIALS` exists with the legacy-compatible header schema (A1:N1). This prevents material-load failures and makes save-data migration straightforward.
 - Share-side sheet selection logic that excludes `__LM_` sheets remains valid and should continue.
 
 ---
@@ -147,7 +149,8 @@ Picker is the standard mechanism to “explicitly select” files under `drive.f
 5. App creates a new spreadsheet (LociMyu dataset) **inside the chosen folder**.
 6. App creates `__LM_META` and stores `glbFileId`.
 7. App creates `__LM_IMAGE_STASH`.
-8. App transitions to “opened dataset” state (dispatch `lm:sheet-context`).
+8. App creates `__LM_MATERIALS` (legacy schema) for material settings.
+9. App transitions to “opened dataset” state (dispatch `lm:sheet-context`).
 
 ### 7.2 Edit — Open existing dataset (sheet-first)
 1. User signs in.
