@@ -361,6 +361,11 @@
 
     try{
       const rows = await fetchRows(spreadsheetId, ctx.sheetTitle);
+
+      // Ready-gate integration:
+      // "sheet" = spreadsheet-side readiness (active sheet exists and header schema is ensured).
+      // This is distinct from "captions" (caption UI has been bound and populated).
+      try{ window.__LM_READY_GATE__?.mark?.('sheet', { title: ctx.sheetTitle, gid: String(sheetGid||'') }); }catch(_e){}
       const items = rowsToItems(rows);
       // nextRowIndex = 最大 rowIndex + 1
       const maxRow = items.reduce((m,it)=> Math.max(m, it.rowIndex || 1), 1);

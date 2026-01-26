@@ -24,6 +24,13 @@
     if (!glbId){
       warn('no active GLB id; set empty images', reason);
       ui.setImages([]);
+      try{
+        window.__LM_READY_GATE__?.mark?.('images', {
+          reason,
+          glbId: null,
+          mode: window.__LM_POLICY_DRIVEFILE_ONLY ? 'drive.file' : 'drive.folder'
+        });
+      }catch(_){ }
       return;
     }
 
@@ -32,6 +39,14 @@
     if (window.__LM_POLICY_DRIVEFILE_ONLY){
       ui.setImages([]);
       log('drive.file mode: skip sibling image listing', reason);
+      try{
+        window.__LM_READY_GATE__?.mark?.('images', {
+          reason,
+          glbId,
+          mode: 'drive.file',
+          note: 'sibling listing skipped'
+        });
+      }catch(_){ }
       return;
     }
     try{
@@ -40,6 +55,15 @@
       if (typeof fn !== 'function'){
         warn('drive.images.list.js missing listSiblingImagesByGlbId');
         ui.setImages([]);
+        try{
+          window.__LM_READY_GATE__?.mark?.('images', {
+            reason,
+            glbId,
+            mode: 'drive.folder',
+            count: 0,
+            note: 'no list function'
+          });
+        }catch(_){ }
         return;
       }
       const raw = await fn(glbId);
@@ -51,6 +75,14 @@
         url: r.url || r.webContentLink || r.webViewLink || ''
       }));
       ui.setImages(imgs);
+      try{
+        window.__LM_READY_GATE__?.mark?.('images', {
+          reason,
+          glbId,
+          mode: 'drive.folder',
+          count: Array.isArray(imgs) ? imgs.length : null
+        });
+      }catch(_){ }
       log('images loaded', imgs.length, 'reason:', reason);
     }catch(e){
       warn('image listing failed', e);
@@ -58,6 +90,15 @@
         const ui2 = window.__LM_CAPTION_UI;
         if (ui2 && typeof ui2.setImages === 'function') ui2.setImages([]);
       }catch(_){}
+      try{
+        window.__LM_READY_GATE__?.mark?.('images', {
+          reason,
+          glbId,
+          mode: 'drive.folder',
+          count: 0,
+          note: 'listing failed'
+        });
+      }catch(_){ }
     }
   }
 
