@@ -119,8 +119,16 @@ async function setSheetContext(spreadsheetId){
 }
 
 async function openDatasetFlow(){
+  // Guard against double-invocation if an existing build already attached
+  // listeners to the Open button.
+  if (window.__LM_OPEN_DATASET_FLOW_RUNNING){
+    warn('openDatasetFlow already running');
+    return;
+  }
+  window.__LM_OPEN_DATASET_FLOW_RUNNING = true;
+
   const status = document.getElementById('lm-open-status');
-  const setStatus = \(s\)=>\{ if \(status\) status\.textContent = s; \};
+  const setStatus = (s)=>{ if (status) status.textContent = s; };
 
   const input = document.getElementById('lmSpreadsheetUrlInput');
   const prefillId = extractSpreadsheetId(input ? input.value : '');
@@ -170,6 +178,8 @@ async function openDatasetFlow(){
     try{ alert('Open failed: ' + (e?.message||String(e))); }catch(_e){}
     const status = document.getElementById('lm-open-status');
     if (status) status.textContent = '';
+  }finally{
+    window.__LM_OPEN_DATASET_FLOW_RUNNING = false;
   }
 }
 
@@ -180,9 +190,56 @@ function installUI(){
   // with the spreadsheet file (Drive) selection UI.
   // Therefore, we insert a *separate* row above the worksheet selector.
 
+  // Prefer augmenting an existing Open spreadsheet button if one already exists
+  // (older builds installed a button-only UI).
+  const existingBtn = document.getElementById('btnPickSpreadsheet')
+    || Array.from(document.querySelectorAll('button')).find(b=>String(b.textContent||'').trim()==='Open spreadsheet…');
+
+  if (existingBtn){
+    // Ensure input exists next to it.
+    if (!document.getElementById('lmSpreadsheetUrlInput')){
+      const inp = document.createElement('input');
+      inp.id = 'lmSpreadsheetUrlInput';
+      inp.type = 'text';
+      inp.placeholder = 'Paste spreadsheet URL or ID…';
+      inp.autocomplete = 'off';
+      inp.spellcheck = false;
+      inp.style.flex = '1';
+      inp.style.minWidth = '260px';
+      inp.style.padding = '4px 6px';
+      // Try to insert after the button within the same row if possible.
+      const parent = existingBtn.parentElement;
+      if (parent){
+        existingBtn.id = 'btnPickSpreadsheet';
+        parent.insertBefore(inp, existingBtn.nextSibling);
+      }
+    }
+
+    // Ensure status element exists.
+    if (!document.getElementById('lm-open-status')){
+      const st = document.createElement('span');
+      st.id = 'lm-open-status';
+      st.className = 'muted';
+      st.style.marginLeft = '4px';
+      st.style.fontSize = '12px';
+      existingBtn.parentElement?.appendChild(st);
+    }
+
+    // Attach handler (guarded) for click + Enter.
+    existingBtn.addEventListener('click', (ev)=>{ ev.preventDefault(); openDatasetFlow(); });
+    const inp = document.getElementById('lmSpreadsheetUrlInput');
+    if (inp){
+      inp.addEventListener('keydown', (ev)=>{
+        if (ev.key === 'Enter'){ ev.preventDefault(); openDatasetFlow(); }
+      });
+    }
+
+    log('UI augmented (existing button)');
+    return;
+  }
+
   const anchor = document.querySelector('.row.ctrl-row.sheet-row');
   if (!anchor) return;
-  if (document.getElementById('btnPickSpreadsheet')) return;
 
   const row = document.createElement('div');
   row.className = 'row ctrl-row';

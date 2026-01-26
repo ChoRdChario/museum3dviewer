@@ -1,5 +1,29 @@
 # LociMyu Update – AI Changelog
 
+## Step 02g – Ensure URL input appears even when an older “Open spreadsheet…” button already exists
+**Date:** 2026-01-26
+
+### What changed
+1. **Augmented existing button-only UI**
+   - `dataset.open.ui.js` now detects an already-present **Open spreadsheet…** button (older builds) and injects the URL/fileId input + status element next to it instead of returning early.
+   - Adds a re-entrant guard to prevent double-picker opening if legacy listeners are still attached.
+
+2. **Fixed an escaped-arrow syntax line**
+   - Corrected an accidentally escaped `setStatus` arrow function to valid JavaScript.
+
+### Why
+- Some deployments already had the Open button installed (Step01e), so Step02f’s early-return prevented the new input from appearing.
+- The input must be visible in the primary UI to make the “URL/fileId → setFileIds → Picker finalize” workflow usable.
+
+### How to test
+1. Reload the app (hard reload recommended).
+2. Confirm the **Open spreadsheet…** row now contains:
+   - Button
+   - **Paste spreadsheet URL or ID…** input
+   - Status text
+3. Paste a Sheets URL and press **Enter** → Picker opens focused on that fileId (if accessible) → select → dataset loads.
+
+
 ## Step 02f – Spreadsheet URL/fileId prefill via Picker setFileIds + Share-safety meta read split
 **Date:** 2026-01-26
 
