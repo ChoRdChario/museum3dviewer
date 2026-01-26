@@ -406,17 +406,32 @@ export async function ensureViewer(opts = {}) {
 
 // GLB fetch from Drive
 async function fetchGlbArrayBuffer(fileId, token) {
-  const url = `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?alt=media`;
-  const res = await fetch(url, {
-    method: 'GET',
-    headers: {
-      'Authorization': `Bearer ${token}`
+  const id = String(fileId||'').trim();
+  const baseUrl = `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(id)}?alt=media`;
+
+  // Primary path: OAuth (drive.file) for explicitly granted files.
+  try{
+    const res = await fetch(baseUrl, {
+      method: 'GET',
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+    if (res.ok) return await res.arrayBuffer();
+
+    // Fallback path: public files ("anyone with link") may return 404/403 under drive.file OAuth.
+    // If an API key is present, retry without OAuth.
+    const apiKey = (typeof window !== 'undefined' && typeof window.__LM_API_KEY === 'string') ? window.__LM_API_KEY.trim() : '';
+    if ((res.status === 403 || res.status === 404) && apiKey){
+      const url = `${baseUrl}&key=${encodeURIComponent(apiKey)}`;
+      const pubRes = await fetch(url, { method: 'GET' });
+      if (pubRes.ok) return await pubRes.arrayBuffer();
+      throw new Error(`[viewer.module] Drive fetch failed ${pubRes.status} ${pubRes.statusText}`);
     }
-  });
-  if (!res.ok) {
+
     throw new Error(`[viewer.module] Drive fetch failed ${res.status} ${res.statusText}`);
+  }catch(e){
+    // Network errors bubble up as-is.
+    throw e;
   }
-  return await res.arrayBuffer();
 }
 
 export async function loadGlbFromDrive(fileId, opts = {}) {

@@ -41,32 +41,43 @@
   }
 
   async function fetchDriveMeta(fileId){
-    if (metaCache.has(fileId)) return metaCache.get(fileId);
-    const fetchAuth = await getAuthFetch();
-    const p = (async ()=>{
-      const url = `${DRIVE_ROOT}/${encodeURIComponent(fileId)}?fields=id,name,mimeType,thumbnailLink,webViewLink,webContentLink`;
-      const meta = await fetchAuth(url, {});
-      return {
-        id: meta?.id || fileId,
-        name: meta?.name || '',
-        mimeType: meta?.mimeType || '',
-        thumbnailUrl: meta?.thumbnailLink || '',
-        url: meta?.webContentLink || meta?.webViewLink || ''
-      };
-    })().catch((e)=>{
-      // Cache negative result as empty to avoid hammering.
-      warn('drive meta fetch failed', fileId, e);
-      return {
-        id: fileId,
-        name: '',
-        mimeType: '',
-        thumbnailUrl: '',
-        url: ''
-      };
-    });
-    metaCache.set(fileId, p);
-    return p;
-  }
+  if (metaCache.has(fileId)) return metaCache.get(fileId);
+
+  const id = String(fileId||'').trim();
+  const authFetch = getAuthFetch(); // may be null if token missing
+
+  const urlBase = `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(id)}?fields=${encodeURIComponent(FIELDS)}&supportsAllDrives=true`;
+
+  const fetchAuth = async ()=>{
+    if (!authFetch) throw new Error('No auth fetch');
+    return await authFetch(urlBase);
+  };
+
+  const fetchPublic = async ()=>{
+    const key = (typeof window.__LM_API_KEY === 'string' && window.__LM_API_KEY.trim()) ? window.__LM_API_KEY.trim() : '';
+    if (!key) throw new Error('No API key');
+    const url = `${urlBase}&key=${encodeURIComponent(key)}`;
+    const res = await fetch(url, { method: 'GET' });
+    if (!res.ok) throw new Error(`Drive public meta fetch failed ${res.status}`);
+    return await res.json();
+  };
+
+  const prom = (async ()=>{
+    try{
+      return await fetchAuth();
+    }catch(e){
+      // Retry public for likely access failures (drive.file does not cover link-only public files).
+      try{
+        return await fetchPublic();
+      }catch(_e2){
+        throw e;
+      }
+    }
+  })();
+
+  metaCache.set(id, prom);
+  return prom;
+}
 
   async function loadImages(reason){
     const ui = window.__LM_CAPTION_UI;

@@ -31,6 +31,54 @@ function uniq(list){
   });
   return out;
 }
+function getApiKey(){
+  try{
+    if (typeof window.__LM_API_KEY === 'string' && window.__LM_API_KEY.trim()) return window.__LM_API_KEY.trim();
+    const m = document.querySelector('meta[name="google-api-key"]');
+    if (m && m.content && m.content.trim()) return m.content.trim();
+  }catch(_e){}
+  return '';
+}
+
+// Public-file probe: for "anyone with link" files, Picker may not list them even if accessible in-browser.
+// We treat those as "public" and skip the access-grant Picker, then rely on viewer/module public fetch fallback.
+const __lm_publicProbeCache = new Map(); // fileId -> boolean
+
+async function isPublicDriveFile(fileId){
+  const id = String(fileId||'').trim();
+  if (!id) return false;
+  if (__lm_publicProbeCache.has(id)) return __lm_publicProbeCache.get(id);
+
+  const key = getApiKey();
+  if (!key){
+    __lm_publicProbeCache.set(id, false);
+    return false;
+  }
+
+  const url = `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(id)}?fields=id&supportsAllDrives=true&key=${encodeURIComponent(key)}`;
+  try{
+    const res = await fetch(url, { method: 'GET' });
+    const ok = !!res && res.ok;
+    __lm_publicProbeCache.set(id, ok);
+    return ok;
+  }catch(_e){
+    __lm_publicProbeCache.set(id, false);
+    return false;
+  }
+}
+
+async function filterIdsRequiringPicker(ids){
+  const list = uniq(ids);
+  if (!list.length) return [];
+  const out = [];
+  // Sequential: keep it lightweight, avoids bursts in early init.
+  for (const id of list){
+    const pub = await isPublicDriveFile(id);
+    if (!pub) out.push(id);
+  }
+  return out;
+}
+
 
 function extractSpreadsheetId(input){
   const s = String(input || '').trim();
@@ -321,9 +369,17 @@ async function openDatasetFlow(){
     if (window.__LM_POLICY_DRIVEFILE_ONLY){
       const ids = uniq([glbId, ...(imageIds||[])]).filter(Boolean);
       if (ids.length){
-        setStatus('Granting access…');
-        await openAccessGrantPicker(ids);
-        try{ window.dispatchEvent(new CustomEvent('lm:refresh-images')); }catch(_e){}
+        // Picker cannot reliably list "anyone-with-link" public files even if they open in a browser.
+        // If a file looks public, skip the grant picker and rely on public fetch fallback in viewer/images loader.
+        const needPicker = await filterIdsRequiringPicker(ids);
+        if (needPicker.length){
+          setStatus('Granting access…');
+          log('grant picker: requesting access for', needPicker);
+          await openAccessGrantPicker(needPicker);
+          try{ window.dispatchEvent(new CustomEvent('lm:refresh-images')); }catch(_e){}
+        }else{
+          log('grant picker: skipped (all files look public)', ids);
+        }
       }
     }
 
@@ -339,10 +395,17 @@ async function openDatasetFlow(){
       // Common failure mode under drive.file: Drive API returns 404/403 until the user
       // explicitly selects the file in Picker.
       if (window.__LM_POLICY_DRIVEFILE_ONLY && isLikelyDriveFileAccessError(e)){
-        setStatus('Grant access to GLB…');
-        await openAccessGrantPicker([glbId, ...(imageIds||[])]);
-        setStatus('Loading GLB…');
-        await loadFn(glbId);
+        const needPicker = await filterIdsRequiringPicker([glbId, ...(imageIds||[])]);
+        if (needPicker.length){
+          setStatus('Grant access…');
+          log('grant picker (retry): requesting access for', needPicker);
+          await openAccessGrantPicker(needPicker);
+          setStatus('Loading GLB…');
+          await loadFn(glbId);
+        } else {
+          // If the file looks public, Picker will likely be empty. Let the original error surface.
+          throw e;
+        }
       } else {
         throw e;
       }
@@ -375,6 +438,7 @@ function installUI(){
       parent.style.display = 'flex';
       parent.style.alignItems = 'center';
       parent.style.gap = '8px';
+      parent.style.flexWrap = 'wrap';
       parent.style.width = '100%';
       parent.style.boxSizing = 'border-box';
     }
@@ -391,6 +455,11 @@ function installUI(){
       inp.placeholder = 'Paste spreadsheet URL or ID…';
       inp.autocomplete = 'off';
       inp.spellcheck = false;
+  inp.style.flex = '1 1 0';
+  inp.style.minWidth = '0';
+  inp.style.width = '100%';
+  inp.style.maxWidth = '100%';
+  inp.style.boxSizing = 'border-box';
       inp.style.flex = '1 1 0';
       inp.style.minWidth = '0';
       inp.style.width = '100%';
@@ -412,6 +481,8 @@ function installUI(){
       st.style.overflow = 'hidden';
       st.style.textOverflow = 'ellipsis';
       st.style.maxWidth = '100%';
+      st.style.flex = '1 1 100%';
+      st.style.order = '99';
       parent?.appendChild(st);
     }
 
@@ -433,6 +504,10 @@ function installUI(){
   const row = document.createElement('div');
   row.className = 'row ctrl-row';
   row.style.marginTop = '8px';
+  row.style.display = 'flex';
+  row.style.alignItems = 'center';
+  row.style.gap = '8px';
+  row.style.flexWrap = 'wrap';
   row.style.width = '100%';
   row.style.boxSizing = 'border-box';
 
