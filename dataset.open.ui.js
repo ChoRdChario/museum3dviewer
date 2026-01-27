@@ -13,7 +13,7 @@ import './persist.guard.js';
 import { getGlbFileId } from './lm.meta.sheet.read.module.js';
 import './picker.bridge.module.js';
 
-console.log('[dataset.open.ui] v02n loaded');
+console.log('[dataset.open.ui] v02o loaded');
 
 const TAG='[dataset.open.ui]';
 const SHEETS_BASE='https://sheets.googleapis.com/v4/spreadsheets';
@@ -114,6 +114,23 @@ function extractDriveFileId(input){
   m = s.match(/[?&]id=([a-zA-Z0-9_-]+)/);
   if (m && m[1]) return m[1];
   return '';
+}
+
+// Dataset guard: we only treat a spreadsheet as a LociMyu dataset if ALL required internal sheets exist.
+// (No auto-creation in Open flow; if missing, we error out.)
+const REQUIRED_INTERNAL_SHEETS = ['__LM_META','__LM_SHEET_NAMES','__LM_MATERIALS','__LM_VIEWS'];
+
+function missingDatasetSheets(sheets){
+  const titles = new Set((sheets||[]).map(s=>String(s?.title||'').trim()).filter(Boolean));
+  const missing = [];
+  for (const t of REQUIRED_INTERNAL_SHEETS){
+    if (!titles.has(t)) missing.push(t);
+  }
+  return missing;
+}
+
+function isDatasetSpreadsheet(sheets){
+  return missingDatasetSheets(sheets).length === 0;
 }
 
 async function getAuthFetch(){
@@ -282,10 +299,15 @@ async function setSheetContext(spreadsheetId, opts = {}){
   const sheets = await listSheets(spreadsheetId);
 
   // Safety: never bind to arbitrary spreadsheets.
-  // If the sheet doesn't look like a LociMyu dataset, stop here.
-  if(!looksLikeDataset(sheets)){
-    alert('This spreadsheet does not look like a LociMyu dataset (missing __LM_* sheets).\n\nFor safety, LociMyu will not open arbitrary spreadsheets.\nPlease paste the correct dataset spreadsheet URL, or use the Create button to initialize a dataset.\n\n(source: ' + source + ')');
-    return;
+  // Open flow must ensure required internal sheets exist. No auto-create here.
+  if (!isDatasetSpreadsheet(sheets)){
+    const missing = missingDatasetSheets(sheets);
+    alert(
+      'このスプレッドシートは LociMyu データセットではありません。\n' +
+      '必要な内部シートが見つかりません: ' + missing.join(', ') + '\n\n' +
+      '(source: ' + source + ')'
+    );
+    return null;
   }
   const def = pickDefaultCaptionSheet(sheets);
   const gidStr = def ? String(def.gid) : '';
@@ -334,10 +356,16 @@ async function openDatasetFlow(){
       // Validate that the current user can access THIS spreadsheet id.
       // If validation fails, stop (avoid accidentally opening a different spreadsheet via picker).
       sheets = await listSheets(prefillId);
-      // Additional safety: refuse to open non-dataset sheets in the Open flow.
-      if (!looksLikeDataset(sheets)){
+      // Strict: do NOT auto-create any __LM_* sheets during Open.
+      // If required internal sheets are missing, treat as non-dataset.
+      if (!isDatasetSpreadsheet(sheets)){
+        const missing = missingDatasetSheets(sheets);
         setStatus('');
-        alert('このスプレッドシートは LociMyu データセットとして初期化されていないようです。\n\n対処:\n- 右ペインの「Create」でデータセットを作成する\n- もしくは、LociMyu が作成したデータセット用スプレッドシートのURLを入力する');
+        alert(
+          'このスプレッドシートは LociMyu データセットではありません。\n' +
+          '必要な内部シートが見つかりません: ' + missing.join(', ') + '\n\n' +
+          'データセットとして作成されたスプレッドシートURLを入力してください。'
+        );
         return;
       }
       spreadsheetId = prefillId;
@@ -354,15 +382,24 @@ async function openDatasetFlow(){
       // Re-check & validate the chosen spreadsheet.
       setStatus('Checking spreadsheet…');
       sheets = await listSheets(spreadsheetId);
-      if (!looksLikeDataset(sheets)){
+      if (!isDatasetSpreadsheet(sheets)){
+        const missing = missingDatasetSheets(sheets);
         setStatus('');
-        alert('選択されたスプレッドシートは LociMyu データセットではありません。\n\n右ペインの「Create」でデータセットを作成するか、データセット用スプレッドシートを選択してください。');
+        alert(
+          '選択されたスプレッドシートは LociMyu データセットではありません。\n' +
+          '必要な内部シートが見つかりません: ' + missing.join(', ') + '\n\n' +
+          'データセット用スプレッドシートを選択してください。'
+        );
         return;
       }
     }
 
     setStatus('Reading spreadsheet…');
     const ctx = await setSheetContext(spreadsheetId, { source });
+    if (!ctx){
+      setStatus('');
+      return;
+    }
 
     // Resolve candidate image attachments (drive.file mode: permission is per-file).
     // Attachments are stored in each caption sheet column H (imageFileId).
@@ -482,11 +519,6 @@ function installUI(){
       inp.placeholder = 'Paste spreadsheet URL or ID…';
       inp.autocomplete = 'off';
       inp.spellcheck = false;
-  inp.style.flex = '1 1 0';
-  inp.style.minWidth = '0';
-  inp.style.width = '100%';
-  inp.style.maxWidth = '100%';
-  inp.style.boxSizing = 'border-box';
       inp.style.flex = '1 1 0';
       inp.style.minWidth = '0';
       inp.style.width = '100%';

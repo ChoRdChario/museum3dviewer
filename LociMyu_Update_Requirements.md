@@ -8,8 +8,8 @@
 - **Step02b (completed):** Fixed Picker selection handling so callers only receive results on **user intent** (`picked` / `cancel`). The bridge no longer resolves early on the initial `loaded` event, and folder picking explicitly enables folder selection (`includeFolders` + `selectFolderEnabled`).
 - **Step02e (completed):** New dataset creation now always creates `__LM_MATERIALS` with the legacy canonical header (`A1:N1`) to keep material save data migration straightforward.
 - **Next planned:** candidate image Picker + persistence into `__LM_IMAGE_STASH`, and Share-mode sheet-first flow.
-**Version:** 1.3  
-**Date:** 2026-01-26 (Asia/Tokyo)  
+**Version:** 1.4  
+**Date:** 2026-01-27 (Asia/Tokyo)  
 **Purpose:** This document is the single source of truth for the LociMyu update. It is written to keep development aligned with Google OAuth verification requirements and the agreed UX/architecture decisions. During implementation, when tradeoffs arise, prefer decisions that preserve the principles and invariants in this document.
 
 ---
@@ -209,12 +209,16 @@ Order from top to bottom:
 
 ## 9. Compatibility and Migration
 
-### 9.1 Legacy datasets without `__LM_META`
-- When opening an old dataset (no `__LM_META`):
-  - Prompt user to select GLB via Picker.
-  - Create `__LM_META` and store `glbFileId`.
-  - Create `__LM_IMAGE_STASH` (empty).
-  - Continue operation.
+### 9.1 Legacy / Non-initialized spreadsheets
+In this phase, **Open** is intentionally strict for safety and predictability.
+
+- A spreadsheet is treated as a LociMyu dataset only if it contains all required internal sheets:
+  - `__LM_META`
+  - `__LM_SHEET_NAMES`
+  - `__LM_MATERIALS`
+  - `__LM_VIEWS`
+- If any are missing, the app must **refuse to open** the spreadsheet and show an error.
+- The Open flow must **not auto-create** internal sheets on the user’s behalf.
 
 ### 9.2 Legacy “same folder auto enumeration”
 - Must be removed.

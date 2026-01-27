@@ -1,5 +1,35 @@
 # LociMyu Update – AI Changelog
 
+## Step 02o – Strict dataset validation for URL open (prevent accidental wrong-sheet bind)
+**Date:** 2026-01-27
+
+### Symptom
+- After pasting a spreadsheet URL, a **different spreadsheet** (e.g. a Google Form response sheet) could be bound instead.
+- `dataset.open.ui.js` also threw `ReferenceError: looksLikeDataset is not defined`.
+
+### What changed
+1. `dataset.open.ui.js`
+   - Adds a strict dataset guard (`REQUIRED_INTERNAL_SHEETS`):
+     - `__LM_META`, `__LM_SHEET_NAMES`, `__LM_MATERIALS`, `__LM_VIEWS`
+   - Open flow now refuses to open any spreadsheet missing these internal sheets.
+   - Removes the undefined `looksLikeDataset` usage (replaced by the guard).
+   - Cleans up minor duplicated UI style lines (to avoid patch drift).
+
+2. `LociMyu_Update_Requirements.md`
+   - Updates compatibility requirements: Open is strict and must not auto-create internal sheets.
+
+### Why it changed
+- Binding to an unintended spreadsheet is a **high-severity data safety risk**.
+- With URL-based open, the app must only ever use the exact spreadsheet ID derived from the input.
+
+### How to test (manual)
+1. Paste a valid dataset spreadsheet URL/ID and click **Open spreadsheet…**.
+   - Expected: opens normally.
+2. Paste a non-dataset spreadsheet URL (no `__LM_*` internal sheets).
+   - Expected: an error dialog appears and the app does not bind/open.
+3. Leave the input empty and click **Open spreadsheet…** (Picker path).
+   - Expected: if you pick a non-dataset spreadsheet, it is refused.
+
 ## Step 01 – drive.file scope normalization + Picker foundation
 **Date:** 2026-01-25
 
@@ -177,19 +207,3 @@ The existing **“Select sheet…”** dropdown is a *worksheet selector* (gid) 
 2. In the Caption tab, open **New LociMyu dataset**.
 3. Click **Choose folder…** → Picker should open without 500.
 4. Click **Choose GLB…** → Picker should open without 500.
-
-## Step 02m (2026-01-27) Open-dataset safety + SyntaxError fix
-
-- Fixed a SyntaxError in `dataset.open.ui.js` caused by multi-line single-quoted strings (switched to template literals).
-- Fixed spreadsheet URL input wiring so the value in the UI (`lmSpreadsheetUrlInput`) is actually used by the open flow.
-- Removed an undefined variable reference (`urlVal`) and replaced it with an explicit `source` flag (`url` / `picker`).
-- Strengthened safety checks to refuse opening spreadsheets that don’t match the expected LociMyu dataset shape, reducing the risk of accidentally reading unrelated spreadsheets.
-
-## Step 02n (2026-01-27)
-
-### Fixes
-- Fixed a production-breaking JavaScript syntax error caused by multiline string literals in `dataset.open.ui.js` by converting user-facing `alert()` messages to single-line strings with `\n` escapes.
-- Added a small version stamp log (`[dataset.open.ui] v02n loaded`) to make it easy to confirm the deployed file is updated.
-- Minor cleanup: removed duplicated inline style assignments for the spreadsheet URL input (no functional change).
-
-
