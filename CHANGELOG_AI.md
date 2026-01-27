@@ -232,3 +232,33 @@ The existing **“Select sheet…”** dropdown is a *worksheet selector* (gid) 
 2. In the Caption tab, open **New LociMyu dataset**.
 3. Click **Choose folder…** → Picker should open without 500.
 4. Click **Choose GLB…** → Picker should open without 500.
+
+
+## Step 02q – Drive.file grant: always show access-grant Picker (GLB required, caption attachments optional)
+**Date:** 2026-01-27
+
+### Problem
+- In `drive.file`-only mode, attempting to load a GLB by fileId could still fail with Drive `alt=media` 404/403 unless the user explicitly granted access via Picker.
+- The previous "public-file probe" could incorrectly skip the grant step, causing hard-to-diagnose 404s.
+
+### What changed
+1. `dataset.open.ui.js`
+   - Adds an explicit **access-grant Picker** step every time a dataset is opened in `drive.file` policy.
+   - The Picker is preloaded with fileIds:
+     - `__LM_META.glbFileId` (required)
+     - Caption attachment fileIds aggregated from caption sheets column H (best-effort)
+   - Enforces that the GLB id must be picked; caption attachments may be picked partially.
+   - Removes the "public-file probe" skip logic to avoid false positives and silent data access failures.
+   - Keeps a retry path: if GLB load still fails, re-open a single-file grant Picker for the GLB and retry once.
+
+2. `LociMyu_Update_Requirements.md`
+   - Bumped document version to v1.5.
+   - Updated the Step02 Edit open flow to reflect "URL is the source of truth" and the new access-grant Picker behavior.
+
+### How to test (manual)
+1. Enable `__LM_POLICY_DRIVEFILE_ONLY` (or run the build configured for drive.file-only).
+2. Paste a known dataset spreadsheet URL and click **Open spreadsheet**.
+3. Confirm:
+   - The access-grant Picker opens and lists the GLB (and any caption attachments found).
+   - After selecting the GLB (at minimum), the GLB loads.
+   - Caption still opens normally even if no attachments are selected.

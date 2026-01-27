@@ -5,7 +5,7 @@
 // - Resolves GLB fileId from __LM_META.
 // - In drive.file mode, triggers a Picker selection step to grant access to:
 //   - GLB (required)
-//   - Caption candidate image attachments from __LM_IMAGE_STASH (optional)
+//   - Caption attachment fileIds gathered from each caption sheet's column H (imageFileId)
 // - Sets sheet-context (spreadsheetId + default caption sheet gid)
 // - Loads GLB via existing GLB loader bridge
 
@@ -13,7 +13,7 @@ import './persist.guard.js';
 import { getGlbFileId } from './lm.meta.sheet.read.module.js';
 import './picker.bridge.module.js';
 
-console.log('[dataset.open.ui] v02o loaded');
+console.log('[dataset.open.ui] v02q loaded');
 
 const TAG='[dataset.open.ui]';
 const SHEETS_BASE='https://sheets.googleapis.com/v4/spreadsheets';
@@ -42,44 +42,11 @@ function getApiKey(){
   return '';
 }
 
-// Public-file probe: for "anyone with link" files, Picker may not list them even if accessible in-browser.
-// We treat those as "public" and skip the access-grant Picker, then rely on viewer/module public fetch fallback.
-const __lm_publicProbeCache = new Map(); // fileId -> boolean
-
-async function isPublicDriveFile(fileId){
-  const id = String(fileId||'').trim();
-  if (!id) return false;
-  if (__lm_publicProbeCache.has(id)) return __lm_publicProbeCache.get(id);
-
-  const key = getApiKey();
-  if (!key){
-    __lm_publicProbeCache.set(id, false);
-    return false;
-  }
-
-  const url = `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(id)}?fields=id&supportsAllDrives=true&key=${encodeURIComponent(key)}`;
-  try{
-    const res = await fetch(url, { method: 'GET' });
-    const ok = !!res && res.ok;
-    __lm_publicProbeCache.set(id, ok);
-    return ok;
-  }catch(_e){
-    __lm_publicProbeCache.set(id, false);
-    return false;
-  }
-}
-
-async function filterIdsRequiringPicker(ids){
-  const list = uniq(ids);
-  if (!list.length) return [];
-  const out = [];
-  // Sequential: keep it lightweight, avoids bursts in early init.
-  for (const id of list){
-    const pub = await isPublicDriveFile(id);
-    if (!pub) out.push(id);
-  }
-  return out;
-}
+// NOTE:
+// We intentionally do NOT attempt to "detect public files" to skip Picker.
+// Under the drive.file policy, the safest behavior is:
+//   - Treat related files as requiring explicit user selection/authorization via Picker.
+//   - Fall back to an explicit picker retry if a Drive fetch fails.
 
 
 function extractSpreadsheetId(input){
@@ -284,20 +251,45 @@ async function openGlbPicker(prefillGlbId){
   return doc?.id || '';
 }
 
-async function openAccessGrantPicker(fileIds){
-  const ids = uniq(fileIds).slice(0, 50);
-  if (!ids.length) return null;
+async function openAccessGrantPicker(fileIds, opts = {}){
+  // NOTE: Under drive.file, the only reliable way to grant Drive API access is user selection in Picker.
+  // We intentionally do NOT skip this step even if a file "looks public" (public probing can be wrong).
+  const ids = uniq(fileIds).filter(Boolean);
+  if (!ids.length) return { pickedIds: [] };
+
+  // Picker view can only take a limited number of fileIds at once.
+  // Keep GLB first, then a bounded number of attachments.
+  const limited = ids.slice(0, 50);
+
   const Picker = window.google?.picker;
   const viewId = Picker?.ViewId?.DOCS || undefined;
-  // Multi-select so user can grant access to multiple required files in one step.
+  const title = opts?.title || 'Grant access to files';
+  const requiredIds = uniq(opts?.requiredIds || []).filter(Boolean);
+  const allowPartial = opts?.allowPartial !== false; // default true
+
   const res = await window.__lm_openPicker({
-    title: 'Grant access to files',
+    title,
     viewId,
     multiselect: true,
     allowSharedDrives: true,
-    fileIds: ids
+    fileIds: limited
   });
-  return res;
+
+  const picked = uniq((res?.docs || []).map(d=>d?.id).filter(Boolean));
+
+  // Enforce required IDs if configured.
+  if (requiredIds.length){
+    const missing = requiredIds.filter(id => !picked.includes(id));
+    if (missing.length){
+      if (allowPartial){
+        warn('grant picker: required file not selected (continuing)', { missing, picked });
+      }else{
+        throw new Error('Required file(s) not selected in Picker: ' + missing.join(', '));
+      }
+    }
+  }
+
+  return { res, pickedIds: picked, requestedIds: limited };
 }
 
 async function setSheetContext(spreadsheetId, opts = {}){
@@ -437,20 +429,19 @@ async function openDatasetFlow(){
     }
 
     // In drive.file policy, request access to GLB and image attachments upfront.
+    // We do NOT attempt to "detect public" files; we prefer explicit, user-granted access.
     if (window.__LM_POLICY_DRIVEFILE_ONLY){
       const ids = uniq([glbId, ...(imageIds||[])]).filter(Boolean);
       if (ids.length){
-        // Picker cannot reliably list "anyone-with-link" public files even if they open in a browser.
-        // If a file looks public, skip the grant picker and rely on public fetch fallback in viewer/images loader.
-        const needPicker = await filterIdsRequiringPicker(ids);
-        if (needPicker.length){
-          setStatus('Granting access…');
-          log('grant picker: requesting access for', needPicker);
-          await openAccessGrantPicker(needPicker);
-          try{ window.dispatchEvent(new CustomEvent('lm:refresh-images')); }catch(_e){}
-        }else{
-          log('grant picker: skipped (all files look public)', ids);
-        }
+        setStatus('Granting access…');
+        log('grant picker: requesting access', { glb: glbId, images: (imageIds||[]).length, total: ids.length });
+        // Require the GLB to be selected; attachments are best-effort.
+        await openAccessGrantPicker(ids, {
+          title: 'Grant access to GLB and attachments',
+          requiredIds: [glbId],
+          allowPartial: false
+        });
+        try{ window.dispatchEvent(new CustomEvent('lm:refresh-images')); }catch(_e){}
       }
     }
 
@@ -466,20 +457,14 @@ async function openDatasetFlow(){
       // Common failure mode under drive.file: Drive API returns 404/403 until the user
       // explicitly selects the file in Picker.
       if (window.__LM_POLICY_DRIVEFILE_ONLY && isLikelyDriveFileAccessError(e)){
-        const needPicker = await filterIdsRequiringPicker([glbId, ...(imageIds||[])]);
-        if (needPicker.length){
-          setStatus('Grant access…');
-          log('grant picker (retry): requesting access for', needPicker);
-          await openAccessGrantPicker(needPicker);
-          setStatus('Loading GLB…');
-          await loadFn(glbId);
-        } else {
-          // If the file looks public, Picker will likely be empty. Let the original error surface.
-          throw e;
-        }
-      } else {
-        throw e;
+        // Retry with an explicit "grant access" picker for the GLB only.
+        setStatus('Grant access…');
+        log('grant picker (retry): requesting access for GLB', glbId);
+        await openAccessGrantPicker([glbId], { requiredIds: [glbId], allowPartial: false });
+        setStatus('Loading GLB…');
+        await loadFn(glbId);
       }
+      throw e;
     }
 
     setStatus('');

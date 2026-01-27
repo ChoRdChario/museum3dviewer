@@ -3,12 +3,12 @@
 ## Current Implementation Status
 
 - **Step01 (completed):** drive.file policy flagging + Google Picker foundation + “Open spreadsheet…” UI for spreadsheet-first operation.
-- **Step02 (in progress / implemented in code):** Edit-mode “新規LociMyuデータ作成” panel now requires an explicit **destination folder selection** (Picker) and creates the dataset spreadsheet **inside that folder** (not My Drive root). The spreadsheet is seeded with `__LM_META`, `__LM_IMAGE_STASH`, and a legacy-compatible `__LM_MATERIALS`.
+- **Step02 (in progress / implemented in code):** Edit-mode “新規LociMyuデータ作成” panel now requires an explicit **destination folder selection** (Picker) and creates the dataset spreadsheet **inside that folder** (not My Drive root). The spreadsheet is seeded with the dataset-required internal sheets: `__LM_META`, `__LM_SHEET_NAMES`, `__LM_MATERIALS` (legacy header), `__LM_VIEWS`.
 - **Step02a (completed):** Fixed Google Picker **500 error** during folder/GLB selection by normalizing Picker viewId usage (`google.picker.ViewId.*`) and hardening the Picker bridge’s viewId resolution.
 - **Step02b (completed):** Fixed Picker selection handling so callers only receive results on **user intent** (`picked` / `cancel`). The bridge no longer resolves early on the initial `loaded` event, and folder picking explicitly enables folder selection (`includeFolders` + `selectFolderEnabled`).
 - **Step02e (completed):** New dataset creation now always creates `__LM_MATERIALS` with the legacy canonical header (`A1:N1`) to keep material save data migration straightforward.
-- **Next planned:** candidate image Picker + persistence into `__LM_IMAGE_STASH`, and Share-mode sheet-first flow.
-**Version:** 1.4  
+- **Next planned:** drive.file access-grant Picker for GLB + caption attachments (caption sheets column H), and Share-mode sheet-first flow.
+**Version:** 1.5  
 **Date:** 2026-01-27 (Asia/Tokyo)  
 **Purpose:** This document is the single source of truth for the LociMyu update. It is written to keep development aligned with Google OAuth verification requirements and the agreed UX/architecture decisions. During implementation, when tradeoffs arise, prefer decisions that preserve the principles and invariants in this document.
 
@@ -81,14 +81,14 @@ This is a strategic shift; the implementation must remain consistent with these 
 - Spreadsheet is selected/authorized first.
 - GLB is read from `__LM_META`.
 - Images displayed:
-  - **Candidate images** from `__LM_IMAGE_STASH`
-  - **Caption-attached images** aggregated from caption sheets
+  - **Caption-attached images** aggregated from caption sheets (column **H = fieldId/fileId**)
+  - (Optional future) a curated candidate list sheet, if we later re-introduce it.
 
 **Share mode**
 - Spreadsheet is selected/authorized first.
 - GLB is read from `__LM_META`.
 - Images displayed:
-  - **Caption-attached images only** (aggregate from caption sheets)
+  - **Caption-attached images only** (aggregate from caption sheets, column **H**)
 - Candidate images never shown in Share UI.
 
 ### 4.2 Picker usage
@@ -121,12 +121,9 @@ Picker is the standard mechanism to “explicitly select” files under `drive.f
   - Row 1: `key`, `value`
   - Row 2: `glbFileId`, `<drive-file-id>`
 
-### 6.2 Internal sheet: `__LM_IMAGE_STASH` (Candidate Images)
-- **Purpose:** Candidate/unused images list managed by the editor to avoid re-adding images each session.
-- **Share UI:** not displayed.
-- **Minimum schema:** fileId list (may be extended later)
-  - Row 1: `fileId` (optionally `name`, `mimeType`, `updatedAt` can be added later, but start minimal)
-  - Subsequent rows: `<drive-file-id>`
+### 6.2 Internal sheet: `__LM_IMAGE_STASH` (Optional future)
+- **Status:** optional / deferred. Current Step02 focuses on **caption-attached images** (caption sheets column H) and does not require a separate curated stash.
+- If we re-introduce a curated candidate list later, `__LM_IMAGE_STASH` can be used as a minimal fileId list.
 
 ### 6.3 Caption sheets
 - Existing caption sheet headers remain the standard and define “caption-attached images”.
@@ -154,14 +151,17 @@ Picker is the standard mechanism to “explicitly select” files under `drive.f
 
 ### 7.2 Edit — Open existing dataset (sheet-first)
 1. User signs in.
-2. User selects dataset spreadsheet (Picker; a pasted URL/fileId may prefill but must finalize selection).
-   - **Update (2026-01-27):** If the user pasted a spreadsheet URL/ID, treat that ID as authoritative and **do not fall back** to Picker on parse/validation failure (avoid opening the wrong sheet and causing an information incident). Use Picker only when the input is empty (explicit user intent).
-   - When opening by URL/ID, the app must validate the dataset by checking that required `__LM_*` sheets exist (and must not auto-create them during Open).
-3. App reads `__LM_META.glbFileId` and loads GLB (if permitted; otherwise prompt Picker to authorize GLB).
-4. App reads caption sheets and loads caption data.
-5. App builds image lists:
-   - Candidate list from `__LM_IMAGE_STASH`
-   - Caption-attached list from caption sheets
+2. User provides Spreadsheet URL/ID and clicks “Open spreadsheet”.
+   - If the input is empty, Picker may be used for selection.
+   - **Safety rule (2026-01-27):** If the user provided a URL/ID, treat that ID as authoritative and **do not fall back** to Picker on parse/validation failure (avoid opening the wrong sheet and causing an information incident).
+   - Validate the dataset by checking that required `__LM_*` sheets exist (must not auto-create them during Open).
+3. App reads `__LM_META.glbFileId`.
+4. App reads caption sheets and loads caption data; it also collects **caption-attached** Drive `fileId`s from caption sheets column **H** (best-effort).
+5. In `drive.file` policy, app prompts a **single “access-grant” Picker** for:
+   - GLB `fileId` (required)
+   - Caption-attached `fileId`s (optional; but should be offered upfront so the user can grant in one step)
+6. App loads GLB and proceeds with the opened dataset.
+7. Image UI is refreshed using the collected caption-attached `fileId`s.
 
 ### 7.3 Edit — Add candidate images (Picker)
 - User uses “Add images” action in the same image UI area.
