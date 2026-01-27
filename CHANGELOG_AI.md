@@ -1,89 +1,5 @@
 # LociMyu Update – AI Changelog
 
-## Step 02j – Grant access to GLB + caption attachments (from caption sheets column H) and show them in the images panel under drive.file
-**Date:** 2026-01-27
-
-### What changed
-1. **Collect caption attachment fileIds from caption sheets (column H: `imageFileId`)**
-   - `dataset.open.ui.js` now reads caption sheet gids from `__LM_SHEET_NAMES` (column A) and batch-reads each target sheet’s column H.
-   - Values are normalized (accepts raw fileId or Drive URL) and deduplicated.
-   - The resulting list is published as `window.__LM_CANDIDATE_IMAGE_FILEIDS` and triggers `lm:refresh-images`.
-
-2. **Grant access up-front via Picker for all required Drive files (drive.file policy)**
-   - `dataset.open.ui.js` now always calls Picker once per open-flow (before GLB load) with:
-     - `fileIds = [glbFileId, ...attachmentFileIds]`
-     - `multiselect: true`
-     - `viewId: DOCS` (so mixed types are visible)
-
-3. **Populate the Images panel in drive.file mode using explicit fileIds (no folder scanning)**
-   - `caption.images.loader.js` now resolves Drive metadata for `window.__LM_CANDIDATE_IMAGE_FILEIDS` (thumbnail/name/url) via Drive API and calls `__LM_CAPTION_UI.setImages()`.
-   - Keeps the existing “drive.folder sibling listing” path intact for non-drive.file builds.
-
-### Why
-- Under `drive.file`, Drive content access is per-file and must be explicitly granted. The dataset spreadsheet can be opened by URL, but GLB and image attachments still require explicit authorization.
-- Attachments are stored per caption sheet and sheets can be renamed/added, so we must anchor the scan to `__LM_SHEET_NAMES` (gid-based).
-
-### How to test
-1. Open a dataset spreadsheet (by Picker or by pasting the spreadsheet URL/ID).
-2. Confirm a **single** “Grant access to files” Picker appears and includes the GLB plus any attachment files.
-3. Select the GLB and attachment(s) (multi-select) and confirm:
-   - GLB loads (no 404 on `drive/v3/files/<id>?alt=media`).
-   - Images panel lists the attachments (thumbnails may depend on Drive metadata availability).
-4. Add an attachment fileId into column H (`imageFileId`) of a caption sheet, reload, and confirm it appears in the Images panel after the open-flow.
-
-## Step 02g – Ensure URL input appears even when an older “Open spreadsheet…” button already exists
-**Date:** 2026-01-26
-
-### What changed
-1. **Augmented existing button-only UI**
-   - `dataset.open.ui.js` now detects an already-present **Open spreadsheet…** button (older builds) and injects the URL/fileId input + status element next to it instead of returning early.
-   - Adds a re-entrant guard to prevent double-picker opening if legacy listeners are still attached.
-
-2. **Fixed an escaped-arrow syntax line**
-   - Corrected an accidentally escaped `setStatus` arrow function to valid JavaScript.
-
-### Why
-- Some deployments already had the Open button installed (Step01e), so Step02f’s early-return prevented the new input from appearing.
-- The input must be visible in the primary UI to make the “URL/fileId → setFileIds → Picker finalize” workflow usable.
-
-### How to test
-1. Reload the app (hard reload recommended).
-2. Confirm the **Open spreadsheet…** row now contains:
-   - Button
-   - **Paste spreadsheet URL or ID…** input
-   - Status text
-3. Paste a Sheets URL and press **Enter** → Picker opens focused on that fileId (if accessible) → select → dataset loads.
-
-
-## Step 02f – Spreadsheet URL/fileId prefill via Picker setFileIds + Share-safety meta read split
-**Date:** 2026-01-26
-
-### What changed
-1. **Added spreadsheet URL/fileId input to “Open spreadsheet…” UI**
-   - `dataset.open.ui.js` now includes a paste field (URL or fileId).
-   - The value is parsed into a spreadsheetId and passed to Picker using `fileIds` (DocsView.setFileIds), so the user can finalize selection even when the file does not appear in general listings.
-
-2. **Share-mode safety: removed write-capable meta module from Share load path**
-   - New file: `lm.meta.sheet.read.module.js` (read-only access to `__LM_META` / `glbFileId`).
-   - `dataset.open.ui.js` imports the read-only module; write-back of `glbFileId` (Edit-only) is now via dynamic import of `lm.meta.sheet.module.js`.
-
-### Why
-- Improves UX for cases where the user has only a spreadsheet URL and the file does not reliably appear in Picker listings.
-- Keeps the drive.file policy invariant (“pasted URL/fileId may prefill but must finalize selection via Picker”).
-- Ensures Share entry avoids loading write-capable modules, aligning with Share safety requirements.
-
-### How to test
-1. **Open existing dataset by listing (baseline)**
-   - Click “Open spreadsheet…” and pick a dataset spreadsheet normally.
-2. **Open by pasting URL**
-   - Paste a Google Sheets URL (…/spreadsheets/d/<ID>/…) into the input, press Enter (or click Open).
-   - Confirm Picker opens focused on that spreadsheet; select it; dataset loads.
-3. **Permission-negative case**
-   - Paste a spreadsheet URL that the signed-in account cannot access.
-   - Confirm Picker cannot select it and the app shows a clear message.
-4. **Share mode safety check**
-   - Load Share mode entry and confirm no meta write is attempted; opening a dataset reads `__LM_META` and loads GLB when permitted.
-
 ## Step 01 – drive.file scope normalization + Picker foundation
 **Date:** 2026-01-25
 
@@ -262,27 +178,9 @@ The existing **“Select sheet…”** dropdown is a *worksheet selector* (gid) 
 3. Click **Choose folder…** → Picker should open without 500.
 4. Click **Choose GLB…** → Picker should open without 500.
 
+## Step 02m (2026-01-27) Open-dataset safety + SyntaxError fix
 
-## Step 02h – Spreadsheet URL open UX stabilization (layout + auth import fix)
-**Date:** 2026-01-26
-
-### Symptoms
-- The newly-added “Paste spreadsheet URL/ID” input could overflow the right panel.
-- Pasting a spreadsheet URL/ID still resulted in an empty Picker (“No spreadsheets”), making it impossible to proceed.
-
-### Root causes
-- The row that hosts the new input wasn't fully constrained to the panel's flex layout (min-width / status placement caused horizontal overflow).
-- In some deployments, `dataset.open.ui.js` is served from a subdirectory; relative dynamic imports like `import('./auth.fetch.bridge.js')` can fail, causing the URL/ID pre-validation (Sheets API) to fail and the flow to fall back to Picker.
-
-### What changed
-1. `dataset.open.ui.js`
-   - Reworked layout to match the GLB row: flex row, input `minWidth: 0`, width-constrained, and status rendered on a separate line.
-   - Resolved dynamic imports relative to the module URL (`import(new URL('./auth.fetch.bridge.js', import.meta.url))`) to avoid path issues when hosted under subpaths.
-   - Picker fallback now passes the user-provided spreadsheetId when available (`fileIds` pre-navigation).
-
-### How to test
-1. Sign in.
-2. In the right panel, paste a Google Sheets URL into the new input and press Enter.
-3. Confirm:
-   - The input does not overflow the panel.
-   - The dataset open flow proceeds to “Reading spreadsheet…” (Sheets API validation works), without relying on Drive listing.
+- Fixed a SyntaxError in `dataset.open.ui.js` caused by multi-line single-quoted strings (switched to template literals).
+- Fixed spreadsheet URL input wiring so the value in the UI (`lmSpreadsheetUrlInput`) is actually used by the open flow.
+- Removed an undefined variable reference (`urlVal`) and replaced it with an explicit `source` flag (`url` / `picker`).
+- Strengthened safety checks to refuse opening spreadsheets that don’t match the expected LociMyu dataset shape, reducing the risk of accidentally reading unrelated spreadsheets.

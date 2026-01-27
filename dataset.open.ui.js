@@ -274,11 +274,15 @@ async function openAccessGrantPicker(fileIds){
   return res;
 }
 
-async function setSheetContext(spreadsheetId){
+async function setSheetContext(spreadsheetId, opts = {}){
   // Determine default caption sheet and publish lm:sheet-context.
+  const source = opts?.source || 'unknown';
   const sheets = await listSheets(spreadsheetId);
-  if(urlVal && !looksLikeDataset(sheets)){
-    alert('This spreadsheet does not look like a LociMyu dataset (missing __LM_* sheets). Use the Create button to initialize a dataset in this spreadsheet, or paste the correct dataset URL.');
+
+  // Safety: never bind to arbitrary spreadsheets.
+  // If the sheet doesn't look like a LociMyu dataset, stop here.
+  if(!looksLikeDataset(sheets)){
+    alert(`This spreadsheet does not look like a LociMyu dataset (missing __LM_* sheets).\n\nFor safety, LociMyu will not open arbitrary spreadsheets.\nPlease paste the correct dataset spreadsheet URL, or use the Create button to initialize a dataset.\n\n(source: ${source})`);
     return;
   }
   const def = pickDefaultCaptionSheet(sheets);
@@ -309,6 +313,7 @@ async function openDatasetFlow(){
   const input = document.getElementById('lmSpreadsheetUrlInput');
   const rawInput = (input ? String(input.value||'') : '').trim();
   const prefillId = extractSpreadsheetId(rawInput);
+  const source = prefillId ? 'url' : 'picker';
 
   try{
     let spreadsheetId = '';
@@ -318,11 +323,11 @@ async function openDatasetFlow(){
     // If the user pasted something but we cannot parse a spreadsheet id, do NOT fall back to picker.
     if (rawInput && !prefillId){
       setStatus('');
-      alert('スプレッドシートのURL/IDが正しく解析できませんでした。
+      alert(`スプレッドシートのURL/IDが正しく解析できませんでした。
 
 入力例:
 - https://docs.google.com/spreadsheets/d/<ID>/edit
-- <ID>');
+- <ID>`);
       return;
     }
 
@@ -334,11 +339,11 @@ async function openDatasetFlow(){
       // Additional safety: refuse to open non-dataset sheets in the Open flow.
       if (!looksLikeDataset(sheets)){
         setStatus('');
-        alert('このスプレッドシートは LociMyu データセットとして初期化されていないようです。
+        alert(`このスプレッドシートは LociMyu データセットとして初期化されていないようです。
 
 対処:
 - 右ペインの「Create」でデータセットを作成する
-- もしくは、LociMyu が作成したデータセット用スプレッドシートのURLを入力する');
+- もしくは、LociMyu が作成したデータセット用スプレッドシートのURLを入力する`);
         return;
       }
       spreadsheetId = prefillId;
@@ -357,15 +362,15 @@ async function openDatasetFlow(){
       sheets = await listSheets(spreadsheetId);
       if (!looksLikeDataset(sheets)){
         setStatus('');
-        alert('選択されたスプレッドシートは LociMyu データセットではありません。
+        alert(`選択されたスプレッドシートは LociMyu データセットではありません。
 
-右ペインの「Create」でデータセットを作成するか、データセット用スプレッドシートを選択してください。');
+右ペインの「Create」でデータセットを作成するか、データセット用スプレッドシートを選択してください。`);
         return;
       }
     }
 
     setStatus('Reading spreadsheet…');
-    const ctx = await setSheetContext(spreadsheetId);
+    const ctx = await setSheetContext(spreadsheetId, { source });
 
     // Resolve candidate image attachments (drive.file mode: permission is per-file).
     // Attachments are stored in each caption sheet column H (imageFileId).
