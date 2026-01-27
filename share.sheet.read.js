@@ -69,7 +69,7 @@ async function readSheetDisplayNameMap(spreadsheetId){
   if(typeof fetchJSON !== 'function') return map;
 
   // Read header row as well so we can resolve the column indices robustly.
-  const range = '__LM_SHEET_NAMES!A1:D';
+  const range = "'__LM_SHEET_NAMES'!A1:D";
   const url = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(range)}?valueRenderOption=UNFORMATTED_VALUE`;
 
   try{

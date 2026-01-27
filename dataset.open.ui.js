@@ -152,7 +152,7 @@ async function readCaptionSheetGids(spreadsheetId){
   // __LM_SHEET_NAMES has A=sheetGid, B=displayName, C=sheetTitle, D=updatedAt
   // We rely on gid because the user can rename sheets freely.
   const fetchJSON = await getAuthFetch();
-  const range = encodeURIComponent('__LM_SHEET_NAMES!A:A');
+  const range = encodeURIComponent(`${a1Sheet('__LM_SHEET_NAMES')}!A:A`);
   const url = `${SHEETS_BASE}/${encodeURIComponent(spreadsheetId)}/values/${range}?majorDimension=COLUMNS`;
   try{
     const data = await fetchJSON(url);
@@ -180,7 +180,7 @@ async function readAttachmentFileIdsFromCaptionSheets(spreadsheetId, sheets){
   params.set('majorDimension', 'COLUMNS');
   for (const s of targets){
     // Use sheet title for A1 notation.
-    params.append('ranges', `${s.title}!H:H`);
+    params.append('ranges', `${a1Sheet(s.title)}!H:H`);
   }
   const url = `${SHEETS_BASE}/${encodeURIComponent(spreadsheetId)}/values:batchGet?${params.toString()}`;
   try{
@@ -277,6 +277,10 @@ async function openAccessGrantPicker(fileIds){
 async function setSheetContext(spreadsheetId){
   // Determine default caption sheet and publish lm:sheet-context.
   const sheets = await listSheets(spreadsheetId);
+  if(urlVal && !looksLikeDataset(sheets)){
+    alert('This spreadsheet does not look like a LociMyu dataset (missing __LM_* sheets). Use the Create button to initialize a dataset in this spreadsheet, or paste the correct dataset URL.');
+    return;
+  }
   const def = pickDefaultCaptionSheet(sheets);
   const gidStr = def ? String(def.gid) : '';
 
@@ -302,36 +306,62 @@ async function openDatasetFlow(){
 
   const status = document.getElementById('lm-open-status');
   const setStatus = (s)=>{ if (status) status.textContent = s; };
-
   const input = document.getElementById('lmSpreadsheetUrlInput');
-  const prefillId = extractSpreadsheetId(input ? input.value : '');
+  const rawInput = (input ? String(input.value||'') : '').trim();
+  const prefillId = extractSpreadsheetId(rawInput);
 
   try{
     let spreadsheetId = '';
+    let sheets = null;
 
-    // 1) Direct open path: validate the pasted id via Sheets API.
+    // 1) URL/ID direct open (safe-by-default).
+    // If the user pasted something but we cannot parse a spreadsheet id, do NOT fall back to picker.
+    if (rawInput && !prefillId){
+      setStatus('');
+      alert('スプレッドシートのURL/IDが正しく解析できませんでした。
+
+入力例:
+- https://docs.google.com/spreadsheets/d/<ID>/edit
+- <ID>');
+      return;
+    }
+
     if (prefillId){
       setStatus('Checking spreadsheet…');
-      try{
-        await listSheets(prefillId);
-        spreadsheetId = prefillId;
-      }catch(e){
-        warn('prefill spreadsheet check failed', e);
+      // Validate that the current user can access THIS spreadsheet id.
+      // If validation fails, stop (avoid accidentally opening a different spreadsheet via picker).
+      sheets = await listSheets(prefillId);
+      // Additional safety: refuse to open non-dataset sheets in the Open flow.
+      if (!looksLikeDataset(sheets)){
+        setStatus('');
+        alert('このスプレッドシートは LociMyu データセットとして初期化されていないようです。
+
+対処:
+- 右ペインの「Create」でデータセットを作成する
+- もしくは、LociMyu が作成したデータセット用スプレッドシートのURLを入力する');
+        return;
       }
+      spreadsheetId = prefillId;
     }
 
-    // 2) Picker fallback.
+    // 2) Picker path: only when the input is empty (explicit user intent).
     if (!spreadsheetId){
       setStatus('Opening picker…');
-      spreadsheetId = await openSpreadsheetPicker(prefillId || '');
-    }
-
-    if (!spreadsheetId){
-      setStatus('');
-      if (prefillId){
-        alert('このスプレッドシートは、現在のGoogleアカウントでは選択できない可能性があります。\n\n確認事項:\n- 同じGoogleアカウントでサインインしているか\n- URL/IDが正しいか\n-（ドメイン制限等がある場合）アクセス権があるか');
+      spreadsheetId = await openSpreadsheetPicker('');
+      if (!spreadsheetId){
+        setStatus('');
+        return;
       }
-      return;
+      // Re-check & validate the chosen spreadsheet.
+      setStatus('Checking spreadsheet…');
+      sheets = await listSheets(spreadsheetId);
+      if (!looksLikeDataset(sheets)){
+        setStatus('');
+        alert('選択されたスプレッドシートは LociMyu データセットではありません。
+
+右ペインの「Create」でデータセットを作成するか、データセット用スプレッドシートを選択してください。');
+        return;
+      }
     }
 
     setStatus('Reading spreadsheet…');

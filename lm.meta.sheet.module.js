@@ -51,7 +51,7 @@ export async function ensureMetaSheet(spreadsheetId){
       json: { requests: [{ addSheet: { properties: { title: '__LM_META', gridProperties: { rowCount: 50, columnCount: 2 } } } }] }
     });
     // Initialize header row (optional)
-    await fetchJSON(`${SHEETS_BASE}/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent('__LM_META!A1:B1')}?valueInputOption=RAW`, {
+    await fetchJSON(`${SHEETS_BASE}/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent("'__LM_META'!A1:B1")}?valueInputOption=RAW`, {
       method: 'PUT',
       json: { values: [['key','value']] }
     });
@@ -65,7 +65,7 @@ export async function readMeta(spreadsheetId){
   const map = new Map();
   if (!spreadsheetId) return map;
   const fetchJSON = await getAuthFetch();
-  const range = '__LM_META!A1:B50';
+  const range = "'__LM_META'!A1:B50";
   try{
     const res = await fetchJSON(`${SHEETS_BASE}/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(range)}?valueRenderOption=UNFORMATTED_VALUE`);
     const rows = Array.isArray(res?.values) ? res.values : [];
@@ -95,7 +95,7 @@ export async function writeMeta(spreadsheetId, key, value){
   await ensureMetaSheet(spreadsheetId);
 
   const fetchJSON = await getAuthFetch();
-  const range = '__LM_META!A2:B50';
+  const range = "'__LM_META'!A2:B50";
   // Read existing keys to find row
   let rowIndex = null;
   try{
@@ -118,7 +118,7 @@ export async function writeMeta(spreadsheetId, key, value){
     }catch(_e){}
   }
 
-  const putRange = `__LM_META!A${rowIndex}:B${rowIndex}`;
+  const putRange = `'__LM_META'!A${rowIndex}:B${rowIndex}`;
   await fetchJSON(`${SHEETS_BASE}/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(putRange)}?valueInputOption=RAW`, {
     method: 'PUT',
     json: { values: [[String(key), String(value ?? '')]] }

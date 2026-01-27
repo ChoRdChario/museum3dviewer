@@ -148,7 +148,7 @@ async function ensureSheet(spreadsheetId, title, { hidden=true, rowCount=1000, c
 
 async function seedImageStashHeaders(spreadsheetId){
   const fetchJSON = await getAuthFetch();
-  const range = encodeURIComponent('__LM_IMAGE_STASH!A1:D1');
+  const range = encodeURIComponent("'__LM_IMAGE_STASH'!A1:D1");
   const url = `${SHEETS_BASE}/${encodeURIComponent(spreadsheetId)}/values/${range}?valueInputOption=RAW`;
   await fetchJSON(url, {
     method: 'PUT',
@@ -175,7 +175,7 @@ async function ensureLegacyMaterialsSheet(spreadsheetId){
   ];
 
   const fetchJSON = await getAuthFetch();
-  const range = encodeURIComponent('__LM_MATERIALS!A1:N1');
+  const range = encodeURIComponent("'__LM_MATERIALS'!A1:N1");
   const url = `${SHEETS_BASE}/${encodeURIComponent(spreadsheetId)}/values/${range}?valueInputOption=RAW`;
   await fetchJSON(url, {
     method: 'PUT',
