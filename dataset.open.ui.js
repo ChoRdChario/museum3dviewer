@@ -120,6 +120,35 @@ function extractDriveFileIdAndResourceKey(input){
 // This folder is expected to contain (directly) all GLB / image assets referenced by the dataset.
 const ASSET_FOLDER_LS_KEY = 'lmAssetFolderUrl';
 
+
+// Stage B: approved asset folder id (Picker-selected folder; drive.file "entry")
+const ASSET_FOLDER_APPROVED_ID_LS_KEY = 'lmAssetFolderApprovedId';
+
+function getApprovedAssetFolderId(){
+  try{
+    if (typeof window.__LM_ASSET_FOLDER_APPROVED_ID === 'string' && window.__LM_ASSET_FOLDER_APPROVED_ID.trim()){
+      return window.__LM_ASSET_FOLDER_APPROVED_ID.trim();
+    }
+    const v = localStorage.getItem(ASSET_FOLDER_APPROVED_ID_LS_KEY) || '';
+    return String(v||'').trim();
+  }catch(_e){ return ''; }
+}
+
+function setApprovedAssetFolderId(folderId){
+  try{
+    const id = String(folderId||'').trim();
+    if (!id) return;
+    window.__LM_ASSET_FOLDER_APPROVED_ID = id;
+    localStorage.setItem(ASSET_FOLDER_APPROVED_ID_LS_KEY, id);
+  }catch(_e){}
+}
+
+function clearApprovedAssetFolderId(){
+  try{ window.__LM_ASSET_FOLDER_APPROVED_ID = ''; }catch(_e){}
+  try{ localStorage.removeItem(ASSET_FOLDER_APPROVED_ID_LS_KEY); }catch(_e){}
+}
+
+
 function extractDriveFolderId(input){
   const s = String(input || '').trim();
   if (!s) return '';
@@ -179,6 +208,44 @@ async function getAuthFetch(){
   if (typeof window.__lm_fetchJSONAuth === 'function') return window.__lm_fetchJSONAuth;
   throw new Error('auth fetch missing');
 }
+
+function looksLikeGlb(file){
+  const mt = String(file?.mimeType || '').toLowerCase();
+  const name = String(file?.name || '').toLowerCase();
+  if (mt === 'model/gltf-binary') return true;
+  if (mt === 'application/octet-stream' && name.endsWith('.glb')) return true;
+  return false;
+}
+function looksLikeImage(file){
+  const mt = String(file?.mimeType || '').toLowerCase();
+  return mt.startsWith('image/');
+}
+
+async function listFolderChildrenDirect(folderId){
+  const authFetch = await getAuthFetch();
+  const q = `'${String(folderId)}' in parents and trashed=false`;
+  const fields = 'files(id,name,mimeType,resourceKey,shortcutDetails),nextPageToken';
+  const params = new URLSearchParams({
+    q,
+    fields,
+    pageSize: '1000',
+    supportsAllDrives: 'true',
+    includeItemsFromAllDrives: 'true'
+  });
+  const url = `https://www.googleapis.com/drive/v3/files?${params.toString()}`;
+  const json = await authFetch(url);
+
+  // shortcut を軽く解決（targetId を採用）
+  const files = (json?.files || []).map(f=>{
+    if (f?.mimeType === 'application/vnd.google-apps.shortcut' && f?.shortcutDetails?.targetId){
+      return { ...f, id: f.shortcutDetails.targetId };
+    }
+    return f;
+  });
+  return files;
+}
+
+
 
 function isEditMode(){
   // Share mode sets explicit flags and/or armed guards.
@@ -321,6 +388,44 @@ async function openGlbPicker(prefillGlbId){
   return doc?.id || '';
 }
 
+async function openAssetFolderPicker(){
+  const Picker = window.google?.picker;
+  const viewId = Picker?.ViewId?.FOLDERS || 'FOLDERS';
+  const opts = {
+    title: 'Select Asset Folder',
+    viewId,
+    multiselect: false,
+    includeFolders: true,
+    allowSharedDrives: true
+  };
+  const res = await window.__lm_openPicker(opts);
+  const doc = res?.docs?.[0];
+  return doc?.id || '';
+}
+
+async function ensureAssetFolderApproved(setStatus){
+  const approved = getApprovedAssetFolderId();
+  if (approved) return approved;
+
+  if (setStatus) setStatus('Select Asset Folder…');
+  const pickedId = await openAssetFolderPicker();
+  if (!pickedId) throw new Error('Asset folder not selected');
+
+  setApprovedAssetFolderId(pickedId);
+
+  // Best-effort: persist into __LM_META when we can (edit mode only)
+  try{
+    if (isEditMode() && window.__LM_ACTIVE_SPREADSHEET_ID){
+      const m = await import(new URL('./lm.meta.sheet.module.js', import.meta.url));
+      if (m && typeof m.writeMeta === 'function') await m.writeMeta(window.__LM_ACTIVE_SPREADSHEET_ID, 'assetFolderId', pickedId);
+    }
+  }catch(_e){}
+
+  return pickedId;
+}
+
+
+
 async function openAccessGrantPicker(fileIds, opts = {}){
   // NOTE: Under drive.file, the only reliable way to grant Drive API access is user selection in Picker.
   // We intentionally do NOT skip this step even if a file "looks public" (public probing can be wrong).
@@ -355,10 +460,9 @@ async function openAccessGrantPicker(fileIds, opts = {}){
     parentId
   };
 
-  // If we don't have a folder root, restrict to candidate fileIds to make the user selection quick.
-  if (!parentId){
-    pickerReq.fileIds = limited;
-  }
+  // Provide candidate fileIds even when parentId is set.
+  // This helps pre-navigation and reduces 'No documents' dead-ends under drive.file.
+  pickerReq.fileIds = limited;
 
   const res = await window.__lm_openPicker(pickerReq);
 
@@ -497,6 +601,7 @@ async function openDatasetFlow(){
 
     setStatus('Reading spreadsheet…');
     const ctx = await setSheetContext(spreadsheetId, { source });
+    try{ window.__LM_ACTIVE_SPREADSHEET_ID = spreadsheetId; }catch(_e){}
     if (!ctx){
       setStatus('');
       return;
@@ -534,28 +639,59 @@ async function openDatasetFlow(){
       }catch(e){ warn('writeMeta failed', e); }
     }
 
-    // In drive.file policy, request access to GLB and image attachments upfront.
-    // We do NOT attempt to "detect public" files; we prefer explicit, user-granted access.
-    if (window.__LM_POLICY_DRIVEFILE_ONLY){
-      const assetFolderId = getAssetFolderId();
-      const pickerMimeTypes = 'model/gltf-binary,model/gltf+json,application/octet-stream,image/png,image/jpeg,image/webp,image/gif';
-      const ids = uniq([glbId, ...(imageIds||[])]).filter(Boolean);
-      if (ids.length){
-        setStatus('Granting access…');
-        log('grant picker: requesting access', { glb: glbId, images: (imageIds||[]).length, total: ids.length });
-        // Require the GLB to be selected; attachments are best-effort.
-        await openAccessGrantPicker(ids, {
-          title: 'Grant access to GLB and attachments',
-          requiredIds: [glbId],
-          allowPartial: false,
-          parentId: assetFolderId || undefined,
-          mimeTypes: pickerMimeTypes
-        });
-        try{ window.dispatchEvent(new CustomEvent('lm:refresh-images')); }catch(_e){}
-      }
-    }
+// In drive.file policy, request access to GLB and image attachments upfront.
+// We do NOT attempt to "detect public" files; we prefer explicit, user-granted access.
+if (window.__LM_POLICY_DRIVEFILE_ONLY){
+  const pickerMimeTypes = 'model/gltf-binary,model/gltf+json,application/octet-stream,image/png,image/jpeg,image/webp,image/gif';
 
-    setStatus('Loading GLB…');
+  // Stage B: Folder selection via Picker (drive.file entry)
+  let approvedFolderId = '';
+  try{
+    approvedFolderId = await ensureAssetFolderApproved(setStatus);
+  }catch(e){
+    // User cancelled or selection failed.
+    setStatus('');
+    warn('asset folder approval cancelled/failed', e);
+    return;
+  }
+
+  // Stage C: bounded listing (direct children only) to build candidate fileIds.
+  setStatus('Scanning asset folder (direct children)…');
+  let candidateFromFolder = [];
+  try{
+    const children = await listFolderChildrenDirect(approvedFolderId);
+    candidateFromFolder = (children || [])
+      .filter(f => looksLikeGlb(f) || looksLikeImage(f))
+      .map(f => f.id)
+      .filter(Boolean);
+  }catch(e){
+    warn('listFolderChildrenDirect failed', e);
+    // Most likely: folder not authorized yet under drive.file. Force re-pick.
+    clearApprovedAssetFolderId();
+    setStatus('');
+    alert('アセットフォルダ内の列挙に失敗しました。\n\n手順:\n1) フォルダURLを新規タブで開く\n2) マイドライブに追加（ショートカット）\n3) アプリに戻り「Select Asset Folder」をもう一度実行\n\n（drive.fileの仕様で、UIで見えてもAPIでは404になり得ます）');
+    return;
+  }
+
+  const ids = uniq([glbId, ...(imageIds||[]), ...(candidateFromFolder||[])]).filter(Boolean);
+  if (ids.length){
+    setStatus('Granting access (select files)…');
+    log('grant picker: requesting access', { folder: approvedFolderId, glb: glbId, images: (imageIds||[]).length, folderCandidates: candidateFromFolder.length, total: ids.length });
+
+    // Require the GLB to be selected; stop if missing.
+    await openAccessGrantPicker(ids, {
+      title: 'Select GLB and images (multi-select)',
+      requiredIds: [glbId],
+      allowPartial: false,
+      parentId: approvedFolderId,
+      mimeTypes: pickerMimeTypes
+    });
+    try{ window.dispatchEvent(new CustomEvent('lm:refresh-images')); }catch(_e){}
+  }
+}
+
+setStatus('Loading GLB…');
+
     try{ window.__LM_ACTIVE_GLB_ID = glbId; }catch(_e){}
     try{ window.__LM_CURRENT_GLB_ID__ = glbId; }catch(_e){}
 
@@ -570,9 +706,9 @@ async function openDatasetFlow(){
         // Retry with an explicit "grant access" picker for the GLB only.
         setStatus('Grant access…');
         log('grant picker (retry): requesting access for GLB', glbId);
-        const assetFolderId = getAssetFolderId();
+        const assetFolderId = getApprovedAssetFolderId() || undefined;
         const pickerMimeTypes = 'model/gltf-binary,model/gltf+json,application/octet-stream,image/png,image/jpeg,image/webp,image/gif';
-        await openAccessGrantPicker([glbId], { requiredIds: [glbId], allowPartial: false, parentId: assetFolderId || undefined, mimeTypes: pickerMimeTypes });
+        await openAccessGrantPicker([glbId], { requiredIds: [glbId], allowPartial: false, parentId: assetFolderId, mimeTypes: pickerMimeTypes });
         setStatus('Loading GLB…');
         await loadFn(glbId);
       }
@@ -632,6 +768,38 @@ function installUI(){
       // Match GLB row: input first, button second.
       if (parent) parent.insertBefore(inp, existingBtn);
     }
+
+
+
+// Stage B: "Select Asset Folder" button (drive.file entry)
+if (!document.getElementById('btnPickAssetFolder')){
+  const btnF = document.createElement('button');
+  btnF.id = 'btnPickAssetFolder';
+  btnF.type = 'button';
+  btnF.textContent = 'Select Asset Folder';
+  try{ btnF.classList.add('mini'); }catch(_e){}
+  btnF.style.flex = '0 0 auto';
+
+  // Place next to "Open spreadsheet…" button.
+  parent?.insertBefore(btnF, document.getElementById('lm-open-status') || null);
+
+  btnF.addEventListener('click', async (ev)=>{
+    ev.preventDefault();
+    const status = document.getElementById('lm-open-status');
+    const setStatus = (s)=>{ if (status) status.textContent = s; };
+
+    try{
+      setStatus('Select Asset Folder…');
+      const id = await openAssetFolderPicker();
+      if (!id){ setStatus(''); return; }
+      setApprovedAssetFolderId(id);
+      setStatus('Asset folder selected.');
+    }catch(e){
+      warn('asset folder picker failed', e);
+      setStatus('');
+    }
+  }, { passive: false });
+}
 
     // Ensure status element exists (on its own line to avoid overflow).
     if (!document.getElementById('lm-open-status')){

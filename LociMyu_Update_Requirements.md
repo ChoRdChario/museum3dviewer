@@ -1,7 +1,17 @@
 # LociMyu Update Requirements (Drive scope → drive.file / Picker migration)
 
-**Version:** 1.4  
+**Version:** 1.4.1  
 **Last Updated:** 2026-01-28  
+
+
+## 0. Update History
+
+- **1.4.1 (2026-01-28)**: Implemented Stage B/C wiring in `dataset.open.ui.js`:
+  - Added **Select Asset Folder** UI and persistence (`lmAssetFolderApprovedId`).
+  - Added bounded Drive `files.list` (direct children only) for Stage C candidate discovery.
+  - Updated grant Picker request to provide `fileIds` even when `parentId` is set (reduces “No documents”).
+  - Updated retry grant flow to use approved folder id.
+
 
 This document is the source of truth for the ongoing migration from restricted Drive scopes to **drive.file** and the associated **Google Picker** based access model.
 
