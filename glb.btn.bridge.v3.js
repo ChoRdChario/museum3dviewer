@@ -73,31 +73,38 @@
     raw = String(raw).trim();
     if (!raw) return '';
 
-    // Cache resourceKey from shared links (if any)
+    // If the user pasted a Drive link that contains a resourceKey, remember it.
+    // (Drive security update: link-shared files may require it for API access.)
     let rk = '';
     try{
-      const mrk = raw.match(/[?&]resourcekey=([^&#]+)/i);
-      if (mrk && mrk[1]) rk = decodeURIComponent(mrk[1]);
-    }catch(_e){}
-
-    let fid = '';
-    if (/^[a-zA-Z0-9_-]{20,}$/.test(raw)) fid = raw;
-    const m = raw.match(/[?&#/]id=([a-zA-Z0-9_-]+)/) || raw.match(/\/d\/([a-zA-Z0-9_-]+)/);
-    if (!fid && m && m[1]) fid = m[1];
-    if (!fid){
-      const m2 = raw.match(/[-\w]{25,}/);
-      fid = (m2 && m2[0]) || '';
-    }
-
-    // Remember mapping for Drive API calls
-    try{
-      if (fid && rk){
-        window.__lm_driveResourceKeys = window.__lm_driveResourceKeys || {};
-        window.__lm_driveResourceKeys[fid] = rk;
+      if (/^https?:\/\//i.test(raw)){
+        const u = new URL(raw);
+        rk = u.searchParams.get('resourcekey') || u.searchParams.get('resourceKey') || '';
       }
-    }catch(_e){}
+    }catch(_e){ rk = ''; }
 
-    return fid;
+    if (/^[a-zA-Z0-9_-]{20,}$/.test(raw)){
+      if (rk){
+        window.__lm_resourceKeyRegistry = window.__lm_resourceKeyRegistry || Object.create(null);
+        window.__lm_resourceKeyRegistry[raw] = rk;
+      }
+      return raw;
+    }
+    const m = raw.match(/[?&#/]id=([a-zA-Z0-9_-]+)/) || raw.match(/\/d\/([a-zA-Z0-9_-]+)/);
+    if (m && m[1]){
+      if (rk){
+        window.__lm_resourceKeyRegistry = window.__lm_resourceKeyRegistry || Object.create(null);
+        window.__lm_resourceKeyRegistry[m[1]] = rk;
+      }
+      return m[1];
+    }
+    const m2 = raw.match(/[-\w]{25,}/);
+    const id2 = (m2 && m2[0]) || '';
+    if (id2 && rk){
+      window.__lm_resourceKeyRegistry = window.__lm_resourceKeyRegistry || Object.create(null);
+      window.__lm_resourceKeyRegistry[id2] = rk;
+    }
+    return id2;
   }
 
   /**

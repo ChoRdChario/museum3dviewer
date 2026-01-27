@@ -36,6 +36,11 @@ This is a strategic shift; the implementation must remain consistent with these 
 ### 2.2 IDs
 - **Drive fileId:** The identifier for a Drive file (GLB, image, spreadsheet). (User sometimes wrote “fieldid”; treat it as fileId.)
 
+- **Drive resourceKey:** Some link-shared Drive items require a **resourceKey** to be accessed via the Drive API (Drive “security update”).
+  - In this update, resourceKeys are **captured opportunistically from Picker selections** (or pasted Drive URLs) and stored in **runtime memory**.
+  - When fetching `files.get?alt=media`, attach `X-Goog-Drive-Resource-Keys: <fileId>/<resourceKey>` when available.
+  - This does **not** change the minimum-scope policy: it still works under `drive.file` as long as the user explicitly selects the file in Picker.
+
 ### 2.3 Sheets
 - **Caption spreadsheet (LociMyu data):** A Google Sheets file that contains caption sheets and internal `__LM_*` sheets used by the app.
 - **Caption sheets:** User-facing sheets with caption headers used for rendering/editing.
@@ -95,6 +100,8 @@ This is a strategic shift; the implementation must remain consistent with these 
 Picker is the standard mechanism to “explicitly select” files under `drive.file`:
 - Spreadsheet selection (entrypoint)
 - Additional selection for GLB and images when access is missing or to add candidate images
+
+**Shared Drives / shared-with-me:** The Picker bridge must enable shared drive visibility (`SUPPORT_DRIVES` + view drives enabled) so that link-shared or Shared Drive files can actually be selected (avoid “No documents”).
 
 ---
 

@@ -405,22 +405,17 @@ export async function ensureViewer(opts = {}) {
 }
 
 // GLB fetch from Drive
-function __lm_getDriveResourceKeyHeader(fileId){
-  try{
-    const rk = window.__lm_driveResourceKeys && window.__lm_driveResourceKeys[fileId];
-    if (!rk) return null;
-    return { 'X-Goog-Drive-Resource-Keys': `${fileId}/${rk}` };
-  }catch(_e){
-    return null;
-  }
-}
 async function fetchGlbArrayBuffer(fileId, token) {
   const id = String(fileId||'').trim();
+  // supportsAllDrives: required for Shared Drives files (and harmless for regular Drive).
   const baseUrl = `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(id)}?alt=media&supportsAllDrives=true`;
+
+  // Drive security update: shared links may require a resourceKey.
+  const rk = (typeof window !== 'undefined' && window.__lm_resourceKeyRegistry) ? (window.__lm_resourceKeyRegistry[id] || '') : '';
+  const rkHeader = rk ? { 'X-Goog-Drive-Resource-Keys': `${id}/${rk}` } : null;
 
   // Primary path: OAuth (drive.file) for explicitly granted files.
   try{
-    const rkHeader = __lm_getDriveResourceKeyHeader(id);
     const res = await fetch(baseUrl, {
       method: 'GET',
       headers: {
@@ -435,7 +430,12 @@ async function fetchGlbArrayBuffer(fileId, token) {
     const apiKey = (typeof window !== 'undefined' && typeof window.__LM_API_KEY === 'string') ? window.__LM_API_KEY.trim() : '';
     if ((res.status === 403 || res.status === 404) && apiKey){
       const url = `${baseUrl}&key=${encodeURIComponent(apiKey)}`;
-      const pubRes = await fetch(url, { method: 'GET', headers: { ...(rkHeader || {}) } });
+      const pubRes = await fetch(url, {
+        method: 'GET',
+        headers: {
+          ...(rkHeader || {})
+        }
+      });
       if (pubRes.ok) return await pubRes.arrayBuffer();
       throw new Error(`[viewer.module] Drive fetch failed ${pubRes.status} ${pubRes.statusText}`);
     }

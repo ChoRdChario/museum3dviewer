@@ -20,6 +20,12 @@
 let _apiJsLoading = null;
 let _pickerReady = false;
 
+// Drive security update: link-shared Drive files may require a resourceKey for API access.
+// Keep a simple in-memory registry so other modules can attach the correct
+// `X-Goog-Drive-Resource-Keys` header when needed.
+// Map: fileId -> resourceKey
+window.__lm_resourceKeyRegistry = window.__lm_resourceKeyRegistry || Object.create(null);
+
 function getApiKey(){
   try{
     if (typeof window.__LM_API_KEY === 'string' && window.__LM_API_KEY.trim()) return window.__LM_API_KEY.trim();
@@ -95,12 +101,31 @@ function mapDocs(data){
     docs = [data[R.DOCUMENT]];
   }
 
-  return (docs || []).filter(Boolean).map(d=>({
-    id: d.id,
-    name: d.name,
-    mimeType: d.mimeType,
-    url: d.url
-  }));
+  const reg = window.__lm_resourceKeyRegistry || (window.__lm_resourceKeyRegistry = Object.create(null));
+
+  function rkFromUrl(u){
+    try{
+      if (!u) return '';
+      const url = new URL(String(u));
+      // Drive uses `resourcekey` (lowercase) in share links, but be permissive.
+      return String(url.searchParams.get('resourcekey') || url.searchParams.get('resourceKey') || '');
+    }catch(_e){
+      return '';
+    }
+  }
+
+  return (docs || []).filter(Boolean).map(d=>{
+    // Picker may expose resourceKey either as a direct field or only via the URL.
+    const resourceKey = String(d.resourceKey || d.resource_key || rkFromUrl(d.url) || '');
+    if (d.id && resourceKey) reg[String(d.id)] = resourceKey;
+    return {
+      id: d.id,
+      name: d.name,
+      mimeType: d.mimeType,
+      url: d.url,
+      resourceKey
+    };
+  });
 }
 
 async function openPicker(opts = {}){
@@ -144,6 +169,15 @@ async function openPicker(opts = {}){
 
   try{
     if (includeFolders && typeof view.setIncludeFolders === 'function') view.setIncludeFolders(true);
+  }catch(_e){}
+
+  // Shared Drives / shared-with-me visibility.
+  // Without this, Picker can show "No documents" even when a fileId is supplied.
+  try{
+    if (opts && opts.allowSharedDrives){
+      if (typeof view.setEnableDrives === 'function') view.setEnableDrives(true);
+      if (typeof view.setIncludeItemsFromAllDrives === 'function') view.setIncludeItemsFromAllDrives(true);
+    }
   }catch(_e){}
 
   // Folder picking: must explicitly allow selecting folders.

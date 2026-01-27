@@ -156,15 +156,12 @@
     }
 
     // Folder selection / Shared Drives support
-    // NOTE: Picker API setFileIds() and DocsView.setEnableDrives() cannot be combined.
-    // Docs: setEnableDrives overrides previous calls including setFileIds.
-    // To reliably pre-navigate to fileIds, only enable drives browsing when we are NOT
-    // using fileIds.
-    const hasFileIds = Array.isArray(options.fileIds) && options.fileIds.length;
+    // - Folder picking requires includeFolders + selectFolderEnabled
+    // - Shared Drives requires enableDrives
     if (options.includeFolders || options.allowSharedDrives) {
       try{ view.setIncludeFolders(true); }catch(_e){}
       try{ view.setSelectFolderEnabled(true); }catch(_e){}
-      if (options.allowSharedDrives && !hasFileIds) {
+      if (options.allowSharedDrives) {
         try{ view.setEnableDrives(true); }catch(_e){}
       }
     }
@@ -181,6 +178,26 @@
 
             if (action === String(p.Action.PICKED).toLowerCase()) {
               const docs = (data.docs || data[p.Response.DOCUMENTS] || []).map(d => Object.assign({}, d));
+
+              // Capture resourceKeys when available (Drive security update).
+              const reg = window.__lm_resourceKeyRegistry || (window.__lm_resourceKeyRegistry = Object.create(null));
+              for (const d of docs) {
+                try{
+                  const id = String(d && d.id || '').trim();
+                  if (!id) continue;
+                  const rk = (d.resourceKey || d.resourcekey || '').toString() || (()=>{
+                    try{
+                      const u = new URL(String(d.url||''));
+                      return u.searchParams.get('resourcekey') || u.searchParams.get('resourceKey') || '';
+                    }catch(_e){ return ''; }
+                  })();
+                  if (rk) {
+                    reg[id] = rk;
+                    d.resourceKey = rk;
+                  }
+                }catch(_e){}
+              }
+
               const doc = docs && docs[0];
               resolve({ action: 'picked', doc, docs, raw: data });
               return;
