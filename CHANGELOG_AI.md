@@ -1,5 +1,30 @@
 # LociMyu Update – AI Changelog
 
+## Step 02p – Fix A1 quoting helper missing (unblocks caption attachment scan + access-grant picker)
+**Date:** 2026-01-27
+
+### Symptom
+- URL-open succeeded and captions could bind, but Open flow aborted with:
+  - `ReferenceError: a1Sheet is not defined` (from `readCaptionSheetGids()`)
+- As a side-effect, the app never reached the step that aggregates GLB/image `fileId`s and opens the access-grant Picker.
+
+### What changed
+1. `dataset.open.ui.js`
+   - Adds `a1Sheet(sheetTitle)` utility to always quote sheet titles for A1 notation (and escape single quotes).
+   - This prevents Sheets API `Unable to parse range` errors for internal sheets and caption sheets with spaces/symbols.
+
+### Why it changed
+- The Open flow must be robust to arbitrary user sheet names; A1 ranges must be quoted safely.
+- The access-grant picker workflow depends on successfully scanning caption sheets for attachment `fileId`s.
+
+### How to test (manual)
+1. Open a valid dataset by URL/ID.
+   - Expected: no ReferenceError; attachment scanning runs.
+2. Ensure `__LM_SHEET_NAMES` exists and contains caption sheet gids.
+   - Expected: `readAttachmentFileIdsFromCaptionSheets()` returns a list (may be empty if no attachments).
+3. If `drive.file` mode is on and attachment/GLB fileIds include non-public/private files:
+   - Expected: the access-grant picker opens with those fileIds.
+
 ## Step 02o – Strict dataset validation for URL open (prevent accidental wrong-sheet bind)
 **Date:** 2026-01-27
 

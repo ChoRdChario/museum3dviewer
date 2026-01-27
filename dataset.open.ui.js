@@ -151,6 +151,13 @@ function isEditMode(){
   return true;
 }
 
+function a1Sheet(sheetTitle){
+  // Always quote sheet titles for A1 notation.
+  // Google Sheets A1 escaping: single quote inside title is doubled.
+  const t = String(sheetTitle || '').replace(/'/g, "''");
+  return `'${t}'`;
+}
+
 async function listSheets(spreadsheetId){
   const fetchJSON = await getAuthFetch();
   const url = `${SHEETS_BASE}/${encodeURIComponent(spreadsheetId)}?fields=sheets(properties(sheetId,title))`;

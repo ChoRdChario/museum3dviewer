@@ -155,6 +155,8 @@ Picker is the standard mechanism to “explicitly select” files under `drive.f
 ### 7.2 Edit — Open existing dataset (sheet-first)
 1. User signs in.
 2. User selects dataset spreadsheet (Picker; a pasted URL/fileId may prefill but must finalize selection).
+   - **Update (2026-01-27):** If the user pasted a spreadsheet URL/ID, treat that ID as authoritative and **do not fall back** to Picker on parse/validation failure (avoid opening the wrong sheet and causing an information incident). Use Picker only when the input is empty (explicit user intent).
+   - When opening by URL/ID, the app must validate the dataset by checking that required `__LM_*` sheets exist (and must not auto-create them during Open).
 3. App reads `__LM_META.glbFileId` and loads GLB (if permitted; otherwise prompt Picker to authorize GLB).
 4. App reads caption sheets and loads caption data.
 5. App builds image lists:
