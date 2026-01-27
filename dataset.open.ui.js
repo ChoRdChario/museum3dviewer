@@ -13,6 +13,8 @@ import './persist.guard.js';
 import { getGlbFileId } from './lm.meta.sheet.read.module.js';
 import './picker.bridge.module.js';
 
+console.log('[dataset.open.ui] v02n loaded');
+
 const TAG='[dataset.open.ui]';
 const SHEETS_BASE='https://sheets.googleapis.com/v4/spreadsheets';
 
@@ -282,7 +284,7 @@ async function setSheetContext(spreadsheetId, opts = {}){
   // Safety: never bind to arbitrary spreadsheets.
   // If the sheet doesn't look like a LociMyu dataset, stop here.
   if(!looksLikeDataset(sheets)){
-    alert(`This spreadsheet does not look like a LociMyu dataset (missing __LM_* sheets).\n\nFor safety, LociMyu will not open arbitrary spreadsheets.\nPlease paste the correct dataset spreadsheet URL, or use the Create button to initialize a dataset.\n\n(source: ${source})`);
+    alert('This spreadsheet does not look like a LociMyu dataset (missing __LM_* sheets).\n\nFor safety, LociMyu will not open arbitrary spreadsheets.\nPlease paste the correct dataset spreadsheet URL, or use the Create button to initialize a dataset.\n\n(source: ' + source + ')');
     return;
   }
   const def = pickDefaultCaptionSheet(sheets);
@@ -323,11 +325,7 @@ async function openDatasetFlow(){
     // If the user pasted something but we cannot parse a spreadsheet id, do NOT fall back to picker.
     if (rawInput && !prefillId){
       setStatus('');
-      alert(`スプレッドシートのURL/IDが正しく解析できませんでした。
-
-入力例:
-- https://docs.google.com/spreadsheets/d/<ID>/edit
-- <ID>`);
+      alert('スプレッドシートのURL/IDが正しく解析できませんでした。\n\n入力例:\n- https://docs.google.com/spreadsheets/d/<ID>/edit\n- <ID>');
       return;
     }
 
@@ -339,11 +337,7 @@ async function openDatasetFlow(){
       // Additional safety: refuse to open non-dataset sheets in the Open flow.
       if (!looksLikeDataset(sheets)){
         setStatus('');
-        alert(`このスプレッドシートは LociMyu データセットとして初期化されていないようです。
-
-対処:
-- 右ペインの「Create」でデータセットを作成する
-- もしくは、LociMyu が作成したデータセット用スプレッドシートのURLを入力する`);
+        alert('このスプレッドシートは LociMyu データセットとして初期化されていないようです。\n\n対処:\n- 右ペインの「Create」でデータセットを作成する\n- もしくは、LociMyu が作成したデータセット用スプレッドシートのURLを入力する');
         return;
       }
       spreadsheetId = prefillId;
@@ -362,9 +356,7 @@ async function openDatasetFlow(){
       sheets = await listSheets(spreadsheetId);
       if (!looksLikeDataset(sheets)){
         setStatus('');
-        alert(`選択されたスプレッドシートは LociMyu データセットではありません。
-
-右ペインの「Create」でデータセットを作成するか、データセット用スプレッドシートを選択してください。`);
+        alert('選択されたスプレッドシートは LociMyu データセットではありません。\n\n右ペインの「Create」でデータセットを作成するか、データセット用スプレッドシートを選択してください。');
         return;
       }
     }

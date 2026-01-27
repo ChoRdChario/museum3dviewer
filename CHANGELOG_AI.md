@@ -184,3 +184,12 @@ The existing **“Select sheet…”** dropdown is a *worksheet selector* (gid) 
 - Fixed spreadsheet URL input wiring so the value in the UI (`lmSpreadsheetUrlInput`) is actually used by the open flow.
 - Removed an undefined variable reference (`urlVal`) and replaced it with an explicit `source` flag (`url` / `picker`).
 - Strengthened safety checks to refuse opening spreadsheets that don’t match the expected LociMyu dataset shape, reducing the risk of accidentally reading unrelated spreadsheets.
+
+## Step 02n (2026-01-27)
+
+### Fixes
+- Fixed a production-breaking JavaScript syntax error caused by multiline string literals in `dataset.open.ui.js` by converting user-facing `alert()` messages to single-line strings with `\n` escapes.
+- Added a small version stamp log (`[dataset.open.ui] v02n loaded`) to make it easy to confirm the deployed file is updated.
+- Minor cleanup: removed duplicated inline style assignments for the spreadsheet URL input (no functional change).
+
+
