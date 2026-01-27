@@ -116,6 +116,43 @@ function extractDriveFileIdAndResourceKey(input){
   return { fileId, resourceKey };
 }
 
+// Asset folder URL (Drive) - collected via the top input (#glbUrl) and stored in localStorage.
+// This folder is expected to contain (directly) all GLB / image assets referenced by the dataset.
+const ASSET_FOLDER_LS_KEY = 'lmAssetFolderUrl';
+
+function extractDriveFolderId(input){
+  const s = String(input || '').trim();
+  if (!s) return '';
+  // If user pastes just the ID
+  if (/^[a-zA-Z0-9_-]{20,}$/.test(s) && !s.includes('/')) return s;
+  // Drive folder URL: .../drive/folders/<ID>
+  let m = s.match(/\/folders\/([a-zA-Z0-9_-]+)/);
+  if (m && m[1]) return m[1];
+  // Alternative: .../folderview?id=<ID>
+  m = s.match(/[?&]id=([a-zA-Z0-9_-]+)/);
+  if (m && m[1]) return m[1];
+  return '';
+}
+
+function getAssetFolderUrl(){
+  try{
+    // Prefer explicit global set by UI bridge; fall back to localStorage.
+    if (typeof window.__LM_ASSET_FOLDER_URL === 'string' && window.__LM_ASSET_FOLDER_URL.trim()) {
+      return window.__LM_ASSET_FOLDER_URL.trim();
+    }
+    const v = localStorage.getItem(ASSET_FOLDER_LS_KEY) || '';
+    return String(v || '').trim();
+  }catch(_e){
+    return '';
+  }
+}
+
+function getAssetFolderId(){
+  const url = getAssetFolderUrl();
+  const id = extractDriveFolderId(url);
+  return id;
+}
+
 // Dataset guard: we only treat a spreadsheet as a LociMyu dataset if ALL required internal sheets exist.
 // (No auto-creation in Open flow; if missing, we error out.)
 const REQUIRED_INTERNAL_SHEETS = ['__LM_META','__LM_SHEET_NAMES','__LM_MATERIALS','__LM_VIEWS'];
@@ -300,13 +337,30 @@ async function openAccessGrantPicker(fileIds, opts = {}){
   const requiredIds = uniq(opts?.requiredIds || []).filter(Boolean);
   const allowPartial = opts?.allowPartial !== false; // default true
 
-  const res = await window.__lm_openPicker({
+  // If an Asset Folder is provided, open Picker rooted at that folder.
+  // This avoids "no documents" when docId listing is insufficient (e.g., binary files, shared locations).
+  const parentId = opts?.parentId || undefined;
+  const mimeTypes = opts?.mimeTypes || (
+    // GLB can be stored as model/gltf-binary OR sometimes falls back to octet-stream.
+    // Keep common image mimes too.
+    'model/gltf-binary,model/gltf+json,application/octet-stream,image/png,image/jpeg,image/webp,image/gif'
+  );
+
+  const pickerReq = {
     title,
     viewId,
     multiselect: true,
     allowSharedDrives: true,
-    fileIds: limited
-  });
+    mimeTypes,
+    parentId
+  };
+
+  // If we don't have a folder root, restrict to candidate fileIds to make the user selection quick.
+  if (!parentId){
+    pickerReq.fileIds = limited;
+  }
+
+  const res = await window.__lm_openPicker(pickerReq);
 
   // If Picker returns resourceKey, cache it for subsequent Drive API calls.
   try{
@@ -483,6 +537,8 @@ async function openDatasetFlow(){
     // In drive.file policy, request access to GLB and image attachments upfront.
     // We do NOT attempt to "detect public" files; we prefer explicit, user-granted access.
     if (window.__LM_POLICY_DRIVEFILE_ONLY){
+      const assetFolderId = getAssetFolderId();
+      const pickerMimeTypes = 'model/gltf-binary,model/gltf+json,application/octet-stream,image/png,image/jpeg,image/webp,image/gif';
       const ids = uniq([glbId, ...(imageIds||[])]).filter(Boolean);
       if (ids.length){
         setStatus('Granting access…');
@@ -491,7 +547,9 @@ async function openDatasetFlow(){
         await openAccessGrantPicker(ids, {
           title: 'Grant access to GLB and attachments',
           requiredIds: [glbId],
-          allowPartial: false
+          allowPartial: false,
+          parentId: assetFolderId || undefined,
+          mimeTypes: pickerMimeTypes
         });
         try{ window.dispatchEvent(new CustomEvent('lm:refresh-images')); }catch(_e){}
       }
@@ -512,7 +570,9 @@ async function openDatasetFlow(){
         // Retry with an explicit "grant access" picker for the GLB only.
         setStatus('Grant access…');
         log('grant picker (retry): requesting access for GLB', glbId);
-        await openAccessGrantPicker([glbId], { requiredIds: [glbId], allowPartial: false });
+        const assetFolderId = getAssetFolderId();
+        const pickerMimeTypes = 'model/gltf-binary,model/gltf+json,application/octet-stream,image/png,image/jpeg,image/webp,image/gif';
+        await openAccessGrantPicker([glbId], { requiredIds: [glbId], allowPartial: false, parentId: assetFolderId || undefined, mimeTypes: pickerMimeTypes });
         setStatus('Loading GLB…');
         await loadFn(glbId);
       }

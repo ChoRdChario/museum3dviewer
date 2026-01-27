@@ -158,17 +158,21 @@ Picker is the standard mechanism to “explicitly select” files under `drive.f
 
 ### 7.2 Edit — Open existing dataset (sheet-first)
 1. User signs in.
-2. User provides Spreadsheet URL/ID and clicks “Open spreadsheet”.
+2. User provides **Asset folder URL** (Drive folder link) and clicks “Open”.
+   - The app opens the folder link in a new tab.
+   - If the folder is not yet visible to the user in Drive UI, the user adds it to **My Drive** (shortcut) as the required preparation step.
+   - The app stores the URL locally (best-effort) so the user does not need to re-enter it.
+3. User provides Spreadsheet URL/ID and clicks “Open spreadsheet”.
    - If the input is empty, Picker may be used for selection.
    - **Safety rule (2026-01-27):** If the user provided a URL/ID, treat that ID as authoritative and **do not fall back** to Picker on parse/validation failure (avoid opening the wrong sheet and causing an information incident).
    - Validate the dataset by checking that required `__LM_*` sheets exist (must not auto-create them during Open).
-3. App reads `__LM_META.glbFileId`.
-4. App reads caption sheets and loads caption data; it also collects **caption-attached** Drive `fileId`s from caption sheets column **H** (best-effort).
-5. In `drive.file` policy, app prompts a **single “access-grant” Picker** for:
-   - GLB `fileId` (required)
-   - Caption-attached `fileId`s (optional; but should be offered upfront so the user can grant in one step)
-6. App loads GLB and proceeds with the opened dataset.
-7. Image UI is refreshed using the collected caption-attached `fileId`s.
+4. App reads `__LM_META.glbFileId`.
+5. App reads caption sheets and loads caption data; it also collects **caption-attached** Drive `fileId`s from caption sheets column **H** (best-effort).
+6. In `drive.file` policy, app prompts a **single “access-grant” Picker**.
+   - If an Asset folder is set, the Picker must open **rooted at that folder** (parent) so the user can select everything required in one step.
+   - GLB `fileId` is required; caption-attached `fileId`s are optional but should be granted upfront when possible.
+7. App loads GLB and proceeds with the opened dataset.
+8. Image UI is refreshed using the collected caption-attached `fileId`s.
 
 ### 7.3 Edit — Add candidate images (Picker)
 - User uses “Add images” action in the same image UI area.

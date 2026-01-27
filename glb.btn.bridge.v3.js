@@ -328,17 +328,50 @@
     if (!btn) return;
     if (btn.dataset && btn.dataset.glbBridgeWiredV3) return;
     btn.dataset.glbBridgeWiredV3 = '1';
-    btn.addEventListener('click', async ()=>{
+    // NOTE: This input/button pair was originally used for manual GLB loading.
+    // It has been repurposed to support the new UX:
+    //   1) User pastes the Asset Folder URL (Drive folder link)
+    //   2) This button opens the folder in a new tab so the user can "Add shortcut to Drive" (My Drive)
+    //   3) Dataset open flow uses the stored folder URL as the Picker browsing root.
+    const LS_KEY = 'lmAssetFolderUrl';
+
+    // Prefill from previous session if available.
+    try{
+      const input = document.querySelector('#glbUrl');
+      if (input && (!input.value || !input.value.trim())){
+        const prev = localStorage.getItem(LS_KEY);
+        if (prev) input.value = prev;
+      }
+    }catch(_){/* ignore */}
+
+    btn.addEventListener('click', ()=>{
       try{
         const input = document.querySelector('#glbUrl');
         let raw = input && input.value ? input.value.trim() : '';
-        if (!raw) raw = prompt('Driveの共有URL または fileId を入力してください') || '';
-        const id = extractId(raw);
-        if (!id){ log('no id'); return; }
-        log('load fileId', id);
-        try{ window.__LM_ACTIVE_GLB_ID = id; }catch(_){}
-        await loadById(id);
-      }catch(e){ err('btn load failed', e); }
+        if (!raw) raw = prompt('アセットフォルダのURL（Google Drive フォルダリンク）を入力してください') || '';
+        if (!raw){ log('no folder url'); return; }
+
+        // Persist for dataset.open.ui.js.
+        try{ localStorage.setItem(LS_KEY, raw); }catch(_){/* ignore */}
+        const folderId = extractId(raw);
+        try{ window.__LM_ASSET_FOLDER_URL = raw; window.__LM_ASSET_FOLDER_ID = folderId; }catch(_){/* ignore */}
+
+        // Open the folder link so the user can add it to My Drive (shortcut).
+        // "noopener" is important to avoid giving the new tab access to the opener.
+        try{ window.open(raw, '_blank', 'noopener,noreferrer'); }catch(_){ window.open(raw, '_blank'); }
+
+        // Hint: keep it short; avoid blocking flow with a modal that might be suppressed.
+        try{
+          alert('開いたフォルダで「ドライブに追加（ショートカット）」を行ってください。完了したらこのタブに戻って、スプレッドシートを開き直してください。');
+        }catch(_){/* ignore */}
+
+        // Notify listeners.
+        try{
+          window.dispatchEvent(new CustomEvent('lm:asset-folder-set', { detail:{ url: raw, folderId } }));
+        }catch(_){/* ignore */}
+
+        log('asset folder set', { folderId });
+      }catch(e){ err('btn asset-folder failed', e); }
     }, { passive:true });
     log('button wired');
   }

@@ -301,3 +301,34 @@ The existing **“Select sheet…”** dropdown is a *worksheet selector* (gid) 
    - After selecting, the GLB downloads and loads (no Drive 404).
 4. (Optional) Put a full Drive URL containing `resourcekey=...` into `__LM_META.glbFileId` or a caption sheet H cell.
    - Confirm Drive fetch succeeds after granting access.
+
+
+## Step 02s – Asset folder-rooted Picker (fix "No documents" for binary assets)
+**Date:** 2026-01-27
+
+### Problem
+- In some datasets, the access-grant Picker showed **"No documents"** when preloading by `fileId` (notably for non-Google binary assets such as `.glb`).
+- The old "GLB URL" input had become a dead UI element after sheet-first dataset opening.
+
+### What changed
+1. `index.html`
+   - Repurpose the top input into **Asset folder URL**.
+   - Repurpose the button into an **Open folder** action.
+
+2. `glb.btn.bridge.v3.js`
+   - The top button now opens the entered folder URL in a new tab and stores it to `localStorage` (`lmAssetFolderUrl`) so the dataset open flow can reuse it.
+
+3. `dataset.open.ui.js`
+   - When an Asset folder is available, open the access-grant Picker **rooted at that folder** (`parentId`) and apply a permissive `mimeTypes` filter (GLB + common images + `application/octet-stream`).
+
+4. `picker.bridge.js`
+   - Add support for `parentId` and allow `mimeTypes` to be specified as either array or comma-separated string.
+   - Do not force `includeFolders/selectFolderEnabled` just because Shared Drives are enabled.
+
+### How to test (manual)
+1. In drive.file-only mode, paste the **asset folder** URL (Drive folder link) into the top field and click **Open**.
+   - If needed, add the folder as a shortcut to **My Drive** in the opened tab.
+2. Paste the dataset spreadsheet URL and click **Open spreadsheet**.
+3. Confirm:
+   - The access-grant Picker opens inside the asset folder (not empty).
+   - Selecting the required GLB (and any images) allows the dataset to load.

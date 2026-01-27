@@ -144,8 +144,16 @@
     }
 
     // Mime filter
+    // Accept both array and comma-separated string for convenience.
     if (Array.isArray(options.mimeTypes) && options.mimeTypes.length) {
       try{ view.setMimeTypes(options.mimeTypes.join(',')); }catch(_e){}
+    } else if (typeof options.mimeTypes === 'string' && options.mimeTypes.trim()) {
+      try{ view.setMimeTypes(options.mimeTypes.trim()); }catch(_e){}
+    }
+
+    // Optional: root the view at a specific folder.
+    if (options.parentId) {
+      try{ if (typeof view.setParent === 'function') view.setParent(String(options.parentId)); }catch(_e){}
     }
 
     // Pre-navigate to required fileIds (Picker Jan 2025 feature)
@@ -157,13 +165,13 @@
 
     // Folder selection / Shared Drives support
     // - Folder picking requires includeFolders + selectFolderEnabled
-    // - Shared Drives requires enableDrives
-    if (options.includeFolders || options.allowSharedDrives) {
+    // - Shared Drives requires enableDrives (does NOT imply folder selection)
+    if (options.includeFolders) {
       try{ view.setIncludeFolders(true); }catch(_e){}
       try{ view.setSelectFolderEnabled(true); }catch(_e){}
-      if (options.allowSharedDrives) {
-        try{ view.setEnableDrives(true); }catch(_e){}
-      }
+    }
+    if (options.allowSharedDrives) {
+      try{ view.setEnableDrives(true); }catch(_e){}
     }
 
     // Promise wrapper around callback-based picker
