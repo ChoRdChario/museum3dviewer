@@ -145,6 +145,7 @@ async function resolveDriveGlbToBlob(src){
   const token = await __lm_getAccessToken();
   const headers = { "Authorization": `Bearer ${token}` };
   let fileIdMatch = null;
+  let resourceKey = '';
 
   if (typeof src === "string"){
     // pattern: https://drive.google.com/file/d/<id>/view?usp=...
@@ -153,16 +154,28 @@ async function resolveDriveGlbToBlob(src){
     // pattern: https://drive.google.com/open?id=<id>
     const m2 = src.match(/[?&]id=([^&]+)/);
     if (!fileIdMatch && m2) fileIdMatch = m2[1];
+    const mrk = src.match(/[?&]resourcekey=([^&#]+)/i);
+    if (mrk && mrk[1]) {
+      try{ resourceKey = decodeURIComponent(mrk[1]); }catch(_e){ resourceKey = mrk[1]; }
+    }
   }
   const fileId = fileIdMatch || src.id || src.fileId || src;
   if (!fileId) throw new Error("[drive] cannot resolve fileId from src");
 
-  const metaRes = await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?alt=json&fields=id,name,mimeType`, { headers });
+  if (resourceKey){
+    try{
+      window.__lm_driveResourceKeys = window.__lm_driveResourceKeys || {};
+      window.__lm_driveResourceKeys[fileId] = resourceKey;
+      headers["X-Goog-Drive-Resource-Keys"] = `${fileId}/${resourceKey}`;
+    }catch(_e){}
+  }
+
+  const metaRes = await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?alt=json&fields=id,name,mimeType&supportsAllDrives=true`, { headers });
   if (!metaRes.ok) throw new Error("[drive] meta fetch failed "+metaRes.status);
   const meta = await metaRes.json();
   LOG("[drive] meta", meta);
 
-  const downloadRes = await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?alt=media`, { headers });
+  const downloadRes = await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?alt=media&supportsAllDrives=true`, { headers });
   if (!downloadRes.ok) throw new Error("[drive] download failed "+downloadRes.status);
   return await downloadRes.blob();
 }

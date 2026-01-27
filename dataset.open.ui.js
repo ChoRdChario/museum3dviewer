@@ -83,6 +83,39 @@ function extractDriveFileId(input){
   return '';
 }
 
+function extractDriveFileIdAndResourceKey(input){
+  const s = String(input || '').trim();
+  if (!s) return { fileId: '', resourceKey: '' };
+
+  // Resource keys appear in shared links as a query param: ...?resourcekey=0-XXXX
+  let resourceKey = '';
+  try{
+    const m = s.match(/[?&]resourcekey=([^&#]+)/i);
+    if (m && m[1]) resourceKey = decodeURIComponent(m[1]);
+  }catch(_e){}
+
+  // Optional compact form: <fileId>|<resourceKey>
+  if (!resourceKey && s.includes('|')) {
+    const parts = s.split('|');
+    if (parts.length >= 2) {
+      const rk = String(parts[1] || '').trim();
+      if (rk) resourceKey = rk;
+    }
+  }
+
+  const fileId = extractDriveFileId(s);
+
+  // Persist mapping globally so Drive fetchers can attach the header when needed
+  if (fileId && resourceKey) {
+    try{
+      window.__lm_driveResourceKeys = window.__lm_driveResourceKeys || {};
+      window.__lm_driveResourceKeys[fileId] = resourceKey;
+    }catch(_e){}
+  }
+
+  return { fileId, resourceKey };
+}
+
 // Dataset guard: we only treat a spreadsheet as a LociMyu dataset if ALL required internal sheets exist.
 // (No auto-creation in Open flow; if missing, we error out.)
 const REQUIRED_INTERNAL_SHEETS = ['__LM_META','__LM_SHEET_NAMES','__LM_MATERIALS','__LM_VIEWS'];
@@ -275,6 +308,21 @@ async function openAccessGrantPicker(fileIds, opts = {}){
     fileIds: limited
   });
 
+  // If Picker returns resourceKey, cache it for subsequent Drive API calls.
+  try{
+    const docs = res?.docs || [];
+    if (docs && docs.length){
+      window.__lm_driveResourceKeys = window.__lm_driveResourceKeys || {};
+      docs.forEach(d => {
+        const id = d?.id;
+        const rk = d?.resourceKey;
+        if (id && rk && !window.__lm_driveResourceKeys[id]){
+          window.__lm_driveResourceKeys[id] = rk;
+        }
+      });
+    }
+  }catch(_e){}
+
   const picked = uniq((res?.docs || []).map(d=>d?.id).filter(Boolean));
 
   // Enforce required IDs if configured.
@@ -403,12 +451,16 @@ async function openDatasetFlow(){
     // Resolve candidate image attachments (drive.file mode: permission is per-file).
     // Attachments are stored in each caption sheet column H (imageFileId).
     setStatus('Reading attachments…');
-    const imageIds = await readAttachmentFileIdsFromCaptionSheets(spreadsheetId, ctx?.sheets||[]);
+    const imageIdsRaw = await readAttachmentFileIdsFromCaptionSheets(spreadsheetId, ctx?.sheets||[]);
+    const imageIds = (imageIdsRaw || [])
+      .map(v => extractDriveFileIdAndResourceKey(v).fileId)
+      .filter(Boolean);
     try{ window.__LM_CANDIDATE_IMAGE_FILEIDS = imageIds; }catch(_e){}
     try{ window.dispatchEvent(new CustomEvent('lm:refresh-images')); }catch(_e){}
 
     // Resolve GLB id.
-    let glbId = await getGlbFileId(spreadsheetId);
+    let glbIdRaw = await getGlbFileId(spreadsheetId);
+    let glbId = extractDriveFileIdAndResourceKey(glbIdRaw).fileId;
     if (glbId && glbId === spreadsheetId) glbId = '';
 
     if (!glbId){

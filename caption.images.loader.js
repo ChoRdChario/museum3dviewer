@@ -44,20 +44,22 @@
   if (metaCache.has(fileId)) return metaCache.get(fileId);
 
   const id = String(fileId||'').trim();
-  const authFetch = getAuthFetch(); // may be null if token missing
+  const authFetch = await getAuthFetch(); // may be null if token missing
+  const rk = (window.__lm_driveResourceKeys && window.__lm_driveResourceKeys[id]) || null;
+  const rkHeader = rk ? { 'X-Goog-Drive-Resource-Keys': `${id}/${rk}` } : null;
 
   const urlBase = `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(id)}?fields=${encodeURIComponent(FIELDS)}&supportsAllDrives=true`;
 
   const fetchAuth = async ()=>{
     if (!authFetch) throw new Error('No auth fetch');
-    return await authFetch(urlBase);
+    return await authFetch(urlBase, rkHeader ? { headers: rkHeader } : undefined);
   };
 
   const fetchPublic = async ()=>{
     const key = (typeof window.__LM_API_KEY === 'string' && window.__LM_API_KEY.trim()) ? window.__LM_API_KEY.trim() : '';
     if (!key) throw new Error('No API key');
     const url = `${urlBase}&key=${encodeURIComponent(key)}`;
-    const res = await fetch(url, { method: 'GET' });
+    const res = await fetch(url, rkHeader ? { method: 'GET', headers: rkHeader } : { method: 'GET' });
     if (!res.ok) throw new Error(`Drive public meta fetch failed ${res.status}`);
     return await res.json();
   };

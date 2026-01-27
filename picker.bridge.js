@@ -156,12 +156,15 @@
     }
 
     // Folder selection / Shared Drives support
-    // - Folder picking requires includeFolders + selectFolderEnabled
-    // - Shared Drives requires enableDrives
+    // NOTE: Picker API setFileIds() and DocsView.setEnableDrives() cannot be combined.
+    // Docs: setEnableDrives overrides previous calls including setFileIds.
+    // To reliably pre-navigate to fileIds, only enable drives browsing when we are NOT
+    // using fileIds.
+    const hasFileIds = Array.isArray(options.fileIds) && options.fileIds.length;
     if (options.includeFolders || options.allowSharedDrives) {
       try{ view.setIncludeFolders(true); }catch(_e){}
       try{ view.setSelectFolderEnabled(true); }catch(_e){}
-      if (options.allowSharedDrives) {
+      if (options.allowSharedDrives && !hasFileIds) {
         try{ view.setEnableDrives(true); }catch(_e){}
       }
     }

@@ -262,3 +262,42 @@ The existing **“Select sheet…”** dropdown is a *worksheet selector* (gid) 
    - The access-grant Picker opens and lists the GLB (and any caption attachments found).
    - After selecting the GLB (at minimum), the GLB loads.
    - Caption still opens normally even if no attachments are selected.
+
+
+## Step 02r – Shared Drive + resourceKey compatibility for drive.file grant & Drive fetch
+**Date:** 2026-01-27
+
+### Problem
+- Grant Picker could show **"No documents"** when we try to pre-navigate by fileIds while also enabling Shared Drives browsing.
+- GLB downloads from Shared Drives could fail with Drive `alt=media` **404** (missing `supportsAllDrives=true`).
+- Link-shared items protected by a **resourceKey** could not be fetched via Drive API without providing the resourceKey.
+
+### What changed
+1. `picker.bridge.js`
+   - Fix: avoid calling `DocsView.setEnableDrives(true)` when `setFileIds(...)` is used (Picker docs state they override each other).
+   - Still enables the `SUPPORT_DRIVES` feature on the Picker builder for Shared Drive compatibility.
+
+2. `viewer.module.cdn.js`
+   - Fix: add `supportsAllDrives=true` to Drive `alt=media` requests.
+   - Add: send `X-Goog-Drive-Resource-Keys: <fileId>/<resourceKey>` header when a resourceKey is known.
+
+3. `dataset.open.ui.js`
+   - Add: accept Drive URLs (not just raw ids) in dataset fields and extract `resourcekey=...` when present.
+   - Add: cache resource keys into `window.__lm_driveResourceKeys` and opportunistically record `doc.resourceKey` returned by Picker.
+
+4. `caption.images.loader.js`
+   - Fix: `await getAuthFetch()` (was a Promise, not a fetch function).
+   - Add: include resourceKey header when fetching Drive metadata.
+
+5. `glb.btn.bridge.v3.js` and `boot.esm.cdn.js`
+   - Add: parse and cache `resourcekey=...` from user-provided Drive URLs.
+   - Fix: add `supportsAllDrives=true` for Drive downloads.
+
+### How to test (manual)
+1. Create or use a dataset where the GLB lives in a **Shared Drive**.
+2. Open the dataset URL in drive.file-only mode.
+3. Confirm:
+   - The access-grant Picker shows the GLB (not "No documents").
+   - After selecting, the GLB downloads and loads (no Drive 404).
+4. (Optional) Put a full Drive URL containing `resourcekey=...` into `__LM_META.glbFileId` or a caption sheet H cell.
+   - Confirm Drive fetch succeeds after granting access.

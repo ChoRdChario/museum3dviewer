@@ -72,11 +72,32 @@
     if (!raw) return '';
     raw = String(raw).trim();
     if (!raw) return '';
-    if (/^[a-zA-Z0-9_-]{20,}$/.test(raw)) return raw;
+
+    // Cache resourceKey from shared links (if any)
+    let rk = '';
+    try{
+      const mrk = raw.match(/[?&]resourcekey=([^&#]+)/i);
+      if (mrk && mrk[1]) rk = decodeURIComponent(mrk[1]);
+    }catch(_e){}
+
+    let fid = '';
+    if (/^[a-zA-Z0-9_-]{20,}$/.test(raw)) fid = raw;
     const m = raw.match(/[?&#/]id=([a-zA-Z0-9_-]+)/) || raw.match(/\/d\/([a-zA-Z0-9_-]+)/);
-    if (m && m[1]) return m[1];
-    const m2 = raw.match(/[-\w]{25,}/);
-    return (m2 && m2[0]) || '';
+    if (!fid && m && m[1]) fid = m[1];
+    if (!fid){
+      const m2 = raw.match(/[-\w]{25,}/);
+      fid = (m2 && m2[0]) || '';
+    }
+
+    // Remember mapping for Drive API calls
+    try{
+      if (fid && rk){
+        window.__lm_driveResourceKeys = window.__lm_driveResourceKeys || {};
+        window.__lm_driveResourceKeys[fid] = rk;
+      }
+    }catch(_e){}
+
+    return fid;
   }
 
   /**
