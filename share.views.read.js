@@ -47,7 +47,7 @@ function rowToState(row){
 async function readAllViewsRows(spreadsheetId){
   const fetchJSON = window.__lm_fetchJSONAuth;
   if (typeof fetchJSON !== 'function') throw new Error(TAG+' missing __lm_fetchJSONAuth');
-  const range = encodeURIComponent("'__LM_VIEWS'!A:Q");
+  const range = encodeURIComponent('__LM_VIEWS!A:Q');
   const url = `${SHEETS_BASE}/${encodeURIComponent(spreadsheetId)}/values/${range}?majorDimension=ROWS&valueRenderOption=UNFORMATTED_VALUE`;
   const data = await fetchJSON(url);
   return (data?.values || []);

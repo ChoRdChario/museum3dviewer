@@ -8,8 +8,8 @@
       version: "α.2025-12-17",
     },
     google: {
-      clientId: "157105746935-b594qhhg9a6utksl9ojdf8rrapv38bap.apps.googleusercontent.com",
-      apiKey: "AIzaSyBv-YOqv_Ky61rBJtEmdP-n8auZkQ4lye4",
+      clientId: "595200751510-ncahnf7edci6b9925becn5to49r6cguv.apps.googleusercontent.com",
+      apiKey: "AIzaSyCUnTCr5yWUWPdEXST9bKP1LpgawU5rIbI",
     },
   };
 
@@ -17,9 +17,6 @@
   window.__LM_CONFIG = Object.assign(window.__LM_CONFIG||{}, cfg);
   window.__LM_CLIENT_ID = cfg.google.clientId;
   window.__LM_API_KEY = cfg.google.apiKey;
-
-  // Policy: drive.file only (no folder scanning / no broad Drive access)
-  window.__LM_POLICY_DRIVEFILE_ONLY = true;
 
   // Keep legacy DOM hooks in sync (some modules read from meta tags)
   function setMeta(name, content){

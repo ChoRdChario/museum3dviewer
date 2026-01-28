@@ -1,8 +1,10 @@
 // share.sheet.read.js
-// Share-mode read-only sheet reader (drive.file flow):
-// - Uses a user-selected spreadsheet (lm:sheet-context)
-// - Lists caption sheets (non __LM_* sheets) and populates dropdown
-// - Loads captions from selected sheet and feeds __LM_CAPTION_UI.setItems()
+// Share-mode read-only sheet reader:
+// - After GLB load: locate save spreadsheet (find-only)
+// - List caption sheets (non __LM_* sheets) and populate dropdown
+// - Load captions from selected sheet and feed __LM_CAPTION_UI.setItems()
+
+import { findExistingSaveSheetByGlbId, dispatchSheetContext } from './save.locator.share.js';
 
 const TAG = '[share.sheet.read]';
 const gate = window.__LM_READY_GATE__;
@@ -51,12 +53,6 @@ async function listSheets(spreadsheetId){
   return sheets;
 }
 
-function dispatchSheetContext(spreadsheetId, sheetGid){
-  try{
-    window.dispatchEvent(new CustomEvent('lm:sheet-context', { detail:{ spreadsheetId, sheetGid } }));
-  }catch(_e){}
-}
-
 async function readSheetDisplayNameMap(spreadsheetId){
   // Reads optional displayName registry sheet: __LM_SHEET_NAMES
   // NOTE: The column order is defined by sheet-rename.module.js and may evolve.
@@ -69,7 +65,7 @@ async function readSheetDisplayNameMap(spreadsheetId){
   if(typeof fetchJSON !== 'function') return map;
 
   // Read header row as well so we can resolve the column indices robustly.
-  const range = "'__LM_SHEET_NAMES'!A1:D";
+  const range = '__LM_SHEET_NAMES!A1:D';
   const url = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(range)}?valueRenderOption=UNFORMATTED_VALUE`;
 
   try{
@@ -153,116 +149,110 @@ async function readCaptionRows(spreadsheetId, sheetTitle){
   return items;
 }
 
-let currentSpreadsheetId = '';
-let currentSheetGid = '';
-
-async function hydrateSheetList(){
-  const select = document.querySelector('#save-target-sheet');
-  if (!currentSpreadsheetId){
-    setOptions(select, []);
-    return;
-  }
-
-  const rawSheets = await listSheets(currentSpreadsheetId);
-  const displayNameMap = await readSheetDisplayNameMap(currentSpreadsheetId);
-
-  const captionSheets = rawSheets
-    .filter(s=>!isSystemSheetTitle(s.title))
-    .map(s=>({
-      gid: s.gid,
-      title: displayNameMap.get(String(s.gid)) || s.title
-    }));
-
-  setOptions(select, captionSheets);
-
-  // Choose a default gid if not set
-  if (!currentSheetGid){
-    currentSheetGid = captionSheets[0] ? String(captionSheets[0].gid) : '';
-  }
-  if (select && currentSheetGid) select.value = currentSheetGid;
-
-  if (currentSheetGid){
-    dispatchSheetContext(currentSpreadsheetId, currentSheetGid);
-  }
-}
-
-async function loadCaptionsForCurrent(){
+function applyItems(items){
   const ui = window.__LM_CAPTION_UI;
   if (!ui || typeof ui.setItems !== 'function') return;
-  if (!currentSpreadsheetId || !currentSheetGid){
-    ui.setItems([]);
+  ui.setItems(items || []);
+  if (typeof ui.refreshList === 'function') ui.refreshList();
+}
+
+async function loadForSelectedSheet(spreadsheetId, sheets){
+  const sel = document.querySelector('#save-target-sheet');
+  if (!sel) return;
+  const gid = sel.value ? Number(sel.value) : null;
+  const picked = sheets.find(s=>Number(s.gid)===gid) || sheets.find(s=>!isSystemSheetTitle(s.title)) || sheets[0];
+  if (!picked){
+    applyItems([]);
     return;
   }
+  if (!sel.value) sel.value = String(picked.gid);
+
+  // Update sheet context for downstream consumers (views/materials).
   try{
-    const gid = currentSheetGid;
-    // Resolve sheet title from gid
-    const rawSheets = await listSheets(currentSpreadsheetId);
-    const s = rawSheets.find(x=>String(x.gid)===String(gid));
-    const sheetTitle = s?.title;
-    if (!sheetTitle){
-      ui.setItems([]);
-      return;
-    }
-    const rows = await readCaptionRows(currentSpreadsheetId, sheetTitle);
-    ui.setItems(rows);
+    const baseCtx = window.__LM_SHEET_CTX__ || {};
+    dispatchSheetContext(Object.assign({}, baseCtx, { sheetGid: picked.gid, sheetTitle: picked.title }));
+  }catch(_e){}
+  setStatus(`Loading captions from ${picked.title}…`);
+  try{
+    const items = await readCaptionRows(spreadsheetId, picked.title);
+    applyItems(items);
+    setStatus(`Captions: ${items.length}`);
+    log('loaded captions', items.length, 'from', picked.title);
     try{ gate?.mark?.('captions'); }catch(_e){}
   }catch(e){
-    err('load captions failed', e);
+    err('failed to read captions', e);
+    setStatus('Captions: failed to load (read-only)');
+    applyItems([]);
+    try{ gate?.mark?.('captions'); }catch(_e){}
   }
 }
 
-function wireSelect(){
-  const select = document.querySelector('#save-target-sheet');
-  if (!select) return;
-  if (select.dataset && select.dataset.lmWiredShareSelect) return;
-  select.dataset.lmWiredShareSelect = '1';
-  select.addEventListener('change', ()=>{
-    currentSheetGid = select.value || '';
-    if (currentSpreadsheetId && currentSheetGid){
-      dispatchSheetContext(currentSpreadsheetId, currentSheetGid);
-    }
-    loadCaptionsForCurrent();
-  }, { passive:true });
+async function start(glbFileId){
+  setStatus('Locating spreadsheet…');
+  let ctx = null;
+  try{
+    ctx = await findExistingSaveSheetByGlbId(glbFileId);
+  }catch(e){
+    err('locator failed', e);
+    setStatus('Spreadsheet: lookup failed');
+    return;
+  }
+
+  if (!ctx?.spreadsheetId){
+    dispatchSheetContext({ mode:'share', glbFileId, spreadsheetId:null, parentId:ctx?.parentId||null });
+    try{ gate?.mark?.('sheet'); }catch(_e){}
+    setStatus('Spreadsheet: not found (read-only)');
+    applyItems([]);
+    try{ gate?.mark?.('captions'); }catch(_e){}
+    return;
+  }
+
+  dispatchSheetContext({ mode:'share', glbFileId, spreadsheetId:ctx.spreadsheetId, parentId:ctx.parentId||null });
+
+  try{ gate?.mark?.('sheet'); }catch(_e){}
+
+  setStatus('Spreadsheet: found. Listing sheets…');
+  let sheets = [];
+  try{
+    sheets = await listSheets(ctx.spreadsheetId);
+  }catch(e){
+    err('failed to list sheets', e);
+    setStatus('Spreadsheet: cannot list sheets');
+    return;
+  }
+
+  const sel = document.querySelector('#save-target-sheet');
+  const displayNameMap = await readSheetDisplayNameMap(ctx.spreadsheetId);
+  const sheetsForOptions = sheets
+    .filter(s=>!isSystemSheetTitle(s.title))
+    .map(s=>({ gid: s.gid, title: displayNameMap.get(String(s.gid)) || s.title }));
+  setOptions(sel, sheetsForOptions);
+  // In Share mode, Create is disabled already; ensure anyway
+  const createBtn = document.querySelector('#save-target-create');
+  if (createBtn) createBtn.disabled = true;
+
+  // bind change handler once
+  if (sel && !sel.__lmShareBound){
+    sel.__lmShareBound = true;
+    sel.addEventListener('change', ()=>{
+      loadForSelectedSheet(ctx.spreadsheetId, sheets);
+    });
+  }
+
+  await loadForSelectedSheet(ctx.spreadsheetId, sheets);
 }
 
-function arm(){
-  wireSelect();
-
-  // When a spreadsheet is chosen (drive.file flow), this event will fire.
-  window.addEventListener('lm:sheet-context', (ev)=>{
-    const d = ev?.detail || {};
-    const sid = String(d.spreadsheetId || '');
-    const gid = String(d.sheetGid || '');
-    if (!sid) return;
-
-    const changed = (sid !== currentSpreadsheetId);
-    currentSpreadsheetId = sid;
-    if (gid) currentSheetGid = gid;
-
-    if (changed){
-      hydrateSheetList().then(loadCaptionsForCurrent).catch(e=>err('hydrate failed', e));
-    } else {
-      loadCaptionsForCurrent();
+// hook to GLB loaded event
+(function(){
+  if (window.__LM_SHARE_SHEET_READER_READY__) return;
+  window.__LM_SHARE_SHEET_READER_READY__ = true;
+  document.addEventListener('lm:glb-loaded', (ev)=>{
+    try{
+      const glbFileId = ev?.detail?.glbFileId || ev?.detail?.fileId || window.__LM_CURRENT_GLB_ID__ || null;
+      if (!glbFileId) return;
+      start(String(glbFileId));
+    }catch(e){
+      err('start failed', e);
     }
   });
-
-  // If ctx already exists, boot from it.
-  const sid0 = window.__LM_ACTIVE_SPREADSHEET_ID || '';
-  const gid0 = window.__LM_ACTIVE_SHEET_GID || '';
-  if (sid0){
-    currentSpreadsheetId = String(sid0);
-    currentSheetGid = String(gid0||'');
-    hydrateSheetList().then(loadCaptionsForCurrent).catch(e=>err('boot hydrate failed', e));
-  }
-}
-
-if (document.readyState === 'loading'){
-  document.addEventListener('DOMContentLoaded', arm, { once:true });
-} else {
-  arm();
-}
-
-// NOTE:
-// Older Share mode implementations relied on Drive folder scanning (restricted scope) to locate
-// the spreadsheet from a GLB id. In drive.file mode, spreadsheet selection becomes explicit
-// (Picker) and is handled by dataset.open.ui.js.
+})();

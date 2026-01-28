@@ -64,7 +64,7 @@
   // ---- 1 行 append ----
   async function appendRowForContext(ctx, row){
     const fetchAuth = await ensureAuthFetch();
-    const range = encodeURIComponent("'__LM_MATERIALS'!A:N");
+    const range = encodeURIComponent('__LM_MATERIALS!A:N');
     const url = `${SHEETS}/${ctx.spreadsheetId}/values/${range}:append` +
                 `?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`;
     await fetchAuth(url, {
@@ -134,7 +134,7 @@
   // ---- 互換用：__LM_MATERIALS への通常 append を塞ぐフラグ ----
   function forbidAppendToMaterials(range){
     if (!range) return false;
-    return /^'?__LM_MATERIALS'?!/i.test(range);
+    return /^__LM_MATERIALS!/i.test(range);
   }
 
   // 既存の materialsPersist にぶら下げ（caption 側の append ガード用）

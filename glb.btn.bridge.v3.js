@@ -72,39 +72,11 @@
     if (!raw) return '';
     raw = String(raw).trim();
     if (!raw) return '';
-
-    // If the user pasted a Drive link that contains a resourceKey, remember it.
-    // (Drive security update: link-shared files may require it for API access.)
-    let rk = '';
-    try{
-      if (/^https?:\/\//i.test(raw)){
-        const u = new URL(raw);
-        rk = u.searchParams.get('resourcekey') || u.searchParams.get('resourceKey') || '';
-      }
-    }catch(_e){ rk = ''; }
-
-    if (/^[a-zA-Z0-9_-]{20,}$/.test(raw)){
-      if (rk){
-        window.__lm_resourceKeyRegistry = window.__lm_resourceKeyRegistry || Object.create(null);
-        window.__lm_resourceKeyRegistry[raw] = rk;
-      }
-      return raw;
-    }
+    if (/^[a-zA-Z0-9_-]{20,}$/.test(raw)) return raw;
     const m = raw.match(/[?&#/]id=([a-zA-Z0-9_-]+)/) || raw.match(/\/d\/([a-zA-Z0-9_-]+)/);
-    if (m && m[1]){
-      if (rk){
-        window.__lm_resourceKeyRegistry = window.__lm_resourceKeyRegistry || Object.create(null);
-        window.__lm_resourceKeyRegistry[m[1]] = rk;
-      }
-      return m[1];
-    }
+    if (m && m[1]) return m[1];
     const m2 = raw.match(/[-\w]{25,}/);
-    const id2 = (m2 && m2[0]) || '';
-    if (id2 && rk){
-      window.__lm_resourceKeyRegistry = window.__lm_resourceKeyRegistry || Object.create(null);
-      window.__lm_resourceKeyRegistry[id2] = rk;
-    }
-    return id2;
+    return (m2 && m2[0]) || '';
   }
 
   /**
@@ -293,16 +265,7 @@
       try{ gate?.mark?.('glb'); }catch(_e){}
 
       // Existing pipeline: locate / create save sheet and dispatch sheet-context, etc.
-      if (!window.__LM_POLICY_DRIVEFILE_ONLY){
-        // Legacy (folder-scan) pipeline.
-        await postLoadEnsureSaveSheet(fileId);
-      } else {
-        // drive.file mode: do not scan folders or auto-locate save sheets.
-        // Sheet context should be established from the user-selected spreadsheet.
-        try{
-          window.__LM_ACTIVE_GLB_ID = fileId;
-        }catch(_e){}
-      }
+      await postLoadEnsureSaveSheet(fileId);
 
       // Images are loaded from GLB folder (Drive). Let the images loader start now.
       try{ document.dispatchEvent(new Event('lm:refresh-images')); }catch(_e){}
@@ -328,50 +291,17 @@
     if (!btn) return;
     if (btn.dataset && btn.dataset.glbBridgeWiredV3) return;
     btn.dataset.glbBridgeWiredV3 = '1';
-    // NOTE: This input/button pair was originally used for manual GLB loading.
-    // It has been repurposed to support the new UX:
-    //   1) User pastes the Asset Folder URL (Drive folder link)
-    //   2) This button opens the folder in a new tab so the user can "Add shortcut to Drive" (My Drive)
-    //   3) Dataset open flow uses the stored folder URL as the Picker browsing root.
-    const LS_KEY = 'lmAssetFolderUrl';
-
-    // Prefill from previous session if available.
-    try{
-      const input = document.querySelector('#glbUrl');
-      if (input && (!input.value || !input.value.trim())){
-        const prev = localStorage.getItem(LS_KEY);
-        if (prev) input.value = prev;
-      }
-    }catch(_){/* ignore */}
-
-    btn.addEventListener('click', ()=>{
+    btn.addEventListener('click', async ()=>{
       try{
         const input = document.querySelector('#glbUrl');
         let raw = input && input.value ? input.value.trim() : '';
-        if (!raw) raw = prompt('アセットフォルダのURL（Google Drive フォルダリンク）を入力してください') || '';
-        if (!raw){ log('no folder url'); return; }
-
-        // Persist for dataset.open.ui.js.
-        try{ localStorage.setItem(LS_KEY, raw); }catch(_){/* ignore */}
-        const folderId = extractId(raw);
-        try{ window.__LM_ASSET_FOLDER_URL = raw; window.__LM_ASSET_FOLDER_ID = folderId; }catch(_){/* ignore */}
-
-        // Open the folder link so the user can add it to My Drive (shortcut).
-        // "noopener" is important to avoid giving the new tab access to the opener.
-        try{ window.open(raw, '_blank', 'noopener,noreferrer'); }catch(_){ window.open(raw, '_blank'); }
-
-        // Hint: keep it short; avoid blocking flow with a modal that might be suppressed.
-        try{
-          alert('開いたフォルダで「ドライブに追加（ショートカット）」を行ってください。完了したらこのタブに戻って、スプレッドシートを開き直してください。');
-        }catch(_){/* ignore */}
-
-        // Notify listeners.
-        try{
-          window.dispatchEvent(new CustomEvent('lm:asset-folder-set', { detail:{ url: raw, folderId } }));
-        }catch(_){/* ignore */}
-
-        log('asset folder set', { folderId });
-      }catch(e){ err('btn asset-folder failed', e); }
+        if (!raw) raw = prompt('Driveの共有URL または fileId を入力してください') || '';
+        const id = extractId(raw);
+        if (!id){ log('no id'); return; }
+        log('load fileId', id);
+        try{ window.__LM_ACTIVE_GLB_ID = id; }catch(_){}
+        await loadById(id);
+      }catch(e){ err('btn load failed', e); }
     }, { passive:true });
     log('button wired');
   }

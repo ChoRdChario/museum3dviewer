@@ -4,9 +4,7 @@
  * Policy: Share safety is guaranteed by *not loading* write-capable modules.
  * This file only wires Sign-in and provides a cached access token getter.
  *
- * Scopes are minimal for Share:
- *  - Sheets: readonly
- *  - Drive: drive.file (read-only operations in Share code, but permission is file-scoped)
+ * Scopes are READONLY.
  */
 
 const LOG = (...a)=>console.log(...a);
@@ -15,8 +13,7 @@ const ERR = (...a)=>console.error(...a);
 // READONLY scopes for Share Mode.
 window.LM_SCOPES = [
   "https://www.googleapis.com/auth/spreadsheets.readonly",
-  // Drive access is limited to user-selected files (Picker-based) under drive.file.
-  "https://www.googleapis.com/auth/drive.file",
+  "https://www.googleapis.com/auth/drive.readonly",
 ];
 
 function pickClientIdFromDOM(){
