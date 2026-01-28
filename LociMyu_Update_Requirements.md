@@ -1,10 +1,15 @@
 # LociMyu Update Requirements (Drive scope → drive.file / Picker migration)
 
-**Version:** 1.4.2  
+**Version:** 1.4.4  
 **Last Updated:** 2026-01-28  
 
 
 ## 0. Update History
+
+- **1.4.4 (2026-01-28)**: Fix Asset Folder approval picker for shortcut/shared-folder cases:
+  - Stage B now prefers `DocsView.setFileIds(<folderId>)` when a folderId is known (from URL) to avoid relying on My Drive indexing/shortcuts.
+  - `picker.bridge.js`: pass `setFileIds` as comma-separated string; add optional `NAV_HIDDEN` feature.
+  - This resolves cases where folder is visible but **Select** stays disabled because the visible item was a **shortcut** and not selectable as a folder.
 
 - **1.4.2 (2026-01-28)**: Fix Picker folder selection under shared-folder (non-shared-drive) use cases and align Picker API usage:
   - Folder Picker now uses `DOCS` view + folder mimeType, disables Shared drives tab for this flow, and sets `ownedByMe:false` to allow shared items.

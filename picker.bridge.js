@@ -165,7 +165,7 @@
       try{ if (typeof view.setParent === 'function') view.setParent(String(options.parentId)); }catch(_e){}
     } else if (hasFileIds) {
       // Pre-navigate to required fileIds (when not using parent-rooted browsing)
-      try{ if (typeof view.setFileIds === 'function') view.setFileIds(options.fileIds); }catch(_e){}
+      try{ if (typeof view.setFileIds === 'function') view.setFileIds(Array.isArray(options.fileIds) ? options.fileIds.join(',') : String(options.fileIds||'')); }catch(_e){}
     }
 
     // Folder selection / Shared Drives support
@@ -245,6 +245,10 @@
 
         if (options.multiselect) {
           builder = builder.enableFeature(p.Feature.MULTISELECT_ENABLED);
+        }
+
+        if (options.navHidden) {
+          try{ builder = builder.enableFeature(p.Feature.NAV_HIDDEN); }catch(_e){}
         }
 
         if (options.allowSharedDrives) {

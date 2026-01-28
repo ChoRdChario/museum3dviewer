@@ -390,16 +390,37 @@ async function openGlbPicker(prefillGlbId){
 
 async function openAssetFolderPicker(){
   const Picker = window.google?.picker;
-  // NOTE: Use DOCS view with folder mimeType for better compatibility under drive.file.
-  const viewId = Picker?.ViewId?.DOCS || undefined;
+
+  // Prefer pre-navigated consent when we already know a folderId (e.g. from URL).
+  // This avoids relying on My Drive indexing / shortcuts and works better for "anyone with link" folders
+  // (requires Developer Key, which picker.bridge.js enforces).
+  const hintedFolderId = (typeof getAssetFolderId === 'function' ? getAssetFolderId() : '') || '';
+  if (hintedFolderId && hintedFolderId.trim()){
+    const viewId = Picker?.ViewId?.DOCS || undefined;
+    const opts = {
+      title: 'Select Asset Folder',
+      viewId,
+      // show just the folder item we want the user to consent to
+      fileIds: [hintedFolderId.trim()],
+      mimeTypes: 'application/vnd.google-apps.folder',
+      multiselect: false,
+      includeFolders: true,
+      allowSharedDrives: false,
+      ownedByMe: false,
+      navHidden: true
+    };
+    const res = await window.__lm_openPicker(opts);
+    const doc = res?.docs?.[0];
+    return doc?.id || '';
+  }
+
+  // Fallback: allow browsing. (Shortcuts to folders may not be selectable; prefer hintedFolderId path.)
+  const viewId = Picker?.ViewId?.FOLDERS || undefined;
   const opts = {
     title: 'Select Asset Folder',
     viewId,
-    mimeTypes: 'application/vnd.google-apps.folder',
     multiselect: false,
     includeFolders: true,
-    // Shared-folder (link/shared-with-me) lives under My Drive/Shared with me, not "Shared drives".
-    // Enabling Shared drives can land the user on an empty tab ("No folders") and is not needed here.
     allowSharedDrives: false,
     ownedByMe: false
   };
