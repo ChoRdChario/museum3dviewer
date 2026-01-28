@@ -424,7 +424,7 @@ async function openAssetFolderPicker(){
   const Picker = window.google?.picker;
 
   // Prefer pre-navigated consent when we already know a folderId (e.g. from URL).
-  // This avoids relying on My Drive indexing / shortcuts and works better for "anyone with link" folders
+  // This avoids relying on My Drive indexing/shortcuts and works better for "anyone with link" folders
   // (requires Developer Key, which picker.bridge.js enforces).
   const hintedFolderId = (typeof getAssetFolderId === 'function' ? getAssetFolderId() : '') || '';
   if (hintedFolderId && hintedFolderId.trim()){
@@ -432,7 +432,7 @@ async function openAssetFolderPicker(){
     const opts = {
       title: 'Select Asset Folder',
       viewId,
-      // show just the folder item we want the user to consent to
+      // show just the folder (or folder shortcut) item we want the user to consent to
       fileIds: [hintedFolderId.trim()],
       mimeTypes: 'application/vnd.google-apps.folder,application/vnd.google-apps.shortcut',
       multiselect: false,
@@ -444,7 +444,8 @@ async function openAssetFolderPicker(){
     const res = await window.__lm_openPicker(opts);
     const doc = res?.docs?.[0];
     if (doc?.id) return await resolvePickedAssetFolderId(doc);
-    // If pre-navigated view rendered empty (common when folderId points to a shortcut), fall back to browse mode.
+
+    // If pre-navigated view rendered empty, fall back to browse mode.
     try{ console.warn('[dataset.open.ui] pre-navigated folder picker returned empty; falling back to browse'); }catch(_e){}
   }
 
@@ -462,21 +463,6 @@ async function openAssetFolderPicker(){
   const doc = res?.docs?.[0];
   if (doc?.id) return await resolvePickedAssetFolderId(doc);
   return '';
-
-
-  // Fallback: allow browsing. (Shortcuts to folders may not be selectable; prefer hintedFolderId path.)
-  const viewId = Picker?.ViewId?.FOLDERS || undefined;
-  const opts = {
-    title: 'Select Asset Folder',
-    viewId,
-    multiselect: false,
-    includeFolders: true,
-    allowSharedDrives: false,
-    ownedByMe: false
-  };
-  const res = await window.__lm_openPicker(opts);
-  const doc = res?.docs?.[0];
-  return doc?.id || '';
 }
 
 

@@ -1,10 +1,14 @@
 # LociMyu Update Requirements (Drive scope → drive.file / Picker migration)
 
-**Version:** 1.4.4  
+**Version:** 1.4.6  
 **Last Updated:** 2026-01-28  
 
 
 ## 0. Update History
+
+- **1.4.6 (2026-01-28)**: Hotfix for v1.4.5 patch load error:
+  - Fixed duplicate `const viewId` declaration in `dataset.open.ui.js` (`openAssetFolderPicker`), which caused a SyntaxError and prevented the app from loading.
+  - No behavioral change intended beyond restoring loadability.
 
 - **1.4.4 (2026-01-28)**: Fix Asset Folder approval picker for shortcut/shared-folder cases:
   - Stage B now prefers `DocsView.setFileIds(<folderId>)` when a folderId is known (from URL) to avoid relying on My Drive indexing/shortcuts.
