@@ -332,3 +332,5 @@ The existing **“Select sheet…”** dropdown is a *worksheet selector* (gid) 
 3. Confirm:
    - The access-grant Picker opens inside the asset folder (not empty).
    - Selecting the required GLB (and any images) allows the dataset to load.
+
+- 2026-01-28: v1.4.5 patch: Resolve shortcut folder IDs in Stage B and fallback when setFileIds view is empty.

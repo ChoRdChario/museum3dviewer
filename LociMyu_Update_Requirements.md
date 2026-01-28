@@ -241,3 +241,8 @@ B. App never opens a spreadsheet other than the one the user specified.
 
 C. App does not auto-create missing dataset sheets; it fails fast with a clear error.
 
+
+
+## v1.4.5 (patch)
+- Stage B (asset folder approval): handle the case where the user-supplied folder URL / MyDrive entry is a **shortcut** (`application/vnd.google-apps.shortcut`). The picker now allows selecting either folder or shortcut, and resolves shortcut -> target folderId via Drive API `files.get` after user selection.
+- If pre-navigated picker (`setFileIds`) renders empty, automatically fall back to browse mode.

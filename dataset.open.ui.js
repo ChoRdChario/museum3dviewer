@@ -209,6 +209,38 @@ async function getAuthFetch(){
   throw new Error('auth fetch missing');
 }
 
+
+async function resolvePickedAssetFolderId(pickedDoc){
+  // pickedDoc: google.picker.DocumentObject
+  const id = pickedDoc?.id ? String(pickedDoc.id) : '';
+  if (!id) return '';
+  const mt = String(pickedDoc?.mimeType || '').toLowerCase();
+
+  // If user picked a shortcut, resolve to its target folder id via Drive API (allowed because user explicitly picked it).
+  if (mt === 'application/vnd.google-apps.shortcut'){
+    try{
+      const authFetch = await getAuthFetch();
+      const fields = 'id,mimeType,shortcutDetails(targetId,targetMimeType)';
+      const params = new URLSearchParams({ fields, supportsAllDrives:'true' });
+      const url = `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(id)}?${params.toString()}`;
+      const meta = await authFetch(url);
+      const targetId = meta?.shortcutDetails?.targetId ? String(meta.shortcutDetails.targetId) : '';
+      const targetMt = String(meta?.shortcutDetails?.targetMimeType || '').toLowerCase();
+      if (targetId && targetMt === 'application/vnd.google-apps.folder') return targetId;
+      // If targetMimeType is missing, still accept targetId as folder id (best effort).
+      if (targetId) return targetId;
+    }catch(e){
+      try{ console.warn('[dataset.open.ui] shortcut resolve failed', e); }catch(_e){}
+    }
+    // As a last resort, return the shortcut id (may not work for listing children).
+    return id;
+  }
+
+  // Normal folder
+  return id;
+}
+
+
 function looksLikeGlb(file){
   const mt = String(file?.mimeType || '').toLowerCase();
   const name = String(file?.name || '').toLowerCase();
@@ -402,7 +434,7 @@ async function openAssetFolderPicker(){
       viewId,
       // show just the folder item we want the user to consent to
       fileIds: [hintedFolderId.trim()],
-      mimeTypes: 'application/vnd.google-apps.folder',
+      mimeTypes: 'application/vnd.google-apps.folder,application/vnd.google-apps.shortcut',
       multiselect: false,
       includeFolders: true,
       allowSharedDrives: false,
@@ -411,8 +443,26 @@ async function openAssetFolderPicker(){
     };
     const res = await window.__lm_openPicker(opts);
     const doc = res?.docs?.[0];
-    return doc?.id || '';
+    if (doc?.id) return await resolvePickedAssetFolderId(doc);
+    // If pre-navigated view rendered empty (common when folderId points to a shortcut), fall back to browse mode.
+    try{ console.warn('[dataset.open.ui] pre-navigated folder picker returned empty; falling back to browse'); }catch(_e){}
   }
+
+  // Fallback: allow browsing. (Shortcuts to folders may not be selectable; prefer hintedFolderId path.)
+  const viewId = Picker?.ViewId?.FOLDERS || undefined;
+  const opts = {
+    title: 'Select Asset Folder',
+    viewId,
+    multiselect: false,
+    includeFolders: true,
+    allowSharedDrives: false,
+    ownedByMe: false
+  };
+  const res = await window.__lm_openPicker(opts);
+  const doc = res?.docs?.[0];
+  if (doc?.id) return await resolvePickedAssetFolderId(doc);
+  return '';
+
 
   // Fallback: allow browsing. (Shortcuts to folders may not be selectable; prefer hintedFolderId path.)
   const viewId = Picker?.ViewId?.FOLDERS || undefined;
