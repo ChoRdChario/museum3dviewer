@@ -151,16 +151,21 @@
       try{ view.setMimeTypes(options.mimeTypes.trim()); }catch(_e){}
     }
 
-    // Optional: root the view at a specific folder.
-    if (options.parentId) {
-      try{ if (typeof view.setParent === 'function') view.setParent(String(options.parentId)); }catch(_e){}
+    const hasParent = !!options.parentId;
+    const hasFileIds = Array.isArray(options.fileIds) && options.fileIds.length;
+
+    // NOTE: DocsView does not reliably support setParent and setFileIds together.
+    // If both are provided, prefer parent-rooted browsing and ignore seed ids.
+    if (hasParent && hasFileIds) {
+      try{ console.warn('[picker] both parentId and fileIds provided; using parentId only'); }catch(_e){}
     }
 
-    // Pre-navigate to required fileIds (Picker Jan 2025 feature)
-    if (Array.isArray(options.fileIds) && options.fileIds.length) {
-      try{
-        if (typeof view.setFileIds === 'function') view.setFileIds(options.fileIds);
-      }catch(_e){}
+    // Optional: root the view at a specific folder.
+    if (hasParent) {
+      try{ if (typeof view.setParent === 'function') view.setParent(String(options.parentId)); }catch(_e){}
+    } else if (hasFileIds) {
+      // Pre-navigate to required fileIds (when not using parent-rooted browsing)
+      try{ if (typeof view.setFileIds === 'function') view.setFileIds(options.fileIds); }catch(_e){}
     }
 
     // Folder selection / Shared Drives support
@@ -169,6 +174,10 @@
     if (options.includeFolders) {
       try{ view.setIncludeFolders(true); }catch(_e){}
       try{ view.setSelectFolderEnabled(true); }catch(_e){}
+    }
+    // Some Picker variants default to 'owned by me'. Explicitly allow shared items when requested.
+    if (typeof options.ownedByMe === 'boolean') {
+      try{ if (typeof view.setOwnedByMe === 'function') view.setOwnedByMe(!!options.ownedByMe); }catch(_e){}
     }
     if (options.allowSharedDrives) {
       try{ view.setEnableDrives(true); }catch(_e){}

@@ -390,18 +390,24 @@ async function openGlbPicker(prefillGlbId){
 
 async function openAssetFolderPicker(){
   const Picker = window.google?.picker;
-  const viewId = Picker?.ViewId?.FOLDERS || 'FOLDERS';
+  // NOTE: Use DOCS view with folder mimeType for better compatibility under drive.file.
+  const viewId = Picker?.ViewId?.DOCS || undefined;
   const opts = {
     title: 'Select Asset Folder',
     viewId,
+    mimeTypes: 'application/vnd.google-apps.folder',
     multiselect: false,
     includeFolders: true,
-    allowSharedDrives: true
+    // Shared-folder (link/shared-with-me) lives under My Drive/Shared with me, not "Shared drives".
+    // Enabling Shared drives can land the user on an empty tab ("No folders") and is not needed here.
+    allowSharedDrives: false,
+    ownedByMe: false
   };
   const res = await window.__lm_openPicker(opts);
   const doc = res?.docs?.[0];
   return doc?.id || '';
 }
+
 
 async function ensureAssetFolderApproved(setStatus){
   const approved = getApprovedAssetFolderId();
@@ -429,12 +435,15 @@ async function ensureAssetFolderApproved(setStatus){
 async function openAccessGrantPicker(fileIds, opts = {}){
   // NOTE: Under drive.file, the only reliable way to grant Drive API access is user selection in Picker.
   // We intentionally do NOT skip this step even if a file "looks public" (public probing can be wrong).
-  const ids = uniq(fileIds).filter(Boolean);
-  if (!ids.length) return { pickedIds: [] };
+  const ids = uniq(fileIds || []).filter(Boolean);
 
-  // Picker view can only take a limited number of fileIds at once.
-  // Keep GLB first, then a bounded number of attachments.
-  const limited = ids.slice(0, 50);
+  // If parentId is provided, we can still open a folder-rooted Picker even when we have no seed ids.
+  // Without parentId, we need at least one id to request access.
+  const parentId = opts?.parentId || undefined;
+  if (!ids.length && !parentId) return { pickedIds: [] };
+
+  // Local safety cap: when using setFileIds, seed only the first 50 ids (UI/compat reasons).
+  const limited = ids.length > 50 ? ids.slice(0, 50) : ids;
 
   const Picker = window.google?.picker;
   const viewId = Picker?.ViewId?.DOCS || undefined;
@@ -443,8 +452,7 @@ async function openAccessGrantPicker(fileIds, opts = {}){
   const allowPartial = opts?.allowPartial !== false; // default true
 
   // If an Asset Folder is provided, open Picker rooted at that folder.
-  // This avoids "no documents" when docId listing is insufficient (e.g., binary files, shared locations).
-  const parentId = opts?.parentId || undefined;
+  // NOTE: Picker DocsView does NOT allow using setParent and setFileIds together reliably.
   const mimeTypes = opts?.mimeTypes || (
     // GLB can be stored as model/gltf-binary OR sometimes falls back to octet-stream.
     // Keep common image mimes too.
@@ -456,13 +464,16 @@ async function openAccessGrantPicker(fileIds, opts = {}){
     viewId,
     multiselect: true,
     allowSharedDrives: true,
-    mimeTypes,
-    parentId
+    mimeTypes
   };
 
-  // Provide candidate fileIds even when parentId is set.
-  // This helps pre-navigation and reduces 'No documents' dead-ends under drive.file.
-  pickerReq.fileIds = limited;
+  // Folder-rooted mode: setParent only (no setFileIds).
+  if (parentId) {
+    pickerReq.parentId = parentId;
+  } else if (limited.length) {
+    // Seed mode: setFileIds only (no setParent).
+    pickerReq.fileIds = limited;
+  }
 
   const res = await window.__lm_openPicker(pickerReq);
 
@@ -655,39 +666,34 @@ if (window.__LM_POLICY_DRIVEFILE_ONLY){
     return;
   }
 
-  // Stage C: bounded listing (direct children only) to build candidate fileIds.
-  setStatus('Scanning asset folder (direct children)…');
+  // Stage C: (optional) bounded listing (direct children only) for hints/diagnostics.
+  // IMPORTANT: Under drive.file, listing can still 404/403 until the user explicitly grants access.
+  // We must NOT block on listing. The Picker rooted at the folder is the actual grant step.
   let candidateFromFolder = [];
   try{
+    setStatus('Scanning asset folder (direct children)…');
     const children = await listFolderChildrenDirect(approvedFolderId);
     candidateFromFolder = (children || [])
       .filter(f => looksLikeGlb(f) || looksLikeImage(f))
       .map(f => f.id)
       .filter(Boolean);
   }catch(e){
-    warn('listFolderChildrenDirect failed', e);
-    // Most likely: folder not authorized yet under drive.file. Force re-pick.
-    clearApprovedAssetFolderId();
-    setStatus('');
-    alert('アセットフォルダ内の列挙に失敗しました。\n\n手順:\n1) フォルダURLを新規タブで開く\n2) マイドライブに追加（ショートカット）\n3) アプリに戻り「Select Asset Folder」をもう一度実行\n\n（drive.fileの仕様で、UIで見えてもAPIでは404になり得ます）');
-    return;
+    warn('listFolderChildrenDirect failed (continuing to Picker anyway)', e);
   }
 
-  const ids = uniq([glbId, ...(imageIds||[]), ...(candidateFromFolder||[])]).filter(Boolean);
-  if (ids.length){
-    setStatus('Granting access (select files)…');
-    log('grant picker: requesting access', { folder: approvedFolderId, glb: glbId, images: (imageIds||[]).length, folderCandidates: candidateFromFolder.length, total: ids.length });
+  setStatus('Granting access (select files)…');
+  log('grant picker: requesting access', { folder: approvedFolderId, glb: glbId, images: (imageIds||[]).length, folderCandidates: candidateFromFolder.length });
 
-    // Require the GLB to be selected; stop if missing.
-    await openAccessGrantPicker(ids, {
-      title: 'Select GLB and images (multi-select)',
-      requiredIds: [glbId],
-      allowPartial: false,
-      parentId: approvedFolderId,
-      mimeTypes: pickerMimeTypes
-    });
-    try{ window.dispatchEvent(new CustomEvent('lm:refresh-images')); }catch(_e){}
-  }
+  // Folder-rooted Picker (MULTISELECT): user selects GLB + images.
+  // NOTE: In folder-rooted mode we do not seed fileIds; user must select within the folder UI.
+  await openAccessGrantPicker([], {
+    title: 'Select GLB and images (multi-select)',
+    requiredIds: [glbId],
+    allowPartial: false,
+    parentId: approvedFolderId,
+    mimeTypes: pickerMimeTypes
+  });
+  try{ window.dispatchEvent(new CustomEvent('lm:refresh-images')); }catch(_e){}
 }
 
 setStatus('Loading GLB…');

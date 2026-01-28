@@ -1,10 +1,16 @@
 # LociMyu Update Requirements (Drive scope → drive.file / Picker migration)
 
-**Version:** 1.4.1  
+**Version:** 1.4.2  
 **Last Updated:** 2026-01-28  
 
 
 ## 0. Update History
+
+- **1.4.2 (2026-01-28)**: Fix Picker folder selection under shared-folder (non-shared-drive) use cases and align Picker API usage:
+  - Folder Picker now uses `DOCS` view + folder mimeType, disables Shared drives tab for this flow, and sets `ownedByMe:false` to allow shared items.
+  - `picker.bridge.js`: do not use `setParent` and `setFileIds` together (prefer parent-rooted browsing).
+  - `openAccessGrantPicker`: allows folder-rooted Picker even with empty seed ids; in parent-rooted mode we do not seed `fileIds`.
+  - Stage C no longer blocks on Drive `files.list` failure; continues to Picker as the actual grant step.
 
 - **1.4.1 (2026-01-28)**: Implemented Stage B/C wiring in `dataset.open.ui.js`:
   - Added **Select Asset Folder** UI and persistence (`lmAssetFolderApprovedId`).
